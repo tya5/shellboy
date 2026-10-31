@@ -2786,7 +2786,14 @@ Updated exact-source qualification is recorded in issue #97 after its next lease
 ## #88 notification references: implementation in progress
 
 The UI-only bounded metadata projection and exact original-reference navigation
-are being prepared on the #102 baseline. Synthetic unit cases cover identity,
-rename/delete, query counts/plans and stale dependency ownership. Rust compilation,
-real PTY fixtures and final standard qualification are pending; this section does
-not claim completion. No Core event, protocol or storage schema is changed.
+are prepared on landed #87/main805efc9. Synthetic unit cases cover identity,
+rename/delete, query counts/plans and stale dependency ownership. First native
+qualification passed formatting, integration layout (94 suites) and 70 Python
+tests, then stopped at clippy compilation: the new exact-original UI test was
+placed in a sibling module without its fixture/key helpers (E0425). The test is
+now moved into the existing helper-owning module; that correction is not yet
+Rust-qualified. No Rust tests, binary/fixture build or PTY ran in that failed
+chain. Python SQLite3.51 synthetic metadata/query-plan observations are separate
+non-Rust evidence. Real PTY fixtures and final standard qualification remain
+pending; this section does not claim completion. No Core event, protocol or
+storage schema is changed. P1 observations remain deferred and non-gating.

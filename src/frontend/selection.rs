@@ -123,16 +123,37 @@ impl Selection {
         }
         self.generations.entry(thread.to_owned()).or_insert(0);
     }
-    pub(super) fn observe_notices(&mut self,thread:&str,generation:u64,epoch:u64,threads:Vec<String>) {
-        if self.accepts(thread,generation,epoch) {
-            self.notice_children=threads.into_iter().filter(|id|id.len()<=256).take(128).collect();
+    pub(super) fn observe_notices(
+        &mut self,
+        thread: &str,
+        generation: u64,
+        epoch: u64,
+        threads: Vec<String>,
+    ) {
+        if self.accepts(thread, generation, epoch) {
+            self.notice_children = threads
+                .into_iter()
+                .filter(|id| id.len() <= 256)
+                .take(128)
+                .collect();
         }
     }
     pub(super) fn dependent_parent(&self, changed: &str) -> Option<String> {
-        (self.live_children.iter().chain(&self.notice_children).any(|child|child==changed)
-         || self.tool_scope.as_ref().is_some_and(|scope|scope.nodes.iter().any(|node|node.presentation.fields.iter().any(|f|f.key=="/ui_notice/thread_id"&&f.value==changed))))
-            .then(|| self.active_thread.clone())
-            .flatten()
+        (self
+            .live_children
+            .iter()
+            .chain(&self.notice_children)
+            .any(|child| child == changed)
+            || self.tool_scope.as_ref().is_some_and(|scope| {
+                scope.nodes.iter().any(|node| {
+                    node.presentation
+                        .fields
+                        .iter()
+                        .any(|f| f.key == "/ui_notice/thread_id" && f.value == changed)
+                })
+            }))
+        .then(|| self.active_thread.clone())
+        .flatten()
     }
     fn observe_live_children(&mut self, snapshot: &crate::ui::activity::ActivitySnapshot) {
         self.live_children = snapshot
@@ -451,21 +472,24 @@ mod live_child_tests {
     }
     #[test]
     fn current_notice_dependencies_are_bounded_generation_fenced_and_cleared_on_switch() {
-        let mut selection=Selection::default();
-        selection.select_thread("parent".into(),2);
-        let epoch=selection.progress_epoch;
-        selection.observe_notices("parent",2,epoch,vec!["child".into()]);
-        assert_eq!(selection.dependent_parent("child").as_deref(),Some("parent"));
+        let mut selection = Selection::default();
+        selection.select_thread("parent".into(), 2);
+        let epoch = selection.progress_epoch;
+        selection.observe_notices("parent", 2, epoch, vec!["child".into()]);
+        assert_eq!(
+            selection.dependent_parent("child").as_deref(),
+            Some("parent")
+        );
         assert!(selection.dependent_parent("unrelated").is_none());
-        selection.observe_notices("parent",1,epoch,vec![]);
+        selection.observe_notices("parent", 1, epoch, vec![]);
         assert!(selection.dependent_parent("child").is_some());
-        selection.observe_notices("parent",2,epoch.wrapping_sub(1),vec![]);
+        selection.observe_notices("parent", 2, epoch.wrapping_sub(1), vec![]);
         assert!(selection.dependent_parent("child").is_some());
-        selection.observe_notices("parent",2,epoch,vec!["bounded".into();200]);
-        assert_eq!(selection.notice_children.len(),128);
-        selection.select_thread("other".into(),3);
+        selection.observe_notices("parent", 2, epoch, vec!["bounded".into(); 200]);
+        assert_eq!(selection.notice_children.len(), 128);
+        selection.select_thread("other".into(), 3);
         assert!(selection.dependent_parent("bounded").is_none());
-        selection.observe_notices("parent",2,epoch,vec!["child".into()]);
+        selection.observe_notices("parent", 2, epoch, vec!["child".into()]);
         assert!(selection.dependent_parent("child").is_none());
     }
 }

@@ -184,7 +184,13 @@ impl UiNode {
                 })
             })
             .collect::<Vec<_>>();
-        let notice_fields=self.presentation.fields.iter().filter(|f|f.key.starts_with("/ui_notice/")).cloned().collect::<Vec<_>>();
+        let notice_fields = self
+            .presentation
+            .fields
+            .iter()
+            .filter(|f| f.key.starts_with("/ui_notice/"))
+            .cloned()
+            .collect::<Vec<_>>();
         if blocks.is_empty() && notice_fields.is_empty() {
             return None;
         }
@@ -197,7 +203,11 @@ impl UiNode {
             reasoning_ranges: vec![],
             presentation: NodePresentation {
                 kind: self.presentation.kind.clone(),
-                title: if notice_fields.is_empty() {String::new()} else {self.presentation.title.clone()},
+                title: if notice_fields.is_empty() {
+                    String::new()
+                } else {
+                    self.presentation.title.clone()
+                },
                 blocks,
                 fields: notice_fields,
                 ..Default::default()
@@ -208,12 +218,26 @@ impl UiNode {
         if self.node_id != source.node_id {
             return false;
         }
-        let old=self.presentation.fields.iter().filter(|f|f.key.starts_with("/ui_notice/")).collect::<Vec<_>>();
-        let incoming=source.presentation.fields.iter().filter(|f|f.key.starts_with("/ui_notice/")).collect::<Vec<_>>();
-        let mut changed = old!=incoming;
+        let old = self
+            .presentation
+            .fields
+            .iter()
+            .filter(|f| f.key.starts_with("/ui_notice/"))
+            .collect::<Vec<_>>();
+        let incoming = source
+            .presentation
+            .fields
+            .iter()
+            .filter(|f| f.key.starts_with("/ui_notice/"))
+            .collect::<Vec<_>>();
+        let mut changed = old != incoming;
         if changed {
-            self.presentation.fields.retain(|f|!f.key.starts_with("/ui_notice/"));
-            self.presentation.fields.extend(incoming.into_iter().cloned());
+            self.presentation
+                .fields
+                .retain(|f| !f.key.starts_with("/ui_notice/"));
+            self.presentation
+                .fields
+                .extend(incoming.into_iter().cloned());
             self.presentation.bound_metadata();
         }
         for block in &mut self.presentation.blocks {

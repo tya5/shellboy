@@ -299,12 +299,22 @@ impl UiState {
                         .find(|f| f.key == key)
                         .map(|f| f.value.clone())
                 };
-                (field("/ui_notice/execution_id").or_else(||field("/payload/execution_id")),
-                 field("/ui_notice/thread_id").or_else(||field("/payload/thread_id")),
-                 field("/ui_notice/source_node"),field("/ui_notice/group_id"),field("/ui_notice/call_id"),field("/ui_notice/unavailable"),field("/ui_notice/source_error"))
+                (
+                    field("/ui_notice/execution_id").or_else(|| field("/payload/execution_id")),
+                    field("/ui_notice/thread_id").or_else(|| field("/payload/thread_id")),
+                    field("/ui_notice/source_node"),
+                    field("/ui_notice/group_id"),
+                    field("/ui_notice/call_id"),
+                    field("/ui_notice/unavailable"),
+                    field("/ui_notice/source_error"),
+                )
             });
         if let Some((execution, thread, source, group, call, unavailable, source_error)) = notice {
-            if let Some(reason)=unavailable {self.active_view_mut().status=reason;self.dirty=true;return Some(vec![]);}
+            if let Some(reason) = unavailable {
+                self.active_view_mut().status = reason;
+                self.dirty = true;
+                return Some(vec![]);
+            }
             if let Some(execution) = execution {
                 let layout = self.item_layout();
                 if let Some((row, target)) =
@@ -325,17 +335,19 @@ impl UiState {
                     self.select_history_item(row, target, &layout);
                     return Some(vec![]);
                 }
-                if let (Some(source),Some(group_id),Some(call_id))=(source,group,call) {
-                    let mut details=details::Details::for_node(self.view(),source.clone(),false)
-                        .with_sources(std::slice::from_ref(&source))
-                        .with_item_key(ItemKey::Tool {group_id,call_id});
-                    let action=details.open_source(source,&mut self.next_detail_request);
-                    self.details=Some(details);
-                    self.dirty=true;
+                if let (Some(source), Some(group_id), Some(call_id)) = (source, group, call) {
+                    let mut details =
+                        details::Details::for_node(self.view(), source.clone(), false)
+                            .with_sources(std::slice::from_ref(&source))
+                            .with_item_key(ItemKey::Tool { group_id, call_id });
+                    let action = details.open_source(source, &mut self.next_detail_request);
+                    self.details = Some(details);
+                    self.dirty = true;
                     return Some(vec![action]);
                 }
-                self.active_view_mut().status = source_error.unwrap_or_else(||
-                    crate::presentation::rows::NOTICE_SOURCE_OUTSIDE_WINDOW.into());
+                self.active_view_mut().status = source_error.unwrap_or_else(|| {
+                    crate::presentation::rows::NOTICE_SOURCE_OUTSIDE_WINDOW.into()
+                });
                 self.dirty = true;
                 return Some(vec![]);
             }
@@ -980,6 +992,57 @@ mod tests {
         }));
         assert!(!ui.view().items.active);
     }
+    #[test]
+    fn notification_outside_window_opens_only_its_exact_saved_original() {
+        let mut ui = fixture();
+        let fields = [
+            ("execution_id", "execution"),
+            ("group_id", "exact-group"),
+            ("call_id", "same"),
+            ("source_node", "exact-result"),
+            ("title", "saved shell · printf CORRECT"),
+        ]
+        .into_iter()
+        .map(|(key, value)| crate::presentation::PresentationField {
+            key: format!("/ui_notice/{key}"),
+            label: key.into(),
+            value: value.into(),
+            ..Default::default()
+        })
+        .collect();
+        ui.apply(UiUpdate::History {
+            thread_id: "thread".into(),
+            generation: ui.view().generation,
+            nodes: vec![UiNode {
+                node_id: "notice".into(),
+                presentation: crate::presentation::NodePresentation {
+                    kind: crate::presentation::PresentationKind::Event,
+                    title: "saved shell".into(),
+                    fields,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }],
+            pending: Default::default(),
+            read_revision: 2,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 2,
+            total_nodes: 1,
+        });
+        Terminal::new(TestBackend::new(80, 28))
+            .unwrap()
+            .draw(|frame| draw(frame, &mut ui))
+            .unwrap();
+        key(&mut ui, KeyCode::Tab);
+        let actions = key(&mut ui, KeyCode::Enter);
+        assert!(
+            matches!(actions.as_slice(),[UiAction::LoadOriginal{node_id,..}] if node_id=="exact-result")
+        );
+        assert!(ui.details.is_some());
+        assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
+    }
 }
 
 #[cfg(test)]
@@ -1074,18 +1137,6 @@ mod heading_focus_tests {
                 }
             }
         }
-    }
-    #[test]
-    fn notification_outside_window_opens_only_its_exact_saved_original() {
-        let mut ui=fixture();
-        let fields=[("execution_id","execution"),("group_id","exact-group"),("call_id","same"),("source_node","exact-result"),("title","saved shell · printf CORRECT")].into_iter().map(|(key,value)|crate::presentation::PresentationField{key:format!("/ui_notice/{key}"),label:key.into(),value:value.into(),..Default::default()}).collect();
-        ui.apply(UiUpdate::History {thread_id:"thread".into(),generation:ui.view().generation,nodes:vec![UiNode{node_id:"notice".into(),presentation:crate::presentation::NodePresentation{kind:crate::presentation::PresentationKind::Event,title:"saved shell".into(),fields,..Default::default()},..Default::default()}],pending:Default::default(),read_revision:2,before_cursor:None,append:false,first_ordinal:0,selection_revision:2,total_nodes:1});
-        Terminal::new(TestBackend::new(80,28)).unwrap().draw(|frame|draw(frame,&mut ui)).unwrap();
-        key(&mut ui,KeyCode::Tab);
-        let actions=key(&mut ui,KeyCode::Enter);
-        assert!(matches!(actions.as_slice(),[UiAction::LoadOriginal{node_id,..}] if node_id=="exact-result"));
-        assert!(ui.details.is_some());
-        assert_eq!(ui.view().thread_id.as_deref(),Some("thread"));
     }
 }
 

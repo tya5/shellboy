@@ -53,8 +53,8 @@ mod streaming;
 mod streams;
 #[cfg(test)]
 use streaming::StreamBody;
-mod tools;
 mod notices;
+mod tools;
 mod usage;
 mod watch_page;
 mod watch_read;

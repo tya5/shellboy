@@ -249,10 +249,15 @@ impl ThreadView {
         let ids = self.nodes[start..end]
             .iter()
             .filter(|node| {
-                node.presentation.fields.iter().any(|f|f.key=="/ui_notice/title") || node.presentation
-                    .blocks
+                node.presentation
+                    .fields
                     .iter()
-                    .any(|block| block.tool.is_some())
+                    .any(|f| f.key == "/ui_notice/title")
+                    || node
+                        .presentation
+                        .blocks
+                        .iter()
+                        .any(|block| block.tool.is_some())
             })
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
