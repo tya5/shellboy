@@ -296,6 +296,13 @@ pub(super) fn read_list_facts_tx(
     db: &Connection,
     scope: CapturedScope,
 ) -> Result<RawLists, StorageError> {
+    if db.is_autocommit() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "List facts require the caller-owned snapshot transaction",
+        )
+        .into());
+    }
     let mut budget = status::TextBudget {
         used: scope
             .text_bytes
