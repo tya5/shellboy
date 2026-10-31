@@ -4842,3 +4842,17 @@ are deliberately not run for this scripts-only stage per the user; no local CI
 job dispatch, main integration or issue closure occurs. Three-OS CI belongs to
 worker4. Full VT/emoji/font/IME/ConPTY/physical terminal fidelity and the multi-day
 aggregate token/time reduction are not established by these checks.
+
+Combined #94.1/#94.2 qualification: retain main9b4ae34, then #94.1@661de822 and
+rebase the submitted #94.2 onto it on a new branch. All setup/status/acceptance
+conflicts retain both submissions, including the #94.1 rebase note. The two
+helpers/tests are byte-for-byte unchanged from their separate qualified SHAs;
+product, manifests and workflow source are unchanged from main9b4ae34. Combined
+Python39 tests, layout94/watchdog, py_compile, both helps, record-retention and
+diff checks pass. Immediate live help and completed-frame replay pass again
+with the existing #91 debug binary; no Rust build or paid provider is used.
+Evidence: /tmp/issue-94-combined-tests.log, /tmp/issue-94-combined-record-delta.json,
+/tmp/issue-94-combined-live.json and /tmp/issue-94-combined-replay.json. Native
+three-OS CI and integration remain delegated to worker4; old branches are not
+force-pushed. This qualifies combined scripts, not physical terminal/ConPTY or
+universal VT/font behavior; the earlier failed observations remain recorded.
