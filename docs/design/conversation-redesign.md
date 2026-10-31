@@ -1006,7 +1006,9 @@ remain Thread/generation/request-revision checked. ItemState retains its
 secondary request registry, new worker, queue, timer or persistent state.
 
 Every projected occurrence of a tool uses the same best correlated outcome and
-one ItemKey for its disclosure state. In particular an older exact-result block
+one ItemKey for its disclosure state. Disclosure uses outcome class, so equivalent
+saved/current terminal aliases and exit-metadata refinements do not undo a close.
+In particular an older exact-result block
 cannot fall back to its own attention default after the header was explicitly
 closed. Empty result nodes with an unambiguous exact result-node reference from
 an already-rendered tool are not independent placeholder items. Ambiguous

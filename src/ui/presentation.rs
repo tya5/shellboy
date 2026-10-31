@@ -1307,8 +1307,11 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     } else {
         tool.exit_code
     };
-    let kind = if state == "exited" && code.is_none() { RowKind::Unknown }
-        else { crate::presentation::rows::tool_kind(state, tool.requires_attention()) };
+    let kind = if state == "exited" && code.is_none() {
+        RowKind::Unknown
+    } else {
+        crate::presentation::rows::tool_kind(state, tool.requires_attention())
+    };
     // Progress and metadata refinements must not undo an explicit close.
     let disclosure = format!("{kind:?}");
     match tool.output_revision {
@@ -1623,10 +1626,18 @@ fn append_node_cached(
         );
     }
 }
-pub(super) fn tool_observation_rank(block: &crate::presentation::PresentationBlock) -> (bool, bool) {
-    (block.tool.as_ref().is_some_and(|tool|
-        tool.group_id.as_ref().is_some_and(|group| !group.is_empty()) && !tool.call_id.is_empty()),
-        block.kind == BlockKind::ToolResult)
+pub(super) fn tool_observation_rank(
+    block: &crate::presentation::PresentationBlock,
+) -> (bool, bool) {
+    (
+        block.tool.as_ref().is_some_and(|tool| {
+            tool.group_id
+                .as_ref()
+                .is_some_and(|group| !group.is_empty())
+                && !tool.call_id.is_empty()
+        }),
+        block.kind == BlockKind::ToolResult,
+    )
 }
 fn result_owners(view: &ThreadView, begin: usize, end: usize) -> BTreeMap<String, Option<ItemKey>> {
     let mut owners = BTreeMap::new();
@@ -1684,9 +1695,14 @@ fn typed_history(
         for (block_index, block) in node.presentation.blocks.iter().enumerate() {
             if let Some(tool) = &block.tool {
                 let key = correlated_tool_key(tool, &node.node_id, block_index, &owners);
-                if best.get(&key).is_none_or(|&(old_node, old_block)|
-                    tool_observation_rank(block) >= tool_observation_rank(&view.nodes()[old_node].presentation.blocks[old_block]))
-                { best.insert(key, (index, block_index)); }
+                if best.get(&key).is_none_or(|&(old_node, old_block)| {
+                    tool_observation_rank(block)
+                        >= tool_observation_rank(
+                            &view.nodes()[old_node].presentation.blocks[old_block],
+                        )
+                }) {
+                    best.insert(key, (index, block_index));
+                }
             }
         }
     }
@@ -4006,13 +4022,18 @@ mod conversation_item_tests {
     }
     #[test]
     fn equivalent_terminal_metadata_does_not_reset_a_closed_disclosure() {
-        let mut saved=tool("one","failed");saved.exit_code=Some(1);
-        let mut observed=saved.clone();observed.current_state=Some("exited".into());observed.current_exit_code=Some(1);
-        assert_eq!(tool_outcome(&saved),tool_outcome(&observed));
-        let mut success=tool("one","completed");
-        let before=tool_outcome(&success);success.current_state=Some("exited".into());success.current_exit_code=Some(0);
-        assert_eq!(before,tool_outcome(&success));
-        assert_ne!(tool_outcome(&saved),tool_outcome(&success));
+        let mut saved = tool("one", "failed");
+        saved.exit_code = Some(1);
+        let mut observed = saved.clone();
+        observed.current_state = Some("exited".into());
+        observed.current_exit_code = Some(1);
+        assert_eq!(tool_outcome(&saved), tool_outcome(&observed));
+        let mut success = tool("one", "completed");
+        let before = tool_outcome(&success);
+        success.current_state = Some("exited".into());
+        success.current_exit_code = Some(0);
+        assert_eq!(before, tool_outcome(&success));
+        assert_ne!(tool_outcome(&saved), tool_outcome(&success));
     }
     #[test]
     fn duplicate_result_outcomes_cannot_reopen_a_closed_canonical_header() {
@@ -4076,20 +4097,42 @@ mod conversation_item_tests {
     #[test]
     fn missing_group_result_uses_its_exact_owner_and_keeps_richer_observed_header() {
         use crate::config::Config;
-        let mut view=ThreadView::new(&Config::default(),std::env::temp_dir());
-        let mut call=tool("owner","completed");call.result_node_id=Some("legacy".into());
-        let key=ItemKey::tool(&call,"call",0);let outcome=tool_outcome(&call);
-        assert!(view.items.toggle(key.clone(),false,&outcome));
-        assert!(!view.items.toggle(key,false,&outcome));
-        let mut legacy=tool("owner","failed");legacy.group_id=None;legacy.exit_code=Some(7);
-        *view.nodes_mut_for_test()=vec![
-            node("call","",vec![PresentationBlock {kind:BlockKind::ToolCall,tool:Some(call),..Default::default()}]),
-            node("legacy","STALE_LEGACY",vec![PresentationBlock {kind:BlockKind::ToolResult,tool:Some(legacy),source_exact:true,text:"STALE_LEGACY".into(),..Default::default()}]),
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut call = tool("owner", "completed");
+        call.result_node_id = Some("legacy".into());
+        let key = ItemKey::tool(&call, "call", 0);
+        let outcome = tool_outcome(&call);
+        assert!(view.items.toggle(key.clone(), false, &outcome));
+        assert!(!view.items.toggle(key, false, &outcome));
+        let mut legacy = tool("owner", "failed");
+        legacy.group_id = None;
+        legacy.exit_code = Some(7);
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(call),
+                    ..Default::default()
+                }],
+            ),
+            node(
+                "legacy",
+                "STALE_LEGACY",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolResult,
+                    tool: Some(legacy),
+                    source_exact: true,
+                    text: "STALE_LEGACY".into(),
+                    ..Default::default()
+                }],
+            ),
         ];
-        let shown=plain(&history(&view,80).0);
-        assert_eq!(shown.matches("printf synthetic").count(),1);
-        assert!(shown.contains("✓ printf synthetic"),"{shown}");
-        assert!(!shown.contains("STALE_LEGACY"),"{shown}");
+        let shown = plain(&history(&view, 80).0);
+        assert_eq!(shown.matches("printf synthetic").count(), 1);
+        assert!(shown.contains("✓ printf synthetic"), "{shown}");
+        assert!(!shown.contains("STALE_LEGACY"), "{shown}");
     }
     #[test]
     fn empty_exact_result_members_do_not_leave_separate_detail_placeholders() {

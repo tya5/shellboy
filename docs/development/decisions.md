@@ -2385,3 +2385,14 @@ closed to obtain a real BrokenPipe, without a production injection hook or
 scheduling sleep. Verify cleanup at the real failed-write boundary, retaining
 the existing shared watchdog and assertions. This changes the fixture, not
 startup/shutdown behavior, and does not broaden stage 2 into handover/reconnect.
+
+## #99: Separate disclosure outcome from output progress
+
+A tool's stable group/call identity owns disclosure. Its outcome class (running,
+success, failure, cancellation, unknown) decides when an explicit choice can be
+reset; equivalent saved/current terminal spellings and numeric exit metadata do
+not. Saved output sequence/completeness decides whether an open snapshot can be
+refreshed. This preserves explicit closes during metadata-only observations and
+prevents completed-output timestamps from becoming a redraw clock. Revisit if a
+future contract permits one group/call to acquire a genuinely different execution;
+such a change needs an explicit identity transition, not a display-string guess.
