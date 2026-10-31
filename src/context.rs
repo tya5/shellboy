@@ -54,7 +54,7 @@ fn sql_error(error: rusqlite::Error) -> ApiError {
 fn missing() -> ApiError {
     ApiError::new(ErrorCode::TargetUnavailable, "context target not found")
 }
-fn lifetime(created: &str, ended: Option<&str>) -> Option<u64> {
+pub(crate) fn lifetime(created: &str, ended: Option<&str>) -> Option<u64> {
     let start = DateTime::parse_from_rfc3339(created).ok()?;
     let end = DateTime::parse_from_rfc3339(ended?).ok()?;
     if end < start {
@@ -63,9 +63,13 @@ fn lifetime(created: &str, ended: Option<&str>) -> Option<u64> {
     u64::try_from(end.signed_duration_since(start).num_milliseconds()).ok()
 }
 fn reason(raw: Option<String>) -> Result<Option<Value>> {
+    prepare_reason(raw.as_deref())
+}
+/// Canonical pure decoding after bounded saved facts leave a database snapshot.
+pub(crate) fn prepare_reason(raw: Option<&str>) -> Result<Option<Value>> {
     let parsed = raw
         .map(|raw| {
-            serde_json::from_str::<Value>(&raw)
+            serde_json::from_str::<Value>(raw)
                 .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid saved context reason"))
         })
         .transpose()?;

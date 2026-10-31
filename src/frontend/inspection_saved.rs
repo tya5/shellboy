@@ -838,7 +838,17 @@ mod tests {
         let observed =
             crate::test_watchdog::watchdog("saved gets independent of blocked writer", async {
                 let mut values = Vec::new();
-                for command in [shell(), message(), revisit()] {
+                for command in [
+                    shell(),
+                    message(),
+                    revisit(),
+                    Command::RunGet(crate::protocol::RunTarget {
+                        run_id: "run".into(),
+                    }),
+                    Command::TurnGet(crate::protocol::TurnTarget {
+                        turn_id: "turn".into(),
+                    }),
+                ] {
                     values.push(
                         super::super::management_request(
                             &control,
@@ -871,6 +881,12 @@ mod tests {
         assert_eq!(values[0]["command"], "printf done");
         assert_eq!(values[1]["message_id"], "message");
         assert_eq!(values[2]["run_id"], "run");
+        assert_eq!(values[3]["run_id"], "run");
+        assert_eq!(values[3]["usage_totals"]["scope"], "run");
+        assert_eq!(values[3]["usage_totals"]["scope_id"], "run");
+        assert_eq!(values[4]["turn_id"], "turn");
+        assert_eq!(values[4]["usage_totals"]["scope"], "turn");
+        assert_eq!(values[4]["usage_totals"]["scope_id"], "turn");
         for value in values {
             assert_eq!(value["view_observation"]["thread_id"], "target");
             assert!(

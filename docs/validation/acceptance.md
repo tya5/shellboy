@@ -5695,3 +5695,32 @@ only a deadlock guard. Optional scalar copies are bounded before decoding;
 required identity overflow is explicit. This does not qualify the full standard,
 integration suite, live refresh/shared snapshots, P3/P6, native popup screens or
 3OS CI for this source. Those remain open in the G ledger.
+
+## G bounded Run/Turn extraction — local standard checkpoint
+
+The next G unit adds readonly Run/Turn metadata and retains initial saved usage
+totals in that same transaction via the canonical saved-usage helper. Context
+reason/lifetime preparation is shared with the existing domain implementation.
+Required lifecycle scalar overflow is explicit; reason plus Revisit copy shares
+64KiB, and owned Run/execution lists report their128-row coverage limit. Actual
+prefix VM work remains constant between150 and1150 matching children; small
+results retain canonical order. Complete latest-Turn lookup work remains a G9
+qualification item for equal-time rows; a finite result alone is not that proof.
+
+Native macOS, Rust1.99.1, temporary synthetic databases and loopback-discard model
+configuration only. The13-test targeted saved/lifecycle run passed after fixing
+an invalid oversized-JSON fixture. A following full library run passed1149/0/15,
+including exact canonical totals and deleted-scope markers; strict library Clippy
+passed. The first compile required wiring existing pure context helpers and the
+correct collected tuple type. The first targeted test run was4/1 because the
+fixture used non-JSON text where SQLite requires JSON. Later standard v5 passed
+Clippy/Python/layout/watchdog but stopped1149/1/15 in the library: a newly added
+ordering fixture used NULL where started_at is NOT NULL. That fixture now uses a
+legal empty timestamp; no schema constraint, assertion or watchdog was relaxed.
+Final `sh scripts/check.sh` v6 completed successfully on this commit's runtime
+source:2109 passed/0 failed/35 ignored (library1150, integration940, block
+replacement12, frontend structure7), Python66, layout94, watchdog/fmt and strict
+all-target Clippy. The exact initial totals/deleted marker, legal empty ordering,
+blocked writer across all five targets, and existing overview/history/edit detail
+integration tests all ran and passed. These results do not qualify live subscriptions,
+shared500ms/3s admission, P3/P6, native popup layouts or three-OS CI for G.

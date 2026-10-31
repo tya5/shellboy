@@ -11,6 +11,7 @@ mod draft_saver;
 mod header;
 mod history_reader;
 mod input_history;
+mod inspection_lifecycle;
 mod inspection_saved;
 mod lineage;
 mod lineage_observer;
@@ -179,6 +180,12 @@ async fn management_request_trigger(
     cancel: CancellationToken,
     trigger: crate::usage_totals::UsageTrigger,
 ) -> Result<Value, ApiError> {
+    if inspection_lifecycle::supports(&command) {
+        return match inspection_lifecycle::request(control, command, cancel, trigger).await {
+            Ok(value) => Ok(value),
+            Err(error) => Ok(serde_json::json!({"error":error})),
+        };
+    }
     if inspection_saved::supports(&command) {
         return match inspection_saved::request(control, command, cancel).await {
             Ok(value) => Ok(value),

@@ -2676,3 +2676,18 @@ See the source-qualified acceptance record. This is an initial explicit read,
 not completed G5/G6 live subscriptions/shared admission. Next extract bounded
 Run/Turn facts and wire exact target notifications/shared admission, preserving
 F/#95 and #100. G remains local; no main push, release, install or user data change.
+
+## G5 bounded Run/Turn initial reads
+
+Explicit Run/Turn detail reads now use readonly snapshots and retain canonical
+saved usage totals in the same transaction. Reason/lifetime decoding and usage
+scope-unavailable semantics are shared with existing domain helpers. Scalar/JSON
+copy and owned-ID lists are finite; foreign targets and deleted-scope markers
+remain exact. Current native standard2109/0/35, Python66 and strict all-target
+Clippy pass; observed fixture failures/corrections are retained in acceptance.
+This qualifies the extraction, not G's live subscriptions/shared admission. The
+latest-Turn equal-time ordering needs G9's existing-index extension/qualification;
+no schema change is included here. Next connect the saved-target observer and
+joint read plan, then complete remaining saved-domain coverage and native/P6
+counts. Root archive is preserved; G remains local with no installed/user-data
+change. Latest fetched main remains d29e0fc, already merged with #100 retained.

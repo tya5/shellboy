@@ -1984,7 +1984,7 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     })
 }
 
-fn saved_usage_for_detail(
+pub(crate) fn saved_usage_for_detail(
     db: &Connection,
     scope: &crate::usage_totals::Scope,
     context: crate::usage_totals::ReadContext,

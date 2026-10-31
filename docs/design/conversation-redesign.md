@@ -240,6 +240,31 @@ Initial explicit F8 reads use the existing admission/pool and report their read
 scope/time. This intermediate route is not completion of live target subscriptions
 or the final joint current/browser/inspector snapshot; those remain mandatory.
 
+The next extraction covers saved Run/Turn metadata. Their initial explicit reads
+must retain canonical saved usage totals in the same readonly transaction; normal
+reactive refresh later separates metadata500ms and usage3s. Run metadata copies
+at most128 owned Run IDs and128 active execution IDs, with per-state indexed
+prefixes of129 before sorting. Recovery reason and Revisit share64KiB. Saved
+scalar cells are bounded to512 bytes before materialization; an oversized scalar
+makes this projection explicitly unavailable rather than silently changing an
+identity, timestamp or lifecycle fact. This initial extraction adds no schema/index.
+The canonical latest-Turn ordering uses(created_at,id); the existing Run/time
+index does not cover the ID tie-breaker. G9 must measure tied timestamps and
+qualify bounded lookup or extend the existing index before G admission. Initial
+finite result copies alone do not establish bounded total SQLite work.
+
+For that G9 qualification, prefer replacing the existing turns_by_run index with
+(run_id,created_at,id), keeping its identity and current canonical ordering, over
+adding a redundant parallel index. A local SQLite diagnostic found a temporary
+sort and work proportional to the equal-time group with the current two-column
+index; adding id removes that sort. This is design/preflight evidence only, not
+qualification on bundled SQLite or a shipped schema change. Prove the complete
+Run query, scalar bounds, fresh/upgrade schema equivalence and atomic index/
+ledger/user_version rollback before adoption. Recheck main's migration slot just
+before coding/admission; current main is17. Document a closed-owner backup of
+the complete data directory before any schema upgrade; never run the validation
+on user data or automatically migrate their installed binary.
+
 Private domain helpers are permitted only where they avoid duplicating canonical
 schema/semantics: index saved views know private space/pause/failure keys and must
 not call the heavyweight full-status/provider path; GC observations know category

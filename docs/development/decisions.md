@@ -2350,3 +2350,23 @@ bounded formatting bands and visible-ID scope; do not broaden formatting work.
 The patch is confined to presentation, with no new state/epoch/table/index/
 worker/queue/pool/timer and no replay of the unreviewed E browser draft. User
 binary, owner and databases remain unchanged; Core/UI review is required.
+
+## G saved Run/Turn bounded reads and latest-Turn tie ordering
+
+Retain initial saved usage totals and their canonical unavailable-scope marker
+when moving explicit Run/Turn details to readonly snapshots. Reuse the existing
+saved-usage helper, lifetime calculation and pure context-reason decoder; these
+are internal domain semantics, not a new Core operation or read-model engine.
+Bound JSON copies before decoding, and make oversized lifecycle scalars explicitly
+unavailable instead of silently truncating identities/timestamps. Owned ID lists
+use finite per-state indexed prefixes and explicit128-row coverage limits.
+
+Do not infer bounded latest-Turn work from a point result or query count. Current
+main17 has turns_by_run(run_id,created_at), but canonical ordering also uses id.
+Local Python SQLite3.53.0 diagnosis at100/10000 equal-time rows showed1319/130016
+VM steps and a temporary tie sort; extending the existing index with id showed
+17/14 steps and a covering seek. This preflight is not bundled-Rust qualification.
+G9 must confirm the complete query and migration/rollback using bundled SQLite;
+recheck the schema slot and backup requirement before adoption. No production
+schema/index is changed by this checkpoint. Revisit if current main supplies a
+suitable covering index or canonical ordering changes.
