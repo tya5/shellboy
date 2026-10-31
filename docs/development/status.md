@@ -15,6 +15,15 @@ Owner assembly and partial-startup cleanup now live in `owner_session`, outside
 the TUI frontend. The existing TUI adapter, cancellation and delivery tests move
 with their implementation. No headless command or shutdown behavior is added
 in this structural stage. Stage evidence and integration are tracked in #5.
+## HTTP/header and paired-view ordering (#95)
+
+Generation header waits preserve an already-ready response before an expired
+local wait, after cancellation. Pending headers and non-generation total limits
+retain their deadlines. Permanent-body tests fence real header reception and use
+Tokio virtual time, checking actual HTTP JSONL as well as saved attempts. E keeps
+a pending selected change for a joint read instead of admitting an independent
+browser snapshot around an older inflight ticket. Core review and split-Windows
+repeat qualification are tracked in #95; #5 stages 2/3 remain held separately.
 
 ## Explicit usage-limit recovery (#76)
 
