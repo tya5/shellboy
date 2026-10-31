@@ -288,7 +288,7 @@ pub struct ListOptions {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Examples:\n  shellboy status\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nSaved database facts only; OS processes and independent RAG searches are not observed.\nUse operation get --operation ID to inspect an operation receipt.\nGuide: shellboy docs get --id shellboy/agent-guide"
+    after_help = "Examples:\n  shellboy status\n  shellboy status --memory\n  shellboy operation get --operation OPERATION_ID\n  shellboy status --thread THREAD\n  shellboy status --run RUN --all\n  shellboy status --state failed --since 2026-10-25T00:00:00Z\n\nActivity mode reads saved database facts only. --memory observes current owner cache accounting and native process memory. Neither mode starts model or RAG work.\nUse operation get --operation ID to inspect an operation receipt.\nGuide: shellboy docs get --id shellboy/agent-guide"
 )]
 pub struct StatusOptions {
     /// Query the running owner's cache accounting and native process memory.
