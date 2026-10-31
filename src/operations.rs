@@ -809,7 +809,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::Category,
         default_origin: DefaultOrigin::Literal,
         label: "保存カテゴリ",
-        help: "all/raw/managed-images/history/indexを選びます。",
+        help: "回収対象を選びます。保存状態の照会は選択に関係なく全体を表示します。",
         kind: FieldType::Choice,
         discovery: Discovery::None,
     },

@@ -103,6 +103,17 @@ pub(super) fn report(value: Value, budget: usize) -> Report {
             "notice",
             "view_limits",
             "view_observation",
+            "/blockers/live_run_count",
+            "/blockers/stopping_run_count",
+            "root_revision",
+            "snapshot_only",
+            "deletable_now",
+            "updated_at",
+            "selection",
+            "references",
+            "observation",
+            "targets",
+            "downstream",
         ],
     );
     presentation::fields::decorate(&mut fields, &safe);
@@ -825,5 +836,39 @@ mod attachment_reference_tests {
             )
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod saved_review_field_tests {
+    use super::*;
+    #[test]
+    fn dense_blockers_cannot_hide_snapshot_permission_scope_or_reference_limits() {
+        let value = serde_json::json!({"thread_id":"root","snapshot_only":true,"deletable_now":false,"root_revision":4,"blockers":{"live_run_count":50,"stopping_run_count":0,"runs":(0..50).map(|i|serde_json::json!({"id":format!("run-{i}"),"thread_id":format!("child-{i}"),"state":"live"})).collect::<Vec<_>>()},"selection":{"thread_count":50},"references":{"shared_path_nodes":3},"observation":{"references_complete":false},"view_observation":{"observed_at":"read-time"}});
+        let report = report(value.clone(), 8 * 1024 * 1024);
+        for (key, value) in [
+            ("/thread_id", "root"),
+            ("/snapshot_only", "true"),
+            ("/deletable_now", "false"),
+            ("/root_revision", "4"),
+            ("/blockers/live_run_count", "50"),
+            ("/blockers/stopping_run_count", "0"),
+            ("/selection/thread_count", "50"),
+            ("/references/shared_path_nodes", "3"),
+            ("/observation/references_complete", "false"),
+            ("/view_observation/observed_at", "read-time"),
+        ] {
+            assert_eq!(
+                report
+                    .fields
+                    .iter()
+                    .find(|field| field.key == key)
+                    .map(|field| field.value.as_str()),
+                Some(value),
+                "missing {key}"
+            );
+        }
+        assert!(report.omitted);
+        assert_eq!(report.detail, Some(value));
     }
 }

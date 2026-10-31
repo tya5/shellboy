@@ -448,7 +448,7 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
     fields
 }
 
-/// Reserve common metadata roots before a large list consumes the bounded field
+/// Reserve common metadata roots or exact pointers before a large list consumes the bounded field
 /// window. Reuses the existing collector without cloning/reordering source JSON.
 pub(crate) fn prioritized_fields(value: &Value, roots: &[&str]) -> Vec<PresentationField> {
     let mut out = Vec::new();
@@ -457,12 +457,16 @@ pub(crate) fn prioritized_fields(value: &Value, roots: &[&str]) -> Vec<Presentat
     for (prefix, source) in roots
         .iter()
         .filter_map(|key| {
-            value.get(*key).map(|part| {
-                (
-                    format!("/{}", crate::json_pointer::escape_segment(key)),
-                    part,
-                )
-            })
+            if key.starts_with('/') {
+                value.pointer(key).map(|part| ((*key).to_owned(), part))
+            } else {
+                value.get(*key).map(|part| {
+                    (
+                        format!("/{}", crate::json_pointer::escape_segment(key)),
+                        part,
+                    )
+                })
+            }
         })
         .chain(std::iter::once((String::new(), value)))
     {

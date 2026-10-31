@@ -291,7 +291,9 @@ not itself completion of commit notifications or live subscriptions.
 General management results reserve common identity/state/scope/coverage/limit/read-
 time fields before admitting expansive array fields. Reuse the existing bounded
 pointer/preview collector for selected metadata roots and the remaining source;
-deduplicate exact pointers under the same128-field/64KiB output budget. Do not
+deduplicate exact pointers under the same128-field/64KiB output budget. Exact
+metadata pointers can reserve blocker counts without expanding their large Run
+list first; permission/snapshot/source-reference fields remain visible. Do not
 clone the raw body to reorder it, raise the field cap, or add per-list geometry
 exceptions. Full retained detail remains separately budgeted and addressable.
 
@@ -327,6 +329,19 @@ remains non-filtering, matching the canonical status route; collection owns that
 category selector. Core placement
 keeps private retention/pin/quota/path/file-worker policy in its existing owner;
 frontend owns presentation, visibility and observation lifetime.
+
+The saved deletion view examines at most256 physical descendant candidates plus
+a sentinel (and the root), depth8, and1024 combined reference/replacement-owner
+witnesses. Deleted descendants/foreign memberships and noncompleted replacements
+consume admission before exclusion; they cannot create an unbounded negative
+lookup. Scope/reference incompleteness cannot prove negative counts or permission;
+unproven values remain unknown, while a witnessed blocker still denies deletion.
+Observed lower bounds stay separate. Deletion read scalars are capped
+512 bytes before Rust string materialization; invalid/oversized cells fail the
+observation rather than creating a partial authorization. Exact CLI preview and
+the dedicated destructive confirmation/revision checks remain unchanged. Core
+placement preserves private path/replacement/attachment relationships and canonical
+scope semantics; frontend owns read lifetime and presentation, never permission.
 
 Private domain helpers are permitted only where they avoid duplicating canonical
 schema/semantics: index saved views know private space/pause/failure keys and must

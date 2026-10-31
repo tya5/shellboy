@@ -715,6 +715,7 @@ impl ValueEnum for wire::StorageCategory {
 }
 #[derive(Debug, Clone, Args)]
 pub struct StorageOptions {
+    /// Category for collection; status always reports all categories.
     #[arg(long, value_enum)]
     pub category: Option<Category>,
 }
