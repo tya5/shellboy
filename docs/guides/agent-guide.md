@@ -361,6 +361,12 @@ When sending to another data directory, use `--sender-label` to name yourself;
 Origin is stripped across owners, so the receiver sees `external_cli` plus that
 unverified name, not your authenticated model identity.
 
+## Storage and resources
+
+Shell raw output can expire (default seven days / total 1GiB); large output consumes that budget. Preserve needed results in a durable file or answer rather than relying on later raw reads.
+Managed clipboard images can also expire (default seven days / total 256MiB); their exposed absolute `path` has the same lifecycle, not permanent availability. Active selections, drafts and send pins protect them.
+Collection keeps history references/reasons, not the reclaimed content; conversations have no automatic expiry. See [Recovery and storage](recovery-and-storage.md) and [Configuration](configuration.md) for retention, GC and cache budgets.
+
 ## Queued messages and human Turn interruption
 
 `shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.

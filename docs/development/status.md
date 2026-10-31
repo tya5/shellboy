@@ -17,6 +17,14 @@ for failure/nonzero exits/cancellation. Static headers and cached live seconds
 share that rule, with unchanged NO_COLOR metadata. Native 80-column PTY checks
 cover dark/light/plain/fallback; evidence and limits are recorded in acceptance.
 
+## Storage/resource guide refresh (#81)
+
+Both User Guides summarize current retention, automatic collection, storage
+cleanup, cache budgets and on-demand owner memory. Delegation uses bundled guide
+IDs; usage/Esc explanations now align across languages. The Agent Guide warns
+against relying on retained raw output or managed paths. F8 naming stays with #41.
+Documentation validation and implementation sources are recorded in acceptance.
+
 ## On-demand owner memory (#80)
 
 CLI status --memory returns existing body/layout/attachment/replay cache accounting

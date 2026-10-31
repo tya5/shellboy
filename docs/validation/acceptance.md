@@ -4281,3 +4281,30 @@ on the exact candidate; native branch CI must pass before main integration.
   `/tmp/issue-83-metadata-pty-v4/` (screens, raw, cell-color JSON and results).
   Physical-terminal/font readability, IME, OS clipboard and Windows ConPTY
   remain unverified; this small color-only change does not rerun P1.
+
+## 2026-10-31 storage/resource guide audit (#81)
+
+- Scope: documentation only, against main `0ca4ec5` after reviewed #83 was
+  fast-forwarded unchanged. #83 main CI `41175347395` passes on all three OSes.
+- Requirements: #81 body and its two additional comments. Both User Guides
+  explain storage/GC/cache/memory and bundled delegation IDs; Esc, last-successful
+  usage and the usage-section placement are aligned. Only the stale live-work
+  qualifier is removed; watch/forms and deferred F8 names remain unchanged.
+- Sources: `src/config.rs` Retention/Cache (7 days, 1GiB/256MiB;
+  32/16/32/64MiB), `src/control.rs` maintenance (initial pass, then 60-second
+  sleep), `src/gc.rs`/`src/gc/history.rs` (raw/history batches and reachability),
+  `src/attachments.rs` collect_managed (protection and owned clipboard paths),
+  `src/memory.rs`/`src/control/memory.rs` (on-demand metrics), `src/docs.rs`
+  and `src/control/driver/request.rs` (bundled guides and short system entry).
+- Important clarification: 128 is a raw/history DB batch size, not a global
+  collection-per-pass/minute limit. Raw/history collection can repeat batches;
+  managed-image candidate selection has no equivalent LIMIT 128. The managed
+  report truncates details to 128, not collection work. No runtime change here.
+- Compared against recovery/storage, configuration and attachment guides.
+  No remaining checkout/absolute-guide-path premise was found in feature guides.
+- Python document/script tests: 18 pass. All 33 Japanese-guide local links and
+  fragment targets pass an ad-hoc check (the initial checker mishandled same-file
+  fragments; correcting its path resolution fixes the checker, not guide text).
+  Standard check and rebuilt bundled-guide inspection are pending. No release
+  build, performance/PTY rerun, terminal/IME/clipboard/ConPTY verification or
+  real-data GC is performed for this documentation change.
