@@ -4401,3 +4401,21 @@ is not expanded; no idle-without-Run state, subscription or UI watch screen is
 added. No new table/worker/queue/dependency, real provider, user data, installed
 binary or owner swap is part of qualification. #80/#83 main is retained; UI edits
 only initialize new optional DTO fields after their owner work completed.
+
+
+### Final-gate integration findings (#74)
+
+The first combined local gate stopped in lib tests:960 passed/3 failed/13 ignored.
+The new receipt Thread-order index gave the submission fence an equivalent
+Thread-prefix SEARCH instead of receipt_target; the plan test now allows these
+two named prefix indexes while retaining the target binding and no-scan checks.
+No retention assertion or production fence policy is changed. The lightweight
+header intentionally leaves new optional CLI message bodies unobserved; its test
+still enforces three statements and all shared facts, separately asserting the
+canonical received message and the header's None fields. It does not add body
+queries or drop the old header checks. An old-schema startup fixture left the
+four new indexes while rolling back its ledger; it now drops those derived
+indexes too. Runtime migration stays strict, with no IF NOT EXISTS workaround.
+That touched fixture's10s guard moves to the shared60s watchdog, removing one
+more stale allowance (two removed in this task). Revalidation follows normally;
+these deterministic integration findings are not called unrelated CI flakes.

@@ -432,14 +432,6 @@
     "reason": "Opt-in non-gating performance workload sampling/pacing window, not an upper/lower response-latency assertion; readiness/completion guards use shared WATCHDOG."
   },
   {
-    "file": "src/frontend/startup.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "b9354d54abaeaafc3c72ec9035ae5da920b96cd47c753d2a448ba7582998261b",
-    "function": "cancellation_at_database_preparation_finishes_migration_before_releasing_owner",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing cancellation_at_database_preparation_finishes_migration_before_releasing_owner test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
     "file": "src/frontend/streams.rs",
     "rule": "raw-timeout",
     "fingerprint": "80f636bb208cba544ed1a6966b94bcd799e4b8c3cf33377a19072f910d5e17d5",

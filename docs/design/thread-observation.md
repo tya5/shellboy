@@ -82,3 +82,8 @@ Root recovery recording is the only additional transition-side work: the
 already-existing child_recovery_wait fact is retained even when no parent is
 present. This is necessary to observe recovery/resume in an unobserved interval;
 there is no delivery for root Runs and no new event kind or state machine.
+
+The UI's pre-existing bounded header reader does not fetch these optional CLI
+message bodies; its DTO fields remain unobserved/None and its query budget is
+unchanged. Canonical ThreadList/Get populate them. Shared header facts must still
+match, independently of this explicit projection boundary.
