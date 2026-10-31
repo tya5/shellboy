@@ -2695,3 +2695,15 @@ Parent-owned background serve and nested-tool lifecycle checks, native bootstrap
 snapshot/pre-DB-close cutpoints and CLI recovery workflow are prepared. Serve
 adds Unix INT to graceful termination without changing TUI policy; repeated TERM
 in drain is not forced termination. Qualification and native-OS limits are in #5.
+
+## #91 band extent follow-up (in progress)
+
+Cell-level baseline captures precede product edits: 80/140 and odd widths,
+dark/light/NO_COLOR, plus live loopback input and scrolling. These synthetic
+inputs did not reproduce the reported one-cell-short continuation; their bands
+already occupy x=1 through width-2. Header text reaching both outer cells is
+confirmed. The correction enforces background extent from source identity rather
+than the final styled span, explicitly resets normal background edges, and uses
+one theme inset for full-width header color with inset text. Synthetic short-line
+and band-to-plain replacement tests are prepared. No candidate Rust check/build
+has run yet. This is not a causal claim about the user's physical-terminal case.

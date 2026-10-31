@@ -10,6 +10,9 @@ import sqlite3
 import sys
 import subprocess
 import tempfile
+import os
+import threading
+from http.server import ThreadingHTTPServer
 
 spec = importlib.util.spec_from_file_location("capture", Path(__file__).with_name("check-paste-commands.py"))
 capture = importlib.util.module_from_spec(spec)
@@ -22,11 +25,17 @@ def main():
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--mark", default="⇥")
+    parser.add_argument("--columns", type=int, nargs="+", default=[80, 140])
+    parser.add_argument("--live-probe", action="store_true")
     args = parser.parse_args()
     binary, fixture = args.binary.resolve(), args.fixture.resolve()
     args.out.mkdir(parents=True, exist_ok=False)
     results = []
-    for cols in (80, 140):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), capture.Mock) if args.live_probe else None
+    if server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    base_url = f"http://127.0.0.1:{server.server_port}/v1" if server else "http://127.0.0.1:9/v1"
+    for cols in args.columns:
         for palette, no_color in [("dark", False), ("light", False), ("dark", True)]:
             name = f"{cols}-{palette}-plain-{int(no_color)}"
             out = args.out / name
@@ -37,7 +46,7 @@ def main():
                                timeout=capture.WATCHDOG_SECONDS)
                 (root / "config.toml").write_text(
                     'default_connection="visual"\ndefault_model="offline-fixture"\n'
-                    '[connections.visual]\nbase_url="http://127.0.0.1:9/v1"\n'
+                    f'[connections.visual]\nbase_url="{base_url}"\n'
                     f'[ui]\ncopy_backend="osc52"\npalette="{palette}"\nbell=false\n')
                 with sqlite3.connect(root / "data/shellboy.db") as db:
                     expected = [json.loads(row[0])["content"] for row in db.execute(
@@ -49,6 +58,10 @@ def main():
                     text = terminal.expect(lambda text: "CODE_END" in text and "LONG_END" in text and
                                            "名前なし" in text and "Claude" in text, "input-bands")
                     (out / "bands.txt").write_text(text + "\n")
+                    (out / "cells.json").write_text(json.dumps([
+                        [{"x": x, "text": cell.data, "fg": cell.fg, "bg": cell.bg}
+                         for x, cell in enumerate(row)] for row in terminal.screen.buffer
+                    ], ensure_ascii=False, indent=2) + "\n")
                     assert "入力 ·" not in text
                     rows = text.splitlines()
                     mark_rows = [i for i, row in enumerate(rows) if args.mark in row]
@@ -96,6 +109,30 @@ def main():
                     terminal.expect(lambda text: "LONG_BEGIN" in text and "名前なし" in text,
                                     "close-original")
                     terminal.send("\x1b[1;5F")
+                    if args.live_probe:
+                        payload = "LIVE_EDGE_BEGIN " + "外からの入力 ✨e\u0301🙂 " * 180 + "\n短い続き LIVE_EDGE_END"
+                        env = {key: value for key, value in os.environ.items() if not key.startswith("SHELLBOY_")}
+                        command = [str(binary), "--config", str(root / "config.toml"), "--data-dir", str(root / "data"),
+                                   "message", "send", "--thread", "visual-input-bands", "--sender-label", "cell-probe", "--text", payload]
+                        subprocess.run(command, check=True, capture_output=True, env=env, timeout=capture.WATCHDOG_SECONDS)
+                        terminal.expect(lambda s: "LIVE_EDGE_END" in s and "PASTE_FIXTURE_REPLY" in s, "live band")
+                        def save_cells(label):
+                            (out / (label + ".txt")).write_text(terminal.text() + "\n")
+                            (out / (label + "-cells.json")).write_text(json.dumps([
+                                [{"x": x, "text": c.data, "fg": c.fg, "bg": c.bg} for x, c in enumerate(row)]
+                                for row in terminal.screen.buffer], ensure_ascii=False, indent=2) + "\n")
+                        save_cells("live")
+                        for page in range(16):
+                            if "短い依頼" in terminal.text():
+                                break
+                            before_frame = terminal.frames.frame_count
+                            terminal.send("\x1b[5~")
+                            terminal.expect(lambda _s: terminal.frames.frame_count > before_frame, "page up completed frame")
+                        assert "短い依頼" in terminal.text(), terminal.text()
+                        save_cells("scroll-up")
+                        terminal.send("\x1b[1;5F")
+                        terminal.expect(lambda s: "LIVE_EDGE_END" in s and "PASTE_FIXTURE_REPLY" in s, "return to live tail")
+                        save_cells("scroll-tail")
                     results.append({"case": name, "mark": args.mark, "band_rows": len(color_evidence),
                                     "copy_body_only": True, "selection_copy_body_only": True,
                                     "original_copy_body_only": True})
@@ -112,6 +149,9 @@ def main():
                         (out / "cleanup-failure.txt").write_text(str(error) + "\n")
                     finally:
                         (out / "terminal.raw").write_bytes(terminal.raw)
+    if server:
+        server.shutdown()
+        server.server_close()
     (args.out / "results.json").write_text(json.dumps(results, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(results, ensure_ascii=False, indent=2))
 
