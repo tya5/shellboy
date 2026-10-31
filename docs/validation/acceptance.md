@@ -3748,3 +3748,7 @@ case after requiring the selected excerpt result. Its exact shared-sequence,
 one-observation and no-reload assertions remain intact. A full check on the
 final review branch is still required; one focused success does not prove the
 intermittent cause or complete E's performance gates.
+
+## Manual P2/P5 measurement tooling
+
+[CI procedure](../development/native-tui-ci.md) separates fixture/source validity errors from record-only CPU/read/draw observations. Python20/0 and YAML syntax checks pass locally. Instrumented sourcee5870d0 builds in release mode, and native macOS80-column2s P2/P5/P5-list fixture smokes pass. Initial wide-character exporter failure is retained and corrected with a focused regression. Full CI windows, baseline execution and the instrumented E+#75 measurement binary remain unqualified. Windows is explicitly unavailable until a native ConPTY fixture exists. These procedure checks do not qualify P2/P5 performance.

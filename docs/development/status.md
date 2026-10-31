@@ -1517,3 +1517,7 @@ an earlier row retains the selected screen anchor, changes the count, and makes
 the new row selectable by Up. Every fixture exits0; no paid/default-store or
 clipboard action occurs. This supersedes the pre-#75 native scope for these
 specific behaviors, not physical Windows UX or full performance acceptance.
+
+## Manual P2/P5 CI tooling (pending execution)
+
+An opt-in source-witnessed native Unix measurement path is prepared in CI; the existing Windows test-timing job is unchanged. See [the procedure and limits](native-tui-ci.md). Python20/0, YAML syntax and an instrumented release build with three native2s fixture smokes pass. The smokes cover silent background, hidden output and hidden output with List visible; they qualify the harness only. Full CI windows, baseline execution and Windows ConPTY qualification remain unperformed. No performance success is claimed from tooling or skipped jobs.
