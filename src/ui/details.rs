@@ -860,7 +860,7 @@ impl Details {
                 super::ItemKey::tool(tool, &node.node_id, *index) == *key
                     && crate::tool_description::label(tool.description.as_deref()).is_some()
             })
-            .max_by_key(|(_, _, block, _)| crate::presentation::tool_observation_rank(block))
+            .max_by_key(|(_, _, block, _)| super::presentation::tool_observation_rank(block))
             .map(|(_, _, _, tool)| {
                 format!(
                     "shell · call {} · コマンドpreview {}",
