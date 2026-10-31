@@ -5987,7 +5987,7 @@ passes13/0; `cargo test --locked --lib explicit_saved_gets_finish` passes1/0.
 The latter includes IndexStatus alongside existing saved readers while the
 writer is deliberately blocked and checks unchanged receipts. Strict library
 Clippy passes. The existing edit-adapter frontend integration passes1/0 with the retained
-management spaces/coverage/definitions assertions. Canonical index tests pass42/0/1; the complete standard check is running;
+management spaces/coverage/definitions assertions. Canonical index tests pass42/0/1; the complete standard check was interrupted by SIGTERM during all-target Clippy;
 these targeted results do not inherit the preceding2160-test standard result.
 
 The initial canonical parity regression caught a refactoring error: a shadowed
@@ -5997,3 +5997,12 @@ regression now verifies both unchanged coverage and two stale segments after
 revision change. Initial failed logs are retained privately, not counted as
 passes. Budget/cursor/selected-space/scalar/disabled-auto-history tests also pass.
 No live-observer/P3/P6/three-OS or native layout completion is established here.
+
+Source2ae8c40: the standard attempt completed layout95, watchdog policy,
+Python70/0 and formatting, then all-target Clippy was terminated by signal15
+(exit143). The cause is not established; no Rust diagnostic or passing
+all-target result was produced. This attempt is interrupted, not a successful
+standard check. Targeted13/0, blocked-writer1/0, frontend1/0, canonical index42/0/1
+and strict library Clippy remain their separately qualified results. Commit
+secret scan7c04dbc..2ae8c40 passes. Resume with the standard check before claiming
+whole-source qualification; no G publication/admission follows from this record.
