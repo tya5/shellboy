@@ -112,13 +112,17 @@ impl IndexService {
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
+                let mut changed = false;
                 for adoption in adoptions {
-                    adoption.adopt_embedding_tx(&tx)?;
+                    changed |= adoption.adopt_embedding_tx(&tx)?;
                 }
                 tx.commit()?;
-                Ok(())
+                Ok(changed)
             })
             .await;
+        if let Ok(changed) = &adopted {
+            self.publish_saved(*changed);
+        }
         if let Err(error) = adopted {
             let error = error.into_api_error();
             let kind = serde_json::to_value(error.code)
@@ -157,12 +161,13 @@ impl IndexService {
             return self.fail_claims(key, claims, error, false).await;
         }
         let key = key.to_owned();
-        self.database.call(move |db| {
+        let changed = self.database.call(move |db| {
             let tx = db.transaction()?;
             let detail = json!({"kind":"embedding_batch_failure","input_count":claims.len(),"error":error,"fallback":"single"});
+            let mut changed = false;
             for claimed in claims {
                 if !claim_valid(&tx,&claimed)? || !witness_valid(&tx,&claimed.work.witness,&claimed.work.body_kind)? || !group_current(&tx,IndexKeys::new(&key),&claimed.work.group)? {
-                    discard_claim(&tx,&claimed,"Source or group changed before batch failure adoption")?;
+                    changed |= discard_claim(&tx,&claimed,"Source or group changed before batch failure adoption")?;
                     continue;
                 }
                 let Some(job) = claimed.job_id else {
@@ -173,13 +178,16 @@ impl IndexService {
                 work.next_at = None;
                 work.error = Some(json!({"batch_fallback":detail}));
                 tx.execute("UPDATE embedding_job SET state='pending',error_json=?2,next_attempt_at=NULL WHERE id=?1",params![job,detail.to_string()])?;
+                changed = true; // validated running claim was returned to pending
                 if update_json_meta(&tx,&IndexKeys::input(&job),&work)? != 1 {
                     return Err(serde_error());
                 }
             }
             tx.commit()?;
-            Ok(())
-        }).await.map_err(db_error)
+            Ok(changed)
+        }).await.map_err(db_error)?;
+        self.publish_saved(changed);
+        Ok(())
     }
 
     async fn fail_claims(

@@ -112,16 +112,18 @@ impl IndexService {
             } else {
                 None
             };
-        self.database
+        let changed = self
+            .database
             .call(move |db| {
                 let tx = db.transaction()?;
-                dimensions::clear_failure(&tx, IndexKeys::new(&current_key))?;
-                retry_tx(&tx, args, current_key, compatible_keys, family, filter)?;
+                let mut changed = dimensions::clear_failure(&tx, IndexKeys::new(&current_key))?;
+                changed |= retry_tx(&tx, args, current_key, compatible_keys, family, filter)?;
                 tx.commit()?;
-                Ok(())
+                Ok(changed)
             })
             .await
             .map_err(db_error)?;
+        self.publish_saved(changed);
         self.wake();
         Ok(())
     }
@@ -131,20 +133,21 @@ impl IndexService {
         let id = space_id.to_owned();
         let keys = self.identity_keys();
         let config = self.config.clone();
-        self.database
+        let changed = self.database
             .call(move |db| {
                 let tx = db.transaction()?;
-                select_space_tx(&tx, &id, &keys)?;
+                let changed = select_space_tx(&tx, &id, &keys)?;
                 let space = load_space(&tx, &id)?.ok_or_else(serde_error)?;
                 let marker = meta(&tx, &IndexKeys::query_profile(&id))?;
                 query_profile_key(&config, &space.profile, &space.model, marker.as_deref().unwrap_or(""))
                     .ok_or_else(|| StorageError::from(err(ErrorCode::InvalidState,
                         "Selected index space query fingerprint is missing or incompatible; explicitly rebuild with the intended embedding configuration")))?;
                 tx.commit()?;
-                Ok(())
+                Ok(changed)
             })
             .await
             .map_err(db_error)?;
+        self.publish_saved(changed);
         self.wake();
         Ok(())
     }
@@ -215,11 +218,12 @@ fn retry_tx(
     compatible_keys: Vec<String>,
     family: Option<String>,
     filter: Option<HashSet<String>>,
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
     let embedding_job_sql =
         "SELECT id,source_node_id FROM embedding_job WHERE space_id=?1 AND state='failed'";
     let embedding_job_sql_2 = "UPDATE embedding_job SET state='pending',attempts=0,error_json=NULL,next_attempt_at=NULL WHERE id=?1";
-    let index_space_sql = "UPDATE index_space SET state=CASE WHEN state='candidate_paused' THEN 'candidate' WHEN state='paused' THEN 'active' ELSE state END WHERE id=?1";
+    let index_space_sql = "UPDATE index_space SET state=CASE WHEN state='candidate_paused' THEN 'candidate' WHEN state='paused' THEN 'active' ELSE state END WHERE id=?1 AND state IN ('candidate_paused','paused')";
+    let mut changed = false;
     let explicit = args.space_id.is_some();
     let mut keys = compatible_keys.clone();
     let mut spaces = HashSet::new();
@@ -286,7 +290,7 @@ fn retry_tx(
             if filter.as_ref().is_none_or(|ids| ids.contains(&node))
                 && meta(tx, &IndexKeys::input(&job))?.is_some()
             {
-                tx.execute(embedding_job_sql_2, [&job])?;
+                changed |= tx.execute(embedding_job_sql_2, [&job])? > 0;
                 if let Some(mut work) = json_meta::<Work>(tx, &IndexKeys::input(&job))? {
                     work.authorization = "explicit-retry".into();
                     set_json_meta(tx, &IndexKeys::input(&job), &work)?;
@@ -294,19 +298,19 @@ fn retry_tx(
                 }
             }
         }
-        tx.execute(index_space_sql, [space_id])?;
+        changed |= tx.execute(index_space_sql, [space_id])? > 0;
     }
     for key in &compatible_keys {
-        tx.execute(
+        changed |= tx.execute(
             "DELETE FROM app_meta WHERE key=?1",
             [IndexKeys::new(key).pause()],
-        )?;
+        )? > 0;
     }
     for key in &keys {
-        tx.execute(
+        changed |= tx.execute(
             "DELETE FROM app_meta WHERE key=?1",
             [IndexKeys::new(key).common_failures()],
-        )?;
+        )? > 0;
         if key == &current_key {
             let mut statement = tx.prepare("SELECT key,value FROM app_meta WHERE key LIKE ?1")?;
             let rows = statement
@@ -324,7 +328,7 @@ fn retry_tx(
                 {
                     admission.state = "pending".into();
                     admission.error = None;
-                    update_json_meta(tx, &record, &admission)?;
+                    changed |= update_json_meta(tx, &record, &admission)? > 0;
                 }
             }
         }
@@ -348,23 +352,23 @@ fn retry_tx(
                 work.attempts = 0;
                 work.next_at = None;
                 work.error = None;
-                update_json_meta(tx, &record, &work)?;
+                changed |= update_json_meta(tx, &record, &work)? > 0;
             }
         }
     } // The endpoint family pause is shared even for an explicit current space.
     if let Some(family) = family {
-        tx.execute(
+        changed |= tx.execute(
             "DELETE FROM app_meta WHERE key=?1",
             [IndexKeys::new(&family).pause()],
-        )?;
-        tx.execute(
+        )? > 0;
+        changed |= tx.execute(
             "DELETE FROM app_meta WHERE key=?1",
             [IndexKeys::new(&family).common_failures()],
-        )?;
+        )? > 0;
     }
-    Ok(())
+    Ok(changed)
 }
-fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<(), StorageError> {
+fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<bool, StorageError> {
     let space = load_space(tx, id)?.ok_or_else(|| {
         StorageError::from(err(ErrorCode::TargetUnavailable, "Unknown index space"))
     })?;
@@ -383,13 +387,16 @@ fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<()
             "Incomplete candidate cannot become active",
         )));
     }
-    tx.execute(
-        "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused')",
-        [],
-    )?;
-    tx.execute("UPDATE index_space SET state='active' WHERE id=?1", [&id])?;
-    set_meta(tx, IndexKeys::ACTIVE_SPACE, id)?;
-    Ok(())
+    let mut changed = tx.execute(
+        "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused') AND id<>?1",
+        [id],
+    )? > 0;
+    changed |= tx.execute(
+        "UPDATE index_space SET state='active' WHERE id=?1 AND state<>'active'",
+        [&id],
+    )? > 0;
+    changed |= store::set_meta_changed(tx, IndexKeys::ACTIVE_SPACE, id)?;
+    Ok(changed)
 }
 fn read_status(
     db: &Connection,

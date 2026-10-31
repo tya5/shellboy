@@ -202,21 +202,22 @@ pub(super) fn discard_claim(
     tx: &Transaction<'_>,
     claimed: &Claimed,
     reason: &str,
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
+    let mut changed = false;
     if let Some(job) = &claimed.job_id {
-        tx.execute(
-            "UPDATE embedding_job SET state='failed',error_json=?2 WHERE id=?1",
+        changed |= tx.execute(
+            "UPDATE embedding_job SET state='failed',error_json=?2 WHERE id=?1 AND (state<>'failed' OR error_json IS NOT ?2)",
             params![
                 job,
                 json!({"kind":"source_changed","message":reason}).to_string()
             ],
-        )?;
-        tx.execute("DELETE FROM app_meta WHERE key=?1", [IndexKeys::input(job)])?;
+        )? > 0;
+        changed |= tx.execute("DELETE FROM app_meta WHERE key=?1", [IndexKeys::input(job)])? > 0;
     }
     if let Some(bootstrap) = &claimed.bootstrap_key {
-        tx.execute("DELETE FROM app_meta WHERE key=?1", [bootstrap])?;
+        changed |= tx.execute("DELETE FROM app_meta WHERE key=?1", [bootstrap])? > 0;
     }
-    Ok(())
+    Ok(changed)
 }
 
 /// A space transition does not revoke a valid, already-authorized source input.
@@ -225,19 +226,26 @@ pub(super) fn defer_claim(
     tx: &Transaction<'_>,
     claimed: &Claimed,
     space_state: &str,
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
     let error = json!({"kind":"space_unavailable","space_state":space_state,"message":"Space changed before adoption; select/retry explicitly. The API request may already have been billed."});
+    let mut changed = false;
     if let Some(job) = &claimed.job_id {
-        tx.execute("UPDATE embedding_job SET state='failed',error_json=?2,next_attempt_at=NULL WHERE id=?1",params![job,error.to_string()])?;
+        changed |= tx.execute("UPDATE embedding_job SET state='failed',error_json=?2,next_attempt_at=NULL WHERE id=?1 AND (state<>'failed' OR error_json IS NOT ?2 OR next_attempt_at IS NOT NULL)",params![job,error.to_string()])? > 0;
     }
     if let Some(bootstrap) = &claimed.bootstrap_key {
         let mut work = claimed.work.clone();
         work.state = "failed".into();
         work.error = Some(error);
         work.next_at = None;
-        update_json_meta(tx, bootstrap, &work)?;
+        let encoded = encode_json(&work)?;
+        if meta(tx, bootstrap)?.is_some_and(|old| old != encoded) {
+            changed |= tx.execute(
+                "UPDATE app_meta SET value=?2 WHERE key=?1",
+                params![bootstrap, encoded],
+            )? > 0;
+        }
     }
-    Ok(())
+    Ok(changed)
 }
 
 #[cfg(test)]

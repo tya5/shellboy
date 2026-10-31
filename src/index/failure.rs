@@ -57,7 +57,7 @@ impl IndexService {
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
-                adopt_failure_tx(
+                let changed = adopt_failure_tx(
                     &tx,
                     &claimed,
                     IndexKeys::new(&key),
@@ -67,10 +67,13 @@ impl IndexService {
                     &config,
                 )?;
                 tx.commit()?;
-                Ok(())
+                Ok(changed)
             })
             .await
             .map_err(db_error);
+        if let Ok(changed) = &outcome {
+            self.publish_saved(*changed);
+        }
         if let Err(adoption_error) = &outcome {
             let claimed = recovery_claim;
             let diagnostic = json!({
@@ -85,11 +88,13 @@ impl IndexService {
             }
             // Keep the fixed input and actual provider failure. A separate
             // transaction must not rerun the malformed streak update.
-            let _ = self.database.call(move |db| {
+            let diagnostic_saved = self.database.call(move |db| {
                 let tx = db.transaction()?;
+                let mut changed = false;
                 if claim_valid(&tx, &claimed)?
                     && group_current(&tx, IndexKeys::new(&recovery_key), &claimed.work.group)?
                     && witness_valid(&tx, &claimed.work.witness, &claimed.work.body_kind)? {
+                    changed = true; // a validated running claim is being failed
                     if let Some(job) = &claimed.job_id {
                         tx.execute("UPDATE embedding_job SET state='failed',error_json=?2,next_attempt_at=NULL WHERE id=?1",params![job,diagnostic.to_string()])?;
                     }
@@ -105,10 +110,13 @@ impl IndexService {
                     }
                 }
                 tx.commit()?;
-                Ok(())
+                Ok(changed)
             }).await;
+            if let Ok(changed) = diagnostic_saved {
+                self.publish_saved(changed);
+            }
         }
-        outcome
+        outcome.map(|_| ())
     }
 }
 
@@ -121,7 +129,7 @@ fn adopt_failure_tx(
     error: &ModelError,
     cancelled: bool,
     config: &Config,
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
     let (failure_key, pause_keys) = family;
     let retry_delays = &config.indexing.retry_delays_ms;
     let retries = config.indexing.retries;
@@ -141,8 +149,7 @@ fn adopt_failure_tx(
         || !group_current(tx, keys, &claimed.work.group)?
         || !witness_valid(tx, &claimed.work.witness, &claimed.work.body_kind)?
     {
-        discard_claim(tx, claimed, "Source disappeared before error adoption")?;
-        return Ok(());
+        return discard_claim(tx, claimed, "Source disappeared before error adoption");
     }
     if length && claimed.work.segment.end - claimed.work.segment.start > 1 && !cancelled {
         tx.execute(
@@ -241,7 +248,7 @@ fn adopt_failure_tx(
             }
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]

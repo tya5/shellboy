@@ -48,6 +48,17 @@ pub(super) fn meta(db: &Connection, key: &str) -> Result<Option<String>, Storage
     .optional()
     .map_err(StorageError::from)
 }
+pub(super) fn set_meta_changed(
+    tx: &Transaction<'_>,
+    key: &str,
+    value: &str,
+) -> Result<bool, StorageError> {
+    if meta(tx, key)?.as_deref() == Some(value) {
+        return Ok(false);
+    }
+    set_meta(tx, key, value)?;
+    Ok(true)
+}
 pub(super) fn set_meta(tx: &Transaction<'_>, key: &str, value: &str) -> Result<(), StorageError> {
     let app_meta_sql = "INSERT INTO app_meta(key,value)VALUES(?1,?2)ON CONFLICT(key)DO UPDATE SET value=excluded.value";
     tx.execute(app_meta_sql, params![key, value])?;
@@ -324,13 +335,13 @@ pub(super) fn maybe_activate_candidate(
     tx: &Transaction<'_>,
     keys: IndexKeys<'_>,
     group: &str,
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
     let embedding_job_sql = "SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state NOT IN ('done','split'))";
     if group == "active"
         || !group_current(tx, keys, group)?
         || meta(tx, &keys.enqueueing(group))?.is_some()
     {
-        return Ok(());
+        return Ok(false);
     }
     let auto_pending: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key LIKE ?1)",
@@ -338,20 +349,20 @@ pub(super) fn maybe_activate_candidate(
         |row| row.get(0),
     )?;
     if auto_pending {
-        return Ok(());
+        return Ok(false);
     }
     let Some(space) = space_for_group(tx, keys, group)? else {
-        return Ok(());
+        return Ok(false);
     };
     let unfinished: bool = tx.query_row(embedding_job_sql, [&space.id], |r| r.get(0))?;
     if unfinished {
-        return Ok(());
+        return Ok(false);
     }
     let mut statement = tx.prepare("SELECT value FROM app_meta WHERE key LIKE ?1")?;
     for row in statement.query_map([keys.bootstrap_pattern()], |r| r.get::<_, String>(0))? {
         let work: Work = decode_json(&row?)?;
         if work.group == group {
-            return Ok(());
+            return Ok(false);
         }
     }
     drop(statement);
@@ -365,7 +376,7 @@ pub(super) fn maybe_activate_candidate(
     )?;
     set_meta(tx, IndexKeys::ACTIVE_SPACE, &space.id)?;
     tx.execute("DELETE FROM app_meta WHERE key=?1", [keys.rebuild()])?;
-    Ok(())
+    Ok(true)
 }
 /// Delete every derived body in the transaction that tombstones source text.
 pub fn delete_source_vectors_tx(tx: &Transaction<'_>, node_id: &str) -> Result<(), ApiError> {
@@ -449,7 +460,7 @@ pub(super) struct EmbeddingAdoption {
     pub(super) vector: Vec<f32>,
 }
 impl EmbeddingAdoption {
-    pub(super) fn adopt_embedding_tx(&self, tx: &Transaction<'_>) -> Result<(), StorageError> {
+    pub(super) fn adopt_embedding_tx(&self, tx: &Transaction<'_>) -> Result<bool, StorageError> {
         let claimed = &self.claimed;
         let key_copy = self.embedding.key.as_str();
         let failure_key = self.failure_key.as_str();
@@ -459,16 +470,14 @@ impl EmbeddingAdoption {
             || !witness_valid(tx, &claimed.work.witness, &claimed.work.body_kind)?
             || !group_current(tx, IndexKeys::new(key_copy), &claimed.work.group)?
         {
-            discard_claim(tx, claimed, "Source or index group changed before adoption")?;
-            return Ok(());
+            return discard_claim(tx, claimed, "Source or index group changed before adoption");
         }
         let space = match &claimed.space {
             Some(space) => load_space(tx, &space.id)?.ok_or_else(serde_error)?,
             None => ensure_space(tx, &self.embedding, &claimed.work.group, dimension)?,
         };
         if !matches!(space.state.as_str(), "active" | "candidate") {
-            claim::defer_claim(tx, claimed, &space.state)?;
-            return Ok(());
+            return claim::defer_claim(tx, claimed, &space.state);
         }
         if vector.len() != space.dimension || vector.iter().any(|v| !v.is_finite()) {
             return Err(StorageError::from(err(
@@ -488,11 +497,12 @@ impl EmbeddingAdoption {
                     |r| r.get(0),
                 )?;
                 if state == "done" {
-                    if let Some(bootstrap) = &claimed.bootstrap_key {
-                        tx.execute("DELETE FROM app_meta WHERE key=?1", [bootstrap])?;
-                    }
-
-                    return Ok(());
+                    let changed = if let Some(bootstrap) = &claimed.bootstrap_key {
+                        tx.execute("DELETE FROM app_meta WHERE key=?1", [bootstrap])? > 0
+                    } else {
+                        false
+                    };
+                    return Ok(changed);
                 }
             }
             job_id
@@ -512,7 +522,7 @@ impl EmbeddingAdoption {
             [IndexKeys::new(failure_key).common_failures()],
         )?;
         maybe_activate_candidate(tx, IndexKeys::new(key_copy), &claimed.work.group)?;
-        Ok(())
+        Ok(true)
     }
 }
 

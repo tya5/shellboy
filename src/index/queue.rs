@@ -130,7 +130,8 @@ impl IndexService {
         work: Vec<Work>,
     ) -> Result<usize, ApiError> {
         let key = key.to_owned();
-        self.database
+        let inserted = self
+            .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 let mut inserted = 0;
@@ -160,17 +161,19 @@ impl IndexService {
                 Ok(inserted)
             })
             .await
-            .map_err(db_error)
+            .map_err(db_error)?;
+        self.publish_saved(inserted > 0);
+        Ok(inserted)
     }
 }
 
-pub(super) fn recover_inflight(db: &mut Connection) -> Result<(), StorageError> {
+pub(super) fn recover_inflight(db: &mut Connection) -> Result<bool, StorageError> {
     let tx = db.transaction()?;
     let interrupted = json!({"kind":"interrupted","message":"Previous embedding request interrupted; retry explicitly and consider duplicate billing"});
-    tx.execute(
+    let mut changed = tx.execute(
         "UPDATE embedding_job SET state='failed',error_json=?1 WHERE state='running'",
         [interrupted.to_string()],
-    )?;
+    )? > 0;
     let mut statement =
         tx.prepare("SELECT key,value FROM app_meta WHERE key LIKE 'index.bootstrap.%'")?;
     let rows = statement
@@ -184,28 +187,39 @@ pub(super) fn recover_inflight(db: &mut Connection) -> Result<(), StorageError> 
             work.error = Some(
                 json!({ "kind":"interrupted","message":"Previous bootstrap request interrupted; retry explicitly"} ),
             );
-            update_json_meta(&tx, &key, &work)?;
+            changed |= update_json_meta(&tx, &key, &work)? > 0;
         }
     }
     tx.commit()?;
-    Ok(())
+    Ok(changed)
 }
+#[cfg(test)]
 pub(super) fn recover_authorization(db: &mut Connection) -> Result<(), StorageError> {
-    let app_meta_sql = "SELECT key,value FROM app_meta WHERE key LIKE 'index.auto.%' AND json_extract(value,'$.state')='running'";
-    let mut statement = db.prepare(app_meta_sql)?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    for (key, value) in rows {
-        let mut admission: AutoAdmission = decode_json(&value)?;
-        admission.state = "failed".into();
-        admission.error = Some("Index source preparation interrupted; retry explicitly".into());
-        update_json_meta(db, &key, &admission)?;
-    }
-    Ok(())
+    recover_authorization_progress(db).0
+}
+/// Preserve each existing autocommit before a possible later decode/save error.
+pub(super) fn recover_authorization_progress(
+    db: &mut Connection,
+) -> (Result<(), StorageError>, bool) {
+    let mut changed = false;
+    let result = (|| {
+        let app_meta_sql = "SELECT key,value FROM app_meta WHERE key LIKE 'index.auto.%' AND json_extract(value,'$.state')='running'";
+        let mut statement = db.prepare(app_meta_sql)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(statement);
+        for (key, value) in rows {
+            let mut admission: AutoAdmission = decode_json(&value)?;
+            admission.state = "failed".into();
+            admission.error = Some("Index source preparation interrupted; retry explicitly".into());
+            changed |= update_json_meta(db, &key, &admission)? > 0;
+        }
+        Ok(())
+    })();
+    (result, changed)
 }
 
 /// Select and mark one authorized source before any parsing/HTTP work.

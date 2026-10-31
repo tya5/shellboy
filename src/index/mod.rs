@@ -138,6 +138,7 @@ pub struct IndexService {
     database: DbWorker,
     config: Arc<Config>,
     notify: Arc<Notify>,
+    saved_changed: Arc<Notify>,
     profile_key: Option<String>,
     endpoint_family_key: Option<String>,
     started: AtomicBool,
@@ -183,6 +184,7 @@ impl IndexService {
             database,
             config,
             notify: Arc::new(Notify::new()),
+            saved_changed: Arc::new(Notify::new()),
             profile_key,
             endpoint_family_key,
             started: AtomicBool::new(false),
@@ -257,14 +259,19 @@ impl IndexService {
         }
         // Inflight calls from a prior owner may already have incurred billing.
         // Keep them failed for explicit retry rather than silently replaying.
-        self.database
+        let changed = self
+            .database
             .call(queue::recover_inflight)
             .await
             .map_err(db_error)?;
-        self.database
-            .call(queue::recover_authorization)
+        self.publish_saved(changed);
+        let (recovered, changed) = self
+            .database
+            .call(|db| Ok(queue::recover_authorization_progress(db)))
             .await
             .map_err(db_error)?;
+        self.publish_saved(changed);
+        recovered.map_err(db_error)?;
         let cancel = self.stop.child_token();
         let mut joins = Vec::new();
         for _ in 0..self.config.indexing.concurrency {
@@ -318,6 +325,11 @@ impl IndexService {
         }
         Ok(())
     }
+    fn publish_saved(&self, changed: bool) {
+        if changed {
+            self.saved_changed.notify_one();
+        }
+    }
     pub fn wake(&self) {
         self.notify.notify_waiters();
         self.notify.notify_one();
@@ -335,6 +347,7 @@ impl IndexService {
         let Some((record, mut admission)) = admission else {
             return Ok(false);
         };
+        self.publish_saved(true); // claim_authorization committed pending -> running
         match self.enqueue_new(&[admission.node_id.clone()]).await {
             Ok(_) => {
                 let lookup = IndexKeys::new(key).rebuild();
@@ -354,39 +367,41 @@ impl IndexService {
                 {
                     admission.state = "failed".into();
                     admission.error = Some(error.to_string());
-                    self.database
-                        .call(move |db| {
-                            update_json_meta(db, &record, &admission)?;
-                            Ok(())
-                        })
+                    let changed = self
+                        .database
+                        .call(move |db| Ok(update_json_meta(db, &record, &admission)? > 0))
                         .await
                         .map_err(db_error)?;
+                    self.publish_saved(changed);
                     return Ok(true);
                 }
                 let profile = key.to_owned();
-                self.database
+                let changed = self
+                    .database
                     .call(move |db| {
                         let tx = db.transaction()?;
-                        tx.execute("DELETE FROM app_meta WHERE key=?1", [record])?;
+                        let mut changed =
+                            tx.execute("DELETE FROM app_meta WHERE key=?1", [record])? > 0;
                         if let Some(group) = group {
-                            maybe_activate_candidate(&tx, IndexKeys::new(&profile), &group)?;
+                            changed |=
+                                maybe_activate_candidate(&tx, IndexKeys::new(&profile), &group)?;
                         }
                         tx.commit()?;
-                        Ok(())
+                        Ok(changed)
                     })
                     .await
                     .map_err(db_error)?;
+                self.publish_saved(changed);
             }
             Err(error) => {
                 admission.state = "failed".into();
                 admission.error = Some(error.to_string());
-                self.database
-                    .call(move |db| {
-                        update_json_meta(db, &record, &admission)?;
-                        Ok(())
-                    })
+                let changed = self
+                    .database
+                    .call(move |db| Ok(update_json_meta(db, &record, &admission)? > 0))
                     .await
                     .map_err(db_error)?;
+                self.publish_saved(changed);
             }
         }
         Ok(true)
@@ -644,6 +659,7 @@ impl IndexService {
             })
             .await
             .map_err(db_error)?;
+        self.publish_saved(true);
         self.enqueue(&ids, &group, "explicit-rebuild").await
     }
     async fn enqueue(
@@ -671,6 +687,7 @@ impl IndexService {
                 })
                 .await
                 .map_err(db_error)?;
+            self.publish_saved(true);
         }
         for node in node_ids {
             if !seen.insert(node) {
@@ -768,6 +785,7 @@ impl IndexService {
                 })
                 .await
                 .map_err(db_error)?;
+            self.publish_saved(true);
         }
         self.wake();
         Ok(preview)
@@ -775,28 +793,31 @@ impl IndexService {
     async fn capacity_allowed(&self, key: &str) -> Result<bool, ApiError> {
         let key = key.to_owned();
         let config = self.config.clone();
-        self.database
+        let (allowed, changed) = self
+            .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 match crate::gc::require_capacity_tx(&tx, &config) {
                     Ok(()) => {
                         tx.commit()?;
-                        Ok(true)
+                        Ok((true, false))
                     }
                     Err(error) if error.code == ErrorCode::StorageLimit => {
-                        pause::save(
+                        let changed = pause::save(
                             &tx,
                             &IndexKeys::new(&key).pause(),
                             &serde_json::to_value(&error).map_err(|_| serde_error())?,
                         )?;
                         tx.commit()?;
-                        Ok(false)
+                        Ok((false, changed))
                     }
                     Err(error) => Err(StorageError::from(error)),
                 }
             })
             .await
-            .map_err(db_error)
+            .map_err(db_error)?;
+        self.publish_saved(changed);
+        Ok(allowed)
     }
     pub async fn process_one(&self, cancel: CancellationToken) -> Result<bool, ApiError> {
         let outcome = self.process_one_inner(cancel).await;
@@ -817,16 +838,20 @@ impl IndexService {
                 .database
                 .call(move |db| {
                     let tx = db.transaction()?;
+                    let mut changed = false;
                     for key in keys {
                         let pause = IndexKeys::new(&key).pause();
                         if meta(&tx, &pause)?.is_none() {
-                            pause::save(&tx, &pause, &reason)?;
+                            changed |= pause::save(&tx, &pause, &reason)?;
                         }
                     }
                     tx.commit()?;
-                    Ok(())
+                    Ok(changed)
                 })
                 .await;
+            if let Ok(changed) = &paused {
+                self.publish_saved(*changed);
+            }
             if let Err(pause_error) = paused {
                 // Storage cannot preserve even the diagnostic. Stop spending;
                 // restart/repair is required rather than a hidden retry loop.
@@ -890,8 +915,14 @@ impl IndexService {
             .map_err(db_error)?;
         let claims = match claimed {
             ClaimResult::Idle => return Ok(false),
-            ClaimResult::Progress => return Ok(true),
-            ClaimResult::Ready(claims) => claims,
+            ClaimResult::Progress => {
+                self.publish_saved(true);
+                return Ok(true);
+            }
+            ClaimResult::Ready(claims) => {
+                self.publish_saved(true);
+                claims
+            }
         };
         self.process_claims(&key, claims, cancel).await?;
         self.wake();
@@ -1253,3 +1284,6 @@ mod source_metadata_tests {
         db.shutdown().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod saved_notification_tests;

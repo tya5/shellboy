@@ -30,14 +30,21 @@ pub(super) fn candidate_stopped(
     Ok(json_meta::<CandidateMode>(db, &candidate_key(keys))?
         .is_some_and(|mode| mode.group == group && mode.error.is_some()))
 }
-pub(super) fn clear_failure(tx: &Transaction<'_>, keys: IndexKeys<'_>) -> Result<(), StorageError> {
+pub(super) fn clear_failure(
+    tx: &Transaction<'_>,
+    keys: IndexKeys<'_>,
+) -> Result<bool, StorageError> {
     let record = candidate_key(keys);
     if let Some(mut mode) = json_meta::<CandidateMode>(tx, &record)? {
+        if mode.error.is_none() && mode.paused_at.is_none() {
+            return Ok(false);
+        }
         mode.error = None;
         mode.paused_at = None;
         set_json_meta(tx, &record, &mode)?;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 pub(super) fn bind_space(
     tx: &Transaction<'_>,
@@ -78,25 +85,26 @@ impl IndexService {
                 "Cannot encode dimension validation failure",
             )
         })?;
-        self.database
+        let (handled, changed) = self
+            .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 if !claim_valid(&tx, &claimed)?
                     || !witness_valid(&tx, &claimed.work.witness, &claimed.work.body_kind)?
                     || !group_current(&tx, IndexKeys::new(&profile), &group)?
                 {
-                    discard_claim(
+                    let changed = discard_claim(
                         &tx,
                         &claimed,
                         "Source or group changed before dimension validation",
                     )?;
                     tx.commit()?;
-                    return Ok(true);
+                    return Ok((true, changed));
                 }
                 let Some(mut mode) =
                     json_meta::<CandidateMode>(&tx, &record)?.filter(|mode| mode.group == group)
                 else {
-                    return Ok(false);
+                    return Ok((false, false));
                 };
                 mode.error = Some(error.clone());
                 mode.paused_at = Some(now());
@@ -118,10 +126,12 @@ impl IndexService {
                     }
                 }
                 tx.commit()?;
-                Ok(true)
+                Ok((true, true))
             })
             .await
-            .map_err(db_error)
+            .map_err(db_error)?;
+        self.publish_saved(changed);
+        Ok(handled)
     }
     pub async fn probe(&self, args: IndexProbeArgs) -> Result<IndexProbeObservation, ApiError> {
         crate::protocol::Command::IndexProbe(args.clone()).validate()?;
@@ -170,6 +180,7 @@ impl IndexService {
             tx.execute("DELETE FROM app_meta WHERE key IN (SELECT key FROM app_meta WHERE key LIKE 'index.probe.%' ORDER BY json_extract(value,'$.checked_at') DESC,key DESC LIMIT -1 OFFSET 32)",[])?;
             tx.commit()?; Ok(())
         }).await.map_err(db_error)?;
+        self.publish_saved(true);
         if !observation.success {
             let mut error = err(
                 ErrorCode::IoFailed,

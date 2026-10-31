@@ -1,6 +1,6 @@
 //! Stable saved pause facts; reads never manufacture a stop time.
 use super::*;
-pub(super) fn save(tx: &Transaction<'_>, key: &str, value: &Value) -> Result<(), StorageError> {
+pub(super) fn save(tx: &Transaction<'_>, key: &str, value: &Value) -> Result<bool, StorageError> {
     let cause = |v: &Value| {
         json!([
             v.get("kind"),
@@ -12,13 +12,14 @@ pub(super) fn save(tx: &Transaction<'_>, key: &str, value: &Value) -> Result<(),
     if let Some(old) = json_meta::<Value>(tx, key)?
         && cause(&old) == cause(value)
     {
-        return Ok(());
+        return Ok(false);
     }
     let mut value = value.clone();
     if let Some(object) = value.as_object_mut() {
         object.insert("paused_at".into(), json!(now()));
     }
-    set_json_meta(tx, key, &value)
+    set_json_meta(tx, key, &value)?;
+    Ok(true)
 }
 pub(super) fn facts(key: &str, value: &str) -> (Option<String>, String) {
     let at = serde_json::from_str::<Value>(value).ok().and_then(|v| {
