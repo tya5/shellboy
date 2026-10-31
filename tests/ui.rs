@@ -1497,7 +1497,7 @@ fn typed_conversation_has_inline_markers_and_details_copy_full_urls_without_chan
     let mut terminal = Terminal::new(TestBackend::new(64, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let normal = screen_text(&terminal);
-    assert!(normal.contains("● 日本語の調査"));
+    assert!(normal.contains("▸ 日本語の調査"));
     assert!(!normal.contains(node_id));
     assert!(!normal.contains("あなた\n"));
     ui.event(key(KeyCode::F(7)));

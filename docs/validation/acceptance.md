@@ -4169,3 +4169,8 @@ incorrectly reused a view that intentionally retained its old source. Both tests
 are corrected. Self-check also separated Enter following from Space/mouse
 expansion; exact loaded source, independent unavailable source and child Thread
 navigation now pass the focused regression without adding a read/poll operation.
+
+The next full run passed950 unit tests and918 integration tests, with two
+remaining integration golden-label failures (`●` answer and `↳` background).
+These are updated to the adopted `▸` and `⏵ 背景（利用者）` contracts without
+changing source-order, command-identity, cancellation or watchdog assertions.

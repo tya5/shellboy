@@ -627,10 +627,10 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     }
     for wanted in [
         "printf one",
-        "↳ sleep 30",
+        "⏵ 背景（利用者）",
+        "sleep 30",
         "⊘ printf MUST_NOT_RUN",
         "利用者が先行する呼出しを背景へ移したため未実行",
-        "背景継続（返却時）",
     ] {
         assert!(shown.contains(wanted), "missing {wanted}: {shown}");
     }
