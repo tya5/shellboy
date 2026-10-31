@@ -12,7 +12,9 @@ limits #41 to the existing E/F/G main admissions, requirement ledgers and P2–P
 measurements. Later conversation marker/notification/spacing, pasted slash,
 footer/seconds, owned-work presentation/configuration and detail/copy/image
 convenience additions are owned by #83–#87. They are not new requirements for
-this E/F/G admission. #85–#87 start only after F/G reach main. The delivery plan
+this E/F/G admission. Coordination6541457457 allows #85–#87/#90 to start
+before F/G; the later-admitted side reconciles overlapping changes. G uses
+#87 when it is already on main at G startup. The delivery plan
 retains an explicit handoff mapping; earlier original catalogue/forms/reactivity
 and immutable source/copy identity contracts below remain applicable.
 

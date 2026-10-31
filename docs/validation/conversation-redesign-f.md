@@ -154,3 +154,36 @@ Published950c9ed CI41187246963 artifacts verify Linux2,020/0/34,
 macOS2,019/0/35 and Windows1,888/0/26. All3 cancellation regressions,
 paired-snapshot and scoped-Watch CLI tests have actual successful harness
 lines at the exact source SHA on every OS.
+
+
+## Requirement evidence map before final admission
+
+This maps retained F ledger rows to concrete evidence; it does not authorize
+main admission. Latest combined-source standard/native CI and reviewer approval
+remain explicit final gates rather than inferred from earlier successful runs.
+
+| Ledger | Delivered path and evidence |
+| --- | --- |
+| F1 | Existing-browser List/Watch/Tab, filter/selection and descendant shortcut tests in `ui::threads::watch_integration_tests`; actual eight-condition native mode-switch captures. |
+| F2 | Prepared flat categories/parent details; stable-order tests in `ui::watch`; new80/140 long-title/command field-priority regression and real WezTerm window review. |
+| F3 | Run/answer identity, seen-LRU/uncertainty and close/reopen tests in `ui::watch`; no table or TTL. |
+| F4 | Shared readonly `view_read`/snapshot broker, exact same-sequence CLI integration and native P3 cases above; all-closed/pre-open/partial-live cancellation regressions verified on all3 OSes at950c9ed. |
+| F5 | Visible-only factual clocks and order tests in `ui::watch`; formal P2/P5 above; viewport-neighborhood formatting regression exercises2,000 rows and actual Home/End/Page drawing. |
+| F6 | Bounded command/recovery/answer reader, sanitize/oversize tests and specified requested-live retained-memory observation above; source budget is not total heap. |
+| F7 | Exact Run/generation action guards and actual separate-CLI scoped-Watch recovery, retry replacement and stop lifecycle integration. |
+| F8 | Readonly one-statement BFS/count fixtures: unowned Runs, depth8,256 discoveries, cycles and category counts; explicit native P4 observation above. |
+| F9 | Deleted-bridge/missing-root/retained-grandchild and truncated lower-bound tests in `frontend::lineage`/`watch_page`; actual retained records, never fabricated descendants after GC. |
+| F10 | `lineage` affected-root/new-frontier tests and `lineage_observer` notification-during-read, hidden-scope, overflow, lag and failed-read tests. |
+| F11 | Scoped cursor/watermark/root/filter tests in `watch_page`, runtime late-scope rejection, actual CLI child creation updates parent counts. |
+| F12 | Main observation index16 retained; only F parent lookup index17. Fresh-schema/upgrade/rollback/reopen tests and backup guidance; numbering rechecked at main2b3cd91. |
+| F13 | No G models, new table, worker or queue. Raw saved facts remain shared; session/discovery state is frontend-owned. Readonly snapshot ownership and projection bounds are in the adopted design. |
+| F14 | Exact-source standards/3OS CI above; #71/#54/#77/#83/#84 retained. Main2b3cd91 owner-session extraction retained; its only F difference is the migration-fixture index drop. Final integration qualification pending. |
+| F15 | Source-qualified native P3/P4 and formal long P2/P5 above. Later presentation/integration source is not relabelled; final follow-up and unresolved strict P2 before-bin/CPU interpretation remain visible to review. |
+| F16 | Independent English TUI/Agent and Japanese User Guide, help/completion; native8-condition PTYs and actual80/140 WezTerm images. Final3OS candidate/main gate and reviewer approval remain open; physical Windows UX unverified. |
+
+Real macOS WezTerm80x40 and140x40 captures use an isolated synthetic failed-run
+fixture and a frozen binary built from the Watch layout source. Long Japanese/
+emoji titles are ellipsized while the leading state, factual state age, parent
+and footer remain visible. Both actual images were reviewed; these captures do
+not substitute for live-shell lifecycle or Windows terminal evidence. No paid
+provider, user's database, clipboard or running terminal session is used.

@@ -2346,3 +2346,14 @@ and pyte dependency. The CLI owns temporary paths and fixes OSC52, with bounded
 key actions and loopback-only configuration. Native captures and replay are used
 immediately on #84/#91 fixtures; limits and failed observations are in acceptance.
 This is developer tooling only; product Rust, schema and workflows are unchanged.
+
+
+## F latest-main owner-session reconciliation
+
+F3242027 merges main2b3cd91, including issue5 stage1's common owner_session
+module and #94 developer helpers. The moved startup module differs from main
+only by F's parent-index drop in its older-schema fixture. Main's bootstrap,
+worker ownership and cleanup remain unchanged. F's migration is still17 after
+checking main16. The design now removes the superseded wait-for-F/G scheduling
+sentence as well as retaining the coordination plan. Final standard/native CI
+and reviewer admission remain pending; no F/G main admission occurred.
