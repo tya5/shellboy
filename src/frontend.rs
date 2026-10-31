@@ -3163,7 +3163,7 @@ async fn run_with_delivery(
             },
             _=tick.tick(),if selection.progress_running || management.usage_waiting() || (status_enabled && status_dirty)=> {
                 status_ready = true;
-                if selection.progress_running && let Some(thread)=selection.active_thread.clone() {
+                if let Some(thread)=selection.periodic_refresh_thread(&refreshing) {
                     dirty_threads.insert(thread);
                 }
             },

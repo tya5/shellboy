@@ -21,6 +21,15 @@ impl Selection {
         self.active_thread.as_deref() != Some(thread)
             || self.refresh_not_before.is_none_or(|due| now >= due)
     }
+    pub(super) fn periodic_refresh_thread(
+        &self,
+        refreshing: &std::collections::HashSet<String>,
+    ) -> Option<String> {
+        self.active_thread
+            .as_ref()
+            .filter(|thread| self.progress_running && !refreshing.contains(*thread))
+            .cloned()
+    }
     pub(super) fn refresh_started(&mut self, thread: &str, now: tokio::time::Instant) {
         if self.active_thread.as_deref() == Some(thread) {
             self.refresh_not_before = Some(now + std::time::Duration::from_millis(500));
@@ -218,6 +227,71 @@ mod refresh_scope_tests {
                 ..Default::default()
             }],
         }
+    }
+    #[test]
+    fn periodic_ticks_during_an_idle_changed_read_do_not_queue_a_second_observation() {
+        let mut selected = Selection::default();
+        selected.select_thread("t".into(), 1);
+        selected.changed("t");
+        let epoch = selected.progress_epoch;
+        let mut refreshing = std::collections::HashSet::from(["t".to_owned()]);
+        let mut dirty = std::collections::HashSet::new();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("periodic-poll-witness.jsonl");
+        let mut witness = std::fs::File::create(&path).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+        use std::io::Write;
+        for tick in 0..8 {
+            if let Some(thread) = selected.periodic_refresh_thread(&refreshing) {
+                dirty.insert(thread);
+            }
+            writeln!(
+                witness,
+                "{}",
+                serde_json::json!({"tick":tick,"dirty_threads":dirty.len()})
+            )
+            .unwrap();
+        }
+        assert!(
+            dirty.is_empty(),
+            "a progress tick is not another saved Changed event"
+        );
+        assert!(selected.accepts("t", 1, epoch));
+        selected.progress_running = false; // The admitted snapshot has idle activity.
+        refreshing.remove("t");
+        assert!(selected.periodic_refresh_thread(&refreshing).is_none());
+        assert!(
+            dirty.is_empty(),
+            "idle completion must not leave a queued second read"
+        );
+        writeln!(
+            witness,
+            "{}",
+            serde_json::json!({"event":"idle_complete","dirty_threads":dirty.len()})
+        )
+        .unwrap();
+        drop(witness);
+        assert_eq!(std::fs::read_to_string(path).unwrap().lines().count(), 9);
+    }
+    #[test]
+    fn real_changed_during_a_read_still_invalidates_old_activity_and_gets_another_read() {
+        let mut selected = Selection::default();
+        selected.select_thread("t".into(), 1);
+        let old_epoch = selected.progress_epoch;
+        let mut refreshing = std::collections::HashSet::from(["t".to_owned()]);
+        selected.changed("t");
+        let dirty = std::collections::HashSet::from(["t".to_owned()]);
+        assert!(!selected.accepts("t", 1, old_epoch));
+        assert!(selected.periodic_refresh_thread(&refreshing).is_none());
+        assert!(
+            dirty.contains("t"),
+            "real Changed remains dirty independently of ticks"
+        );
+        refreshing.clear();
+        assert_eq!(
+            selected.periodic_refresh_thread(&refreshing).as_deref(),
+            Some("t")
+        );
     }
     #[test]
     fn changed_bursts_share_one_start_deadline_and_switch_resets_it() {
