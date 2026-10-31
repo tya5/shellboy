@@ -2407,3 +2407,20 @@ marks serve capability; TUI does not enable it. Saved acceptance is not restart
 intent and expected instance identity prevents stale shutdown of a new owner.
 No new table, queue, worker, timer or capacity is needed. Tests count committed
 facts and side effects at named boundaries, not elapsed shutdown seconds.
+
+## #105: Line Tables For Development And Tests (2026-11-01)
+
+Use `[profile.dev] debug = "line-tables-only"`; Cargo's test profile inherits it.
+Keep release settings, the encoding_rs optimization and the existing #46 test
+aggregation unchanged. This reduces retained development debug information while
+preserving source-line panic backtraces; inspecting local variable values with a
+native debugger is an explicit trade-off. Revisit if full debug information is
+needed for a particular investigation, using a local profile override.
+
+One frozen macOS/aarch64 cold pair (main5ecbebc versus profile-only7a4bfc88)
+passed2125 Rust tests/35 ignored and71 Python tests on each side. Allocated target
+size fell5773640 to4680264 KiB (18.94%; `du -sh`:5.5G to4.5G); the main executable
+fell111329272 to107014568 bytes. A post-snapshot Cargo example panic retained
+stack locations at source lines2 and3. Both temporary targets/probe were deleted.
+Elapsed440.95/427.87 seconds are observations, not gates. Details and provenance
+are recorded on issue105; latest-main checks/3-OS CI are separate qualification.
