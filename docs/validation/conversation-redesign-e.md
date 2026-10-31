@@ -89,3 +89,55 @@ file bytes; the runtime after source/kind and copied binary hash were checked.
 The public CI builds use separate subject targets and are unaffected. Future
 local runs must retain runtime source/harness witnesses and never trust target
 cache freshness alone.
+
+
+## Formal producer3 P2/P5 follow-up
+
+Workflow41166258538 completed successfully at exact7c6f4d6. The
+[full issue report](https://github.com/tya5/shellboy/issues/41#issuecomment-6539050643)
+records all12 pairs/24 complete windows. Source/harness/binary/profile hashes,
+full600s/60s windows, all producer identities/counts,0 window model requests and
+normal owner cleanup were checked. No observations are missing or relabelled.
+The artifacts are native-tui-{Linux,macOS}-{80,140}-41166258538 in that run.
+
+CPU is RUSAGE_SELF across app threads, one-core percent, excluding tool children.
+Each row compares sequential subjects on the same runner; there is no cross-host
+average. Deltas use unrounded inputs. P5-list retains the actual visible List.
+
+| Runner / columns | Window | Main CPU % | E CPU % | Δ percentage points | Draws / max1s-bin main→E | UI tasks main→E | UI writer jobs main→E | RO opens main→E | output Hz main→E |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Linux-140 | p2 | 3.7897 | 3.7852 | -0.0045 | 600/1→600/1 | 0→0 | 0→0 | 0→0 | 0.00→0.00 |
+| Linux-140 | p5 | 7.1894 | 7.1482 | -0.0412 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 150.00→150.00 |
+| Linux-140 | p5-list | 7.4105 | 7.1216 | -0.2889 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 150.00→150.00 |
+| Linux-80 | p2 | 3.7568 | 3.7550 | -0.0017 | 600/1→600/1 | 0→0 | 0→0 | 0→0 | 0.00→0.00 |
+| Linux-80 | p5 | 7.3909 | 7.2631 | -0.1278 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 150.00→150.00 |
+| Linux-80 | p5-list | 7.1076 | 7.1918 | +0.0842 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 150.00→150.00 |
+| macOS-140 | p2 | 0.3389 | 0.3823 | +0.0434 | 600/2→600/2 | 0→0 | 0→0 | 0→0 | 0.00→0.00 |
+| macOS-140 | p5 | 3.7471 | 3.4966 | -0.2505 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 55.08→55.72 |
+| macOS-140 | p5-list | 3.3998 | 3.7411 | +0.3413 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 54.57→53.98 |
+| macOS-80 | p2 | 0.3112 | 0.2605 | -0.0507 | 600/1→600/1 | 0→0 | 0→0 | 0→0 | 0.00→0.00 |
+| macOS-80 | p5 | 3.5860 | 3.8144 | +0.2285 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 57.05→55.62 |
+| macOS-80 | p5-list | 3.6816 | 3.7600 | +0.0783 | 0/0→0/0 | 0→0 | 0→0 | 0→0 | 55.12→55.06 |
+
+
+All16 P5/P5-list windows reach40 saved commits/second: Linux150, Mac53.98–57.05.
+All have0 draws/UI read-task admissions/UI writer jobs/readonly opens. Lines are
+not substituted for commits. The original producer1 run41160746679 remains a
+separate main912b2e2→CBC comparison: Linux about50commits/s, Mac16.62–17.77
+(unqualified40Hz load). Workload and sources changed, so cross-run CPU differences
+cannot be attributed to E. The original report6538392801 retains its full values.
+
+P2 has600 draws/600s and0 UI reads in all8 windows. Mac140 nevertheless has
+max1s-bin2 on both subjects (main1 such bin, E88); shortest intervals0.753213 /
+0.844620s. The other three pairs have max1s-bin1. Average1Hz is not a strict-bin
+pass, and phase/scheduler contributions were not separated. P2 Mac140 CPU rises
+0.0434percentage points; other pairs decrease. Mixed P5 CPU differences and one
+pair per host establish neither stable improvement nor a no-worse guarantee.
+P2's strict redraw/CPU policy therefore remains open across D/F work.
+
+All DB work is not zero: raw output/index/maintenance remain active. Both subjects
+record AttachmentService::collect_managed20 times per P2 and2 times per P5 in
+the unknown-caller field. Windows TUI jobs upload explicit unavailable.json; no
+ConPTY performance result is inferred. Initial short-ref checkout failure
+41166177038 remains separate. Main admission still needs later reviewer approval;
+P3 matched-service/caller follow-up and full #41 remain unfinished.

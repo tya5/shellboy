@@ -1693,3 +1693,14 @@ lifecycle facts after observations. It must not substitute direct-read timing
 for actual Changed-to-paint or future F/G/global coalescing. The first wrong
 page-count assumption and stale shared-target build were rejected and retained.
 No product/runtime format change or main push was made for the measurements.
+
+## E producer3 formal comparison reported (2026-10-31)
+
+Approved frozen7c6f4d6 workflow41166258538 is entirely green. Ordinary3OS repair
+and full12pair/24window witness checks pass. P5 all16 windows meet40commits/s,
+including Mac53.98–57.05 (Linux150), with0 display reads/draws. Full table,
+originalproducer1 separation and limits are in E qualification and #41 report
+6539050643. P2 strict-bin/CPU and P3 matched-services/caller gates remain open;
+F/G and optional spacing remain independent. Continue local matched-P3 work
+while the delegated reviewer considers results. E main admission is not approved
+by this CI result alone; main and installed binaries remain unchanged.

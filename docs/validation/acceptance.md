@@ -4154,3 +4154,19 @@ Record that lifecycle/caller asymmetry and require a matched-services follow-up.
 No UI event-loop, future F/G, full-consumer, Windows or pure-SQL-time success is
 inferred. Source/binary/controller/fixture failure records remain private and
 separate from the frozen public CI candidate. Main remains unchanged.
+
+## Formal repaired E producer3 CI result (2026-10-31)
+
+Workflow41166258538 completes success at7c6f4d6. The
+[E qualification record](conversation-redesign-e.md) and #41 comment6539050643
+contain all12 same-runner pairs/24 source-matched600s/60s windows and3OS counts.
+All16 P5/P5-list windows meet40 saved commits/s: Linux150, Mac53.98–57.05;
+0 draws/UI read-task/UI writer jobs/readonly opens,0 model requests. Original
+producer1 run41160746679 is separate and not retrospectively qualified on Mac.
+
+P2's average1Hz/0 UI reads does not satisfy its strict policy: Mac140 max1s-bin2
+on both subjects,2-draw bins1→88; CPU0.3389→0.3823%. Do not infer the cause or
+promise no worsening. P3's lifecycle/caller asymmetry remains open. Green job
+status is a fixture/source success, not blanket performance acceptance. Windows
+TUI unavailable records, initial short-SHA checkout failure and raw maintenance
+work remain explicit. No main integration, release/install or user-data change.
