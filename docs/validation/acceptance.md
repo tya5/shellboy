@@ -3767,3 +3767,27 @@ Correct that sentence and align both User Guides with reactive saved updates,
 selection retention and explicit resync. Guides are embedded, so the final review
 candidate receives another full standard check after this documentation change.
 No Rust UI behavior changes, F/G implementation, push or release is introduced.
+
+
+### Final E measurement-review candidate qualified (3f36f02)
+
+The complete macOS standard check after all embedded-guide corrections passes
+1891/0/32: lib965/13 ignored, integration916/17, termination7/1, crash3/1;
+layout93, Python20, fmt and strict all-target Clippy also pass. The strict paired
+browser test passes again with selected-row readiness. Earlier failed runs stay
+in this record and are not erased or attributed to a proven product cause.
+
+E-only cuta390f87 and measurement-review3f36f02 have identical Rust sources,
+tests, migrations, manifests/toolchain and embedded guides; the latter adds only
+CI tooling and its nonembedded documentation. Main15037c1 is included. E's UI
+Rust is unchanged since the six native a0d8865 cases; those captures retain their
+original executable hash and are not relabelled as a new binary run. The #77
+helper matches its current source, #71 source is unchanged and #54's tick guard
+is preserved.
+
+Full P3 comparison,600s P2/60s P5 before/after CI and physical Windows terminal
+measurements remain unqualified. The2s fixture smokes qualify the controller only.
+Neither E nor the CI review branch has been pushed. Next step: delegated reviewer
+Claude may approve publishing only `issue-41/e-ci-review` to run ordinary3-OS CI
+and the Unix P2/P5 comparison; this does not itself approve E main admission.
+F/G are excluded; required code-block copy additions remain G-C1–G-C6.
