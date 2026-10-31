@@ -2768,3 +2768,10 @@ implemented as ordinary metadata over existing call/shell history. Existing item
 focus/disclosure and original paging expose commands; cache keys derive from
 those existing inputs rather than independent interaction state. Source/SSE/UI
 and paging tests are prepared; compilation, PTY and final checks are pending.
+
+### #97 local qualification
+
+The description-label candidate passes local type/targeted/SSE/paging checks,
+12 copied-binary PTY cases and the standard check. Failure history and exact
+source/results are recorded in issue #97. Core/UI review, native CI and main
+integration remain pending; no real-provider or general security claim is made.
