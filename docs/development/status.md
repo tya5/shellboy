@@ -2775,3 +2775,10 @@ The description-label candidate passes local type/targeted/SSE/paging checks,
 12 copied-binary PTY cases and the standard check. Failure history and exact
 source/results are recorded in issue #97. Core/UI review, native CI and main
 integration remain pending; no real-provider or general security claim is made.
+
+### #97 raw replay review correction
+
+Received shell arguments remain verbatim in response, adopted node, tool_call
+and subsequent model input. Only execution deserialization/display labels are
+80-character bounded; no normalization or truncation marker is persisted.
+Updated exact-source qualification is recorded in issue #97 after its next lease.

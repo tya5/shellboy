@@ -204,7 +204,6 @@ pub struct StreamObservation {
 impl ModelResponse {
     pub fn completed(mut raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
         crate::usage::normalize_response(&mut raw);
-        crate::tool_description::normalize(&mut raw, MAX_TOOL_ARGUMENT_BYTES);
         if raw.get("status").and_then(Value::as_str) != Some("completed") {
             return Err(ModelError::new("incomplete", "Response was not completed"));
         }

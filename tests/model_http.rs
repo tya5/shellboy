@@ -1450,9 +1450,9 @@ async fn fragmented_shell_description_sse_is_bounded_and_opt_out_is_visible_in_h
                 assert_eq!(args.command, command);
                 assert!(args.description.as_ref().is_none_or(|s|s.chars().count() <= 80));
                 assert_eq!(server.await.unwrap(), 1, "metadata must not cause another HTTP request");
-                if description.as_ref().is_some_and(|s|s.chars().count() > 80) {
-                    assert_eq!(response.raw["_shellboy_description_truncations"]["call"], 100);
-                }
+                assert_eq!(response.output[0]["arguments"], arguments.to_string());
+                assert_eq!(response.raw["output"][0]["arguments"], arguments.to_string());
+                assert_eq!(response.output[0]["arguments"], response.raw["output"][0]["arguments"]);
             }
         }
         assert_eq!(count, 12);

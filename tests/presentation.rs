@@ -1486,7 +1486,8 @@ fn shell_descriptions_are_bounded_searchable_and_never_replace_canonical_command
         }
         if description.as_ref().is_some_and(|s| s.chars().count() > 80) {
             assert_eq!(tool.description.as_ref().unwrap().chars().count(), 80);
-            assert_eq!(response.raw["_shellboy_description_truncations"]["c"], 100);
+            assert_eq!(saved["description"].as_str().unwrap().chars().count(), 100);
+            assert_eq!(response.output[0]["arguments"], args.to_string());
         }
     }
 }

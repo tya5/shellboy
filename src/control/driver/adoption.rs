@@ -43,10 +43,7 @@ pub(super) async fn adopt_response(
                 tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.http_observation',json(?2)) WHERE id=?1",params![attempt_id,observation])?;
             }
             let node=id();
-            let mut payload = json!({"output":output,"reasoning_epoch":current.epoch,"group_id":group_id});
-            if let Some(truncations) = raw.get("_shellboy_description_truncations") {
-                payload["shell_description_truncations"] = truncations.clone();
-            }
+            let payload = json!({"output":output,"reasoning_epoch":current.epoch,"group_id":group_id});
             history::append_node(&tx,&current.thread,&node,Some(&current.turn),"assistant_response",&payload,&now())?;
             index.authorize_new_tx(&tx,std::slice::from_ref(&node)).map_err(crate::storage::StorageError::from)?;
             // Same commit/root-revision boundary as the selected answer. This

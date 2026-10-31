@@ -274,10 +274,13 @@ state. Its paused-clock and request-JSONL tests remain part of qualification.
 
 ## Bounded shell descriptions
 
-Shell calls may include an optional model-authored description. Canonical completed
-shell arguments retain at most 80 Unicode scalar values of description, without
-changing command text; truncation is recorded as Shellboy normalization metadata,
-not a provider assertion. Display strips plain-text controls and falls back to
+Shell calls may include an optional model-authored description. Received function
+call arguments are saved and replayed verbatim, including long descriptions and
+JSON whitespace. Only execution deserialization and display labels are capped at
+80 Unicode scalar values. No description normalization or truncation metadata is
+added to the response or adopted node. The existing MAX_TOOL_ARGUMENT_BYTES bound
+limits the entire arguments string, just as for command text. Display strips
+plain-text controls and falls back to
 the command for absent/empty/whitespace-only descriptions. The description is not
 an authorization or a verified explanation of the command. shell.describe_calls
 is true by default; false omits the parameter from generation tool definitions

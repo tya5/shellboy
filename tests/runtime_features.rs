@@ -3341,3 +3341,43 @@ async fn explicit_summary_boundary_waits_after_foreground_and_not_for_background
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn description_raw_arguments_survive_adoption_and_next_model_request_byte_exact() {
+    crate::test_watchdog::watchdog("description raw adoption and model replay", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut requests, server) = proxy().await;
+        let owner = owner(root.path(), &url).await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        let arguments = format!(" {{ \"description\" : {}, \"command\" : \"echo RAW_DESCRIPTION_COMMAND\" }} \n", json!("語".repeat(100)));
+        send(&control, &target, "one raw description call").await;
+        let first = incoming(&control, &mut requests).await;
+        let log = root.path().join("requests.jsonl");
+        record_headless_request(&log, &first.body);
+        first.reply.send((200, json!({"id":"raw-description","status":"completed","output":[{
+            "type":"function_call","name":"shell","call_id":"raw-description-call","arguments":arguments
+        }]}))).unwrap();
+        let next = incoming(&control, &mut requests).await;
+        record_headless_request(&log, &next.body);
+        let replayed = next.body["input"].as_array().unwrap().iter().find(|v| v["type"] == "function_call" && v["call_id"] == "raw-description-call").unwrap();
+        assert_eq!(replayed["arguments"], arguments);
+        let original = arguments.clone();
+        control.store.database.call(move |db| {
+            let saved: String = db.query_row("SELECT arguments_json FROM tool_call WHERE call_id='raw-description-call'", [], |r| r.get(0))?;
+            assert_eq!(saved, original);
+            let payload: String = db.query_row("SELECT payload_json FROM node WHERE kind='assistant_response' AND json_extract(payload_json,'$.output[0].call_id')='raw-description-call'", [], |r| r.get(0))?;
+            let payload: Value = serde_json::from_str(&payload).unwrap();
+            assert_eq!(payload["output"][0]["arguments"], original);
+            assert!(payload.get("shell_description_truncations").is_none());
+            Ok(())
+        }).await.unwrap();
+        next.reply.send((200, answer("complete"))).unwrap();
+        settled(&control, &target).await;
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
+        assert!(requests.try_recv().is_err());
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }).await.unwrap();
+}
