@@ -1078,7 +1078,9 @@ impl Store {
             Command::UsageGet(args) => {
                 if args.group_by.is_some() {
                     return MutationResult::value(crate::usage_totals::breakdown::read(
-                        tx, args, &self.instance_id,
+                        tx,
+                        args,
+                        &self.instance_id,
                     )?);
                 }
                 let scope = if let Some(id) = &args.turn_id {

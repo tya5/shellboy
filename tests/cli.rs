@@ -1190,14 +1190,39 @@ async fn thread_wait_after_cursor_maps_to_the_shared_contract_and_bounds_targets
 #[tokio::test]
 async fn grouped_usage_cli_preserves_scope_timezone_limit_and_cursor() {
     for group in ["hour", "day", "thread"] {
-        let command=convert(&["usage","get","--group-by",group,"--timezone=+09:00","--limit","12","--cursor","opaque","--since","2026-10-31T00:00:00Z","--until","2026-11-01T00:00:00Z"]).await;
-        let Command::UsageGet(a)=command else {panic!("usage command")};
-        assert_eq!(a.group_by.as_deref(),Some(group));
-        assert_eq!(a.timezone.as_deref(),Some("+09:00"));
-        assert_eq!(a.limit,Some(12));assert_eq!(a.cursor.as_deref(),Some("opaque"));
+        let command = convert(&[
+            "usage",
+            "get",
+            "--group-by",
+            group,
+            "--timezone=+09:00",
+            "--limit",
+            "12",
+            "--cursor",
+            "opaque",
+            "--since",
+            "2026-10-31T00:00:00Z",
+            "--until",
+            "2026-11-01T00:00:00Z",
+        ])
+        .await;
+        let Command::UsageGet(a) = command else {
+            panic!("usage command")
+        };
+        assert_eq!(a.group_by.as_deref(), Some(group));
+        assert_eq!(a.timezone.as_deref(), Some("+09:00"));
+        assert_eq!(a.limit, Some(12));
+        assert_eq!(a.cursor.as_deref(), Some("opaque"));
         assert!(a.thread_id.is_none());
     }
-    for flags in [vec!["--group-by","month"],vec!["--timezone","UTC"],vec!["--limit","2"],vec!["--cursor","opaque"]] {
-        assert!(Cli::try_parse_from(["shellboy","usage","get"].into_iter().chain(flags)).is_err());
+    for flags in [
+        vec!["--group-by", "month"],
+        vec!["--timezone", "UTC"],
+        vec!["--limit", "2"],
+        vec!["--cursor", "opaque"],
+    ] {
+        assert!(
+            Cli::try_parse_from(["shellboy", "usage", "get"].into_iter().chain(flags)).is_err()
+        );
     }
 }
