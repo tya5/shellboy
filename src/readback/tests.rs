@@ -266,7 +266,58 @@ fn compaction_sources_merge_without_merging_restore_into_its_omission() {
         let p = compactions(&c, "t", &a).unwrap();
         assert_eq!(p["items"].as_array().unwrap().len(), 1);
         assert_eq!(p["items"][0]["kind"], "automatic_reduction");
+        let all_raw = read_compactions_tx(&c, "t", &comp_args()).unwrap();
+        let period_raw = read_compactions_tx(&c, "t", &a).unwrap();
+        drop(c);
+        assert_eq!(prepare_compactions(all_raw).unwrap(), page);
+        assert_eq!(prepare_compactions(period_raw).unwrap(), p);
     });
+}
+#[test]
+fn spill_coverage_admission_keeps_integer_semantics_and_no_extra_lookup_queries() {
+    use crate::frontend::sql_trace::Statements;
+    for (count, covered) in [
+        (json!(1), true),
+        (json!(true), true),
+        (json!(0), false),
+        (json!(-1), false),
+        (json!(1.0), false),
+        (json!("1"), false),
+        (Value::Null, false),
+        (json!(9223372036854775808u64), false),
+        (json!({"count":1}), false),
+    ] {
+        let c = db();
+        node(
+            &c,
+            "original",
+            "message",
+            "2026-10-31T00:00:00Z",
+            json!({"content":"source"}),
+        );
+        replacement(&c, "spill", "spill", "2026-10-31T00:01:00Z", json!({}));
+        operation(
+            &c,
+            "summary-op",
+            "summary",
+            "2026-10-31T00:02:00Z",
+            json!({"compact":{"spilled_groups":count,"original_node_ids":["original"]}}),
+        );
+        let trace = Statements::new(&c);
+        let raw = read_compactions_tx(&c, "t", &comp_args()).unwrap();
+        assert_eq!(trace.count(), if covered { 5 } else { 4 }, "{count}");
+        drop(trace);
+        drop(c);
+        let page = prepare_compactions(raw).unwrap();
+        let items = page["items"].as_array().unwrap();
+        assert_eq!(items.len(), if covered { 1 } else { 2 }, "{count}: {page}");
+        assert_eq!(items[0]["event_id"], "operation:summary-op");
+        assert_eq!(
+            items.iter().any(|row| row["event_id"] == "spill"),
+            !covered,
+            "{count}: {page}"
+        );
+    }
 }
 #[test]
 fn command_redaction_covers_credentials_controls_and_unicode_bounds() {

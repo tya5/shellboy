@@ -130,6 +130,10 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
             [serde_json::json!({"content":"retained answer","opaque":"x".repeat(2*1024*1024)}).to_string()])?;
         db.execute("UPDATE turn SET answer_node_id='bounded-answer',state='completed' WHERE id='independent-run'",[])?;
         db.execute("UPDATE run SET state='completed' WHERE id='independent-run'",[])?;
+        db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('foreign-restore','fixture','{}','hash','completed',?1,'2026-10-31T00:00:00Z')",
+            [serde_json::json!({"result":{"thread_id":"independent","status":"queued","context_edit":{"action":"restore"}}}).to_string()])?;
+        db.execute("INSERT INTO app_meta(key,value)VALUES('compact.result.foreign-restore',?1)",
+            [serde_json::json!({"state":"completed","ended_at":"2026-10-31T00:02:00Z","outcome":{"result":{"marker_node_id":"bounded-answer","omitted_nodes":0}}}).to_string()])?;
         Ok(())
     }).await.unwrap();
     let path = control.store.database.path().to_path_buf();
@@ -176,6 +180,11 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
     assert_eq!(
         field(result, "/last_answer/node_id"),
         Some("bounded-answer")
+    );
+    assert_eq!(field(result, "/last_compaction/kind"), Some("restore"));
+    assert_eq!(
+        field(result, "/last_compaction/event_id"),
+        Some("operation:foreign-restore")
     );
     assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
     writer.execute_batch("ROLLBACK").unwrap();

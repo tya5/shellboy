@@ -56,8 +56,11 @@ pub(super) fn receipt_query(w: &Window) -> String {
     let group = format!(
         "CASE WHEN {kind}='restore' THEN o.operation_id ELSE COALESCE({node},o.operation_id) END"
     );
+    let spilled = format!(
+        "COALESCE(json_extract({root},'$.compact.spilled_groups'),json_extract({root},'$.spilled_groups'))"
+    );
     format!(
-        "SELECT min(o.operation_id),o.created_at,{at},{kind},{},json_extract({meta},'$.state'),count(*) FROM operation_receipt o INDEXED BY compact_operation_thread JOIN app_meta m ON m.key='compact.result.'||o.operation_id LEFT JOIN node n ON n.id={node} AND {kind}<>'restore' WHERE CASE WHEN json_valid(o.result_ref_json) THEN json_extract(o.result_ref_json,'$.result.status')='queued' ELSE 0 END AND json_extract(o.result_ref_json,'$.result.thread_id')=?1 AND json_valid(m.value) AND {} GROUP BY {group} ORDER BY usage_saved_start({at}) DESC,min(o.operation_id) DESC LIMIT ?2",
+        "SELECT min(o.operation_id),o.created_at,{at},{kind},{},json_extract({meta},'$.state'),count(*),CASE WHEN typeof({spilled})='integer' AND {spilled}>0 THEN {spilled} ELSE 0 END FROM operation_receipt o INDEXED BY compact_operation_thread JOIN app_meta m ON m.key='compact.result.'||o.operation_id LEFT JOIN node n ON n.id={node} AND {kind}<>'restore' WHERE CASE WHEN json_valid(o.result_ref_json) THEN json_extract(o.result_ref_json,'$.result.status')='queued' ELSE 0 END AND json_extract(o.result_ref_json,'$.result.thread_id')=?1 AND json_valid(m.value) AND {} GROUP BY {group} ORDER BY usage_saved_start({at}) DESC,min(o.operation_id) DESC LIMIT ?2",
         enriched(&root),
         w.sql(&at)
     )
@@ -143,10 +146,57 @@ fn insert(events: &mut BTreeMap<String, Value>, id: String, value: Value) {
         events.insert(id, value);
     }
 }
-pub(crate) fn list(db: &Connection, thread: &str, a: &CompactListArgs) -> Result<Value, ApiError> {
+pub(crate) struct RawCompactions {
+    thread: String,
+    limit: usize,
+    window: Window,
+    cap: usize,
+    saturated: bool,
+    receipts: Vec<ReceiptRow>,
+    automatic: Vec<AutomaticRow>,
+    replacements: Vec<ReplacementRow>,
+    covered_spills: std::collections::HashSet<String>,
+}
+struct ReceiptRow {
+    id: String,
+    at: Option<String>,
+    kind: String,
+    raw: String,
+    state: Option<String>,
+    operation_count: i64,
+    in_window: bool,
+}
+struct AutomaticRow {
+    id: String,
+    at: Option<String>,
+    raw: String,
+    failure: Option<String>,
+    retry: Option<i64>,
+    turn: String,
+    outcome: String,
+    failures: i64,
+}
+struct ReplacementRow {
+    id: String,
+    at: String,
+    format: String,
+    raw: String,
+}
+pub(crate) fn list(
+    db: &Connection,
+    thread: &str,
+    args: &CompactListArgs,
+) -> Result<Value, ApiError> {
+    prepare(read_tx(db, thread, args)?)
+}
+pub(crate) fn read_tx(
+    db: &Connection,
+    thread: &str,
+    a: &CompactListArgs,
+) -> Result<RawCompactions, ApiError> {
     a.validate()?;
     super::register(db)?;
-    let w = Window::new(a.since.as_deref(), a.until.as_deref())?;
+    let window = Window::new(a.since.as_deref(), a.until.as_deref())?;
     let exists: bool = db
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
@@ -161,10 +211,11 @@ pub(crate) fn list(db: &Connection, thread: &str, a: &CompactListArgs) -> Result
         ));
     }
     let cap = (a.limit as usize * 4 + 1).min(801);
-    let mut events = BTreeMap::new();
-    let mut saturated = false;
-    let mut st = db.prepare(&receipt_query(&w)).map_err(error)?;
-    let rows = st
+    let mut receipts = Vec::new();
+    let mut spills = Vec::new();
+    let mut included_receipts = 0usize;
+    let mut statement = db.prepare(&receipt_query(&window)).map_err(error)?;
+    for row in statement
         .query_map(params![thread, cap as i64], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -174,47 +225,37 @@ pub(crate) fn list(db: &Connection, thread: &str, a: &CompactListArgs) -> Result
                 r.get::<_, String>(4)?,
                 r.get::<_, Option<String>>(5)?,
                 r.get::<_, i64>(6)?,
+                r.get::<_, i64>(7)?,
             ))
         })
-        .map_err(error)?;
-    let mut count = 0;
-    let mut spills = Vec::new();
-    for row in rows {
-        let (id, start, at, kind, raw, state, operation_count) = row.map_err(error)?;
-        let stats = parse(raw)?;
-        if !w.includes(at.as_deref()) {
-            continue;
+        .map_err(error)?
+    {
+        let (id, start, at, kind, raw, state, operation_count, spilled) = row.map_err(error)?;
+        let in_window = window.includes(at.as_deref());
+        if in_window {
+            included_receipts += 1;
+            if spilled > 0 {
+                spills.push((id.clone(), start, at.clone(), spilled as u64));
+            }
         }
-        count += 1;
-        if stats["spilled_groups"].as_u64().is_some_and(|n| n > 0) {
-            spills.push((
-                id.clone(),
-                start,
-                at.clone(),
-                stats["spilled_groups"].as_u64().unwrap(),
-            ));
-        }
-        let key = if kind == "restore" {
-            format!("operation:{id}")
-        } else {
-            event_id(&stats, &format!("operation:{id}"))
-        };
-        insert(
-            &mut events,
-            key.clone(),
-            json!({"event_id":key,"thread_id":thread,"kind":kind,"at":at,"timestamp_basis":"replacement_created_at_or_operation_completed_at","operation_ids":[id],"operation_count":operation_count,"operation_ids_truncated":operation_count>1,"state":state,"metrics":stats}),
-        );
+        receipts.push(ReceiptRow {
+            id,
+            at,
+            kind,
+            raw,
+            state,
+            operation_count,
+            in_window,
+        });
     }
-    saturated |= count == cap;
+    drop(statement);
     let mut covered_spills = std::collections::HashSet::new();
     for (op, start, end, n) in spills {
         let Some(end) = end else {
             continue;
         };
-        // Per-thread compaction is serialized. The latest matching spill rows before
-        // this result belong to its reported spill count; earlier restored rows do not.
-        let sql = SPILL_COVERAGE_SQL;
-        let mut q = db.prepare(sql).map_err(error)?;
+        // Preserve the canonical per-thread serialization/coverage association.
+        let mut q = db.prepare(SPILL_COVERAGE_SQL).map_err(error)?;
         for row in q
             .query_map(
                 params![
@@ -231,73 +272,112 @@ pub(crate) fn list(db: &Connection, thread: &str, a: &CompactListArgs) -> Result
             covered_spills.insert(row.map_err(error)?);
         }
     }
-    let mut st = db.prepare(&automatic_query(&w)).map_err(error)?;
-    let mut count = 0;
-    for row in st
+    let mut statement = db.prepare(&automatic_query(&window)).map_err(error)?;
+    let automatic = statement
         .query_map(params![thread, cap as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<String>>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, Option<String>>(3)?,
-                r.get::<_, Option<i64>>(4)?,
-                r.get::<_, String>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, i64>(7)?,
-            ))
+            Ok(AutomaticRow {
+                id: r.get(0)?,
+                at: r.get(1)?,
+                raw: r.get(2)?,
+                failure: r.get(3)?,
+                retry: r.get(4)?,
+                turn: r.get(5)?,
+                outcome: r.get(6)?,
+                failures: r.get(7)?,
+            })
         })
         .map_err(error)?
-    {
-        let (id, at, raw, failure, retry, turn, outcome, failures) = row.map_err(error)?;
-        count += 1;
-        let stats = parse(raw)?;
-        if !w.includes(at.as_deref()) {
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(error)?;
+    drop(statement);
+    let mut statement = db.prepare(&replacement_query(&window)).map_err(error)?;
+    let replacements = statement
+        .query_map(params![thread, cap as i64], |r| {
+            Ok(ReplacementRow {
+                id: r.get(0)?,
+                at: r.get(1)?,
+                format: r.get(2)?,
+                raw: r.get(3)?,
+            })
+        })
+        .map_err(error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(error)?;
+    let saturated = included_receipts == cap || automatic.len() == cap || replacements.len() == cap;
+    Ok(RawCompactions {
+        thread: thread.into(),
+        limit: a.limit as usize,
+        window,
+        cap,
+        saturated,
+        receipts,
+        automatic,
+        replacements,
+        covered_spills,
+    })
+}
+pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
+    let RawCompactions {
+        thread,
+        limit,
+        window,
+        cap,
+        saturated,
+        receipts,
+        automatic,
+        replacements,
+        covered_spills,
+    } = raw;
+    let mut events = BTreeMap::new();
+    for row in receipts {
+        let stats = parse(row.raw)?;
+        if !row.in_window {
             continue;
         }
-        let key = event_id(&stats, &format!("attempt:{id}"));
+        let key = if row.kind == "restore" {
+            format!("operation:{}", row.id)
+        } else {
+            event_id(&stats, &format!("operation:{}", row.id))
+        };
         insert(
             &mut events,
             key.clone(),
-            json!({"event_id":key,"thread_id":thread,"kind":"automatic_reduction","at":at,"timestamp_basis":"replacement_created_at_or_attempt_ended_or_started_at","attempt_id":id,"turn_id":turn,"trigger":{"failure_kind":failure,"retry_number":retry,"retained_failures_in_turn_through_attempt":failures},"state":outcome,"metrics":stats}),
+            json!({"event_id":key,"thread_id":thread,"kind":row.kind,"at":row.at,"timestamp_basis":"replacement_created_at_or_operation_completed_at","operation_ids":[row.id],"operation_count":row.operation_count,"operation_ids_truncated":row.operation_count>1,"state":row.state,"metrics":stats}),
         );
     }
-    saturated |= count == cap;
-    let mut st = db.prepare(&replacement_query(&w)).map_err(error)?;
-    let mut count = 0;
-    for row in st
-        .query_map(params![thread, cap as i64], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-            ))
-        })
-        .map_err(error)?
-    {
-        let (id, at, format, raw) = row.map_err(error)?;
-        count += 1;
-        if covered_spills.contains(&id) {
+    for row in automatic {
+        let stats = parse(row.raw)?;
+        if !window.includes(row.at.as_deref()) {
             continue;
         }
-        let stats = parse(raw)?;
-        if !w.includes(Some(&at)) {
+        let key = event_id(&stats, &format!("attempt:{}", row.id));
+        insert(
+            &mut events,
+            key.clone(),
+            json!({"event_id":key,"thread_id":thread,"kind":"automatic_reduction","at":row.at,"timestamp_basis":"replacement_created_at_or_attempt_ended_or_started_at","attempt_id":row.id,"turn_id":row.turn,"trigger":{"failure_kind":row.failure,"retry_number":row.retry,"retained_failures_in_turn_through_attempt":row.failures},"state":row.outcome,"metrics":stats}),
+        );
+    }
+    for row in replacements {
+        if covered_spills.contains(&row.id) {
+            continue;
+        }
+        let stats = parse(row.raw)?;
+        if !window.includes(Some(&row.at)) {
             continue;
         }
         let kind = if stats["reason"].is_string() {
             "range_omission"
-        } else if format == "spill-v1" {
+        } else if row.format == "spill-v1" {
             "spill"
         } else {
             "summary"
         };
         insert(
             &mut events,
-            id.clone(),
-            json!({"event_id":id,"thread_id":thread,"kind":kind,"at":at,"timestamp_basis":"replacement_created_at","metrics":stats,"record_kind":"retained_replacement"}),
+            row.id.clone(),
+            json!({"event_id":row.id,"thread_id":thread,"kind":kind,"at":row.at,"timestamp_basis":"replacement_created_at","metrics":stats,"record_kind":"retained_replacement"}),
         );
     }
-    saturated |= count == cap;
     let mut items = events.into_values().collect::<Vec<_>>();
     items.sort_by(|a, b| {
         let ak = crate::usage_totals::start_key(a["at"].as_str());
@@ -305,9 +385,9 @@ pub(crate) fn list(db: &Connection, thread: &str, a: &CompactListArgs) -> Result
         bk.cmp(&ak)
             .then_with(|| b["event_id"].as_str().cmp(&a["event_id"].as_str()))
     });
-    let more = items.len() > a.limit as usize;
-    items.truncate(a.limit as usize);
+    let more = items.len() > limit;
+    items.truncate(limit);
     Ok(
-        json!({"items":items,"more":more,"period":w.json(),"coverage":{"source_candidate_limit":cap,"candidate_limit_reached":saturated,"retention":"retained facts only; missing legacy metrics are unknown; expired operation receipts can hide restores and operation associations","failure_count":"retained Turn failures, not an invented consecutive-failure counter"}}),
+        json!({"items":items,"more":more,"period":window.json(),"coverage":{"source_candidate_limit":cap,"candidate_limit_reached":saturated,"retention":"retained facts only; missing legacy metrics are unknown; expired operation receipts can hide restores and operation associations","failure_count":"retained Turn failures, not an invented consecutive-failure counter"}}),
     )
 }
