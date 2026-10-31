@@ -1,5 +1,23 @@
 # Development status
 
+## G latest-main integration78abbf8: qualification running
+
+The G branch now includes origin/mainca317a8 (#88 saved notification links and
+#97 exact command-description/source behavior). Both operation-form/help and
+notification-reference PTY procedures survive the setup-document conflict;
+measurement instructions use the shared target directly rather than executable
+copies. Driver, preview reader/streams/tools, conversation insets, serve and OS
+signals match main byte-for-byte. Index auto_history guards remain in place.
+
+One announced shared-target `RUST_TEST_THREADS=2 sh scripts/check.sh` is running.
+Python71, layout95/watchdog and strict all-target Clippy have passed; Rust test
+compilation is live. This is not a full-standard success. Resume by polling the
+existing standard-check process and private issue-41-g-mainca317-standard-v21.log;
+do not restart merely because observation expires. After qualification continue
+the complete G saved-route inventory, header/SQL bounds and P3/P6/native gates.
+No push, main admission, installed binary or user data change.
+
+
 ## G latest-compaction display resource envelope
 
 Source18b2b5f implements design7e87880: canonical compaction capture is shared

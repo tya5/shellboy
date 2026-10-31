@@ -785,7 +785,7 @@ Read-only initial routes and their native tests remain separately qualified.
 
 | Route/result | Mutable facts and retained evidence | Remaining connection/qualification |
 | --- | --- | --- |
-| ThreadGet | Exact target settings, lifecycle, selected path, last input/answer/compaction; retain captured form target | Shared header/independent usage are connected. Input/answer use canonical shared raw/preparation with bounded source/scalar copies atc3608f0. Compaction preparation also runs after the snapshot at35f45ce; actual held-writer frontend route retains a nonempty restore. Compaction/header/query/source limits remain to qualify. |
+| ThreadGet | Exact target settings, lifecycle, selected path, last input/answer/compaction; retain captured form target | Shared header/independent usage are connected. Input/answer use canonical shared raw/preparation with bounded source/scalar copies atc3608f0. Compaction preparation also runs after the snapshot at35f45ce; actual held-writer frontend route retains a nonempty restore. Display envelope/source copies are qualified at18b2b5f; header and indexed-query cost proof remain open. |
 | RunGet / TurnGet | Lifecycle, ownership, recovery, saved usage, owned work | Reuse extracted scalar/JSON guards; exact Thread dependencies, independent3s usage, late/stop/retry tests. |
 | ShellGet / MessageGet / RevisitGet | Native execution/delivery/Revisit state; immutable command or accepted message source | Reuse extracted readers; committed lifecycle/delivery/owner-output invalidation without retargeting the viewer. |
 | OperationGet | Immutable acceptance/expiry versus current downstream delivery/compaction | Subscribe to receipt/downstream changes and expiry; never replay an operation while observing it. |
