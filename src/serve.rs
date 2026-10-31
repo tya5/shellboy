@@ -20,7 +20,7 @@ fn emit(value: &Value) -> bool {
 }
 #[cfg(unix)]
 async fn signal(signals: &mut crate::os_signals::ServeSignals) {
-    let _ = signals.recv().await;
+    signals.recv().await;
 }
 #[cfg(not(unix))]
 async fn signal(_: &mut ()) {
