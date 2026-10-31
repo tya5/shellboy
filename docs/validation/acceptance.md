@@ -3810,7 +3810,7 @@ comments/raw strings, manual deadlines, and exact allowance growth/staleness.
 The checker is lexical, not a full Rust macro expander. The committed reason list
 pins existing file/function/fingerprint counts; copying a deferred timeout adds
 an unapproved occurrence, and deleting one requires removing its stale allowance.
-At the current snapshot134 #41-owned occurrences are deliberately deferred and14
+At the current snapshot135 #41-owned occurrences are deliberately deferred and14
 intentional helper/virtual-clock/non-gating workload occurrences remain allowed.
 This is not a claim that #41's legacy short waits are already migrated. The
 initial #41 diff did not include src/frontend/control_tests.rs; a later read-only
@@ -3870,3 +3870,15 @@ Python16/fmt/strict Clippy. Before integration main advanced to15037c1 (#75,
 readback/schema indexes), so these gates are retained as candidate evidence and
 the combined final tree will be checked independently rather than assuming the
 older pair qualifies new production/schema code.
+
+
+### Readback combined-tree guard alignment
+
+Main15037c1 added three new raw readback test guards outside the deferred set;
+CLI/readonly observations now use the shared async helper and the synchronous
+readback test wrapper delegates to shared blocking_recv. Its new storage migration
+guard is already60s but src/storage.rs is #41-owned, so that exact occurrence is
+recorded as deferred (now135 deferred +14 deliberate). No #75 production code or
+migration was changed. Rebase conflicts were only src/lib.rs's appended module
+declarations (readback plus cfg(test) test_watchdog both retained) and validation
+appendices (complete upstream prefix retained). New combined native gates follow.

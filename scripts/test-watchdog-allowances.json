@@ -624,6 +624,14 @@
     "reason": "Deferred #41/shared-read: existing performance_semantic_ranking_writer_contention test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
+    "file": "src/storage.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "293c1adcf505786afccf99a6906f1d9b7b2ba1f0dae7bb84f267fc3371fbc0ab",
+    "function": "schema14_index_upgrade_keeps_source_rows_and_malformed_optional_receipts",
+    "count": 1,
+    "reason": "Deferred #41-owned storage fixture added by #75 main15037c1; existing schema14-to15 readback upgrade guard is60s, migrate with the storage test file."
+  },
+  {
     "file": "src/ui/performance_stream.rs",
     "rule": "wall-deadline",
     "fingerprint": "287020d6c3c8322d859060dae95538c34b85e79c3b7de91543467eeb2b92ea42",
