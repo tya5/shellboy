@@ -9,7 +9,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::{Duration, timeout},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -57,7 +56,7 @@ async fn fake(
 ) -> (
     HttpModelClient,
     oneshot::Receiver<Request>,
-    JoinHandle<usize>,
+    count_after::CountAfter,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let connection = Connection {
@@ -69,9 +68,11 @@ async fn fake(
         ..Default::default()
     };
     let (tx, rx) = oneshot::channel();
+    let (finished, completion) = oneshot::channel();
     let content_type = content_type.to_owned();
     let task = tokio::spawn(async move {
-        let Ok(Ok((mut stream, _))) = timeout(Duration::from_secs(2), listener.accept()).await
+        let Ok(Ok((mut stream, _))) =
+            crate::test_watchdog::watchdog("tests/model_http.rs: fake", listener.accept()).await
         else {
             return 0;
         };
@@ -90,16 +91,18 @@ async fn fake(
             }
         }
         drop(stream);
-        if timeout(Duration::from_millis(75), listener.accept())
-            .await
-            .is_ok()
-        {
+        let _ = completion.await;
+        if futures_util::FutureExt::now_or_never(listener.accept()).is_some() {
             2
         } else {
             1
         }
     });
-    (HttpModelClient::new(connection).unwrap(), rx, task)
+    (
+        HttpModelClient::new(connection).unwrap(),
+        rx,
+        count_after::CountAfter::new(task, finished),
+    )
 }
 fn final_response(text: &str) -> Value {
     json!({"id":"resp_fixture","status":"completed","output":[{"type":"message","id":"msg_fixture","role":"assistant","status":"completed","phase":"commentary","content":[{"type":"output_text","text":text}]}]})
@@ -299,11 +302,7 @@ async fn cancelled_before_start_and_missing_credentials_make_no_request() {
         .await
         .unwrap_err();
     assert_eq!(failure.error.kind, "config_missing");
-    assert!(
-        timeout(Duration::from_millis(100), listener.accept())
-            .await
-            .is_err()
-    );
+    assert!(futures_util::FutureExt::now_or_never(listener.accept()).is_none());
 }
 #[tokio::test]
 async fn cancellation_interrupts_bounded_event_backpressure_and_preserves_partial() {
@@ -326,13 +325,13 @@ async fn cancellation_interrupts_bounded_event_backpressure_and_preserves_partia
             .await
     });
     request.await.unwrap();
-    let first = timeout(Duration::from_secs(2), rx.recv())
+    let first = crate::test_watchdog::watchdog("tests/model_http.rs: cancellation_interrupts_bounded_event_backpressure_and_preserves_partial", rx.recv())
         .await
         .unwrap()
         .unwrap();
     assert_eq!(first["delta"], "one");
     cancel.cancel();
-    let failure = timeout(Duration::from_secs(2), attempt)
+    let failure = crate::test_watchdog::watchdog("tests/model_http.rs: cancellation_interrupts_bounded_event_backpressure_and_preserves_partial", attempt)
         .await
         .unwrap()
         .unwrap()
@@ -666,18 +665,24 @@ async fn cancellation_interrupts_a_stalled_http_stream() {
             .await
     });
     assert_eq!(
-        timeout(Duration::from_secs(2), rx.recv())
-            .await
-            .unwrap()
-            .unwrap()["delta"],
+        crate::test_watchdog::watchdog(
+            "tests/model_http.rs: cancellation_interrupts_a_stalled_http_stream",
+            rx.recv()
+        )
+        .await
+        .unwrap()
+        .unwrap()["delta"],
         "before cancellation"
     );
     cancel.cancel();
-    let failure = timeout(Duration::from_secs(2), attempt)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap_err();
+    let failure = crate::test_watchdog::watchdog(
+        "tests/model_http.rs: cancellation_interrupts_a_stalled_http_stream",
+        attempt,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap_err();
     assert_eq!(failure.error.kind, "cancelled");
     assert_eq!(failure.partial_text, "before cancellation");
     release.send(()).unwrap();
@@ -1377,7 +1382,7 @@ async fn sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only(
         let original = raw.clone();
         let body = sse(&[json!({"type":format!("response.{state}"),"response":raw})]);
         let server = tokio::spawn(async move {
-            let (mut stream, _) = timeout(Duration::from_secs(60), listener.accept())
+            let (mut stream, _) = crate::test_watchdog::watchdog("tests/model_http.rs: sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only", listener.accept())
                 .await
                 .unwrap()
                 .unwrap();
@@ -1385,8 +1390,7 @@ async fn sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only(
             stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",body.len()).as_bytes()).await.unwrap();
             stream.write_all(&body).await.unwrap();
         });
-        let result = timeout(
-            Duration::from_secs(60),
+        let result = crate::test_watchdog::watchdog("tests/model_http.rs: sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only",
             client.response(
                 response_request("fixture", vec![], None, false),
                 CancellationToken::new(),
@@ -1415,3 +1419,6 @@ async fn sse_terminal_usage_is_normalized_for_success_and_failed_envelopes_only(
         server.await.unwrap();
     }
 }
+
+#[path = "support/count_after.rs"]
+mod count_after;

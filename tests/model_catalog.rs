@@ -8,8 +8,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::oneshot,
-    task::JoinHandle,
-    time::{Duration, timeout},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -39,7 +37,7 @@ async fn fixture(
 ) -> (
     HttpModelClient,
     oneshot::Receiver<String>,
-    JoinHandle<usize>,
+    count_after::CountAfter,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let client = HttpModelClient::new(connection(format!(
@@ -48,6 +46,7 @@ async fn fixture(
     )))
     .unwrap();
     let (tx, rx) = oneshot::channel();
+    let (finished, completion) = oneshot::channel();
     let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         let _ = tx.send(request_head(&mut stream).await);
@@ -59,16 +58,14 @@ async fn fixture(
             let _ = stream.write_all(&body).await;
         }
         drop(stream);
-        if timeout(Duration::from_millis(50), listener.accept())
-            .await
-            .is_ok()
-        {
+        let _ = completion.await;
+        if futures_util::FutureExt::now_or_never(listener.accept()).is_some() {
             2
         } else {
             1
         }
     });
-    (client, rx, server)
+    (client, rx, count_after::CountAfter::new(server, finished))
 }
 #[test]
 fn models_endpoint_preserves_configured_api_root() {
@@ -224,11 +221,14 @@ async fn catalog_cancellation_interrupts_headers_and_incomplete_body() {
         });
         rx.await.unwrap();
         cancel.cancel();
-        let error = timeout(Duration::from_secs(1), task)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
+        let error = crate::test_watchdog::watchdog(
+            "tests/model_catalog.rs: catalog_cancellation_interrupts_headers_and_incomplete_body",
+            task,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
         assert_eq!(error.kind, "cancelled");
         server.abort();
     }
@@ -244,9 +244,8 @@ async fn catalog_precancelled_makes_no_http_request() {
     let cancel = CancellationToken::new();
     cancel.cancel();
     assert_eq!(client.models(cancel).await.unwrap_err().kind, "cancelled");
-    assert!(
-        timeout(Duration::from_millis(50), listener.accept())
-            .await
-            .is_err()
-    );
+    assert!(futures_util::FutureExt::now_or_never(listener.accept()).is_none());
 }
+
+#[path = "support/count_after.rs"]
+mod count_after;

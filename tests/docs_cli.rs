@@ -143,72 +143,75 @@ fn protocol_recovery_hint_finds_real_offline_shell_examples() {
 
 #[tokio::test]
 async fn agent_semantic_search_guidance_is_bundled_and_examples_match_the_cli() {
-    tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        use clap::Parser;
-        let root = tempfile::tempdir().unwrap();
-        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
-            .current_dir(root.path())
-            .env_clear()
-            .kill_on_drop(true)
-            .args([
-                "--config",
-                root.path().join("missing.toml").to_str().unwrap(),
-                "--data-dir",
-                root.path().join("uncreated").to_str().unwrap(),
-                "docs",
-                "get",
-                "--id",
-                "shellboy/agent-guide",
-                "--section",
-                "when-semantic-history-search-helps",
-            ])
-            .output()
-            .await
-            .unwrap();
-        assert!(output.status.success(), "{:?}", output);
-        assert!(output.stderr.is_empty());
-        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
-        let text = value["result"]["text"].as_str().unwrap();
-        for required in [
-            "omitted by automatic reduction",
-            "hundreds of nodes",
-            "another conversation recovered",
-            "Windows CI timeouts",
-            "PTY test failures",
-            "GitHub API 502s",
-            "truncated model requests",
-            "release",
-            "installer validation",
-            "merge-conflict",
-            "reasons for an earlier decision",
-            "one query-embedding API request",
-            "no search is needed",
-            "not new user authorization",
-            "verify today's",
-            "not just your selected path",
-            "rag get --ref REFERENCE",
-        ] {
-            assert!(text.contains(required), "missing {required}: {text}");
-        }
-        assert_eq!(
-            text.lines().filter(|line| line.starts_with("- ")).count(),
-            5
-        );
-        let mut examples = 0;
-        for line in text.lines().filter(|line| line.starts_with("shellboy ")) {
-            let (prefix, quoted) = line.split_once(" --query '").unwrap();
-            let (query, suffix) = quoted.rsplit_once("' --limit ").unwrap();
-            let substituted = prefix.replace("\"$SHELLBOY_THREAD_ID\"", "THIS_THREAD");
-            let mut args = substituted.split_whitespace().collect::<Vec<_>>();
-            args.extend(["--query", query, "--limit", suffix]);
-            shellboy::cli::Cli::try_parse_from(args).unwrap();
-            examples += 1;
-        }
-        assert_eq!(examples, 3);
-        shellboy::cli::Cli::try_parse_from(["shellboy", "rag", "get", "--ref", "REFERENCE"])
-            .unwrap();
-        assert!(!root.path().join("uncreated").exists());
-    })
+    crate::test_watchdog::watchdog(
+        "tests/docs_cli.rs: agent_semantic_search_guidance_is_bundled_and_examples_match_the_cli",
+        async {
+            use clap::Parser;
+            let root = tempfile::tempdir().unwrap();
+            let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+                .current_dir(root.path())
+                .env_clear()
+                .kill_on_drop(true)
+                .args([
+                    "--config",
+                    root.path().join("missing.toml").to_str().unwrap(),
+                    "--data-dir",
+                    root.path().join("uncreated").to_str().unwrap(),
+                    "docs",
+                    "get",
+                    "--id",
+                    "shellboy/agent-guide",
+                    "--section",
+                    "when-semantic-history-search-helps",
+                ])
+                .output()
+                .await
+                .unwrap();
+            assert!(output.status.success(), "{:?}", output);
+            assert!(output.stderr.is_empty());
+            let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let text = value["result"]["text"].as_str().unwrap();
+            for required in [
+                "omitted by automatic reduction",
+                "hundreds of nodes",
+                "another conversation recovered",
+                "Windows CI timeouts",
+                "PTY test failures",
+                "GitHub API 502s",
+                "truncated model requests",
+                "release",
+                "installer validation",
+                "merge-conflict",
+                "reasons for an earlier decision",
+                "one query-embedding API request",
+                "no search is needed",
+                "not new user authorization",
+                "verify today's",
+                "not just your selected path",
+                "rag get --ref REFERENCE",
+            ] {
+                assert!(text.contains(required), "missing {required}: {text}");
+            }
+            assert_eq!(
+                text.lines().filter(|line| line.starts_with("- ")).count(),
+                5
+            );
+            let mut examples = 0;
+            for line in text.lines().filter(|line| line.starts_with("shellboy ")) {
+                let (prefix, quoted) = line.split_once(" --query '").unwrap();
+                let (query, suffix) = quoted.rsplit_once("' --limit ").unwrap();
+                let substituted = prefix.replace("\"$SHELLBOY_THREAD_ID\"", "THIS_THREAD");
+                let mut args = substituted.split_whitespace().collect::<Vec<_>>();
+                args.extend(["--query", query, "--limit", suffix]);
+                shellboy::cli::Cli::try_parse_from(args).unwrap();
+                examples += 1;
+            }
+            assert_eq!(examples, 3);
+            shellboy::cli::Cli::try_parse_from(["shellboy", "rag", "get", "--ref", "REFERENCE"])
+                .unwrap();
+            assert!(!root.path().join("uncreated").exists());
+        },
+    )
     .await
     .expect("bundled guide watchdog");
 }

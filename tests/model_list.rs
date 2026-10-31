@@ -6,7 +6,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::{mpsc, oneshot},
-    time::{Duration, timeout},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -72,7 +71,7 @@ fn list(connection: Option<&str>, thread: Option<&str>) -> Command {
     })
 }
 async fn incoming(rx: &mut mpsc::Receiver<Incoming>) -> Incoming {
-    timeout(Duration::from_secs(5), rx.recv())
+    crate::test_watchdog::watchdog("tests/model_list.rs: incoming", rx.recv())
         .await
         .unwrap()
         .unwrap()
@@ -345,10 +344,13 @@ async fn owner_shutdown_cancels_pending_catalog_without_creating_a_receipt() {
     let copied = req.clone();
     let call = tokio::spawn(async move { worker.request(copied).await });
     let pending = incoming(&mut rx).await;
-    timeout(Duration::from_secs(5), control.shutdown())
-        .await
-        .unwrap()
-        .unwrap();
+    crate::test_watchdog::watchdog(
+        "tests/model_list.rs: owner_shutdown_cancels_pending_catalog_without_creating_a_receipt",
+        control.shutdown(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let result = call.await.unwrap();
     assert_eq!(result.error.unwrap().code, ErrorCode::InvalidState);
     let operation = req.operation_id;
@@ -716,18 +718,17 @@ async fn history_search_ipc_disconnect_closes_embedding_http_and_next_observatio
     let command = query();
     let observer =
         tokio::spawn(async move { shellboy::ipc::call(&directory, command, None, None).await });
-    timeout(Duration::from_secs(5), stalled)
+    crate::test_watchdog::watchdog("tests/model_list.rs: history_search_ipc_disconnect_closes_embedding_http_and_next_observation_succeeds", stalled)
         .await
         .unwrap()
         .unwrap();
     observer.abort();
     assert!(observer.await.unwrap_err().is_cancelled());
-    timeout(Duration::from_secs(5), disconnected)
+    crate::test_watchdog::watchdog("tests/model_list.rs: history_search_ipc_disconnect_closes_embedding_http_and_next_observation_succeeds", disconnected)
         .await
         .expect("IPC disconnect must close query HTTP before request_timeout_ms=60000")
         .unwrap();
-    let next = timeout(
-        Duration::from_secs(5),
+    let next = crate::test_watchdog::watchdog("tests/model_list.rs: history_search_ipc_disconnect_closes_embedding_http_and_next_observation_succeeds",
         shellboy::ipc::call(&owner.loaded.data_dir, query(), None, None),
     )
     .await
@@ -747,7 +748,7 @@ async fn history_search_ipc_disconnect_closes_embedding_http_and_next_observatio
         })
         .await
         .unwrap();
-    timeout(Duration::from_secs(5), http)
+    crate::test_watchdog::watchdog("tests/model_list.rs: history_search_ipc_disconnect_closes_embedding_http_and_next_observation_succeeds", http)
         .await
         .unwrap()
         .unwrap();

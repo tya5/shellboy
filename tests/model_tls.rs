@@ -12,7 +12,6 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     task::JoinHandle,
-    time::{Duration, timeout},
 };
 use tokio_rustls::{
     TlsAcceptor,
@@ -54,8 +53,11 @@ impl Fixture {
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
                 // Certificate rejection is an expected handshake failure, not a failed fixture.
-                let Ok(Ok(mut stream)) =
-                    timeout(Duration::from_secs(5), acceptor.accept(stream)).await
+                let Ok(Ok(mut stream)) = crate::test_watchdog::watchdog(
+                    "tests/model_tls.rs: start",
+                    acceptor.accept(stream),
+                )
+                .await
                 else {
                     continue;
                 };
@@ -141,8 +143,7 @@ async fn self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_
     let explicit = fixture.client(Some(true));
     let insecure = fixture.client(Some(false));
     for client in [&omitted, &explicit] {
-        let failure = timeout(
-            Duration::from_secs(5),
+        let failure = crate::test_watchdog::watchdog("tests/model_tls.rs: self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_other_clients",
             client.response(
                 response_request("synthetic-tls", vec![], None, false),
                 CancellationToken::new(),
@@ -155,8 +156,7 @@ async fn self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_
         assert_eq!(failure.error.kind, "transport");
     }
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 0);
-    let result = timeout(
-        Duration::from_secs(5),
+    let result = crate::test_watchdog::watchdog("tests/model_tls.rs: self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_other_clients",
         insecure.response(
             response_request("synthetic-tls", vec![], None, false),
             CancellationToken::new(),
@@ -171,8 +171,7 @@ async fn self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_
     // Verify both existing clients and a newly built connection after opt-out use.
     let fresh = fixture.client(None);
     for client in [&omitted, &explicit, &fresh] {
-        let failure = timeout(
-            Duration::from_secs(5),
+        let failure = crate::test_watchdog::watchdog("tests/model_tls.rs: self_signed_tls_requires_explicit_connection_opt_out_and_never_changes_other_clients",
             client.response(
                 response_request("synthetic-tls", vec![], None, false),
                 CancellationToken::new(),
@@ -197,16 +196,14 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
     let input = ["synthetic embedding".into()];
     for verification in [None, Some(true)] {
         let client = fixture.client(verification);
-        let failure = timeout(
-            Duration::from_secs(5),
+        let failure = crate::test_watchdog::watchdog("tests/model_tls.rs: tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_other_connections",
             client.models(CancellationToken::new()),
         )
         .await
         .unwrap()
         .unwrap_err();
         assert_eq!(failure.kind, "transport");
-        let failure = timeout(
-            Duration::from_secs(5),
+        let failure = crate::test_watchdog::watchdog("tests/model_tls.rs: tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_other_connections",
             client.embeddings(
                 "synthetic-tls",
                 &input,
@@ -222,16 +219,14 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
     }
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 0);
     let client = fixture.client(Some(false));
-    let models = timeout(
-        Duration::from_secs(5),
+    let models = crate::test_watchdog::watchdog("tests/model_tls.rs: tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_other_connections",
         client.models(CancellationToken::new()),
     )
     .await
     .unwrap()
     .unwrap();
     assert_eq!(models, ["synthetic-tls-model"]);
-    let embedding = timeout(
-        Duration::from_secs(5),
+    let embedding = crate::test_watchdog::watchdog("tests/model_tls.rs: tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_other_connections",
         client.embeddings(
             "synthetic-tls",
             &input,
@@ -248,8 +243,7 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
     let fresh = fixture.client(None);
     assert_eq!(
-        timeout(
-            Duration::from_secs(5),
+        crate::test_watchdog::watchdog("tests/model_tls.rs: tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_other_connections",
             fresh.models(CancellationToken::new())
         )
         .await
@@ -259,8 +253,7 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
         "transport"
     );
     assert_eq!(
-        timeout(
-            Duration::from_secs(5),
+        crate::test_watchdog::watchdog("tests/model_tls.rs: tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_other_connections",
             fresh.embeddings(
                 "synthetic-tls",
                 &input,

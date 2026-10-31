@@ -10,7 +10,7 @@ use shellboy::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    time::{Duration, timeout},
+    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 const TEXT: &str = include_str!("fixtures/chat/text-usage.sse");
@@ -22,7 +22,7 @@ const USAGE_NO_CHOICES: &str = include_str!("fixtures/chat/usage-no-choices.sse"
 const LENGTH: &str = include_str!("fixtures/chat/length.sse");
 const UNKNOWN: &str = include_str!("fixtures/chat/missing-usage.sse");
 const CONTEXT: &str = include_str!("fixtures/chat/context-error.sse");
-const WATCH: Duration = Duration::from_secs(60);
+
 const JSON_REPLY: &str = r#"{"id":"json-fixture","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2}}"#;
 const JSON_LENGTH: &str = r#"{"id":"json-length","choices":[{"index":0,"message":{"role":"assistant","content":"partial"},"finish_reason":"length"}],"usage":{"completion_tokens":3}}"#;
 const PARTIAL: &str = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"part\"},\"finish_reason\":null}]}\n\n";
@@ -241,7 +241,7 @@ async fn reply(stream: &mut tokio::net::TcpStream, status: u16, kind: &str, body
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn loopback_transport_headers_error_facts_and_partial_usage_share_the_existing_client() {
-    timeout(WATCH, async {
+    crate::test_watchdog::watchdog("tests/chat_completions.rs: loopback_transport_headers_error_facts_and_partial_usage_share_the_existing_client", async {
         let usage_cutoff = TEXT.strip_suffix("data: [DONE]\n\n").unwrap();
         for (status, body, kind) in [
             (200, TEXT, "text/event-stream"),
@@ -340,16 +340,16 @@ async fn chat_inactivity_timeout_is_a_shared_deadline_with_a_controlled_clock() 
             .response(request(), CancellationToken::new(), Some(events))
             .await
     });
-    timeout(WATCH, receive.recv()).await.unwrap().unwrap();
+    crate::test_watchdog::watchdog("tests/chat_completions.rs: chat_inactivity_timeout_is_a_shared_deadline_with_a_controlled_clock", receive.recv()).await.unwrap().unwrap();
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(61)).await;
-    let failure = timeout(WATCH, attempt).await.unwrap().unwrap().unwrap_err();
+    let failure = crate::test_watchdog::watchdog("tests/chat_completions.rs: chat_inactivity_timeout_is_a_shared_deadline_with_a_controlled_clock", attempt).await.unwrap().unwrap().unwrap_err();
     tokio::time::resume();
     assert_eq!(failure.error.kind, "timeout");
     assert_eq!(failure.partial_text, "part");
     assert!(!failure.facts.terminal_received);
     let _ = stop.send(());
-    timeout(WATCH, server).await.unwrap().unwrap();
+    crate::test_watchdog::watchdog("tests/chat_completions.rs: chat_inactivity_timeout_is_a_shared_deadline_with_a_controlled_clock", server).await.unwrap().unwrap();
 }
 
 async fn wait_turn(
@@ -359,7 +359,7 @@ async fn wait_turn(
     changes: &mut tokio::sync::broadcast::Receiver<shellboy::control::EngineEvent>,
 ) {
     use shellboy::protocol::*;
-    timeout(WATCH, async {
+    crate::test_watchdog::watchdog("tests/chat_completions.rs: wait_turn", async {
         loop {
             let reply = control
                 .request(Request::new(
@@ -386,7 +386,7 @@ async fn wait_turn(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared() {
     use shellboy::{app::DataOwner, control::Control, protocol::*};
-    timeout(WATCH,async {
+    crate::test_watchdog::watchdog("tests/chat_completions.rs: core_retries_tools_context_reduction_and_saved_cache_usage_are_shared",async {
         let root=tempfile::tempdir().unwrap();
         let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();let address=listener.local_addr().unwrap();
         let config=root.path().join("config.toml");

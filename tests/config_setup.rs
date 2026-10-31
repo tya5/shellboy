@@ -1,6 +1,6 @@
 use serde_json::Value;
 use shellboy::config_setup::{MINIMAL, TEMPLATE, report};
-use std::{path::Path, process::Command, time::Duration};
+use std::{path::Path, process::Command};
 
 fn command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_shellboy"));
@@ -209,7 +209,7 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            let (mut stream, _) = tokio::time::timeout(Duration::from_secs(60), listener.accept())
+            let (mut stream, _) = crate::test_watchdog::watchdog("tests/config_setup.rs: check_only_gets_catalog_and_preserves_status_and_base_root_hint_without_secrets", listener.accept())
                 .await
                 .unwrap()
                 .unwrap();
@@ -283,7 +283,7 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         if status == 404 {
             assert!(text.contains("https://proxy.example/v1") && text.contains("/responses"));
         }
-        let listener = tokio::time::timeout(Duration::from_secs(60), server)
+        let listener = crate::test_watchdog::watchdog("tests/config_setup.rs: check_only_gets_catalog_and_preserves_status_and_base_root_hint_without_secrets", server)
             .await
             .unwrap()
             .unwrap()
@@ -498,7 +498,7 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
         })))
         .await;
     assert!(sent.ok, "{sent:?}");
-    let reason = tokio::time::timeout(Duration::from_secs(60), async {
+    let reason = crate::test_watchdog::watchdog("tests/config_setup.rs: missing_key_recovery_has_setup_details_and_never_opens_an_http_connection", async {
         loop {
             let reply = control
                 .request(request(Command::ThreadGet(ThreadTarget {

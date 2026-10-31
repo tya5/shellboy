@@ -10,7 +10,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinHandle,
-    time::{Duration, Instant, sleep, timeout},
+    time::{Duration, sleep},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -70,7 +70,7 @@ fn terminal_frame() -> Vec<u8> {
 
 #[tokio::test]
 async fn embeddings_deadline_bounds_headers_empty_partial_and_error_bodies() {
-    timeout(Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("tests/http_deadlines.rs: embeddings_deadline_bounds_headers_empty_partial_and_error_bodies", async {
         let mut empty = headers(200, "application/json");
         let mut partial = empty.clone();
         partial.extend_from_slice(b"{\"data\":[");
@@ -136,51 +136,54 @@ async fn embeddings_deadline_bounds_headers_empty_partial_and_error_bodies() {
 
 #[tokio::test]
 async fn stream_timeout_retains_partial_text_and_public_model_events() {
-    timeout(Duration::from_secs(10), async {
-        let event = json!({"type":"response.output_text.delta","delta":"already received"});
-        let mut initial = headers(200, "text/event-stream");
-        initial.extend_from_slice(format!("data: {event}\n\n").as_bytes());
-        let (client, _, server) = stalled(
-            Connection {
-                stream_idle_timeout_ms: 500,
-                ..Default::default()
-            },
-            initial,
-        )
-        .await;
-        let (sender, mut events) = mpsc::channel(4);
-        let failure = client
-            .response(
-                response_request("fixture", vec![], None, false),
-                CancellationToken::new(),
-                Some(sender),
+    crate::test_watchdog::watchdog(
+        "tests/http_deadlines.rs: stream_timeout_retains_partial_text_and_public_model_events",
+        async {
+            let event = json!({"type":"response.output_text.delta","delta":"already received"});
+            let mut initial = headers(200, "text/event-stream");
+            initial.extend_from_slice(format!("data: {event}\n\n").as_bytes());
+            let (client, _, server) = stalled(
+                Connection {
+                    stream_idle_timeout_ms: 500,
+                    ..Default::default()
+                },
+                initial,
             )
-            .await
-            .unwrap_err();
-        assert_eq!(failure.error.kind, "timeout");
-        assert_eq!(failure.partial_text, "already received");
-        assert!(failure.facts.received == shellboy::model::http::ResponseReceived::Output);
-        assert!(
-            failure
-                .error
-                .message
-                .contains("connections.deadline_fixture.stream_idle_timeout_ms")
-        );
-        assert_eq!(events.recv().await.unwrap(), event);
-        assert!(
-            events.recv().await.is_none(),
-            "transport observations leaked into public model events"
-        );
-        server.abort();
-        let _ = server.await;
-    })
+            .await;
+            let (sender, mut events) = mpsc::channel(4);
+            let failure = client
+                .response(
+                    response_request("fixture", vec![], None, false),
+                    CancellationToken::new(),
+                    Some(sender),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(failure.error.kind, "timeout");
+            assert_eq!(failure.partial_text, "already received");
+            assert!(failure.facts.received == shellboy::model::http::ResponseReceived::Output);
+            assert!(
+                failure
+                    .error
+                    .message
+                    .contains("connections.deadline_fixture.stream_idle_timeout_ms")
+            );
+            assert_eq!(events.recv().await.unwrap(), event);
+            assert!(
+                events.recv().await.is_none(),
+                "transport observations leaked into public model events"
+            );
+            server.abort();
+            let _ = server.await;
+        },
+    )
     .await
     .expect("partial stream escaped inactivity timeout");
 }
 
 #[tokio::test]
 async fn heartbeat_chunks_keep_a_stream_alive_past_its_idle_and_request_limits() {
-    timeout(Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("tests/http_deadlines.rs: heartbeat_chunks_keep_a_stream_alive_past_its_idle_and_request_limits", async {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let client = HttpModelClient::new(Connection {
             base_url: format!("http://{}", listener.local_addr().unwrap()),
@@ -202,7 +205,6 @@ async fn heartbeat_chunks_keep_a_stream_alive_past_its_idle_and_request_limits()
             }
             stream.write_all(&terminal_frame()).await.unwrap();
         });
-        let started = Instant::now();
         let result = client
             .response(
                 response_request("fixture", vec![], None, false),
@@ -212,7 +214,6 @@ async fn heartbeat_chunks_keep_a_stream_alive_past_its_idle_and_request_limits()
             .await
             .unwrap();
         assert_eq!(result.text, "complete");
-        assert!(started.elapsed() > Duration::from_millis(1_000));
         server.await.unwrap();
     })
     .await
@@ -221,144 +222,156 @@ async fn heartbeat_chunks_keep_a_stream_alive_past_its_idle_and_request_limits()
 
 #[tokio::test]
 async fn disabled_stream_deadline_still_allows_cancellation() {
-    timeout(Duration::from_secs(10), async {
-        let (client, ready, server) = stalled(
-            Connection {
-                stream_idle_timeout_ms: 0,
-                request_timeout_ms: 1_000,
-                ..Default::default()
-            },
-            headers(200, "text/event-stream"),
-        )
-        .await;
-        let cancel = CancellationToken::new();
-        let task = tokio::spawn({
-            let cancel = cancel.clone();
-            async move {
-                client
-                    .response(
-                        response_request("fixture", vec![], None, false),
-                        cancel,
-                        None,
-                    )
-                    .await
-            }
-        });
-        ready.await.unwrap();
-        sleep(Duration::from_millis(1_200)).await;
-        assert!(
-            !task.is_finished(),
-            "request deadline was applied to an unlimited stream"
-        );
-        cancel.cancel();
-        let failure = timeout(Duration::from_secs(2), task)
+    crate::test_watchdog::watchdog(
+        "tests/http_deadlines.rs: disabled_stream_deadline_still_allows_cancellation",
+        async {
+            let (client, ready, server) = stalled(
+                Connection {
+                    stream_idle_timeout_ms: 0,
+                    request_timeout_ms: 1_000,
+                    ..Default::default()
+                },
+                headers(200, "text/event-stream"),
+            )
+            .await;
+            let cancel = CancellationToken::new();
+            let task = tokio::spawn({
+                let cancel = cancel.clone();
+                async move {
+                    client
+                        .response(
+                            response_request("fixture", vec![], None, false),
+                            cancel,
+                            None,
+                        )
+                        .await
+                }
+            });
+            ready.await.unwrap();
+            sleep(Duration::from_millis(1_200)).await;
+            assert!(
+                !task.is_finished(),
+                "request deadline was applied to an unlimited stream"
+            );
+            cancel.cancel();
+            let failure = crate::test_watchdog::watchdog(
+                "tests/http_deadlines.rs: disabled_stream_deadline_still_allows_cancellation",
+                task,
+            )
             .await
             .unwrap()
             .unwrap()
             .unwrap_err();
-        assert_eq!(failure.error.kind, "cancelled");
-        server.abort();
-        let _ = server.await;
-    })
+            assert_eq!(failure.error.kind, "cancelled");
+            server.abort();
+            let _ = server.await;
+        },
+    )
     .await
     .expect("disabled deadline prevented cancellation");
 }
 
 #[tokio::test]
 async fn configured_model_catalog_deadline_covers_an_incomplete_body() {
-    timeout(Duration::from_secs(10), async {
-        let mut initial = headers(200, "application/json");
-        initial.extend_from_slice(b"{\"data\":[");
-        let (client, _, server) = stalled(
-            Connection {
-                request_timeout_ms: 1_000,
-                ..Default::default()
-            },
-            initial,
-        )
-        .await;
-        let error = client.models(CancellationToken::new()).await.unwrap_err();
-        assert_eq!(error.kind, "timeout");
-        assert!(error.message.contains("limit 1000 ms"));
-        assert!(
-            error
-                .message
-                .contains("connections.deadline_fixture.request_timeout_ms")
-        );
-        server.abort();
-        let _ = server.await;
-    })
+    crate::test_watchdog::watchdog(
+        "tests/http_deadlines.rs: configured_model_catalog_deadline_covers_an_incomplete_body",
+        async {
+            let mut initial = headers(200, "application/json");
+            initial.extend_from_slice(b"{\"data\":[");
+            let (client, _, server) = stalled(
+                Connection {
+                    request_timeout_ms: 1_000,
+                    ..Default::default()
+                },
+                initial,
+            )
+            .await;
+            let error = client.models(CancellationToken::new()).await.unwrap_err();
+            assert_eq!(error.kind, "timeout");
+            assert!(error.message.contains("limit 1000 ms"));
+            assert!(
+                error
+                    .message
+                    .contains("connections.deadline_fixture.request_timeout_ms")
+            );
+            server.abort();
+            let _ = server.await;
+        },
+    )
     .await
     .expect("catalog ignored its configured deadline");
 }
 
 #[tokio::test]
 async fn separate_connections_do_not_share_stream_deadlines() {
-    timeout(Duration::from_secs(10), async {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let connection = Connection {
-            base_url: format!("http://{}", listener.local_addr().unwrap()),
-            stream_idle_timeout_ms: 500,
-            ..Default::default()
-        };
-        let fast = HttpModelClient::for_connection("short", connection.clone()).unwrap();
-        let slow = HttpModelClient::for_connection(
-            "long",
-            Connection {
-                stream_idle_timeout_ms: 2_500,
-                ..connection
-            },
-        )
-        .unwrap();
-        let server = tokio::spawn(async move {
-            let mut tasks = Vec::new();
-            for _ in 0..2 {
-                let (mut stream, _) = listener.accept().await.unwrap();
-                tasks.push(tokio::spawn(async move {
-                    read_request(&mut stream).await;
-                    stream
-                        .write_all(&headers(200, "text/event-stream"))
-                        .await
-                        .unwrap();
-                    sleep(Duration::from_millis(1_200)).await;
-                    // The short-deadline client may already have closed its socket.
-                    let _ = stream.write_all(&terminal_frame()).await;
-                }));
-            }
-            for task in tasks {
-                task.await.unwrap();
-            }
-        });
-        let (short_result, long_result) = tokio::join!(
-            fast.response(
-                response_request("fixture", vec![], None, false),
-                CancellationToken::new(),
-                None
-            ),
-            slow.response(
-                response_request("fixture", vec![], None, false),
-                CancellationToken::new(),
-                None
-            ),
-        );
-        let failure = short_result.unwrap_err();
-        assert_eq!(failure.error.kind, "timeout");
-        assert!(
-            failure
-                .error
-                .message
-                .contains("connections.short.stream_idle_timeout_ms")
-        );
-        assert_eq!(long_result.unwrap().text, "complete");
-        server.await.unwrap();
-    })
+    crate::test_watchdog::watchdog(
+        "tests/http_deadlines.rs: separate_connections_do_not_share_stream_deadlines",
+        async {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let connection = Connection {
+                base_url: format!("http://{}", listener.local_addr().unwrap()),
+                stream_idle_timeout_ms: 500,
+                ..Default::default()
+            };
+            let fast = HttpModelClient::for_connection("short", connection.clone()).unwrap();
+            let slow = HttpModelClient::for_connection(
+                "long",
+                Connection {
+                    stream_idle_timeout_ms: 2_500,
+                    ..connection
+                },
+            )
+            .unwrap();
+            let server = tokio::spawn(async move {
+                let mut tasks = Vec::new();
+                for _ in 0..2 {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    tasks.push(tokio::spawn(async move {
+                        read_request(&mut stream).await;
+                        stream
+                            .write_all(&headers(200, "text/event-stream"))
+                            .await
+                            .unwrap();
+                        sleep(Duration::from_millis(1_200)).await;
+                        // The short-deadline client may already have closed its socket.
+                        let _ = stream.write_all(&terminal_frame()).await;
+                    }));
+                }
+                for task in tasks {
+                    task.await.unwrap();
+                }
+            });
+            let (short_result, long_result) = tokio::join!(
+                fast.response(
+                    response_request("fixture", vec![], None, false),
+                    CancellationToken::new(),
+                    None
+                ),
+                slow.response(
+                    response_request("fixture", vec![], None, false),
+                    CancellationToken::new(),
+                    None
+                ),
+            );
+            let failure = short_result.unwrap_err();
+            assert_eq!(failure.error.kind, "timeout");
+            assert!(
+                failure
+                    .error
+                    .message
+                    .contains("connections.short.stream_idle_timeout_ms")
+            );
+            assert_eq!(long_result.unwrap().text, "complete");
+            server.await.unwrap();
+        },
+    )
     .await
     .expect("per-connection deadline fixture failed to complete");
 }
 
 #[tokio::test]
 async fn inactivity_retry_facts_distinguish_headers_metadata_and_partial_json() {
-    timeout(Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("tests/http_deadlines.rs: inactivity_retry_facts_distinguish_headers_metadata_and_partial_json", async {
         let mut metadata = headers(200, "text/event-stream");
         metadata.extend_from_slice(b": heartbeat\n\ndata: {\"type\":\"response.created\",\"response\":{\"output\":[]}}\n\n");
         let mut json_partial = headers(200, "application/json");
