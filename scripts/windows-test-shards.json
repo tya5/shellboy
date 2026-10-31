@@ -46,7 +46,7 @@
     "http_deadlines": "1",
     "http_header_measurement": "1",
     "http_observation": "1",
-    "index": "2",
+    "index": "1",
     "index_batch": "2",
     "index_dimensions": "1",
     "index_space_gc": "2",
@@ -108,5 +108,13 @@
     "ui_scroll_stream": "1",
     "ui_thread_deletion": "2",
     "work_status": "1"
+  },
+  "rebalance": {
+    "run": "https://github.com/tya5/shellboy/actions/runs/41185378870",
+    "observed_execution_seconds": {
+      "1": 128.032,
+      "2": 182.828
+    },
+    "move": "index: shard 2 -> 1 (isolated native module 26.641 seconds)"
   }
 }

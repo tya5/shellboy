@@ -2,6 +2,23 @@
 
 ## Batched native CI (#92, in progress)
 
+Source1fa0e95 passes first-attempt three-OS run
+[41185378870](https://github.com/tya5/shellboy/actions/runs/41185378870), including
+Python28 and Node12 self-tests, format/strict all-target Clippy and all native
+harnesses. The Windows cross-job audit proves1846 complete identities, including
+24 ignored, are covered exactly once: shard1 selects1259/16 ignored, shard2
+587/8 ignored. No failures or ignored-set differences were recorded.
+
+Observed Windows shard1 build173.578s/execution128.032s, shard2
+build182.484s/execution182.828s. Tests-step totals (including all-target build)
+were302s/366s; job wall times441s/511s. These are runner samples, not guaranteed
+speedups. Each shard independently compiles/inventories all targets, so extra
+parallel build/link resource use is explicit. The measured execution imbalance
+motivates moving index (isolated26.641s) from shard2 to shard1. The final
+rebalance requires a new exact-source native run before integration; do not
+claim the earlier SHA qualifies the changed assignment. Live main-push reuse
+still requires reviewer approval and exact-SHA integration.
+
 Candidatefa1e26b run41184815121 passes Linux/macOS but Windows partition
 execution rejects ambiguous substring skip filters (for example cli:: also
 matches docs_cli::). Replace module-substring skips with discovered complete
@@ -44,7 +61,7 @@ ignored identities with the disjoint union of selected identities; harness
 summary counts must match the selected subset. Python fixtures cover dropped,
 duplicated, ignored, mismatched-source and unknown-target cases. Node fixtures
 cover exact-SHA success, wrong SHA/repository, reruns, partial/skipped jobs and
-API failure. These new tests and the final three-OS workflow are not yet qualified.
+API failure. These fixtures pass on1fa0e95; the final rebalanced assignment remains pending.
 No local Rust build/test was performed on the8GB integration host. Live main-push
 reuse and the unqualified-main-SHA full-run path remain untested pending review
 and authorized integration; mocked gate cases do not establish those live paths.

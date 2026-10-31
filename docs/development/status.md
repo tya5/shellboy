@@ -14,8 +14,9 @@ unchanged. Loopback/virtual-clock checks pass; exact-source CI is tracked in #76
 Exact-SHA main-push reuse is guarded by first-attempt successful native-job
 evidence from the read-only Actions API. Windows has explicit measured module
 partitions and a cross-job full-inventory/disjoint-union audit; four test threads
-are unchanged. Branch CI/reviewer approval and live main-push reuse qualification
-remain pending; see acceptance for measurement source and untested cases.
+are unchanged. Three-OS checks and exact-union audit pass on1fa0e95; the final
+index-module rebalance, reviewer approval and live main-push reuse qualification
+remain pending. See acceptance for measurement source and untested cases.
 
 ## CI observation ordering (#89)
 
