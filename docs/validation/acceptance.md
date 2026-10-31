@@ -1,5 +1,50 @@
 # Validation record
 
+## #41 D2 owned work and output (local)
+
+Final source807ac97 passes native macOS arm64/Rust1.99.1 standard checks:
+**1,777 passed/0 failed/32 ignored**, layout90/Python6/fmt/strict Clippy.
+The [qualification](conversation-redesign-live-work.md) separates actual pipe/DB
+commit ordering, same-snapshot timing, typed ownership/selection, finite decoder
+and outbox tests from native six-condition PTY shell interactions. NO_COLOR
+chromatic output is absent in both widths. Synthetic fixtures and a loopback
+Responses mock avoid the default store, credentials and paid model APIs.
+
+D's P2/P5 and full multi-consumer P3 remain open, along with E/F/G and applicable
+native OS/GUI gates. Short PTY byte counts are not draw/DB-job/CPU counters and
+old B+C CI does not qualify this source. No push/release/install was performed.
+
+## #41 D1 SQL batches and raw headers (local)
+
+Source558b870 integrates current-main1b559b9 and passes native macOS arm64/
+Rust1.99.1 standard checks: **1,745/0/32**, layout90/Python6/fmt/strict Clippy.
+Actual SQLite traces, independent old-query oracles and10,000-unrelated-record
+scaling regressions verify bounded tool/sender/recovery reads and PK/source-index
+shape; raw-header/title/draft preparation is off-DB. No schema/migration/authority
+change is introduced. The [detailed record](conversation-redesign-shared-read.md#d1-actual-sql-batches-and-bounded-raw-headers)
+retains before/intermediate/final evidence, the rejected missing-index assumption
+and remaining limits. P3 selected workload SQL176→26, worker p50 4.813→3.334ms;
+VM16,602→22,632 remains higher, so no universal CPU claim. D/E/F/G, global planner,
+performance and native Windows/Linux/visual gates remain incomplete. No paid API,
+real store, installed binary, push or release was involved.
+
+## #41 D0 shared-read and E tree-cache foundation (local)
+
+Source67f6f09 integrates mainbb7e29b and qualifies locally with
+`sh scripts/check.sh`: **1,711 passed /0 failed /32 ignored**, layout90,
+Python6, formatting and strict all-target Clippy on native macOS arm64/Rust1.99.1.
+The [detailed record](conversation-redesign-shared-read.md) retains the observed
+initial failures and distinguishes shared current-view/paused facts, atomic
+application/diagnostics, tree caching and viewport corrections from unfinished
+live-work, list patches/Watch and general popup work. Actual selected-view worker measurement is7→1 jobs, with worker p95
+3.675→3.940ms (no SQL-time speedup); full multi-consumer P3 and native
+Windows/Linux qualification remain pending. Follow-up161b4c9 additionally fixes
+external deletion notifications through existing postcommit effects. Its standard
+check passes **1,713/0/32** (library828, integration875, termination7, crash3),
+including exact singleton/cascade targets and effect-free replay/rejection/rollback.
+Browser patch consumers are still pending. No paid API, real user data, installed
+executable or release is involved.
+
 ## #59 sender inspection and labels
 
 2026-10-30, native macOS arm64/Rust1.99.1. `sh scripts/check.sh` succeeds:

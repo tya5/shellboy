@@ -1,5 +1,6 @@
 //! Independent, read-only display tails. CLI cursors and read pins are untouched.
 use super::*;
+pub(crate) mod live;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PreviewLimits {
@@ -85,7 +86,7 @@ fn suffix(
     Ok((bytes, start))
 }
 
-fn decode(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (String, bool, bool) {
+fn boundary_cut(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (usize, bool) {
     let mut cut = 0;
     let uncertain = start != 0
         && encoding != encoding_rs::UTF_8
@@ -113,6 +114,10 @@ fn decode(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (String, b
             cut += 2;
         }
     }
+    (cut, uncertain)
+}
+fn decode(bytes: &[u8], start: usize, encoding: &'static Encoding) -> (String, bool, bool) {
+    let (cut, uncertain) = boundary_cut(bytes, start, encoding);
     let (text, errors) = encoding.decode_without_bom_handling(&bytes[cut..]);
     (text.into_owned(), errors, uncertain)
 }
@@ -161,7 +166,7 @@ pub(crate) fn preview_tail(
 mod tests {
     use super::*;
 
-    fn fixture(encoding: &str) -> Connection {
+    pub(super) fn fixture(encoding: &str) -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT);
             CREATE TABLE shell_execution(id TEXT PRIMARY KEY,owner_run_id TEXT,state TEXT,exit_code INTEGER,end_reason TEXT,output_complete INTEGER,saved_sequence INTEGER,retention_generation INTEGER,output_encoding TEXT,started_at TEXT,ended_at TEXT);

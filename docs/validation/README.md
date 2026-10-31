@@ -9,3 +9,8 @@ Run standard checks from the repository root with `sh scripts/check.sh`
 Additional synthetic fixtures and verification tools live in `tests/`, `examples/`
 and `scripts/`. Keep generated artifacts in ignored locations such as `target/`.
 Do not include real conversations, personal paths or credentials in public records.
+
+Conversation redesign evidence is split into [B+C](conversation-redesign-bc.md),
+[shared reads](conversation-redesign-shared-read.md), and
+[live work](conversation-redesign-live-work.md). Each records its own source,
+observations and remaining gates; evidence is not transferable between increments.

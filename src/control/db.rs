@@ -1365,6 +1365,7 @@ impl Store {
             status,
             reason,
             wake,
+            owner_changed,
         } = assign_message(tx, &id, caller, now)?;
         let message_id = uuid::Uuid::new_v4().to_string();
         let payload = json!({"role":"user","content":content.elements});
@@ -1397,6 +1398,9 @@ impl Store {
         .map_err(sql_error)?;
         bump_roots(tx)?;
         let mut result = MutationResult::value(saved_acceptance)?;
+        if let Some(owner) = owner_changed {
+            result.changed_threads.push(owner);
+        }
         if wake {
             if args.now {
                 result.wake_threads.push(id);
@@ -1416,6 +1420,7 @@ struct MessageAssignment {
     status: DeliveryStatus,
     reason: Option<&'static str>,
     wake: bool,
+    owner_changed: Option<String>,
 }
 
 fn assign_message(
@@ -1440,6 +1445,7 @@ fn assign_message(
     let mut status = DeliveryStatus::Accepted;
     let mut reason = None;
     let mut wake = false;
+    let mut owner_changed = None;
     if let Some((run_id, state, owner)) = run {
         if let Some(caller) = caller
             && parent.as_deref() == Some(&caller.thread_id)
@@ -1509,6 +1515,9 @@ fn assign_message(
         } else {
             None
         };
+        owner_changed = caller
+            .filter(|_| owner.is_some())
+            .map(|origin| origin.thread_id.clone());
         let run_id = uuid::Uuid::new_v4().to_string();
         tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at) VALUES(?1,?2,?3,'live',?4)",params![run_id,id,owner,now]).map_err(sql_error)?;
         super::context::record(
@@ -1547,6 +1556,7 @@ fn assign_message(
         status,
         reason,
         wake,
+        owner_changed,
     })
 }
 
@@ -1665,6 +1675,30 @@ fn bounded_thread_title(text: &str) -> String {
     title
 }
 
+/// Pure display policy shared with the frontend's off-worker title preparation.
+pub(crate) fn title_from_user_payload(payload: &Value) -> Option<String> {
+    if payload.get("role").and_then(Value::as_str) != Some("user") {
+        return None;
+    }
+    let text = match payload.get("content") {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(content)) => content
+            .iter()
+            .filter(|part| {
+                matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("input_text" | "text")
+                )
+            })
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return None,
+    };
+    let title = bounded_thread_title(&text);
+    (!title.is_empty()).then_some(title)
+}
+
 /// Display-only fallback. Never rewrite an explicit title or the user's history.
 /// The selected path, rather than a Run's latest assistant/tool output, defines
 /// the earliest meaningful user text, including on a forked/shared history.
@@ -1694,26 +1728,7 @@ pub(crate) fn thread_display_title(
             else {
                 continue;
             };
-            if payload.get("role").and_then(Value::as_str) != Some("user") {
-                continue;
-            }
-            let text = match payload.get("content") {
-                Some(Value::String(text)) => text.clone(),
-                Some(Value::Array(content)) => content
-                    .iter()
-                    .filter(|part| {
-                        matches!(
-                            part.get("type").and_then(Value::as_str),
-                            Some("input_text" | "text")
-                        )
-                    })
-                    .filter_map(|part| part.get("text").and_then(Value::as_str))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                _ => continue,
-            };
-            let title = bounded_thread_title(&text);
-            if !title.is_empty() {
+            if let Some(title) = title_from_user_payload(&payload) {
                 return Ok(title);
             }
         }
@@ -2158,7 +2173,11 @@ fn delete_thread(
         )
         .map_err(sql_error)?;
     tx.execute("INSERT INTO gc_job(id,kind,root_revision,cursor_json,state) VALUES(?1,'history',?2,?3,'pending')",params![uuid::Uuid::new_v4().to_string(),revision,json!({"deleted_thread_ids":targets}).to_string()]).map_err(sql_error)?;
-    MutationResult::value(Accepted { accepted: true })
+    let mut result = MutationResult::value(Accepted { accepted: true })?;
+    // The caller publishes these existing notifications only after commit.
+    // A receipt replay returns its saved value without repeating the effects.
+    result.changed_threads = targets;
+    Ok(result)
 }
 
 fn bump_roots(tx: &Transaction<'_>) -> Result<()> {
@@ -3415,5 +3434,520 @@ mod message_acknowledgement_state_tests {
         assert!(replay.now);
         assert_eq!(replay.delivery_status, DeliveryStatus::Accepted);
         db.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod thread_deletion_notification_tests {
+    use super::*;
+    use crate::{
+        app::DataOwner,
+        control::{Control, EngineEvent},
+    };
+    use std::collections::BTreeSet;
+
+    async fn fixture() -> (tempfile::TempDir, DataOwner) {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+        let owner = DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        (root, owner)
+    }
+
+    async fn seed(db: &DbWorker) {
+        db.call(|db| {
+            for (id, parent) in [("parent", None), ("child", Some("parent")), ("grandchild", Some("child")), ("unrelated", None)] {
+                db.execute("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?2,?1,'/','','fixture','synthetic','now')", params![id,parent])?;
+            }
+            Ok(())
+        }).await.unwrap();
+    }
+
+    fn delete(instance: &str, descendants: bool) -> Request {
+        Request::new(
+            format!("{instance}:delete-notification"),
+            Command::ThreadDelete(ThreadDeleteArgs {
+                thread_id: "parent".into(),
+                descendants,
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn deletion_effects_are_exact_committed_targets_and_replay_has_no_effects() {
+        for descendants in [false, true] {
+            let (root, owner) = fixture().await;
+            seed(&owner.db).await;
+            let store = Store::new(
+                owner.db.clone(),
+                Arc::new(owner.loaded.config.clone()),
+                root.path().into(),
+                owner.instance_id.clone(),
+            );
+            let request = delete(&owner.instance_id, descendants);
+            let first = store.execute(request.clone(), None).await.unwrap();
+            let targets = first
+                .changed_threads
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            let expected = if descendants {
+                BTreeSet::from([
+                    "parent".to_owned(),
+                    "child".to_owned(),
+                    "grandchild".to_owned(),
+                ])
+            } else {
+                BTreeSet::from(["parent".to_owned()])
+            };
+            assert_eq!(targets, expected);
+            assert_eq!(first.changed_threads.len(), targets.len());
+            assert!(
+                first.wake_threads.is_empty()
+                    && first.quiet_wake_threads.is_empty()
+                    && first.stop_runs.is_empty()
+                    && first.compact_threads.is_empty()
+            );
+            let replay = store.execute(request, None).await.unwrap();
+            assert_eq!(replay.result, first.result);
+            assert!(
+                replay.changed_threads.is_empty()
+                    && replay.wake_threads.is_empty()
+                    && replay.quiet_wake_threads.is_empty()
+            );
+            owner.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn external_deletion_notifies_after_commit_but_never_on_replay_rejection_or_rollback() {
+        for mode in 0..4 {
+            let (root, owner) = fixture().await;
+            let control = Control::new(&owner, root.path().into());
+            control.start().await.unwrap();
+            seed(&owner.db).await;
+            owner.db.call(move |db| {
+                if mode == 2 {
+                    db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('live-child','child','live','now')", [])?;
+                } else if mode == 3 {
+                    db.execute_batch("CREATE TRIGGER reject_child_deletion BEFORE UPDATE OF deleted_at ON thread WHEN OLD.id='child' BEGIN SELECT RAISE(ABORT,'synthetic deletion rollback'); END;")?;
+                }
+                Ok(())
+            }).await.unwrap();
+            let mut events = control.subscribe();
+            let request = delete(&owner.instance_id, mode != 0);
+            let response = control.request(request.clone()).await;
+            assert_eq!(response.ok, mode < 2, "mode={mode}, {response:?}");
+            if mode >= 2 {
+                assert_eq!(
+                    response.error.as_ref().unwrap().code,
+                    if mode == 2 {
+                        ErrorCode::InvalidState
+                    } else {
+                        ErrorCode::SaveFailed
+                    }
+                );
+            }
+            let mut notified = BTreeSet::new();
+            while let Ok(event) = events.try_recv() {
+                let EngineEvent::Changed {
+                    thread_id,
+                    recovery: false,
+                } = event
+                else {
+                    panic!("unexpected deletion event: {event:?}")
+                };
+                assert!(notified.insert(thread_id), "one notification per target");
+            }
+            let committed = owner
+                .db
+                .call(|db| {
+                    let ids = db
+                        .prepare("SELECT id FROM thread WHERE deleted_at IS NOT NULL")?
+                        .query_map([], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<BTreeSet<_>>>()?;
+                    Ok(ids)
+                })
+                .await
+                .unwrap();
+            let expected = match mode {
+                0 => BTreeSet::from(["parent".to_owned()]),
+                1 => BTreeSet::from([
+                    "parent".to_owned(),
+                    "child".to_owned(),
+                    "grandchild".to_owned(),
+                ]),
+                _ => BTreeSet::new(),
+            };
+            assert_eq!(notified, expected, "mode={mode}");
+            assert_eq!(
+                committed, notified,
+                "event consumers see only committed deletion facts"
+            );
+            if mode < 2 {
+                let replay = control.request(request).await;
+                assert!(replay.ok);
+                assert_eq!(replay.result, response.result);
+                assert!(matches!(
+                    events.try_recv(),
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                ));
+            }
+            let shutdown = control.shutdown().await;
+            if mode == 3 {
+                assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
+            } else {
+                shutdown.unwrap();
+            }
+            owner.shutdown().await.unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod owned_child_notification_tests {
+    use super::*;
+    use crate::{
+        app::DataOwner,
+        control::{Control, EngineEvent},
+    };
+    use futures_util::FutureExt;
+
+    fn parent_origin() -> Origin {
+        Origin {
+            instance_id: "fixture".into(),
+            thread_id: "parent".into(),
+            run_id: "parent-run".into(),
+            turn_id: "parent-turn".into(),
+            execution_id: "parent-shell".into(),
+            token: "synthetic".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn owned_new_run_acceptance_notifies_parent_without_waking_it_or_replaying_effects() {
+        for mode in ["owned", "human", "foreign", "stopping-owner", "rollback"] {
+            let root = tempfile::tempdir().unwrap();
+            let db = DbWorker::open(root.path().join("fixture.db"))
+                .await
+                .unwrap();
+            db.call(|db| {db.execute_batch("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent',NULL,'parent','/','','p','m','now'),('child','parent','child','/','','p','m','now'),('foreign',NULL,'foreign','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'),('foreign-run','foreign','live','now');")?;Ok(())}).await.unwrap();
+            if mode == "stopping-owner" {
+                db.call(|db| {
+                    db.execute("UPDATE run SET state='stopping' WHERE id='parent-run'", [])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            } else if mode == "rollback" {
+                db.call(|db| {db.execute_batch("CREATE TRIGGER reject_child_receipt BEFORE INSERT ON receipt BEGIN SELECT RAISE(ABORT,'synthetic acceptance rollback'); END;")?;Ok(())}).await.unwrap();
+            }
+            let store = Store::new(
+                db.clone(),
+                Arc::new(Config::default()),
+                root.path().into(),
+                "fixture".into(),
+            );
+            let caller = match mode {
+                "human" => None,
+                "foreign" => Some(Origin {
+                    thread_id: "foreign".into(),
+                    run_id: "foreign-run".into(),
+                    ..parent_origin()
+                }),
+                _ => Some(parent_origin()),
+            };
+            let request = Request::new(
+                "fixture:new-child",
+                Command::MessageSend(MessageSendArgs {
+                    sender_label: None,
+                    thread_id: Some("child".into()),
+                    text: "synthetic delegation".into(),
+                    now: false,
+                }),
+            );
+            let result = store.execute(request.clone(), caller.clone()).await;
+            if matches!(mode, "stopping-owner" | "rollback") {
+                assert_eq!(
+                    result.unwrap_err().code,
+                    if mode == "rollback" {
+                        ErrorCode::SaveFailed
+                    } else {
+                        ErrorCode::InvalidState
+                    }
+                );
+                db.call(|db| {
+                    assert_eq!(
+                        db.query_row(
+                            "SELECT count(*) FROM run WHERE thread_id='child'",
+                            [],
+                            |row| row.get::<_, i64>(0)
+                        )?,
+                        0
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            } else {
+                let first = result.unwrap();
+                assert_eq!(
+                    first.changed_threads,
+                    if mode == "owned" {
+                        vec!["parent".to_owned()]
+                    } else {
+                        vec![]
+                    }
+                );
+                assert_eq!(first.quiet_wake_threads, vec!["child".to_owned()]);
+                assert!(first.wake_threads.is_empty() && first.stop_runs.is_empty());
+                let owner = db
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT owner_run_id FROM run WHERE thread_id='child'",
+                            [],
+                            |row| row.get::<_, Option<String>>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(owner.as_deref(), (mode == "owned").then_some("parent-run"));
+                let replay = store.execute(request, caller.clone()).await.unwrap();
+                assert_eq!(replay.result, first.result);
+                assert!(
+                    replay.changed_threads.is_empty()
+                        && replay.wake_threads.is_empty()
+                        && replay.quiet_wake_threads.is_empty()
+                );
+                if mode == "owned" {
+                    let second = store
+                        .execute(
+                            Request::new(
+                                "fixture:existing-child",
+                                Command::MessageSend(MessageSendArgs {
+                                    sender_label: None,
+                                    thread_id: Some("child".into()),
+                                    text: "another input".into(),
+                                    now: false,
+                                }),
+                            ),
+                            caller,
+                        )
+                        .await
+                        .unwrap();
+                    assert!(
+                        second.changed_threads.is_empty(),
+                        "an unchanged owner edge is not a new-child notification"
+                    );
+                }
+            }
+            db.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn recovery_and_completion_owner_nudges_notify_live_or_stopping_parents_only() {
+        for parent_state in ["live", "stopping", "completed"] {
+            let root = tempfile::tempdir().unwrap();
+            let config = root.path().join("config.toml");
+            std::fs::write(&config, "").unwrap();
+            let owner = DataOwner::start(
+                Some(config),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let state = parent_state.to_owned();
+            owner.db.call(move |db| {
+                db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','parent','/','','p','m','now'),('child','child','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'); INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('child-run','child','parent-run','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('child-turn','child','child-run','recovery_wait','now');")?;
+                db.execute("UPDATE run SET state=?1 WHERE id='parent-run'",[state])?;Ok(())
+            }).await.unwrap();
+            // An existing synthetic driver captures the pre-existing quiet
+            // nudge, so this test never starts a model HTTP request.
+            let nudge = Arc::new(tokio::sync::Notify::new());
+            control.live.test_drivers().lock().await.insert(
+                "parent".into(),
+                super::super::DriverSlot {
+                    id: "synthetic-parent-driver".into(),
+                    run_id: "parent-run".into(),
+                    stop: tokio_util::sync::CancellationToken::new(),
+                    nudge: nudge.clone(),
+                    foreground: Arc::new(super::super::foreground::ForegroundSlot::default()),
+                    turn: Arc::new(tokio::sync::Mutex::new(None)),
+                },
+            );
+            let mut events = control.subscribe();
+            for completed in [false, true] {
+                if completed {
+                    owner.db.call(|db| {db.execute_batch("UPDATE turn SET state='completed' WHERE id='child-turn'; UPDATE run SET state='completed' WHERE id='child-run';")?;Ok(())}).await.unwrap();
+                }
+                control.nudge_owner("child-run").await;
+                if parent_state == "completed" {
+                    assert!(matches!(
+                        events.try_recv(),
+                        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                    ));
+                } else {
+                    assert!(
+                        matches!(events.try_recv(),Ok(EngineEvent::Changed {thread_id,recovery:false}) if thread_id=="parent")
+                    );
+                    assert!(matches!(
+                        events.try_recv(),
+                        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                    ));
+                }
+                assert_eq!(
+                    nudge.notified().now_or_never().is_some(),
+                    parent_state == "live",
+                    "only the existing live-parent quiet nudge may run"
+                );
+            }
+            control.live.test_drivers().lock().await.clear();
+            owner.shutdown().await.unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod driverless_child_stop_notification_tests {
+    use super::*;
+    use crate::{
+        app::DataOwner,
+        control::{Control, EngineEvent},
+    };
+    use futures_util::FutureExt;
+
+    #[tokio::test]
+    async fn stopping_an_offscreen_recovery_child_refreshes_parent_only_after_successful_drain() {
+        for (parent_state, fail_drain) in [
+            ("live", false),
+            ("stopping", false),
+            ("completed", false),
+            ("live", true),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let config = root.path().join("config.toml");
+            std::fs::write(&config, "").unwrap();
+            let owner = DataOwner::start(
+                Some(config),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            control.start().await.unwrap();
+            let parent_state_owned = parent_state.to_owned();
+            owner.db.call(move |db| {
+                let tx=db.transaction()?;
+                tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','parent','/','','p','m','now')",[])?;
+                tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent',?1,'2026-10-25T00:00:00Z')",[parent_state_owned])?;
+                tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('parent-turn','parent','parent-run','completed','2026-10-25T00:00:00Z')",[])?;
+                for index in 0..4 {
+                    let thread=format!("child-{index}");let run=format!("run-{index}");let turn=format!("turn-{index}");
+                    tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?1,'/','','p','m','now')",[&thread])?;
+                    tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,'parent-run','live',?3)",params![run,thread,format!("2026-10-25T00:00:0{}Z",index+1)])?;
+                    tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'recovery_wait','2026-10-25T00:00:00Z')",params![turn,thread,run])?;
+                }
+                let oldest=tx.prepare("SELECT id FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping') ORDER BY created_at,id LIMIT 3")?.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                assert_eq!(oldest,["run-0","run-1","run-2"],"target run-3 is outside the bounded display dependencies");
+                assert_eq!(tx.query_row("SELECT count(*) FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,4);
+                if fail_drain {
+                    tx.execute_batch("CREATE TRIGGER reject_child_drain BEFORE UPDATE OF state ON run WHEN OLD.id='run-3' AND NEW.state='stopped' BEGIN SELECT RAISE(ABORT,'synthetic stopped-child rollback'); END;")?;
+                }
+                tx.commit()?;Ok(())
+            }).await.unwrap();
+            // The selected parent is idle with a driver. Stopping its hidden
+            // child must update metadata without starting/nudging model work.
+            let nudge = Arc::new(tokio::sync::Notify::new());
+            control.live.test_drivers().lock().await.insert(
+                "parent".into(),
+                super::super::DriverSlot {
+                    id: "synthetic-idle-parent".into(),
+                    run_id: "parent-run".into(),
+                    stop: tokio_util::sync::CancellationToken::new(),
+                    nudge: nudge.clone(),
+                    foreground: Arc::new(super::super::foreground::ForegroundSlot::default()),
+                    turn: Arc::new(tokio::sync::Mutex::new(None)),
+                },
+            );
+            assert!(
+                !control
+                    .live
+                    .test_drivers()
+                    .lock()
+                    .await
+                    .contains_key("child-3")
+            );
+            let mut events = control.subscribe();
+            let response = control
+                .request(Request::new(
+                    format!("{}:stop-hidden-child", owner.instance_id),
+                    Command::RunStop(RunTarget {
+                        run_id: "run-3".into(),
+                    }),
+                ))
+                .await;
+            assert!(
+                response.ok,
+                "the stop intent receipt commits independently of later drain: {response:?}"
+            );
+            let mut parent_notifications = 0;
+            let mut child_notifications = 0;
+            let mut errors = 0;
+            while let Ok(event) = events.try_recv() {
+                match event {
+                    EngineEvent::Changed {
+                        thread_id,
+                        recovery: false,
+                    } if thread_id == "parent" => parent_notifications += 1,
+                    EngineEvent::Changed {
+                        thread_id,
+                        recovery: false,
+                    } if thread_id == "child-3" => child_notifications += 1,
+                    EngineEvent::Error { thread_id, error }
+                        if fail_drain && thread_id == "child-3" =>
+                    {
+                        assert_eq!(error.code, ErrorCode::SaveFailed);
+                        errors += 1;
+                    }
+                    other => panic!("unexpected stop notification: {other:?}"),
+                }
+            }
+            assert_eq!(
+                parent_notifications,
+                usize::from(!fail_drain && parent_state != "completed")
+            );
+            assert_eq!(child_notifications, 1);
+            assert_eq!(errors, usize::from(fail_drain));
+            assert!(
+                nudge.notified().now_or_never().is_none(),
+                "display notification must never nudge the parent model"
+            );
+            owner.db.call(move |db| {
+                let target=db.query_row("SELECT r.state,u.state FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id='run-3'",[],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?;
+                assert_eq!(target,if fail_drain {("stopping".into(),"recovery_wait".into())}else{("stopped".into(),"stopped".into())});
+                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,if fail_drain {4}else{3});
+                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2') AND state='live'",[],|row|row.get::<_,i64>(0))?,3);
+                if fail_drain {db.execute_batch("DROP TRIGGER reject_child_drain;")?;}
+                Ok(())
+            }).await.unwrap();
+            control.live.test_drivers().lock().await.clear();
+            let shutdown = control.shutdown().await;
+            if fail_drain {
+                assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
+            } else {
+                shutdown.unwrap();
+            }
+            owner.shutdown().await.unwrap();
+        }
     }
 }

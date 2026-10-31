@@ -69,28 +69,44 @@ async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     })
     .await
     .unwrap();
+    // The canonical header/path can arrive together. Do not consume the
+    // header and then wait for a second copy of that same atomic observation.
+    let mut header_seen = false;
     next_update(&mut updates_receive, |update| match update {
+        UiUpdate::CurrentView {
+            details, history, ..
+        } if details.thread_id == thread && details.title == "saved message" => {
+            let UiUpdate::History { nodes, .. } = *history else {
+                panic!("paired canonical history")
+            };
+            assert!(
+                nodes
+                    .iter()
+                    .any(|node| node.role == "user" && node.text.contains("saved message"))
+            );
+            Some(())
+        }
         UiUpdate::Thread {
             details,
             draft: None,
             ..
-        } if details.thread_id == thread && details.title == "saved message" => Some(()),
-        _ => None,
-    })
-    .await;
-    // Stop only after the immutable user node has entered the selected path.
-    // Its terminal receipt records admission, not cancellation or an answer.
-    next_update(&mut updates_receive, |update| match update {
+        } if details.thread_id == thread && details.title == "saved message" => {
+            header_seen = true;
+            None
+        }
         UiUpdate::History { nodes, .. }
             if nodes
                 .iter()
-                .any(|node| node.role == "user" && node.text.contains("saved message")) =>
+                .any(|node| node.role == "user" && node.text.contains("saved message"))
+                && header_seen =>
         {
             Some(())
         }
         _ => None,
     })
     .await;
+    // Stop only after the immutable user node has entered the selected path.
+    // Its terminal receipt records admission, not cancellation or an answer.
     actions_send
         .send(UiAction::Cancel {
             thread_id: thread.clone(),
@@ -1162,7 +1178,9 @@ async fn progress_distinguishes_answered_background_and_counts_only_actual_spawn
     let control = Control::new(&owner, root.path().into());
     owner.db.call(|db|{db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','2026-10-01T00:00:00Z','2026-10-01T00:00:02Z'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('spawned','r','u','spawned','running','/','{\"spawned\":true}','UTF-8','UTF-8','closed','now'),('cancelled','r','u','cancelled','stopped','/','{}','UTF-8','UTF-8','closed','now'),('rejected','r','u','rejected','failed','/','{\"spawned\":false}','UTF-8','UTF-8','closed','now');")?;Ok(())}).await.unwrap();
     let (send, receive) = std::sync::mpsc::sync_channel(8);
-    assert!(frontend::progress(&control, &send, "t").await.unwrap());
+    // The returned flag requests foreground polling, not Run liveness.
+    // Answered background work remains visible via Changed and a local clock.
+    assert!(!frontend::progress(&control, &send, "t").await.unwrap());
     assert!(
         matches!(receive.try_recv().unwrap(),UiUpdate::Progress{tool_calls:1,state,..}if state=="回答済み背景処理中")
     );
@@ -2462,7 +2480,12 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     assert!(response.ok);
     // Wait until the metadata-triggered refresh actually reached the UI queue.
     next_update(&mut incoming, |update| match update {
-        UiUpdate::History { thread_id, .. } if thread_id == thread => Some(()),
+        UiUpdate::CurrentView {
+            details, history, ..
+        } if details.thread_id == thread && details.title == "metadata during stream" => {
+            assert!(matches!(*history,UiUpdate::History {thread_id,..} if thread_id==thread));
+            Some(())
+        }
         UiUpdate::Stream { ack: Some(ack), .. } => {
             ack.notify_one();
             None
@@ -2517,6 +2540,42 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     complete.send(()).unwrap();
     let mut observed = None;
     let (node, revision, total) = next_update(&mut incoming, |update| match update {
+        UiUpdate::CurrentView {
+            generation: actual,
+            details,
+            history,
+            committed,
+            ..
+        } => {
+            assert_eq!((&details.thread_id, actual), (&thread, generation));
+            let UiUpdate::History {
+                nodes,
+                selection_revision,
+                total_nodes,
+                ..
+            } = *history
+            else {
+                panic!("paired canonical history")
+            };
+            let node = nodes
+                .iter()
+                .find(|node| node.text.contains("persisted final prose"))?;
+            assert_eq!(
+                committed
+                    .iter()
+                    .filter(|(owner, _)| owner == &attempt)
+                    .count(),
+                1,
+                "one canonical mapping per attempt"
+            );
+            assert!(
+                committed
+                    .iter()
+                    .any(|(owner, target)| owner == &attempt && target == &node.node_id),
+                "atomic frame must carry mapping before canonical history is adopted"
+            );
+            Some((node.node_id.clone(), selection_revision, total_nodes))
+        }
         UiUpdate::StreamCommitted {
             thread_id,
             generation: actual,

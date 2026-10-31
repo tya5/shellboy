@@ -12,6 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
 };
 use std::{
+    cell::{OnceCell, RefCell},
     collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
 };
@@ -45,6 +46,12 @@ pub(super) struct ThreadBrowser {
     preferred: Option<String>,
     generation: u64,
     filter_deadline: Option<Instant>,
+    tree: OnceCell<TreeCache>,
+    tree_revision: u64,
+    table_state: RefCell<TableState>,
+    table_body_rows: std::cell::Cell<usize>,
+    #[cfg(test)]
+    tree_rebuilds: std::cell::Cell<usize>,
 }
 
 pub(super) enum ThreadOutcome {
@@ -65,7 +72,33 @@ struct TreeRow {
     children: bool,
 }
 
+struct TreeCache {
+    rows: Vec<TreeRow>,
+    visible: Vec<usize>,
+    positions: Vec<Option<usize>>,
+    ids: BTreeMap<String, usize>,
+    revision: u64,
+}
+
 impl ThreadBrowser {
+    fn invalidate_tree(&mut self) {
+        self.tree_revision = self.tree_revision.wrapping_add(1);
+        self.tree.take();
+    }
+    fn selected_position(&self) -> Option<usize> {
+        self.tree().positions.get(self.selected).copied().flatten()
+    }
+    fn selected_screen_row(&self) -> usize {
+        self.selected_position()
+            .unwrap_or(0)
+            .saturating_sub(self.table_state.borrow().offset())
+    }
+    fn restore_screen_row(&self, screen_row: usize) {
+        let position = self.selected_position();
+        let mut state = self.table_state.borrow_mut();
+        state.select(position);
+        *state.offset_mut() = position.unwrap_or(0).saturating_sub(screen_row);
+    }
     pub fn items(&self) -> &[ThreadSummary] {
         &self.items
     }
@@ -129,6 +162,9 @@ impl ThreadBrowser {
         self.preferred = preferred;
         self.items = drafts;
         self.selected = 0;
+        self.invalidate_tree();
+        *self.table_state.get_mut() = TableState::default();
+        self.table_body_rows.set(0);
         // Reopening must retain a deletion outcome that arrived while closed.
         // Filtering/paging still clears it through normal invalidation.
         let notice = self.notice.take().filter(|_| !self.notice_seen.get());
@@ -153,11 +189,8 @@ impl ThreadBrowser {
             return;
         }
         let deleted: BTreeSet<_> = ids.iter().map(String::as_str).collect();
-        let old_visible = self.visible_indices();
-        let position = old_visible
-            .iter()
-            .position(|index| *index == self.selected)
-            .unwrap_or(0);
+        let position = self.selected_position().unwrap_or(0);
+        let screen_row = self.selected_screen_row();
         let surviving_selection = self
             .items
             .get(self.selected)
@@ -175,9 +208,10 @@ impl ThreadBrowser {
         self.collapsed.retain(|id| !deleted.contains(id.as_str()));
         self.display_times
             .retain(|id, _| !deleted.contains(id.as_str()));
+        self.invalidate_tree();
         let visible = self.visible_indices();
         self.selected = surviving_selection
-            .and_then(|id| self.items.iter().position(|thread| thread.thread_id == id))
+            .and_then(|id| self.tree().ids.get(&id).copied())
             .filter(|index| visible.contains(index))
             .or_else(|| {
                 visible
@@ -185,6 +219,7 @@ impl ThreadBrowser {
                     .copied()
             })
             .unwrap_or(0);
+        self.restore_screen_row(screen_row);
     }
     #[allow(clippy::too_many_arguments)]
     pub fn apply(
@@ -208,6 +243,14 @@ impl ThreadBrowser {
                 .map(|t| t.thread_id.clone())
                 .or(active)
         });
+        // An initial preferred selection has no previously displayed row to
+        // anchor. Starting it at the top would hide earlier rows unnecessarily.
+        let screen_row = self
+            .items
+            .get(self.selected)
+            .filter(|thread| selected.as_deref() == Some(thread.thread_id.as_str()))
+            .and_then(|_| self.selected_position())
+            .map(|_| self.selected_screen_row());
         if requested_cursor.is_none() {
             self.items.clear();
         }
@@ -225,6 +268,7 @@ impl ThreadBrowser {
                 self.items.push(item);
             }
         }
+        self.invalidate_tree();
         self.update_times(display_times);
         self.loading = false;
         self.error = None;
@@ -233,9 +277,17 @@ impl ThreadBrowser {
             self.error = Some("表示上限2000件。文字入力で絞り込んでください".into());
         }
         self.selected = selected
-            .and_then(|id| self.items.iter().position(|t| t.thread_id == id))
+            .and_then(|id| self.tree().ids.get(&id).copied())
             .unwrap_or_else(|| self.visible_indices().first().copied().unwrap_or(0));
         self.reveal(self.selected);
+        if let Some(screen_row) = screen_row {
+            self.restore_screen_row(screen_row);
+        } else {
+            let position = self.selected_position();
+            let state = self.table_state.get_mut();
+            state.select(position);
+            *state.offset_mut() = 0;
+        }
         true
     }
     pub fn key(&mut self, key: KeyEvent) -> ThreadOutcome {
@@ -269,11 +321,7 @@ impl ThreadBrowser {
             self.preferred = None;
         }
         let previous_filter_len = self.filter.len();
-        let visible = self.visible_indices();
-        let position = visible
-            .iter()
-            .position(|i| *i == self.selected)
-            .unwrap_or(0);
+        let position = self.selected_position().unwrap_or(0);
         match key.code {
             KeyCode::Esc => self.close(),
             KeyCode::F(1) => {
@@ -293,25 +341,31 @@ impl ThreadBrowser {
                 }
             }
             KeyCode::Up => {
-                if let Some(index) = visible.get(position.saturating_sub(1)) {
-                    self.selected = *index;
+                if let Some(index) = self
+                    .visible_indices()
+                    .get(position.saturating_sub(1))
+                    .copied()
+                {
+                    self.selected = index;
                 }
             }
             KeyCode::Down => {
-                if let Some(index) =
-                    visible.get((position + 1).min(visible.len().saturating_sub(1)))
+                if let Some(index) = self
+                    .visible_indices()
+                    .get((position + 1).min(self.visible_indices().len().saturating_sub(1)))
+                    .copied()
                 {
-                    self.selected = *index;
+                    self.selected = index;
                 }
             }
             KeyCode::Home => {
-                if let Some(index) = visible.first() {
-                    self.selected = *index;
+                if let Some(index) = self.visible_indices().first().copied() {
+                    self.selected = index;
                 }
             }
             KeyCode::End => {
-                if let Some(index) = visible.last() {
-                    self.selected = *index;
+                if let Some(index) = self.visible_indices().last().copied() {
+                    self.selected = index;
                 }
             }
             KeyCode::Left => {
@@ -367,6 +421,7 @@ impl ThreadBrowser {
             _ => return ThreadOutcome::None,
         }
         if self.filter.len() != previous_filter_len {
+            self.invalidate_tree();
             self.invalidate(None);
             self.filter_deadline = Some(now + FILTER_DELAY);
         }
@@ -407,7 +462,15 @@ impl ThreadBrowser {
             .unwrap_or(&thread.updated_at);
         fit(&one_line(value), width)
     }
-    fn rows(&self) -> Vec<TreeRow> {
+    fn tree(&self) -> &TreeCache {
+        self.tree.get_or_init(|| {
+            #[cfg(test)]
+            self.tree_rebuilds.set(self.tree_rebuilds.get() + 1);
+            self.build_tree()
+        })
+    }
+
+    fn build_tree(&self) -> TreeCache {
         let threads = &self.items;
         let ids: BTreeMap<_, _> = threads
             .iter()
@@ -487,19 +550,41 @@ impl ThreadBrowser {
                 ));
             }
         }
-        rows
+        let visible: Vec<_> = rows.iter().map(|row| row.index).collect();
+        let mut positions = vec![None; threads.len()];
+        for (position, &index) in visible.iter().enumerate() {
+            positions[index] = Some(position);
+        }
+        TreeCache {
+            rows,
+            visible,
+            positions,
+            ids: ids
+                .into_iter()
+                .map(|(id, index)| (id.to_owned(), index))
+                .collect(),
+            revision: self.tree_revision,
+        }
     }
 
-    fn visible_indices(&self) -> Vec<usize> {
-        self.rows().into_iter().map(|row| row.index).collect()
+    fn rows(&self) -> &[TreeRow] {
+        let tree = self.tree();
+        debug_assert_eq!(tree.revision, self.tree_revision);
+        &tree.rows
+    }
+
+    fn visible_indices(&self) -> &[usize] {
+        &self.tree().visible
     }
 
     fn parent_index(&self, index: usize) -> Option<usize> {
         let threads = &self.items;
         let parent = threads.get(index)?.parent_id.as_deref()?;
-        threads.iter().position(|thread| {
-            thread.thread_id == parent && thread.thread_id != threads[index].thread_id
-        })
+        self.tree()
+            .ids
+            .get(parent)
+            .copied()
+            .filter(|parent| *parent != index)
     }
 
     fn collapse(&mut self, index: usize) -> bool {
@@ -513,14 +598,22 @@ impl ThreadBrowser {
         {
             return false;
         }
-        self.collapsed.insert(thread.thread_id.clone())
+        let changed = self.collapsed.insert(thread.thread_id.clone());
+        if changed {
+            self.invalidate_tree();
+        }
+        changed
     }
 
     fn expand(&mut self, index: usize) -> bool {
         let threads = &self.items;
-        threads
+        let changed = threads
             .get(index)
-            .is_some_and(|thread| self.collapsed.remove(&thread.thread_id))
+            .is_some_and(|thread| self.collapsed.remove(&thread.thread_id));
+        if changed {
+            self.invalidate_tree();
+        }
+        changed
     }
 
     fn reveal(&mut self, mut index: usize) {
@@ -663,7 +756,7 @@ impl ThreadBrowser {
             columns.push(Constraint::Length(time_width as u16));
             headers.push(Cell::from("更新"));
         }
-        let selected_visible = rows.iter().position(|row| row.index == selected_index);
+        let selected_visible = self.selected_position();
         let table_rows = rows.iter().map(|row| {
             let thread = &threads[row.index];
             let selected = row.index == selected_index;
@@ -692,8 +785,17 @@ impl ThreadBrowser {
         let table = Table::new(table_rows, columns)
             .column_spacing(1)
             .header(Row::new(headers).style(Style::default().fg(theme::MUTED)));
-        let mut selection = TableState::default().with_selected(selected_visible);
-        frame.render_stateful_widget(table, table_area, &mut selection);
+        let mut selection = self.table_state.borrow_mut();
+        selection.select(selected_visible);
+        // A taller viewport can fit formerly hidden predecessors. Ordinary
+        // mutations retain the selected screen row even with a blank bottom.
+        let body_rows = usize::from(table_area.height.saturating_sub(1));
+        if body_rows > self.table_body_rows.replace(body_rows) {
+            let max_offset = rows.len().saturating_sub(body_rows);
+            let offset = selection.offset().min(max_offset);
+            *selection.offset_mut() = offset;
+        }
+        frame.render_stateful_widget(table, table_area, &mut *selection);
     }
 
     fn label(
@@ -1028,6 +1130,7 @@ mod tests {
             ThreadOutcome::Info(message) if message.contains("未送信の下書き"))
         );
         browser.items.clear();
+        browser.invalidate_tree();
         assert!(matches!(
             browser.key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
             ThreadOutcome::None
@@ -1178,6 +1281,7 @@ mod tests {
         row.updated_at = "UNKNOWN".into();
         assert_eq!(tree.short_time(&row, 11), "UNKNOWN");
         tree.items = vec![row.clone()];
+        tree.invalidate_tree();
         tree.update_times(vec![]);
         assert!(tree.display_times.is_empty(), "stale labels are evicted");
         row.thread_id = "other".into();
@@ -1345,10 +1449,10 @@ mod tests {
                 vec![],
                 None
             ));
-            let row = browser.rows().remove(0);
+            let row = &browser.rows()[0];
             assert!(
                 !browser
-                    .label(&row, &browser.items[0], true, false, 80)
+                    .label(row, &browser.items[0], true, false, 80)
                     .contains("[exit]")
             );
         }
@@ -1367,21 +1471,21 @@ mod tests {
             items: vec![item.clone()],
             ..Default::default()
         };
-        let row = browser.rows().remove(0);
+        let row = &browser.rows()[0];
         assert!(
             browser
-                .label(&row, &item, true, false, 90)
+                .label(row, &item, true, false, 90)
                 .contains("Revisit 5 · next reserved")
         );
         assert!(
             browser
-                .label(&row, &item, true, false, 24)
+                .label(row, &item, true, false, 24)
                 .contains("Revisit 5+")
         );
         item.revisit = None;
         assert!(
             !browser
-                .label(&row, &item, true, false, 90)
+                .label(row, &item, true, false, 90)
                 .contains("Revisit")
         );
     }
@@ -1423,6 +1527,11 @@ mod tests {
         tree.open(String::new(), vec![], Some("s7".into()));
         let generation = tree.generation();
         assert!(tree.apply(generation, None, items.clone(), vec![], None, vec![], None));
+        assert_eq!(
+            tree.table_state.borrow().offset(),
+            0,
+            "first preferred selection has no prior viewport anchor"
+        );
         let find_title = |buffer: &ratatui::buffer::Buffer, title: &str| {
             buffer
                 .content
@@ -1501,6 +1610,199 @@ mod tests {
     }
 
     #[test]
+    fn tree_cache_survives_paints_navigation_and_clock_labels_until_structure_changes() {
+        let mut tree = ThreadBrowser {
+            items: vec![
+                thread("parent", None),
+                thread("child", Some("parent")),
+                thread("other", None),
+            ],
+            ..Default::default()
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20)).unwrap();
+        for _ in 0..5 {
+            terminal
+                .draw(|frame| tree.draw(frame, frame.area(), None, true))
+                .unwrap();
+            tree.key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+            tree.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+            tree.update_times(vec![]);
+        }
+        assert_eq!(
+            tree.tree_rebuilds.get(),
+            1,
+            "paint, focus and clocks reuse the tree"
+        );
+        assert!(tree.collapse(0));
+        assert_eq!(tree.visible_indices(), [0, 2]);
+        assert_eq!(tree.tree_rebuilds.get(), 2);
+        assert!(!tree.collapse(0));
+        tree.rows();
+        assert_eq!(
+            tree.tree_rebuilds.get(),
+            2,
+            "a repeated collapse changes no facts"
+        );
+        let generation = tree.generation();
+        assert!(tree.apply(
+            generation,
+            None,
+            vec![thread("replacement", None)],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        assert_eq!(tree.visible_indices(), [0]);
+        assert_eq!(tree.items()[0].thread_id, "replacement");
+        assert_eq!(tree.tree_rebuilds.get(), 3);
+        assert!(!tree.apply(
+            generation.wrapping_add(1),
+            None,
+            vec![],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        tree.rows();
+        assert_eq!(
+            tree.tree_rebuilds.get(),
+            3,
+            "a rejected response changes no cache"
+        );
+    }
+
+    #[test]
+    fn refreshed_tree_and_removal_keep_selected_identity_and_table_screen_row() {
+        let items = (0..60)
+            .map(|index| thread(&format!("t{index:02}"), None))
+            .collect::<Vec<_>>();
+        let mut tree = ThreadBrowser {
+            items: items.clone(),
+            ..Default::default()
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20)).unwrap();
+        tree.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        for _ in 0..5 {
+            tree.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        }
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        let selected = tree.items()[tree.selected()].thread_id.clone();
+        let screen_row = tree.selected_screen_row();
+        assert!(tree.table_state.borrow().offset() > 0);
+        let mut reordered = items;
+        reordered.rotate_left(10);
+        assert!(tree.apply(
+            tree.generation(),
+            None,
+            reordered,
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert_eq!(tree.items()[tree.selected()].thread_id, selected);
+        assert_eq!(tree.selected_screen_row(), screen_row);
+        tree.remove_deleted(&["t10".into(), "t11".into()]);
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert_eq!(tree.items()[tree.selected()].thread_id, selected);
+        assert_eq!(tree.selected_screen_row(), screen_row);
+        let position = tree.selected_position().unwrap();
+        let next = tree.items()[tree.visible_indices()[position + 1]]
+            .thread_id
+            .clone();
+        tree.remove_deleted(&[selected]);
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert_eq!(tree.items()[tree.selected()].thread_id, next);
+        assert_eq!(tree.selected_screen_row(), screen_row);
+    }
+
+    #[test]
+    fn growing_the_browser_reveals_rows_that_now_fit_without_losing_selection() {
+        let mut tree = ThreadBrowser {
+            items: (0..12)
+                .map(|index| thread(&format!("t{index:02}"), None))
+                .collect(),
+            ..Default::default()
+        };
+        tree.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        let mut small =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 15)).unwrap();
+        small
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert!(tree.table_state.borrow().offset() > 0);
+        let rebuilds = tree.tree_rebuilds.get();
+        let mut large =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 40)).unwrap();
+        large
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert_eq!(tree.table_state.borrow().offset(), 0);
+        assert_eq!(tree.items()[tree.selected()].thread_id, "t11");
+        assert_eq!(
+            tree.tree_rebuilds.get(),
+            rebuilds,
+            "resizing is not a tree mutation"
+        );
+        let shown = text(large.backend().buffer());
+        for index in 0..12 {
+            assert!(
+                shown.contains(&format!("t{index:02}")),
+                "all rows fit after resize"
+            );
+        }
+    }
+
+    #[test]
+    fn deleting_rows_below_selection_keeps_its_screen_row_with_a_blank_bottom() {
+        let mut tree = ThreadBrowser {
+            items: (0..40)
+                .map(|index| thread(&format!("t{index:02}"), None))
+                .collect(),
+            ..Default::default()
+        };
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20)).unwrap();
+        tree.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        for _ in 0..3 {
+            tree.key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        }
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert_eq!(tree.items()[tree.selected()].thread_id, "t36");
+        let screen_row = tree.selected_screen_row();
+        let offset = tree.table_state.borrow().offset();
+        assert!(offset > 0);
+        tree.remove_deleted(&["t37".into(), "t38".into(), "t39".into()]);
+        terminal
+            .draw(|frame| tree.draw(frame, frame.area(), None, true))
+            .unwrap();
+        assert_eq!(tree.items()[tree.selected()].thread_id, "t36");
+        assert_eq!(tree.selected_screen_row(), screen_row);
+        assert_eq!(tree.table_state.borrow().offset(), offset);
+    }
+
+    #[test]
     fn missing_parents_cycles_and_deep_trees_are_explicit_and_bounded() {
         let mut threads = vec![
             thread("orphan", Some("missing")),
@@ -1525,6 +1827,7 @@ mod tests {
             threads.push(thread(&format!("deep-{i}"), parent.as_deref()));
         }
         tree.items = threads.clone();
+        tree.invalidate_tree();
         let rows = tree.rows();
         assert_eq!(rows.len(), threads.len());
         assert!(rows.iter().all(|row| row.ancestors.len() <= 8));
@@ -1659,9 +1962,10 @@ mod tests {
         for title in ["", " \n\t", "\u{1b}[31m\u{1b}[0m"] {
             thread.title = title.into();
             tree.items = vec![thread.clone()];
-            let row = tree.rows().remove(0);
+            tree.invalidate_tree();
+            let row = &tree.rows()[0];
             assert!(
-                tree.label(&row, &thread, false, false, 50)
+                tree.label(row, &thread, false, false, 50)
                     .contains("名称未設定")
             );
         }

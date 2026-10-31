@@ -49,6 +49,110 @@ After rebase onto Chat sourcee65baaa, exact source6b2f5c9 passes **1719/0/32**,
 layout92, Python6, fmt and strict Clippy in the same environment. Only appended
 document histories conflicted; both are retained and runtime patches unchanged.
 No dependency/feature changes remain. Native main CI is pending.
+## #41 D2 live work (local functional qualification)
+
+Source807ac97 adds owned shell/child/wait rows, saved timing and bounded live
+output in independently reviewable local commits552e325/39b81cc/9bf7369/51a1eda/
+761c232/45b8b15/78511d4. New work, recovery/completion and no-Driver child stops
+notify the owning view without adding a model wake for metadata. The accepted
+selected projection seals at most3 child dependencies; existing500ms reads and
+postcommit output markers drive display updates. No new table/worker/queue,
+public operation or migration is introduced.
+
+Final native macOS arm64/Rust1.99.1 standard passes **1,777/0/32**
+(library891/integration876/termination7/crash3), layout90/Python6/fmt/strict
+Clippy. Actual shell commit/rollback markers, snapshot-clock races, decoder
+continuity, stale/hidden output, owned/wait proof and delivery pressure are
+covered. Six actual PTYs (80/140 columns ×dark/light/NO_COLOR) verify the shell
+row after Turn completion, CLI-driven output updates and removal after stop.
+English/Japanese User Guides, TUI guide and built-in help describe the controls.
+See [live-work qualification](../validation/conversation-redesign-live-work.md)
+for historical failures, the wide-cell harness correction and exact limits.
+
+D is not closed: P2's native ten-minute CPU/draw/DB counters, hidden-output P5,
+combined multi-consumer P3 and applicable OS/visual admission gates remain open.
+The three-second PTY transport samples and simulated600-second UI-clock test
+are explicitly not those native performance results. E ID-summary patches,
+F Watch/descendants and G catalogue/forms/popups remain. Changes are local;
+no push, installed executable update, release, paid API or default-store change.
+
+## #41 D1 actual SQL batching and raw header (locally qualified)
+
+Commits2f2e39b/5000b05/ee369f6/92e9450 separate tool/sender/recovery SQL batches
+from raw-header preparation. Merge46963c9 integrates main1b559b9's submitted-copy
+retention, Thread-scoped fences and setup fixes. Final558b870 fixes physical join
+order and skips non-user title windows. Native macOS/Rust1.99.1 standard passes
+**1,745/0/32** (library859, integration876, termination7, crash3), layout90,
+Python6, formatting and strict all-target Clippy.
+
+Real SQLite traces verify tool direct/projected50-node reads in2 statements,
+whole-group scopes in3, sender tool scopes in2/user scopes in4, recovery50-event
+scopes in1 and raw headers in1/3. Collision/ambiguity, original provenance,
+GC source lookup, sparse ordinals, byte caps and old-query parity are covered.
+Header/title and initial draft JSON prepare after DB release. Bounded earlier
+source loss is explicit rather than replaced with a later title. CLI behavior
+and conversation schema14 remain; the existing node-source index suffices.
+
+The same-main128-node/50-tool P3 comparison retains1 worker job while SQL
+executions fall176→26. Worker p50 is4.813→3.334ms and p95 is9.826→4.359ms in this
+instrumented local sample. VM work still rises16,602→22,632; no global SQL/CPU
+speedup or every-surface P3 completion is claimed. An intermediate61,255-VM plan
+was investigated and corrected; a minimal-schema missing-index assumption was
+rejected before any schema change. Full evidence and limits are in
+[qualification](../validation/conversation-redesign-shared-read.md#d1-actual-sql-batches-and-bounded-raw-headers).
+
+Next: D live-work/clock/output, E ID-restricted browser patches, F Watch/descendants
+and G catalogue/forms/popups, plus full planner and applicable performance/native
+gates. These changes remain local: no push, installed update, release, paid API
+or default-data change.
+
+## #41 D0 shared current-view read (locally qualified)
+
+Local foundation commits6d1e04a/54fd089/635cd9b/e6b1cfc extract connection reads
+and off-DB preparation. Commitf43f7dd consumes those helpers in one current-view
+transaction: receipts, Thread/page and paired pending, source/tool/recovery/usage,
+received audits and activity. The selected consumer shares one500ms start deadline
+and one in-flight refresh; paused tool facts are scoped to that transaction.
+The UI applies coherent generation/read revisions without dropping paid text,
+original sender evidence or #58 shrink/stale diagnostics. No new worker/table/queue.
+
+Separate commit55cdc67 caches Thread tree structure/ID maps and retains selected
+identity and screen row through refresh/removal; first preferred selection and
+viewport growth have explicit regressions. This is E's cache foundation only,
+not E's batched external-change projection or Watch implementation.
+
+The first shared-read library run found2 failures (818 passed/13 ignored): an
+old Thread-only notification expectation and a real initial-viewport regression.
+Both are corrected; additional audits restore event-kind filtering and paired
+history diagnostics. Latest main throughbb7e29b, including #59's explanation and
+#69's standalone setup, is integrated. Source67f6f09 now passes the standard check:
+**1,711 passed /0 failed /32 ignored**, layout90/Python6/fmt/strict Clippy.
+The first integrated check's2 stale observer failures and their correction remain
+in the [qualification record](../validation/conversation-redesign-shared-read.md).
+All4 real separate-CLI/GC reactivity tests pass in that final suite.
+
+Actual128-node/50-tool observation now verifies7→1 DB jobs per selected refresh;
+worker p95 is3.675→3.940ms, so no SQL-time speedup is claimed. Source identity is
+checked after rejecting one shared-cache artifact mix-up. At that D0 checkpoint, per-node helper SQL and the reused
+ThreadDetails title scan remained open. D1 above implements their actual batches
+and frontend raw-title boundary; global multi-consumer gates still remain open.
+See the qualification.
+
+Next: D live-work/clock/output behavior,
+E/F list/watch/descendants,
+and G catalogue/forms/general popups. Visible source-detail reads are still their
+existing separate finite consumer; activity polling also remains until D's next
+unit. Do not claim every-surface1job/500ms or P2/P4/P5/P6 completion. These commits
+are local only; no installed update, release, paid API or default-data change.
+
+## #41 E prerequisite: external deletion notifications (local)
+
+Commit161b4c9 returns exact committed singleton/cascade deletion targets through
+existing Changed effects, with no effects on replay/rejection/rollback. Two real
+Store/Control regression tests pass. Follow-up standard check at161b4c9 succeeds:
+**1,713 passed /0 failed /32 ignored**, layout90/Python6/fmt/strict Clippy.
+E browser patch consumers and native Windows/Linux qualification remain unfinished. This adds no schema, event type,
+worker, queue or lifecycle policy.
 
 ## #60 Medium follow-up: indexed Thread-scoped receipt fences
 

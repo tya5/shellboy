@@ -373,7 +373,8 @@ fn targets_deleted(
         | UiAction::DraftAttachments { draft_id, .. }
         | UiAction::ActivateDraft { draft_id }
         | UiAction::RestoreSnapshot { draft_id, .. } => drafts.contains(draft_id),
-        UiAction::RefreshTools { thread_id, .. }
+        UiAction::ClearToolObservation { thread_id, .. }
+        | UiAction::RefreshTools { thread_id, .. }
         | UiAction::LoadReceived { thread_id, .. }
         | UiAction::RecallInput { thread_id, .. }
         | UiAction::LoadEditRequest { thread_id, .. }

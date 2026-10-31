@@ -166,6 +166,15 @@ pub(super) fn footer_lines(
     {
         facts.push(format!("{}s", elapsed / 1000));
     }
+    if !view
+        .activity
+        .snapshot
+        .as_ref()
+        .is_some_and(|snapshot| snapshot.turn_in_progress)
+        && let Some(work) = view.live_work.footer()
+    {
+        facts.push(work);
+    }
     if view.pending_messages.total > 0 {
         facts.push(format!("待ち {}", view.pending_messages.total));
     }

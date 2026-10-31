@@ -24,6 +24,8 @@
 !/docs/validation/README.md
 !/docs/validation/acceptance.md
 !/docs/validation/conversation-redesign-bc.md
+!/docs/validation/conversation-redesign-shared-read.md
+!/docs/validation/conversation-redesign-live-work.md
 !/docs/validation/manual-terminal.md
 /scripts/check-review-plan.py
 /scripts/check-models.py

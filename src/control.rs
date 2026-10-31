@@ -88,6 +88,8 @@ struct DriverSlot {
 struct LiveShell {
     run_id: String,
     handle: ShellHandle,
+    // In-process observation of a successfully committed output batch only.
+    last_committed_output: Option<std::time::Instant>,
 }
 
 pub struct Control {
@@ -864,23 +866,32 @@ impl Control {
             .database
             .call(move |db| {
                 Ok(
-                    db.query_row("SELECT thread_id FROM run WHERE id=?1", [run], |r| {
-                        r.get::<_, String>(0)
+                    db.query_row("SELECT child.thread_id,parent.thread_id FROM run child LEFT JOIN run parent ON parent.id=child.owner_run_id AND parent.state IN ('live','stopping') WHERE child.id=?1", [run], |r| {
+                        Ok((r.get::<_, String>(0)?,r.get::<_,Option<String>>(1)?))
                     })?,
                 )
             })
             .await;
-        if let Ok(thread) = thread {
+        if let Ok((thread, parent)) = thread {
             if let Some(token) = self.compact_tasks.lock().await.get(&thread) {
                 token.cancel();
             }
             let active = self.live.cancel_run(&thread, run_id).await;
-            if !active && let Err(error) = driver::stop_without_driver(self, run_id).await {
-                self.fail_storage().await;
-                self.publish_event(EngineEvent::Error {
-                    thread_id: thread.clone(),
-                    error,
-                });
+            if !active {
+                match driver::stop_without_driver(self, run_id).await {
+                    Ok(()) => {
+                        if let Some(parent) = parent.filter(|parent| parent != &thread) {
+                            self.changed(&parent);
+                        }
+                    }
+                    Err(error) => {
+                        self.fail_storage().await;
+                        self.publish_event(EngineEvent::Error {
+                            thread_id: thread.clone(),
+                            error,
+                        });
+                    }
+                }
             }
             self.changed(&thread);
         }
@@ -907,10 +918,15 @@ impl Control {
         let run = child_run.to_owned();
         let owner=self.store.database.call(move|db| {
             use rusqlite::OptionalExtension;
-            Ok(db.query_row("SELECT parent.thread_id FROM run child JOIN run parent ON parent.id=child.owner_run_id WHERE child.id=?1 AND parent.state='live'",[run],|row|row.get::<_,String>(0)).optional()?)
+            Ok(db.query_row("SELECT parent.thread_id,parent.state FROM run child JOIN run parent ON parent.id=child.owner_run_id WHERE child.id=?1 AND parent.state IN ('live','stopping')",[run],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?))).optional()?)
         }).await;
         match owner {
-            Ok(Some(thread)) => self.kick_quiet(thread).await,
+            Ok(Some((thread, state))) => {
+                self.changed(&thread);
+                if state == "live" {
+                    self.kick_quiet(thread).await;
+                }
+            }
             Err(_) => self.fail_storage().await,
             _ => {}
         }
@@ -1445,6 +1461,7 @@ mod failure_tests {
             LiveShell {
                 run_id: "fixture-run-without-driver".into(),
                 handle: shell.handle.clone(),
+                last_committed_output: None,
             },
         );
         // Model a recovery-wait background shell: no driver remains to stop it.
@@ -1558,3 +1575,21 @@ mod shell_lifecycle_tests;
 
 #[cfg(all(test, unix))]
 mod progress_tests;
+
+impl Control {
+    pub(crate) fn shell_output_notification(&self) -> &Notify {
+        &self.shell_output_changed
+    }
+    pub(crate) async fn committed_output_markers(
+        &self,
+        executions: &[String],
+    ) -> Result<Vec<(String, std::time::Instant)>, ApiError> {
+        if executions.len() > 3 {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                "Visible output observation exceeds3 executions",
+            ));
+        }
+        Ok(self.live.output_markers(executions).await)
+    }
+}

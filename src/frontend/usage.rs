@@ -30,8 +30,13 @@ fn cached_tokens(count: Option<u64>) -> String {
         .unwrap_or_else(|| "未報告".into())
 }
 
-pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
-    let requests = nodes
+pub(super) struct Observation {
+    index: usize,
+    sources: Vec<(String, Option<u64>)>,
+}
+
+pub(super) fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
+    nodes
         .iter()
         .enumerate()
         .filter(|(_, node)| {
@@ -39,48 +44,67 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
                 && !node.presentation.provisional_stream
         })
         .map(|(index, node)| (index, node.node_id.clone()))
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+pub(super) fn read_tx(
+    db: &rusqlite::Connection,
+    requests: &[(usize, String)],
+) -> Result<Vec<Observation>, crate::storage::StorageError> {
     if requests.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let ids = serde_json::to_string(&requests.iter().map(|(_, id)| id).collect::<Vec<_>>())
         .expect("string IDs serialize");
+    let sql = SOURCE.replace(
+        "USAGE_SCALARS",
+        &crate::usage::sql_projection("a.usage_json"),
+    );
+    let mut statement = db.prepare(&sql)?;
+    let mut sources = HashMap::<String, Vec<(String, Option<u64>)>>::new();
+    let rows = statement.query_map(rusqlite::params![ids], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            crate::usage::StandardUsage::read(row, 2)?.cached_tokens,
+        ))
+    })?;
+    for row in rows {
+        let (node, id, count) = row?;
+        sources.entry(node).or_default().push((id, count));
+    }
+    Ok(requests
+        .iter()
+        .map(|(index, node)| Observation {
+            index: *index,
+            sources: sources.get(node).cloned().unwrap_or_default(),
+        })
+        .collect())
+}
+
+pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
+    let requests = requests(nodes);
+    if requests.is_empty() {
+        return Ok(());
+    }
     let observations = control
         .store
         .database
-        .call(move |db| {
-            let sql = SOURCE.replace(
-                "USAGE_SCALARS",
-                &crate::usage::sql_projection("a.usage_json"),
-            );
-            let mut statement = db.prepare(&sql)?;
-            let mut sources = HashMap::<String, Vec<(String, Option<u64>)>>::new();
-            let rows = statement.query_map(rusqlite::params![ids], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    crate::usage::StandardUsage::read(row, 2)?.cached_tokens,
-                ))
-            })?;
-            for row in rows {
-                let (node, id, count) = row?;
-                sources.entry(node).or_default().push((id, count));
-            }
-            let mut observations = Vec::with_capacity(requests.len());
-            for (index, node) in requests {
-                let (attempt, display) = match sources.get(&node).map(Vec::as_slice).unwrap_or(&[])
-                {
-                    [(id, count)] => (Some(id.clone()), cached_tokens(*count)),
-                    [] => (None, "未報告（要求の記録なし）".into()),
-                    _ => (None, "未報告（要求との対応が一意でない）".into()),
-                };
-                observations.push((index, attempt, display));
-            }
-            Ok(observations)
-        })
+        .call(move |db| read_tx(db, &requests))
         .await
         .map_err(|error| error.into_api_error())?;
-    for (index, attempt, display) in observations {
+    apply(nodes, observations);
+    Ok(())
+}
+
+pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>) {
+    for observation in observations {
+        let index = observation.index;
+        let (attempt, display) = match observation.sources.as_slice() {
+            [(id, count)] => (Some(id.clone()), cached_tokens(*count)),
+            [] => (None, "未報告（要求の記録なし）".into()),
+            _ => (None, "未報告（要求との対応が一意でない）".into()),
+        };
         let presentation = &mut nodes[index].presentation;
         presentation
             .fields
@@ -116,7 +140,6 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
             .truncate(crate::presentation::MAX_FIELDS);
         presentation.bound_metadata();
     }
-    Ok(())
 }
 
 #[cfg(test)]

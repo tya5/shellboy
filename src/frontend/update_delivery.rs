@@ -266,6 +266,16 @@ fn latest_key(value: &UiUpdate) -> Option<String> {
         UiUpdate::Status { thread_id, .. } => format!("status:{thread_id:?}"),
         UiUpdate::DraftStatus { draft_id, .. } => format!("draft:{draft_id}"),
         UiUpdate::Progress { thread_id, .. } => format!("progress:{thread_id}"),
+        UiUpdate::LiveWorkObserved {
+            thread_id,
+            generation,
+            ..
+        } => format!("live-markers:{thread_id}:{generation}"),
+        UiUpdate::LiveWorkPreview {
+            thread_id,
+            generation,
+            ..
+        } => format!("live-preview:{thread_id}:{generation}"),
         UiUpdate::ModelReceive {
             thread_id,
             generation,
@@ -322,6 +332,56 @@ mod tests {
             pending,
             batch: receipt_delivery::Batch::new(receipts),
         }
+    }
+    #[test]
+    fn live_display_pressure_coalesces_without_consuming_critical_delivery_slots() {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        tx.send(UiUpdate::RecoveryBell).unwrap();
+        let updates = BufferedUpdates::new(tx);
+        for revision in 1..=1000 {
+            assert!(
+                updates
+                    .defer(UiUpdate::LiveWorkObserved {
+                        thread_id: "t".into(),
+                        generation: 1,
+                        revision,
+                        markers: vec![("e".into(), std::time::Instant::now())]
+                    })
+                    .is_none()
+            );
+            assert!(
+                updates
+                    .defer(UiUpdate::LiveWorkPreview {
+                        thread_id: "t".into(),
+                        generation: 1,
+                        revision,
+                        execution_id: "e".into(),
+                        result: Ok(crate::ui::live_work::LiveOutputPreview {
+                            stdout: revision.to_string(),
+                            stderr: String::new(),
+                            decode_uncertain: false,
+                            skipped: false,
+                            complete: false
+                        })
+                    })
+                    .is_none()
+            );
+        }
+        {
+            let pending = updates.delivery.pending.lock().unwrap();
+            assert!(pending.critical.is_empty());
+            assert_eq!(pending.latest.len(), 2);
+        }
+        rx.recv().unwrap();
+        updates.flush_pending();
+        assert!(matches!(
+            rx.recv().unwrap(),
+            UiUpdate::LiveWorkObserved { revision: 1000, .. }
+        ));
+        updates.flush_pending();
+        assert!(
+            matches!(rx.recv().unwrap(),UiUpdate::LiveWorkPreview {revision:1000,result:Ok(preview),..} if preview.stdout=="1000")
+        );
     }
     #[test]
     fn cloned_main_handle_cannot_consume_the_main_reserve() {

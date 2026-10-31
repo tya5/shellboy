@@ -1584,6 +1584,22 @@ facts correctly remain unknown. Revisit that historical presentation only under
 separate conversation-design scope, not by inventing identity in sender facts.
 
 
+## #41 D0: separate helper extraction from shared-planner adoption (2026-10-30)
+
+First extract existing connection reads and off-DB preparation behind unchanged
+async wrappers. This is not yet the one-job refresh optimization and does not
+complete D. Fully implemented preprojection/aggregate helper APIs are tested
+under cfg(test) until the shared planner adds their production callers; promote
+those helpers in that caller commit rather than suppress dead-code warnings or
+add redundant runtime queries merely to satisfy lint. The existing projected
+read path remains fast and behavior-preserving in this foundation commit.
+
+Move Revisit summary decoding off the DB worker through one pure helper sharing
+the existing private State and summary conversion. Malformed summary evidence
+remains unavailable as before; no state/schema/worker/queue or Core policy changes.
+The later shared-read commit must preserve raw legacy-null band evidence separately
+from typed unknown sender inspection and keep F6 immutable sender facts intact.
+
 ## 2026-10-30: D-006 legacy sender display clarification (#68 / #59)
 
 Active. Source: issue68 D-006 and the issue59 review follow-up. Preserve old null
@@ -1603,6 +1619,64 @@ loading and model-catalog HTTP bounds rather than add provider templates, login,
 interactive setup or billed chat probes. Keep AGENTS existence display deferred:
 it requires worker-fed filesystem observations and overlaps #41; this task only
 changes empty-state/notification text. Revisit after that UI work is stable.
+
+
+## #41 shared-read measurement and remaining SQL work (2026-10-31)
+
+A single DB-worker closure is necessary for the coherent current-view witness,
+but it is not evidence of one batched SQL plan. The actual128-node/50-tool fixture
+changes7→1 worker jobs; p95 worker time changes3.675→3.940ms. Preserve that slight
+increase rather than describing a SQL speedup. Existing per-node tool/source
+queries and empty-title fallback parsing on the DB worker are explicit remaining
+work before final SQL-only/global batching qualification. Start with exact modern
+node/tool PK batches; preserve bounded receipt collision/null evidence and sparse
+call ordinals rather than replacing row limits with assumed ordinal ranges.
+
+This keeps Core small: source/execution validation remains read-only frontend
+projection, without a new worker/table/queue or compatibility engine. Separate a
+bounded UI raw-title observation from off-worker preparation; do not silently
+change the CLI's existing title policy as a side effect. Revisit this choice if
+bounded witness exhaustion demonstrably hides essential labels, and record that
+case before changing the fallback contract.
+
+Private cross-worktree measurement reused a before binary once because of a shared
+Cargo target cache. Exclude that sample; force package compilation and require an
+explicit source witness plus per-sample expected job assertion in future private
+comparisons. Instrumentation stays ignored and must never enter shipped code.
+
+
+## #41 D1: bounded title evidence belongs in the frontend (2026-10-31)
+
+Use the existing pure title policy with a bounded SQL-only frontend witness,
+leaving CLI lookup unchanged. Prefix caps cover inspected path/receipt entries,
+not merely returned matching users; source bytes share one512KiB budget. A missing
+earlier candidate yields an explicit limited-evidence title, never a confidently
+selected later request or an unsent claim. Pending-prefix exhaustion conservatively
+suppresses derivation because created_at ties can reorder by node rowid beyond the
+receipt-index prefix. This trades a rare generic title for finite read work and
+correct source order without Core indexes or persisted derived titles. Revisit if
+real bounded-witness exhaustion affects ordinary conversations; measure before
+raising caps or changing CLI contracts.
+
+
+## #41 D1: retain the existing source index; reject an unnecessary migration (2026-10-31)
+
+The initial Python minimal-schema probe omitted tool_result_node(node_id), which
+has shipped since migration2. Its rising VM-step curve therefore does not model
+the current store and must not justify a migration. Before any code/schema change,
+full-schema inspection found the existing index. With that index, the corrected
+probe remains3,486 VM steps for one missing-payload source plus49 known sources
+as unrelated results grow1,000→10,000; the proposed covering index saves only3
+VM operations in that fixture. Require a bundled-SQLite/full-current-schema
+regression rather than treating this Python result as native proof.
+
+Retain schema14 and the existing index. The briefly considered, uncommitted
+migration15 design is rejected; no migration/source-index code was written or
+user data changed. Current payload GC can still use exact saved result relations
+without an old-format shim or a new authority policy. Revisit a covering index
+only with measured same-node fanout or native lookup evidence demonstrating a
+material benefit beyond the current index. Check the full schema and existing
+migration history before using a minimal prototype to infer a missing index.
 
 ## 2026-10-31: catalog absence is advisory (#68 D-009 / #69)
 
@@ -1737,3 +1811,103 @@ source replacements without truncation. An explicitly summarized omission may
 reintroduce information and increase selected context; report that caveat.
 Automatic overflow behavior is unchanged. No actual provider call is authorized
 or required by this implementation's loopback tests.
+
+## #41 D1: verify physical query shape, not statement count (2026-10-31)
+
+The first integrated P3 trace46963c9 reduced176→26 SQL executions but increased
+VM work16,602→61,255. A kind filter let SQLite drive the modern selector from
+nodes_retention and repeatedly scan the requested JSON IDs. Force requested IDs
+outermost with an ordinary CROSS JOIN and existing node PK lookup; retain the
+kind filter and add a bundled-SQLite unrelated-node scaling regression. Python
+full-schema isolation measures selector30,146→4,037 VM steps; this guides the
+change but does not substitute for native requalification.
+
+Also filter user candidates only after the materialized128-member title prefix,
+then run the byte-budget window over those candidates. Retain a singleton status
+witness for zero users so path/pending exhaustion is still explicit. The synthetic
+128-nonuser case drops15,953→3,336 VM steps in the Python probe. This changes no
+source ordering, copy budget, title authority or public contract. Requalify native
+before/after results rather than reporting fewer SQL statements as a speedup.
+
+
+## #41 D2: reuse exact registered wait sources (2026-10-31)
+
+Copy existing operation/source-execution identities, then join their saved shell
+owner and pending key in the activity transaction. Do not add duplicated Origin
+scope fields to the registry or infer ownership from OS-handle liveness. Handles
+can be removed before pending-wait cleanup; driver identity can race a replacement
+Run. The exact saved-owner join preserves that boundary. Snapshot128 is above the
+normal CLI transport's24 concurrent ordinary requests; direct Control calls can
+exceed that, so overflow is explicitly unavailable instead of an arbitrary prefix
+that might hide the selected Run's oldest waits. Revisit the cap only with a real
+admitted workload, and keep unavailable distinct from zero.
+
+Background wait registration/cleanup currently lack a guaranteed Changed when
+Turn state stays unchanged. Add existing factual notifications after registration
+and committed deletion; retain existing CAS/stop/disconnect semantics. No new
+state, worker, queue, table, protocol operation or registry lifetime is introduced.
+
+### #41 D2 incremental output ownership
+
+Keep one display-only decoder/cursor for the open live shell in the existing
+frontend observer. Initial observation and retention/encoding changes use the
+finite tail; contiguous updates carry each stream's decoder state. If saved
+bytes outrun the4KiB read allowance or the128-row metadata window, explicitly
+reset to a tail and mark skipped/uncertain instead of replaying an unbounded
+backlog. Preserve incomplete code units until a committed complete terminal
+snapshot. The cursor owns no CLI pin, durable offset or public read cursor.
+Selection/visibility/shell closure cancels and drops it; stale replies cannot
+install it in a new scope. Decoder state and display text share one open-shell
+lifetime, with4KiB total retained text and4KiB total new bytes/read. These are
+bounded active display working data, separate from retained history previews.
+
+### #41 D2 validation findings before admission
+
+The first full standard run failed three assertions. Two were real product
+regressions: initial live-read admission recomputed an immediate Instant after
+its caller's `now`, keeping the first read forever in the future; the new live
+clock used the draft-touching UI accessor and scheduled redundant autosave
+signature checks. Fix admission against the saved optional deadline and use a
+presentation-only mutable accessor. Keep the original assertions.
+
+The remaining overflow assertion was a test harness defect: concatenating every
+Ratatui cell inserted continuation blanks inside wide Japanese text. The last
+Wait row's original label already fit its40-column allocation. Reconstruct rows
+using Unicode display widths, preserve real spaces/newlines and retain the exact
+visible overflow/command and hidden-ID assertions. The separately added width
+reservation protects overflow when secondary timing grows; it was not a third
+reproduced product bug. The second run's886/1/13 isolated this harness failure;
+the first run's884/3/13 and neither partial run are passing qualification.
+Record the later exact source and full standard result separately.
+
+## D2: 親への停止通知をDriverなしの経路にも揃える
+
+復旧待ちの子RunはliveのままDriverが終了できるため、後続の停止は通常のowner nudgeを通らない。表示中3件の依存追跡だけでは、範囲外の子を停止した際に親の件数が更新されない。既存stop target取得にlive/stoppingの親Threadを含め、Driverなしのdrainがcommitした後だけChangedを送る。親モデルは起動せず、失敗時は既存の子Errorを維持する。新しい照会・状態・通知型は増やさない。再確認条件は停止処理の所有境界またはDriver終了時の親通知責任が変わった場合。
+
+D2's third standard run passed888 library tests but stopped at one integration
+assertion expecting answered-background progress to request periodic polling.
+The adopted reactive design deliberately returns false for this cadence while
+preserving the factual background label and actual-spawn count. Update that
+single boolean expectation and document the helper's return meaning; the
+stopping-Run expectation remains true. This is an intentional cadence contract
+change, unlike the initial-admission and autosave defects above.
+
+A subsequent audit found a genuine snapshot-time race: deriving the live-work
+monotonic base in delayed presentation could discard a newer output marker as
+if it belonged to an older DB observation. Capture the paired monotonic/wall
+base before returning raw SQL facts and prepare ages against that captured base.
+Also reconstruct trimmed cursor strings when retained capacity exceeds the
+allowance, because trimming length alone does not release allocation. Neither
+finding is qualified by earlier green library tests; repeat current-source checks.
+
+
+D2 output observation/preview delivery uses the existing latest-value outbox
+instead of ordered critical-result slots. A stalled UI must not retain one
+critical record for each output marker. Marker updates therefore carry all
+currently observed displayed execution scalars (maximum3), not just the changed
+subset; replacing a pending update preserves a different earlier shell's known
+marker. Full preview snapshots are replaceable by Thread/generation as well.
+Receipt/business results keep ordered delivery. Pressure tests exercise1,000
+updates per kind with a full raw UI channel and require two latest entries,
+zero critical entries and the newest values after draining. No channel/queue or
+capacity is added. The previously qualified45b8b15 source predates this follow-up.

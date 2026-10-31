@@ -16,8 +16,8 @@ subpart gets a reviewable commit; avoid a combined redesign commit.
 | A: adopted design | Stable node/tool/work identities, bounded projections, read limits, input/focus and validation decisions | Adopted; B+C shipped and freshness gate green; D–G open |
 | B: conversation structure | User/sender bands, distinct fixed header, one collapsed tool row, failures with true tail, concrete notifications and quiet chrome | Shipped including freshness follow-up17c4271; native three-OS CI green |
 | C: history interaction | Inline expansion/focus/click, stable F6/F7/original/copy targets, retained composer recall | Shipped including freshness follow-up17c4271; native three-OS CI green |
-| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Planned |
-| E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Planned |
+| D: live work | Foreground/background shells, owned children/waits after Turn completion, bounded expansion/output reads, real saved elapsed time | Local live UI/ownership/wait/output and delivery source807ac97 qualifies1777/0/32 plus6 actual PTYs; P2/P5/global planner and applicable native gates pending |
+| E: browser reactivity | Shared ID-restricted summary query, bounded coalescing and stale guards, stable filtered tree patches, state colors | Local tree-cache/viewport foundation qualified; summary patches and native gates pending |
 | F: watch/descendants | Existing-browser watch mode, unread session policy, confirmed actions, bounded lineage counts and scoped entry | Planned |
 | G: operations/forms | Shared operation catalogue/effects/terms/fields, complete CLI mapping, clear forms, nonselectable headings and popup wheel ownership | Planned |
 
@@ -29,15 +29,15 @@ The first B+C structural/interaction subset shipped as main b0e3c29. Source342cb
 passes the native standard check and six actual PTY conditions; main three-OS
 CI41057195099 passes at b0e3c29. P1/P3/P7 results and limits are in
 [the qualification record](../validation/conversation-redesign-bc.md). This does
-not complete all B+C inventory rows: the freshness follow-up below remains open
-alongside D–G. Unchecked cross-cutting requirements must not be inferred complete
-from shipment of their structural subset. Existing background management and F8 controls remain available
+not itself complete every B+C inventory row. The later freshness follow-up below
+shipped on17c4271 and passed its native main gate. D–G remain open; unchecked
+cross-cutting requirements must not be inferred complete from the B+C shipment. Existing background management and F8 controls remain available
 until the new live/watch/form increments are delivered.
 
 ## B+C freshness follow-up (review6523314574)
 
-This remains **B+C work**, not an implicit transfer to D–G. Complete it before
-claiming B+C done; the next main admission is this follow-up. The shipped
+This is **B+C work**, not an implicit transfer to D–G. It shipped on17c4271
+and passed its native main gate; the checklist below records its completed scope. The shipped
 structure/interaction remains usable, but current cached facts may become stale.
 No new worker/table/queue or timer-driven DB polling is authorized.
 
@@ -212,3 +212,96 @@ G's later CLI/form catalogue must include the #59 `message send --sender-label`
 argument and sender-inspection fields. Its name is self-asserted, never a source
 of authority; preserve the sender contract rather than inventing a TUI-only
 meaning or silently treating external CLI as a verified human.
+
+
+## D0 shared-read local qualification
+
+Commitsf43f7dd/55cdc67 separate the coherent selected-view snapshot from tree
+caching. Merge2fd4197 integrates #59/#69 mainbb7e29b;67f6f09 adapts exact header,
+path and stream-mapping integration observers. Native local standard1711/0/32
+passes, including actual CLI mutations/GC and paired diagnostics. See
+[qualification](../validation/conversation-redesign-shared-read.md) for observed
+failures and boundaries. This does not check off global refresh consolidation,
+D live work, E patches, F, G or their performance/native gates.
+
+G's typed catalogue must reflect #69's `config init`/`config check` leaves and
+all their current options in addition to #59 sender-label. Completeness follows
+the current CLI, not the historical57-leaf count.
+
+D0 selected-view measurement:7aea088→2fd4197 has7→1 actual DB jobs on every
+128-node/50-tool sample. Worker p95 is3.675→3.940ms; do not report a worker-time
+improvement. Open-popup/list/watch/descendant combined measurements remain future
+P3 gates. A stale shared-target artifact was rejected, with source-witness and
+per-sample job assertions required on the final after-run.
+
+E producer prerequisite161b4c9 fixes the previously tracked external ThreadDelete
+notification gap using existing postcommit Changed effects. Focused Store/Control
+checks cover exact singleton/cascade IDs and effect-free replay/rejection/rollback;
+full follow-up standard at161b4c9 passes1713/0/32. The notification producer fix is
+not an implemented list patch consumer. Existing per-node SQL in D0 raw helpers
+also remains to be converted to real batched queries before global P3 completion.
+
+D0/D1 raw-helper audit: the reused control::db::thread_details still calls
+thread_display_title for an empty stored title, which scans/parses saved user
+payloads on the DB worker. Separate a bounded frontend title observation from
+off-worker preparation before claiming SQL-only/global batch completion, without
+silently changing CLI title fallback or adding Core compatibility policy.
+
+
+## D1 local batching/header qualification
+
+Source558b870 (including currentmain1b559b9) passes1745/0/32 standard checks.
+Tools modern/projected scopes use actual2SQL (whole groups3), sender scopes2/4,
+recovery1 and header1/3; independent query oracles and native unrelated-record
+scaling tests preserve source/identity/time/byte semantics. No new schema/index
+is needed: retained sources already have migration2's node index. Header/title
+and initial draft JSON no longer parse in the frontend DB closure.
+
+Same-main P3 selected workload:1workerjob retained, SQL176→26, worker p50/p95
+4.813/9.826→3.334/4.359ms, VM16,602→22,632. Intermediate61,255VM revealed a reversed
+selector plan and was fixed; higher remaining VM and measurement limits stay
+explicit in [qualification](../validation/conversation-redesign-shared-read.md#d1-actual-sql-batches-and-bounded-raw-headers).
+This closes the recorded D0 per-node SQL/header debt for those paths, not D live
+work, E patches/F/G, global multi-consumer P3, or native/visual admission gates.
+
+## E implementation seams after the D2 audit
+
+Keep E's next complete unit separate from live-work display. Standalone
+ThreadCreate/ThreadFork currently return no changed_threads; notify the exact
+created ID after commit before claiming additions work. UIEvents already
+forwards all existing Changed facts, so no broader subscription is necessary.
+
+Extract saved summary facts from THREAD_LIST_SQL into an ordinary connection
+helper for at most128 IDs and reuse the existing activity classifier. Do not
+call ThreadGet or the CLI's unbounded title/excerpt derivation per changed row.
+D2's at-most-three child title witnesses are an explicit bounded exception, not
+an acceptable256-query/64MiB128-Thread browser batch. Design a set-oriented title
+witness with a shared byte allowance before enabling that batch.
+
+The existing frontend/read slots should own one visible-browser dirty set and
+500ms deadline; a changed ID outside the loaded page still needs one bounded
+summary lookup to discover matching additions. Closing clears that work. Patches
+must preserve selected ID, screen row, expansion and filters, update ordering
+from saved facts, remove deleted/nonmatching IDs, and reject old page/patch
+snapshots so pagination cannot resurrect a deletion. Keep preview-body hydration
+separate from summary patches: current list rows do not need excerpt bodies,
+but clearing a selected row's known excerpt silently would be a regression.
+These are implementation constraints, not completed E validation.
+
+
+## D2 local live-work functional qualification
+
+Reviewable commits552e325/39b81cc/9bf7369/51a1eda/761c232/45b8b15 separate
+pending waits, child-owner facts, output markers, incremental read cursors, UI and
+frontend integration.78511d4 coalesces display snapshots in existing latest-value
+slots;807ac97 adds bundled help/User Guides. Standard **1777/0/32** and actual
+80/140-column ×dark/light/NO_COLOR PTYs6/6 pass. See
+[live-work qualification](../validation/conversation-redesign-live-work.md).
+This does not check off P2/P5/native GUI/OS or full multi-consumer P3, and does not
+complete E/F/G. Preserve that distinction before admission.
+
+The existing D1 title policy deliberately skips NULL/unparseable bodies and may
+choose a later readable input (covered by its original tests/CLI-parity policy).
+Changing that to limited/unknown evidence is a possible E policy refinement,
+not a silent correction bundled into D2. Decide and document it before the
+set-oriented title reader changes those cases.

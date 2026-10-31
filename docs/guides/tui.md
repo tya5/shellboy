@@ -77,6 +77,13 @@ The configured send key queues normally at the next boundary. Ctrl+Enter sends i
 
 `準備中` (preparing), `モデル応答待ち` (awaiting model), `応答受信中` (receiving response), and `ツール処理中` (processing tools) use moving text brightness. `待機中` (waiting), `回答済み背景処理中` (answered, background work active), `実行継続中` (execution continuing), and `停止処理中` (stopping) use a slowly pulsing marker. Completed, interrupted, failed, and recovery-wait states are static; failure and recovery wait use an attention color.
 
+When no explicit title is saved, the conversation header derives a short name
+from a bounded prefix of the selected requests, then pending input. If earlier
+source evidence falls outside the read bounds, `名称未設定（元本文の取得範囲外）`
+means the header cannot safely derive the first request. It does not mean there
+are no messages; inspect history or set an explicit title. This header read does
+not rewrite the title or alter the CLI's title lookup.
+
 The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `会話 · 詳細`.
 
 Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought or the target behind `待機中` (waiting), are not guessed. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
@@ -147,6 +154,7 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 | Left/Right / Backspace / Delete | Move/delete by character, accounting for combining characters and emoji |
 | Up/Down | Select completion, recall sent text, or move between draft lines; see below |
 | Tab | Complete the selected slash candidate |
+| Shift+Tab | Focus visible owned work above the composer; Up/Down selects, Space toggles shell output, F6 inspects, `o` opens a child, Esc returns |
 | Home / End | Start/end of the current draft line |
 | Mouse wheel | Move history three display rows, measured after wrapping |
 | PgUp / PgDn | Move history by viewport height minus one row |

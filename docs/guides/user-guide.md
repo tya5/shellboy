@@ -106,6 +106,11 @@ or Revisit. The fixed header is separate from the conversation: title and state
 on the left, connection/model/working directory on the right. Long paths keep
 their final portion; the original value remains available in details.
 
+For an automatically derived header title, `名称未設定（元本文の取得範囲外）` means
+that earlier source evidence exceeded the header's bounded read. Messages still
+exist; inspect history or assign an explicit conversation title. The display does
+not rewrite the saved title.
+
 Each shell call has one compact row containing its command and known outcome or
 duration. IDs and per-response call numbers are left to details. Successful
 output starts closed; a failed call opens a short tail preview, including stderr
@@ -123,6 +128,9 @@ opening the display does not run, retry or stop the command.
 | History focus | `o` / `c` | Open the selected original / copy its source |
 | History focus | Esc / Tab | Return to the composer |
 | Conversation | F6 / F7 | Details / links for the selected item |
+| Composer | Shift+Tab | Focus visible live work above the composer |
+| Live work | Up / Down; Space | Choose work; open/close the selected shell output |
+| Live work | F6; `o`; Esc | Inspect the selected work; open a child conversation; return to input |
 
 With mouse capture enabled, click an item to open or close it. Empty-composer Up
 still recalls sent messages. Opening details does not submit a new request.
@@ -278,3 +286,21 @@ reliably block every such attack. Limit what it can reach using the OS boundary,
 and use saved provenance/history to inspect actions; neither replaces the other.
 See [Agent Guide](agent-guide.md#safety-boundary) and
 [stopping and recovery](recovery-and-storage.md).
+
+
+## Live work above the composer
+
+Up to three oldest shells, owned child Runs and pending waits remain visible
+while the selected Run owns work, including after its answer completes. Overflow
+shows a count; missing saved timing or wait evidence is not reported as zero.
+Elapsed time comes from saved start facts. Saved-output age and a newly observed
+output commit are distinguished; local clocks do not poll the database.
+
+Use Shift+Tab or click a work row to focus it. Space toggles a shell's bounded
+output preview, F6 opens the matching inspection form, and `o` opens a selected
+child conversation. Esc returns to the composer. Opening output neither runs
+nor stops the command. An open preview refreshes at most twice per second;
+large backlogs skip to a marked tail and uncertain decoding remains explicit.
+Closed/covered views and conversation switching stop that preview subscription.
+F2 keeps its existing frozen-screen behavior. Use `/status` or F8 when more than
+three work items or full saved facts are needed.

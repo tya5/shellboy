@@ -404,3 +404,181 @@ them to ordinary bands is optional and is not required to change the existing
 band classification. The explicit initial user-source provenance read remains
 separate from notification-driven mutable-source refresh, without a new worker
 or Core sender inference.
+
+
+### D0 combined current-view read
+
+The existing refresh task collects receipt states and the visible Thread/page,
+paired pending input, sender/tool/recovery/usage facts, received audits and activity
+inside one short DB-worker transaction. SQL-only helpers return owned raw data;
+JSON/rendering/sanitization and clocks are prepared on the existing presentation
+worker after releasing that transaction. The page's paired read revision identifies
+the entire transaction snapshot. Failed raw tails reuse validated source/execution
+facts from this read and use the existing finite read-only output path, not another
+DB-worker correlation lookup. Closed successful output still performs no raw read.
+
+Domain view failures do not erase separately observed receipt states. Generation,
+selection/read revisions, paid stream-commit mappings and existing source-window
+acceptance remain authoritative. Current-view coalescing and paused-source feedback
+must be integrated before the one-job target is claimed or this D0 unit admitted.
+There is no new queue, worker, table or protocol operation.
+
+
+### D1 bounded frontend header/title observation
+
+The shared current-view collector and initial Thread selection use a frontend raw header query, not the CLI
+ThreadDetails helper that derives titles while holding the DB worker. Read the
+Thread/current Run/open Turn and direct owned counts as raw SQL facts; construct
+context and labels on the existing presentation worker. Share the existing pure
+user-payload title policy so explicit stored titles remain verbatim and normal
+derived titles retain Unicode, text-part ordering and terminal-sanitization rules.
+CLI title lookup semantics and wire/schema are unchanged.
+
+For an empty stored title, inspect a prefix of at most128 selected-path entries
+(plus one sentinel), then accepted/held receipt prefixes of at most128 per state
+(plus sentinels), using the existing path/receipt indexes. Inspect prefix membership
+before node-kind/path exclusion rather than scan an unlimited history to find128
+users. Only user JSON bodies can be copied: at most128KiB each and512KiB total
+across the witness. Compute lengths and cumulative bounded-prefix budgets in SQL
+before copying; parse JSON only after releasing the transaction.
+
+An omitted earlier candidate or exhausted path prefix cannot justify choosing a
+later user as the first request. Pending prefix exhaustion is conservative because
+equal-time receipt and node order can differ: report limited evidence instead of
+selecting a possibly later input. Display `名称未設定（元本文の取得範囲外）` when that
+uncertainty prevents deriving a title; distinguish this from exhaustive no-user
+`未送信` and exhaustive unreadable/empty-user `名称未設定`. An already found earlier
+selected-path title wins regardless of later truncation. This label is a frontend
+observation limit, never a fabricated sender/Thread state or title mutation.
+No new worker, table, index, queue or protocol command is introduced.
+
+
+### D1 existing retained-source lookup index
+
+Use the existing `tool_result_node(node_id)` index, shipped since migration2,
+for exact retained source-relation resolution. This includes current payload-GC
+cases; it is not an old-format repair or new authority rule. Keep the existing
+uniqueness check and unknown result for genuinely ambiguous relations. Current
+conversation schema remains14 and no new index/migration is adopted.
+
+
+### D2 pending-wait source scope and live DTO
+
+Before the activity DB read, copy at most128 existing WaitRegistry entries as
+(operation ID, source shell execution ID), without credentials or new registry
+fields. CLI transport admits at most24 ordinary requests, but direct Control
+callers are not globally limited by that semaphore: an over128 snapshot is
+explicitly unavailable, never a truncated global prefix. Resolve exact saved
+shell ownership and wait.pending operation keys inside the same activity read
+transaction, filter by the saved current Run, then sort by saved start/ID and
+retain the oldest3 rows. A removed OS handle does not erase a still-pending saved
+wait. Missing keys are absent observations, not phantom waits. Unknown wait scope
+is separate from zero; wait rows are observations, not extra child/process counts.
+
+Publish existing Changed only after the initial pending commit and registry
+installation, and after committed pending-key deletion even when no foreground
+Turn transition occurs. Keep existing Turn CAS, cancellation and cleanup order;
+add no business event type, lifecycle state, table, queue or background poller.
+The registry's existing Guard still owns removal. The bounded snapshot is read
+on the frontend task, never by the UI thread or while holding the DB transaction.
+
+LiveWorkSnapshot carries saved Run identity, prepared bounded rows, shell/child
+counts, optional exact wait count, overflow and one monotonic observation base.
+Rows contain typed Shell(execution/Turn), ChildRun(Run/Thread) or Wait(operation/
+execution) identities, prepared label/state, saved timestamps and optional elapsed/
+output-age bases. UI timing remains distinct from observed Turn time. Unknown
+wait scope is visible and does not claim exact oldest ordering across missing
+observations. All normally admitted CLI waits are included in the exact scope.
+
+### D2 child identity, chronological display and unavailable evidence
+
+Only the at most3 displayed owned-child rows acquire bounded title witnesses
+through the same frontend header title policy: explicit title first, otherwise
+at most128 path/pending membership candidates and512KiB copied evidence per
+child. SQL collects owned facts inside the existing read transaction; title JSON
+and saved activity classification are prepared after leaving the DB worker.
+This fixed display-only title work may issue at most2 extra bounded statements
+per displayed child; it never calls the CLI's unbounded derived-title reader.
+Child rows reuse the existing saved Run/Turn/attempt/tool activity classifier,
+including recovery and background state, rather than presenting every live Run
+as undifferentiated running work.
+
+Display chronology uses SQLite julianday timestamps and stable ID ties, with
+unknown timestamps last. SQLite's date-function precision can tie starts within
+one millisecond; this is display order, not lifecycle ordering or a timestamp
+rewrite. Chrono computes elapsed bases from the original saved timestamps.
+Malformed or missing required fields in an exact present pending-wait key make
+the wait count unavailable; missing keys remain absent, and fully typed but
+mismatching source identities remain excluded. No wait row is fabricated from
+unverifiable metadata. A terminal selected Run never acquires a live-work
+projection even if inconsistent retained rows still say running.
+
+### D2 parent notification for owned child work
+
+An accepted new Run with a proven `owner_run_id` publishes existing Changed for
+its owning Thread in the same post-commit effects as child acceptance. This is a
+metadata notification, not permission to wake or interrupt the parent model.
+Receipt replay, rejected acceptance and rollback publish no repeated effects.
+The existing completion/recovery owner nudge also publishes parent Changed after
+its saved owner lookup, including a stopping parent; retain the existing quiet
+model nudge only for a live parent. Parent display freshness must not wait for a
+foreground shell or model request to finish consuming its owner delivery.
+
+Frontend seals the at most3 displayed ChildRun Thread IDs to the accepted current
+Run/Thread/generation snapshot. Changed for those exact dependencies invalidates
+only the selected parent's existing coalesced read; it never launches a hidden
+child read. Selection/Run/generation change replaces that dependency set. The
+new-owner and terminal/recovery parent notifications cover count changes beyond
+the displayed rows; unrelated hidden Thread changes cause no extra reads. Active
+Run deletion remains rejected by the existing deletion transaction. No global
+owner scan, persistent dependency index, lifecycle state or notification type is
+added.
+
+
+### D2 live output working set
+
+The open shell owns a display-only cursor in the existing frontend task. It
+retains separate encoding_rs decoders and at most4KiB total decoded text across
+both streams, rebuilding trimmed strings so retained String capacities also
+obey that cursor allowance. Its prepared UI copy also retains at most4KiB total, so this
+consumer has an explicit8KiB retained text allowance outside cache.body_bytes,
+not a4KiB application-wide or RSS bound. Only one such cursor and one UI copy
+exist for the selected open live shell; temporary bounded preparation/delivery
+copies and small decoder/identity metadata are distinct. Closing, hiding,
+completion or selection changes discard both active copies. Inactive views
+retain no live output body. Existing history/item cache limits are unchanged.
+
+Each observation uses one read-only transaction, at most128 chunk metadata rows
+and4KiB total new raw bytes. Contiguous ranges retain stream decoder state;
+initial observation, retention/encoding change, missing range or excessive
+backlog starts a tail and reports skipped/uncertain evidence. UTF8/UTF16 tail
+alignment is charged to that same byte allowance. Incomplete units remain in
+the decoder until more bytes or a saved terminal output_complete snapshot.
+No CLI cursor, read pin, encoding mutation or durable position is created.
+
+### D2 stopping a child without a live Driver
+
+A recovery-wait child can retain a live owned Run after its Driver has exited.
+Stopping that child drains its saved ownership synchronously rather than passing
+through the Driver's normal owner nudge. Extend Control's existing stop target
+lookup with its saved live/stopping parent Thread. After the no-Driver drain
+successfully commits, publish existing Changed for that parent without a model
+kick; this covers counts even when the child is outside the oldest3 visible
+rows. A failed drain publishes the existing child error and no parent terminal
+notification. Active Driver stops retain their existing completion owner nudge.
+No new query, registry, worker or receipt behavior is introduced.
+
+Live-work captures paired wall/monotonic observation clocks at the end of its
+same-transaction DB read, before returning to presentation workers. Preparation
+uses that captured wall clock for saved elapsed bases and publishes the captured
+monotonic base. Presentation queue delay is then added by normal UI timing; it
+cannot make an older snapshot erase a newer committed-output marker.
+
+
+Live output observations and previews are replaceable display snapshots in the
+existing frontend outbox, not critical operation results. Coalesce one marker
+snapshot and one preview per Thread/generation through its existing latest-value
+slots. Every marker snapshot includes all observed displayed executions (at most3),
+so replacing it cannot lose an earlier different shell's activity. Receipts and
+business-operation outcomes keep their ordered critical delivery. This adds no
+channel or capacity; raw UI-channel deliveries remain separately bounded.

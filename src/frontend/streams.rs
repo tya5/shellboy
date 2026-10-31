@@ -63,7 +63,7 @@ fn normalize_page(page: &mut PreviewPage, budget: usize) {
     page.stdout = normalize(&page.stdout, budget.saturating_sub(page.stderr.len()));
 }
 
-async fn execution_preview(
+pub(super) async fn execution_preview(
     control: &Control,
     execution: String,
     limit: usize,
@@ -98,6 +98,41 @@ async fn execution_preview(
         }
         normalize_page(&mut page, limit);
         Ok(page)
+    })
+    .await?
+}
+
+pub(super) async fn live_execution_preview(
+    control: &Control,
+    execution: String,
+    cursor: Option<crate::control::output::preview::live::LiveCursor>,
+) -> Result<
+    (
+        crate::control::output::preview::live::LiveCursor,
+        PreviewPage,
+    ),
+    ApiError,
+> {
+    let path = control.store.database.path().to_path_buf();
+    presentation_work(move || {
+        let db =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|e| {
+                    crate::storage::save_error(format!("live preview database open failed: {e}"))
+                })?;
+        db.busy_timeout(std::time::Duration::from_millis(250))
+            .and_then(|_| db.pragma_update(None, "query_only", true))
+            .map_err(|e| {
+                crate::storage::save_error(format!("live preview read-only setup failed: {e}"))
+            })?;
+        let (cursor, mut page) = crate::control::output::preview::live::read(
+            &db,
+            &execution,
+            cursor,
+            PreviewLimits { bytes: 4096 },
+        )?;
+        normalize_page(&mut page, 4096);
+        Ok((cursor, page))
     })
     .await?
 }
@@ -139,6 +174,26 @@ pub(super) async fn enrich_previews(
     nodes: &mut [UiNode],
     width: u16,
 ) -> Result<(), ApiError> {
+    enrich_previews_inner(control, nodes, width, None).await
+}
+
+/// Facts and source projection belong to the same admitted read transaction.
+/// Reuse that exact correlation without another DB-worker source lookup.
+pub(super) async fn enrich_previews_observed(
+    control: &Control,
+    nodes: &mut [UiNode],
+    width: u16,
+    facts: &super::tools::ToolFacts,
+) -> Result<(), ApiError> {
+    enrich_previews_inner(control, nodes, width, Some(facts)).await
+}
+
+async fn enrich_previews_inner(
+    control: &Control,
+    nodes: &mut [UiNode],
+    width: u16,
+    observed: Option<&super::tools::ToolFacts>,
+) -> Result<(), ApiError> {
     let deadline = Instant::now()
         + Duration::from_millis(control.store.config.io.file_prepare_timeout_ms.min(1000));
     for node in nodes.iter_mut() {
@@ -150,13 +205,30 @@ pub(super) async fn enrich_previews(
             .filter_map(|block| block.tool.as_ref())
             .filter(|tool| tool.execution_id.is_some() && tool.requires_attention())
             .filter(|tool| seen.insert((tool.group_id.clone(), tool.call_id.clone())))
-            .map(|tool| (tool.group_id.clone(), tool.call_id.clone()))
+            .map(|tool| {
+                (
+                    tool.group_id.clone(),
+                    tool.call_id.clone(),
+                    tool.execution_id.clone(),
+                )
+            })
             .collect::<Vec<_>>();
-        for (group, call) in failed {
-            let result = match tokio::time::timeout_at(
-                deadline,
-                preview(control, &node.node_id, group.as_deref(), &call, 2048),
-            )
+        for (group, call, expected_execution) in failed {
+            let result = match tokio::time::timeout_at(deadline, async {
+                match observed {
+                    None => preview(control, &node.node_id, group.as_deref(), &call, 2048).await,
+                    Some(facts) => {
+                        let execution = observed_execution(
+                            facts,
+                            &node.node_id,
+                            group.as_deref(),
+                            &call,
+                            expected_execution.as_deref(),
+                        )?;
+                        execution_preview(control, execution, 2048).await
+                    }
+                }
+            })
             .await
             {
                 Ok(result) => result,
@@ -193,6 +265,33 @@ pub(super) async fn enrich_previews(
         *target = node;
     }
     Ok(())
+}
+
+fn observed_execution(
+    facts: &super::tools::ToolFacts,
+    node: &str,
+    group: Option<&str>,
+    call: &str,
+    expected_execution: Option<&str>,
+) -> Result<String, ApiError> {
+    let unavailable = || {
+        ApiError::new(
+            ErrorCode::TargetUnavailable,
+            "Saved tool output source is unavailable or does not match this read",
+        )
+    };
+    let mut matched = facts.sources().iter().filter(|source| {
+        source.node_id == node && Some(source.group_id.as_str()) == group && source.call_id == call
+    });
+    let source = matched.next().ok_or_else(unavailable)?;
+    if matched.next().is_some()
+        || source.shell_state.is_none()
+        || source.execution_id.is_none()
+        || source.execution_id.as_deref() != expected_execution
+    {
+        return Err(unavailable());
+    }
+    source.execution_id.clone().ok_or_else(unavailable)
 }
 
 fn apply_preview(
@@ -510,6 +609,82 @@ mod tests {
             .await
             .unwrap();
         enrich_previews(&control, &mut nodes, 80).await.unwrap();
+        let facts=control.store.database.call(|db| {
+            let payload=serde_json::json!({"group_id":"g","output":[{"type":"function_call","call_id":"a"},{"type":"function_call","call_id":"b"}]}).to_string();
+            db.execute("UPDATE node SET payload_json=?1 WHERE id='calls'",[payload])?;
+            super::super::tools::read_nodes_tx(db,&["calls".into()])
+        }).await.unwrap();
+        assert_eq!(
+            observed_execution(&facts, "calls", Some("g"), "a", Some("exec-a")).unwrap(),
+            "exec-a"
+        );
+        for (node, group, call, execution) in [
+            ("unrelated", Some("g"), "a", Some("exec-a")),
+            ("calls", Some("other"), "a", Some("exec-a")),
+            ("calls", None, "a", Some("exec-a")),
+            ("calls", Some("g"), "missing", Some("exec-a")),
+            ("calls", Some("g"), "a", Some("exec-b")),
+        ] {
+            assert_eq!(
+                observed_execution(&facts, node, group, call, execution)
+                    .unwrap_err()
+                    .code,
+                ErrorCode::TargetUnavailable
+            );
+        }
+        let ambiguous = control
+            .store
+            .database
+            .call(|db| {
+                super::super::tools::read_tx(
+                    db,
+                    &[("calls".into(), "a".into()), ("calls".into(), "a".into())],
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            observed_execution(&ambiguous, "calls", Some("g"), "a", Some("exec-a"))
+                .unwrap_err()
+                .code,
+            ErrorCode::TargetUnavailable
+        );
+        let missing_shell=control.store.database.call(|db| {
+            db.execute("UPDATE tool_call SET operation_id='unavailable-execution' WHERE group_id='g' AND call_id='b'",[])?;
+            let facts=super::super::tools::read_tx(db,&[("calls".into(),"b".into())])?;
+            db.execute("UPDATE tool_call SET operation_id='exec-b' WHERE group_id='g' AND call_id='b'",[])?;
+            Ok(facts)
+        }).await.unwrap();
+        assert_eq!(
+            observed_execution(
+                &missing_shell,
+                "calls",
+                Some("g"),
+                "b",
+                Some("unavailable-execution")
+            )
+            .unwrap_err()
+            .code,
+            ErrorCode::TargetUnavailable
+        );
+        // Hold the actual DB worker. The observed path must complete through
+        // its read-only connection, without a second source-validation job.
+        let (entered, entered_rx) = tokio::sync::oneshot::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        let db = control.store.database.clone();
+        let blocked = tokio::spawn(async move {
+            db.call(move |_| {
+                let _ = entered.send(());
+                let _ = release_rx.recv_timeout(std::time::Duration::from_secs(10));
+                Ok(())
+            })
+            .await
+        });
+        entered_rx.await.unwrap();
+        let observed = enrich_previews_observed(&control, &mut nodes, 80, &facts).await;
+        let _ = release.send(());
+        blocked.await.unwrap().unwrap();
+        observed.unwrap();
         for call in ["a", "b"] {
             assert!(
                 nodes[0]
@@ -592,6 +767,14 @@ mod tests {
             });
         }
         enrich(&control, &mut nodes, 80).await.unwrap();
+        enrich_previews_observed(
+            &control,
+            &mut nodes,
+            80,
+            &super::super::tools::ToolFacts::default(),
+        )
+        .await
+        .unwrap();
         for node in nodes {
             assert_eq!(node.text, "saved canonical text");
             assert_eq!(node.presentation.read_revision, 19);
