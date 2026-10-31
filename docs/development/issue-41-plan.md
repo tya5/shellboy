@@ -359,3 +359,24 @@ inside the readonly task. That path can issue per-row queries and scan filtered
 candidates; bounded patch SQL and writer independence must not be presented as a
 global constant-query or lower-CPU claim. Long P2/P5 measurements belong in the
 manual CI measurement job, distinct from functional/native UI tests.
+
+
+## Subsequent G mandatory copy/paste and attachment additions
+
+These requirements are tracked now and implemented with G after separate E/F
+admission. They do not change E's current key or CLI contracts.
+
+| ID | Required outcome | Evidence required before G admission |
+| --- | --- | --- |
+| G-C1 | A manually typed leading slash command still executes when only its arguments contain pasted IDs. A wholly pasted leading slash remains literal, visibly explained rather than silently submitted as a command. | Typed `/copy ` plus pasted ID, wholly pasted command and input-hint tests plus actual PTY records. |
+| G-C2 | One-key copy from focused answer (fallback reading position), clear composer/help/F2 escape route for long answers, and factual page/remaining instructions beyond64KiB. | Actual saved-original identity, Unicode/body/page boundaries and discoverability PTY records; host clipboard changes require explicit fixture isolation. |
+| G-C3 | Popup letter keys accept upper/lowercase consistently; hints and operation catalogue agree. | Table-driven popup key parity and native records. |
+| G-C4 | Per-code-block number/copy affordance; focus+one key or click copies the whole block from saved raw Markdown, never folded/wrapped paint text. | Long prompt/code examples, multiple blocks, exact original bytes/text and1–2-action native captures without entering node IDs. |
+| G-C5 | Argumentless `/copy` offers the single code block directly and a choice when multiple blocks exist; whole-answer copy remains explicit and discoverable. Final syntax/default is decided in G's adopted design, with factual block number/character-count success notice. | Catalogue/help/command parser and original-block extraction agree; existing Markdown parser/extraction is reused. No independent rendering parser. |
+| G-C6 | Empty-composer/help/slash discovery for `/image` and `/attach`; image-only paste guidance only when observable, and failure explains `/attach <path>` fallback. | Facts-only clipboard adapter cases and native discoverability capture; no guessed clipboard contents. |
+
+Sources: review comments6536761757,6536813721,6536844049,6536999852 and
+[6537521409](https://github.com/tya5/shellboy/issues/41#issuecomment-6537521409).
+Copying a code block is UI/Frontend composition of the existing saved-original
+read and Markdown extraction path, not justification for a new Core operation,
+worker, table, parser or storage format.
