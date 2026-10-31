@@ -420,3 +420,37 @@ unmeasured. Local E-only68304cc repairs the deadline priority and test guards,
 includes latestmainc950 and qualifies1891/0/32 plusPython11; no follow-up push or
 new three-OS CI is claimed. Keep this fixed cut separate from published CBC and
 from its historical main912 comparison. Do not merge F/G or close #41 on this data.
+
+## Additional mandatory D presentation follow-up (2026-10-31)
+
+Comments6538770938–6539059651 add required owned-work/history presentation.
+Track this as a separate D follow-up; do not mix it into the frozen E candidate,
+claim the prior default-three-row P2/P5 qualifies a new maximum, or silently drop
+it when F/G land. Implement on its own reviewable branch after the applicable
+admission decision. No new storage/table is justified by these display requests.
+
+Supersession:6538923280 replaces the earlier box-header proposal with a heading
+and indented output-style guide;6539007408 replaces the heading with
+`◉ 抱えている作業` and cancels6538871885's state suppression. Every row shows
+its actual state.6538953877's color roles and6538881172's configurable bound remain.
+
+| ID | Required final outcome | Evidence required |
+| --- | --- | --- |
+| D3-M1 | One shared marker catalogue distinguishes running tool, unobserved state, event, successful/failed/cancelled tool, input source, summary/spill and owned-work heading. Reserve `◉` for the heading; update help and #35 translation-key inventory. | Collision audit and actual80/wide-column PTYs; dark/light/NO_COLOR and non256 fallback distinguish kinds without color. No running-state inference from missing facts. |
+| D3-M2 | History tool rows show saved background status/reason (including human_backgrounded/additional_input) and saved-start elapsed time while running. Same execution can be identified/navigated between history and owned work. | Synthetic background shell plus subsequent foreground calls, source identity, saved time and navigation tests; actual PTYs, no machine-speed assertion. |
+| D3-L1 | Nonempty region has `◉ 抱えている作業` plus counts and `  │ ` content guides; heading/guide/kind share one theme role, target name a distinct role, factual attention state uses existing warning role. Every row retains its state. |80/wide dark/light/plain and non256 captures, empty height0, focus marker and nested preview `  │   │ ` remain distinct. No earlier box or suppressed-state rule. |
+| D3-L2 | One blank line separates conversation and nonempty owned-work header. Header/gap/nonselectable decoration participate in the same height/scroll geometry; no padding focus or changed F6/F7 identity. | Geometry/anchor/focus tests plus PTY scroll and collapsed/expanded/overflow cases. This boundary gap is mandatory even though the earlier general B-S spacing proposal is optional. |
+| D3-C1 | One bounded `[ui]` row setting controls SQL limits and UI truncation, default3. Adopt its name/range/0 policy with cost rationale before implementation; reject out-of-range values at config check/startup, never clamp. Visible height reduction retains Other N. | Config example/guide/TUI guide,1/default/max synthetic PTYs, actual read cardinality, invalid-value cases and P2/P5 at the adopted maximum. Existing producer3/default3 results do not qualify the future maximum. |
+| D3-N1 | Completion notifications state which shell/child ended and saved result/duration, using bounded existing source metadata, and navigate to the original tool/source through F7 or focus+Enter. Notification marker is prominent and aligned, not an indented faint dot. | Shell completion, child answer/work completion/report, unavailable source and mixed-kind PTYs; #35 keys, no invented facts or new saved event. |
+| D3-W1 | Wait row names the first saved condition/target plus Other N, resolves bounded shell/child labels in the existing read, and displays factual elapsed/deadline information. | shell_ended/child answer/multiple conditions/timeout cases; unknown/missing/deleted targets remain explicit. No new table or polling worker. |
+| D3-W2 | Wait and its target row are visibly linked/navigable; suppress duplicate invoking `shellboy wait` shell only using proven saved execution/origin identity, never command-string guessing. | Target present/offscreen/deleted and external-CLI versus shell-origin fixtures; exact identities and resume/removal behavior. |
+
+Sources:6538770938,6538809528,6538824245,6538846624,6538871885,
+6538881172,6538923280,6538953877,6539007408,6539048809,6539059651.
+The saved wait JSON already contains conditions/timeout_ms; verify actual retained
+schema and decoder before adopting projection details. The proposed interpretation
+of0/default as no deadline is not the current CLI contract:0 means immediate
+check and default is30000ms. Preserve those meanings unless separately changed;
+missing saved facts are unknown, not an invented infinite wait. No adopted new
+setting or marker choice beyond the user-selected heading is implied by this
+requirement inventory.

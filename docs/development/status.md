@@ -1704,3 +1704,15 @@ originalproducer1 separation and limits are in E qualification and #41 report
 F/G and optional spacing remain independent. Continue local matched-P3 work
 while the delegated reviewer considers results. E main admission is not approved
 by this CI result alone; main and installed binaries remain unchanged.
+
+## New mandatory owned-work requirements tracked (2026-10-31)
+
+Latest #41 comments through6539059651 are recorded as D3-M/L/C/N/W rows in the
+plan, including superseded box/state-suppression proposals. Final heading is
+`◉ 抱えている作業`, all row states remain visible, role colors are shared,
+row capacity becomes bounded configuration, and saved wait conditions/deadlines
+and notification source navigation require completion. They are not included in
+E7c6f4d6 or covered by its default-three-row formal results. Preserve current wait
+0=immediate/default30000ms semantics; a comment's infinite-wait suggestion is not
+adopted as a contract change. Design/implementation and maximum-capacity/native
+proof remain independent pending work; no new Core table is justified.
