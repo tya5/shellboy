@@ -2004,3 +2004,7 @@ The original assertions/timeouts remain; native fixed-order red/green tests and
 existing end-to-end recovery/closing tests pass locally. #91 band rendering is
 not the originating path. Core review and exact-source native CI are tracked in
 #96; original CI did not record all registration/pool-admission events.
+#95's third pinned-tool observation is a fixture navigation-intent ordering error:
+pause before dispatching a non-tail window, not after waiting for its reply.
+Two-order pure-state coverage and the original retained-body assertions remain;
+no UI retention change or longer guard is used for that case.
