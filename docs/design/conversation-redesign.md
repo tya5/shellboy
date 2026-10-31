@@ -384,6 +384,26 @@ nonnegative-integer semantics, not an additional per-row query or a second
 business-state decoder. Candidate caps alone do not prove bounded source copies
 or total query work: G9 must still qualify/limit those queries before admission.
 
+Thread's latest-compaction display uses the same reader with limit1 (at most5
+receipt/automatic/replacement candidates each and25 spill IDs, at most9 SQL
+statements). Its dedicated readonly connection temporarily applies SQLite's
+256KiB string/BLOB/row limit and a2500-callback allowance at approximately100 VM
+instructions per callback, including preparation. The callback count is the
+resource gate, not a wall-clock or an exact VM/time promise. Scalar result cells
+are512 bytes and SQL-to-Rust copied text shares256KiB, checked before String copying.
+Restore connection limits/remove the callback on every exit; no hook is currently
+installed by the owning snapshot helper. Future snapshot hooks must be composed
+at that owner boundary, never silently overwritten.
+
+An owned size/work limit makes only last_compaction unknown with an explicit
+limited-field witness; current Thread lifecycle/configuration still updates.
+It is not evidence that no compaction exists, nor a successful stub. Other SQL
+failures retain their actual error path. CLI full readback does not install this
+display envelope. Tests must prove small-result parity, owned interruption and
+oversize behavior, unchanged stored source, restored limits/callback and a usable
+same transaction after either limit. Explain/index and broader G9 checks remain
+separate from this envelope. No table, worker, queue, timer or public API is added.
+
 The next extraction covers saved Run/Turn metadata. Their initial explicit reads
 must retain canonical saved usage totals in the same readonly transaction; normal
 reactive refresh later separates metadata500ms and usage3s. Run metadata copies

@@ -1,5 +1,24 @@
 # 開発判断
 
+## Scoped resource envelope for latest-compaction display (#41, 2026-11-01)
+
+Use the existing canonical readback queries under a private readonly display
+envelope rather than duplicating receipt/automatic/replacement merge semantics
+in a second reader or adding stored summary state. Limit1 bounds returned rows;
+SQLite's value-length limit, a counted progress allowance and pre-copy cell/
+aggregate text limits bound additional resource exposure. Over budget means an
+explicitly unknown compaction field; the rest of Thread metadata stays live.
+CLI output and saved sources stay intact. This does not replace actual query-plan
+and full G9 evidence, and no latency threshold is promised.
+
+The budget is a conservative initial display policy, not a statement about
+typical user data. Revisit if ordinary synthetic/observed histories frequently
+hit it, if SQLite behavior changes, or if snapshot ownership installs its own
+progress callback. SQLite permits one callback per connection; current ownership
+is one finite presentation worker/readonly connection, with RAII cleanup before
+the caller continues its shared snapshot. A new owner-level hook requires
+composition, not replacement. No generic observation engine or persistent cache.
+
 公開版の判断を記録します。日付、理由、影響、代替案、再確認条件を必要な範囲で残します。過去の私的作業記録を利用の前提にしません。
 
 ## Coalesced Snapshot Reads And Slow-Only Diagnostics (#47, 2026-10-30, Active)
