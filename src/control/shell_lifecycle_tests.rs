@@ -336,7 +336,7 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
         .send(tool(&format!("printf READY > '{}'; cat", marker.display())))
         .unwrap();
     let execution = starting(&control).await;
-    let registration_gate = control.live.test_shells().lock().await;
+    let registration_gate = control.live.test_registration.lock().await;
     drop(origin_gate);
     wait_marker(&marker).await;
     let origin = control
@@ -358,20 +358,41 @@ async fn self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_dr
     let sending = control.clone();
     let signal = tokio::spawn(async move { sending.request(request).await });
     wait_saved_signal(&control, &execution, false).await;
-    drop(registration_gate);
     let response = crate::test_watchdog::watchdog("src/control/shell_lifecycle_tests.rs: self_stop_during_registration_keeps_reply_grace_owned_until_shutdown_drain", signal)
         .await
         .unwrap()
         .unwrap();
     assert!(response.ok, "{:?}", response.error);
-    let shell = control
-        .live
-        .test_shells()
-        .lock()
-        .await
-        .get(&execution)
-        .unwrap()
-        .clone();
+    // Acceptance is deliberately observed before live publication. The old
+    // test raced this valid order after releasing the registry mutex.
+    assert!(
+        !control
+            .live
+            .test_shells()
+            .lock()
+            .await
+            .contains_key(&execution)
+    );
+    wait_saved_signal(&control, &execution, false).await;
+    let mut changes = control.subscribe();
+    drop(registration_gate);
+    let shell = crate::test_watchdog::watchdog("self-stop handle publication", async {
+        loop {
+            if let Some(shell) = control
+                .live
+                .test_shells()
+                .lock()
+                .await
+                .get(&execution)
+                .cloned()
+            {
+                break shell;
+            }
+            changes.recv().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(
         shell
             .handle

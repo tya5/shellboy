@@ -4199,3 +4199,57 @@ statements above are superseded by the following independent final results:
 - Source/script changes stop at7028c3b; subsequent status/acceptance edits are
   evidence-only. Branch CI and review outcome are recorded in issue #83; local
   success alone is not three-OS admission or physical terminal qualification.
+
+## #89 CI observation ordering qualification
+
+2026-10-31, native macOS 26.3.1 arm64 / Rust 1.99.1. Synthetic owners, loopback
+fixtures and native owned child processes only; no user DB, settings, installed
+binary, owner or release/tag changes. Build jobs are capped at 2 and test threads
+at 4 to limit memory. Every new wait uses the shared 60-second watchdog; there
+is no performance threshold or increased production/test timeout.
+
+### Causes and controlled order
+
+- Run 41172774266 attempt 1 failed at the immediate live-shell unwrap.
+  `signal_shell` saves stopping and can clone no handle before `register_shell`;
+  the reply is nevertheless valid. A cfg(test, unix) registration gate now
+  deliberately holds native handle publication until after successful acceptance.
+  The test asserts that the live entry is absent at acceptance, then subscribes
+  before releasing the gate and waits for the entry. Native stdin remains
+  writable, the runtime-operation grace owner remains present, and shutdown
+  drains registrations/operations/requests. Ten fresh test invocations passed.
+  The gate is absent from production. The Unix lifeline's startup work can
+  widen this valid interval; no evidence establishes incorrect native killing.
+- Run 41168775635 attempt 1 observed metadata (0,0,1) versus (0,0,0).
+  The runnable driver's `record_context_observations_tx` independently inserts
+  `index.observed.THREAD`. The real CLI test now observes that exact saved key
+  with engine notifications before taking the baseline, verifies (0,0,1), then
+  preserves the complete preview/retransmission non-mutation assertion. Five
+  fresh invocations passed; index metadata is not excluded from the comparison.
+- Run 41170243551 attempt 1 required a signal diagnostic after parent PTY loss.
+  Diagnostics admission uses `try_lock`/`try_send`, so shutdown drain cannot
+  restore records dropped before admission. Grep audited signal/owner diagnostic
+  presence assertions in termination tests. Shared graceful checks now require
+  saved tool completion, stopped Run/app_shutdown and stopped shell, successful
+  native exit where observable, and ESRCH for the known native process group.
+  Present signal records retain stage/boundary validation; missing records are
+  explicitly tested and malformed records are rejected. EOF retains its stricter
+  terminal_lost check. Repeated-signal tests wait for listener endpoint removal
+  rather than log admission, including with a blocked database writer. Three
+  complete native termination-suite invocations passed before the additional
+  malformed-record check; final standard/native CI covers that check too.
+
+Local full-check and exact-source three-OS CI outcomes are retained in issue #89.
+Repeated passing runs are supplementary observations, not the causal evidence:
+that evidence is the forced acknowledgment-before-publication order, saved
+index-context boundary, and the documented lossy diagnostic admission contract.
+No runtime interruption capture or native lifeline/stderr source is changed,
+leaving the concurrent #82 work separate. No schema, table, worker or queue is
+added. Prior failed-job reruns from #80 remain historical, not proof of a fix.
+
+Local standard check (`CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=4 sh scripts/check.sh`)
+passes: Rust 1,889 passed / 0 failed / 33 ignored, integration layout 93,
+Python 18, fmt and strict all-target Clippy. The document-role test passes
+separately. Status adds 10 lines and deletes 0; this qualification appends its
+record without deleting prior evidence. Rebase/pre-push validation is repeated
+on the exact candidate; native branch CI must pass before main integration.

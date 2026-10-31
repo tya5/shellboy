@@ -1,5 +1,15 @@
 # Development status
 
+## CI observation ordering (#89)
+
+Three intermittent observations are traced to test boundaries: index-context
+metadata can commit independently of preview; starting-stop acknowledgment is
+not live-handle publication; shutdown diagnostics can be dropped at admission.
+Tests now fence registration and observe saved facts/notifications, and use
+native/process cleanup instead of requiring log presence. No production shell
+or lifeline ordering, timeout, retry or assert-on-durable-result is relaxed.
+Exact-source native CI and integration results are tracked in issue #89.
+
 ## On-demand owner memory (#80)
 
 CLI status --memory returns existing body/layout/attachment/replay cache accounting

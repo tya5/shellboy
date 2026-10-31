@@ -1999,3 +1999,14 @@ region rendering. Defer missing command/child names and off-window source
 lookup to a bounded read-projection follow-up, rather than changing Core events.
 No dialog, new worker, queue, schema, protocol or
 theme setting is required. Existing pending DTO work in #74 is not modified.
+
+## #89: Observe committed boundaries, not scheduler or diagnostic admission (2026-10-31)
+
+Status: active. Issue #89 and the #77/ad6c54b test policy apply. The three
+failures have concrete test-side counterexamples: independent context metadata
+commit, valid acceptance before native handle registration, and permitted
+diagnostic drops. Preserve production ordering and grace; add only a test-only
+registration gate, saved-fact/notification observation, and durable/native
+shutdown gates. Listener teardown is the repeated-signal acknowledgment, not
+its best-effort diagnostic line. This does not claim every native lifecycle
+race is impossible or attribute the missing handle to lifeline termination.

@@ -428,3 +428,22 @@ the snapshot reports the same planned state and uncertainty. This is an owner
 interruption, not an observed OS exit. Real terminal records are not rewritten,
 no stored PIDs are signaled, and Run/Turn/receipt/tool repair and normal shutdown
 ordering are unchanged. Native lifetime ownership is specified in shell.md.
+
+## CI observation boundaries (#89)
+
+A successful starting-shell stop acknowledges durable intent, not live handle
+publication. Test both orders explicitly with a test-only registration gate,
+then subscribe before checking the live registry and await registration changes.
+Keep self-reply grace and shutdown-drain assertions unchanged. The Unix lifeline
+can widen the pre-publication interval; acknowledgment never promised otherwise.
+
+Index-preview non-mutation checks must first observe the runnable driver's saved
+`index.observed.THREAD` context fact. Its independent transaction may otherwise
+land between the before/after samples. Use saved facts plus engine notifications,
+not a delay or an exclusion from the metadata accounting.
+
+Shutdown diagnostics use finite best-effort admission. Validate records that are
+present, but establish native shutdown through durable Run/shell/tool outcomes,
+exit status and native process disappearance. For ordered repeated OS signals,
+listener endpoint removal acknowledges that the frontend began shutdown without
+depending on diagnostic admission, including while the database writer is held.
