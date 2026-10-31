@@ -189,3 +189,27 @@ narrow-base emoji presentation widths, oversized clusters/output/screen sizes
 fail closed. Limits are 60s watchdogs, 4 MiB output and 400x200 cells. Live PTYs
 require Unix; replay and most unit tests are portable. No third-party Python
 module or Rust build is required to use the helper.
+
+## Exact batch text replacement
+
+`python3 scripts/dev/replace.py --root .` reads a JSON array from stdin:
+`[{"file":"path/to/existing.txt","before":"old text","after":"new text"}]`.
+Only explicit existing UTF-8 regular files inside the root are considered; no
+path is selected implicitly. Empty input is rejected; an empty array is a no-op.
+All needles must match exactly once, including overlapping matches. Multiple
+rules for the same file apply in array order, in memory; every rule/file is
+validated before any target is written. Newlines are exact, not normalized.
+Empty needles, missing/binary/linked/out-of-root/read-only files are rejected.
+
+Changed files are staged beside each target, originals are retained via hard
+links, and each replacement is atomic. Precommit rechecks detect changed files;
+ordinary write failures roll back earlier replacements. This is not a cross-file
+filesystem transaction against crashes or uncoordinated concurrent editors. If
+rollback itself fails or a committed file changes externally, originals are
+retained in reported recovery directories rather than overwriting new user
+changes. Exit0 means success, exit1 a non-unique needle, exit2 invalid input/I/O,
+and exit3 incomplete recovery. Output is one short JSON line; no file content is
+logged. Input is capped at 4MiB/256 rules and aggregate source/result text32MiB.
+The helper is standard-library-only and does not build Rust or access Shellboy
+settings, data, clipboard or credentials. Use it only on owned source changes;
+no inputs/default paths are inferred from user configuration.

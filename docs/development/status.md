@@ -1948,3 +1948,12 @@ Full latest-main local validation passes1,960/0/33, layout94, Python18, fmt/Clip
 and watchdog policy. Native wheel/paused-update/shutdown passes; worker4 owns
 review-required integration/CI. The src/ui.rs change is only line1728 in
 prepare_visible_render_width (function1697-1795), no rendering logic rewrite.
+
+## Exact batch text replacement (#94.3)
+
+The standard-library stdin-JSON source editor validates all file/rule matches
+before staging any changes. Nonunique/missing matches never partially edit a
+batch. Same-file rules are sequential; explicit roots, UTF-8/newline preservation,
+atomic renames, guarded rollback and reported recovery originals bound failures.
+The helper is already used to edit its own implementation/tests. Developer
+scripts only; Core/storage/protocol/clipboard and installed binaries are untouched.

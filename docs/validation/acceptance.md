@@ -4952,3 +4952,44 @@ known closed result hydration. ui/history_interaction.rs and ui/view.rs own the
 navigation changes. Existing projection/body budgets, rendering, Core and schema
 are unchanged. The record is delivered to worker4 with review required; no local
 workflow_dispatch or main push is authorized under this handoff workflow.
+
+## Exact batch replacement helper (#94.3)
+
+2026-10-31 native macOS/ARM64, Python3.12. The stdin-JSON editor accepts explicit
+existing text paths within a chosen source root. All rules/files are checked in
+memory before any target staging; zero/multiple/overlapping matches fail the
+entire batch. Same-file rules follow JSON order. Empty/no-op arrays do not replace
+inodes. UTF-8, CRLF and executable modes are preserved; missing/binary/linked,
+read-only, non-owned and out-of-root paths are refused. Bounds are 4MiB JSON,
+256 rules and 32MiB aggregate text. Targets on filesystems without hardlinks fail
+before committing. CLI exits and recovery limits are documented in setup/help.
+
+Python54 tests pass (39 prior plus 15 replacement tests): multi-file/sequential
+rules, NFD/emoji/CRLF, nonunique/overlapping failures with unchanged content and
+mtime/mode/inode, empty/no-op rules, invalid/missing/binary/directory/outside paths,
+read-only/hardlinks, Unix symlink/executable mode, stage failure before any commit,
+second-rename failure restoring the original first inode, interruption just after
+rename, concurrent staging/committed edits, incomplete rollback retaining original
+copies, text bounds and real CLI JSON/exit behavior. Faults are synthetic and
+only temporary files are used. A code audit hardened the rename/interrupt recovery
+window and excluded read-atime from preservation assertions before submission.
+No external writer is overwritten in the explicit concurrency regression cases.
+
+Ordinary I/O failures attempt full rollback. This is not an OS/filesystem
+multi-file transaction: power loss, process kill, I/O failure during rollback and
+uncoordinated concurrent editors cannot guarantee global atomicity. Recovery
+failure exits3 with retained original directories rather than claiming success
+or silently discarding originals/new user edits. Successful edits with cleanup
+failure report leftover directories. These limits are not hidden by passing tests.
+
+Immediate self-use: two JSON batches with 7 and 5 exact substitutions update the
+new helper and tests, replacing repeated inline read/replace/write boilerplate.
+No default user data/config path, clipboard or provider is accessed; no Rust build,
+release/install change or paid model test is run. py_compile/help, integration
+layout94/watchdog, diff and record-retention checks pass. Evidence:
+/tmp/issue-94-3-tests-final.log and /tmp/issue-94-3-help.txt. Windows/Linux native
+execution and crash/network-filesystem behavior remain unverified locally; CI is
+delegated to worker4. The issue's original measurement is file rewrite327/1070000
+characters, record checker186/530000, PTY29/80000. Those are the supplied baseline,
+not a newly measured reduction. Multi-day follow-up with the same command-metadata
+counting method remains outstanding; no savings percentage is invented here.
