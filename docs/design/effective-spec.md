@@ -252,3 +252,13 @@ before atomic adoption and safer omission guidance follow
 [compaction](compaction.md#bounded-explicit-summaries-73--d-015). Existing automatic
 failure compaction and model selection do not change; no new persistent table,
 worker or queue is added.
+
+
+## Additive index-status projection defaults (#71 review)
+
+The user-approved #71 review permits serde defaults for the additive
+IndexStatus.auto_history and held_auto_history response fields only. This is a
+narrow exception to the earlier no-old-owner-field-defaults rule, not a general
+Core compatibility parser, schema fallback or request-format downgrade.
+Configuration still defaults auto_history to true; an absent response bool
+uses the requested serde default false, not an inferred owner setting.

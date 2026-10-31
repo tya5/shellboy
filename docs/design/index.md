@@ -275,3 +275,17 @@ object with items, auto_history, degraded and scope_status; when disabled it
 warns that only already-indexed sources are searched and newer sources may be
 missing, even for empty results. History-scoped semantic/hybrid RAG similarly
 warns via its existing degraded/scope_status fields. Keyword search is unchanged.
+
+
+## Held automatic work visibility (#71 review)
+
+Index status separates `held_auto_history` from `pending` when auto_history is
+false. Count only pending automatic source authorizations, current bootstrap
+inputs and jobs in the selected status spaces; automatic work is identified by
+the same `new-finalized` authorization prefix as claim admission. Explicitly
+authorized pending work remains pending, and running/failed/done counts do not
+change. Counts retain their existing queue-entry units (source authorization or
+segment input), not an invented count of unique missing nodes. An explicit
+space selection excludes pre-space authorizations/bootstrap as before. Re-enable
+or explicit reauthorization moves applicable entries back into pending without
+changing saved job state. This is read-only projection, not a new job state.

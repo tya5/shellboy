@@ -3186,7 +3186,8 @@ async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_ra
         let status = off.status(args()).await.unwrap();
         assert!(!status.auto_history);
         assert_eq!(status.done, 1);
-        assert_eq!(status.pending, 1);
+        assert_eq!(status.pending, 0);
+        assert_eq!(status.held_auto_history, 1);
         let report = off.search_report(&shellboy::protocol::HistorySearchArgs { query:"cat".into(), ..Default::default() }, CancellationToken::new()).await.unwrap();
         assert_eq!(report["auto_history"], false);
         assert_eq!(report["degraded"], true);
@@ -3241,7 +3242,9 @@ async fn auto_history_off_holds_bootstrap_until_explicit_backfill() {
         let off = IndexService::new(f.db.clone(), Arc::new(config));
         assert!(!off.process_one(CancellationToken::new()).await.unwrap());
         assert_eq!(f.proxy.count(), 0);
-        assert_eq!(off.status(args()).await.unwrap().pending, 1);
+        let held = off.status(args()).await.unwrap();
+        assert_eq!(held.pending, 0);
+        assert_eq!(held.held_auto_history, 1);
         let empty = off
             .search_report(
                 &shellboy::protocol::HistorySearchArgs {
@@ -3265,4 +3268,130 @@ async fn auto_history_off_holds_bootstrap_until_explicit_backfill() {
     })
     .await
     .expect("held bootstrap watchdog");
+}
+
+#[tokio::test]
+async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        let f = Fixture::new(Config::default()).await;
+        f.node("bootstrap", "cat bootstrap").await;
+        f.service.enqueue_new(&["bootstrap".into()]).await.unwrap();
+        f.node("admission", "cat source authorization").await;
+        let service = f.service.clone();
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            service.authorize_new_tx(&tx, &["admission".into()])?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let mut config = (*f.config).clone();
+        config.indexing.auto_history = false;
+        let off = IndexService::new(f.db.clone(), Arc::new(config));
+        let on = f.service.status(args()).await.unwrap();
+        assert_eq!((on.pending, on.held_auto_history), (2, 0));
+        let held = off.status(args()).await.unwrap();
+        assert_eq!((held.pending, held.held_auto_history), (0, 2));
+        assert!(!off.process_one(CancellationToken::new()).await.unwrap());
+        assert_eq!(f.proxy.count(), 0);
+
+        let mut selected = args();
+        selected.source_ids = vec!["bootstrap".into()];
+        off.backfill(selected).await.unwrap();
+        let explicit_bootstrap = off.status(args()).await.unwrap();
+        assert_eq!(
+            (
+                explicit_bootstrap.pending,
+                explicit_bootstrap.held_auto_history
+            ),
+            (1, 1)
+        );
+        while off.process_one(CancellationToken::new()).await.unwrap() {}
+        assert_eq!(f.proxy.count(), 1);
+        f.node("job", "cat automatic job").await;
+        f.service.enqueue_new(&["job".into()]).await.unwrap();
+        f.node("explicit", "cat explicit job").await;
+        let mut selected = args();
+        selected.source_ids = vec!["explicit".into()];
+        off.backfill(selected).await.unwrap();
+        let mixed = off.status(args()).await.unwrap();
+        assert_eq!(
+            (mixed.pending, mixed.held_auto_history, mixed.done),
+            (1, 2, 1)
+        );
+        for (state, running, failed) in [("running", 1, 0), ("failed", 0, 1)] {
+            f.db.call(move |db| {
+                db.execute(
+                    "UPDATE embedding_job SET state=?1 WHERE source_node_id='job'",
+                    [state],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+            let projected = off.status(args()).await.unwrap();
+            assert_eq!(
+                (
+                    projected.pending,
+                    projected.held_auto_history,
+                    projected.running,
+                    projected.failed
+                ),
+                (1, 1, running, failed)
+            );
+        }
+        f.db.call(|db| {
+            db.execute(
+                "UPDATE embedding_job SET state='pending' WHERE source_node_id='job'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let on = f.service.status(args()).await.unwrap();
+        assert_eq!((on.pending, on.held_auto_history), (3, 0));
+        let selected_space = off
+            .status(IndexArgs {
+                space_id: mixed.space_id,
+                ..args()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            (selected_space.pending, selected_space.held_auto_history),
+            (1, 1)
+        );
+        assert_eq!(
+            f.proxy.count(),
+            1,
+            "status observation must not send embeddings"
+        );
+        while off.process_one(CancellationToken::new()).await.unwrap() {}
+        let settled = off.status(args()).await.unwrap();
+        assert_eq!(
+            (settled.pending, settled.held_auto_history, settled.done),
+            (0, 2, 2)
+        );
+        assert_eq!(f.proxy.count(), 2);
+        let mut selected = args();
+        selected.source_ids = vec!["admission".into(), "job".into()];
+        off.backfill(selected).await.unwrap();
+        let reauthorized = off.status(args()).await.unwrap();
+        assert_eq!(
+            (reauthorized.pending, reauthorized.held_auto_history),
+            (2, 0)
+        );
+        while off.process_one(CancellationToken::new()).await.unwrap() {}
+        let finished = off.status(args()).await.unwrap();
+        assert_eq!(
+            (finished.pending, finished.held_auto_history, finished.done),
+            (0, 0, 4)
+        );
+        assert_eq!(f.proxy.count(), 4);
+        f.close().await;
+    })
+    .await
+    .expect("held index-status watchdog");
 }

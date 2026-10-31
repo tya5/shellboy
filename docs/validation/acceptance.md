@@ -3462,3 +3462,35 @@ Record audit against the new base `a5a08b1`: status 1289 -> 1298
 The complete previous status body and byte-for-byte acceptance prefix remain;
 no historical evidence or role heading is replaced. Exact-source native CI is
 recorded in issue #73 separately from these local checks.
+
+
+## Held automatic-index status and wire defaults (#71 Low review)
+
+2026-10-31, native macOS ARM64 / Rust 1.99.1, based on main 7393ccb.
+`cargo test --locked --test integration index::auto_history -- --nocapture`
+passes 2 tests; `cargo test --locked --test integration protocol::index_status_additive`
+passes 1. The mixed fixture contains a pending source authorization, bootstrap
+input, automatic vector job and explicit work. On/off projections distinguish
+pending from held_auto_history, including selected-space exclusion of pre-space
+metadata. Explicit reauthorization moves applicable entries back into pending;
+completion yields zero held and pending entries. Synthetic running/failed rows
+retain their counters. Status observations do not increment the loopback proxy's
+request count; only the four explicitly authorized inputs send requests.
+The existing automatic-off/bootstrap regressions are retained, with held entries
+now asserted separately instead of as pending. All async additions have only a
+60-second watchdog, no latency condition or short negative observation window.
+
+Wire tests cover omitted/default fields, explicit true/false and nonzero held
+counts, round-trip output and invalid value rejection. Configuration still
+defaults true; missing response fields use only the explicitly requested serde
+defaults, not a fabricated observation of an old owner's effective policy.
+Unrelated required fields remain required. D-016's accepted HistorySearch object
+shape is unchanged. No real provider/user data, installed binary, owner restart,
+new worker, queue, schema or timing suppression is used. Full standard checks,
+final rebased source and native main CI remain independent gates.
+
+The full local `RUST_TEST_THREADS=2 sh scripts/check.sh` passes: 1751 / 0 / 32 passed/failed/ignored,
+layout93, Python9, fmt and strict all-target Clippy. Rebase and ordinary native
+main CI remain separate gates. Record audit against starting main7393ccb:
+status1298->1310, acceptance3464->3496; both original byte prefixes
+are preserved, with zero deleted lines in either historical record.

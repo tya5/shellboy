@@ -1296,3 +1296,15 @@ to change its default later, not whether to remove embedding configuration.
 Native mock tests and full standard check pass; actual usefulness still needs
 the post-rollout week. Active-index-only deletion has no existing CLI; the guide
 states inactive-space GC limits rather than recommending unsafe DB deletion.
+
+
+## Index-status review follow-up (#71)
+
+IndexStatus defaults its additive policy fields on decode only (auto_history
+false, held_auto_history zero); actual owner configuration remains default true.
+Status separates automatic pending authorizations/bootstrap/jobs held by the off
+policy into held_auto_history, leaving explicit pending and running/failed/done
+unchanged. Space selection retains its prior scope. No queue/schema/worker,
+indexing admission, history-search output shape or installed binary is changed.
+Focused mock and wire tests pass; final standard/rebased and native CI are
+separate gates. Existing seven-day observation remains a reviewer rollout task.
