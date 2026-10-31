@@ -321,9 +321,9 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     let observations = progress.clone();
     let mut initializer = runtime.spawn(async move {
         let result =
-            shellboy::frontend::startup::initialize(cli.config, cli.data_dir, token, observations)
+            shellboy::owner_session::initialize(cli.config, cli.data_dir, token, observations)
                 .await;
-        shellboy::frontend::startup::deliver(result, send).await;
+        shellboy::owner_session::deliver(result, send).await;
     });
     let prepared = loop {
         match shellboy::ui::startup::wait_with_termination(
@@ -341,7 +341,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
                 pending = receive;
                 initializer = runtime.spawn(async move {
                     let result = prepared.shutdown().await.map(|_| None);
-                    shellboy::frontend::startup::deliver(result, send).await;
+                    shellboy::owner_session::deliver(result, send).await;
                 });
             }
             Ok(result) => break result,
@@ -374,7 +374,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             return print_error(error, None);
         }
     };
-    let shellboy::frontend::startup::Prepared {
+    let shellboy::owner_session::Prepared {
         owner,
         control,
         server,

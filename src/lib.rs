@@ -24,6 +24,7 @@ pub mod ipc;
 mod json_pointer;
 pub mod memory;
 pub mod model;
+pub mod owner_session;
 pub mod presentation;
 pub mod program_status;
 pub mod protocol;
