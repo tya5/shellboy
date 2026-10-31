@@ -181,9 +181,15 @@ impl ThreadView {
                 _ => continue,
             };
             count += 1;
-            started = Some(started.map_or(send.started_at, |at: Instant| at.min(send.started_at)));
-            if stage.is_none() || phase == activity::ActivityPhase::Sending {
+            if stage.is_none()
+                || (stage != Some(activity::ActivityPhase::Sending)
+                    && phase == activity::ActivityPhase::Sending)
+            {
                 stage = Some(phase);
+                started = Some(send.started_at);
+            } else if stage == Some(phase) {
+                started =
+                    Some(started.map_or(send.started_at, |at: Instant| at.min(send.started_at)));
             }
         }
         stage.map(|phase| (phase, count, started.expect("a pending send has a clock")))
@@ -1623,6 +1629,15 @@ impl ThreadView {
                 ))
         {
             return false;
+        }
+        if pending.status == ReceiptStatus::Accepting
+            && matches!(
+                status,
+                ReceiptStatus::Accepted | ReceiptStatus::Preparing | ReceiptStatus::Completed
+            )
+            && let Some(send) = &mut pending.send
+        {
+            send.started_at = Instant::now();
         }
         pending.status = status.clone();
         pending.message = message.clone();
@@ -3467,5 +3482,64 @@ mod received_window_retention_tests {
         assert!(paused.provisional_nodes.contains("paid-b"));
         assert!(!paused.provisional_nodes.contains("paid-a1"));
         assert!(!paused.provisional_nodes.contains("paid-a2"));
+    }
+}
+
+#[cfg(test)]
+mod footer85_tests {
+    use super::*;
+    #[test]
+    fn send_stage_age_does_not_use_older_reflection_and_duplicate_ack_does_not_reset() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let draft = ui.view().draft.clone();
+        let now = Instant::now();
+        let old = now - Duration::from_secs(120);
+        let recent = now - Duration::from_secs(5);
+        for (revision, status, at) in [
+            (1, ReceiptStatus::Accepted, old),
+            (2, ReceiptStatus::Accepting, recent),
+        ] {
+            ui.active_view_mut().pending.insert(
+                revision,
+                PendingSend {
+                    command_cleared: None,
+                    snapshot: draft.clone(),
+                    status,
+                    message: None,
+                    source_node_id: None,
+                    operation_id: None,
+                    send: Some(SendProgress {
+                        started_at: at,
+                        reflected: false,
+                    }),
+                },
+            );
+        }
+        assert_eq!(
+            ui.view().sending(),
+            Some((activity::ActivityPhase::Sending, 2, recent))
+        );
+        let view = ui.active_view_mut();
+        view.on_receipt(
+            draft.draft_id.clone(),
+            2,
+            None,
+            ReceiptStatus::Accepted,
+            None,
+        );
+        let observed = view.pending[&2].send.as_ref().unwrap().started_at;
+        assert_ne!(observed, recent);
+        view.on_receipt(
+            draft.draft_id.clone(),
+            2,
+            None,
+            ReceiptStatus::Accepted,
+            None,
+        );
+        assert_eq!(view.pending[&2].send.as_ref().unwrap().started_at, observed);
+        assert_eq!(
+            view.sending(),
+            Some((activity::ActivityPhase::Reflecting, 2, old))
+        );
     }
 }

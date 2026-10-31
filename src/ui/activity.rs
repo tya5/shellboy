@@ -151,7 +151,7 @@ pub(super) struct ActivityView {
     early_receive: Option<ReceiveObservation>,
     clock: Option<ObservedClock>,
     phase_clock: Option<PhaseClock>,
-    snapshot_at: Option<Instant>,
+    request_clock: Option<PhaseClock>,
 }
 impl ActivityView {
     #[cfg(test)]
@@ -163,7 +163,6 @@ impl ActivityView {
             return false;
         }
         self.epoch = Some(epoch);
-        self.snapshot_at = Some(at);
         if self.snapshot.as_ref().is_none_or(|previous| {
             previous.run_id != snapshot.run_id || previous.turn_id != snapshot.turn_id
         }) {
@@ -217,6 +216,8 @@ impl ActivityView {
         self.snapshot = Some(snapshot);
         let previous_clock = self.phase_clock.take();
         self.phase_clock = PhaseClock::observe(self, previous_clock, at);
+        let previous_request = self.request_clock.take();
+        self.request_clock = PhaseClock::request(self, previous_request, at);
         changed
     }
     pub fn unavailable_at(&mut self, epoch: u64, at: Instant) -> bool {
@@ -225,6 +226,7 @@ impl ActivityView {
         }
         self.epoch = Some(epoch);
         self.phase_clock = None;
+        self.request_clock = None;
         self.early_receive = None;
         let had_receive = self.receive.take().is_some();
         if let Some(clock) = &mut self.clock {
@@ -305,6 +307,8 @@ impl ActivityView {
         self.received_attempt = Some(attempt.into());
         let previous_clock = self.phase_clock.take();
         self.phase_clock = PhaseClock::observe(self, previous_clock, at);
+        let previous_request = self.request_clock.take();
+        self.request_clock = PhaseClock::request(self, previous_request, at);
         was_visible || before != self.phase() || before_secondary != self.secondary_phase()
     }
 
@@ -315,7 +319,7 @@ impl ActivityView {
         let s = self.snapshot.as_ref()?;
         (self.phase() == ActivityPhase::Tools && s.phase == ActivityPhase::AwaitingModel).then(
             || {
-                if self.received_attempt == s.attempt_id {
+                if s.attempt_id.is_some() && self.received_attempt == s.attempt_id {
                     ActivityPhase::Receiving
                 } else {
                     ActivityPhase::AwaitingModel
@@ -326,36 +330,13 @@ impl ActivityView {
 
     pub fn secondary_note(&self, at: Instant) -> Option<String> {
         let phase = self.secondary_phase()?;
-        let snapshot = self.snapshot.as_ref()?;
-        let time = if phase == ActivityPhase::Receiving {
-            self.receive.as_ref().map(|r| {
-                format!(
-                    "{}{}s",
-                    FooterText::Observed.text(),
-                    at.saturating_duration_since(r.first_at).as_secs()
-                )
-            })
-        } else {
-            snapshot
-                .timing
-                .attempt_started_at
-                .as_ref()
-                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                .zip(snapshot.timing.wall_at)
-                .zip(self.snapshot_at)
-                .and_then(|((start, wall), observed)| {
-                    wall.signed_duration_since(start).to_std().ok().map(|base| {
-                        format!(
-                            "{}s",
-                            base.saturating_add(at.saturating_duration_since(observed))
-                                .as_secs()
-                        )
-                    })
-                })
-        };
-        Some(time.map_or_else(
-            || phase.label().to_owned(),
-            |time| format!("{} · {time}", phase.label()),
+        Some(format!(
+            "{} · {}",
+            phase.label(),
+            self.request_clock.as_ref().map_or_else(
+                || FooterText::UnknownAge.text().to_owned(),
+                |clock| clock.note(at)
+            )
         ))
     }
 

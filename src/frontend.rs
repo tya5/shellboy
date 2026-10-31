@@ -3073,7 +3073,12 @@ async fn run_with_delivery(
                     }
                 }
                 Ok(EngineEvent::Error { thread_id, error }) => {
-                    status(&updates, Some(thread_id), error).await
+                    if activity::saved_execution_recovery(&error) {
+                        // Saved execution recovery owns its reactive footer, not an operation notice.
+                        dirty_threads.insert(thread_id);
+                    } else {
+                        status(&updates, Some(thread_id), error).await;
+                    }
                 }
                 Ok(EngineEvent::Notice { thread_id, foreground_release, cancelled_calls }) => {
                     let release = foreground_release.as_ref().map(|(execution, reason)| (execution.as_str(), *reason));

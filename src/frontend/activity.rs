@@ -59,6 +59,15 @@ fn model_failure_message(
     );
     (message == format!("{model}{suffix}")).then(|| format!("{}{suffix}", model.message))
 }
+pub(super) fn saved_execution_recovery(error: &ApiError) -> bool {
+    !error.is_storage_failure()
+        && (error.code == crate::protocol::ErrorCode::ConfigInvalid
+            || error
+                .details
+                .as_ref()
+                .is_some_and(|d| d.get("recovery").is_some_and(serde_json::Value::is_object)))
+}
+
 impl Projection {
     pub fn label(&self) -> &'static str {
         self.snapshot.phase.label()
@@ -537,5 +546,34 @@ mod footer85_tests {
             serde_json::from_str::<ApiError>(&original).unwrap().message,
             reason.message
         );
+    }
+}
+
+#[cfg(test)]
+mod recovery_notice_tests {
+    use super::*;
+    #[test]
+    fn only_saved_execution_errors_defer_to_reactive_projection() {
+        use crate::protocol::ErrorCode;
+        assert!(!saved_execution_recovery(&ApiError::new(
+            ErrorCode::IoFailed,
+            "unclassified"
+        )));
+        assert!(saved_execution_recovery(
+            &ApiError::new(ErrorCode::IoFailed, "saved")
+                .details(serde_json::json!({"recovery":{}}))
+        ));
+        assert!(!saved_execution_recovery(
+            &ApiError::new(ErrorCode::SaveFailed, "storage")
+                .details(serde_json::json!({"recovery":{}}))
+        ));
+        assert!(saved_execution_recovery(&ApiError::new(
+            ErrorCode::ConfigInvalid,
+            "configuration"
+        )));
+        assert!(!saved_execution_recovery(
+            &ApiError::new(ErrorCode::IoFailed, "bad type")
+                .details(serde_json::json!({"recovery":"untrusted text"}))
+        ));
     }
 }
