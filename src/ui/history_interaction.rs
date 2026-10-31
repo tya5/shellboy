@@ -1074,6 +1074,8 @@ mod description_original_identity_tests {
     #[test]
     fn described_original_targets_exact_call_source_not_adjacent_result() {
         let mut ui = UiState::new(&crate::config::Config::default(), std::env::temp_dir());
+        ui.active_view_mut().scroll.width = 80;
+        ui.active_view_mut().scroll.height = 24;
         let tools = ["a", "b"].map(|call| ToolPresentation {
             group_id: Some("g".into()),
             call_id: call.into(),
