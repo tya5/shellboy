@@ -67,28 +67,33 @@ fn window(a: &UsageGetArgs, saved: Option<&Scan>) -> Result<crate::readback::Win
 struct Scan {
     since: String,
     until: String,
-    after: (i64, u32, String),
+    after: i64,
     group_offset: usize,
     continued: bool,
 }
 fn query() -> String {
-    let sec = include_str!("../readback/time-seconds.sql").trim().replace("{{time}}", "started_at");
-    let nano = include_str!("../readback/time-nanos.sql").trim().replace("{{time}}", "started_at");
-    // Scope and deletion filtering follow this finite time-index window. Even a
-    // selective scope cannot cause an unbounded search through unrelated rows.
+    // Page by the existing primary rowid before time/scope filtering: even an
+    // empty period cannot make one request walk the full attempt table.
+    let source = "CASE WHEN a.started_at>=?1 AND a.started_at<?2 THEN a.usage_json END";
     format!("WITH candidates AS MATERIALIZED (
-        SELECT id,{sec} sec,{nano} nano FROM model_attempt INDEXED BY attempt_started_readback
-        WHERE ({sec})>=?1 AND ({sec})<=?3 AND ({sec},{nano})>=(?1,?2)
-          AND ({sec},{nano})<(?3,?4) AND ({sec},{nano},id)>(?5,?6,?7)
-          AND rowid<=?8 ORDER BY {sec},{nano},id LIMIT {}
-        ) SELECT c.sec,c.nano,a.id,a.turn_id,u.run_id,u.thread_id,t.deleted_at,
-            a.state,a.started_at,a.ended_at,{}
+        SELECT rowid scan_id,id FROM model_attempt WHERE rowid>?3 AND rowid<=?4
+        ORDER BY rowid LIMIT {}
+        ) SELECT c.scan_id,a.id,a.turn_id,u.run_id,u.thread_id,t.deleted_at,
+            a.state,a.started_at,a.ended_at,
+            CASE WHEN a.started_at>=?1 AND a.started_at<?2 THEN 1 ELSE 0 END,{}
         FROM candidates c JOIN model_attempt a ON a.id=c.id
         JOIN turn u ON u.id=a.turn_id JOIN thread t ON t.id=u.thread_id
-        ORDER BY c.sec,c.nano,c.id", ROW_LIMIT + 1, usage::sql_projection("a.usage_json"))
+        ORDER BY c.scan_id", ROW_LIMIT + 1, usage::sql_projection(source))
 }
+fn saved_utc(raw: Option<&str>) -> Option<DateTime<Utc>> {
+    let raw = raw?;
+    if raw.len()>64 || !raw.ends_with("+00:00") { return None; }
+    DateTime::parse_from_rfc3339(raw).ok().map(|v|v.with_timezone(&Utc))
+}
+
 struct Row {
-    key: (i64, u32, String),
+    key: i64,
+    id: String,
     turn: String,
     run: String,
     thread: String,
@@ -96,6 +101,7 @@ struct Row {
     state: String,
     started: Option<String>,
     ended: Option<String>,
+    in_range: bool,
     usage: usage::StandardUsage,
 }
 #[derive(Default)]
@@ -128,7 +134,7 @@ impl Group {
         if !terminal { return; }
         if let Some(input) = u.input_tokens {
             self.inputs.push(input);
-            let id = &row.key.2;
+            let id = &row.id;
             let replace = self.max_input.as_ref().is_none_or(|(n, r)| input > *n || (input == *n && id.as_str() < r["attempt_id"].as_str().unwrap_or("")));
             if replace {
                 self.max_input = Some((input, json!({"attempt_id":id,"turn_id":row.turn,"run_id":row.run,"thread_id":row.thread})));
@@ -167,12 +173,13 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     validate(a)?;
     let started = std::time::Instant::now();
     let mut filter_args = a.clone(); filter_args.cursor = None;
-    let filter = format!("{:x}", Sha256::digest(serde_json::to_vec(&(instance, &filter_args)).unwrap()));
+    let filter = Sha256::digest(serde_json::to_vec(&(instance, &filter_args)).unwrap())
+        .iter().map(|b| format!("{b:02x}")).collect::<String>();
     let cursor = a.cursor.as_deref().map(|s| PageCursor::decode(s, "usage.groups", &filter, 0, None)).transpose()?;
     let saved: Option<Scan> = cursor.as_ref().map(|c| serde_json::from_str(&c.last_sort_key).map_err(|_| expired())).transpose()?;
     let w = window(a, saved.as_ref())?;
     let mut scan = saved.unwrap_or_else(|| Scan { since:w.since.unwrap().to_rfc3339(),until:w.until.unwrap().to_rfc3339(),
-        after:(i64::MIN,0,String::new()),group_offset:0,continued:false });
+        after:0,group_offset:0,continued:false });
     if scan.group_offset > ROW_LIMIT { return Err(expired()); }
     let watermark = match &cursor {
         Some(c) => i64::try_from(c.watermark).map_err(|_| expired())?,
@@ -182,18 +189,25 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         else if let Some(id) = &a.run_id { Some(Scope::Run(id.clone())) }
         else { a.thread_id.as_ref().map(|id| Scope::Thread { id:id.clone(),children:a.include_children }) };
     let selection = scope.as_ref().map(|s| selection(db, s, &mut Trace::default())).transpose()?;
-    let (ls,ln) = w.lower(); let (us,un) = w.upper();
+    // Coarse whole-second string bounds include both fractional boundary
+    // seconds. The bounded Rust pass validates UTC and exact [since,until).
+    let lower = w.since.unwrap().format("%Y-%m-%dT%H:%M:%S").to_string();
+    let upper = w.until.unwrap().checked_add_signed(Duration::seconds(1))
+        .ok_or_else(|| invalid("invalid upper period"))?.format("%Y-%m-%dT%H:%M:%S").to_string();
     let mut statement = db.prepare(&query()).map_err(error)?;
-    let mut rows = statement.query_map(params![ls,ln,us,un,scan.after.0,scan.after.1,scan.after.2,watermark], |r| Ok(Row {
-        key:(r.get(0)?,r.get(1)?,r.get(2)?), turn:r.get(3)?,run:r.get(4)?,thread:r.get(5)?,
-        deleted:r.get::<_,Option<String>>(6)?.is_some(),state:r.get(7)?,started:r.get(8)?,ended:r.get(9)?,usage:usage::StandardUsage::read(r,10)?,
+    let mut rows = statement.query_map(params![lower,upper,scan.after,watermark], |r| Ok(Row {
+        key:r.get(0)?, id:r.get(1)?,turn:r.get(2)?,run:r.get(3)?,thread:r.get(4)?,
+        deleted:r.get::<_,Option<String>>(5)?.is_some(),state:r.get(6)?,started:r.get(7)?,ended:r.get(8)?,in_range:r.get(9)?,usage:usage::StandardUsage::read(r,10)?,
     })).map_err(error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(error)?;
     let row_more = rows.len() > ROW_LIMIT; rows.truncate(ROW_LIMIT);
-    let scanned = rows.len(); let tail = rows.last().map(|r| r.key.clone());
+    let scanned = rows.len(); let tail = rows.last().map(|r| r.key);
     let zone = offset(a.timezone.as_deref().unwrap_or("local"))?;
     let group_by = a.group_by.as_deref().ok_or_else(|| invalid("group_by required"))?;
     let mut groups = BTreeMap::<String,Group>::new(); let mut matched = 0;
+    let mut excluded_times = 0; let mut outside_period = 0;
     for row in rows {
+        let Some(at) = saved_utc(row.started.as_deref()) else { excluded_times += 1; continue; };
+        if !row.in_range || at < w.since.unwrap() || at >= w.until.unwrap() { outside_period += 1; continue; }
         if row.deleted { continue; }
         if let Some(s) = &selection {
             let matches = match s.kind { "turn" => a.turn_id.as_ref() == Some(&row.turn), "run" => a.run_id.as_ref() == Some(&row.run), _ => s.threads.contains(&row.thread) };
@@ -215,9 +229,9 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     } else { None };
     Ok(json!({"group_by":group_by,"timezone":a.timezone.as_deref().unwrap_or("local"),"requested_period":w.json(),
         "items":items,"more":more,"next_cursor":next_cursor,"scanned_candidates":scanned,"matched_attempts":matched,
-        "row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || continued,
+        "excluded_time_count":excluded_times,"outside_period_count":outside_period,"row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || continued,
         "scope_complete":selection.as_ref().is_none_or(|s|s.complete),"statistics_scope":"current_candidate_window",
-        "coverage":{"unknown_starts":"excluded","summary_and_embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}))
+        "coverage":{"unknown_starts":"excluded_time_count includes missing, malformed and non-current UTC formats","summary_and_embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}))
 }
 
 #[cfg(test)]

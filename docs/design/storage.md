@@ -2,9 +2,7 @@
 
 ## Current-only contract (Issue #33, 0.2.0)
 
-Current conversation schema is v18. Migration15 adds derived readback indexes;
-16 adds Thread observation indexes;17 adds the parent-Thread covering index;
-18 adds the bounded cross-conversation usage-start seek index. Migration12 accounts for bounded Revisit
+Current conversation schema on the F preparation branch is v16. Migration 15 adds derived readback indexes;16 adds the parent-Thread covering index. Migration12 accounts for bounded Revisit
 metadata;13 records selected-path admission;14 records Turn interruption and
 indexes drafts. The existing `tool_result_node(node_id)` index from migration2
 also covers retained result-source lookup after payload GC; the earlier #41
@@ -200,15 +198,3 @@ data-directory backup (including any SQLite WAL/SHM files) before opening it
 with the new binary. Older binaries reject schema17. Recheck main's actual
 version and migration names immediately before F admission;17 is not reserved
 against independent work. This primitive alone does not expose descendant UI.
-
-## Grouped usage seek (schema18, #101)
-
-Startup-only migration18 adds `attempt_started_readback` on model_attempt's
-normalized saved-start seconds/nanoseconds and ID, using exactly the shared
-readback time expressions (including offsets/subseconds/invalid sentinels).
-This is the single cross-conversation period-seek index; attempts_by_turn cannot
-serve that query. The index stores no usage JSON or aggregate counters. Existing
-SQLite schema ownership, WAL read snapshots, write paths and GC lifetime apply.
-No table/worker/queue is added and no saved usage row is rewritten. Query-plan,
-row/group bounds, exact scalar statistics and migration preservation tests are
-independent gates; duration is recorded only.

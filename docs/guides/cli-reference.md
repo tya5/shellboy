@@ -741,12 +741,16 @@ owner `local` time by default, or `UTC`/an explicit fixed offset (`+HH:MM` or
 accepted. Repeated local DST hours have distinct offset-bearing keys.
 
 At most 10,000 candidate attempts plus one lookahead are read per scan window,
-before scope/deletion filtering; at most 168 groups are returned (`--limit` lowers
+before time/scope/deletion filtering; at most 168 groups are returned (`--limit` lowers
 that). Repeat the same command with `--cursor NEXT_CURSOR` while `more` is true,
 even when a filtered page is empty. A cursor pages the current window's groups,
 then continues remaining candidates. `scan_truncated` means statistics cover
 only the current candidate window; a group can recur in another window. Do not
 average page percentiles or cache ratios into whole-period estimates. Cursors
 bind filters/limit/owner instance and exclude later inserts, but separate calls
-are not one persistent snapshot. `elapsed_ms` is an observation, not a pass/fail
+are not one persistent snapshot. Current saved UTC `+00:00` timestamps are
+selected by string range; missing, malformed and non-current timestamp formats
+are excluded and counted in `excluded_time_count` for each scan window. Valid
+UTC timestamps outside the period appear in `outside_period_count`.
+`elapsed_ms` is an observation, not a pass/fail
 threshold. Summary/embedding usage and monetary cost are not inferred.

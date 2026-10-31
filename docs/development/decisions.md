@@ -2575,3 +2575,13 @@ Core-review-required; no schema/table/worker expansion beyond it is proposed.
 Use local/UTC/fixed offsets without a new timezone crate; IANA-name support is
 outside this implementation and can be reconsidered with a separate dependency
 review. Max attempt references include Turn/Run/Thread so history is reachable.
+
+### #101 index proposal superseded by reviewer (2026-10-31)
+
+The schema18 expression-index proposal above is rejected. Retain schema17 and
+all existing indexes unchanged. Grouped reads instead page existing primary
+rowids before filtering, cap candidates at10,000+1, and compare UTC started_at
+strings to whole-second period bounds. The finite pass validates current UTC
+format and exact half-open fractional boundaries. Non-current/missing/malformed
+times are counted as excluded, never inferred. Only measured evidence may justify
+a separate proposal for a plain started_at index; no such index is implemented.

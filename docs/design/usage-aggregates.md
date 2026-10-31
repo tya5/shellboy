@@ -83,11 +83,14 @@ and bounded existing descendant selection remain available.
 
 The saved-start interval is half-open, defaults to the last 24 hours, and cannot
 exceed 31 days. Unknown starts are excluded. Each scan page reads at most 10,000
-indexed time-ordered candidates plus one lookahead, before scope/deletion filters;
-JSON projection and retained samples are bounded by that page. One derived
-normalized attempt-start index (schema18) is necessary because attempts_by_turn
-cannot seek a cross-conversation period. It contains no usage bytes; startup
-migration owns creation and SQLite owns its lifetime. No table, worker, queue,
+candidates plus one lookahead in existing primary-rowid order, before time/scope/
+deletion filters. UTC `started_at` string ranges gate scalar JSON extraction;
+the bounded pass validates current UTC format and exact fractional boundaries.
+Missing/malformed/non-current time formats increment `excluded_time_count`;
+valid UTC rows outside the interval increment `outside_period_count`.
+No migration or index is added. A plain started_at index may be proposed only
+with measured row/VM-work evidence and separate approval. JSON projection and
+retained samples are bounded by the candidate page. No table, worker, queue,
 producer hook or persistent aggregate is added.
 
 Responses contain at most 168 groups (default168, `--limit` can lower it).

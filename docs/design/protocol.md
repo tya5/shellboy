@@ -436,5 +436,6 @@ group/scan cursor, page-local statistics, unknown coverage and max-attempt
 references are defined in [usage aggregates](usage-aggregates.md#bounded-grouped-cli-readback-101).
 The response exposes `items`, `more`, `next_cursor`, `requested_period`,
 `scanned_candidates`, `matched_attempts`, `scan_truncated`, `scope_complete`,
-`statistics_scope`, coverage and observed `elapsed_ms`. No receipt or new lifecycle
+`statistics_scope`, `excluded_time_count`, `outside_period_count`, coverage and
+observed `elapsed_ms`. No migration/index is added. No receipt or new lifecycle
 state is created. Existing ungrouped response shape is unchanged.

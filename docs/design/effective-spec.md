@@ -37,10 +37,9 @@ watchdogs remain unchanged.
 
 ## Current conversation storage
 
-Conversation schema18 records selected-path admission (13), Turn interruption
+Conversation schema17 records selected-path admission (13), Turn interruption
 and draft indexes (14), derived readback indexes (15), and bounded Thread
-observation lookup indexes (16), the F parent lookup index (17), and the bounded
-grouped-usage period seek (18); standalone RAG remains schema3. The existing migration2
+observation lookup indexes (16), and the F parent lookup index (17); standalone RAG remains schema3. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;
 no new index/migration is required for that B+C query. F separately requires
 the parent index; see [storage](storage.md). Historical version

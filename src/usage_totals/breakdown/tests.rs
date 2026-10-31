@@ -11,7 +11,7 @@ fn fixture() -> Connection {
     db
 }
 fn insert(db: &Connection, id: &str, thread: &str, at: &str, state: &str, usage: Option<&str>) {
-    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?2,0,0,'p','m',0,?3,'{}',?4,?5,?5)",params![id,thread,state,usage,at]).unwrap();
+    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?2,0,0,'p','m',0,?3,'{}',?4,?5,?5)",params![id,thread,state,usage,DateTime::parse_from_rfc3339(at).map(|v|v.with_timezone(&Utc).to_rfc3339()).unwrap_or_else(|_|at.into())]).unwrap();
 }
 fn args(group: &str) -> UsageGetArgs {
     UsageGetArgs { group_by:Some(group.into()),timezone:Some("UTC".into()),
@@ -49,6 +49,8 @@ fn exact_statistics_periods_states_unknowns_and_read_only_counts() {
     assert_eq!(value["items"][1]["model_attempts"]["failed"]["input_tokens"]["known_sum"],300);
     assert!(value["items"][1]["cache"]["ratio"].is_null());
     assert_eq!(value["more"],false);
+    assert_eq!(value["excluded_time_count"],1);
+    assert_eq!(value["outside_period_count"],2);
     eprintln!("usage101 synthetic exact stats elapsed_ms={}",value["elapsed_ms"]);
 }
 #[test]
@@ -131,13 +133,12 @@ fn maximum_groups_and_validation_bounds() {
     let mut a=args("thread");a.group_by=None;assert!(validate(&a).is_err());
 }
 #[test]
-fn start_index_query_plan_and_schema_18_definition_match() {
+fn existing_rowid_query_plan_and_bounded_scan_counts() {
     let db=fixture();
-    let plan=db.prepare(&format!("EXPLAIN QUERY PLAN {}",query())).unwrap().query_map(params![1793404800_i64,0,1793491200_i64,0,i64::MIN,0,"",i64::MAX],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap().join("\n");
-    assert!(plan.contains("SEARCH model_attempt USING INDEX attempt_started_readback"),"{plan}");
+    let plan=db.prepare(&format!("EXPLAIN QUERY PLAN {}",query())).unwrap().query_map(params!["2026-10-31T00:00:00","2026-11-01T00:00:01",0,i64::MAX],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap().join("\n");
+    assert!(plan.contains("SEARCH model_attempt USING INTEGER PRIMARY KEY"),"{plan}");
     assert!(!plan.contains("SCAN model_attempt"),"{plan}");
-    let actual:String=db.query_row("SELECT sql FROM sqlite_master WHERE name='attempt_started_readback'",[],|r|r.get(0)).unwrap();
-    assert!(include_str!("../../../migrations/0018_usage_breakdown.sql").contains(&actual));
+    assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),17);
 }
 
 #[test]
@@ -152,4 +153,27 @@ fn descendants_overflow_and_unreported_input_are_not_inferred() {
     assert!(g["model_attempts"]["completed"]["input_tokens"]["known_sum"].is_null());
     assert_eq!(g["input_per_request"]["max"],i64::MAX);assert_eq!(g["input_per_request"]["unknown_count"],1);
     assert_eq!(g["cache"]["ratio"],1.0);
+}
+
+#[test]
+fn legacy_non_utc_and_missing_times_are_counted_not_guessed() {
+    let db=fixture();
+    for id in ["offset","z","null"] {insert(&db,id,"t1","2026-10-31T00:00:00Z","completed",None);}
+    db.execute("UPDATE model_attempt SET started_at='2026-10-31T09:00:00+09:00' WHERE id='offset'",[]).unwrap();
+    db.execute("UPDATE model_attempt SET started_at='2026-10-31T00:00:00Z' WHERE id='z'",[]).unwrap();
+    db.execute("UPDATE model_attempt SET started_at=NULL WHERE id='null'",[]).unwrap();
+    let v=read(&db,&args("thread"),"f").unwrap();
+    assert_eq!(v["excluded_time_count"],3);assert_eq!(v["scanned_candidates"],3);
+    assert!(v["items"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn fractional_boundaries_are_exact_after_coarse_utc_string_comparison() {
+    let db=fixture();
+    for (id,at) in [("whole","2026-10-31T00:00:00+00:00"),("low","2026-10-31T00:00:00.1+00:00"),("inside","2026-10-31T00:00:00.100000001+00:00"),("high","2026-10-31T00:00:00.2+00:00")] {
+        insert(&db,id,"t1",at,"completed",Some("{\"input_tokens\":10}"));
+    }
+    let mut a=args("thread");a.since=Some("2026-10-31T00:00:00.1Z".into());a.until=Some("2026-10-31T00:00:00.2Z".into());
+    let v=read(&db,&a,"f").unwrap();assert_eq!(v["matched_attempts"],2);assert_eq!(v["outside_period_count"],2);
+    assert_eq!(v["items"][0]["model_attempts"]["completed"]["input_tokens"]["known_sum"],20);
 }

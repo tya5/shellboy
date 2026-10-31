@@ -6960,3 +6960,8 @@ writer dispatch, schema17->18 row preservation/reopen and indexed EXPLAIN are
 separate assertions. Runtime/standard results are not yet available. Durations
 are observations only. No API/provider/user-data/installed-binary changes or
 TUI changes are included; no new table/worker/queue is introduced.
+
+#101 review update supersedes the pending index/migration plan: no schema change
+or new index remains. The upgrade fixture is removed; query-plan/count gates now
+require existing primary-rowid range access, bounded candidates and explicit
+excluded/malformed/non-current time counts. No prior Rust test result exists.

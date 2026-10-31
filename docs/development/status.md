@@ -3318,3 +3318,8 @@ Schema18 adds one justified derived period-seek index. Synthetic exact numbers,
 unknowns/states/scopes, row/group caps, cursor scope/watermark, EXPLAIN, upgrade
 preservation, CLI and writer-held dispatch coverage are authored. Rust remains
 unrun pending the shared-slot grant; no performance or native-OS claim yet.
+
+#101 review update: schema18/index and upgrade fixture are withdrawn, not shipped.
+Use current UTC started_at string comparisons over capped primary-rowid pages;
+report excluded-time/outside-period counts. Added query-plan/count proof without
+new schema objects. Rust qualification is still pending the assigned shared slot.
