@@ -5518,3 +5518,38 @@ the old CI lacks the full admission/tick trace needed to prove its exact past
 interleaving or exclude all other contributors. Standard/doc checks and final
 SHA are reported in #95. Native Windows/Linux validation on this new source is
 still an integration gate, not inferred from local success or old split runs.
+
+
+## G forms and standalone-client local checkpoint333fd9d
+
+Commits are separated by responsibility: c4bc793 (owned RAG input and its tests),
+3b16ef5 (bounded popup cache/geometry foundation),333fd9d (typed forms/client
+routing). The combined production/test source at333fd9d passes native macOS
+`cargo test --locked --lib`: **1124 passed/0 failed/15 ignored**. Actual harness
+lines verify all35 operation-form tests, all61 identities/45 owner forms/16 client
+builders, current readback/memory/settlement arguments, three owned-ingest tests
+and the scoped Docs-failure/RAG-init client-dispatch test. Initial focused passes
+were33/2fail then34/1fail: stale59/60 count assertions and an old guide caption;
+all full mapping/argument/screen assertions are retained with current61/62 and
+catalogue captions. The final full library run has no failures. Fullstandard,
+strict all-target Clippy, native form captures, current-source P3/P6 and3OS
+admission are **not yet completed** for G.
+
+The catalogue now runs in the normal UI build; the earlier G1 test-only boundary
+is superseded. F8 uses actual typed owner/standalone clients, effect markers,
+nonselectable headings, filtered/action caches, operation-specific explanation,
+field origin/discovery help and display/execute/send labels. No new Core command,
+protocol action, table, worker, queue or generic form interpreter is added.
+Input remains bounded1MiB/form and16MiB at the RAG shared boundary. Only the CLI
+wrapper reads stdin; TUI dispatch passes owned text and frozen startup paths.
+The scoped test replaces2ms polling/raw timeout with a bounded notification
+forwarder and existing test_watchdog helper; watchdog policy passes.
+
+Remaining: command/result titles still have an older independent frontend match
+and must use the typed catalogue; full popup wheel ownership/cache work is not
+qualified by this foundation. Normal-build unused helpers for that pending work
+were visible in the intermediate cargo check; do not report a strict clean check.
+General saved-inspection reactivity, shared readonly admission, Core projection/
+index rationale, actual mutable-target tests, native forms and final gates remain
+open in G1–G12. #100 overlap notice6544035614 is retained; do not overwrite its
+independent F-based fix. No G branch push/main/release/install/user-data change.

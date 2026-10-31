@@ -2612,3 +2612,16 @@ runtime forms. No successful unsupported operation or delivered-G claim is made.
 No full-standard/native-form/CI qualification is claimed for this foundation.
 #100 overlap notice6544035614 records later popup/overlay/frontend seams; retain
 its subsequent F-based fix. G remains independent and unqualified.
+
+
+## G typed forms/client checkpoint333fd9d
+
+G now connects61 operations (45 owner forms/16 standalone builders) to actual
+clients, typed effects/verbs, nonselectable action headings and field help.
+Owned RAG input, popup foundation and forms are separate commits. Native combined
+library check1124/0/15 passes, including35 forms and scoped client notification/
+RAG provenance tests; see [acceptance](../validation/acceptance.md#g-forms-and-standalone-client-local-checkpoint333fd9d).
+Fullstandard/native forms/3OS are not yet G-qualified. Next: centralize the old
+frontend result-title match, complete popup wheel/cache ownership, then saved
+reactive inspectors and the remaining G1–G12 gates. #100's independent fix must
+be retained. No G push/main/release/install/user-data change.
