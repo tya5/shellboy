@@ -205,6 +205,18 @@ mod tests {
     }
 
     #[test]
+    fn stale_owner_never_advertises_an_action_or_enables_confirmation() {
+        let mut slot = None;
+        completed_observation(&mut slot, &identity(1), success(1, ObservationKind::Models), true, false);
+        let mut current = identity(1);
+        current.target = "connection:other".into();
+        let notice = prepare_refresh_notice(slot.as_ref().unwrap(), &current, true, false, false);
+        assert_eq!(notice.freshness, Freshness::Stale);
+        assert_eq!(notice.next_action, NextAction::None);
+        assert!(!notice.confirmation_enabled);
+    }
+
+    #[test]
     fn over_budget_result_retains_previous_fact_and_pending_notice_cannot_repeat() {
         let mut slot = None;
         completed_observation(&mut slot, &identity(1), success(1, ObservationKind::StandaloneClient), true, false);

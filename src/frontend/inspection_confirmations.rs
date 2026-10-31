@@ -202,6 +202,31 @@ mod tests {
     }
 
     #[test]
+    fn valid_limit_witnesses_preserve_all_exact_targets_without_truncation() {
+        let ids = (0..200).map(|index| format!("thread:{index:03}")).collect::<Vec<_>>();
+        let exact = ids.clone();
+        let mut captured = ConfirmationCapture::prepare(identity(1), ObservationKind::Deletion,
+            Arc::new(json!({"count": 200})), DateTime::from_timestamp(1, 0).unwrap(),
+            TargetWitnesses::Known(ids)).unwrap();
+        assert_eq!(captured.targets, TargetWitnesses::Known(exact));
+        assert!(captured.metadata_bytes() <= MAX_METADATA_BYTES);
+        assert!(!invalidate_confirmation(&mut captured, Some(&["thread:999".into()])));
+        assert!(invalidate_confirmation(&mut captured, Some(&["thread:199".into()])));
+        assert!(!notice(&captured, &identity(1)).confirmation_enabled);
+    }
+
+    #[test]
+    fn excessive_result_or_identity_is_not_silently_trimmed() {
+        let mut too_long = identity(1);
+        too_long.target = "x".repeat(513);
+        assert!(ConfirmationCapture::prepare(too_long, ObservationKind::Cost, Arc::new(json!({})),
+            DateTime::from_timestamp(1, 0).unwrap(), TargetWitnesses::Known(vec![])).is_none());
+        assert!(ConfirmationCapture::prepare(identity(1), ObservationKind::Cost,
+            Arc::new(json!("x".repeat(MAX_METADATA_BYTES))), DateTime::from_timestamp(1, 0).unwrap(),
+            TargetWitnesses::Known(vec!["target".into()])).is_none());
+    }
+
+    #[test]
     fn unknown_scope_and_pending_new_request_never_mean_execution_permission() {
         let captured = ConfirmationCapture::prepare(identity(1), ObservationKind::Index, Arc::new(json!({})),
             DateTime::from_timestamp(1, 0).unwrap(), TargetWitnesses::Unavailable).unwrap();
