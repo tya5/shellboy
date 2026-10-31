@@ -6965,3 +6965,13 @@ TUI changes are included; no new table/worker/queue is introduced.
 or new index remains. The upgrade fixture is removed; query-plan/count gates now
 require existing primary-rowid range access, bounded candidates and explicit
 excluded/malformed/non-current time counts. No prior Rust test result exists.
+
+#101 first allocated chain cb8aabc0 checked formatted source1be86f76/basee83047f:
+breakdown10, CLI1 and writer-held read1 passed; recorded synthetic exact/capped
+read durations2.937/67.836ms, not thresholds. Layout94/Python71/fmt passed;
+strict Clippy stopped on Command-size-driven large_enum_variant in existing UI
+enums, so the full Rust suite did not run. Static correction uses boxed slices
+only for three new optional text arguments, preserving JSON strings/null/empty
+and cursor/timezone behavior without UI/G edits or lint suppression. Regression
+assertions cover <=200byte Command and serde roundtrips; corrected source remains
+unqualified until a new explicit shared-slot check. No index/schema/migration.
