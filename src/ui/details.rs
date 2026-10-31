@@ -890,8 +890,8 @@ impl Details {
     }
     pub(super) fn hint_context(&self) -> super::key_hints::Context {
         use super::key_hints::Context;
-        if self.copy_choices.is_some() {
-            return Context::CodeChoices;
+        if let Some(choices) = &self.copy_choices {
+            return choices.hint_context();
         }
         match self.mode {
             Mode::Original if self.original.is_none() => Context::OriginalPending,

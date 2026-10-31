@@ -102,6 +102,13 @@ impl Choices {
             }
         }
     }
+    pub fn hint_context(&self) -> key_hints::Context {
+        match &self.blocks {
+            None => key_hints::Context::CodePending,
+            Some(blocks) if blocks.is_empty() => key_hints::Context::CodeBody,
+            Some(_) => key_hints::Context::CodeChoices,
+        }
+    }
     pub fn matches(&self, view: &ThreadView) -> bool {
         !self.cancel.is_cancelled() && self.owner == Owner::of(view)
     }
@@ -123,7 +130,7 @@ impl Choices {
             }
             KeyCode::Home => self.selected = 0,
             KeyCode::End => self.selected = blocks.len().saturating_sub(1),
-            KeyCode::Char('0') => {
+            code if key_hints::Action::CopyBody.matches(code) => {
                 return details::Outcome::Action(Box::new(UiAction::CopySelected {
                     node_id: self.node_id.clone(),
                     code_block: None,
@@ -153,7 +160,11 @@ impl Choices {
             area,
             "コードの塊をコピー",
             "保存された原文から取得 · 表示の折返しはコピーしません",
-            "↑↓ 選択 · Enter/c コピー · 1-9 番号でコピー\n0 本文全体 · Esc 戻る",
+            match self.hint_context() {
+                key_hints::Context::CodePending => "Esc 戻る",
+                key_hints::Context::CodeBody => "0 本文全体 · Esc 戻る",
+                _ => "↑↓ 選択 · Enter/c コピー · 1-9 番号でコピー\n0 本文全体 · Esc 戻る",
+            },
         );
         if let Some(error) = &self.error {
             popup::reader(
