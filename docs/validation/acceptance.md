@@ -5598,3 +5598,31 @@ was added. These are synthetic UI buffers/owned CLI processes and loopback only,
 not a trace of the user's original terminal geometry or real-provider behavior.
 Final standard/doc-role/bin/docs/record checks and SHA are recorded in #100;
 fresh native CI and user review remain the integration coordinator's gates.
+## #5 stage 2: terminal-free startup
+
+2026-10-31, native macOS arm64 / Rust 1.99.1. An actual child executable starts
+with stdin null and stdout/stderr piped, an explicit relative data directory,
+empty synthetic config, and bogus parent SHELLBOY data/socket/instance/origin
+values. Its ready row identifies its own absolute directory and fresh instance;
+two real read-only CLI requests succeed after EOF. A second owner on that data
+is rejected, the parent data directory is not created, and receipt/model-attempt
+counts remain 0. Captured stdout JSONL grows 0->1 row, remains 1 after repeated
+CLI reads and forced fixture cleanup; stderr remains 0. This is not a normal-
+shutdown result (stage 3 is separate).
+
+Missing/empty data, invalid serve syntax and inappropriate operation IDs produce
+0 stdout / 1 stderr JSON row without opening the inherited data directory. A
+non-UTF-8 directory cannot panic readiness serialization: startup rejects it
+and closes any acquired owner/endpoint. The latter fixture is Unix-only. All new
+process waits use the existing shared 60-second watchdog, not a speed assertion.
+The first native path assertion exposed macOS /var versus /private/var aliases;
+its expected path now uses filesystem canonical identity, not relaxed readiness.
+
+Existing driver assembly overrides each shell's data/instance/Thread/Run/Turn/
+execution/origin; Windows additionally clears an inherited Unix-only socket.
+API keys/proxy variables are not globally removed. There is no runtime global
+namespace mutation, new table, worker or queue, nor an installed-owner change.
+Exact-source standard/doc-role/bundled-guide checks and CI integration are
+reported in #5. These local startup fixtures do not qualify Windows nested Jobs,
+parent-owned shell termination, normal shutdown, all crash boundaries or a real
+provider. Later stages must establish those separately before declaring #5 done.

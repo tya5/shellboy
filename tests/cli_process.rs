@@ -555,7 +555,10 @@ async fn headless_ready_accepts_cli_after_stdin_eof_and_rejects_duplicate_owner(
         let ready: Value = serde_json::from_str(&ready_line).unwrap();
         assert_eq!(ready["event"], "ready");
         assert_eq!(ready["state"], "ready");
-        assert_eq!(ready["data_dir"], data.to_str().unwrap());
+        assert_eq!(
+            ready["data_dir"],
+            data.canonicalize().unwrap().to_str().unwrap()
+        );
         assert_ne!(ready["instance_id"], "parent-instance");
         assert_eq!(
             ready["protocol_version"],
@@ -620,6 +623,40 @@ async fn headless_ready_accepts_cli_after_stdin_eof_and_rejects_duplicate_owner(
                     .unwrap(),
                 0
             );
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn headless_non_utf8_data_directory_is_a_startup_error_not_a_json_panic() {
+    use std::os::unix::ffi::OsStringExt;
+    crate::test_watchdog::watchdog("headless non-UTF-8 startup", async {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+        let data = root
+            .path()
+            .join(std::ffi::OsString::from_vec(vec![b'd', 255]));
+        let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .args(["serve", "--data-dir"])
+            .arg(&data)
+            .arg("--config")
+            .arg(config)
+            .output()
+            .await
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        let text = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(text.lines().count(), 1, "{text}");
+        let error: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(error["ok"], false);
+        assert!(!data.join("endpoint.json").exists());
+        if data.exists() {
+            assert!(shellboy::app::OwnerLock::acquire(&data).is_ok());
         }
     })
     .await
