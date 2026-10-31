@@ -102,3 +102,17 @@ Repeated identical anchors do not reset ages; generation/attempt changes reset
 only the relevant stage. Send acceptance and reflection also have separate local
 stage ages, choosing the oldest pending item of the displayed stage rather than
 an unrelated older pending stage. Unknown or future saved times stay unknown.
+
+## Shared elapsed units and saved terminal time (#85 follow-up)
+
+All human elapsed labels use one presentation formatter, with stable unit keys:
+seconds below a minute, minutes+seconds below an hour, hours+minutes thereafter.
+Tool durations retain tenths below a minute. Stored numeric durations, source
+payloads and copy/original facts stay unchanged. Terminal footer phases append
+only the current saved Run ended_at (never observation time). Convert to the
+viewer offset captured on the presentation worker; same local date shows HH:MM,
+other dates show YYYY-MM-DD HH:MM. Missing/invalid facts explicitly say unknown.
+Formatting a later explicit redraw may age the date label without any idle timer,
+new read or unsolicited frame. Recovery/live phases do not show an older end time.
+Latest user performance policy supersedes the earlier latency/CPU admission gate:
+record measurements only; accept using virtual-clock/frame/read/job count bounds.
