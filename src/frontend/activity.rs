@@ -127,6 +127,15 @@ pub(super) fn read_tx_with_waits(
     thread: &str,
     waits: Option<&[(String, String)]>,
 ) -> Result<RawProjection, crate::storage::StorageError> {
+    read_tx_with_limit(db, thread, waits, 3)
+}
+
+pub(super) fn read_tx_with_limit(
+    db: &Connection,
+    thread: &str,
+    waits: Option<&[(String, String)]>,
+    limit: usize,
+) -> Result<RawProjection, crate::storage::StorageError> {
     let run: Option<(String, String, Option<String>,Option<String>)> = db
         .query_row(
             "SELECT id,state,stop_reason,substr(ended_at,1,128) FROM run WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
@@ -178,7 +187,7 @@ pub(super) fn read_tx_with_waits(
         tools: 0,
         cancelled: 0,
         live_work: if owned && matches!(run_state.as_str(), "live" | "stopping") {
-            Some(super::live_work::read_tx(db, run_id, waits)?)
+            Some(super::live_work::read_tx_limited(db, run_id, waits, limit)?)
         } else {
             None
         },
@@ -416,10 +425,11 @@ pub fn project(db: &Connection, thread: &str) -> Result<Projection, crate::stora
 pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiError> {
     let target = thread.to_owned();
     let waits = control.pending_wait_sources();
+    let limit = control.store.config.ui.live_work_rows;
     let result = control
         .store
         .database
-        .call(move |db| read_tx_with_waits(db, &target, waits.as_deref()))
+        .call(move |db| read_tx_with_limit(db, &target, waits.as_deref(), limit))
         .await
         .map_err(super::storage_error);
     let raw = super::checked_storage(control, result).await?;

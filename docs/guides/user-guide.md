@@ -339,11 +339,12 @@ See [Agent Guide](agent-guide.md#safety-boundary) and
 
 ## Live work above the composer
 
-Up to three oldest shells, owned child Runs and pending waits remain visible
-while the selected Run owns work, including after its answer completes. Overflow
+The `◉ 抱えている作業` section shows the oldest shells, owned child Runs and pending waits
+while the selected Run owns work, including after its answer completes. Its default
+limit is three; `ui.live_work_rows` accepts 1 through 10. Overflow
 shows a count; missing saved timing or wait evidence is not reported as zero.
-Elapsed time comes from saved start facts. Saved-output age and a newly observed
-output commit are distinguished; local clocks do not poll the database.
+Elapsed time comes from saved start facts. Last-output age uses saved or newly
+observed output; local clocks do not poll the database.
 
 Use Shift+Tab or click a work row to focus it. Space toggles a shell's bounded
 output preview, F6 opens the matching inspection form, and `o` opens a selected
@@ -352,4 +353,4 @@ nor stops the command. An open preview refreshes at most twice per second;
 large backlogs skip to a marked tail and uncertain decoding remains explicit.
 Closed/covered views and conversation switching stop that preview subscription.
 F2 keeps its existing frozen-screen behavior. Use `/status` or F8 when more than
-three work items or full saved facts are needed.
+the configured row limit or full saved facts are needed.

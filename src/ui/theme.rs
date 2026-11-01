@@ -89,6 +89,26 @@ impl Palette {
     pub(crate) fn plain(self) -> bool {
         self.no_color
     }
+    pub(crate) fn live_work(self) -> ratatui::style::Style {
+        use ratatui::style::{Modifier, Style};
+        if self.no_color || !self.rich {
+            return Style::default().add_modifier(Modifier::BOLD);
+        }
+        Style::default().fg(match self.choice {
+            crate::config::PaletteMode::Dark => Color::Indexed(45),
+            crate::config::PaletteMode::Light => Color::Indexed(24),
+        })
+    }
+    pub(crate) fn live_work_content(self) -> ratatui::style::Style {
+        use ratatui::style::Style;
+        if self.no_color || !self.rich {
+            return Style::default();
+        }
+        Style::default().fg(match self.choice {
+            crate::config::PaletteMode::Dark => Color::Indexed(223),
+            crate::config::PaletteMode::Light => Color::Indexed(58),
+        })
+    }
     pub(crate) fn muted(self) -> Color {
         if self.no_color || !self.rich {
             return Color::Reset;

@@ -1041,6 +1041,7 @@ mod tests {
                 started_at: None,
                 elapsed_base: None,
                 last_output_at: Some("saved".into()),
+                wait_info: None,
                 output_age_base: Some(Duration::from_secs(age)),
             }],
             shells: 1,

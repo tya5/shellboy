@@ -334,6 +334,13 @@ These settings provide identifiers the endpoint can use; they do not guarantee c
 
 F6 details for a completed answer show saved `usage.input_tokens_details.cached_tokens` as `入力キャッシュ` (input cache). Zero and unreported values are distinct. The UI does not infer cache hits from old records or invalid values and also displays the corresponding model request ID.
 
+## Owned work rows
+
+`ui.live_work_rows` controls how many oldest owned-work rows can be read and
+shown above the composer. It defaults to 3 and accepts integers from 1 to 10;
+other values are configuration errors. Small terminals may show fewer rows and
+report the hidden count. Restart the owner after changing the setting.
+
 ## Terminal program status
 
 `ui.program_status = "on"` (default) emits generic OSC7501 rev0.4 program status
@@ -442,7 +449,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `io` | `output_buffer_bytes=8388608`, `output_batch_bytes=65536`, `output_batch_ms=25` | Raw collection buffer 8MiB, DB batch 64KiB/25ms |
 | `workers` | `attachment=2`, `control_file=1` | Bounded file-worker counts |
 | `indexing` | `auto_history=true`, `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
-| `ui` | `max_fps=30`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"` | Rendering, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait |
+| `ui` | `max_fps=30`, `live_work_rows=3`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"` | Rendering, owned work rows, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait |
 | `logging` | `file_bytes=5242880`, `files=3` | Diagnostic logs, 5MiB ×3 |
 
 `cache.history_bytes` exclusively budgets the cross-Thread send-history conversion LRU. `body_bytes` retains UI bodies and node metadata; `layout_bytes` budgets render layouts including widths/folds; `attachment_base64_bytes` budgets converted attachments. These are not a whole-process RSS cap including active viewport/HTTP pins, SQLite/OS caches, runtime resources, or saved history. Cache eviction does not delete history; data is fetched again as needed. A zero cache budget disables retained caching, not all active working memory.

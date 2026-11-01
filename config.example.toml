@@ -53,6 +53,8 @@ clipboard_days = 7
 clipboard_bytes = 268435456
 
 [ui]
+# Maximum owned-work rows above the composer, from 1 to 10 (default 3).
+live_work_rows = 3
 # program_status = "on" # OSC7501 terminal status; "off" emits nothing.
 # Header/user surfaces: dark or light; NO_COLOR uses plain markers instead.
 palette = "dark"

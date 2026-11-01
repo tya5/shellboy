@@ -2459,17 +2459,23 @@ impl UiState {
             observed_at,
         } = update
         {
+            let live_limit = self.config.ui.live_work_rows;
             let view = self.active_view_mut();
             if view.thread_id.as_deref() != Some(&thread_id) || view.generation != generation {
                 return;
             }
             let previous_phase = view.activity.phase();
             let changed = view.activity.accept_at(epoch, snapshot, observed_at);
-            let live = view
+            let mut live = view
                 .activity
                 .snapshot
                 .as_ref()
                 .and_then(|s| s.live_work.clone());
+            if let Some(snapshot) = &mut live {
+                let hidden = snapshot.rows.len().saturating_sub(live_limit);
+                snapshot.rows.truncate(live_limit);
+                snapshot.overflow = snapshot.overflow.saturating_add(hidden as u64);
+            }
             let changed = view.live_work.accept(live, Instant::now()) || changed;
             let phase = view.activity.phase();
             if changed || phase != previous_phase {

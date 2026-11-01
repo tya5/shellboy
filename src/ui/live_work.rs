@@ -17,6 +17,17 @@ pub enum LiveWorkTarget {
         execution_id: String,
     },
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WaitInfo {
+    pub target: Option<WaitTarget>,
+    pub timeout: Option<Duration>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WaitTarget {
+    Shell(String),
+    Run(String),
+    Thread(String),
+}
 #[derive(Clone, Debug)]
 pub struct LiveWorkRow {
     pub target: LiveWorkTarget,
@@ -26,6 +37,7 @@ pub struct LiveWorkRow {
     pub started_at: Option<String>,
     pub elapsed_base: Option<Duration>,
     pub last_output_at: Option<String>,
+    pub wait_info: Option<WaitInfo>,
     pub output_age_base: Option<Duration>,
 }
 impl PartialEq for LiveWorkRow {
@@ -36,6 +48,7 @@ impl PartialEq for LiveWorkRow {
             && self.state == other.state
             && self.started_at == other.started_at
             && self.last_output_at == other.last_output_at
+            && self.wait_info == other.wait_info
     }
 }
 impl Eq for LiveWorkRow {}
@@ -134,7 +147,7 @@ impl LiveWorkView {
     pub fn accept(&mut self, snapshot: Option<LiveWorkSnapshot>, now: Instant) -> bool {
         let mut snapshot = snapshot;
         if let Some(snapshot) = &mut snapshot {
-            snapshot.rows.truncate(3);
+            snapshot.rows.truncate(10);
             for row in &mut snapshot.rows {
                 row.label = bounded(&row.label, 512);
                 row.description = crate::tool_description::label(row.description.as_deref());
@@ -176,14 +189,38 @@ impl LiveWorkView {
         if self.snapshot.is_none() {
             self.active = false;
         }
-        if self
-            .selected
-            .as_ref()
-            .is_none_or(|key| !self.rows().iter().any(|row| &row.target == key))
-        {
+        if let Some(key) = &self.selected {
+            if !self.rows().iter().any(|row| &row.target == key) {
+                let replacement = match key {
+                    LiveWorkTarget::Shell { execution_id, .. } => {
+                        let mut matches = self.rows().iter().filter(|row| matches!(
+                            &row.target, LiveWorkTarget::Wait { execution_id: id, .. } if id == execution_id
+                        ));
+                        let first = matches.next().map(|row| row.target.clone());
+                        if matches.next().is_none() { first } else { None }
+                    }
+                    LiveWorkTarget::Wait { execution_id, .. } => self.rows().iter().find(|row| matches!(
+                        &row.target, LiveWorkTarget::Shell { execution_id: id, .. } if id == execution_id
+                    )).map(|row| row.target.clone()),
+                    _ => None,
+                };
+                if let Some(replacement) = replacement {
+                    self.selected = Some(replacement);
+                }
+            }
+        } else {
             self.selected = self.rows().first().map(|row| row.target.clone());
         }
-        if self.open.as_ref().is_some_and(|id|!self.rows().iter().any(|row|matches!(&row.target,LiveWorkTarget::Shell {execution_id,..} if execution_id==id))) {self.close();}
+        if self.open.as_ref().is_some_and(|id| {
+            !self.rows().iter().any(|row| {
+                matches!(
+                    &row.target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == id
+                )
+            })
+        }) {
+            self.preview = None;
+            self.error = None;
+        }
         self.markers.retain(|id,_|self.snapshot.as_ref().is_some_and(|s|s.rows.iter().any(|row|matches!(&row.target,LiveWorkTarget::Shell {execution_id,..} if execution_id==id))));
         changed | self.advance(now)
     }
@@ -194,35 +231,37 @@ impl LiveWorkView {
         if self.snapshot.is_none() || available <= 3 {
             return 0;
         }
-        let rows = self.rows().len().clamp(1, 3) as u16;
-        let preview = if self.open.is_some() { 3 } else { 0 };
-        (rows + preview).min(available.saturating_sub(3))
+        let rows = self.rows().len().clamp(1, 10) as u16;
+        let preview = if self
+            .open
+            .as_ref()
+            .is_some_and(|id| self.visible_execution(id))
+        {
+            3
+        } else {
+            0
+        };
+        (2 + rows + preview).min(available.saturating_sub(3))
     }
     pub fn set_area(&mut self, area: Rect) {
         self.area = (area.height > 0).then_some(area);
-        self.visible_rows = self.rows().len().min(usize::from(area.height));
+        self.visible_rows = self
+            .rows()
+            .len()
+            .min(usize::from(area.height.saturating_sub(2)));
         if area.height == 0 {
             self.active = false;
         }
-        if self.selected.as_ref().is_none_or(|key| {
-            !self
-                .rows()
-                .iter()
-                .take(self.visible_rows)
-                .any(|row| &row.target == key)
-        }) {
-            self.selected = self
-                .rows()
-                .first()
-                .filter(|_| self.visible_rows > 0)
-                .map(|row| row.target.clone());
+        if self.selected.is_none() && self.visible_rows > 0 {
+            self.selected = self.rows().first().map(|row| row.target.clone());
         }
         if self
             .open
             .as_ref()
             .is_some_and(|execution| !self.visible_execution(execution))
         {
-            self.close();
+            self.preview = None;
+            self.error = None;
         }
     }
     fn visible_execution(&self, execution: &str) -> bool {
@@ -231,14 +270,8 @@ impl LiveWorkView {
     }
     fn output_age_label(&self, index: usize) -> Option<String> {
         let age = self.seconds.get(index)?.1?;
-        let observed = matches!(&self.rows().get(index)?.target,LiveWorkTarget::Shell {execution_id,..} if self.markers.contains_key(execution_id));
         Some(format!(
-            " · {}{}前",
-            if observed {
-                "出力観測"
-            } else {
-                "保存出力"
-            },
+            " · 最後の出力 {}前",
             crate::presentation::elapsed_text(age.saturating_mul(1000), false)
         ))
     }
@@ -340,7 +373,7 @@ impl LiveWorkView {
             return false;
         };
         let mut changed = false;
-        for (id, at) in markers.into_iter().take(3) {
+        for (id, at) in markers.into_iter().take(10) {
             if executions.contains(&id)
                 && self.visible_execution(&id)
                 && self.markers.get(&id).is_none_or(|old| at > *old)
@@ -394,7 +427,10 @@ impl LiveWorkView {
     }
     fn selected(&self) -> Option<&LiveWorkRow> {
         let selected = self.selected.as_ref()?;
-        self.rows().iter().find(|row| &row.target == selected)
+        self.rows()
+            .iter()
+            .take(self.visible_rows)
+            .find(|row| &row.target == selected)
     }
     fn move_focus(&mut self, down: bool) {
         let index = self
@@ -441,7 +477,8 @@ impl LiveWorkView {
             .unwrap_or_default();
         let output = self.output_age_label(0).unwrap_or_default();
         Some(format!(
-            "shell {} · 子 {} · 待機 {}{timing}{output}",
+            "{} · shell {} · 子 {} · 待機 {}{timing}{output}",
+            crate::presentation::rows::RowKind::LiveWork.spec().1,
             snapshot.shells,
             snapshot.children,
             snapshot
@@ -461,7 +498,39 @@ pub(super) fn draw(
     if area.height == 0 {
         return;
     }
-    let mut lines = vec![];
+    let hidden = view.snapshot.as_ref().map_or(0, |s| {
+        s.overflow
+            .saturating_add((s.rows.len() - view.visible_rows) as u64)
+    });
+    let hidden_label = if view.visible_rows == 0 && hidden > 0 {
+        format!(" · 他{hidden}件")
+    } else {
+        String::new()
+    };
+    let counts = view
+        .snapshot
+        .as_ref()
+        .map(|s| {
+            format!(
+                " · shell {} · 子 {} · 待機 {}",
+                s.shells,
+                s.children,
+                s.waits
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "未取得".into())
+            )
+        })
+        .unwrap_or_default();
+    let (mark, name, _) = crate::presentation::rows::RowKind::LiveWork.spec();
+    let heading = format!("{mark} {name}{hidden_label}{counts}");
+    let mut lines = Vec::new();
+    if area.height > 1 {
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::styled(
+        fit(&heading, usize::from(area.width)),
+        palette.live_work(),
+    ));
     for (index, row) in view.rows().iter().take(view.visible_rows).enumerate() {
         let marker = if view.active && view.selected.as_ref() == Some(&row.target) {
             "›"
@@ -485,6 +554,50 @@ pub(super) fn draw(
             })
             .unwrap_or_default();
         let age = view.output_age_label(index).unwrap_or_default();
+        let deadline = row
+            .wait_info
+            .as_ref()
+            .map(|wait| {
+                match (
+                    wait.timeout,
+                    view.seconds.get(index).and_then(|(elapsed, _)| *elapsed),
+                ) {
+                    (Some(timeout), Some(elapsed)) => format!(
+                        " · 期限目安 {}",
+                        crate::presentation::elapsed_text(
+                            timeout
+                                .saturating_sub(Duration::from_secs(elapsed))
+                                .as_millis()
+                                .min(u128::from(u64::MAX)) as u64,
+                            false
+                        )
+                    ),
+                    _ => " · 期限不明".to_owned(),
+                }
+            })
+            .unwrap_or_default();
+        let linked = row
+            .wait_info
+            .as_ref()
+            .and_then(|wait| wait.target.as_ref())
+            .and_then(|target| {
+                view.rows()
+                    .iter()
+                    .take(view.visible_rows)
+                    .position(|other| match (target, &other.target) {
+                        (WaitTarget::Shell(a), LiveWorkTarget::Shell { execution_id, .. }) => {
+                            a == execution_id
+                        }
+                        (WaitTarget::Run(a), LiveWorkTarget::ChildRun { run_id, .. }) => {
+                            a == run_id
+                        }
+                        (WaitTarget::Thread(a), LiveWorkTarget::ChildRun { thread_id, .. }) => {
+                            a == thread_id
+                        }
+                        _ => false,
+                    })
+            });
+
         let extra = if index + 1 == view.visible_rows {
             view.snapshot.as_ref().map_or(0, |s| {
                 s.overflow
@@ -499,13 +612,19 @@ pub(super) fn draw(
             String::new()
         };
         use unicode_width::UnicodeWidthStr;
-        let prefix = format!("{marker} {kind} ");
+        let prefix = format!(
+            "  │ {marker} [{}] {kind} {}",
+            index + 1,
+            linked
+                .map(|i| format!("→ [{}] ", i + 1))
+                .unwrap_or_default()
+        );
         let right_budget = usize::from(area.width) / 2;
         let overflow = fit(&overflow, right_budget);
         let right = format!(
             "{}{overflow}",
             fit(
-                &format!("{}{elapsed}{age}", state_label(&row.state)),
+                &format!("{}{elapsed}{deadline}{age}", state_label(&row.state)),
                 right_budget.saturating_sub(overflow.width()),
             )
         );
@@ -519,15 +638,26 @@ pub(super) fn draw(
         );
         let gap =
             usize::from(area.width).saturating_sub(prefix.width() + label.width() + right.width());
-        lines.push(Line::from(format!(
-            "{prefix}{label}{}{right}",
-            " ".repeat(gap)
-        )));
+        lines.push(Line::from(vec![
+            Span::styled(prefix, palette.live_work()),
+            Span::styled(label, palette.live_work_content()),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(
+                right,
+                if row.state == "stopping" && !palette.plain() {
+                    Style::default().fg(theme::ATTENTION)
+                } else {
+                    Style::default()
+                },
+            ),
+        ]));
     }
-    if lines.is_empty() {
-        lines.push(Line::from(view.footer().unwrap_or_default()));
-    }
-    if view.open.is_some() && lines.len() < usize::from(area.height) {
+    if view
+        .open
+        .as_ref()
+        .is_some_and(|id| view.visible_execution(id))
+        && lines.len() < usize::from(area.height)
+    {
         if let Some(error) = &view.error {
             lines.push(Line::styled(
                 error.clone(),
@@ -541,7 +671,7 @@ pub(super) fn draw(
                         break;
                     }
                     lines.push(Line::styled(
-                        format!("  │ {line}"),
+                        format!("  │   │ {line}"),
                         if error {
                             Style::default().fg(theme::ATTENTION)
                         } else {
@@ -553,10 +683,10 @@ pub(super) fn draw(
             if (preview.skipped || preview.decode_uncertain)
                 && lines.len() < usize::from(area.height)
             {
-                lines.push(Line::from("  … 表示用抜粋 · F6 詳細"));
+                lines.push(Line::from("  │   │ … 表示用抜粋 · F6 詳細"));
             }
         } else if view.error.is_none() {
-            lines.push(Line::from("  出力を取得中…"));
+            lines.push(Line::from("  │   │ 出力を取得中…"));
         }
     }
     frame.render_widget(Paragraph::new(lines), area);
@@ -595,7 +725,14 @@ impl UiState {
                 }
             }
             KeyCode::F(6) => {
-                let target = self.view().live_work.selected()?.target.clone();
+                let Some(target) = self
+                    .view()
+                    .live_work
+                    .selected()
+                    .map(|row| row.target.clone())
+                else {
+                    return Some(vec![]);
+                };
                 let mut context = self.operation_context(false);
                 let operation = match target {
                     LiveWorkTarget::Shell { execution_id, .. } => {
@@ -631,7 +768,13 @@ impl UiState {
         if !area.contains(ratatui::layout::Position::new(column, row)) {
             return false;
         }
-        let index = usize::from(row - area.y);
+        let Some(offset) = row.saturating_sub(area.y).checked_sub(2) else {
+            return true;
+        };
+        let index = usize::from(offset);
+        if index >= self.view().live_work.visible_rows {
+            return true;
+        }
         let target = self
             .view()
             .live_work
@@ -672,6 +815,7 @@ mod tests {
                     started_at: Some("2026-10-31T00:00:00Z".into()),
                     elapsed_base: Some(Duration::from_secs(900)),
                     last_output_at: None,
+                    wait_info: None,
                     output_age_base: Some(Duration::from_secs(30)),
                 },
                 LiveWorkRow {
@@ -685,6 +829,7 @@ mod tests {
                     started_at: None,
                     elapsed_base: None,
                     last_output_at: None,
+                    wait_info: None,
                     output_age_base: None,
                 },
                 LiveWorkRow {
@@ -698,6 +843,7 @@ mod tests {
                     started_at: None,
                     elapsed_base: None,
                     last_output_at: None,
+                    wait_info: None,
                     output_age_base: None,
                 },
             ],
@@ -723,10 +869,65 @@ mod tests {
         ui
     }
     #[test]
+    fn configured_cap_applies_to_ui_and_counts_hidden_rows() {
+        let at = Instant::now();
+        let mut config = Config::default();
+        config.ui.live_work_rows = 1;
+        let mut ui = UiState::new(&config, PathBuf::from("/"));
+        ui.select_thread("thread".into());
+        ui.apply(UiUpdate::Activity {
+            thread_id: "thread".into(),
+            generation: ui.view().generation,
+            epoch: 1,
+            snapshot: activity::ActivitySnapshot {
+                run_id: Some("owner".into()),
+                phase: activity::ActivityPhase::Background,
+                live_work: Some(snapshot(at)),
+                ..Default::default()
+            },
+            observed_at: at,
+        });
+        assert_eq!(ui.view().live_work.rows().len(), 1);
+        assert_eq!(ui.view().live_work.snapshot.as_ref().unwrap().overflow, 3);
+    }
+    #[test]
+    fn tiny_section_shows_header_and_header_click_does_not_select() {
+        let at = Instant::now();
+        let mut ui = ui(at);
+        ui.view_mut().live_work.set_area(Rect::new(0, 0, 80, 1));
+        let area = Rect::new(0, 0, 80, 1);
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 1)).unwrap();
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    area,
+                    &ui.view().live_work,
+                    theme::Palette::from_capabilities(
+                        crate::config::PaletteMode::Dark,
+                        true,
+                        false,
+                    ),
+                    false,
+                )
+            })
+            .unwrap();
+        let mut text = String::new();
+        let mut x = 0;
+        while x < 80 {
+            let symbol = terminal.backend().buffer()[(x, 0)].symbol();
+            text.push_str(symbol);
+            x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+        }
+        assert!(text.contains("◉") && text.contains("他4件"), "{text}");
+        assert!(ui.live_work_click(0, 0));
+        assert!(!ui.view().live_work.active);
+    }
+    #[test]
     fn saved_work_clock_survives_answer_and_dirties_at_most_once_per_second_without_actions() {
         let at = Instant::now();
         let mut ui = ui(at);
-        ui.view_mut().live_work.set_area(Rect::new(0, 20, 80, 3));
+        ui.view_mut().live_work.set_area(Rect::new(0, 20, 80, 5));
         let first = ui.take_deferred_actions();
         assert!(
             matches!(first.as_slice(),[UiAction::ObserveLiveWork {executions,open:None,..}] if executions==&vec!["execution".to_string()])
@@ -762,11 +963,98 @@ mod tests {
         );
     }
     #[test]
+    fn maximum_rows_share_one_quiet_clock_without_reads() {
+        let at = Instant::now();
+        let mut config = Config::default();
+        config.ui.live_work_rows = 10;
+        let mut ui = UiState::new(&config, PathBuf::from("/"));
+        ui.select_thread("thread".into());
+        let mut work = snapshot(at);
+        let template = work.rows[0].clone();
+        work.rows = (0..10)
+            .map(|i| {
+                let mut row = template.clone();
+                row.target = LiveWorkTarget::Shell {
+                    execution_id: format!("execution-{i}"),
+                    turn_id: None,
+                };
+                row
+            })
+            .collect();
+        work.shells = 10;
+        work.children = 0;
+        work.waits = Some(0);
+        work.overflow = 0;
+        ui.apply(UiUpdate::Activity {
+            thread_id: "thread".into(),
+            generation: ui.view().generation,
+            epoch: 1,
+            snapshot: activity::ActivitySnapshot {
+                run_id: Some("owner".into()),
+                phase: activity::ActivityPhase::Background,
+                live_work: Some(work),
+                ..Default::default()
+            },
+            observed_at: at,
+        });
+        ui.view_mut().live_work.set_area(Rect::new(0, 0, 80, 12));
+        assert_eq!(ui.view().live_work.rows().len(), 10);
+        ui.take_deferred_actions();
+        let mut redraws = 0;
+        for tick in 1..=600 {
+            ui.dirty = false;
+            ui.animation_tick(at + Duration::from_millis(tick * 100));
+            redraws += usize::from(ui.dirty);
+            assert!(ui.take_deferred_actions().is_empty());
+        }
+        assert_eq!(redraws, 60);
+    }
+    #[test]
+    fn folding_preserves_identity_and_ambiguous_or_evicted_targets_do_not_redirect() {
+        let at = Instant::now();
+        let mut ui = ui(at);
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
+        let all = snapshot(at);
+        let mut original = all.clone();
+        original.rows.remove(2);
+        let shell = original.rows[0].target.clone();
+        ui.view_mut().live_work.selected = Some(shell.clone());
+        ui.view_mut().live_work.toggle();
+        let mut folded = all;
+        folded.rows.remove(0);
+        ui.view_mut().live_work.accept(Some(folded.clone()), at);
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
+        assert!(matches!(&ui.view().live_work.selected().unwrap().target,
+            LiveWorkTarget::Wait { operation_id, execution_id } if operation_id == "wait-operation" && execution_id == "execution"));
+        assert_eq!(ui.view().live_work.open.as_deref(), Some("execution"));
+        ui.view_mut().live_work.accept(Some(original.clone()), at);
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
+        assert_eq!(ui.view().live_work.selected().unwrap().target, shell);
+        let mut second = folded.rows[1].clone();
+        second.target = LiveWorkTarget::Wait {
+            operation_id: "other-wait".into(),
+            execution_id: "execution".into(),
+        };
+        folded.rows.push(second);
+        ui.view_mut().live_work.accept(Some(folded), at);
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
+        assert_eq!(ui.view().live_work.selected, Some(shell.clone()));
+        assert!(ui.view().live_work.selected().is_none());
+        ui.view_mut().live_work.active = true;
+        assert!(
+            matches!(ui.live_work_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE)), Some(actions) if actions.is_empty())
+        );
+        assert!(ui.operations.is_none());
+        ui.view_mut().live_work.accept(Some(original), at);
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
+        assert_eq!(ui.view().live_work.selected().unwrap().target, shell);
+    }
+    #[test]
     fn scope_revision_and_exact_execution_guard_live_output_and_postcommit_markers() {
         let at = Instant::now();
         let mut view = LiveWorkView::default();
         view.accept(Some(snapshot(at)), at);
-        view.set_area(Rect::new(0, 0, 80, 3));
+        view.set_area(Rect::new(0, 0, 80, 5));
         let Some(UiAction::ObserveLiveWork {
             revision: first, ..
         }) = view.observe("thread".into(), 1, true)
@@ -871,7 +1159,7 @@ mod tests {
         assert!(!text.contains("child-run"));
         ui.insert("draft stays", false);
         let anchor = ui.view().anchor.clone();
-        assert!(ui.live_work_click(area.x, area.y + 1));
+        assert!(ui.live_work_click(area.x, area.y + 3));
         assert!(ui.view().live_work.active);
         assert_eq!(ui.view().draft.text, "draft stays");
         assert_eq!(ui.view().anchor, anchor);
@@ -880,6 +1168,57 @@ mod tests {
             .unwrap();
         assert!(actions.iter().any(|action|matches!(action,UiAction::SelectThread {thread_id,..} if thread_id=="child-thread")));
         assert!(!ui.view().live_work.active);
+    }
+    #[test]
+    fn wait_target_number_and_approximate_deadline_are_visible() {
+        let at = Instant::now();
+        let mut view = LiveWorkView::default();
+        let mut data = snapshot(at);
+        data.rows[2].wait_info = Some(WaitInfo {
+            target: Some(WaitTarget::Shell("execution".into())),
+            timeout: Some(Duration::from_secs(300)),
+        });
+        data.rows[2].elapsed_base = Some(Duration::from_secs(10));
+        view.accept(Some(data), at);
+        let area = Rect::new(0, 0, 100, 5);
+        view.set_area(area);
+        let backend = ratatui::backend::TestBackend::new(100, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                draw(
+                    frame,
+                    area,
+                    &view,
+                    theme::Palette::from_capabilities(
+                        crate::config::PaletteMode::Dark,
+                        false,
+                        true,
+                    ),
+                    false,
+                )
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in 0..5 {
+            let mut x = 0;
+            while x < 100 {
+                let c = buffer[(x, y)].symbol();
+                text.push_str(c);
+                x += unicode_width::UnicodeWidthStr::width(c).max(1) as u16;
+            }
+            text.push('\n');
+        }
+        assert!(text.contains("◉ 抱えている作業"), "{text}");
+        assert!(
+            text.contains("[1] shell") && text.contains("→ [1]"),
+            "{text}"
+        );
+        assert!(
+            text.contains("期限目安") && text.contains("待機中"),
+            "{text}"
+        );
     }
     #[test]
     fn wrong_generation_reply_never_hydrates_and_labels_cannot_inject_terminal_controls() {
@@ -893,7 +1232,7 @@ mod tests {
                 .label
                 .contains(['\u{1b}', '\n'])
         );
-        ui.view_mut().live_work.set_area(Rect::new(0, 0, 80, 3));
+        ui.view_mut().live_work.set_area(Rect::new(0, 0, 80, 5));
         ui.view_mut().live_work.toggle();
         let actions = ui.take_deferred_actions();
         let [UiAction::ObserveLiveWork { revision, .. }] = actions.as_slice() else {
@@ -928,7 +1267,7 @@ mod tests {
         for popup in [KeyCode::F(1), KeyCode::F(2)] {
             let at = Instant::now();
             let mut ui = ui(at);
-            ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 3));
+            ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
             ui.view_mut().live_work.toggle();
             let actions = ui.take_deferred_actions();
             let [UiAction::ObserveLiveWork { revision, .. }] = actions.as_slice() else {
@@ -977,13 +1316,13 @@ mod tests {
         }
     }
     #[test]
-    fn shrinking_clamps_target_and_close_rejects_late_preview_without_waiting_for_publication() {
+    fn shrinking_preserves_target_and_rejects_late_preview_without_waiting_for_publication() {
         let at = Instant::now();
         let mut ui = ui(at);
         let mut source = snapshot(at);
         source.rows.swap(0, 1);
         ui.view_mut().live_work.accept(Some(source), at);
-        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 3));
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
         ui.view_mut().live_work.selected = Some(LiveWorkTarget::Shell {
             execution_id: "execution".into(),
             turn_id: Some("answered-turn".into()),
@@ -999,13 +1338,10 @@ mod tests {
             "execution",
             Ok(output("kept while visible"))
         ));
-        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 1));
-        assert!(ui.view().live_work.open.is_none());
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 3));
+        assert_eq!(ui.view().live_work.open.as_deref(), Some("execution"));
         assert!(ui.view().live_work.preview.is_none());
-        assert!(matches!(
-            ui.view().live_work.selected().unwrap().target,
-            LiveWorkTarget::ChildRun { .. }
-        ));
+        assert!(ui.view().live_work.selected().is_none());
         assert!(!ui.view_mut().live_work.accept_preview(
             revision,
             "execution",
@@ -1013,21 +1349,19 @@ mod tests {
         ));
         ui.view_mut().live_work.active = true;
         ui.live_work_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
-        let result = ui
-            .operations
-            .as_mut()
-            .unwrap()
-            .key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert!(
-            matches!(result,operations::Outcome::Execute(Command::RunGet(target)) if target.run_id=="child-run")
-        );
+        assert!(ui.operations.is_none());
+        ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
+        assert!(matches!(
+            ui.view().live_work.selected().unwrap().target,
+            LiveWorkTarget::Shell { .. }
+        ));
     }
     #[test]
     fn newer_saved_output_replaces_only_older_commit_observations_and_labels_the_source() {
         let at = Instant::now();
         let mut view = LiveWorkView::default();
         view.accept(Some(snapshot(at)), at);
-        view.set_area(Rect::new(0, 0, 80, 3));
+        view.set_area(Rect::new(0, 0, 80, 5));
         let Some(UiAction::ObserveLiveWork { revision, .. }) =
             view.observe("thread".into(), 1, true)
         else {
@@ -1040,7 +1374,7 @@ mod tests {
         );
         assert_eq!(
             view.output_age_label(0).as_deref(),
-            Some(" · 出力観測1秒前")
+            Some(" · 最後の出力 1秒前")
         );
         let mut saved = snapshot(at + Duration::from_secs(5));
         saved.rows[0].last_output_at = Some("new saved timestamp".into());
@@ -1049,7 +1383,7 @@ mod tests {
         assert!(!view.markers.contains_key("execution"));
         assert_eq!(
             view.output_age_label(0).as_deref(),
-            Some(" · 保存出力1秒前")
+            Some(" · 最後の出力 1秒前")
         );
         view.accept_markers(
             revision,
@@ -1061,7 +1395,7 @@ mod tests {
         assert!(view.markers.contains_key("execution"));
         assert_eq!(
             view.output_age_label(0).as_deref(),
-            Some(" · 出力観測1秒前")
+            Some(" · 最後の出力 1秒前")
         );
     }
 }

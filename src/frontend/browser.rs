@@ -1263,6 +1263,7 @@ mod watch_tests {
                     started_at: None,
                     elapsed_base: None,
                     last_output_at: None,
+                    wait_info: None,
                     output_age_base: None,
                 }],
             }),

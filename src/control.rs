@@ -1677,10 +1677,10 @@ impl Control {
         &self,
         executions: &[String],
     ) -> Result<Vec<(String, std::time::Instant)>, ApiError> {
-        if executions.len() > 3 {
+        if executions.len() > self.store.config.ui.live_work_rows {
             return Err(ApiError::new(
                 ErrorCode::InputLimit,
-                "Visible output observation exceeds3 executions",
+                "Visible output observation exceeds configured live work rows",
             ));
         }
         Ok(self.live.output_markers(executions).await)

@@ -86,11 +86,18 @@ not rewrite the title or alter the CLI's title lookup.
 
 The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `会話 · 詳細`.
 
-Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought or the target behind `待機中` (waiting), are not guessed. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
+Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought, are not guessed. The `抱えている作業` section shows saved wait targets when available and labels the timeout estimate as approximate. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
 
 Animations affect only the status line, never history text or scroll position. Animation redraws stop during selection/copy mode or overlays. Selection mode shows `表示固定` (display frozen), its UTC freeze-entry time when space permits, and exit keys at the top; F2/Esc resumes updates. The open conversation list updates saved row facts reactively; it has no running-state animation.
 
 `観測経過` (observed elapsed time) uses a monotonic clock for the period during which this screen observed Turn activity. It excludes time before selection, before restart, and while state was unavailable; it stops at recovery wait or Turn termination. It differs from a tool header's saved execution duration.
+
+The `◉ 抱えている作業` section above the composer shows the current Run's
+owned shells, child Runs and saved pending waits, including after an answer.
+`ui.live_work_rows` sets the oldest visible rows from 1 to 10 (default 3);
+smaller terminals show a hidden count. Matching row numbers connect a wait to
+its visible target. Shift+Tab focuses a row, Space opens a shell preview, F6
+inspects it, and `o` opens a selected child. Unknown evidence remains unknown.
 
 The composer follows displayed line count, normally limited to one quarter of screen height and at most eight lines; small screens prioritize a three-line control area. Folded pastes become short numbered chips; expand/edit/remove with `/paste NUMBER show|edit|remove`.
 

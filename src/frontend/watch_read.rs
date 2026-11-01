@@ -265,6 +265,7 @@ pub(super) fn prepare_with_titles(
                     started_at: extra.shell_started,
                     output_age_base: super::live_work::age(extra.output_at.as_deref(), wall_at),
                     last_output_at: extra.output_at,
+                    wait_info: None,
                 });
             }
             if let (Some(run_id), Some(thread_id)) = (extra.child_run, extra.child_thread) {
@@ -276,6 +277,7 @@ pub(super) fn prepare_with_titles(
                     elapsed_base: super::live_work::age(extra.child_started.as_deref(), wall_at),
                     started_at: extra.child_started,
                     last_output_at: None,
+                    wait_info: None,
                     output_age_base: None,
                 });
             }

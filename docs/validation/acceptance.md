@@ -7135,3 +7135,30 @@ PowerShell 5.1 and 7 in run 41269475088. Installer checks against the published
 files and upgrades on Linux and Windows were not performed. See
 [publication](../development/publication.md#v050-publication-2026-11-01) for
 the exact source, public checksums, release runs and executable comparisons.
+
+## #86 owned-work section
+
+Local, pre-rebase macOS arm64 observations on the in-progress tree: focused
+live-work frontend tests (13) and UI tests (11) pass; `cargo check --tests`,
+strict Clippy, and the existing hidden-output and virtual-clock tests pass. The
+virtual clock test counts 600 redraws across 600 synthetic seconds and no
+clock-driven read actions. A separate ten-row synthetic case counts 60 redraws
+across 60 synthetic seconds with no clock-driven read actions. The existing
+hidden-output observer test issues 40
+notifications without scheduling output reads for the hidden scope. These do not
+by themselves establish every #41 P2/P5 multi-consumer condition.
+
+Synthetic loopback PTYs at 80 and 140 columns, dark/light, NO_COLOR, and vt100
+show the owned background shell section; all eight existing row-vocabulary
+scenarios pass. A separate synthetic loopback PTY and replay show a shell-ended
+wait, its visible target row and estimated 30-second deadline. A separate
+process-limited PTY shows a live synthetic child Run. Row-limit variants and
+motion-off remain unverified. The
+128-node/50-tool redraw-only fixture reports p50 2796 us, p95 2845 us and max
+2981 us (500 samples); it does not populate ten owned-work rows or supply a
+matched baseline, so it is not a maximum-row performance comparison. Timing is
+observational, not an acceptance threshold.
+
+Full branch CI on all three OSes, the maximum-row hidden-output count gate, an
+exact-tree matched-baseline performance observation and review
+remain outstanding. No real provider, installed executable, or user data is used.

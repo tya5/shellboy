@@ -97,11 +97,11 @@ Use encoding_rs and the existing encoding resolver. Keep separate stream decoder
 
 ## D: owned live work and accurate output activity
 
-Extend frontend/activity.rs with LiveWorkSnapshot captured in the same existing refresh as activity: current Run ID, observed wall/monotonic time, total counts and at most3 oldest rows. Row enum Shell/ChildRun/Wait carries IDs, sanitized display text, saved start time, state, elapsed base and last_output_at where known. Shell commands come from saved shell_json, child titles/classification from the existing Thread projection. Wait rows reflect saved pending waits and do not count as extra child work. The query orders by saved start and ID, uses existing owner indexes and caps returned rows; counts are scalar queries. Completed work disappears on the next Changed refresh. The fixed region sits immediately above composer and remains after the Turn answer when the Run still owns work. Small screens collapse overflow before suppressing composer/history usability.
+Extend frontend/activity.rs with LiveWorkSnapshot captured in the same existing refresh as activity: current Run ID, observed wall/monotonic time, total counts and a configured number of oldest rows. The validated `ui.live_work_rows` range is 1 through 10 (default 3); the same bound applies to each SQL candidate lane, the final merge, displayed rows, and output-marker requests. Values outside the range are errors rather than silently clamped. The section has a blank separator, a dedicated-colour `◉ 抱えている作業` heading and indented `│` rows; every row names its state. Small screens retain the heading and indicate hidden rows. Wait rows replace their own caller-shell rows, but shell counts remain factual. Their target is derived from the first bounded saved condition, with an additional-condition count, and timeout is an approximate saved wall-clock observation (zero means immediate timeout). Unknown or malformed evidence remains unknown. A shared target identity marks visible matching rows; no OS probes or new persistence are introduced. Row enum Shell/ChildRun/Wait carries IDs, sanitized display text, saved start time, state, elapsed base and last_output_at where known. Shell commands come from saved shell_json, child titles/classification from the existing Thread projection. Wait rows reflect saved pending waits and do not count as extra child work. The query orders by saved start and ID, uses existing owner indexes and caps returned rows; counts are scalar queries. Completed work disappears on the next Changed refresh. The fixed region sits immediately above composer and remains after the Turn answer when the Run still owns work. Small screens collapse overflow before suppressing composer/history usability.
 
 Background footer derives oldest-work elapsed and last real output from this same snapshot, never a stopped Turn observation clock. Local Instant advances saved elapsed without DB reads; switching away/back reloads saved timestamps. Unknown saved timing remains unknown. No animation tick performs DB work.
 
-Precise per-shell output activity needs a narrow ephemeral extension to the existing LiveRegistry shell entry: Option<Instant> last_committed_output (or equivalent scalar). collect_shell updates that entry only after an output-batch commit, before the existing global shell_output_changed notification. The entry is installed before collection and removed with its existing handle, so storage is bounded by already-live shells and has the same owner/cleanup. A crate-private getter accepts at most3 displayed execution IDs and copies those scalars under the existing async registry lock. It performs no I/O/DB read and creates no event/queue. Frontend listens to the existing Notify, looks up only displayed live executions, and coalesces repaint in the existing cadence. Never label another shell's output as activity of the selected shell. Initial/past output age is supplied by #45 saved last_output_at in the normal activity snapshot.
+Precise per-shell output activity needs a narrow ephemeral extension to the existing LiveRegistry shell entry: Option<Instant> last_committed_output (or equivalent scalar). collect_shell updates that entry only after an output-batch commit, before the existing global shell_output_changed notification. The entry is installed before collection and removed with its existing handle, so storage is bounded by already-live shells and has the same owner/cleanup. A crate-private getter accepts at most the configured displayed execution IDs and copies those scalars under the existing async registry lock. It performs no I/O/DB read and creates no event/queue. Frontend listens to the existing Notify, looks up only displayed live executions, and coalesces repaint in the existing cadence. Never label another shell's output as activity of the selected shell. Initial/past output age is supplied by #45 saved last_output_at in the normal activity snapshot.
 
 Only focused/open live shell rows read output. Reuse the frontend select loop with one pending deadline, not a spawned poller. On output notification mark the focused execution dirty; at most once/500ms consume at most4KiB total across its streams. If behind, use tail seek; otherwise use the retained decoder/cursor. One request in flight, cancellation on close/completion/Thread switch and identity/revision checks before delivery. No raw output bytes travel as EngineEvent or per-byte UiUpdate; only bounded prepared previews use existing update delivery. Closed live rows have zero output-driven DB reads.
 
@@ -642,7 +642,7 @@ visible changed second labels. Invisible consumers unsubscribe or remain dormant
 | Composer/draft, attachment prep, notices | Local input and existing draft/attachment completion updates | Preserve newer edits and operation notice separation; B+C | Submitted frozen draft is an explicit immutable submission, keyed by revision/operation |
 | Pending-message strip and /queue | Thread Changed and paired history/queue read_revision | Verify CLI/foreign sender, cancellation, recovery and stale replies; B+C | Cancellation selection/confirmation is a chosen-ID snapshot; existing transaction revalidates each target |
 | Focused/expanded tool output | Saved tool/source changes; bounded exact source and preview reads; no closed-output raw reads | Source batch/read cache and shared body accounting; B+C | Completed raw preview is an identified source snapshot, with read time/retention/decode facts and reopen/refresh action; current lifecycle facts stay reactive |
-| Fixed live region: shells, owned children, waits | Relevant Thread Changed in activity transaction; global output Notify only compares at most3 displayed live markers | New D surface | No fixed snapshot for live state; elapsed base includes observation time |
+| Fixed live region: shells, owned children, waits | Relevant Thread Changed in activity transaction; global output Notify only compares at most the configured number of displayed live markers | New D surface | No fixed snapshot for live state; elapsed base includes observation time |
 | Background footer work age/output age | Same D snapshot plus local second clock | New D data, no stopped Turn clock | No separate read or hidden timer |
 | Thread list titles/states/tree | Per-Thread Changed; bounded ID-only patch batch | Currently open/filter/Ctrl+R/page only; E | Never justify stale list as a snapshot; Ctrl+R remains manual recovery |
 | Watch rows and second-line work/recovery/answer | Same changed-ID batch, details for visible rows only | New F surface reusing D/E | Session unread state is local policy, not a saved-fact snapshot; timestamps advance locally |
@@ -933,7 +933,7 @@ callers are not globally limited by that semaphore: an over128 snapshot is
 explicitly unavailable, never a truncated global prefix. Resolve exact saved
 shell ownership and wait.pending operation keys inside the same activity read
 transaction, filter by the saved current Run, then sort by saved start/ID and
-retain the oldest3 rows. A removed OS handle does not erase a still-pending saved
+retain at most the configured `ui.live_work_rows` oldest rows after suppressing verified active wait caller shells. A removed OS handle does not erase a still-pending saved
 wait. Missing keys are absent observations, not phantom waits. Unknown wait scope
 is separate from zero; wait rows are observations, not extra child/process counts.
 
@@ -954,7 +954,7 @@ observations. All normally admitted CLI waits are included in the exact scope.
 
 ### D2 child identity, chronological display and unavailable evidence
 
-Only the at most3 displayed owned-child rows acquire bounded title witnesses
+Only the displayed owned-child rows (at most the configured limit) acquire bounded title witnesses
 through the same frontend header title policy: explicit title first, otherwise
 at most 128 path/pending membership candidates and512KiB copied evidence per
 child. SQL collects owned facts inside the existing read transaction; title JSON
@@ -986,7 +986,7 @@ its saved owner lookup, including a stopping parent; retain the existing quiet
 model nudge only for a live parent. Parent display freshness must not wait for a
 foreground shell or model request to finish consuming its owner delivery.
 
-Frontend seals the at most3 displayed ChildRun Thread IDs to the accepted current
+Frontend seals the displayed ChildRun Thread IDs (at most the configured limit) to the accepted current
 Run/Thread/generation snapshot. Changed for those exact dependencies invalidates
 only the selected parent's existing coalesced read; it never launches a hidden
 child read. Selection/Run/generation change replaces that dependency set. The
@@ -1025,7 +1025,7 @@ Stopping that child drains its saved ownership synchronously rather than passing
 through the Driver's normal owner nudge. Extend Control's existing stop target
 lookup with its saved live/stopping parent Thread. After the no-Driver drain
 successfully commits, publish existing Changed for that parent without a model
-kick; this covers counts even when the child is outside the oldest3 visible
+kick; this covers counts even when the child is outside the configured oldest visible
 rows. A failed drain publishes the existing child error and no parent terminal
 notification. Active Driver stops retain their existing completion owner nudge.
 No new query, registry, worker or receipt behavior is introduced.
@@ -1040,7 +1040,7 @@ cannot make an older snapshot erase a newer committed-output marker.
 Live output observations and previews are replaceable display snapshots in the
 existing frontend outbox, not critical operation results. Coalesce one marker
 snapshot and one preview per Thread/generation through its existing latest-value
-slots. Every marker snapshot includes all observed displayed executions (at most3),
+slots. Every marker snapshot includes all observed displayed executions (at most the configured limit),
 so replacing it cannot lose an earlier different shell's activity. Receipts and
 business-operation outcomes keep their ordered critical delivery. This adds no
 channel or capacity; raw UI-channel deliveries remain separately bounded.

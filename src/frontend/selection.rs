@@ -162,7 +162,7 @@ impl Selection {
             .map(|work| {
                 work.rows
                     .iter()
-                    .take(3)
+                    .take(10)
                     .filter_map(|row| match &row.target {
                         crate::ui::live_work::LiveWorkTarget::ChildRun { thread_id, .. } => {
                             Some(thread_id.clone())
@@ -402,6 +402,7 @@ mod live_child_tests {
                     started_at: None,
                     elapsed_base: None,
                     last_output_at: None,
+                    wait_info: None,
                     output_age_base: None,
                 }],
                 shells: 0,

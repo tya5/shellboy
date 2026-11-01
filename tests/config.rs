@@ -32,6 +32,18 @@ fn unconfigured_defaults_are_valid_and_do_not_invent_models() {
     assert_eq!(c.ui.send_key, "Enter");
 }
 #[test]
+fn live_work_rows_are_bounded_without_clamping() {
+    assert_eq!(Config::parse("").unwrap().ui.live_work_rows, 3);
+    for limit in [1, 3, 10] {
+        let config = Config::parse(&format!("[ui]\nlive_work_rows = {limit}\n")).unwrap();
+        assert_eq!(config.ui.live_work_rows, limit);
+    }
+    for limit in [0, 11] {
+        let error = Config::parse(&format!("[ui]\nlive_work_rows = {limit}\n")).unwrap_err();
+        assert!(error.to_string().contains("ui.live_work_rows"));
+    }
+}
+#[test]
 fn full_contract_and_partial_nested_defaults() {
     let c = Config::parse(
         r#"

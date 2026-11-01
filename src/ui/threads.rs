@@ -4753,6 +4753,7 @@ mod watch_integration_tests {
                             started_at: None,
                             elapsed_base: Some(Duration::from_secs(123)),
                             last_output_at: None,
+                            wait_info: None,
                             output_age_base: None,
                         }],
                         shells: 1,

@@ -3361,3 +3361,15 @@ Python71/layout94/fmt/strict Clippy. No schema/migration/index remains. The
 prior cb8 Clippy size failure and stopped00d3 zero-match artifacts remain invalid
 history, not passes. Only own entry-file mtimes changed to force qualification;
 shared artifacts were not deleted. Native3OS integration remains coordinator-owned.
+
+## #86 owned-work section (in progress)
+
+The section now has a named heading, theme-aware marks, numbered rows, and a
+validated `ui.live_work_rows` limit (1..10, default 3). Wait rows describe a
+bounded first saved condition and an approximate timeout, fold the validated
+caller shell, and link to a visible target by row number. No persistence or
+protocol changes are introduced. This is local work pending rebase, review and
+branch CI; the separate #90 animation work is not included.
+
+The current macOS arm64 synthetic checks, observations and outstanding gates are
+recorded in [acceptance](../validation/acceptance.md#86-owned-work-section).

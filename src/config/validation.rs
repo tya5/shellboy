@@ -378,6 +378,9 @@ impl Ui {
         if self.max_fps == 0 {
             return Err(invalid("ui.max_fps", "must be a positive integer"));
         }
+        if !(1..=10).contains(&self.live_work_rows) {
+            return Err(invalid("ui.live_work_rows", "must be in 1..=10"));
+        }
         if self.paste_fold_chars == 0 {
             return Err(invalid("ui.paste_fold_chars", "must be a positive integer"));
         }

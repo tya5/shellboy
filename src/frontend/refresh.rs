@@ -38,12 +38,24 @@ struct ProjectedVisible {
     tool_scope: Option<ToolObservation>,
 }
 
+#[cfg(test)]
 fn read_visible_tx(
     db: &Connection,
     thread: &str,
     tool_scope: Option<ToolObservation>,
     waits: Option<&[(String, String)]>,
     sequence: u64,
+) -> Result<RawVisible, StorageError> {
+    read_visible_tx_limited(db, thread, tool_scope, waits, sequence, 3)
+}
+
+fn read_visible_tx_limited(
+    db: &Connection,
+    thread: &str,
+    tool_scope: Option<ToolObservation>,
+    waits: Option<&[(String, String)]>,
+    sequence: u64,
+    limit: usize,
 ) -> Result<RawVisible, StorageError> {
     if tool_scope
         .as_ref()
@@ -79,7 +91,7 @@ fn read_visible_tx(
             view_revision: None,
         },
     )?;
-    let activity = activity::read_tx_with_waits(db, thread, waits)?;
+    let activity = activity::read_tx_with_limit(db, thread, waits, limit)?;
     // Admission order belongs to the whole paired observation, not read completion.
     history.set_read_revision(sequence);
     Ok(RawVisible {
@@ -150,6 +162,7 @@ type RawCurrentAndViews = (
 
 // Production coupled collector: all consumers use this caller's connection and
 // read sequence; the same-Thread inspector borrows the already-read header Arc.
+#[cfg(test)]
 fn read_current_and_views_tx(
     db: &Connection,
     thread: &str,
@@ -159,8 +172,21 @@ fn read_current_and_views_tx(
     sequence: u64,
     views: &view_read::Tickets,
 ) -> Result<RawCurrentAndViews, StorageError> {
+    read_current_and_views_tx_limited(db, thread, ids, tool_scope, (waits, 3), sequence, views)
+}
+
+fn read_current_and_views_tx_limited(
+    db: &Connection,
+    thread: &str,
+    ids: &[String],
+    tool_scope: Option<ToolObservation>,
+    wait_policy: (Option<&[(String, String)]>, usize),
+    sequence: u64,
+    views: &view_read::Tickets,
+) -> Result<RawCurrentAndViews, StorageError> {
+    let (waits, limit) = wait_policy;
     let receipts = receipt_states_tx(db, ids)?;
-    let visible = read_visible_tx(db, thread, tool_scope, waits, sequence);
+    let visible = read_visible_tx_limited(db, thread, tool_scope, waits, sequence, limit);
     let facts = if views.is_empty() {
         None
     } else {
@@ -213,11 +239,12 @@ pub(super) async fn run(
         };
         let target=thread.clone();
         let waits=control.pending_wait_sources();
+        let limit=control.store.config.ui.live_work_rows;
         let view_scopes=super::view_read::prepare_requests(&views).await;
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             // Keep typed per-surface failures; do not reinterpret WAL contention.
-            read_current_and_views_tx(db,&target,&ids,tool_scope,waits.as_deref(),sequence,&view_scopes)
+            read_current_and_views_tx_limited(db,&target,&ids,tool_scope,(waits.as_deref(),limit),sequence,&view_scopes)
         }).await;
         drop(_progress_permit);
         let (receipts,visible,browser_result,sequence)=match checked_storage(&control,read).await {

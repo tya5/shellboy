@@ -188,7 +188,7 @@ impl Page {
         );
         page.entry("Esc", "画面を閉じる。通常の会話ではTurnだけ中断");
 
-        page.section("実行中の作業");
+        page.section(crate::presentation::rows::RowKind::LiveWork.spec().1);
         page.entry(
             "Shift+Tab / クリック",
             "入力欄の上にある作業を選ぶ。↑↓で移動",
