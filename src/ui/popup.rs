@@ -72,6 +72,26 @@ pub(super) fn compact_recorded(
     compact(frame, area, title, context, footer, height)
 }
 
+/// Fit a translated popup to its longest line, bounded by its viewport. Borders,
+/// padding and the reader scrollbar have their own cells; no fixed label column
+/// is baked into the translated content.
+pub(super) fn text_viewport(area: Rect, text: &[&str]) -> Rect {
+    use unicode_width::UnicodeWidthStr;
+    let columns = text
+        .iter()
+        .flat_map(|value| value.lines())
+        .map(|line| line.width())
+        .max()
+        .unwrap_or(0);
+    let desired = columns.saturating_add(9).clamp(12, u16::MAX as usize) as u16;
+    let width = area.width.min(desired);
+    Rect {
+        x: area.x + (area.width - width) / 2,
+        width,
+        ..area
+    }
+}
+
 /// The existing application status remains visible below every popup.
 pub(super) const STATUS_ROWS: u16 = 2;
 pub(super) fn viewport(area: Rect) -> Rect {
@@ -436,6 +456,22 @@ mod tests {
     use super::*;
     use ratatui::style::Color;
     use ratatui::{Terminal, backend::TestBackend};
+    #[test]
+    fn translated_popup_width_follows_text_and_clamps_to_viewport() {
+        let area = Rect::new(5, 0, 100, 24);
+        let short = text_viewport(area, &["ok"]);
+        let longer = text_viewport(area, &["a much longer label"]);
+        let full = text_viewport(area, &[&"x".repeat(200)]);
+        assert!(short.width < longer.width);
+        assert_eq!(full.width, area.width);
+        assert_eq!(short.x + short.width / 2, area.x + area.width / 2);
+        unicode_width::set_terminal_width(Some(1));
+        let narrow = text_viewport(area, &["\u{00b7}\u{00b7}\u{00b7}\u{00b7}"]);
+        unicode_width::set_terminal_width(Some(2));
+        let wide = text_viewport(area, &["\u{00b7}\u{00b7}\u{00b7}\u{00b7}"]);
+        assert!(narrow.width < wide.width);
+        unicode_width::clear_terminal_width();
+    }
     #[test]
     fn list_focus_and_footer_remain_distinct_at_small_and_normal_sizes() {
         for (width, height) in [(120, 40), (80, 24), (24, 10), (8, 5)] {

@@ -83,3 +83,29 @@ rather than edited concurrently by every slice.
 
 Check each split against current main before assigning parallel work; shared
 registries, `src/ui.rs`, broad snapshots and guide updates are integration-owned.
+
+## Common layout and test rules
+
+Measure translated complete strings in terminal cells, not bytes or UTF-8 code
+points. Derive a screen's label/content width from its actual localized lines;
+clamp it to the available viewport and reserve borders, padding and scrollbar
+cells separately. `popup::text_viewport` implements this for the stage A sample.
+Do not use a fixed English/Japanese label column. Recalculate after resize.
+
+When space is constrained, preserve in order: the consequence/safety warning
+and destructive scope; explicit confirm/cancel controls; the selected item or
+identity; current state and failure/recovery facts; then secondary context,
+counts, timestamps, hints and decoration. Wrap or scroll the body before hiding
+an action. Truncation is display-only, on a grapheme boundary, with an ASCII
+`.` mark; retain the complete source/copy/execute value. For English text, wrap
+long words at grapheme boundaries if necessary; never cut a critical confirmation
+word when 80/120 columns are available. Status-bar and section rows use the same
+priority: keep state and action, drop decoration and optional detail first, and
+keep overflow discoverable in the existing detail surface.
+
+For stage B, register each synthetic screen with `ui::i18n::verify_screen`:
+provide setup and the essential complete phrases for both languages. It renders
+80/120 columns for measured width one/two and unknown, checks generated symbol
+width invariance, popup borders and essential phrases. Fixtures containing user
+or model data need separate source/copy-preservation assertions; never sanitize
+that data merely to satisfy a symbol test.
