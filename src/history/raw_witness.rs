@@ -139,14 +139,16 @@ impl RawWitness {
         db: &Connection,
         requests: &[RetainedExecutionRequest],
         remaining: &mut usize,
-    ) -> rusqlite::Result<Vec<RetainedExecutionFacts>> {
+    ) -> Result<Vec<RetainedExecutionFacts>,crate::storage::StorageError> {
         if requests.len() > 200 || requests.iter().any(|r| {
             r.execution.is_empty() || r.execution.len() > 128
                 || r.cursor_sequence.is_some_and(|s| s > i64::MAX as u64)
         }) {
-            return Err(rusqlite::Error::InvalidParameterName("retained execution observation limit".into()));
+            return Err(crate::protocol::ApiError::new(crate::protocol::ErrorCode::InputLimit,"retained execution observation limit").into());
         }
         if requests.is_empty() { return Ok(Vec::new()); }
+        let encoded=requests.iter().map(|r|64+r.execution.as_bytes().iter().map(|b|match b{b'"'|b'\\'=>2,0..=31=>6,_=>1}).sum::<usize>()).sum::<usize>();
+        if encoded>128*1024 {return Err(crate::protocol::ApiError::new(crate::protocol::ErrorCode::InputLimit,"retained encoded input limit").into());}
         let parameter = serde_json::to_string(requests)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         db.prepare(RETAINED_EXECUTION_FACTS_SQL)?.query_map([parameter], |row| {
@@ -166,7 +168,7 @@ impl RawWitness {
                 request_index:ordinal,exists:row.get(1)?,generation:row.get(2)?,saved_sequence:row.get(3)?,
                 encoding,state,tombstone:row.get(6)?,cursor_chunk_length:row.get(7)?,oldest_sequence:row.get(8)?,metadata_limited:limited,
             })
-        })?.collect()
+        })?.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
     }
 }
 
