@@ -5919,7 +5919,8 @@ fn draw_recovery(
     if area.height == 0 {
         return;
     }
-    let lines = presentation::recovery_lines(snapshot, language, area.width.saturating_sub(1), area.height);
+    let lines =
+        presentation::recovery_lines(snapshot, language, area.width.saturating_sub(1), area.height);
     frame.render_widget(
         Paragraph::new(lines)
             .style(Style::default().fg(theme::WARNING))
