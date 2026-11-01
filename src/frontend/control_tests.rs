@@ -1429,7 +1429,7 @@ impl super::ClipboardBackend for ScopeClipboard {
 async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_from_terminal_request()
  {
     use crate::ui::{CopyScope, UiUpdate};
-    let (root, owner, control, server) = fixture().await;
+    let (root, owner, control, server) = fixture_with_language("ja").await;
     let clipboard = std::sync::Arc::new(ScopeClipboard::default());
     let (sender, receiver) = actions::channel(16);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -2154,6 +2154,7 @@ async fn external_refresh_failure_keeps_exact_accepted_result_and_reports_failur
     let first = inspection_external::request_identity("thread:a", &"same request", 1).unwrap();
     let mut slot = None;
     let (reply, report) = super::prepare_external(
+        crate::config::UiLanguage::Ja,
         Ok(serde_json::json!({"ok":true,"fact":"original"})),
         65536,
         Some((first.clone(), kind, None)),
@@ -2175,6 +2176,7 @@ async fn external_refresh_failure_keeps_exact_accepted_result_and_reports_failur
     let second = inspection_external::request_identity("thread:a", &"same request", 2).unwrap();
     let previous = inspection_external::retained_result(&slot, &second, kind).unwrap();
     let (reply, report) = super::prepare_external(
+        crate::config::UiLanguage::Ja,
         Ok(serde_json::json!({"ok":false,"error":"failed"})),
         65536,
         Some((second.clone(), kind, Some(previous))),
@@ -2199,7 +2201,11 @@ async fn external_refresh_failure_keeps_exact_accepted_result_and_reports_failur
         false,
     );
     assert_eq!(notice.captured_at, Some(captured_at));
-    assert!(notice.text().contains("再取得に失敗"));
+    assert!(
+        notice
+            .text_in(crate::config::UiLanguage::Ja)
+            .contains("再取得に失敗")
+    );
     let other = inspection_external::request_identity("thread:b", &"same request", 3).unwrap();
     assert!(inspection_external::retained_result(&slot, &other, kind).is_none());
 }

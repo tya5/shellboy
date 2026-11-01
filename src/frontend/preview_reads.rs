@@ -8,7 +8,7 @@ pub(super) async fn load(
 ) -> Result<crate::ui::ToolPreview, String> {
     super::streams::preview(control, source, group, call, limit)
         .await
-        .map(super::tool_preview)
+        .map(|page| super::tool_preview(page, control.store.config.ui.language))
         .map_err(|error| error.to_string())
 }
 

@@ -77,6 +77,9 @@ mod usage;
 mod watch_page;
 mod watch_read;
 
+use crate::config::UiLanguage;
+use crate::ui::i18n;
+mod ui_diagnostics;
 use crate::{
     app::DataOwner,
     attachments::{
@@ -371,19 +374,33 @@ async fn status(
 fn tool_group_notice(
     release: Option<(&str, crate::control::ForegroundRelease)>,
     cancelled_calls: usize,
+    language: UiLanguage,
 ) -> String {
-    let remaining = if cancelled_calls == 0 {
-        "後続の未実行呼出しはありません".to_owned()
-    } else {
-        format!("未実行のツール呼出しを{cancelled_calls}件取り消しました")
+    let remaining = match (language, cancelled_calls) {
+        (UiLanguage::Ja, 0) => "後続の未実行呼出しはありません".to_owned(),
+        (UiLanguage::En, 0) => "No remaining unexecuted calls".to_owned(),
+        (UiLanguage::Ja, _) => format!("未実行のツール呼出しを{cancelled_calls}件取り消しました"),
+        (UiLanguage::En, 1) => "Cancelled 1 unexecuted tool call".to_owned(),
+        (UiLanguage::En, _) => format!("Cancelled {cancelled_calls} unexecuted tool calls"),
     };
     match release {
         Some((execution, reason)) => {
             let cause = match reason {
-                crate::control::ForegroundRelease::Background => "人間の操作",
-                crate::control::ForegroundRelease::AdditionalInput => "追加指示",
+                crate::control::ForegroundRelease::Background => {
+                    i18n::local!(language, "人間の操作", "Human action")
+                }
+                crate::control::ForegroundRelease::AdditionalInput => {
+                    i18n::local!(language, "追加指示", "Additional instruction")
+                }
             };
-            format!("{cause}でshell {execution}の待機を解除し背景へ移しました。{remaining}")
+            match language {
+                UiLanguage::Ja => {
+                    format!("{cause}でshell {execution}の待機を解除し背景へ移しました。{remaining}")
+                }
+                UiLanguage::En => format!(
+                    "{cause} ended the wait for shell {execution} and moved it to the background. {remaining}"
+                ),
+            }
         }
         None => remaining,
     }
@@ -586,6 +603,7 @@ fn external_owner(context: Option<&ManagementContext>) -> Option<String> {
 }
 
 async fn prepare_external(
+    language: UiLanguage,
     mut response: Result<Value, ApiError>,
     budget: u64,
     external: Option<(
@@ -623,10 +641,11 @@ async fn prepare_external(
             result: value.ok_or(()),
         }
     });
-    (reply, prepare_management(response, budget).await)
+    (reply, prepare_management(language, response, budget).await)
 }
 
 async fn prepare_management(
+    language: UiLanguage,
     result: Result<Value, ApiError>,
     budget: u64,
 ) -> Result<management::Report, ApiError> {
@@ -635,7 +654,7 @@ async fn prepare_management(
         Err(error) => serde_json::json!({"error":error}),
     };
     presentation_work(move || {
-        management::report(value, budget.min(MAX_FRAME_BYTES as u64) as usize)
+        management::report_in(language, value, budget.min(MAX_FRAME_BYTES as u64) as usize)
     })
     .await
 }
@@ -894,6 +913,7 @@ async fn run_with_delivery(
     command_slots: Arc<Semaphore>,
     #[cfg(test)] startup: Option<receipt_delivery::Startup>,
 ) -> Result<(), ApiError> {
+    let language = control.store.config.ui.language;
     actions.close_tool_starts_on_quit(&control);
     let client_context = client_operations::ClientContext {
         config_path: owner.loaded.config_path.clone(),
@@ -1262,7 +1282,7 @@ async fn run_with_delivery(
                     status(
                         &updates,
                         None,
-                        format!("CLI受付が停止しました。本体を再起動して復旧してください: {error}"),
+                        ui_diagnostics::cli_stopped(language, error),
                     )
                     .await;
                 }
@@ -1275,7 +1295,7 @@ async fn run_with_delivery(
                         status(
                             &updates,
                             None,
-                            "中断処理の観測が失敗しました。対象状態を確認してください",
+                            i18n::local!(language, "中断処理の観測が失敗しました。対象状態を確認してください", "Interrupt observation failed. Check the target state"),
                         )
                         .await
                     }
@@ -1323,7 +1343,7 @@ async fn run_with_delivery(
                             _ => None,
                         };
                         if !accepted_index.take().is_some_and(|(id, saved)| id == attempt && args == Some(&saved)) {
-                            management_status(&updates, context.clone(), "索引確認が古くなりました。再確認してください").await;
+                            management_status(&updates, context.clone(), i18n::local!(language, "索引確認が古くなりました。再確認してください", "Index confirmation is stale. Confirm again")).await;
                             continue;
                         }
                         (UiAction::Manage(command), None)
@@ -1371,7 +1391,7 @@ async fn run_with_delivery(
                                 Ok((title,fields))=>management_update(&sender,reply_context,UiUpdate::ReceivedList{title,fields}).await,
                                 Err(error)=>management_status(&sender,reply_context,error).await,
                             }
-                        }){management_status(&updates,context,"読取り枠が満杯です。再操作してください").await;}
+                        }){management_status(&updates,context,i18n::local!(language, "読取り枠が満杯です。再操作してください", "Read capacity is full. Try again")).await;}
                     }
                     UiAction::LoadModels {
                         connection,
@@ -1403,7 +1423,7 @@ async fn run_with_delivery(
                                 Err(response
                                     .error
                                     .map(|error| error.to_string())
-                                    .unwrap_or_else(|| "一覧を取得できませんでした".into()))
+                                    .unwrap_or_else(|| i18n::local!(language, "一覧を取得できませんでした", "Could not retrieve the list").into()))
                             };
                             update(&sender, UiUpdate::Models { request_id, completed_at: chrono::Utc::now(), result }).await;
                         }) {
@@ -1413,7 +1433,7 @@ async fn run_with_delivery(
                                     request_id,
                                     completed_at: chrono::Utc::now(),
                                     result: Err(
-                                        "取得キューが満杯です。Ctrl+Rで再取得してください".into()
+                                        i18n::local!(language, "取得キューが満杯です。Ctrl+Rで再取得してください", "The read queue is full. Ctrl+R retries").into()
                                     ),
                                 },
                             )
@@ -1421,18 +1441,18 @@ async fn run_with_delivery(
                         }
                     }
                     UiAction::InterruptTurn {thread_id,turn_id} => {
-                        if !control_tasks.is_empty() {status(&updates,Some(thread_id),"中断操作を処理中です。状態を確認して再操作してください").await;continue;}
+                        if !control_tasks.is_empty() {status(&updates,Some(thread_id),i18n::local!(language, "中断操作を処理中です。状態を確認して再操作してください", "An interrupt is being processed. Check its state, then try again")).await;continue;}
                         let control=control.clone();
                         control_tasks.spawn(async move {let result=control.interrupt_turn(thread_id.clone(),turn_id).await.map(|_|());(thread_id,result)});
                     }
                     UiAction::CancelMessages {message_ids,target} => {
-                        let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,target.thread_id.clone(),"取消キューが満杯です。未受付です").await;continue;};
+                        let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,target.thread_id.clone(),i18n::local!(language, "取消キューが満杯です。未受付です", "The cancel queue is full. Request not accepted")).await;continue;};
                         let control=control.clone();let sender=updates.worker();
                         spawn_work(&mut workers,permit,async move {message_queue::cancel(&control,&sender,target,message_ids).await;});
                     }
                     UiAction::RestoreArchive {archive_id,target} => {
                         let control=control.clone();let sender=updates.worker();let rejected=target.thread_id.clone();
-                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {message_queue::restore(&control,&sender,target,archive_id).await;}) {status(&updates,rejected,"復元キューが満杯です。再操作してください").await;}
+                        if !spawn_read(&mut read_workers,&read_slots,&read_cancel,async move {message_queue::restore(&control,&sender,target,archive_id).await;}) {status(&updates,rejected,i18n::local!(language, "復元キューが満杯です。再操作してください", "The restore queue is full. Try again")).await;}
                     }
                     UiAction::ListRestore {thread_id,generation,request_id} => {
                         let control=control.clone();let sender=updates.worker();let rejected=thread_id.clone();
@@ -1441,7 +1461,7 @@ async fn run_with_delivery(
                                 Ok(entries)=>update(&sender,UiUpdate::RestoreArchives {thread_id,generation,request_id,entries,error:None}).await,
                                 Err(error)=>update(&sender,UiUpdate::RestoreArchives {thread_id,generation,request_id,entries:vec![],error:Some(error.to_string())}).await,
                             }
-                        }) {status(&updates,rejected,"下書き一覧の取得キューが満杯です").await;}
+                        }) {status(&updates,rejected,i18n::local!(language, "下書き一覧の取得キューが満杯です", "The draft-list read queue is full")).await;}
                     }
                     UiAction::Send {
                         generation, now, snapshot,
@@ -1489,7 +1509,7 @@ async fn run_with_delivery(
                                             thread_id,
                                             status: ReceiptStatus::Failed,
                                             message: Some(
-                                                "送信準備キューが満杯です。下書きを保持しました".into(),
+                                                i18n::local!(language, "送信準備キューが満杯です。下書きを保持しました", "The send-preparation queue is full. Draft kept").into(),
                                             ),
                                         },
                                     )
@@ -1610,13 +1630,13 @@ async fn run_with_delivery(
                                 status(
                                     &updates,
                                     target,
-                                    "設定の変更キューが満杯です。完了後に再操作してください",
+                                    i18n::local!(language, "設定の変更キューが満杯です。完了後に再操作してください", "The settings-change queue is full. Wait for completion, then try again"),
                                 )
                                 .await;
                             }
                             continue;
                         };
-                        status(&updates, target.clone(), "設定を反映中.").await;
+                        status(&updates, target.clone(), i18n::local!(language, "設定を反映中.", "Applying settings.")).await;
                         let control = control.clone();
                         let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
@@ -1635,10 +1655,7 @@ async fn run_with_delivery(
                             match result {
                                 Ok(details) => {
                                     let thread = details.thread_id.clone();
-                                    let message = format!(
-                                        "設定を変更しました | {} / {}",
-                                        details.connection, details.model
-                                    );
+                                    let message = ui_diagnostics::settings_changed(language, &details.connection, &details.model);
                                     update(
                                         &sender,
                                         UiUpdate::Thread {
@@ -1675,7 +1692,7 @@ async fn run_with_delivery(
                                 status(
                                     &updates,
                                     selection.active_thread.clone(),
-                                    "再試行の準備キューが満杯です。完了後に再操作してください",
+                                    i18n::local!(language, "再試行の準備キューが満杯です。完了後に再操作してください", "The retry-preparation queue is full. Wait for completion, then try again"),
                                 )
                                 .await;
                             }
@@ -1689,7 +1706,7 @@ async fn run_with_delivery(
                             command_outcome(&sender, submission, &result).await;
                             match result {
                                 Ok(_) => {
-                                    status(&sender, target, "同じ内容で再試行を受け付けました").await
+                                    status(&sender, target, i18n::local!(language, "同じ内容で再試行を受け付けました", "Retry accepted with the same content")).await
                                 }
                                 Err(error) => {
                                     if !has_submission {
@@ -1755,7 +1772,7 @@ async fn run_with_delivery(
                             selection.active_thread.as_deref(), selection.active_draft.as_deref(),
                         );
                         let Ok(permit) = command_slots.clone().try_acquire_owned() else {
-                            management_status(&updates, context, "操作キューが満杯です。未受付です").await;
+                            management_status(&updates, context, i18n::local!(language, "操作キューが満杯です。未受付です", "The operation queue is full. Request not accepted")).await;
                             continue;
                         };
                         let generation = management.next_generation();
@@ -1785,9 +1802,9 @@ async fn run_with_delivery(
                                     value.get("ok").and_then(Value::as_bool) != Some(false)
                                         && value.get("exit_code").and_then(Value::as_u64).is_none_or(|code| code == 0)
                                 });
-                                update(&outcomes, owner.update(format!("{title} | {}", if success {"処理結果を受信"} else {"失敗 | 詳細を確認してください"}))).await;
+                                update(&outcomes, owner.update(format!("{title} | {}", if success {i18n::local!(language, "処理結果を受信", "Result received")} else {i18n::local!(language, "失敗 | 詳細を確認してください", "Failed | Check details")}))).await;
                             }
-                            let (external, result) = prepare_external(response, control.store.config.cache.body_bytes, external).await;
+                            let (external, result) = prepare_external(language,response, control.store.config.cache.body_bytes, external).await;
                             let _ = sender.send(BackgroundResult::Command { external, retained:None,list_command:None, work_status: false, context, generation, title, result }).await;
                         });
                     }
@@ -1833,7 +1850,7 @@ async fn run_with_delivery(
                                 if let Some(owner) = notice_owner {
                                     update(
                                         &updates,
-                                        owner.update(format!("未受付 | {title} | {}", error.message)),
+                                        owner.update(ui_diagnostics::not_accepted(language, &title, &error.message)),
                                     )
                                     .await;
                                 }
@@ -1875,12 +1892,12 @@ async fn run_with_delivery(
                             if mutation && let Some(owner) = notice_owner {
                                 update(
                                     &outcomes,
-                                    owner.update(management::completion_text(&title, stop, &response)),
+                                    owner.update(management::completion_text(language,&title, stop, &response)),
                                 )
                                 .await;
                             }
                             let (external, result) =
-                                prepare_external(response, control.store.config.cache.body_bytes, external).await;
+                                prepare_external(language,response, control.store.config.cache.body_bytes, external).await;
                             let _ = sender
                                 .send(BackgroundResult::Command { external, retained,list_command,
                                     work_status,
@@ -1908,7 +1925,7 @@ async fn run_with_delivery(
                             if let Some(owner) = notice_owner {
                                 update(
                                     &updates,
-                                    owner.update(format!("未受付 | 添付再読込 | {}", error.message)),
+                                    owner.update(ui_diagnostics::not_accepted(language, i18n::local!(language, "添付再読込", "Reload attachments"), &error.message)),
                                 )
                                 .await;
                             }
@@ -1919,18 +1936,18 @@ async fn run_with_delivery(
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         spawn_work(&mut workers, permit, async move {
-                            let title = format!("添付を明示再読込み: {thread_id}（API送信なし）");
+                            let title = ui_diagnostics::attachments_reloaded(language, &thread_id);
                             let response = control.reload_attachments(thread_id).await;
                             command_outcome(&outcomes, submission, &response).await;
                             if let Some(owner) = notice_owner {
                                 update(
                                     &outcomes,
-                                    owner.update(management::completion_text(&title, false, &response)),
+                                    owner.update(management::completion_text(language,&title, false, &response)),
                                 )
                                 .await;
                             }
                             let result =
-                                prepare_management(response, control.store.config.cache.body_bytes)
+                                prepare_management(language,response, control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
                                 .send(BackgroundResult::Command { external:None, retained:None,list_command:None,
@@ -1951,7 +1968,7 @@ async fn run_with_delivery(
                             management_update(
                                 &updates,
                                 context.clone(),
-                                UiUpdate::IndexPreviewFailed { args, attempt, error: "索引操作を準備中です。完了後に再操作してください".into() },
+                                UiUpdate::IndexPreviewFailed { args, attempt, error: i18n::local!(language, "索引操作を準備中です。完了後に再操作してください", "Preparing an index operation. Wait for completion, then try again").into() },
                             )
                             .await;
                             continue;
@@ -1975,7 +1992,7 @@ async fn run_with_delivery(
                                     });
                             let result = match result {
                                 Ok(value) => {
-                                    presentation_work(move || management::index_preview_captured_text(&value, captured_at)).await
+                                    presentation_work(move || management::index_preview_captured_text_in(language,&value, captured_at)).await
                                 }
                                 Err(error) => Err(error),
                             };
@@ -2010,7 +2027,7 @@ async fn run_with_delivery(
                                 status(
                                     &updates,
                                     None,
-                                    "履歴操作を準備中です。完了後に再操作してください",
+                                    i18n::local!(language, "履歴操作を準備中です。完了後に再操作してください", "Preparing a history operation. Wait for completion, then try again"),
                                 )
                                 .await;
                             }
@@ -2084,7 +2101,7 @@ async fn run_with_delivery(
                                             thread_id: None,
                                             status: ReceiptStatus::Failed,
                                             message: Some(
-                                                "送信準備キューが満杯です。下書きを保持しました".into(),
+                                                i18n::local!(language, "送信準備キューが満杯です。下書きを保持しました", "The send-preparation queue is full. Draft kept").into(),
                                             ),
                                         },
                                     )
@@ -2169,7 +2186,7 @@ async fn run_with_delivery(
                         status(
                             &updates,
                             None,
-                            "終了操作は /quit または Ctrl+Q の後に選択してください",
+                            i18n::local!(language, "終了操作は /quit または Ctrl+Q の後に選択してください", "Select shutdown actions after /quit or Ctrl+Q"),
                         )
                         .await
                     }
@@ -2219,7 +2236,7 @@ async fn run_with_delivery(
                                 status(
                                     &updates,
                                     None,
-                                    "原文読込キューが満杯です。完了後に再操作してください",
+                                    i18n::local!(language, "原文読込キューが満杯です。完了後に再操作してください", "The original-read queue is full. Wait for completion, then try again"),
                                 )
                                 .await;
                             }
@@ -2249,20 +2266,20 @@ async fn run_with_delivery(
                                 }=>value,
                             };
                             let _=results.send(BackgroundResult::ThreadPage {generation,requested_cursor,stop:page_stop,result}).await;
-                        }) {update(&updates,UiUpdate::ThreadListFailed {generation,error:"会話一覧の読込キューが満杯です。Ctrl+Rで再取得してください".into()}).await;}
+                        }) {update(&updates,UiUpdate::ThreadListFailed {generation,error:i18n::local!(language, "会話一覧の読込キューが満杯です。Ctrl+Rで再取得してください", "The conversation-list queue is full. Ctrl+R retries").into()}).await;}
                     },
                     UiAction::WatchAction(target)=>{
-                        let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,selection.active_thread.clone(),"Watchの操作キューが満杯です。再操作してください").await;continue;};
+                        let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,selection.active_thread.clone(),i18n::local!(language, "Watchの操作キューが満杯です。再操作してください", "The Watch operation queue is full. Try again")).await;continue;};
                         let output=target.kind==watch::WatchActionKind::Output;
-                        let title=match target.kind {watch::WatchActionKind::Stop=>"Watch | 停止",watch::WatchActionKind::Retry=>"Watch | 再試行",watch::WatchActionKind::Output=>"Watch | 保存出力"}.to_owned();
+                        let title=match target.kind {watch::WatchActionKind::Stop=>i18n::local!(language, "Watch | 停止", "Watch | Stop"),watch::WatchActionKind::Retry=>i18n::local!(language, "Watch | 再試行", "Watch | Retry"),watch::WatchActionKind::Output=>i18n::local!(language, "Watch | 保存出力", "Watch | Saved output")}.to_owned();
                         let generation=if output {management.next_generation()}else{0};
                         let selected=selection.active_thread.clone();let control=control.clone();let results=background_tx.clone();let outcomes=updates.worker();
                         spawn_work(&mut workers,permit,async move {
                             let response=watch_action::execute(&control,target).await;
                             if output {
-                                let result=prepare_management(response,control.store.config.cache.body_bytes).await;
+                                let result=prepare_management(language,response,control.store.config.cache.body_bytes).await;
                                 let _=results.send(BackgroundResult::Command { external:None,retained:None,list_command:None,work_status:false,context:None,generation,title,result}).await;
-                            } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,format!("{title}は未適用 | {error}")).await,}}
+                            } else {match response {Ok(_)=>status(&outcomes,selected,ui_diagnostics::accepted(language, &title)).await,Err(error)=>status(&outcomes,selected,ui_diagnostics::not_applied(language, &title, error)).await,}}
                         });
                     },
                     UiAction::ProgramStatusSeen { thread_id, run_id } => {
@@ -2515,7 +2532,7 @@ async fn run_with_delivery(
                             let result=HistoryReader::new(&control,&sender,render_width).links(node_ids).await.map_err(|error|error.to_string());
                             update(&sender,UiUpdate::DetailLinks {thread_id:target,generation,request_id,result}).await;
                         }) {
-                            update(&updates,UiUpdate::DetailLinks {thread_id,generation,request_id,result:Err("リンクの読込キューが満杯です。完了後に再操作してください".into())}).await;
+                            update(&updates,UiUpdate::DetailLinks {thread_id,generation,request_id,result:Err(i18n::local!(language, "リンクの読込キューが満杯です。完了後に再操作してください", "The link-read queue is full. Wait for completion, then try again").into())}).await;
                         }
                     }
                     UiAction::LoadToolPreview {
@@ -2550,7 +2567,7 @@ async fn run_with_delivery(
                                     ItemKey::Node(_) => false,
                                 };
                                 let result = if !identity_matches {
-                                    Err("出力の表示対象が変わりました。項目を開き直してください".into())
+                                    Err(i18n::local!(language, "出力の表示対象が変わりました。項目を開き直してください", "The displayed output target changed. Reopen the item").into())
                                 } else {
                                     let limit = limit_bytes.min(control.store.config.limits.tool_excerpt_bytes.min(16 * 1024) as usize).max(1);
                                     preview_reads::load(&control, &source_node_id, group_id.as_deref(), &call_id, limit).await
@@ -2563,7 +2580,7 @@ async fn run_with_delivery(
                         ) {
                             update(&updates, UiUpdate::ToolPreview {
                                 thread_id, generation, key, request_revision,
-                                result: Err("出力の読込キューが満杯です。完了後に再操作してください".into()),
+                                result: Err(i18n::local!(language, "出力の読込キューが満杯です。完了後に再操作してください", "The output-read queue is full. Wait for completion, then try again").into()),
                             }).await;
                         }
                     }
@@ -2646,7 +2663,7 @@ async fn run_with_delivery(
                                     generation,
                                     request_id,
                                     result: Err(
-                                        "入力履歴の読込キューが満杯です。完了後に再操作してください"
+                                        i18n::local!(language, "入力履歴の読込キューが満杯です。完了後に再操作してください", "The input-history queue is full. Wait for completion, then try again")
                                             .into(),
                                     ),
                                 },
@@ -2682,7 +2699,7 @@ async fn run_with_delivery(
                                 &updates,
                                 UiUpdate::DraftSaveFailed {
                                     thread_id,
-                                    message: draft_saver.rejected_message().into(),
+                                    message: draft_saver.rejected_message(language).into(),
                                 },
                             )
                             .await;
@@ -2723,7 +2740,7 @@ async fn run_with_delivery(
                                     &updates,
                                     UiUpdate::DraftStatus {
                                         draft_id,
-                                        text: "画像の準備中です。完了後に再操作してください".into(),
+                                        text: i18n::local!(language, "画像の準備中です。完了後に再操作してください", "Preparing an image. Wait for completion, then try again").into(),
                                     },
                                 )
                                 .await;
@@ -2734,7 +2751,7 @@ async fn run_with_delivery(
                             &updates,
                             UiUpdate::DraftStatus {
                                 draft_id: draft_id.clone(),
-                                text: "クリップボード画像を保存中.".into(),
+                                text: i18n::local!(language, "クリップボード画像を保存中.", "Saving clipboard image.").into(),
                             },
                         )
                         .await;
@@ -2771,7 +2788,7 @@ async fn run_with_delivery(
                         status(
                             &updates,
                             None,
-                            "待機の観測を取消しました。対象処理は継続します",
+                            i18n::local!(language, "待機の観測を取消しました。対象処理は継続します", "Wait observation cancelled. The target process continues"),
                         )
                         .await;
                     }
@@ -2788,7 +2805,7 @@ async fn run_with_delivery(
                             } => {} }
                         }) {
                             update(&updates, UiUpdate::CopyChoices { node_id, request_id,
-                                result: Err("原文読込キューが満杯です。Esc後に再操作してください".into()) }).await;
+                                result: Err(i18n::local!(language, "原文読込キューが満杯です。Esc後に再操作してください", "The original-read queue is full. Esc, then try again").into()) }).await;
                         }
                     }
                     UiAction::LoadOriginal {
@@ -2826,7 +2843,7 @@ async fn run_with_delivery(
                                 Err(error) => status(&sender, None, error).await,
                             }
                         }) {
-                            status(&updates, None, "原文読込キューが満杯です").await;
+                            status(&updates, None, i18n::local!(language, "原文読込キューが満杯です", "The original-read queue is full")).await;
                         }
                     }
                     UiAction::FollowManagement {
@@ -2838,7 +2855,7 @@ async fn run_with_delivery(
                             management_status(
                                 &updates,
                                 context.clone(),
-                                "結果が更新されました。現在の一覧から選択してください",
+                                i18n::local!(language, "結果が更新されました。現在の一覧から選択してください", "Results changed. Select from the current list"),
                             )
                             .await;
                             continue;
@@ -2847,13 +2864,13 @@ async fn run_with_delivery(
                             management_status(
                                 &updates,
                                 context.clone(),
-                                "詳細が未保持です。範囲を絞って再照会してください",
+                                i18n::local!(language, "詳細が未保持です。範囲を絞って再照会してください", "Details are not retained. Narrow the scope and query again"),
                             )
                             .await;
                             continue;
                         };
                         let Ok(permit) = command_slots.clone().try_acquire_owned() else {
-                            management_status(&updates, context.clone(), "操作キューが満杯です").await;
+                            management_status(&updates, context.clone(), i18n::local!(language, "操作キューが満杯です", "The operation queue is full")).await;
                             continue;
                         };
                         let generation = management.next_generation();
@@ -2874,7 +2891,7 @@ async fn run_with_delivery(
                             if let Some(scope)=context.clone() {
                                 let resolved=match &target {
                                     management::FollowTarget::Command(command)=>inspection_target(command).map(|target|(target,command_title(command))),
-                                    management::FollowTarget::Attachment {thread_id,attachment_id}=>Some((InspectionTarget::Attachments {thread_id:thread_id.clone(),attachment_id:Some(attachment_id.clone())},"添付の参照".into())),
+                                    management::FollowTarget::Attachment {thread_id,attachment_id}=>Some((InspectionTarget::Attachments {thread_id:thread_id.clone(),attachment_id:Some(attachment_id.clone())},i18n::local!(language, "添付の参照", "Attachment references").into())),
                                 };
                                 if let Some((target,title))=resolved {
                                     let _=sender.send(BackgroundResult::InspectionResolved {generation,context:scope,target,title}).await;
@@ -2890,7 +2907,7 @@ async fn run_with_delivery(
                                     (title,work_status,management_request(&control,*command,CancellationToken::new()).await)
                                 },
                                 management::FollowTarget::Attachment {thread_id,attachment_id}=> {
-                                    ("添付の参照".into(),false,inspection_attachments::request(&control,thread_id,Some(attachment_id),CancellationToken::new()).await)
+                                    (i18n::local!(language, "添付の参照", "Attachment references").into(),false,inspection_attachments::request(&control,thread_id,Some(attachment_id),CancellationToken::new()).await)
                                 },
                             };
                             let observed=match response {
@@ -2907,7 +2924,7 @@ async fn run_with_delivery(
                                     error
                                         .get("message")
                                         .and_then(Value::as_str)
-                                        .unwrap_or("参照を取得できません。Rで一覧を更新してください"),
+                                        .unwrap_or(i18n::local!(language, "参照を取得できません。Rで一覧を更新してください", "References are unavailable. R refreshes the list")),
                                 )
                                 .await;
                                 return;
@@ -2916,7 +2933,7 @@ async fn run_with_delivery(
                             let mut observed=observed;
                             inspection_retained::decorate_original(&mut observed,&retained);
                             let result =
-                                prepare_management(Ok(observed), control.store.config.cache.body_bytes)
+                                prepare_management(language,Ok(observed), control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
                                 .send(BackgroundResult::Command { external:None, retained,list_command,
@@ -2936,11 +2953,11 @@ async fn run_with_delivery(
                         cursor,
                     } => {
                         if request_id != management.request_id {
-                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:"管理結果が更新されました。現在の同じ対象を再取得してください".into()}).await;
+                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:i18n::local!(language, "管理結果が更新されました。現在の同じ対象を再取得してください", "Management results changed. Retrieve the same current target again").into()}).await;
                             continue;
                         }
                         let Some((value,resolved_pointer)) = management.detail_source(&pointer) else {
-                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:"詳細は本文cache予算を超えたため未保持。対象IDから原文pageを取得するか範囲を絞って再照会してください".into()}).await;
+                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer,error:i18n::local!(language, "詳細は本文cache予算を超えたため未保持。対象IDから原文pageを取得するか範囲を絞って再照会してください", "Details exceed the body-cache budget and were not retained. Read an original page by ID or narrow the query").into()}).await;
                             continue;
                         };
                         let sender = updates.worker();
@@ -2972,12 +2989,12 @@ async fn run_with_delivery(
                                 }
                             }
                         }) {
-                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer:refused_pointer,error:"詳細読込キューが満杯です".into()}).await;
+                            management_update(&updates,context.clone(),UiUpdate::ManagementDetailFailure {request_id,detail_request_id,pointer:refused_pointer,error:i18n::local!(language, "詳細読込キューが満杯です", "The detail-read queue is full").into()}).await;
                         }
                     }
                     UiAction::CopyText { text, scope } => {
                         let Ok(permit) = clipboard_slots.clone().try_acquire_owned() else {
-                            management_status(&updates, context.clone(), "クリップボードの準備中です")
+                            management_status(&updates, context.clone(), i18n::local!(language, "クリップボードの準備中です", "Preparing the clipboard"))
                                 .await;
                             continue;
                         };
@@ -3024,7 +3041,7 @@ async fn run_with_delivery(
                                 management_status(
                                     &updates,
                                     context.clone(),
-                                    "クリップボードの準備中です。完了後に再操作してください",
+                                    i18n::local!(language, "クリップボードの準備中です。完了後に再操作してください", "Preparing the clipboard. Wait for completion, then try again"),
                                 )
                                 .await;
                             }
@@ -3063,7 +3080,7 @@ async fn run_with_delivery(
                             status(
                                 &updates,
                                 Some(thread_id),
-                                "中断操作を処理中です。対象状態を確認して再操作してください",
+                                i18n::local!(language, "中断操作を処理中です。対象状態を確認して再操作してください", "An interrupt is being processed. Check the target state, then try again"),
                             )
                             .await;
                             continue;
@@ -3089,7 +3106,7 @@ async fn run_with_delivery(
                                 status(
                                     &updates,
                                     Some(thread_id),
-                                    "操作キューが満杯です。背景化は未受付です",
+                                    i18n::local!(language, "操作キューが満杯です。背景化は未受付です", "The operation queue is full. Backgrounding not accepted"),
                                 )
                                 .await;
                             }
@@ -3186,7 +3203,7 @@ async fn run_with_delivery(
                     result: Err(error),
                 }) => {
                     if error.is_storage_failure() {
-                        update(&updates,UiUpdate::StorageFailed{thread_id,message:format!("正本DBの保存に失敗しました。新規実行を停止し資源を回収しています。下書き本文は画面に保持しています: {error}")}).await;
+                        update(&updates,UiUpdate::StorageFailed{thread_id,message:ui_diagnostics::save_failed(language, error)}).await;
                     } else {
                         update(
                             &updates,
@@ -3396,7 +3413,7 @@ async fn run_with_delivery(
                 Some(BackgroundResult::Copied {
                     scope,
                     result: Ok((CopyOutcome::OsCopied, characters)),
-                }) => status(&updates, None, format!("{}をコピーしました（{characters}文字）", scope.label())).await,
+                }) => status(&updates, None, ui_diagnostics::copied(language, scope, characters, false)).await,
                 Some(BackgroundResult::Copied {
                     scope,
                     result: Ok((CopyOutcome::TerminalRequest(bytes), characters)),
@@ -3405,10 +3422,7 @@ async fn run_with_delivery(
                     status(
                         &updates,
                         None,
-                        format!(
-                            "OSC52: {}のコピー要求を端末へ送りました（{characters}文字・完了未確認）",
-                            scope.label()
-                        ),
+                        ui_diagnostics::copied(language, scope, characters, true),
                     )
                     .await;
                 }
@@ -3433,7 +3447,7 @@ async fn run_with_delivery(
                             inspection_external::CompletionOutcome::Accepted | inspection_external::CompletionOutcome::FailedRetained | inspection_external::CompletionOutcome::FailedUnavailable => {
                                 external_owner_for_delivery = Some(identity.owner.clone());
                                 pending_external = Some((generation, reply));
-                                preview.as_ref().map(|observation| inspection_external::prepare_refresh_notice(observation, &identity, true, false, false).text())
+                                preview.as_ref().map(|observation| inspection_external::prepare_refresh_notice(observation, &identity, true, false, false).text_in(language))
                             }
                             _ => None,
                         }
@@ -3442,7 +3456,7 @@ async fn run_with_delivery(
                     match result {
                         Ok(mut report) => {
                             if let Some(notice) = notice {
-                                report.fields.insert(0, crate::presentation::PresentationField { key: "/observation_notice".into(), label: "観測".into(), value: notice, display: None, value_omitted: false });
+                                report.fields.insert(0, crate::presentation::PresentationField { key: "/observation_notice".into(), label: i18n::local!(language, "観測", "Observation").into(), value: notice, display: None, value_omitted: false });
                             }
                             management.detail = report.detail.map(Arc::new);
                             let retained = if let Some(command) = list_command {
@@ -3451,7 +3465,7 @@ async fn run_with_delivery(
                                         Ok(target) => Some(target),
                                         Err(error) => { management_status(&updates,context.clone(),error).await; None },
                                     },
-                                    None => { management_status(&updates,context.clone(),"一覧の保持予算を超えました。現在状態は未確認です").await; None },
+                                    None => { management_status(&updates,context.clone(),i18n::local!(language, "一覧の保持予算を超えました。現在状態は未確認です", "The list-retention budget was exceeded. Current state is unverified")).await; None },
                                 }
                             } else { retained };
                             let structured = UiUpdate::StructuredManagement {
@@ -3601,7 +3615,7 @@ async fn run_with_delivery(
                 }
                 Ok(EngineEvent::Notice { thread_id, foreground_release, cancelled_calls }) => {
                     let release = foreground_release.as_ref().map(|(execution, reason)| (execution.as_str(), *reason));
-                    status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls)).await
+                    status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls, language)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                     confirmation_revision = confirmation_revision.wrapping_add(1);
@@ -3610,7 +3624,7 @@ async fn run_with_delivery(
                     update(&updates, UiUpdate::ConfirmationSourcesChanged).await;
                     status_dirty |= status_enabled;
                     management.inspection.resync();
-                    descendants.resync();browser.request_resync("会話一覧の変更通知を取りこぼしました。最新のページから再取得します");
+                    descendants.resync();browser.request_resync(i18n::local!(language, "会話一覧の変更通知を取りこぼしました。最新のページから再取得します", "Conversation-list changes were missed. Reloading from the newest page"));
                     #[cfg(test)] stream_metrics::FRONTEND_LAGGED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(thread) = &selection.active_thread {
                         streams.invalidate(thread);
@@ -3753,7 +3767,7 @@ async fn run_with_delivery(
             .and(control_result)
             .and(owner_result)
     };
-    wait_for_shutdown_delivery(&mut actions, &updates, grace, shutdown).await
+    wait_for_shutdown_delivery(&mut actions, &updates, grace, shutdown, language).await
 }
 
 // Drive delivery while the shutdown future is pending, not just the active loop.
@@ -3762,9 +3776,11 @@ async fn wait_for_shutdown_delivery<F: Future<Output = Result<(), ApiError>>>(
     updates: &BufferedUpdates,
     grace: Duration,
     shutdown: F,
+    language: UiLanguage,
 ) -> Result<(), ApiError> {
     let result = {
-        let waiting = wait_for_shutdown_updates(actions, updates, grace, shutdown);
+        let waiting =
+            wait_for_shutdown_updates_localized(actions, updates, grace, shutdown, language);
         tokio::pin!(waiting);
         loop {
             tokio::select! {
@@ -3793,6 +3809,15 @@ async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
     grace: Duration,
     shutdown: F,
 ) -> Result<(), ApiError> {
+    wait_for_shutdown_updates_localized(actions, updates, grace, shutdown, UiLanguage::En).await
+}
+async fn wait_for_shutdown_updates_localized<F: Future<Output = Result<(), ApiError>>>(
+    actions: &mut impl crate::ui::actions::ActionStream,
+    updates: &(impl UpdateTarget + ?Sized),
+    grace: Duration,
+    shutdown: F,
+    language: UiLanguage,
+) -> Result<(), ApiError> {
     let started = tokio::time::Instant::now();
     let mut next_choice = started + grace;
     let mut force_available = false;
@@ -3813,7 +3838,7 @@ async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
                 },
                 Some(UiAction::WaitForShutdown)=>{
                     force_available=false;next_choice=tokio::time::Instant::now()+grace;
-                    update(updates,UiUpdate::ShutdownProgress{elapsed_ms:started.elapsed().as_millis().min(u64::MAX as u128)as u64,detail:"停止・保存を継続しています".into(),force_available:false}).await;
+                    update(updates,UiUpdate::ShutdownProgress{elapsed_ms:started.elapsed().as_millis().min(u64::MAX as u128)as u64,detail:i18n::local!(language, "停止・保存を継続しています", "Continuing shutdown and saving").into(),force_available:false}).await;
                 },
                 None=>actions_open=false,
                 _=>{},
@@ -3821,7 +3846,7 @@ async fn wait_for_shutdown_updates<F: Future<Output = Result<(), ApiError>>>(
             _=tick.tick()=>{
 
                 if tokio::time::Instant::now()>=next_choice{force_available=true;}
-                update(updates,UiUpdate::ShutdownProgress{elapsed_ms:started.elapsed().as_millis().min(u64::MAX as u128)as u64,detail:if force_available{"停止・保存が猶予時間を超えました。待機継続または強制終了を選択してください。強制終了では未保存・未回収が残る可能性があります".into()}else{"新規受付を停止し、所有処理・下書き・出力を保存して解放しています".into()},force_available}).await;
+                update(updates,UiUpdate::ShutdownProgress{elapsed_ms:started.elapsed().as_millis().min(u64::MAX as u128)as u64,detail:if force_available{i18n::local!(language, "停止・保存が猶予時間を超えました。待機継続または強制終了を選択してください。強制終了では未保存・未回収が残る可能性があります", "Shutdown exceeded its grace period. Keep waiting or force quit. Force quit may leave unsaved data and uncollected processes").into()}else{i18n::local!(language, "新規受付を停止し、所有処理・下書き・出力を保存して解放しています", "New requests stopped. Saving and releasing owned work, drafts, and output").into()},force_available}).await;
             },
         }
     }
@@ -4063,30 +4088,54 @@ fn thread_display_times(threads: &[ThreadSummary]) -> Vec<crate::ui::ThreadDispl
         .collect()
 }
 
-fn tool_preview(page: crate::control::output::preview::PreviewPage) -> ToolPreview {
-    tool_preview_at(page, chrono::Utc::now())
+fn tool_preview(
+    page: crate::control::output::preview::PreviewPage,
+    language: UiLanguage,
+) -> ToolPreview {
+    tool_preview_at(page, chrono::Utc::now(), language)
 }
 
 fn tool_preview_at(
     page: crate::control::output::preview::PreviewPage,
     observed_at: chrono::DateTime<chrono::Utc>,
+    language: UiLanguage,
 ) -> ToolPreview {
     use crate::presentation::{BlockKind, OutputStream, PresentationBlock};
     let mut notices = Vec::new();
     if page.skipped {
-        notices.push("前方を省略した末尾抜粋です。全文は原文から取得できます");
+        notices.push(i18n::local!(
+            language,
+            "前方を省略した末尾抜粋です。全文は原文から取得できます",
+            "Tail excerpt; earlier output is omitted. Read the original for full text"
+        ));
     }
     if page.decode_uncertain {
-        notices.push("末尾からの文字変換は不確実です。原文を参照してください");
+        notices.push(i18n::local!(
+            language,
+            "末尾からの文字変換は不確実です。原文を参照してください",
+            "Tail decoding is uncertain. Consult the original"
+        ));
     }
     if page.decode_errors {
-        notices.push("文字変換エラーがあります");
+        notices.push(i18n::local!(
+            language,
+            "文字変換エラーがあります",
+            "Decoding errors are present"
+        ));
     }
     if !page.output_complete {
         notices.push(if page.terminal {
-            "未回収の出力があります"
+            i18n::local!(
+                language,
+                "未回収の出力があります",
+                "Some output is uncollected"
+            )
         } else {
-            "実行中の出力スナップショットです"
+            i18n::local!(
+                language,
+                "実行中の出力スナップショットです",
+                "Output snapshot of a running process"
+            )
         });
     }
     let blocks = [
@@ -4109,14 +4158,10 @@ fn tool_preview_at(
         refresh_error: None,
         // Store the observation label once in the existing budgeted payload.
         // Paint/cache hits must not advance a snapshot's apparent read time.
-        notice: Some(format!(
-            "取得 {} UTC | 閉じて開くと再取得{}",
-            observed_at.format("%Y-%m-%d %H:%M:%S"),
-            if notices.is_empty() {
-                String::new()
-            } else {
-                format!(" | {}", notices.join("。"))
-            },
+        notice: Some(ui_diagnostics::preview_notice(
+            language,
+            observed_at,
+            &notices,
         )),
     }
 }
@@ -4338,20 +4383,28 @@ mod inspection_tests;
 
 #[cfg(test)]
 mod notice_tests {
-    use super::tool_group_notice;
+    use super::{UiLanguage, tool_group_notice};
     use crate::control::ForegroundRelease;
 
     #[test]
     fn tool_group_facts_are_formatted_at_the_frontend_boundary() {
-        let background = tool_group_notice(Some(("execution", ForegroundRelease::Background)), 0);
+        let background = tool_group_notice(
+            Some(("execution", ForegroundRelease::Background)),
+            0,
+            UiLanguage::Ja,
+        );
         assert!(background.contains("人間の操作でshell execution"));
         assert!(background.contains("後続の未実行呼出しはありません"));
         assert!(!background.contains("取り消"));
-        let input = tool_group_notice(Some(("other", ForegroundRelease::AdditionalInput)), 2);
+        let input = tool_group_notice(
+            Some(("other", ForegroundRelease::AdditionalInput)),
+            2,
+            UiLanguage::Ja,
+        );
         assert!(input.contains("追加指示でshell other"));
         assert!(input.contains("2件取り消しました"));
         assert_eq!(
-            tool_group_notice(None, 3),
+            tool_group_notice(None, 3, UiLanguage::Ja),
             "未実行のツール呼出しを3件取り消しました"
         );
     }
@@ -4383,6 +4436,7 @@ mod tool_preview_tests {
             chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
                 .unwrap()
                 .with_timezone(&chrono::Utc),
+            UiLanguage::Ja,
         );
         assert_eq!(
             preview.notice.as_deref(),
@@ -4406,7 +4460,7 @@ mod tool_preview_tests {
         let observed_at = chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        let preview = tool_preview_at(page, observed_at);
+        let preview = tool_preview_at(page, observed_at, UiLanguage::Ja);
         assert_eq!(preview.blocks.len(), 2);
         assert_eq!(preview.blocks[0].stream, Some(OutputStream::Stdout));
         assert_eq!(preview.blocks[1].stream, Some(OutputStream::Stderr));

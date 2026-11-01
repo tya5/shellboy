@@ -6,9 +6,52 @@ Shellboy is a terminal application for conversations and model-directed shell wo
 
 Before granting model-directed shell access, read the [safety model](#safety-model).
 
+## UI language and diagnostics
+
+The TUI defaults to English. Set the display language in your configuration
+before starting it, then restart an already running TUI to apply the change:
+
+```toml
+[ui]
+language = "en" # English; use "ja" for Japanese
+```
+
+Only `en` and `ja` are accepted. Startup uses English until the existing
+configuration worker has loaded the configured language; it then uses that
+language for the remaining startup stages, cancellation, and failure screen.
+Before configuration is available, terminal-adapter failures also use English.
+
+Language changes UI captions, explanations, command diagnostics, and generated
+status notices. It does not translate or rewrite conversation text, model/tool
+messages, provider errors, paths, IDs, code, copied text, or sent attachments.
+CLI JSON keys/values, protocol states, and instructions sent to models stay
+unchanged. A raw provider or operating-system error can therefore remain in a
+different language. Slash commands, shortcuts, and confirmation actions are the
+same in both languages; language selection never authorizes an operation.
+
+- **Unknown command / 未知のコマンド**: use `/help`; command names are not translated.
+- **Not accepted / 未受付**: the UI reports a queue/admission problem. Check the
+  target and saved-input state before trying again; do not infer acceptance or
+  completion from an error message alone. Composer text is retained where the
+  notice says it was kept.
+- **Refresh failed / 更新失敗**: a previous observation is not a claim about the
+  current external state. Check the captured UTC time and last-request time,
+  then use the displayed explicit refresh/reconfirmation action.
+- **OSC52 completion unconfirmed / 完了未確認**: sending a terminal copy request
+  does not prove that the OS clipboard was updated. Copy scope and original
+  payload are independent of the display language.
+- **Force quit / 強制終了**: waiting and forced exit remain separate choices.
+  Forced exit may leave unsaved data or uncollected owned processes. Restart
+  and inspect interrupted work rather than assuming shutdown completed.
+
+An external-observation notice describes facts captured at its recorded time.
+Changing language does not reread configuration during drawing, perform a
+provider/OS probe, renew a confirmation, or repeat a request automatically.
+
 ## Conversations and work states
 
-The UI currently uses Japanese captions. The following table explains the terms you see on screen.
+The following table explains the Japanese captions alongside their English meanings.
+The same saved states and operations apply in either UI language.
 
 | On-screen term | Meaning | Internal information in details |
 |---|---|---|

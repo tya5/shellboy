@@ -106,6 +106,7 @@ pub(super) async fn archives(
     control: &Control,
     thread: Option<String>,
 ) -> Result<Vec<(String, String)>, ApiError> {
+    let language = control.store.config.ui.language;
     let submission_fence = crate::control::submission_retention::fence(
         "json_extract(current.body_json,'$._submission.source_draft_id')",
         "json_extract(current.body_json,'$._submission.source_revision')",
@@ -114,7 +115,7 @@ pub(super) async fn archives(
     let result=control.store.database.call(move|db|{
         let mut stmt=db.prepare(&format!("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {submission_fence}) ORDER BY updated_at DESC,id DESC LIMIT 128"))?;
         let rows=stmt.query_map([thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
-        let result=rows.into_iter().map(|(id,kind,source,text)|{let label=if kind.as_deref()==Some("cancelled_message") {format!("取消した入力 | {}",source.as_deref().unwrap_or("不明"))} else {format!("未確定の送信 | {}",text.as_deref().unwrap_or(""))};(id,label)}).collect();
+        let result=rows.into_iter().map(|(id,kind,source,text)|{let label=if kind.as_deref()==Some("cancelled_message") {match language { UiLanguage::Ja=>format!("取消した入力 | {}",source.as_deref().unwrap_or("不明")),UiLanguage::En=>format!("Cancelled input | {}",source.as_deref().unwrap_or("unknown")) }} else {match language {UiLanguage::Ja=>format!("未確定の送信 | {}",text.as_deref().unwrap_or("")),UiLanguage::En=>format!("Unconfirmed send | {}",text.as_deref().unwrap_or(""))}};(id,label)}).collect();
         Ok(result)
     }).await.map_err(storage_error);
     checked_storage(control, result).await
@@ -201,13 +202,14 @@ pub(super) async fn restore(
     target: DraftRecoveryTarget,
     id: String,
 ) {
+    let language = control.store.config.ui.language;
     let (draft, message) = match restore_archive(control, id).await {
         Ok(draft) => (
             Some(Box::new(draft)),
-            "復元元は /restore list に保持しています。入力欄が空で変更されていなければ復元します"
+            i18n::local!(language, "復元元は /restore list に保持しています。入力欄が空で変更されていなければ復元します", "Source kept in /restore list. Restore only into an empty, unchanged composer")
                 .into(),
         ),
-        Err(error) => (None, format!("復元できません: {error}")),
+        Err(error) => (None, match language {UiLanguage::Ja=>format!("復元できません: {error}"),UiLanguage::En=>format!("Could not restore: {error}")}),
     };
     update(
         updates,
@@ -259,6 +261,7 @@ pub(super) async fn cancel(
     target: DraftRecoveryTarget,
     ids: Vec<String>,
 ) {
+    let language = control.store.config.ui.language;
     let operation = operation(
         control,
         Command::MessageCancel(MessageCancelArgs { message_ids: ids }),
@@ -284,7 +287,10 @@ pub(super) async fn cancel(
                 UiUpdate::DraftRecovery {
                     target,
                     draft: None,
-                    message: format!("取消できません: {error}"),
+                    message: match language {
+                        UiLanguage::Ja => format!("取消できません: {error}"),
+                        UiLanguage::En => format!("Cancellation failed: {error}"),
+                    },
                     notification_id: Some(notification_id),
                 },
             )
@@ -335,7 +341,7 @@ pub(super) async fn cancel(
             Err(_) => restorable = false,
         }
     }
-    let mut counts = std::collections::BTreeMap::<&str, usize>::new();
+    let mut counts = std::collections::BTreeMap::<&str, (MessageCancelOutcome, usize)>::new();
     for item in &result.items {
         let label = match item.outcome {
             MessageCancelOutcome::Cancelled => "取消",
@@ -345,17 +351,25 @@ pub(super) async fn cancel(
             MessageCancelOutcome::Forbidden => "権限なし",
             MessageCancelOutcome::Unavailable => "対象を利用できません",
         };
-        *counts.entry(label).or_default() += 1;
+        counts.entry(label).or_insert((item.outcome, 0)).1 += 1;
     }
     let outcomes = counts
         .into_iter()
-        .map(|(label, count)| format!("{label} {count}件"))
+        .map(|(label, (outcome, count))| match language {
+            UiLanguage::Ja => format!("{label} {count}件"),
+            UiLanguage::En => cancelled_summary(outcome, count),
+        })
         .collect::<Vec<_>>()
         .join(" | ");
     let message = if newly_cancelled == 0 {
         outcomes
     } else {
-        format!("{outcomes} | /restore list に保存済み。編集中の入力は保持します")
+        match language {
+            UiLanguage::Ja => {
+                format!("{outcomes} | /restore list に保存済み。編集中の入力は保持します")
+            }
+            UiLanguage::En => format!("{outcomes} | Saved in /restore list. Current input is kept"),
+        }
     };
     update(
         updates,
@@ -369,6 +383,19 @@ pub(super) async fn cancel(
     .await;
 }
 
+fn cancelled_summary(outcome: MessageCancelOutcome, count: usize) -> String {
+    let noun = if count == 1 { "input" } else { "inputs" };
+    match outcome {
+        MessageCancelOutcome::Cancelled => format!("{count} {noun} cancelled"),
+        MessageCancelOutcome::AlreadyCancelled => format!("{count} {noun} already cancelled"),
+        MessageCancelOutcome::AlreadyAdmitted => {
+            format!("{count} {noun} already applied to the conversation")
+        }
+        MessageCancelOutcome::NotFound => format!("{count} {noun} not found"),
+        MessageCancelOutcome::Forbidden => format!("{count} {noun} not permitted"),
+        MessageCancelOutcome::Unavailable => format!("{count} {noun} unavailable"),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

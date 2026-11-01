@@ -279,7 +279,10 @@ mod tests {
                     NextAction::RepeatInspection
                 }
             );
-            assert_eq!(notice.text(), notice.text());
+            assert_eq!(
+                notice.text_in(crate::config::UiLanguage::Ja),
+                notice.text_in(crate::config::UiLanguage::Ja)
+            );
             assert!(!notice.confirmation_enabled);
             assert!(observation.metadata_bytes() <= MAX_METADATA_BYTES);
         }

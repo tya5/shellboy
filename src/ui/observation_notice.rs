@@ -1,5 +1,7 @@
 //! Passive bounded labels and request witnesses. No reads, dispatch or clocks.
 //! Existing UI owners retain the result and supply captured times and identities.
+use super::i18n;
+use crate::config::UiLanguage;
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 use std::mem::size_of;
@@ -137,14 +139,22 @@ impl ObservationKind {
     pub fn confirmation(self) -> bool {
         matches!(self, Self::Deletion | Self::Cost | Self::Index)
     }
-    fn label(self) -> &'static str {
+    fn label(self, language: UiLanguage) -> &'static str {
         match self {
-            Self::Deletion => "削除対象の確認",
-            Self::Cost => "費用の確認",
-            Self::Index => "索引対象の確認",
-            Self::Models => "取得済みモデル一覧",
-            Self::NativeMemory => "取得済みメモリ観測",
-            Self::StandaloneClient => "完了した明示要求",
+            Self::Deletion => {
+                i18n::local!(language, "削除対象の確認", "Delete-target confirmation")
+            }
+            Self::Cost => i18n::local!(language, "費用の確認", "Cost confirmation"),
+            Self::Index => i18n::local!(language, "索引対象の確認", "Index-target confirmation"),
+            Self::Models => i18n::local!(language, "取得済みモデル一覧", "Retrieved model list"),
+            Self::NativeMemory => i18n::local!(
+                language,
+                "取得済みメモリ観測",
+                "Retrieved memory observation"
+            ),
+            Self::StandaloneClient => {
+                i18n::local!(language, "完了した明示要求", "Completed explicit request")
+            }
         }
     }
 }
@@ -164,11 +174,17 @@ pub(crate) enum NextAction {
     None,
 }
 impl NextAction {
-    fn label(self) -> &'static str {
+    fn label(self, language: UiLanguage) -> &'static str {
         match self {
-            Self::RenewPreview => "対象を明示的に再確認",
-            Self::RefreshModels => "Ctrl+R 再取得",
-            Self::RepeatInspection => "明示的に再照会",
+            Self::RenewPreview => i18n::local!(
+                language,
+                "対象を明示的に再確認",
+                "Explicitly confirm the target again"
+            ),
+            Self::RefreshModels => i18n::local!(language, "Ctrl+R 再取得", "Ctrl+R Refresh"),
+            Self::RepeatInspection => {
+                i18n::local!(language, "明示的に再照会", "Explicitly query again")
+            }
             Self::None => "",
         }
     }
@@ -186,31 +202,58 @@ pub(crate) struct ObservationNotice {
 }
 impl ObservationNotice {
     pub fn text(&self) -> String {
+        self.text_in(UiLanguage::Ja)
+    }
+    pub fn text_in(&self, language: UiLanguage) -> String {
         let captured = self.captured_at.map_or_else(
-            || "取得時刻なし".into(),
-            |time| {
-                format!(
+            || i18n::local!(language, "取得時刻なし", "No capture time").into(),
+            |time| match language {
+                UiLanguage::Ja => format!(
                     "取得 UTC {}",
                     time.to_rfc3339_opts(SecondsFormat::Millis, true)
-                )
+                ),
+                UiLanguage::En => format!(
+                    "Captured UTC {}",
+                    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+                ),
             },
         );
         let state = match self.freshness {
-            Freshness::Captured => "取得時点の事実",
-            Freshness::Stale => "対象変更後・再確認が必要",
-            Freshness::FailedRefresh => "再取得に失敗・以前の取得結果",
-            Freshness::Unavailable => "確認範囲を取得できません",
+            Freshness::Captured => {
+                i18n::local!(language, "取得時点の事実", "Facts at capture time")
+            }
+            Freshness::Stale => i18n::local!(
+                language,
+                "対象変更後・再確認が必要",
+                "Target changed; confirmation required"
+            ),
+            Freshness::FailedRefresh => i18n::local!(
+                language,
+                "再取得に失敗・以前の取得結果",
+                "Refresh failed; previous captured result"
+            ),
+            Freshness::Unavailable => i18n::local!(
+                language,
+                "確認範囲を取得できません",
+                "Confirmation scope is unavailable"
+            ),
         };
-        let attempt = self.last_attempt_at.map_or_else(String::new, |time| {
-            format!(
-                " | 最終要求 UTC {}",
-                time.to_rfc3339_opts(SecondsFormat::Millis, true)
-            )
-        });
+        let attempt = self
+            .last_attempt_at
+            .map_or_else(String::new, |time| match language {
+                UiLanguage::Ja => format!(
+                    " | 最終要求 UTC {}",
+                    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+                ),
+                UiLanguage::En => format!(
+                    " | Last request UTC {}",
+                    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+                ),
+            });
         format!(
             "{} | {captured} | {state}{attempt} | {}",
-            self.kind.label(),
-            self.next_action.label()
+            self.kind.label(language),
+            self.next_action.label(language)
         )
     }
 }
@@ -280,9 +323,12 @@ mod tests {
             next_action: NextAction::RefreshModels,
             confirmation_enabled: false,
         };
-        assert_eq!(notice.text(), notice.text());
-        assert!(notice.text().contains("UTC"));
-        assert!(notice.text().contains("Ctrl+R"));
-        assert!(notice.text().len() < 512);
+        assert_eq!(
+            notice.text_in(UiLanguage::Ja),
+            notice.text_in(UiLanguage::Ja)
+        );
+        assert!(notice.text_in(UiLanguage::Ja).contains("UTC"));
+        assert!(notice.text_in(UiLanguage::Ja).contains("Ctrl+R"));
+        assert!(notice.text_in(UiLanguage::Ja).len() < 512);
     }
 }

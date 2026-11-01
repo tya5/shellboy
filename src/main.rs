@@ -414,15 +414,18 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         }
     };
     let cancel = tokio_util::sync::CancellationToken::new();
-    let (progress, stages) =
-        tokio::sync::watch::channel(shellboy::app::StartupStage::Configuration);
+    let (progress, stages) = tokio::sync::watch::channel(shellboy::app::StartupProgress::default());
     let (send, mut pending) = std::sync::mpsc::sync_channel(1);
     let token = cancel.clone();
     let observations = progress.clone();
     let mut initializer = runtime.spawn(async move {
-        let result =
-            shellboy::owner_session::initialize(cli.config, cli.data_dir, token, observations)
-                .await;
+        let result = shellboy::owner_session::initialize_localized(
+            cli.config,
+            cli.data_dir,
+            token,
+            observations,
+        )
+        .await;
         shellboy::owner_session::deliver(result, send).await;
     });
     let prepared = loop {
@@ -436,7 +439,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             Ok(Ok(Some(prepared))) if cancel.is_cancelled() => {
                 // Cancellation may race the single ready delivery. Never
                 // hand that owner to the conversation UI; keep drawing cleanup.
-                progress.send_replace(shellboy::app::StartupStage::Closing);
+                progress.send_modify(|state| state.stage = shellboy::app::StartupStage::Closing);
                 let (send, receive) = std::sync::mpsc::sync_channel(1);
                 pending = receive;
                 initializer = runtime.spawn(async move {
@@ -455,7 +458,10 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
                         let _ = prepared.shutdown().await;
                     }
                 });
-                eprintln!("Terminal error: {error}");
+                eprintln!(
+                    "{}",
+                    shellboy::ui::startup::terminal_error(stages.borrow().language, error)
+                );
                 runtime.shutdown_background();
                 return ExitCode::FAILURE;
             }
@@ -509,7 +515,8 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     if matches!(&terminal_result, Ok(shellboy::ui::UiExitReason::Forced)) {
         termination.force_cleanup();
         eprintln!(
-            "Forced exit: conversation saving and owned process cleanup may be incomplete. Restart to inspect interrupted work."
+            "{}",
+            shellboy::ui::startup::forced_exit_notice(stages.borrow().language)
         );
         std::process::exit(1);
     }
@@ -519,18 +526,27 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     let result = runtime.block_on(bridge);
     termination.complete();
     if let Err(error) = terminal_result {
-        eprintln!("Terminal error: {error}");
+        eprintln!(
+            "{}",
+            shellboy::ui::startup::terminal_error(stages.borrow().language, error)
+        );
         runtime.shutdown_background();
         return ExitCode::FAILURE;
     }
     let exit_code = match result {
         Ok(Ok(())) => ExitCode::SUCCESS,
         Ok(Err(error)) => {
-            eprintln!("Shutdown error: {error}");
+            eprintln!(
+                "{}",
+                shellboy::ui::startup::shutdown_error(stages.borrow().language, error)
+            );
             ExitCode::FAILURE
         }
         Err(_) => {
-            eprintln!("Runtime adapter failed");
+            eprintln!(
+                "{}",
+                shellboy::ui::startup::runtime_adapter_failed(stages.borrow().language)
+            );
             ExitCode::FAILURE
         }
     };

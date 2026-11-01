@@ -64,11 +64,19 @@ impl DraftSaver {
             false
         }
     }
-    pub(super) fn rejected_message(&self) -> &'static str {
+    pub(super) fn rejected_message(&self, language: UiLanguage) -> &'static str {
         if self.closed || self.sender.is_closed() {
-            "下書き保存workerが停止し、保存待ちも満杯です。本文を保持しています。保存は再試行されません。終了前に本文を控えてください"
+            i18n::local!(
+                language,
+                "下書き保存workerが停止し、保存待ちも満杯です。本文を保持しています。保存は再試行されません。終了前に本文を控えてください",
+                "Draft-save worker stopped. Text remains on screen. No automatic retry"
+            )
         } else {
-            "下書き保存キューが満杯です。本文を保持しています。空きができてから再操作してください"
+            i18n::local!(
+                language,
+                "下書き保存キューが満杯です。本文を保持しています。空きができてから再操作してください",
+                "Draft-save queue is full. Text kept. Wait for capacity, then retry"
+            )
         }
     }
     pub(super) fn pump(&mut self) -> Option<String> {
@@ -196,13 +204,13 @@ mod tests {
         assert_eq!(saver.backlog.len(), 64);
         assert!(!saver.backlog.contains_key("rejected"));
         assert_eq!(
-            saver.rejected_message(),
+            saver.rejected_message(UiLanguage::Ja),
             "下書き保存キューが満杯です。本文を保持しています。空きができてから再操作してください"
         );
         saver.worker.abort();
         saver.sender.closed().await;
         assert!(!saver.closed, "pump has not observed closure yet");
-        let stopped_message = saver.rejected_message();
+        let stopped_message = saver.rejected_message(UiLanguage::Ja);
         assert_eq!(
             stopped_message,
             "下書き保存workerが停止し、保存待ちも満杯です。本文を保持しています。保存は再試行されません。終了前に本文を控えてください"
@@ -215,7 +223,7 @@ mod tests {
             );
         }
         assert_eq!(warned.len(), 64);
-        assert_eq!(saver.rejected_message(), stopped_message);
+        assert_eq!(saver.rejected_message(UiLanguage::Ja), stopped_message);
         assert!(!saver.enqueue(
             "rejected".into(),
             DraftSnapshot::default(),

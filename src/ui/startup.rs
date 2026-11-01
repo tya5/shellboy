@@ -1,5 +1,6 @@
 //! One-shot initialization screen. No file/DB operations or worker waits.
-use super::{TerminalSession, theme};
+use super::{TerminalSession, i18n, theme};
+use crate::config::UiLanguage;
 use crate::{
     app::StartupStage,
     protocol::{ApiError, ErrorCode},
@@ -22,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct Screen {
+    language: UiLanguage,
     stopping: bool,
     ignored_input: bool,
     error: Option<ApiError>,
@@ -59,18 +61,45 @@ impl Screen {
         false
     }
 }
-fn stage_text(stage: StartupStage) -> &'static str {
+fn stage_text(stage: StartupStage, language: UiLanguage) -> &'static str {
     match stage {
-        StartupStage::Configuration => "設定・保存先を確認しています",
-        StartupStage::OwnerLock => "保存先の所有権を確認しています",
-        StartupStage::Database => "DBの確認・更新を進めています",
-        StartupStage::InterruptedWork => "前回中断した処理を整理しています",
-        StartupStage::Control => "実行環境を準備しています",
-        StartupStage::Endpoint => "接続口を準備しています",
-        StartupStage::Closing => "保存処理と所有者の終了を待っています",
+        StartupStage::Configuration => i18n::local!(
+            language,
+            "設定・保存先を確認しています",
+            "Checking configuration and storage"
+        ),
+        StartupStage::OwnerLock => i18n::local!(
+            language,
+            "保存先の所有権を確認しています",
+            "Checking storage ownership"
+        ),
+        StartupStage::Database => i18n::local!(
+            language,
+            "DBの確認・更新を進めています",
+            "Checking and updating the database"
+        ),
+        StartupStage::InterruptedWork => i18n::local!(
+            language,
+            "前回中断した処理を整理しています",
+            "Recovering interrupted work"
+        ),
+        StartupStage::Control => i18n::local!(
+            language,
+            "実行環境を準備しています",
+            "Preparing the runtime"
+        ),
+        StartupStage::Endpoint => {
+            i18n::local!(language, "接続口を準備しています", "Preparing the endpoint")
+        }
+        StartupStage::Closing => i18n::local!(
+            language,
+            "保存処理と所有者の終了を待っています",
+            "Waiting for saving and owner shutdown"
+        ),
     }
 }
 fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize) {
+    let language = screen.language;
     let area = frame.area();
     frame.render_widget(Paragraph::new(""), area);
     let zones = Layout::default()
@@ -83,11 +112,11 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
         .margin(2)
         .split(area);
     let heading = if screen.error.is_some() {
-        "起動できませんでした"
+        i18n::local!(language, "起動できませんでした", "Startup failed")
     } else if screen.stopping {
-        "終了待ち"
+        i18n::local!(language, "終了待ち", "Waiting for shutdown")
     } else {
-        "起動中"
+        i18n::local!(language, "起動中", "Starting")
     };
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -106,18 +135,30 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
         format!(
             "{} {}",
             ["|", "||", "|||", "||"][tick % 4],
-            stage_text(stage)
+            stage_text(stage, language)
         )
     };
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), zones[1]);
     let footer = if screen.error.is_some() {
-        "Enter / Esc 閉じる"
+        i18n::local!(language, "Enter / Esc 閉じる", "Enter / Esc Close")
     } else if screen.stopping {
-        "開始済み処理を中断せず、安全な終了を待っています"
+        i18n::local!(
+            language,
+            "開始済み処理を中断せず、安全な終了を待っています",
+            "Waiting for safe shutdown; started work is not interrupted"
+        )
     } else if screen.ignored_input {
-        "起動完了まで入力できません | Esc / Ctrl+C / Ctrl+Q 終了"
+        i18n::local!(
+            language,
+            "起動完了まで入力できません | Esc / Ctrl+C / Ctrl+Q 終了",
+            "Input disabled during startup | Esc / Ctrl+C / Ctrl+Q Quit"
+        )
     } else {
-        "Esc / Ctrl+C / Ctrl+Q 終了"
+        i18n::local!(
+            language,
+            "Esc / Ctrl+C / Ctrl+Q 終了",
+            "Esc / Ctrl+C / Ctrl+Q Quit"
+        )
     };
     frame.render_widget(Paragraph::new(footer).wrap(Wrap { trim: false }), zones[2]);
 }
@@ -138,7 +179,7 @@ fn render(
 /// Poll only bounded observations; completion and cleanup stay on async workers.
 pub fn wait<T>(
     session: &mut TerminalSession,
-    stages: &watch::Receiver<StartupStage>,
+    stages: &watch::Receiver<crate::app::StartupProgress>,
     result: &Receiver<Result<Option<T>, ApiError>>,
     cancel: &CancellationToken,
 ) -> io::Result<Result<Option<T>, ApiError>> {
@@ -146,7 +187,7 @@ pub fn wait<T>(
 }
 pub fn wait_with_termination<T>(
     session: &mut TerminalSession,
-    stages: &watch::Receiver<StartupStage>,
+    stages: &watch::Receiver<crate::app::StartupProgress>,
     result: &Receiver<Result<Option<T>, ApiError>>,
     cancel: &CancellationToken,
     termination: &super::termination::Termination,
@@ -155,7 +196,7 @@ pub fn wait_with_termination<T>(
 }
 fn wait_inner<T>(
     session: &mut TerminalSession,
-    stages: &watch::Receiver<StartupStage>,
+    stages: &watch::Receiver<crate::app::StartupProgress>,
     result: &Receiver<Result<Option<T>, ApiError>>,
     cancel: &CancellationToken,
     termination: Option<&super::termination::Termination>,
@@ -213,7 +254,9 @@ fn wait_inner<T>(
         }
         let rendered = (|| -> io::Result<bool> {
             super::termination::check_terminal()?;
-            let stage = *stages.borrow();
+            let progress = *stages.borrow();
+            screen.language = progress.language;
+            let stage = progress.stage;
             let tick = if screen.error.is_some() {
                 0
             } else {
@@ -221,6 +264,7 @@ fn wait_inner<T>(
             };
             let signature = (
                 stage,
+                screen.language,
                 tick,
                 screen.stopping,
                 screen.ignored_input,
@@ -261,10 +305,124 @@ fn wait_inner<T>(
     }
 }
 
+/// Human-facing TUI adapter failures; shared ApiError values remain untouched.
+pub fn terminal_error(language: UiLanguage, error: impl std::fmt::Display) -> String {
+    match language {
+        UiLanguage::Ja => format!("端末エラー: {error}"),
+        UiLanguage::En => format!("Terminal error: {error}"),
+    }
+}
+pub fn shutdown_error(language: UiLanguage, error: impl std::fmt::Display) -> String {
+    match language {
+        UiLanguage::Ja => format!("終了処理エラー: {error}"),
+        UiLanguage::En => format!("Shutdown error: {error}"),
+    }
+}
+pub fn runtime_adapter_failed(language: UiLanguage) -> &'static str {
+    i18n::local!(
+        language,
+        "実行環境との接続に失敗しました",
+        "Runtime adapter failed"
+    )
+}
+pub fn forced_exit_notice(language: UiLanguage) -> &'static str {
+    i18n::local!(
+        language,
+        "強制終了: 会話の保存や所有プロセスの回収が未完了の可能性があります。再起動して中断した作業を確認してください。",
+        "Forced exit: conversation saving and owned process cleanup may be incomplete. Restart to inspect interrupted work."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+    #[test]
+    fn localized_startup_screens_preserve_controls_raw_errors_and_width() {
+        for policy in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(policy);
+            for width in [80, 120] {
+                for language in [UiLanguage::En, UiLanguage::Ja] {
+                    for stage in [
+                        StartupStage::Configuration,
+                        StartupStage::OwnerLock,
+                        StartupStage::Database,
+                        StartupStage::InterruptedWork,
+                        StartupStage::Control,
+                        StartupStage::Endpoint,
+                        StartupStage::Closing,
+                    ] {
+                        for mode in 0..4 {
+                            let screen = Screen {
+                                language,
+                                stopping: mode == 2,
+                                ignored_input: mode == 1,
+                                error: (mode == 3).then(|| {
+                                    ApiError::new(ErrorCode::IoFailed, "RAW_PROVIDER_ID_42")
+                                        .hint("RAW_HINT_42")
+                                }),
+                            };
+                            let before = screen
+                                .error
+                                .as_ref()
+                                .map(|error| serde_json::to_value(error).unwrap());
+                            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+                            terminal
+                                .draw(|frame| draw(frame, &screen, stage, 0))
+                                .unwrap();
+                            let buffer = terminal.backend().buffer();
+                            i18n::assert_invariant_ui_symbols(buffer, policy);
+                            use crate::ui::text_width::UnicodeWidthStr;
+                            let mut text = String::new();
+                            for y in 0..buffer.area.height {
+                                let mut x = 0;
+                                while x < width {
+                                    let symbol = buffer[(x, y)].symbol();
+                                    text.push_str(symbol);
+                                    x += symbol.width().max(1) as u16;
+                                }
+                                text.push('\n');
+                            }
+                            let heading = if mode == 3 {
+                                i18n::local!(language, "起動できませんでした", "Startup failed")
+                            } else if mode == 2 {
+                                i18n::local!(language, "終了待ち", "Waiting for shutdown")
+                            } else {
+                                i18n::local!(language, "起動中", "Starting")
+                            };
+                            assert!(
+                                text.contains(heading),
+                                "{language:?} {width} {stage:?} {mode}"
+                            );
+                            if mode == 3 {
+                                assert!(text.contains("RAW_PROVIDER_ID_42"));
+                                assert!(text.contains("RAW_HINT_42"));
+                                assert!(text.contains("Enter / Esc"));
+                            } else if mode == 2 {
+                                assert!(text.contains(i18n::local!(
+                                    language,
+                                    "安全な終了を待っています",
+                                    "Waiting for safe shutdown"
+                                )));
+                            } else {
+                                assert!(text.contains(stage_text(stage, language)));
+                                assert!(text.contains("Ctrl+Q"));
+                            }
+                            assert_eq!(
+                                before,
+                                screen
+                                    .error
+                                    .as_ref()
+                                    .map(|error| serde_json::to_value(error).unwrap())
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent::new(code, modifiers))
     }
@@ -303,7 +461,10 @@ mod tests {
             },
         ));
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        let mut screen = Screen::default();
+        let mut screen = Screen {
+            language: UiLanguage::Ja,
+            ..Default::default()
+        };
         terminal
             .draw(|frame| render(frame, &screen, StartupStage::Database, 0, &snapshot))
             .unwrap();
@@ -324,7 +485,10 @@ mod tests {
     fn startup_wait_failure_and_cleanup_fit_small_and_large_test_terminals() {
         for (width, height) in [(35, 12), (120, 40)] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            let mut screen = Screen::default();
+            let mut screen = Screen {
+                language: UiLanguage::Ja,
+                ..Default::default()
+            };
             terminal
                 .draw(|frame| draw(frame, &screen, StartupStage::Database, 0))
                 .unwrap();

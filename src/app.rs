@@ -119,6 +119,20 @@ pub enum StartupStage {
     Closing,
 }
 
+/// One existing startup watch carries both facts so coalescing cannot lose locale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StartupProgress {
+    pub stage: StartupStage,
+    pub language: crate::config::UiLanguage,
+}
+impl Default for StartupProgress {
+    fn default() -> Self {
+        Self {
+            stage: StartupStage::Configuration,
+            language: crate::config::UiLanguage::En,
+        }
+    }
+}
 pub struct DataOwner {
     pub instance_id: String,
     pub loaded: LoadedConfig,
@@ -141,7 +155,18 @@ impl DataOwner {
         cwd: PathBuf,
         progress: impl Fn(StartupStage) + Send,
     ) -> Result<Self, ApiError> {
-        progress(StartupStage::Configuration);
+        Self::start_with_localized_progress(config_path, data_dir, cwd, move |stage, _| {
+            progress(stage)
+        })
+        .await
+    }
+    pub(crate) async fn start_with_localized_progress(
+        config_path: Option<PathBuf>,
+        data_dir: Option<PathBuf>,
+        cwd: PathBuf,
+        progress: impl Fn(StartupStage, crate::config::UiLanguage) + Send,
+    ) -> Result<Self, ApiError> {
+        progress(StartupStage::Configuration, crate::config::UiLanguage::En);
         let loaded = tokio::task::spawn_blocking(move || {
             let env = PathEnvironment::current();
             let selected = crate::config_setup::selected_path(config_path.as_deref(), &cwd, &env)?;
@@ -154,12 +179,13 @@ impl DataOwner {
         })
         .await
         .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Configuration worker failed"))??;
-        progress(StartupStage::OwnerLock);
+        let language = loaded.config.ui.language;
+        progress(StartupStage::OwnerLock, language);
         let directory = loaded.data_dir.clone();
         let lock = tokio::task::spawn_blocking(move || OwnerLock::acquire(&directory))
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner lock worker failed"))??;
-        progress(StartupStage::Database);
+        progress(StartupStage::Database, language);
         let db = DbWorker::open_owned(loaded.data_dir.join("shellboy.db"), lock.clone())
             .await
             .map_err(storage_error)?;
@@ -172,7 +198,7 @@ impl DataOwner {
             Default::default(),
         );
         let now = chrono::Utc::now().to_rfc3339();
-        progress(StartupStage::InterruptedWork);
+        progress(StartupStage::InterruptedWork, language);
         let recovery = db.call(move |connection| {
             let tx=connection.transaction()?;
             let capture_failures = crate::control::interruption::capture_startup_interrupted_context(&tx,&now)?;
@@ -192,7 +218,7 @@ impl DataOwner {
         let report = match recovery {
             Ok(report) => report,
             Err(error) => {
-                progress(StartupStage::Closing);
+                progress(StartupStage::Closing, language);
                 let _ = db.shutdown().await;
                 let _ = tokio::time::timeout(
                     std::time::Duration::from_millis(loaded.config.io.shutdown_grace_ms),

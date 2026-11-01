@@ -54,6 +54,19 @@ pub async fn initialize(
     .await
 }
 
+/// TUI-only locale metadata shares the existing coalescing stage watch.
+pub async fn initialize_localized(
+    config: Option<PathBuf>,
+    data: Option<PathBuf>,
+    cancel: CancellationToken,
+    progress: watch::Sender<crate::app::StartupProgress>,
+) -> Result<Option<Prepared>, ApiError> {
+    initialize_localized_reporting(config, data, cancel, move |stage, language| {
+        progress.send_replace(crate::app::StartupProgress { stage, language });
+    })
+    .await
+}
+
 // Keep reporting observational. Tests can cancel synchronously at a stage
 // without treating a coalescing watch notification as DB-worker admission.
 pub async fn initialize_reporting(
@@ -62,6 +75,14 @@ pub async fn initialize_reporting(
     cancel: CancellationToken,
     progress: impl Fn(StartupStage) + Send + Sync,
 ) -> Result<Option<Prepared>, ApiError> {
+    initialize_localized_reporting(config, data, cancel, |stage, _| progress(stage)).await
+}
+async fn initialize_localized_reporting(
+    config: Option<PathBuf>,
+    data: Option<PathBuf>,
+    cancel: CancellationToken,
+    progress: impl Fn(StartupStage, crate::config::UiLanguage) + Send + Sync,
+) -> Result<Option<Prepared>, ApiError> {
     let cwd = tokio::task::spawn_blocking(std::env::current_dir)
         .await
         .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Startup path worker failed"))?
@@ -69,30 +90,32 @@ pub async fn initialize_reporting(
     if cancel.is_cancelled() {
         return Ok(None);
     }
-    let owner = DataOwner::start_with_progress(config, data, cwd.clone(), &progress).await?;
+    let owner =
+        DataOwner::start_with_localized_progress(config, data, cwd.clone(), &progress).await?;
+    let language = owner.loaded.config.ui.language;
     if cancel.is_cancelled() {
-        progress(StartupStage::Closing);
+        progress(StartupStage::Closing, language);
         owner.shutdown().await?;
         return Ok(None);
     }
-    progress(StartupStage::Control);
+    progress(StartupStage::Control, language);
     let control = Control::new(&owner, cwd.clone());
     if let Err(error) = control.start().await {
-        progress(StartupStage::Closing);
+        progress(StartupStage::Closing, language);
         let _ = close(owner, Some(control), None).await;
         return Err(error);
     }
     if cancel.is_cancelled() {
-        progress(StartupStage::Closing);
+        progress(StartupStage::Closing, language);
         close(owner, Some(control), None).await?;
         return Ok(None);
     }
-    progress(StartupStage::Endpoint);
+    progress(StartupStage::Endpoint, language);
     let (send, requests) = async_mpsc::channel(128);
     let server = match LocalServer::bind(&owner, send).await {
         Ok(server) => server,
         Err(error) => {
-            progress(StartupStage::Closing);
+            progress(StartupStage::Closing, language);
             let _ = close(owner, Some(control), None).await;
             return Err(error);
         }
@@ -105,7 +128,7 @@ pub async fn initialize_reporting(
         cwd,
     };
     if cancel.is_cancelled() {
-        progress(StartupStage::Closing);
+        progress(StartupStage::Closing, language);
         prepared.shutdown().await?;
         return Ok(None);
     }
@@ -141,6 +164,89 @@ mod tests {
         owner.shutdown().await.unwrap();
         (root, config, data)
     }
+
+    #[tokio::test]
+    async fn localized_progress_keeps_loaded_language_through_cancel_and_watch_coalescing() {
+        use crate::{app::StartupProgress, config::UiLanguage};
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let (_root, config, data) = fixture().await;
+            std::fs::write(
+                &config,
+                format!(
+                    "[ui]\nlanguage = \"{}\"\n",
+                    if language == UiLanguage::Ja {
+                        "ja"
+                    } else {
+                        "en"
+                    }
+                ),
+            )
+            .unwrap();
+            let token = CancellationToken::new();
+            let cancel = token.clone();
+            let (send, watch) = watch::channel(StartupProgress::default());
+            let events = std::sync::Mutex::new(Vec::new());
+            let result = initialize_localized_reporting(
+                Some(config),
+                Some(data.clone()),
+                token,
+                |stage, observed| {
+                    events.lock().unwrap().push((stage, observed));
+                    send.send_replace(StartupProgress {
+                        stage,
+                        language: observed,
+                    });
+                    if stage == StartupStage::Database {
+                        cancel.cancel();
+                    }
+                },
+            )
+            .await
+            .unwrap();
+            assert!(result.is_none());
+            let events = events.into_inner().unwrap();
+            assert_eq!(events[0], (StartupStage::Configuration, UiLanguage::En));
+            assert!(
+                events
+                    .iter()
+                    .skip(1)
+                    .all(|(_, observed)| *observed == language)
+            );
+            assert_eq!(
+                *watch.borrow(),
+                StartupProgress {
+                    stage: StartupStage::Closing,
+                    language
+                }
+            );
+            assert!(OwnerLock::acquire(&data).is_ok());
+            assert!(!data.join("endpoint.json").exists());
+        }
+    }
+    #[tokio::test]
+    async fn localized_progress_stays_english_if_configuration_cannot_be_loaded() {
+        use crate::{app::StartupProgress, config::UiLanguage};
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("invalid.toml");
+        std::fs::write(&config, "[ui]\nlanguage = \"not-a-language\"\n").unwrap();
+        let (send, watch) = watch::channel(StartupProgress::default());
+        let result = initialize_localized(
+            Some(config),
+            Some(root.path().join("data")),
+            CancellationToken::new(),
+            send,
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            *watch.borrow(),
+            StartupProgress {
+                stage: StartupStage::Configuration,
+                language: UiLanguage::En
+            }
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancellation_at_database_preparation_finishes_migration_before_releasing_owner() {
         let (_root, config, data) = fixture().await;
@@ -242,44 +348,64 @@ mod tests {
     }
     #[tokio::test]
     async fn failed_recovery_rolls_back_and_closes_writer_before_failure_delivery() {
-        let (_root, config, data) = fixture().await;
-        let db = DbWorker::open(data.join("shellboy.db")).await.unwrap();
-        db.call(|db| {
+        for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+            let (_root, config, data) = fixture().await;
+            std::fs::write(
+                &config,
+                format!(
+                    "[ui]\nlanguage = \"{}\"\n",
+                    if language == crate::config::UiLanguage::Ja {
+                        "ja"
+                    } else {
+                        "en"
+                    }
+                ),
+            )
+            .unwrap();
+            let db = DbWorker::open(data.join("shellboy.db")).await.unwrap();
+            db.call(|db| {
             db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now');
                 INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now');
                 CREATE TRIGGER fail_recovery BEFORE UPDATE ON turn BEGIN SELECT RAISE(ABORT,'fixture recovery rollback'); END;")?;
             Ok(())
         }).await.unwrap();
-        db.shutdown().await.unwrap();
-        let (send, progress) = watch::channel(StartupStage::Configuration);
-        let result = initialize(
-            Some(config),
-            Some(data.clone()),
-            CancellationToken::new(),
-            send,
-        )
-        .await;
-        assert!(result.is_err());
-        assert_eq!(*progress.borrow(), StartupStage::Closing);
-        let lock = OwnerLock::acquire(&data).unwrap();
-        let db = DbWorker::open(data.join("shellboy.db")).await.unwrap();
-        db.call(|db| {
+            db.shutdown().await.unwrap();
+            let (send, progress) = watch::channel(crate::app::StartupProgress::default());
+            let result = initialize_localized(
+                Some(config),
+                Some(data.clone()),
+                CancellationToken::new(),
+                send,
+            )
+            .await;
+            assert!(result.is_err());
             assert_eq!(
-                db.query_row("SELECT state FROM turn WHERE id='u'", [], |r| r
-                    .get::<_, String>(0))?,
-                "running"
+                *progress.borrow(),
+                crate::app::StartupProgress {
+                    stage: StartupStage::Closing,
+                    language
+                }
             );
-            assert_eq!(
-                db.query_row("SELECT COUNT(*) FROM node", [], |r| r.get::<_, i64>(0))?,
-                0,
-                "interruption snapshot was rolled back too"
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
-        db.shutdown().await.unwrap();
-        drop(lock);
+            let lock = OwnerLock::acquire(&data).unwrap();
+            let db = DbWorker::open(data.join("shellboy.db")).await.unwrap();
+            db.call(|db| {
+                assert_eq!(
+                    db.query_row("SELECT state FROM turn WHERE id='u'", [], |r| r
+                        .get::<_, String>(0))?,
+                    "running"
+                );
+                assert_eq!(
+                    db.query_row("SELECT COUNT(*) FROM node", [], |r| r.get::<_, i64>(0))?,
+                    0,
+                    "interruption snapshot was rolled back too"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+            db.shutdown().await.unwrap();
+            drop(lock);
+        }
     }
 }

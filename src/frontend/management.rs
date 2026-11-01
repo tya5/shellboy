@@ -1,4 +1,5 @@
 //! One active management response; bounded immutable detail pages, never JSON dumps.
+use crate::{config::UiLanguage, ui::i18n};
 use crate::{
     presentation::{self, PresentationField},
     protocol::*,
@@ -46,6 +47,7 @@ pub(super) fn work_status(command: &Command) -> bool {
     matches!(command, Command::Status(args) if !args.memory)
 }
 pub(super) fn completion_text(
+    language: UiLanguage,
     title: &str,
     stop: bool,
     response: &Result<Value, ApiError>,
@@ -54,15 +56,26 @@ pub(super) fn completion_text(
         .as_ref()
         .ok()
         .and_then(|value| value.get("request_operation_id"))
-        .and_then(Value::as_str);
+        .and_then(Value::as_str)
+        .unwrap_or(i18n::local!(language, "未取得", "Not retrieved"));
     let status = match super::management_outcome(response) {
-        Ok(()) if stop => "停止要求を受け付けました".to_owned(),
-        Ok(()) => "受付結果: 成功".to_owned(),
-        Err(error) => format!("受付結果: 失敗（{}）", error.message),
+        Ok(()) if stop => i18n::local!(
+            language,
+            "停止要求を受け付けました",
+            "Stop request accepted"
+        )
+        .to_owned(),
+        Ok(()) => i18n::local!(language, "受付結果: 成功", "Admission result: success").to_owned(),
+        Err(error) => match language {
+            UiLanguage::Ja => format!("受付結果: 失敗（{}）", error.message),
+            UiLanguage::En => format!("Admission result: failed（{}）", error.message),
+        },
     };
-    format!("{status} | {title} | 照会ID {}", id.unwrap_or("未取得"))
+    match language {
+        UiLanguage::Ja => format!("{status} | {title} | 照会ID {id}"),
+        UiLanguage::En => format!("{status} | {title} | Request ID {id}"),
+    }
 }
-
 pub(super) struct Report {
     pub fields: Vec<PresentationField>,
     pub omitted: bool,
@@ -82,19 +95,16 @@ fn heap_bytes(value: &Value) -> usize {
         _ => 0,
     })
 }
+#[cfg(test)]
 pub(super) fn report(value: Value, budget: usize) -> Report {
-    report_in(crate::config::UiLanguage::Ja, value, budget)
+    report_in(UiLanguage::Ja, value, budget)
 }
-pub(super) fn report_in(
-    language: crate::config::UiLanguage,
-    value: Value,
-    budget: usize,
-) -> Report {
+pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Report {
     let mut filter_fields = Vec::new();
     presentation::content_filter::append_fields(&mut filter_fields, &value, language);
     let safe = presentation::safe_detail_value(value);
     if safe.get("filters").is_some() && safe.get("items").is_some() {
-        return work_report(safe, budget);
+        return work_report(language, safe, budget);
     }
     let mut fields = presentation::fields::prioritized_fields(
         &safe,
@@ -183,8 +193,13 @@ pub(super) fn report_in(
             value_omitted: false,
             display: None,
             key: String::new(),
-            label: "すべての詳細を見る".into(),
-            value: "Enterで項目ごとの原文・参照を確認".into(),
+            label: i18n::local!(language, "すべての詳細を見る", "View all details").into(),
+            value: i18n::local!(
+                language,
+                "Enterで項目ごとの原文・参照を確認",
+                "Enter checks each item's original text and references"
+            )
+            .into(),
         },
     );
     if let Some(error) = safe
@@ -193,16 +208,32 @@ pub(super) fn report_in(
     {
         let next = match error.code {
             ErrorCode::InvalidState | ErrorCode::TargetUnavailable => {
-                "F8で現在の作業を確認してください。同じ内容の再試行は復旧待ちのときだけ使えます。新しい指示や停止とは別の操作です。"
+                i18n::local!(
+                    language,
+                    "F8で現在の作業を確認してください。同じ内容の再試行は復旧待ちのときだけ使えます。新しい指示や停止とは別の操作です。",
+                    "Check current work with F8. Retry the same content only while awaiting recovery. This is separate from new instructions or stopping."
+                )
             }
             ErrorCode::ConfigInvalid => {
-                "接続・モデル・作業場所の設定を確認し、原因を直してから明示的に再試行してください。設定変更だけでは再開しません。"
+                i18n::local!(
+                    language,
+                    "接続・モデル・作業場所の設定を確認し、原因を直してから明示的に再試行してください。設定変更だけでは再開しません。",
+                    "Check connection, model, and working directory settings. Fix the cause, then explicitly retry. Settings changes alone do not resume work."
+                )
             }
             ErrorCode::SaveFailed => {
-                "保存障害のため新しい操作は停止しています。原因と保存状態を確認してください。"
+                i18n::local!(
+                    language,
+                    "保存障害のため新しい操作は停止しています。原因と保存状態を確認してください。",
+                    "New operations are stopped because saving failed. Check the cause and saved state."
+                )
             }
             _ => {
-                "原因と対象をF8の詳細で確認し、必要な対処をしてから再操作してください。保存済み依頼と未受付の操作を区別してください。"
+                i18n::local!(
+                    language,
+                    "原因と対象をF8の詳細で確認し、必要な対処をしてから再操作してください。保存済み依頼と未受付の操作を区別してください。",
+                    "Check the cause and target in F8 details before acting again. Distinguish saved requests from operations that were not accepted."
+                )
             }
         };
         fields.insert(
@@ -211,18 +242,23 @@ pub(super) fn report_in(
                 value_omitted: false,
                 display: None,
                 key: String::new(),
-                label: "次にできること".into(),
+                label: i18n::local!(language, "次にできること", "Available next actions").into(),
                 value: next.into(),
             },
         );
         if let Some(field) = fields.iter_mut().find(|field| field.key == "/error/hint") {
-            field.label = "対処の補足（原文）".into();
+            field.label = i18n::local!(
+                language,
+                "対処の補足（原文）",
+                "Additional guidance (original)"
+            )
+            .into();
         }
     }
     let detail =
         (heap_bytes(&safe).saturating_add(size_of::<[usize; 2]>()) <= budget).then_some(safe);
     if detail.is_none() {
-        fields.push(PresentationField { value_omitted: false, display: None, key: String::new(), label:"詳細の保持".into(), value:"本文cache予算を超えるため詳細は未保持。対象IDで原文pageを取得、または範囲を絞って再照会してください".into() });
+        fields.push(PresentationField { value_omitted: false, display: None, key: String::new(), label:i18n::local!(language, "詳細の保持", "Detail retention").into(), value:i18n::local!(language, "本文cache予算を超えるため詳細は未保持。対象IDで原文pageを取得、または範囲を絞って再照会してください", "Details exceed the body-cache budget and were not retained. Read an original page by ID or narrow the query").into() });
     }
     Report {
         fields,
@@ -231,7 +267,7 @@ pub(super) fn report_in(
     }
 }
 
-fn work_report(safe: Value, budget: usize) -> Report {
+fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
     let text = |value: &Value, key: &str| {
         value
             .get(key)
@@ -244,7 +280,7 @@ fn work_report(safe: Value, budget: usize) -> Report {
         for (index, item) in items.iter().enumerate() {
             let title: String = text(item, "thread_title").chars().take(36).collect();
             let title = if title.trim().is_empty() {
-                "件名未設定".to_owned()
+                i18n::local!(language, "件名未設定", "Untitled").to_owned()
             } else {
                 title
             };
@@ -273,12 +309,13 @@ fn work_report(safe: Value, budget: usize) -> Report {
                 label: format!(
                     "{marker} {} | {}",
                     match text(item, "kind").as_str() {
-                        "message" => "依頼",
-                        "run" => "作業",
-                        "turn" => "応答処理",
-                        "shell" => "コマンド",
-                        "wait" => "待機",
-                        "attempt" | "model_attempt" => "モデル要求",
+                        "message" => i18n::local!(language, "依頼", "Request"),
+                        "run" => i18n::local!(language, "作業", "Work"),
+                        "turn" => i18n::local!(language, "応答処理", "Response processing"),
+                        "shell" => i18n::local!(language, "コマンド", "Command"),
+                        "wait" => i18n::local!(language, "待機", "Wait"),
+                        "attempt" | "model_attempt" =>
+                            i18n::local!(language, "モデル要求", "Model request"),
                         other => other,
                     },
                     presentation::fields::state_label(&text(item, "state"))
@@ -296,16 +333,31 @@ fn work_report(safe: Value, budget: usize) -> Report {
             value_omitted: false,
             display: None,
             key: "/filters".into(),
-            label: "該当する保存状態".into(),
-            value: "0件（非表示の終端状態は /status all で確認）".into(),
+            label: i18n::local!(language, "該当する保存状態", "Matching saved states").into(),
+            value: i18n::local!(
+                language,
+                "0件（非表示の終端状態は /status all で確認）",
+                "0 entries (use /status all for hidden terminal states)"
+            )
+            .into(),
         });
     }
     fields.push(PresentationField {
         value_omitted: false,
         display: None,
         key: String::new(),
-        label: "観測範囲・全詳細".into(),
-        value: "保存済みの状態。Enterで所属・モデル・参照先・取得時刻を確認".into(),
+        label: i18n::local!(
+            language,
+            "観測範囲・全詳細",
+            "Observation scope and full details"
+        )
+        .into(),
+        value: i18n::local!(
+            language,
+            "保存済みの状態。Enterで所属・モデル・参照先・取得時刻を確認",
+            "Saved state. Enter checks ownership, model, references, and capture time"
+        )
+        .into(),
     });
     let detail =
         (heap_bytes(&safe).saturating_add(size_of::<[usize; 2]>()) <= budget).then_some(safe);
@@ -315,8 +367,13 @@ fn work_report(safe: Value, budget: usize) -> Report {
             value_omitted: false,
             display: None,
             key: String::new(),
-            label: "詳細未保持".into(),
-            value: "cache予算を超えています。F8の作業状態で範囲・件数を絞って再取得".into(),
+            label: i18n::local!(language, "詳細未保持", "Details not retained").into(),
+            value: i18n::local!(
+                language,
+                "cache予算を超えています。F8の作業状態で範囲・件数を絞って再取得",
+                "The cache budget was exceeded. Narrow scope/count in F8 Work status, then refresh"
+            )
+            .into(),
         });
     }
     Report {
@@ -507,34 +564,67 @@ fn tree(value: &Value, path: &str, labels: Option<&Value>, emit: &mut impl FnMut
         _ => emit(&format!("{label}: {value}\n")),
     }
 }
+#[cfg(test)]
 pub(super) fn index_preview_text(value: &Value) -> String {
+    index_preview_text_in(UiLanguage::Ja, value)
+}
+fn index_preview_text_in(language: UiLanguage, value: &Value) -> String {
     let mut lines = Vec::new();
     for (key, label) in [
-        ("sources", "資料数"),
-        ("segments", "区間数"),
-        ("characters", "対象文字数"),
-        ("already_indexed", "索引済み"),
-        ("unavailable", "取得不能"),
+        ("sources", i18n::local!(language, "資料数", "Sources")),
+        ("segments", i18n::local!(language, "区間数", "Segments")),
+        (
+            "characters",
+            i18n::local!(language, "対象文字数", "Target characters"),
+        ),
+        (
+            "already_indexed",
+            i18n::local!(language, "索引済み", "Already indexed"),
+        ),
+        (
+            "unavailable",
+            i18n::local!(language, "取得不能", "Unavailable"),
+        ),
     ] {
         let count = value
             .get(key)
             .and_then(Value::as_u64)
             .map(|n| n.to_string())
-            .unwrap_or_else(|| "未取得".into());
+            .unwrap_or_else(|| i18n::local!(language, "未取得", "Not retrieved").into());
         lines.push(format!("{label}: {count}"));
     }
-    lines.push("API未送信 | 金額は未見積".into());
+    lines.push(
+        i18n::local!(
+            language,
+            "API未送信 | 金額は未見積",
+            "No API request sent | Cost not estimated"
+        )
+        .into(),
+    );
     lines.join("\n")
 }
+#[cfg(test)]
 pub(super) fn index_preview_captured_text(
     value: &Value,
     captured_at: chrono::DateTime<chrono::Utc>,
 ) -> String {
-    format!(
-        "{}\n取得時刻: {}\n再確認: 対象指定時は P、その他は閉じて再操作",
-        index_preview_text(value),
-        captured_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    )
+    index_preview_captured_text_in(UiLanguage::Ja, value, captured_at)
+}
+pub(super) fn index_preview_captured_text_in(
+    language: UiLanguage,
+    value: &Value,
+    captured_at: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let preview = index_preview_text_in(language, value);
+    let captured = captured_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    match language {
+        UiLanguage::Ja => {
+            format!("{preview}\n取得時刻: {captured}\n再確認: 対象指定時は P、その他は閉じて再操作")
+        }
+        UiLanguage::En => format!(
+            "{preview}\nCaptured at: {captured}\nRecheck: P for a specified target; otherwise close and repeat the operation"
+        ),
+    }
 }
 #[cfg(test)]
 fn preview_text(value: &Value) -> String {
@@ -620,6 +710,48 @@ pub(super) fn detail_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn localized_ui_projection_keeps_raw_details_ids_and_captured_time() {
+        let captured = chrono::DateTime::parse_from_rfc3339("2026-11-01T12:34:56.789Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            for count in [0, 1, 2, 1_000_000] {
+                let value = serde_json::json!({"sources":count,"segments":count,"characters":count,"already_indexed":count,"unavailable":count});
+                let before = value.clone();
+                let text = index_preview_captured_text_in(language, &value, captured);
+                assert!(text.contains("2026-11-01T12:34:56.789Z"));
+                assert!(text.contains(&format!(
+                    "{}: {count}",
+                    i18n::local!(language, "資料数", "Sources")
+                )));
+                assert!(text.contains(i18n::local!(
+                    language,
+                    "API未送信 | 金額は未見積",
+                    "No API request sent | Cost not estimated"
+                )));
+                assert_eq!(value, before);
+            }
+            let raw = "RAW_PROVIDER 原文 /path~key id-42";
+            let response = Err(ApiError::new(ErrorCode::InvalidArgument, raw));
+            assert!(completion_text(language, "RAW_TITLE", false, &response).contains(raw));
+            assert!(completion_text(language, "RAW_TITLE", false, &response).contains("RAW_TITLE"));
+            let value = serde_json::json!({"error":ApiError::new(ErrorCode::SaveFailed,raw).hint(raw),"raw_status":"native-state","id":"id-42"});
+            let expected = crate::presentation::safe_detail_value(value.clone());
+            let localized = report_in(language, value.clone(), usize::MAX);
+            assert_eq!(localized.detail.as_ref(), Some(&expected));
+            let reference = report(value, usize::MAX);
+            for (field, baseline) in localized.fields.iter().zip(reference.fields.iter()) {
+                assert_eq!(field.key, baseline.key);
+                if !field.key.is_empty() {
+                    assert_eq!(field.value, baseline.value);
+                }
+            }
+            assert!(localized.fields.iter().any(|field| field.label
+                == i18n::local!(language, "次にできること", "Available next actions")));
+        }
+    }
+
     #[test]
     fn status_receipt_lookup_does_not_enable_overview_navigation() {
         assert!(work_status(&Command::Status(StatusArgs::default())));
