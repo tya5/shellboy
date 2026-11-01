@@ -3953,10 +3953,28 @@ mod tests {
                         "OSS syntax colors must remain"
                     );
                 } else {
+                    let body_lines: Vec<_> = lines
+                        .iter()
+                        .filter(|line| {
+                            !line.spans.iter().any(|span| {
+                                span.style.underline_color == Some(theme::COPY_DECORATION)
+                            })
+                        })
+                        .cloned()
+                        .collect();
+                    let mut body_buffer = ratatui::buffer::Buffer::empty(area);
+                    Paragraph::new(borrowed(&body_lines))
+                        .style(Style::default().fg(terminal_foreground))
+                        .render(area, &mut body_buffer);
+                    let samples: Vec<_> = body_buffer
+                        .content
+                        .iter()
+                        .filter(|cell| cell.bg == Color::Rgb(30, 34, 40) && cell.symbol() == "s")
+                        .collect();
+                    assert!(!samples.is_empty(), "plain code sample must be rendered");
                     assert!(
-                        code_cells
+                        samples
                             .iter()
-                            .filter(|cell| cell.symbol() == "s")
                             .all(|cell| cell.fg == Color::Rgb(208, 214, 223)),
                         "plain code uses its paired foreground"
                     );
