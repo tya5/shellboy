@@ -1359,9 +1359,14 @@ impl Details {
         };
         let context = if matches!(self.mode, Mode::Nodes) {
             let selected = self.selected.saturating_add(1).min(count);
-            match language {
-                UiLanguage::Ja => format!("{selected} / {count}件 | 内容を選んでEnterで詳細を表示"),
-                UiLanguage::En => format!(
+            match (language, count) {
+                (UiLanguage::Ja, _) => {
+                    format!("{selected} / {count}件 | 内容を選んでEnterで詳細を表示")
+                }
+                (UiLanguage::En, 1) => {
+                    format!("{selected} / 1 item | Select an item and press Enter for details")
+                }
+                (UiLanguage::En, _) => format!(
                     "{selected} / {count} items | Select an item and press Enter for details"
                 ),
             }
@@ -1399,9 +1404,10 @@ impl Details {
         } else {
             let selected = self.selected.saturating_add(1).min(count);
             let node = safe(&self.node_id);
-            match language {
-                UiLanguage::Ja => format!("{selected} / {count}件 | node {node}"),
-                UiLanguage::En => format!("{selected} / {count} items | node {node}"),
+            match (language, count) {
+                (UiLanguage::Ja, _) => format!("{selected} / {count}件 | node {node}"),
+                (UiLanguage::En, 1) => format!("{selected} / 1 item | node {node}"),
+                (UiLanguage::En, _) => format!("{selected} / {count} items | node {node}"),
             }
         };
         let footer = super::key_hints::detail_footer_for(self.hint_context(), language);
@@ -1471,9 +1477,14 @@ impl Details {
                 let p = &node.presentation;
                 if p.metadata_limited {
                     let count = p.fields.len();
-                    Some(match language {
-                        UiLanguage::Ja => format!("詳細{count}項目を保持・上限あり | A 対象を照会"),
-                        UiLanguage::En => format!(
+                    Some(match (language, count) {
+                        (UiLanguage::Ja, _) => {
+                            format!("詳細{count}項目を保持・上限あり | A 対象を照会")
+                        }
+                        (UiLanguage::En, 1) => {
+                            "1 detail field retained; limit reached | A Inspect target".into()
+                        }
+                        (UiLanguage::En, _) => format!(
                             "{count} detail fields retained; limit reached | A Inspect target"
                         ),
                     })
@@ -1691,14 +1702,50 @@ mod tests {
             .join("\n")
     }
     #[test]
+    fn single_detail_count_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.select_thread("thread-fixture".into());
+            *ui.view_mut().nodes_mut_for_test() = vec![UiNode {
+                node_id: "node-fixture".into(),
+                role: "user".into(),
+                text: "sample".into(),
+                total_chars: 6,
+                presentation: NodePresentation {
+                    kind: PresentationKind::User,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }];
+            ui.details = Some(Details::new(ui.view(), false));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["1 / 1 item", "You"],
+                UiLanguage::Ja => &["1 / 1件", "あなた"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn detail_screen_is_bilingual_at_standard_widths() {
         fn configure(ui: &mut UiState) {
             ui.details = Some(Details::new(ui.view(), false));
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Conversation details", "No items to display", "Esc Back"],
-                UiLanguage::Ja => &["会話の詳細", "表示できる項目はありません", "Esc 戻る"],
+                UiLanguage::En => &[
+                    "Conversation details",
+                    "0 / 0 items",
+                    "No items to display",
+                    "Esc Back",
+                ],
+                UiLanguage::Ja => &[
+                    "会話の詳細",
+                    "0 / 0件",
+                    "表示できる項目はありません",
+                    "Esc 戻る",
+                ],
             }
         }
         super::super::i18n::verify_screen(configure, expected);

@@ -1500,17 +1500,23 @@ impl ManagementPopup {
                         ManagementMode::Index => self.index_label(),
                         _ => status.to_owned(),
                     };
-                    let context = match (self.language, structured.omitted) {
-                        (UiLanguage::En, true) => {
+                    let context = match (self.language, structured.omitted, count) {
+                        (UiLanguage::En, true, 1) => {
+                            format!("{selected} / 1 field | View all details | {status}")
+                        }
+                        (UiLanguage::En, false, 1) => format!("{selected} / 1 field | {status}"),
+                        (UiLanguage::En, true, _) => {
                             format!("{selected} / {count} fields | View all details | {status}")
                         }
-                        (UiLanguage::En, false) => {
+                        (UiLanguage::En, false, _) => {
                             format!("{selected} / {count} fields | {status}")
                         }
-                        (UiLanguage::Ja, true) => {
+                        (UiLanguage::Ja, true, _) => {
                             format!("{selected} / {count}項目 | すべての詳細を見る | {status}")
                         }
-                        (UiLanguage::Ja, false) => format!("{selected} / {count}項目 | {status}"),
+                        (UiLanguage::Ja, false, _) => {
+                            format!("{selected} / {count}項目 | {status}")
+                        }
                     };
                     let context = if let Some(inspection) = &self.inspection {
                         format!("{} | {context}", inspection.label_for(self.language))
@@ -1640,6 +1646,31 @@ mod preview_notice_tests {
     use super::*;
 
     #[test]
+    fn single_management_field_count_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.management.open_structured(
+                "Synthetic".into(),
+                1,
+                vec![PresentationField {
+                    key: "/state".into(),
+                    label: "State".into(),
+                    value: "ready".into(),
+                    ..Default::default()
+                }],
+                false,
+                false,
+            );
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["1 / 1 field", "State"],
+                UiLanguage::Ja => &["1 / 1項目", "State"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn index_loading_preview_is_bilingual_at_standard_widths() {
         fn configure(ui: &mut UiState) {
             let args = IndexArgs {
@@ -1654,8 +1685,8 @@ mod preview_notice_tests {
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Cost preview", "API not called"],
-                UiLanguage::Ja => &["費用preview", "API未送信"],
+                UiLanguage::En => &["0 / 0 fields", "Cost preview", "API not called"],
+                UiLanguage::Ja => &["0 / 0項目", "費用preview", "API未送信"],
             }
         }
         super::super::i18n::verify_screen(configure, expected);

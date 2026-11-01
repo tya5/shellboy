@@ -297,12 +297,16 @@ impl ModelPicker {
             self.selected + 1
         };
         let count = filtered.len();
-        let context = match self.language {
-            UiLanguage::En => format!(
+        let context = match (self.language, count) {
+            (UiLanguage::En, 1) => format!(
+                "{} | Filter: {} | {position} / 1 model",
+                self.connection, self.query
+            ),
+            (UiLanguage::En, _) => format!(
                 "{} | Filter: {} | {position} / {count} models",
                 self.connection, self.query
             ),
-            UiLanguage::Ja => format!(
+            (UiLanguage::Ja, _) => format!(
                 "{} | 絞込み: {} | {position} / {count}件",
                 self.connection, self.query
             ),
@@ -645,6 +649,64 @@ mod language_rendering_tests {
     }
 
     #[test]
+    fn multiple_model_count_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.models = Some(ModelPicker {
+                language: ui.config.ui.language,
+                paint: Default::default(),
+                filtered_indices: vec![0, 1],
+                request: 1,
+                connection: "mock".into(),
+                current: None,
+                models: vec!["model-one".into(), "model-two".into()],
+                query: String::new(),
+                selected: 0,
+                loading: false,
+                error: None,
+                captured_at: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+                last_attempt_at: None,
+                notice_scroll: None,
+            });
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["1 / 2 models", "model-one"],
+                UiLanguage::Ja => &["1 / 2件", "model-one"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn single_model_count_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.models = Some(ModelPicker {
+                language: ui.config.ui.language,
+                paint: Default::default(),
+                filtered_indices: vec![0],
+                request: 1,
+                connection: "mock".into(),
+                current: None,
+                models: vec!["fixture-model".into()],
+                query: String::new(),
+                selected: 0,
+                loading: false,
+                error: None,
+                captured_at: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+                last_attempt_at: None,
+                notice_scroll: None,
+            });
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["1 / 1 model", "fixture-model"],
+                UiLanguage::Ja => &["1 / 1件", "fixture-model"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn loading_model_picker_is_bilingual_at_standard_widths() {
         fn configure(ui: &mut UiState) {
             ui.models = Some(ModelPicker {
@@ -666,8 +728,8 @@ mod language_rendering_tests {
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Loading models", "Ctrl+R"],
-                UiLanguage::Ja => &["モデル一覧を取得中", "Ctrl+R"],
+                UiLanguage::En => &["0 / 0 models", "Loading models", "Ctrl+R"],
+                UiLanguage::Ja => &["0 / 0件", "モデル一覧を取得中", "Ctrl+R"],
             }
         }
         super::super::i18n::verify_screen(configure, expected);

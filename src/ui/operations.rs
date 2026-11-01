@@ -19,6 +19,15 @@ use ratatui::{
 };
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
+pub(super) fn catalogue_label(id: OperationId, language: UiLanguage) -> String {
+    metadata::text_for(id.label_text(), language).replace('·', "|")
+}
+#[allow(dead_code)]
+pub(super) fn catalogue_meaning(id: OperationId, language: UiLanguage) -> &'static str {
+    metadata::text_for(id.meaning_text(), language)
+}
+
 // A smaller initial management page leaves room to inspect each row in the TUI.
 const MANAGEMENT_LIST_LIMIT: u32 = 20;
 const ATTACHMENT_CHOICES: &[&str] = &[
@@ -714,14 +723,17 @@ impl Operations {
             };
             let effect = metadata::text_for(form.effect().text(), form.language);
             let conditions = form.conditions.len();
-            let context = match (form.language, form.operation == OpKind::Wait) {
-                (UiLanguage::En, true) => {
+            let context = match (form.language, form.operation == OpKind::Wait, conditions) {
+                (UiLanguage::En, true, 1) => {
+                    format!("{effect} | {field_context} | 1 observation condition")
+                }
+                (UiLanguage::En, true, _) => {
                     format!("{effect} | {field_context} | {conditions} observation conditions")
                 }
-                (UiLanguage::Ja, true) => {
+                (UiLanguage::Ja, true, _) => {
                     format!("{effect} | {field_context} | 観測条件 {conditions}件")
                 }
-                (_, false) => format!("{effect} | {field_context}"),
+                (_, false, _) => format!("{effect} | {field_context}"),
             };
             let verb = metadata::text_for(
                 form.operation.catalogue().enter_verb(form.effect()).text(),
@@ -3171,6 +3183,25 @@ mod language_rendering_tests {
             assert_eq!(args.thread_id, "thread-fixture");
             assert!(args.descendants);
         }
+    }
+
+    #[test]
+    fn single_wait_condition_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.open_operations(Some(OpKind::Wait));
+            let form = ui.operations.as_mut().unwrap().form.as_mut().unwrap();
+            form.conditions
+                .push(crate::protocol::WaitCondition::TurnCompleted {
+                    turn_id: "turn-fixture".into(),
+                });
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["1 observation condition", "F9"],
+                UiLanguage::Ja => &["観測条件 1件", "F9"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
     }
 
     #[test]
