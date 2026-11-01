@@ -8009,3 +8009,19 @@ cover width one, width two, disagreement and timeout. Shellboy layout follows
 the observation; Ratatui remains upstream and a measured mismatch is exposed in
 TUI status and diagnostics. Windows behavior depends on the public backend; an
 unsuccessful probe is unknown. Exact candidate CI evidence is in the handoff.
+
+## #138 Windows initial selected/browser committed baseline
+
+Windows run41342038037 attempt1, job124953965722 failed the delayed-selected-view
+fixture at frontend_reactivity.rs:342 (observation watchdog, bridge unfinished,
+no delivered CurrentView); the retry passed. The initial tick was not guaranteed
+before idle activity disabled selected polling, whereas browser excerpt delivery
+was independent. Both baseline waits now use a real CLI title commit/Changed,
+matching owner snapshot identity and adopted consumer titles, not elapsed time
+or a speculative startup read. The delayed case still asserts no selected view
+adoption before release and adoption afterward. The measured 16 changes keep
+all original count/shared-sequence/no-reload assertions. Production, watchdog
+budgets and stale-read rejection are unchanged. See the failure and qualification
+record in [frontend stability](frontend-stability.md#windows-committed-baseline-follow-up-138).
+Local results and the required three consecutive Windows successes at one exact
+SHA are reported separately at handoff, not inferred from earlier CI passes.

@@ -62,7 +62,8 @@ No timing observation is a pass threshold and no local full standard run is used
   a browser excerpt only proves the browser consumer is ready. Clearing the
   observation vectors at that boundary can count a pending setup `CurrentView`
   together with the first Changed refresh.
-- Wait for both an initial `CurrentView` and the selected browser excerpt before
+- Original correction (superseded by the Windows follow-up below): wait for
+  both an initial `CurrentView` and the selected browser excerpt before
   clearing the vectors or issuing the first measured mutation. The readiness
   regression covers both delivery orders and specifically rejects browser-only
   readiness. A real-fixture regression also holds initial `CurrentView` updates
@@ -79,3 +80,40 @@ No timing observation is a pass threshold and no local full standard run is used
   behavior changes are introduced. The original failure is confirmed by CI;
   local diagnostic repetition did not reproduce it (11 focused passes and one
   passing related-module run before the fix).
+
+### Windows committed-baseline follow-up (#138)
+
+- Original failure: run `41342038037`, attempt 1, Windows job `124953965722`;
+  `initial_browser_excerpt_does_not_complete_a_delayed_selected_view` timed out
+  at `frontend_reactivity.rs:342`, with `bridge_finished=false` and no delivered
+  CurrentView snapshots. Retrying succeeded; that does not erase the failure.
+- Source tracing: SelectThread emits separate Thread/History, then activity.
+  The initial fixture data predates subscription and emits no Changed. A
+  periodic tick can admit a paired read before idle activity, but idle activity
+  disables `Selection::progress_running`. Browser observation has independent
+  admission and can finish without a selected CurrentView ever being produced.
+  Waiting for a nonempty held vector therefore depended on a startup tick, not
+  a guaranteed final state. Extending the watchdog cannot produce that read.
+- Both affected fixtures now commit distinct baseline titles through the real
+  separate CLI/owner Changed route. The delayed case requires a held CurrentView
+  with the exact committed title plus browser adoption, verifies no selected
+  adoption before release, then awaits selected adoption after release. The
+  measured shared-header/browser case requires the matching snapshot identity
+  and both adopted titles before clearing its vectors. Old startup snapshots
+  and browser-only delivery cannot satisfy the committed boundary.
+- The 16 measured changes retain exactly-one-selected-read, shared browser/read
+  sequence, fixed browser generation and fixed page count. No production code,
+  periodic rates, stale-read guards, timeout budgets, retries or assertions are
+  relaxed. Watchdog diagnostics additionally retain bounded browser traces and
+  the held-view count.
+- Validation uses disposable databases, loopback-only/unreachable provider URLs
+  and the real separate CLI. Local focused results and three consecutive
+  same-SHA all-OS CI run IDs are supplied at handoff; they are not claimed by
+  source inspection alone. Physical terminals/live providers and Windows-local
+  execution are not tested by this fixture change.
+
+Local macOS candidate preparation: `cargo fmt --all`,
+`cargo check --locked --tests`, and
+`cargo test --locked --test integration frontend_reactivity:: -- --nocapture`
+passed (17 tests, 1032 filtered). This covers both baseline regressions and all
+16 measured changes; it is not a Windows result or a local full standard run.

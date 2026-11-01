@@ -13,14 +13,19 @@ Threads were append-only (body sizes matched the saved byte counts), so the
 stall is provider-side; see the decision record.
 ## macOS frontend CI readiness (#138, CI half)
 
-The paired-header/browser fixture now waits for its initial `CurrentView` as
-well as the browser excerpt before measuring Changed observations. A delayed
-real-update regression and a delivery-order readiness matrix protect the setup
-boundary; all 16 shared-snapshot/count/no-reload assertions remain unchanged.
-No timeout or product behavior changes. Qualification and original CI panic
-are tracked in [frontend stability](../validation/frontend-stability.md);
-repeated exact-SHA Linux/macOS CI must pass before integration. W3's separate
-local-only investigation is outside this change.
+The paired-header/browser fixtures establish a committed title baseline through
+real CLI/Changed rather than assuming an initial tick produces CurrentView.
+Windows run41342038037 attempt1 exposed that the previous readiness boundary
+could wait forever after idle activity stopped polling; its retry passed.
+The delayed real-update regression holds the matching committed snapshot until
+the browser adopts the title, then releases and verifies selected adoption.
+All 16 shared-snapshot/count/no-reload assertions remain unchanged; no timeout
+or product behavior changes. Qualification and failure history are tracked in
+[frontend stability](../validation/frontend-stability.md). Three consecutive
+Windows passes at the same SHA (all-OS dispatches) are required before handoff.
+Local checks and exact-SHA CI evidence are reported separately; the earlier
+Linux/macOS passes do not qualify the new candidate. W3's separate local-only
+investigation is outside this change.
 ## Resource-usage guide (#116 stage 3)
 
 The English `shellboy/resource-usage` guide publishes stage-1 and stage-2

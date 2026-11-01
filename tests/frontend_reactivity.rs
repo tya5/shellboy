@@ -350,8 +350,8 @@ impl Fixture {
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "{label}: observation watchdog; bridge_finished={}; current_view_snapshots={:?}\nLAST DRAWN SCREEN:\n{}",
-                self.bridge.is_finished(), self.current_view_trace, self.last_screen
+                "{label}: observation watchdog; bridge_finished={}; held_current_views={}; browser_trace={:?}; current_view_snapshots={:?}\nLAST DRAWN SCREEN:\n{}",
+                self.bridge.is_finished(), self.held_initial_views.as_ref().map_or(0, Vec::len), self.browser_trace, self.current_view_trace, self.last_screen
             )
         })
     }
@@ -1049,29 +1049,55 @@ async fn initial_browser_excerpt_does_not_complete_a_delayed_selected_view() {
         fixture.actions.send(action).await.unwrap();
     }
     fixture
+        .observed_until("initial browser excerpt", |fixture, _| {
+            fixture.browser_selected_ready
+        })
+        .await;
+    // Idle activity can stop startup polling before any CurrentView is read.
+    // A committed Changed event guarantees the observation whose delivery we hold.
+    const BASELINE: &str = "DELAYED_SELECTED_BASELINE";
+    fixture
+        .cli(&["thread", "set", "--thread", "reactive", "--title", BASELINE])
+        .await;
+    fixture
         .observed_until(
-            "browser excerpt while selected refresh is held",
+            "committed selected baseline is held while browser adopts it",
             |fixture, _| {
-                fixture.browser_selected_ready
-                    && fixture
-                        .held_initial_views
-                        .as_ref()
-                        .is_some_and(|held| !held.is_empty())
+                fixture
+                    .ui
+                    .threads()
+                    .iter()
+                    .any(|row| row.thread_id == "reactive" && row.title == BASELINE)
+                    && fixture.held_initial_views.as_ref().is_some_and(|held| {
+                        held.iter().any(|update| {
+                            matches!(update,
+                                UiUpdate::CurrentView { details, .. }
+                                    if details.thread_id == "reactive" && details.title == BASELINE
+                            )
+                        })
+                    })
             },
         )
         .await;
+    assert_eq!(fixture.ui.view().title, "BASE_TITLE");
     assert!(fixture.view_sequences.is_empty());
     assert!(!initial_selected_browser_ready(
         &fixture.view_sequences,
         fixture.browser_selected_ready,
     ));
-    // Release actual initial observations, not a sleep or a synthetic refresh.
+    // Release actual owner observations, not a sleep or a synthetic refresh.
     for update in fixture.held_initial_views.take().unwrap() {
         fixture.accept_update(update);
     }
     fixture
-        .observed_until("both initial consumers have delivered", |fixture, _| {
+        .observed_until("both baseline consumers have adopted", |fixture, _| {
             initial_selected_browser_ready(&fixture.view_sequences, fixture.browser_selected_ready)
+                && fixture.ui.view().title == BASELINE
+                && fixture
+                    .ui
+                    .threads()
+                    .iter()
+                    .any(|row| row.thread_id == "reactive" && row.title == BASELINE)
         })
         .await;
     fixture.finish().await;
@@ -1093,16 +1119,25 @@ async fn selected_header_and_open_browser_share_one_changed_snapshot_without_rel
             ui.threads_visible() && ui.threads().iter().any(|row| row.thread_id == "reactive")
         })
         .await;
+    // Header/history and even a browser excerpt do not guarantee a startup
+    // CurrentView. Establish a saved baseline before clearing measured vectors.
+    const BASELINE: &str = "PAIRED_SELECTED_BASELINE";
     fixture
-        .observed_until(
-            "initial selected view and browser snapshot",
-            |fixture, _| {
-                initial_selected_browser_ready(
-                    &fixture.view_sequences,
-                    fixture.browser_selected_ready,
-                )
-            },
-        )
+        .cli(&["thread", "set", "--thread", "reactive", "--title", BASELINE])
+        .await;
+    fixture
+        .observed_until("committed selected and browser baseline", |fixture, _| {
+            initial_selected_browser_ready(&fixture.view_sequences, fixture.browser_selected_ready)
+                && fixture.current_view_trace.back().is_some_and(|snapshot| {
+                    snapshot["thread"] == "reactive" && snapshot["title"] == BASELINE
+                })
+                && fixture.ui.view().title == BASELINE
+                && fixture
+                    .ui
+                    .threads()
+                    .iter()
+                    .any(|row| row.thread_id == "reactive" && row.title == BASELINE)
+        })
         .await;
     let generation = fixture.ui.list_generation();
     let pages = fixture.browser_pages;

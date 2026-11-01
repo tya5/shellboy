@@ -157,3 +157,12 @@ and completed activity ahead of paired-snapshot delivery. No elapsed-success
 condition, repeated refresh key, synthetic usage injection, provider request or
 production periodic-poll change is needed. Watchdog failures retain the last
 frame and eight bounded CurrentView identity/usage snapshots.
+
+The selected-header/browser fixtures follow the same rule: a browser excerpt
+cannot guarantee that idle startup will produce a CurrentView. Establish the
+baseline with a real CLI title commit/Changed and await that exact title in
+both consumers before measuring later mutations. The delayed-delivery test
+holds the matching owner-produced CurrentView until the browser adopts the
+committed title, verifies the selected view is still unchanged, then releases
+and awaits adoption. Arbitrary startup snapshots cannot satisfy this boundary.
+The 16 measured shared-snapshot/count/no-reload checks remain unchanged.
