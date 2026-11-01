@@ -1277,3 +1277,103 @@ mod tests {
         assert!(!ui.dirty, "blocked wheel must not redraw the popup");
     }
 }
+// Shared confirmation dispatcher calls these only for application-owned text.
+#[allow(dead_code)]
+pub(super) fn confirmation_title(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<&'static str> {
+    (language == crate::config::UiLanguage::En && !matches!(confirmation, Confirmation::ForceQuit))
+        .then_some("Confirm action")
+}
+#[allow(dead_code)]
+pub(super) fn confirmation_context(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<&'static str> {
+    (language == crate::config::UiLanguage::En && !matches!(confirmation, Confirmation::ForceQuit))
+        .then_some("Review the details")
+}
+#[allow(dead_code)]
+pub(super) fn confirmation_footer(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<&'static str> {
+    if language != crate::config::UiLanguage::En {
+        return None;
+    }
+    match confirmation {
+        Confirmation::ThreadDeletion(_) | Confirmation::ForceQuit => None,
+        Confirmation::StaleIndex { .. } => Some("N / Esc Back | Review again\n^v/PgUp/PgDn Scroll"),
+        _ => Some("Y Execute | N / Esc Back\n^v/PgUp/PgDn Scroll"),
+    }
+}
+#[allow(dead_code)]
+pub(super) fn confirmation_text(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<String> {
+    if language != crate::config::UiLanguage::En {
+        return None;
+    }
+    match confirmation {
+        Confirmation::Watch(target) if target.kind == watch::WatchActionKind::Stop => {
+            Some(format!(
+                "Stop the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
+                target.thread_id, target.run_id
+            ))
+        }
+        Confirmation::Watch(target) => Some(format!(
+            "Retry the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
+            target.thread_id, target.run_id
+        )),
+        Confirmation::EditStop { run_id, .. } => Some(format!(
+            "Stop prior work {run_id}?\nAfter its final state is confirmed, a new conversation is forked just before the original request and the edited text is sent as a new request. The original request and old history are unchanged."
+        )),
+        Confirmation::Index {
+            command, detail, ..
+        } => match command {
+            Command::IndexBackfill(_) => {
+                Some(format!("Confirm index operation | backfill\n{detail}"))
+            }
+            Command::IndexRetry(_) => Some(format!("Confirm index operation | retry\n{detail}")),
+            Command::IndexRebuild(_) => {
+                Some(format!("Confirm index operation | rebuild\n{detail}"))
+            }
+            _ => Some(format!("Confirm index operation\n{detail}")),
+        },
+        Confirmation::StaleIndex { detail } => Some(format!(
+            "This confirmation is stale and cannot execute. Close it and preview again.\n{detail}"
+        )),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod confirmation_language_tests {
+    use super::*;
+    use crate::config::UiLanguage;
+
+    #[test]
+    fn stale_index_confirmation_preserves_detail_and_never_offers_execution() {
+        let confirmation = Confirmation::StaleIndex {
+            detail: "opaque fixture".into(),
+        };
+        let text = confirmation_text(&confirmation, UiLanguage::En).unwrap();
+        assert!(text.contains("stale") && text.contains("cannot execute"));
+        assert!(text.contains("opaque fixture"));
+        let footer = confirmation_footer(&confirmation, UiLanguage::En).unwrap();
+        assert!(!footer.contains("Y Execute"));
+        assert!(footer.contains("N / Esc"));
+        assert!(confirmation_text(&confirmation, UiLanguage::Ja).is_none());
+    }
+
+    #[test]
+    fn force_quit_stays_on_the_existing_stage_a_translation() {
+        let confirmation = Confirmation::ForceQuit;
+        assert!(confirmation_title(&confirmation, UiLanguage::En).is_none());
+        assert!(confirmation_context(&confirmation, UiLanguage::En).is_none());
+        assert!(confirmation_footer(&confirmation, UiLanguage::En).is_none());
+        assert!(confirmation_text(&confirmation, UiLanguage::En).is_none());
+    }
+}
