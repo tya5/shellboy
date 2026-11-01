@@ -76,8 +76,9 @@ Messages support, and new request and resource inspection tools.
   to all saved history (#107, #108, #115, #118).
 - The bundled [resource usage guide](../guides/resource-usage.md) documents
   reproducible Linux PSS and startup measurements, including fake-model
-  comparisons. Results are sampled observations, not rankings, peak-memory
-  guarantees or predictions of real-model cost or quality (#116).
+  comparisons. The published sample measures a v0.5.0 build, not v0.6.0.
+  Results are sampled observations, not rankings, peak-memory guarantees or
+  predictions of real-model cost or quality (#116).
 
 ## Known issues
 
