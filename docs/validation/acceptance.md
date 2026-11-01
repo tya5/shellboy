@@ -14,8 +14,10 @@ is an existing guard and is not independently exercised by these new tests.
 
 On macOS, rust-slot `cargo check --tests`, the retry arithmetic unit test and
 `cargo test --test integration runtime_features::proactive_` passed (five tests,
-execution a859273f-e050-45ac-a0ea-8eb1e7d9cdc1). The strengthened tests and policy fixture also passed on macOS in execution
-8f733d3b-adc2-418c-b674-8dccfae9f327. Linux/macOS branch CI is pending. Real-provider behavior, the private 1741-character incident, and native
+execution a859273f-e050-45ac-a0ea-8eb1e7d9cdc1). The strengthened integration tests also passed on macOS in execution
+8f733d3b-adc2-418c-b674-8dccfae9f327; its policy test filter matched zero
+tests because the shared build directory reused another worktree's binary, so
+that policy fixture still requires a forced rebuild and test. Linux/macOS branch CI is pending. Real-provider behavior, the private 1741-character incident, and native
 Windows are not locally tested; Windows remains the integrator's three-OS CI
 responsibility.
 
