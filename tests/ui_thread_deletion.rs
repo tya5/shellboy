@@ -81,7 +81,10 @@ fn accept(ui: &mut UiState, id: u64, args: &ThreadDeleteArgs, deletable: bool) {
         request_id: id,
         args: args.clone(),
         execute: false,
-        result: Ok(ThreadDeletionReply::Preview(preview(args, deletable))),
+        result: Ok(ThreadDeletionReply::Preview(
+            preview(args, deletable),
+            chrono::Utc::now(),
+        )),
     });
 }
 fn screen(ui: &mut UiState) -> String {

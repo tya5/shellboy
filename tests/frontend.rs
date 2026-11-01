@@ -981,11 +981,18 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         thread_ids: vec!["source".into()],
         source_ids: vec![],
     };
-    send.send(UiAction::IndexPreview(scope.clone()))
-        .await
-        .unwrap();
+    send.send(UiAction::IndexPreview {
+        args: scope.clone(),
+        attempt: 7,
+    })
+    .await
+    .unwrap();
     let preview = next_update(&mut incoming, |u| match u {
-        UiUpdate::IndexPreviewReady { args, text } => Some((args, text)),
+        UiUpdate::IndexPreviewReady {
+            args,
+            text,
+            attempt: 7,
+        } => Some((args, text)),
         _ => None,
     })
     .await;
@@ -999,6 +1006,90 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .parse::<u64>()
         .unwrap();
     assert!(characters > 64 * 1024);
+    let deletion = ThreadDeleteArgs {
+        thread_id: "source".into(),
+        descendants: false,
+    };
+    send.send(UiAction::ThreadDeletion {
+        request_id: 30,
+        args: deletion.clone(),
+        execute: false,
+        known_thread_ids: vec![],
+    })
+    .await
+    .unwrap();
+    next_update(&mut incoming, |update| match update {
+        UiUpdate::ThreadDeletion {
+            request_id: 30,
+            execute: false,
+            result: Ok(_),
+            ..
+        } => Some(()),
+        _ => None,
+    })
+    .await;
+    // Leave the invalidation in the UI channel, as if input raced delivery.
+    let changed = observer
+        .request(Request::new(
+            format!("{}:preview-race", observer.store.instance_id),
+            Command::ThreadSet(ThreadSetArgs {
+                agents: None,
+                thread_id: Some("source".into()),
+                title: Some("changed".into()),
+                connection: None,
+                model: None,
+                effort: None,
+                cwd: None,
+            }),
+        ))
+        .await;
+    assert!(changed.ok);
+    next_update(&mut incoming, |update| {
+        matches!(update, UiUpdate::ConfirmationSourcesChanged).then_some(())
+    })
+    .await;
+    send.send(UiAction::ThreadDeletion {
+        request_id: 31,
+        args: deletion,
+        execute: true,
+        known_thread_ids: vec![],
+    })
+    .await
+    .unwrap();
+    next_update(&mut incoming, |update| match update {
+        UiUpdate::ThreadDeletion {
+            request_id: 31,
+            execute: true,
+            result: Err(error),
+            ..
+        } if error.message.contains("削除確認が古く") => Some(()),
+        _ => None,
+    })
+    .await;
+    send.send(UiAction::ConfirmedIndex {
+        command: Command::IndexBackfill(scope.clone()),
+        attempt: 7,
+    })
+    .await
+    .unwrap();
+    next_update(&mut incoming, |update| match update {
+        UiUpdate::Status { text, .. } if text.contains("索引確認が古く") => Some(()),
+        _ => None,
+    })
+    .await;
+    observer
+        .store
+        .database
+        .call(|db| {
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM embedding_job", [], |row| row
+                    .get::<_, i64>(0))?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     // A new Run can appear after loading the original. Consent is bound to its ID.
     observer.store.database.call(|db|{db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('late-run','source','live','now')",[])?;Ok(())}).await.unwrap();
     send.send(UiAction::SendEdited {

@@ -204,6 +204,7 @@ mod tests {
         ui.thread_browser.close();
         ui.confirmation = Some(Confirmation::Index {
             command: Command::IndexStatus(IndexArgs::default()),
+            attempt: 1,
             detail: "long detail\n".repeat(100),
         });
         ui.confirmation_cache.clear();
@@ -276,6 +277,7 @@ mod tests {
         ui.help_visible = false;
         ui.set_confirmation(Confirmation::Index {
             command: Command::IndexStatus(IndexArgs::default()),
+            attempt: 1,
             detail: "cost facts\n".repeat(4000),
         });
         paint(&mut ui, 100, 30);
@@ -302,6 +304,7 @@ mod tests {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.set_confirmation(Confirmation::Index {
             command: Command::IndexStatus(IndexArgs::default()),
+            attempt: 1,
             detail: "old source\n".repeat(100),
         });
         paint(&mut ui, 100, 30);

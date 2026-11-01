@@ -29,6 +29,15 @@ fn command_action(action: &UiAction) -> &UiAction {
         action => action,
     }
 }
+fn preview_attempt(actions: &[UiAction]) -> u64 {
+    actions
+        .iter()
+        .find_map(|action| match command_action(action) {
+            UiAction::IndexPreview { attempt, .. } => Some(*attempt),
+            _ => None,
+        })
+        .expect("index preview action")
+}
 fn command_actions(actions: &[UiAction]) -> Vec<UiAction> {
     actions
         .iter()
@@ -642,7 +651,7 @@ fn index_overlay_requires_explicit_scope_and_cost_confirmation_and_shows_results
     text(&mut ui, "/index all");
     let actions = enter(&mut ui);
     assert!(actions.iter().any(
-        |action| matches!(command_action(action),UiAction::IndexPreview(args)if args.scope==Some(IndexScope::All))
+        |action| matches!(command_action(action),UiAction::IndexPreview { args, .. }if args.scope==Some(IndexScope::All))
     ));
     ui.apply(UiUpdate::Management {
         title: "index status all".into(),
@@ -659,19 +668,20 @@ fn index_overlay_requires_explicit_scope_and_cost_confirmation_and_shows_results
     let args = actions
         .iter()
         .find_map(|action| match command_action(action) {
-            UiAction::IndexPreview(args) => Some(args.clone()),
+            UiAction::IndexPreview { args, .. } => Some(args.clone()),
             _ => None,
         })
         .unwrap();
     ui.apply(UiUpdate::IndexPreviewReady {
         args,
+        attempt: preview_attempt(&actions),
         text: "sources=10 segments=20 characters=1000 already_indexed=4 unavailable=1".into(),
     });
     ui.event(key(KeyCode::Char('b')));
     assert!(enter(&mut ui).is_empty());
     let actions = ui.event(key(KeyCode::Char('y')));
     assert!(
-        matches!(command_action(&actions[0]),UiAction::Manage(Command::IndexBackfill(args))if args.scope==Some(IndexScope::All))
+        matches!(command_action(&actions[0]),UiAction::ConfirmedIndex { command: Command::IndexBackfill(args), .. } if args.scope==Some(IndexScope::All))
     );
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
@@ -747,7 +757,7 @@ fn space_status_is_readonly_until_scope_and_matching_preview_are_present() {
     );
     let retry = ui.event(key(KeyCode::Char('t')));
     assert!(
-        matches!(command_action(&retry[0]), UiAction::IndexPreview(args) if args.space_id.as_deref() == Some("old-space") && args.scope.is_none())
+        matches!(command_action(&retry[0]), UiAction::IndexPreview { args, .. } if args.space_id.as_deref() == Some("old-space") && args.scope.is_none())
     );
     assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
     ui.event(key(KeyCode::Esc));
@@ -756,7 +766,7 @@ fn space_status_is_readonly_until_scope_and_matching_preview_are_present() {
     let selected = actions
         .iter()
         .find_map(|action| match command_action(action) {
-            UiAction::IndexPreview(args) => Some(args.clone()),
+            UiAction::IndexPreview { args, .. } => Some(args.clone()),
             _ => None,
         })
         .unwrap();
@@ -768,18 +778,20 @@ fn space_status_is_readonly_until_scope_and_matching_preview_are_present() {
             space_id: Some("wrong-space".into()),
             ..selected.clone()
         },
+        attempt: preview_attempt(&actions),
         text: "wrong preview".into(),
     });
     ui.event(key(KeyCode::Char('r')));
     assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
     ui.apply(UiUpdate::IndexPreviewReady {
         args: selected,
+        attempt: preview_attempt(&actions),
         text: "sources=2 segments=4 characters=500".into(),
     });
     ui.event(key(KeyCode::Char('r')));
     let actions = ui.event(key(KeyCode::Char('y')));
     assert!(
-        matches!(command_action(&actions[0]),UiAction::Manage(Command::IndexRebuild(args))if args.scope==Some(IndexScope::Threads) && args.space_id.as_deref()==Some("selected-space"))
+        matches!(command_action(&actions[0]),UiAction::ConfirmedIndex { command: Command::IndexRebuild(args), .. } if args.scope==Some(IndexScope::Threads) && args.space_id.as_deref()==Some("selected-space"))
     );
     ui.event(key(KeyCode::Char('r')));
     assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
@@ -3830,7 +3842,7 @@ fn index_management_shows_preview_states_and_global_retry_requires_confirmation(
 
     let actions = ui.event(key(KeyCode::Char('t')));
     assert!(
-        matches!(command_action(&actions[0]), UiAction::IndexPreview(args) if args == &IndexArgs::default())
+        matches!(command_action(&actions[0]), UiAction::IndexPreview { args, .. } if args == &IndexArgs::default())
     );
     assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
@@ -3840,6 +3852,7 @@ fn index_management_shows_preview_states_and_global_retry_requires_confirmation(
 
     ui.apply(UiUpdate::IndexPreviewFailed {
         args: IndexArgs::default(),
+        attempt: preview_attempt(&actions),
         error: "synthetic preview failure".into(),
     });
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
@@ -3851,10 +3864,11 @@ fn index_management_shows_preview_states_and_global_retry_requires_confirmation(
     let actions = ui.event(key(KeyCode::Char('t')));
     assert!(matches!(
         command_action(&actions[0]),
-        UiAction::IndexPreview(_)
+        UiAction::IndexPreview { .. }
     ));
     ui.apply(UiUpdate::IndexPreviewReady {
         args: IndexArgs::default(),
+        attempt: preview_attempt(&actions),
         text: "資料数: 2\n分割数: 3\n文字数: 400\nAPI未送信 · 金額は未見積".into(),
     });
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
@@ -3868,7 +3882,7 @@ fn index_management_shows_preview_states_and_global_retry_requires_confirmation(
     assert!(ui.event(key(KeyCode::Char('t'))).is_empty());
     let actions = ui.event(key(KeyCode::Char('y')));
     assert!(
-        matches!(command_action(&actions[0]), UiAction::Manage(Command::IndexRetry(args)) if args == &IndexArgs::default())
+        matches!(command_action(&actions[0]), UiAction::ConfirmedIndex { command: Command::IndexRetry(args), .. } if args == &IndexArgs::default())
     );
 }
 
@@ -3881,12 +3895,13 @@ fn structured_index_status_cannot_hide_ready_preview() {
     let args = actions
         .iter()
         .find_map(|action| match command_action(action) {
-            UiAction::IndexPreview(args) => Some(args.clone()),
+            UiAction::IndexPreview { args, .. } => Some(args.clone()),
             _ => None,
         })
         .unwrap();
     ui.apply(UiUpdate::IndexPreviewReady {
         args: args.clone(),
+        attempt: preview_attempt(&actions),
         text: "資料数: 2\n分割数: 3\n文字数: 400".into(),
     });
     ui.apply(UiUpdate::StructuredManagement {
@@ -3904,6 +3919,7 @@ fn structured_index_status_cannot_hide_ready_preview() {
     assert!(shown.contains("文字数: 400"));
     ui.apply(UiUpdate::IndexPreviewFailed {
         args: IndexArgs::default(),
+        attempt: preview_attempt(&actions),
         error: "wrong-scope-error".into(),
     });
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();

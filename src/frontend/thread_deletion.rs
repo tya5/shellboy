@@ -34,7 +34,7 @@ pub(super) fn candidates(
     known
 }
 pub(super) enum Outcome {
-    Preview(Value),
+    Preview(Value, chrono::DateTime<chrono::Utc>),
     Applied,
 }
 pub(super) async fn run(
@@ -49,7 +49,7 @@ pub(super) async fn run(
     };
     let value = request(control, command).await?;
     if !execute {
-        return Ok(Outcome::Preview(value));
+        return Ok(Outcome::Preview(value, chrono::Utc::now()));
     }
     if value.get("accepted").and_then(Value::as_bool) != Some(true) {
         return Err(ApiError::new(
@@ -348,7 +348,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             run(&control, args.clone(), false).await.unwrap(),
-            Outcome::Preview(value) if value["deletable_now"] == true
+            Outcome::Preview(value, _) if value["deletable_now"] == true
         ));
         // The preview is only a snapshot: a Run starting afterwards must
         // still prevent the actual mutation.

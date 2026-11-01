@@ -15,12 +15,15 @@ fn failure_text(error: &crate::protocol::ApiError) -> String {
     };
     format!("{prefix}: {}", error.message)
 }
-pub(super) const FOOTER: &str =
+const FOOTER_READY: &str =
     "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 削除 · ↑↓/PgUp/PgDn 閲覧";
+const FOOTER_DISABLED: &str =
+    "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 使用不可 · ↑↓/PgUp/PgDn 閲覧";
 #[derive(Clone, Debug)]
 enum Phase {
     Loading,
     Ready(Value),
+    Stale(Option<Value>),
     Executing,
     Failed(crate::protocol::ApiError),
 }
@@ -29,13 +32,28 @@ pub(super) struct DeletionDialog {
     request_id: u64,
     args: ThreadDeleteArgs,
     title: String,
+    captured_at: Option<chrono::DateTime<chrono::Utc>>,
     phase: Phase,
 }
 impl DeletionDialog {
+    pub(super) fn footer(&self) -> &'static str {
+        if self.can_execute() {
+            FOOTER_READY
+        } else {
+            FOOTER_DISABLED
+        }
+    }
     fn matches(&self, request_id: u64, args: &ThreadDeleteArgs) -> bool {
         self.request_id == request_id
             && self.args.thread_id == args.thread_id
             && self.args.descendants == args.descendants
+    }
+    pub(super) fn invalidate(&mut self) {
+        self.phase = match std::mem::replace(&mut self.phase, Phase::Stale(None)) {
+            Phase::Ready(value) => Phase::Stale(Some(value)),
+            Phase::Loading => Phase::Stale(None),
+            other => other,
+        };
     }
     fn can_execute(&self) -> bool {
         matches!(&self.phase,Phase::Ready(value) if value.get("deletable_now").and_then(Value::as_bool)==Some(true))
@@ -51,6 +69,12 @@ impl DeletionDialog {
                 "しない"
             }
         );
+        if let Some(captured_at) = self.captured_at {
+            text.push_str(&format!(
+                "確認時刻: {}\n",
+                captured_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            ));
+        }
         match &self.phase {
             Phase::Loading => text.push_str("\n削除影響を確認中… Y はまだ使えません。"),
             Phase::Executing => {
@@ -60,14 +84,19 @@ impl DeletionDialog {
                 "\n{}\n閉じてから再度選んでください。",
                 failure_text(error)
             )),
-            Phase::Ready(value) => {
+            Phase::Stale(None) => {
+                text.push_str("\n確認が古くなりました。閉じて再確認してください。Y は使えません。")
+            }
+            Phase::Ready(value) | Phase::Stale(Some(value)) => {
                 let number = |pointer: &str| {
                     value
                         .pointer(pointer)
                         .and_then(Value::as_u64)
                         .map_or_else(|| "不明".to_owned(), |value| value.to_string())
                 };
-                text.push_str(if self.can_execute() {
+                text.push_str(if matches!(self.phase, Phase::Stale(_)) {
+                    "\n確認が古くなりました。閉じて再確認してください。Y は使えません。"
+                } else if self.can_execute() {
                     "\n削除できます。Y で実行します。"
                 } else {
                     "\n削除できません。作業を停止してから再度確認してください。"
@@ -138,6 +167,7 @@ impl UiState {
             .unwrap_or_else(|| "タイトルなし".into());
         let dialog = DeletionDialog {
             title,
+            captured_at: None,
             request_id: self.next_thread_deletion_request,
             args: ThreadDeleteArgs {
                 thread_id: thread,
@@ -185,6 +215,7 @@ impl UiState {
             && matches!(key.code, KeyCode::Char('d' | 'D' | ' '))
         {
             dialog.args.descendants = !dialog.args.descendants;
+            dialog.captured_at = None;
             dialog.phase = Phase::Loading;
             execute = Some(false);
         } else if !key
@@ -244,8 +275,11 @@ impl UiState {
                 self.thread_browser
                     .notice(format!("{} 件の会話を削除しました", ids.len()));
             }
-            Ok(ThreadDeletionReply::Preview(value)) if !execute && matches => {
-                if let Some(Confirmation::ThreadDeletion(dialog)) = &mut self.confirmation {
+            Ok(ThreadDeletionReply::Preview(value, captured_at)) if !execute && matches => {
+                if let Some(Confirmation::ThreadDeletion(dialog)) = &mut self.confirmation
+                    && matches!(dialog.phase, Phase::Loading)
+                {
+                    dialog.captured_at = Some(captured_at);
                     dialog.phase = if value.get("thread_id").and_then(Value::as_str)
                         == Some(args.thread_id.as_str())
                         && value.get("descendants").and_then(Value::as_bool)
@@ -268,6 +302,7 @@ impl UiState {
                 }
                 if matches
                     && let Some(Confirmation::ThreadDeletion(dialog)) = &mut self.confirmation
+                    && (execute || matches!(dialog.phase, Phase::Loading))
                 {
                     dialog.phase = Phase::Failed(error);
                 }
@@ -390,5 +425,138 @@ fn targets_deleted(
         UiAction::RebaseStream(request) => threads.contains(&request.thread_id),
         UiAction::ThreadDeletion { args, .. } => threads.contains(&args.thread_id),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod observation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn duplicate_preview_cannot_replace_the_original_evidence() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let action = ui.begin_thread_deletion("thread".into()).pop().unwrap();
+        let UiAction::ThreadDeletion {
+            request_id, args, ..
+        } = action
+        else {
+            panic!("expected preview request");
+        };
+        let preview = |count| {
+            ThreadDeletionReply::Preview(
+                json!({
+                    "thread_id": "thread", "descendants": false,
+                    "deletable_now": true, "selection": {"thread_count": count}
+                }),
+                chrono::Utc::now(),
+            )
+        };
+        ui.apply_thread_deletion(request_id, args.clone(), false, Ok(preview(1)));
+        ui.apply_thread_deletion(request_id, args.clone(), false, Ok(preview(99)));
+        ui.apply_thread_deletion(
+            request_id,
+            args,
+            false,
+            Err(crate::protocol::ApiError::new(
+                crate::protocol::ErrorCode::InvalidState,
+                "late failure",
+            )),
+        );
+        let Some(Confirmation::ThreadDeletion(dialog)) = &ui.confirmation else {
+            panic!("expected deletion dialog");
+        };
+        let Phase::Ready(value) = &dialog.phase else {
+            panic!("expected ready preview");
+        };
+        assert_eq!(value.pointer("/selection/thread_count"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn malformed_first_preview_cannot_be_replaced_by_a_duplicate() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let action = ui.begin_thread_deletion("thread".into()).pop().unwrap();
+        let UiAction::ThreadDeletion {
+            request_id, args, ..
+        } = action
+        else {
+            panic!("expected preview request");
+        };
+        ui.apply_thread_deletion(
+            request_id,
+            args.clone(),
+            false,
+            Ok(ThreadDeletionReply::Preview(
+                json!({"thread_id": "other", "descendants": false}),
+                chrono::Utc::now(),
+            )),
+        );
+        ui.apply_thread_deletion(
+            request_id,
+            args,
+            false,
+            Ok(ThreadDeletionReply::Preview(
+                json!({"thread_id": "thread", "descendants": false}),
+                chrono::Utc::now(),
+            )),
+        );
+        assert!(matches!(&ui.confirmation,
+            Some(Confirmation::ThreadDeletion(dialog)) if matches!(dialog.phase, Phase::Failed(_))));
+    }
+}
+
+#[cfg(test)]
+mod invalidation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn changed_deletion_preserves_evidence_disables_y_and_rejects_late_preview() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let action = ui.begin_thread_deletion("thread".into()).pop().unwrap();
+        let UiAction::ThreadDeletion {
+            request_id, args, ..
+        } = action
+        else {
+            panic!("preview")
+        };
+        let value = json!({"thread_id":"thread", "descendants":false, "deletable_now":true,
+            "selection":{"thread_count":1}});
+        let captured_at = chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        ui.apply_thread_deletion(
+            request_id,
+            args.clone(),
+            false,
+            Ok(ThreadDeletionReply::Preview(value.clone(), captured_at)),
+        );
+        ui.apply(UiUpdate::ConfirmationSourcesChanged);
+        ui.apply_thread_deletion(
+            request_id,
+            args,
+            false,
+            Ok(ThreadDeletionReply::Preview(
+                json!({"thread_id":"thread", "descendants":false, "deletable_now":true}),
+                chrono::Utc::now(),
+            )),
+        );
+        let Some(Confirmation::ThreadDeletion(dialog)) = &ui.confirmation else {
+            panic!("dialog")
+        };
+        assert!(matches!(&dialog.phase, Phase::Stale(Some(saved)) if saved == &value));
+        assert!(dialog.text().contains("古く"));
+        assert_eq!(dialog.captured_at, Some(captured_at));
+        assert!(dialog.text().contains("2026-10-30T04:05:06Z"));
+        assert!(dialog.footer().contains("Y 使用不可"));
+        assert!(
+            ui.thread_deletion_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+                .is_empty()
+        );
+        let actions = ui.thread_deletion_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+        assert!(matches!(
+            actions.as_slice(),
+            [UiAction::ThreadDeletion { execute: false, .. }]
+        ));
     }
 }
