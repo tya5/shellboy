@@ -139,8 +139,8 @@ impl Connection {
         if let Some(effort) = &self.default_effort {
             nonempty(&format!("connections.{name}.default_effort"), effort)?;
         }
-        if let Some(header) = &self.api_key_header {
-            if self.api_key_env.is_none()
+        if let Some(header) = &self.api_key_header
+            && (self.api_key_env.is_none()
                 || header.is_empty()
                 || header.len() > 256
                 || !header.bytes().all(header_name_byte)
@@ -154,13 +154,12 @@ impl Connection {
                         | "connection"
                         | "x-shellboy-session-id"
                         | "anthropic-version"
-                )
-            {
-                return Err(invalid(
-                    format!("connections.{name}.api_key_header"),
-                    "requires api_key_env and a valid non-transport-owned HTTP header name of at most 256 bytes",
-                ));
-            }
+                ))
+        {
+            return Err(invalid(
+                format!("connections.{name}.api_key_header"),
+                "requires api_key_env and a valid non-transport-owned HTTP header name of at most 256 bytes",
+            ));
         }
         if let Some(env) = &self.api_key_env {
             if !valid_env_name(env) {
