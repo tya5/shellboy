@@ -69,8 +69,8 @@ fn argumentless_restore_edits_only_the_current_saved_threads_input_range() {
     invalid.select_thread("current-thread".into());
     invalid.insert("/restore not-a-draft-number", false);
     assert!(enter(&mut invalid).is_empty());
-    assert!(invalid.view().status.contains("引数なし"));
-    assert!(invalid.view().status.contains("下書き"));
+    assert!(invalid.view().status.contains("/restore restores the input range"));
+    assert!(invalid.view().status.contains("/restore <number> restores a failed draft"));
 }
 
 fn cwd() -> PathBuf {
