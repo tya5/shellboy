@@ -139,12 +139,14 @@ const SHELL_SQL:&str="SELECT
  CASE WHEN octet_length(s.turn_id)<=512 THEN s.turn_id END,
  CASE WHEN octet_length(s.started_at)<=512 THEN s.started_at END,
  CASE WHEN octet_length(s.shell_json)<=65536 THEN s.shell_json END,
- (SELECT CASE WHEN octet_length(received_at)<=512 THEN received_at END FROM output_chunk WHERE execution_id=s.id ORDER BY sequence DESC LIMIT 1),
+ CASE WHEN octet_length(c.received_at)<=512 THEN c.received_at END,
  COALESCE(octet_length(s.end_reason)>512,0)
  +2*(octet_length(s.output_encoding)>64)+4*(octet_length(s.cwd)>512)
  +8*(octet_length(s.started_at)>512)+16*(octet_length(s.shell_json)>65536)
- +32*COALESCE((SELECT octet_length(received_at)>512 FROM output_chunk WHERE execution_id=s.id ORDER BY sequence DESC LIMIT 1),0)
- FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1";
+ +32*COALESCE(octet_length(c.received_at)>512,0)
+ FROM shell_execution s JOIN run r ON r.id=s.owner_run_id
+ LEFT JOIN output_chunk c ON c.rowid=(SELECT rowid FROM output_chunk WHERE execution_id=s.id ORDER BY sequence DESC LIMIT 1)
+ WHERE s.id=?1";
 const MESSAGE_SQL:&str="SELECT
  CASE WHEN octet_length(r.target_thread_id)<=512 THEN r.target_thread_id END,
  CASE WHEN octet_length(r.state)<=64 THEN r.state END,
@@ -744,6 +746,18 @@ mod tests {
     #[test]
     fn shell_latest_output_lookup_work_does_not_grow_with_retained_output() {
         let mut db = fixture();
+        db.execute(
+            "INSERT INTO output_chunk VALUES('shell',2,'stdout',2,X'61','2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let received: String = db.query_row(SHELL_SQL, ["shell"], |r| r.get(11)).unwrap();
+        assert_eq!(received, "2025-01-01T00:00:00Z");
+        db.execute(
+            "DELETE FROM output_chunk WHERE execution_id='shell' AND sequence=2",
+            [],
+        )
+        .unwrap();
         let mut previous = 0;
         for total in [1000, 10000] {
             let tx = db.transaction().unwrap();

@@ -3,7 +3,7 @@
 use super::{ApiError, BlockingFiles, ErrorCode};
 use crate::config::Retention;
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::Connection;
 use std::{
     path::{Path, PathBuf},
     time::Instant,
@@ -271,12 +271,23 @@ pub(crate) fn read_tx(
         .map_err(sql_error)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(sql_error)?;
+    let samples = output_samples(
+        db,
+        &rows
+            .iter()
+            .take(limits.executions)
+            .map(|row| row.0.as_deref())
+            .collect::<Vec<_>>(),
+        limits.output_witnesses,
+    )?;
     let mut executions_complete = rows.len() <= limits.executions;
     let mut executions = Vec::new();
     let mut remaining = limits.output_witnesses;
-    let mut raw_examined = 0;
-    for (id, state, ended, started, pinned, marked) in rows.into_iter().take(limits.executions) {
-        let Some(id) = id else {
+    let raw_examined = samples.iter().map(Vec::len).sum();
+    for ((id, state, ended, started, pinned, marked), sizes) in
+        rows.into_iter().take(limits.executions).zip(samples)
+    {
+        let Some(_) = id else {
             executions_complete = false;
             continue;
         };
@@ -284,15 +295,6 @@ pub(crate) fn read_tx(
             executions_complete = false;
             break;
         }
-        let mut chunks=db.prepare("SELECT length(bytes) FROM output_chunk WHERE execution_id=?1 ORDER BY sequence LIMIT ?2").map_err(sql_error)?;
-        let sizes = chunks
-            .query_map(params![id, (remaining + 1) as i64], |row| {
-                row.get::<_, Option<i64>>(0)
-            })
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?;
-        raw_examined += sizes.len();
         let complete = sizes.len() <= remaining;
         let used = sizes.len().min(remaining);
         let bytes = sizes
@@ -335,6 +337,38 @@ pub(crate) fn read_tx(
         quota: retention.tool_raw_bytes,
     })
 }
+fn output_samples(
+    db: &Connection,
+    ids: &[Option<&str>],
+    budget: usize,
+) -> Result<Vec<Vec<Option<i64>>>, ApiError> {
+    let mut out = vec![Vec::new(); ids.len()];
+    if budget == 0 {
+        return Ok(out);
+    }
+    let mut values = Vec::new();
+    let arms = ids.iter().enumerate().filter_map(|(ordinal,id)| {
+        let id = (*id)?;
+        values.push(id);
+        Some(format!("SELECT * FROM (SELECT {ordinal},length(bytes) FROM output_chunk WHERE execution_id=?{} ORDER BY sequence LIMIT {})", values.len(), budget+1))
+    }).collect::<Vec<_>>();
+    if arms.is_empty() {
+        return Ok(out);
+    }
+    // UNION ALL is a streaming concatenation. No outer ORDER BY or materialized
+    // per-owner aggregate may consume history before the one shared sentinel.
+    let sql = format!("{} LIMIT {}", arms.join(" UNION ALL "), budget + 1);
+    let mut statement = db.prepare(&sql).map_err(sql_error)?;
+    let mut rows = statement
+        .query(rusqlite::params_from_iter(values))
+        .map_err(sql_error)?;
+    while let Some(row) = rows.next().map_err(sql_error)? {
+        let owner = row.get::<_, i64>(0).map_err(sql_error)? as usize;
+        out[owner].push(row.get(1).map_err(sql_error)?);
+    }
+    Ok(out)
+}
+
 fn add_bytes(total: &mut u64, value: u64, overflow: &mut bool) {
     match total.checked_add(value) {
         Some(sum) => *total = sum,
@@ -724,6 +758,7 @@ impl super::GcService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::params;
     use std::time::Duration;
     fn db() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -740,6 +775,29 @@ mod tests {
             params![id, sequence, bytes],
         )
         .unwrap();
+    }
+    #[test]
+    fn batch_keeps_empty_and_unconfirmed_owners_and_one_shared_boundary_witness() {
+        let db = db();
+        execution(&db, "empty", "exited");
+        execution(&db, "unconfirmed", "running");
+        execution(&db, "tail", "exited");
+        chunk(&db, "unconfirmed", 9, b"x");
+        chunk(&db, "unconfirmed", 2, b"xx");
+        chunk(&db, "tail", 0, b"xxx");
+        let ids = [Some("empty"), Some("unconfirmed"), Some("tail")];
+        let trace = crate::frontend::sql_trace::Statements::new(&db);
+        let sampled = output_samples(&db, &ids, 2).unwrap();
+        assert_eq!(trace.count(), 1);
+        assert_eq!(sampled, vec![vec![], vec![Some(2), Some(1)], vec![Some(3)]]);
+        assert_eq!(sampled.iter().map(Vec::len).sum::<usize>(), 3);
+        drop(trace);
+        let sampled = output_samples(&db, &ids, 1).unwrap();
+        assert_eq!(sampled, vec![vec![], vec![Some(2), Some(1)], vec![]]);
+        assert_eq!(
+            output_samples(&db, &ids, 0).unwrap(),
+            vec![vec![], vec![], vec![]]
+        );
     }
     #[test]
     fn small_complete_prefixes_match_full_cli_totals_and_reclaimable_eligibility() {
@@ -892,8 +950,8 @@ mod tests {
         .unwrap();
         assert_eq!(
             trace.count(),
-            17 + 16,
-            "execution prefixes stop before eligibility filtering; at most16 PK followups"
+            18,
+            "execution prefixes stop before eligibility filtering; one streaming batch"
         );
         drop(trace);
         assert_eq!(empty_raw.executions.len(), 16);
