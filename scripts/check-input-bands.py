@@ -64,7 +64,7 @@ def main():
                         [{"x": x, "text": cell.data, "fg": cell.fg, "bg": cell.bg}
                          for x, cell in enumerate(row)] for row in terminal.screen.buffer
                     ], ensure_ascii=False, indent=2) + "\n")
-                    assert "入力 ·" not in text
+                    assert "入力 |" not in text
                     rows = text.splitlines()
                     mark_rows = [i for i, row in enumerate(rows) if args.mark in row]
                     assert len(mark_rows) == 4, text
@@ -105,7 +105,7 @@ def main():
                     selected = copy("\tc")
                     assert selected in expected and "Claude" not in selected, selected
                     terminal.send("o")
-                    terminal.expect(lambda text: "┌ 原文 " in text and selected.splitlines()[0] in text and
+                    terminal.expect(lambda text: "+ 原文 " in text and selected.splitlines()[0] in text and
                                     "名乗り：" in text, "F6-original")
                     original = copy("c")
                     assert original == selected, (original, selected)
@@ -125,7 +125,7 @@ def main():
                         terminal.expect(lambda s: "LIVE_EDGE_END" in s and "PASTE_FIXTURE_REPLY" in s, "live band")
                         def save_cells(label):
                             rows = terminal.text().splitlines()
-                            end = next(i for i, text in enumerate(rows) if text.startswith("┌"))
+                            end = next(i for i, text in enumerate(rows) if text.startswith("+"))
                             audit = {"band_rows": 0, "normal_rows": 0}
                             for y in range(1, end):
                                 cells = terminal.screen.buffer[y]

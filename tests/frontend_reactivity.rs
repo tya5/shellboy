@@ -635,7 +635,10 @@ async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() 
     fixture
         .until("foreign run stop clears recovery", |ui, screen| {
             ui.view().run_id.is_none()
-                && screen.contains('■')
+                && screen
+                    .lines()
+                    .next()
+                    .is_some_and(|line| line.trim_start().starts_with('#'))
                 && screen.contains("前回の復旧待ち")
                 && !screen.contains("操作を待っています")
                 && !screen.contains("/retry 同じ内容で再試行")
@@ -1786,10 +1789,10 @@ async fn index_observation_retains_success_after_one_failed_explicit_refresh() {
     fixture.command("/index thread").await;
     let first = fixture
         .until("first index preview", |_, screen| {
-            screen.contains("費用preview · 取得済み")
+            screen.contains("費用preview | 取得済み")
         })
         .await;
-    assert_eq!(first.matches("費用preview · 取得済み").count(), 1);
+    assert_eq!(first.matches("費用preview | 取得済み").count(), 1);
     assert_eq!(first.matches("資料数: 1").count(), 1, "{first}");
     // This private disposable DB change creates a broken write-space lookup
     // without emitting Changed, so the next explicit preview fails in Core.
@@ -1807,16 +1810,16 @@ async fn index_observation_retains_success_after_one_failed_explicit_refresh() {
     }
     let failed = fixture
         .until("failed index preview", |_, screen| {
-            screen.contains("費用preview · 取得失敗")
+            screen.contains("費用preview | 取得失敗")
         })
         .await;
-    assert_eq!(failed.matches("費用preview · 取得失敗").count(), 1);
+    assert_eq!(failed.matches("費用preview | 取得失敗").count(), 1);
     assert_eq!(
         failed.matches("区間数: 1").count(),
         1,
         "previous result must remain visible: {failed}"
     );
-    assert_eq!(failed.matches("前回の結果 · 古い情報").count(), 1);
+    assert_eq!(failed.matches("前回の結果 | 古い情報").count(), 1);
     assert_eq!(fixture.index_preview_ready, 1);
     assert_eq!(fixture.index_preview_failed, 1);
     let actions = fixture.ui.event(Event::Key(KeyEvent::new(
@@ -1842,7 +1845,7 @@ async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() 
     fixture.command("/index thread").await;
     fixture
         .until("index captured", |_, screen| {
-            screen.contains("費用preview · 取得済み")
+            screen.contains("費用preview | 取得済み")
         })
         .await;
     assert_eq!(fixture.index_preview_ready, 1);
@@ -1870,7 +1873,7 @@ async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() 
         .await;
     assert_eq!(fixture.confirmation_changed, previous + 1);
     assert_eq!(
-        stale.matches("N / Esc 戻る · 再確認が必要").count(),
+        stale.matches("N / Esc 戻る | 再確認が必要").count(),
         1,
         "{stale}"
     );

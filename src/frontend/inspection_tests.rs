@@ -295,7 +295,7 @@ async fn cleared_f8_thread_target_is_not_replaced_by_reply_owner_context() {
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
         ui.management
             .as_ref()
-            .is_some_and(|view| view.title == "会話 · 詳細")
+            .is_some_and(|view| view.title == "会話 | 詳細")
     })
     .await;
     let screen = draw(&mut ui);

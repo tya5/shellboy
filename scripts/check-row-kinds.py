@@ -190,9 +190,9 @@ def main():
                         # Last two items are quiet groups; choose the shell
                         # notice before the final answer and follow it with Enter.
                         terminal.send("\t\x1b[A\x1b[A\x1b[A\r ")
-                        scene("notice-jump-open-tool", lambda s: "│ BACKGROUND_DONE" in s)
+                        scene("notice-jump-open-tool", lambda s: "| BACKGROUND_DONE" in s)
                         terminal.send(" \t")
-                        scene("tool-closed-input", lambda s: "│ BACKGROUND_DONE" not in s and "Ctrl+T 会話" in s)
+                        scene("tool-closed-input", lambda s: "| BACKGROUND_DONE" not in s and "Ctrl+T 会話" in s)
                         results.append({"case": name, "observations": observations, "execution_id": execution, "metadata_colors": {kind: cells[-1][1] for kind, cells in metadata.items()}})
                     except Exception:
                         (out / "failure.txt").write_text(terminal.text() + "\n")

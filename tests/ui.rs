@@ -380,7 +380,7 @@ fn test_backend_renders_status_modes_and_native_unicode_cursor() {
     let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let rendered = screen_text(&terminal);
-    assert!(rendered.trim_start().starts_with('·'));
+    assert!(rendered.trim_start().starts_with('|'));
     assert!(rendered.contains("送信") && rendered.contains("改行") && rendered.contains("F1"));
     assert!(!rendered.contains("追従中"));
     assert!(rendered.replace(' ', "").contains("日本語"));
@@ -2481,7 +2481,7 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
             .lines()
             .rev()
             .take(2)
-            .any(|line| line.contains('…')),
+            .any(|line| line.contains('.')),
         "the quiet footer must show the pending read"
     );
     let mut reads = 0;
@@ -2525,7 +2525,7 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
             .lines()
             .rev()
             .take(2)
-            .any(|line| line.contains('…'))
+            .any(|line| line.contains('.'))
     );
 }
 
@@ -3878,7 +3878,7 @@ fn index_management_shows_preview_states_and_global_retry_requires_confirmation(
     assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let shown = screen_text(&terminal);
-    assert!(shown.contains("再試行preview · 取得中"), "{shown}");
+    assert!(shown.contains("再試行preview | 取得中"), "{shown}");
     assert!(shown.contains("API未送信"));
 
     ui.apply(UiUpdate::IndexPreviewFailed {
@@ -3909,7 +3909,7 @@ fn index_management_shows_preview_states_and_global_retry_requires_confirmation(
     assert!(shown.contains("費用"));
     ui.event(key(KeyCode::Char('n')));
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-    assert!(screen_text(&terminal).contains("再試行preview · 取得済み"));
+    assert!(screen_text(&terminal).contains("再試行preview | 取得済み"));
     assert!(ui.event(key(KeyCode::Char('t'))).is_empty());
     let actions = ui.event(key(KeyCode::Char('y')));
     assert!(
@@ -3945,7 +3945,7 @@ fn structured_index_status_cannot_hide_ready_preview() {
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let shown = screen_text(&terminal);
-    assert!(shown.contains("費用preview · 取得済み"), "{shown}");
+    assert!(shown.contains("費用preview | 取得済み"), "{shown}");
     assert!(shown.contains("資料数: 2"));
     assert!(shown.contains("文字数: 400"));
     ui.apply(UiUpdate::IndexPreviewFailed {

@@ -24,10 +24,10 @@ def main():
         "cases": [],
     }
     forms = [
-        ("run get", "作業 · 詳細", "表示"),
-        ("message send", "依頼 · 送信", "送信"),
-        ("docs get", "ガイド · 本文", "表示"),
-        ("config init", "設定 · テンプレート作成", "実行"),
+        ("run get", "作業 | 詳細", "表示"),
+        ("message send", "依頼 | 送信", "送信"),
+        ("docs get", "ガイド | 本文", "表示"),
+        ("config init", "設定 | テンプレート作成", "実行"),
     ]
     for cols, rows in [(80, 24), (140, 40)]:
         for mode, palette, term, plain in [
@@ -59,13 +59,13 @@ def main():
                     form = scene(key + "-form", lambda text: title in text and f"Enter {verb}" in text)
                     assert f"Enter {verb}" in form.splitlines()[-1], (name, key, "bottom hint verb")
                     terminal.send("\x1bOP")  # F1
-                    help_text = scene(key + "-help", lambda text: title + " · 使い方" in text
+                    help_text = scene(key + "-help", lambda text: title + " | 使い方" in text
                           and "Esc/F1 入力欄へ" in text)
                     hint = help_text.splitlines()[-1]
                     assert "Enter" not in hint and "次の項目" not in hint, (name, key, hint)
                     terminal.send("\x1b")
                     scene(key + "-restored", lambda text: title in text and f"Enter {verb}" in text
-                          and title + " · 使い方" not in text)
+                          and title + " | 使い方" not in text)
                     terminal.send("\x1b")
                     scene(key + "-list", lambda text: "CLIと同じ操作" in text)
                 manifest["cases"].append({"name": name, "forms": len(forms), "passed": True})

@@ -77,7 +77,7 @@ fn live_list_marks_current_filters_and_changes_only_the_current_saved_thread() {
         Ok(vec!["model-a", "model-b", "model-c"]),
     );
     let shown = screen(&mut state, 100, 30);
-    assert!(shown.contains("model-b  ● 現在"));
+    assert!(shown.contains("model-b  * 現在"));
     assert!(!shown.contains("\"data\""));
     key(&mut state, KeyCode::Char('a'));
     let shown = screen(&mut state, 100, 30);
@@ -267,7 +267,7 @@ fn oversized_model_stays_visible_without_truncating_the_copy_target() {
             shown.contains("oversize-"),
             "selected item at {width}x{height}"
         );
-        assert!(shown.contains('…') && shown.contains("Esc"));
+        assert!(shown.contains('.') && shown.contains("Esc"));
     }
     let copied = state.event(Event::Key(KeyEvent::new(
         KeyCode::Char('y'),

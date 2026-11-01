@@ -13,6 +13,17 @@ use ratatui::{
     },
 };
 pub(super) use reader::{ReaderCache, reader_cached};
+pub(super) const ASCII_BORDER: ratatui::symbols::border::Set<'static> =
+    ratatui::symbols::border::Set {
+        top_left: "+",
+        top_right: "+",
+        bottom_left: "+",
+        bottom_right: "+",
+        vertical_left: "|",
+        vertical_right: "|",
+        horizontal_top: "-",
+        horizontal_bottom: "-",
+    };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct PaintBounds {
@@ -120,7 +131,7 @@ impl Item {
                     }
                 }
                 line.spans
-                    .insert(0, Span::styled("… ", Style::default().fg(theme::MUTED)));
+                    .insert(0, Span::styled(". ", Style::default().fg(theme::MUTED)));
             }
             self.lines.extend(tail);
         }
@@ -270,6 +281,7 @@ fn panel_height(
     frame.render_widget(
         Block::default()
             .borders(Borders::ALL)
+            .border_set(ASCII_BORDER)
             .border_style(Style::default().fg(theme::MUTED))
             .title(
                 Line::from(format!(" {title} ")).style(
@@ -302,7 +314,7 @@ fn panel_height(
 }
 pub(super) fn separator(frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(
-        Paragraph::new("─".repeat(usize::from(area.width)))
+        Paragraph::new("-".repeat(usize::from(area.width)))
             .style(Style::default().fg(theme::MUTED)),
         area,
     );
@@ -410,6 +422,8 @@ fn scrollbar(frame: &mut Frame<'_>, area: Rect, total: usize, position: usize) {
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(None)
             .end_symbol(None)
+            .track_symbol(Some("|"))
+            .thumb_symbol("#")
             .thumb_style(Style::default().fg(theme::ACCENT))
             .track_style(Style::default().fg(theme::MUTED)),
         area,
@@ -432,8 +446,8 @@ mod tests {
                         frame,
                         frame.area(),
                         "選択一覧",
-                        "30件 · 対象",
-                        "Esc 戻る\n↑↓ 選択 · Enter 詳細",
+                        "30件 | 対象",
+                        "Esc 戻る\n^v 選択 | Enter 詳細",
                     );
                     assert!(body.right() <= width && body.bottom() <= height);
                     list(
@@ -514,7 +528,7 @@ mod tests {
                     frame.area(),
                     "原文",
                     "保存済み",
-                    "Esc 戻る · C コピー",
+                    "Esc 戻る | C コピー",
                 );
                 let lines = (0..100)
                     .map(|i| Line::from(format!("line {i:03}")))

@@ -134,7 +134,7 @@ fn fit(text: &str, width: usize) -> String {
         used += part.width();
         result.push_str(part);
     }
-    result.push('…');
+    result.push('.');
     result
 }
 fn state_label(state: &str) -> &str {
@@ -309,7 +309,7 @@ impl LiveWorkView {
     fn output_age_label(&self, index: usize) -> Option<String> {
         let age = self.seconds.get(index)?.1?;
         Some(format!(
-            " · 最後の出力 {}前",
+            " | 最後の出力 {}前",
             crate::presentation::elapsed_text(age.saturating_mul(1000), false)
         ))
     }
@@ -466,7 +466,7 @@ impl LiveWorkView {
                 self.preview = Some(preview);
                 self.error = None;
             }
-            Ok(_) => self.error = Some("出力の表示上限を超えました · F6 詳細".into()),
+            Ok(_) => self.error = Some("出力の表示上限を超えました | F6 詳細".into()),
             Err(error) => self.error = Some(bounded(&error, 256)),
         }
         true
@@ -516,14 +516,14 @@ impl LiveWorkView {
             .and_then(|(elapsed, _)| *elapsed)
             .map(|s| {
                 format!(
-                    " · 最古 {}",
+                    " | 最古 {}",
                     crate::presentation::elapsed_text(s.saturating_mul(1000), false)
                 )
             })
             .unwrap_or_default();
         let output = self.output_age_label(0).unwrap_or_default();
         Some(format!(
-            "{} · shell {} · 子 {} · 待機 {}{timing}{output}",
+            "{} | shell {} | 子 {} | 待機 {}{timing}{output}",
             crate::presentation::rows::RowKind::LiveWork.spec().1,
             snapshot.shells,
             snapshot.children,
@@ -550,7 +550,7 @@ pub(super) fn draw(
             .saturating_add((s.rows.len() - view.visible_rows) as u64)
     });
     let hidden_label = if view.visible_rows == 0 && hidden > 0 {
-        format!(" · 他{hidden}件")
+        format!(" | 他{hidden}件")
     } else {
         String::new()
     };
@@ -560,7 +560,7 @@ pub(super) fn draw(
         .filter(|_| view.has_work())
         .map(|s| {
             format!(
-                " · shell {} · 子 {} · 待機 {}",
+                " | shell {} | 子 {} | 待機 {}",
                 s.shells,
                 s.children,
                 s.waits
@@ -570,7 +570,7 @@ pub(super) fn draw(
         })
         .unwrap_or_default();
     let (mark, name, _) = crate::presentation::rows::RowKind::LiveWork.spec();
-    let empty_label = if view.has_work() { "" } else { " · なし" };
+    let empty_label = if view.has_work() { "" } else { " | なし" };
     let fold = if view.collapsed { " ▸" } else { "" };
     let heading = fit(
         &format!("{mark} {name}{empty_label}{hidden_label}{counts}{fold}"),
@@ -609,9 +609,9 @@ pub(super) fn draw(
         };
         let last_item = index + 1 == view.visible_rows;
         let connector = if last_item && !separate_overflow {
-            "└─"
+            "+-"
         } else {
-            "├─"
+            "+-"
         };
         let elapsed = view
             .seconds
@@ -619,7 +619,7 @@ pub(super) fn draw(
             .and_then(|(e, _)| *e)
             .map(|s| {
                 format!(
-                    " · {}",
+                    " | {}",
                     crate::presentation::elapsed_text(s.saturating_mul(1000), false)
                 )
             })
@@ -634,7 +634,7 @@ pub(super) fn draw(
                     view.seconds.get(index).and_then(|(elapsed, _)| *elapsed),
                 ) {
                     (Some(timeout), Some(elapsed)) => format!(
-                        " · 期限目安 {}",
+                        " | 期限目安 {}",
                         crate::presentation::elapsed_text(
                             timeout
                                 .saturating_sub(Duration::from_secs(elapsed))
@@ -643,7 +643,7 @@ pub(super) fn draw(
                             false
                         )
                     ),
-                    _ => " · 期限不明".to_owned(),
+                    _ => " | 期限不明".to_owned(),
                 }
             })
             .unwrap_or_default();
@@ -678,7 +678,7 @@ pub(super) fn draw(
             0
         };
         let overflow = if extra > 0 {
-            format!(" · 他{extra}件")
+            format!(" | 他{extra}件")
         } else {
             String::new()
         };
@@ -687,7 +687,7 @@ pub(super) fn draw(
             "{connector}[{}]{marker}{kind} {}",
             index + 1,
             linked
-                .map(|i| format!("→ [{}] ", i + 1))
+                .map(|i| format!("> [{}] ", i + 1))
                 .unwrap_or_default()
         );
         let right_budget = usize::from(area.width) / 2;
@@ -725,7 +725,7 @@ pub(super) fn draw(
     }
     if separate_overflow {
         lines.push(Line::styled(
-            format!("└─ 他{hidden}件"),
+            format!("+- 他{hidden}件"),
             palette.live_work(),
         ));
     }
@@ -754,7 +754,7 @@ pub(super) fn draw(
                         break;
                     }
                     lines.push(Line::styled(
-                        format!("  │   │ {line}"),
+                        format!("  |   | {line}"),
                         if error {
                             Style::default().fg(theme::ATTENTION)
                         } else {
@@ -766,10 +766,10 @@ pub(super) fn draw(
             if (preview.skipped || preview.decode_uncertain)
                 && lines.len() < usize::from(area.height)
             {
-                lines.push(Line::from("  │   │ … 表示用抜粋 · F6 詳細"));
+                lines.push(Line::from("  |   | . 表示用抜粋 | F6 詳細"));
             }
         } else if view.error.is_none() {
-            lines.push(Line::from("  │   │ 出力を取得中…"));
+            lines.push(Line::from("  |   | 出力を取得中."));
         }
     }
     frame.render_widget(Paragraph::new(lines), area);
@@ -1402,7 +1402,7 @@ mod tests {
             text.push('\n');
         }
         assert!(text.contains("◉ 抱えている作業"), "{text}");
-        assert!(text.contains("[1] $") && text.contains("→ [1]"), "{text}");
+        assert!(text.contains("[1] $") && text.contains("> [1]"), "{text}");
         assert!(
             text.contains("期限目安") && text.contains("待機中"),
             "{text}"
@@ -1563,7 +1563,7 @@ mod tests {
         );
         assert_eq!(
             view.output_age_label(0).as_deref(),
-            Some(" · 最後の出力 1秒前")
+            Some(" | 最後の出力 1秒前")
         );
         let mut saved = snapshot(at + Duration::from_secs(5));
         saved.rows[0].last_output_at = Some("new saved timestamp".into());
@@ -1572,7 +1572,7 @@ mod tests {
         assert!(!view.markers.contains_key("execution"));
         assert_eq!(
             view.output_age_label(0).as_deref(),
-            Some(" · 最後の出力 1秒前")
+            Some(" | 最後の出力 1秒前")
         );
         view.accept_markers(
             revision,
@@ -1584,7 +1584,7 @@ mod tests {
         assert!(view.markers.contains_key("execution"));
         assert_eq!(
             view.output_age_label(0).as_deref(),
-            Some(" · 最後の出力 1秒前")
+            Some(" | 最後の出力 1秒前")
         );
     }
 
@@ -1626,7 +1626,7 @@ mod tests {
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
         ui.select_thread("thread".into());
         let (text, empty) = screen(&mut ui);
-        assert!(text.contains("◉ 抱えている作業 · なし"), "{text}");
+        assert!(text.contains("◉ 抱えている作業 | なし"), "{text}");
         assert_eq!(empty, 5);
         assert!(ui.view().live_work.blink_origin().is_none());
         let mut two = snapshot(at);
@@ -1683,7 +1683,7 @@ mod tests {
     fn body_lines(ui: &mut UiState) -> Vec<String> {
         let (text, _) = screen(ui);
         text.lines()
-            .filter(|l| l.contains("├─") || l.contains("└─"))
+            .filter(|l| l.trim_start().starts_with("+-[") || l.trim_start().starts_with("+- 他"))
             .map(str::to_owned)
             .collect()
     }
@@ -1699,7 +1699,7 @@ mod tests {
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(
-            lines[0].starts_with("└─[1]") && lines[0].contains("$ printf"),
+            lines[0].starts_with("+-[1]") && lines[0].contains("$ printf"),
             "{lines:?}"
         );
         assert!(!lines[0].contains("shell "), "{lines:?}");
@@ -1708,9 +1708,9 @@ mod tests {
         set_work(&mut ui, Some(three), 2, at);
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
-        assert!(lines[0].starts_with("├─[1]") && lines[0].contains("$ "));
-        assert!(lines[1].starts_with("├─[2]") && lines[1].contains("↳ child task"));
-        assert!(lines[2].starts_with("└─[3]") && lines[2].contains("⋯ saved wait"));
+        assert!(lines[0].starts_with("+-[1]") && lines[0].contains("$ "));
+        assert!(lines[1].starts_with("+-[2]") && lines[1].contains("↳ child task"));
+        assert!(lines[2].starts_with("+-[3]") && lines[2].contains("⋯ saved wait"));
         // Padding rows carry no connector: same count with fewer items.
         let mut two = snapshot(at);
         two.rows.truncate(2);
@@ -1718,14 +1718,14 @@ mod tests {
         set_work(&mut ui, Some(two), 3, at);
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 2, "{lines:?}");
-        assert!(lines[1].starts_with("└─[2]"));
+        assert!(lines[1].starts_with("+-[2]"));
         // Overflow is its own last line.
         let mut many = snapshot(at);
         many.overflow = 4;
         set_work(&mut ui, Some(many), 4, at);
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
-        assert!(lines[0].starts_with("├─[1]") && lines[1].starts_with("├─[2]"));
-        assert!(lines[2].starts_with("└─ 他5件"), "{lines:?}");
+        assert!(lines[0].starts_with("+-[1]") && lines[1].starts_with("+-[2]"));
+        assert!(lines[2].starts_with("+- 他5件"), "{lines:?}");
     }
 }

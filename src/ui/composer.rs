@@ -510,7 +510,7 @@ impl UiState {
                 recall.ordinal = Some(ordinal);
                 recall.node_id = Some(node_id);
                 recall.shown_revision = view.draft.revision;
-                view.status = "入力履歴 · ↑古い / ↓新しい・下書きへ".into();
+                view.status = "入力履歴 | ^古い / v新しい・下書きへ".into();
             }
             Ok(None) if !older => {
                 let queued = std::mem::take(&mut recall.queued);
@@ -625,7 +625,7 @@ impl UiState {
             })
             .collect::<Vec<_>>();
         lines.push(
-            Line::from("↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる")
+            Line::from("^v 選択 | Tab/Enter 補完 | Esc 閉じる")
                 .style(Style::default().fg(theme::MUTED)),
         );
         frame.render_widget(Paragraph::new(lines), popup);

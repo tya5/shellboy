@@ -154,7 +154,7 @@ async fn call_and_background_result_share_current_exit_facts_and_failed_reads_cl
         .unwrap();
     assert_eq!(call.status, "completed");
     assert_eq!(call.exit_code, None);
-    assert!(call.heading().starts_with("✗ #3 printf terminal · 終了 7"));
+    assert!(call.heading().starts_with("✗ #3 printf terminal | 終了 7"));
     assert!(
         !call.heading().contains("返却時"),
         "a call carries no saved result code"

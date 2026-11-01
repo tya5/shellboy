@@ -152,7 +152,7 @@ def main():
             text = re.sub(r'\x1b\][^\x1b\x07]*(?:\x07|\x1b\\)', '', text)
             return re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
 
-        while not ('┌作業状態' in rendered_text() and 'run failed: Native child' in rendered_text()):
+        while not ('+作業状態' in rendered_text() and 'run failed: Native child' in rendered_text()):
             assert owner[0].poll() is None, 'Fixture owner exited'
             assert time.monotonic() < deadline, 'TUI work view did not render'
             time.sleep(.05)

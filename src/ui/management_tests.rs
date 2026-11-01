@@ -376,7 +376,7 @@ fn mutation_owner_survives_saved_draft_install_receipt_body_eviction_and_other_r
             .is_empty(),
         "only the old body is evicted"
     );
-    let notice = "停止要求を受け付けました · Runの停止 · 照会ID fixture:receipt";
+    let notice = "停止要求を受け付けました | Runの停止 | 照会ID fixture:receipt";
     for update in [
         report(owner, "stale mutation report"),
         UiUpdate::Status {
@@ -411,7 +411,7 @@ fn received_list_opens_an_off_path_original_and_rejects_closed_list_results() {
     let report = || UiUpdate::ScopedManagement {
         context: context.clone(),
         update: Box::new(UiUpdate::ReceivedList {
-            title: "受信記録 · 35件".into(),
+            title: "受信記録 | 35件".into(),
             fields: vec![PresentationField {
                 key: "/received/source/old-audit".into(),
                 label: "古い失敗".into(),

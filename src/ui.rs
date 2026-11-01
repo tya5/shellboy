@@ -30,6 +30,7 @@ pub(crate) mod draft;
 mod help;
 mod history_interaction;
 mod history_items;
+mod i18n;
 #[cfg(test)]
 pub(crate) use history_items::ItemState as PreviewItemState;
 pub use history_items::{ItemKey, Preview as ToolPreview};
@@ -64,6 +65,9 @@ mod redraw;
 pub mod startup;
 mod terminal_guard;
 pub mod termination;
+mod text_width;
+#[cfg(all(test, unix))]
+mod text_width_pty_tests;
 pub(crate) mod theme;
 use terminal_guard::TerminalGuard;
 mod thread_deletion;
@@ -1628,45 +1632,84 @@ pub enum ManagementFollow {
     Next,
     Refresh,
 }
-const HELP_FOOTER: &str = "Esc / Enter / F1 戻る · ↑↓ / PgUp / PgDn 閲覧";
+const HELP_FOOTER: &str = "Esc / Enter / F1 戻る | ^v / PgUp / PgDn 閲覧";
 const MANAGEMENT_DETAIL_FOOTER: &str =
-    "Esc 戻る · ↑↓/PgUp/PgDn 閲覧\nN 次page · P 先頭 · C このpageをコピー";
-const CONFIRMATION_FOOTER: &str = "N / Esc 戻る · Y 実行\n↑↓/PgUp/PgDn 閲覧";
+    "Esc 戻る | ^v/PgUp/PgDn 閲覧\nN 次page | P 先頭 | C このpageをコピー";
+const CONFIRMATION_FOOTER: &str = "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧";
 const CONFIRMATION_CONTEXT: &str = "内容を確認してください";
 impl Confirmation {
-    fn footer(&self) -> &'static str {
-        if let Self::ThreadDeletion(dialog) = self {
-            dialog.footer()
+    fn footer(&self, language: crate::config::UiLanguage) -> String {
+        if matches!(self, Self::ForceQuit) {
+            i18n::Message::ForceQuitFooter.render(language)
+        } else if let Self::ThreadDeletion(dialog) = self {
+            dialog.footer().into()
         } else if matches!(self, Self::StaleIndex { .. }) {
-            "N / Esc 戻る · 再確認が必要\n↑↓/PgUp/PgDn 閲覧"
+            "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧".into()
         } else {
-            CONFIRMATION_FOOTER
+            CONFIRMATION_FOOTER.into()
         }
     }
-    fn lines(&self) -> Vec<Line<'static>> {
-        self.text()
+    fn context(&self, language: crate::config::UiLanguage) -> String {
+        if matches!(self, Self::ForceQuit) {
+            i18n::Message::ForceQuitContext.render(language)
+        } else {
+            CONFIRMATION_CONTEXT.into()
+        }
+    }
+    fn title(&self, language: crate::config::UiLanguage) -> String {
+        if matches!(self, Self::ForceQuit) {
+            i18n::Message::ForceQuitTitle.render(language)
+        } else {
+            "実行の確認".into()
+        }
+    }
+    fn lines(&self, language: crate::config::UiLanguage) -> Vec<Line<'static>> {
+        self.text(language)
             .lines()
             .map(|line| Line::from(line.to_owned()))
             .collect()
     }
-    fn text(&self) -> String {
+    fn text(&self, language: crate::config::UiLanguage) -> String {
         match self {
-                Confirmation::Watch(target)=>format!("表示中の保存済み対象を{}しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",if target.kind==watch::WatchActionKind::Stop {"停止"}else{"再試行"},target.thread_id,target.run_id),
-                Confirmation::MessageQueue {detail,..}=>detail.clone(),
-                Confirmation::ThreadDeletion(dialog)=>dialog.text(),
-                Confirmation::EditStop{run_id,..}=>format!("旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"),
-                Confirmation::Index{command,detail,..}=>format!("索引処理の実行確認 · {}\n{detail}",match command { Command::IndexBackfill(_)=>"backfill", Command::IndexRetry(_)=>"retry", Command::IndexRebuild(_)=>"rebuild", _=>"索引操作" }),
-                Confirmation::StaleIndex{detail}=>format!("確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"),
-                Confirmation::Operation{detail,..}=>detail.clone(),
-                Confirmation::ForceQuit=>"強制終了しますか？\n保存/回収が未完了の可能性があります。プロセスを終了し、次回起動で復旧します。".into(),
-            }
+            Confirmation::Watch(target) => format!(
+                "表示中の保存済み対象を{}しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
+                if target.kind == watch::WatchActionKind::Stop {
+                    "停止"
+                } else {
+                    "再試行"
+                },
+                target.thread_id,
+                target.run_id
+            ),
+            Confirmation::MessageQueue { detail, .. } => detail.clone(),
+            Confirmation::ThreadDeletion(dialog) => dialog.text(),
+            Confirmation::EditStop { run_id, .. } => format!(
+                "旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"
+            ),
+            Confirmation::Index {
+                command, detail, ..
+            } => format!(
+                "索引処理の実行確認 | {}\n{detail}",
+                match command {
+                    Command::IndexBackfill(_) => "backfill",
+                    Command::IndexRetry(_) => "retry",
+                    Command::IndexRebuild(_) => "rebuild",
+                    _ => "索引操作",
+                }
+            ),
+            Confirmation::StaleIndex { detail } => format!(
+                "確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"
+            ),
+            Confirmation::Operation { detail, .. } => detail.clone(),
+            Confirmation::ForceQuit => i18n::Message::ForceQuitBody.render(language),
+        }
     }
-    fn layout(&self, area: Rect) -> (String, u16) {
-        let text = self.text();
+    fn layout(&self, area: Rect, language: crate::config::UiLanguage) -> (String, u16) {
+        let text = self.text(language);
         let width = popup::reader_width(popup::body_area(
             area,
-            CONFIRMATION_CONTEXT,
-            self.footer(),
+            &self.context(language),
+            &self.footer(language),
             None,
         ))
         .max(1);
@@ -1674,16 +1717,21 @@ impl Confirmation {
             .wrap(Wrap { trim: false })
             .line_count(width);
         // Border 2 + context 2 + divider 1 + the common footer's at most two rows.
-        let overhead = 5 + self.footer().lines().count().clamp(1, 2);
+        let overhead = 5 + self.footer(language).lines().count().clamp(1, 2);
         let height = rows.saturating_add(overhead).clamp(8, u16::MAX as usize) as u16;
         (text, height)
     }
-    fn page(&self, area: Rect) -> u16 {
-        let (_, height) = self.layout(area);
-        popup::body_area(area, CONFIRMATION_CONTEXT, self.footer(), Some(height))
-            .height
-            .saturating_sub(1)
-            .max(1)
+    fn page(&self, area: Rect, language: crate::config::UiLanguage) -> u16 {
+        let (_, height) = self.layout(area, language);
+        popup::body_area(
+            area,
+            &self.context(language),
+            &self.footer(language),
+            Some(height),
+        )
+        .height
+        .saturating_sub(1)
+        .max(1)
     }
 }
 pub struct UiState {
@@ -3314,7 +3362,7 @@ impl UiState {
                         view.on_load_failed(message.clone());
                     }
                     if selected && let Some(details) = &mut self.details {
-                        details.mark_stale(&format!("更新失敗 · 前回の観測値: {message}"));
+                        details.mark_stale(&format!("更新失敗 | 前回の観測値: {message}"));
                     }
                 }
             }
@@ -3637,10 +3685,10 @@ impl UiState {
                     let next = view.draft.revision + 1;
                     view.draft = pending.snapshot.clone();
                     view.draft.revision = next;
-                    view.status = format!("操作は失敗しました · 入力を復元しました: {error}");
+                    view.status = format!("操作は失敗しました | 入力を復元しました: {error}");
                 } else {
                     view.status = format!(
-                        "操作は失敗しました · 現在の入力を保持 · /restore {} で元の操作を復元: {error}",
+                        "操作は失敗しました | 現在の入力を保持 | /restore {} で元の操作を復元: {error}",
                         submission.revision
                     );
                 }
@@ -4442,7 +4490,7 @@ impl UiState {
                 };
                 self.invalidate_management();
                 self.management.open_text(ManagementView {
-                    title: "受信記録 · 読込み中".into(),
+                    title: "受信記録 | 読込み中".into(),
                     text: String::new(),
                     scroll: 0,
                 });
@@ -4700,7 +4748,7 @@ impl UiState {
                     .iter()
                     .map(|a| {
                         format!(
-                            "下書き: {} · {} · {}\n{}",
+                            "下書き: {} | {} | {}\n{}",
                             a.id,
                             a.kind,
                             a.state,
@@ -5192,7 +5240,7 @@ impl UiState {
                 self.management.mode = management::ManagementMode::Index;
                 let attempt = self.management.begin_preview(args.clone());
                 self.management.open_text(ManagementView {
-                    title: "索引 · 費用preview".into(),
+                    title: "索引 | 費用preview".into(),
                     text: "対象件数を確認しています。まだ実行していません".into(),
                     scroll: 0,
                 });
@@ -5225,7 +5273,7 @@ impl UiState {
             management::ManagementMode::General
         };
         self.management.open_text(ManagementView {
-            title: "操作 · 受付待ち".into(),
+            title: "操作 | 受付待ち".into(),
             text: "処理しています。Wは明示waitの観測だけを取消します".into(),
             scroll: 0,
         });
@@ -5282,7 +5330,7 @@ impl UiState {
             if visible > 0 {
                 visible.saturating_sub(1).max(1)
             } else {
-                confirmation.page(popup::viewport(self.viewport))
+                confirmation.page(popup::viewport(self.viewport), self.config.ui.language)
             }
         });
         if let Some(scroll) = popup::reader_key(key.code, self.confirmation_scroll, page) {
@@ -5437,7 +5485,7 @@ impl UiState {
                 area,
                 "終了処理",
                 "保存と実行停止の状態",
-                "W / Enter 待機継続 · F 強制終了を選択",
+                "W / Enter 待機継続 | F 強制終了を選択",
                 12,
                 &self.aux_popup_paint,
             );
@@ -5448,31 +5496,29 @@ impl UiState {
             popup::reader(frame, body, &lines, 0);
         }
         if let Some(confirmation) = &self.confirmation {
-            let width = popup::reader_width(popup::body_area(
-                area,
-                CONFIRMATION_CONTEXT,
-                confirmation.footer(),
-                None,
-            ))
-            .max(1);
+            let language = self.config.ui.language;
+            let context = confirmation.context(language);
+            let footer = confirmation.footer(language);
+            let title = confirmation.title(language);
+            let width = popup::reader_width(popup::body_area(area, &context, &footer, None)).max(1);
             let rows = self
                 .confirmation_cache
-                .prepare(0, width, || confirmation.lines());
-            let overhead = 5 + confirmation.footer().lines().count().clamp(1, 2);
+                .prepare(0, width, || confirmation.lines(language));
+            let overhead = 5 + footer.lines().count().clamp(1, 2);
             let height = rows.saturating_add(overhead).clamp(8, u16::MAX as usize) as u16;
             let body = popup::compact_recorded(
                 frame,
                 area,
-                "実行の確認",
-                CONFIRMATION_CONTEXT,
-                confirmation.footer(),
+                &title,
+                &context,
+                &footer,
                 height,
                 &self.aux_popup_paint,
             );
             self.confirmation_scroll =
                 self.confirmation_cache
                     .render(frame, body, 0, self.confirmation_scroll, || {
-                        confirmation.lines()
+                        confirmation.lines(language)
                     });
         }
         if matches!(
@@ -5788,7 +5834,7 @@ pub fn cursor_position(text: &str, byte_cursor: usize, width: u16) -> (u16, u16)
 /// Render a cached source window without changing canonical text or offsets.
 fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize) -> String {
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
-        return "[本文未キャッシュ · スクロールで原文を再取得]".into();
+        return "[本文未キャッシュ | スクロールで原文を再取得]".into();
     }
     let start = start.max(node.base_char_offset);
     let mut range = 0;
@@ -5820,7 +5866,7 @@ fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize)
             && global < end
         {
             let label = format!(
-                "[推論 {}文字 · 折りたたみ /reasoning]\n",
+                "[推論 {}文字 | 折りたたみ /reasoning]\n",
                 end.saturating_sub(begin)
             );
             out.push_str(&label);
@@ -5842,21 +5888,21 @@ fn draw_recovery(frame: &mut Frame<'_>, area: Rect, snapshot: &activity::Activit
     }
     let current = snapshot.phase == activity::ActivityPhase::Recovery;
     let title = if current {
-        "! 復旧待ち · 操作を待っています".to_owned()
+        "! 復旧待ち | 操作を待っています".to_owned()
     } else {
-        format!("! 前回の復旧待ち · {}", snapshot.phase.label())
+        format!("! 前回の復旧待ち | {}", snapshot.phase.label())
     };
     let reason = crate::presentation::sanitize_plain(&recovery.message, 0)
         .0
         .replace('\n', " ");
     let next = if current {
-        "/retry 同じ内容で再試行 · 入力で新指示 · Ctrl+C 停止 · F8 詳細"
+        "/retry 同じ内容で再試行 | 入力で新指示 | Ctrl+C 停止 | F8 詳細"
     } else {
-        "入力で新しい作業 · F8 作業/応答処理の詳細"
+        "入力で新しい作業 | F8 作業/応答処理の詳細"
     };
     let mut lines = vec![
         Line::from(title),
-        Line::from(format!("{} · {reason}", recovery.stage)),
+        Line::from(format!("{} | {reason}", recovery.stage)),
     ];
     let reduction_row = u16::from(snapshot.context_reduction.is_some() && area.height >= 4);
     if reduction_row > 0
@@ -5875,13 +5921,13 @@ fn draw_recovery(frame: &mut Frame<'_>, area: Rect, snapshot: &activity::Activit
         }
     } else if area.height >= 4 + reduction_row {
         lines.push(Line::from(format!(
-            "依頼は保存済み · 未反映指示 {}件 · 保存済みツール結果 {}件",
+            "依頼は保存済み | 未反映指示 {}件 | 保存済みツール結果 {}件",
             recovery.pending_messages, recovery.saved_tool_results
         )));
     }
     if area.height >= 5 + reduction_row {
         lines.push(Line::from(format!(
-            "動作中shell {}件 · 回収未完了 {}件 · 副作用は詳細で確認",
+            "動作中shell {}件 | 回収未完了 {}件 | 副作用は詳細で確認",
             recovery.live_shells, recovery.uncollected_shells
         )));
     }
@@ -5889,7 +5935,11 @@ fn draw_recovery(frame: &mut Frame<'_>, area: Rect, snapshot: &activity::Activit
     frame.render_widget(
         Paragraph::new(lines)
             .style(Style::default().fg(theme::WARNING))
-            .block(Block::default().borders(Borders::LEFT)),
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT)
+                    .border_set(popup::ASCII_BORDER),
+            ),
         area,
     );
 }
@@ -6033,10 +6083,11 @@ fn draw_input(
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_set(popup::ASCII_BORDER)
                 .border_style(Style::default().fg(state.palette.muted()))
                 .title_bottom(
                     if state.view().draft.text.is_empty() && input_area.width >= 60 {
-                        "/image 画像を添付 · /attach パス"
+                        "/image 画像を添付 | /attach パス"
                     } else {
                         ""
                     },
@@ -6102,7 +6153,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         .as_deref()
         .and_then(|root| state.descendants.label(root))
     {
-        spans.push(Span::raw(format!(" · {label}")));
+        spans.push(Span::raw(format!(" | {label}")));
     }
     let hints = state
         .key_hints
@@ -6148,7 +6199,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     state.aux_popup_paint.set(None);
     state.viewport = area;
     if area.width < 8 || area.height < 5 {
-        frame.render_widget(Paragraph::new("Shellboy · enlarge terminal"), area);
+        frame.render_widget(Paragraph::new("Shellboy | enlarge terminal"), area);
         state.visible_links.clear();
         state.dirty = false;
         return;
@@ -6365,7 +6416,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     state.capture_popup_paint();
     state.dirty = false;
 }
-pub const HELP: &str = "操作するときはEscで会話へ戻る · / でコマンド候補を表示";
+pub const HELP: &str = "操作するときはEscで会話へ戻る | / でコマンド候補を表示";
 
 /// Must run on the main OS thread. Updates should be sent through a bounded
 /// std::sync::mpsc::sync_channel; the UI only calls try_recv and try_send.
@@ -6384,10 +6435,24 @@ pub struct TerminalSession {
     link_snapshot: std::rc::Rc<std::cell::RefCell<crate::terminal_links::LinkSnapshot>>,
     _guard: TerminalGuard,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
+    width_probe: Option<text_width::Probe>,
+    width_observation: Option<text_width::AmbiguousWidth>,
 }
 impl TerminalSession {
     pub fn set_diagnostics(&mut self, diagnostics: crate::diagnostics::Diagnostics) {
+        if let Some(observation) = self.width_observation {
+            record_terminal_width(&diagnostics, observation);
+        }
         self.diagnostics = Some(diagnostics);
+    }
+
+    /// Poll without blocking or consuming keyboard events. True means complete.
+    fn poll_terminal_width(&mut self) -> bool {
+        poll_terminal_width(
+            &mut self.width_probe,
+            &mut self.width_observation,
+            &self.diagnostics,
+        )
     }
     pub fn enter() -> io::Result<Self> {
         let guard = TerminalGuard::new();
@@ -6405,13 +6470,80 @@ impl TerminalSession {
             io::stdout(),
             std::rc::Rc::clone(&link_snapshot),
         ))?;
+        unicode_width::set_process_terminal_width(None);
+        // Row 11 avoids the standard CSI 1;modifier R encoding of modified F3.
+        let fits_probe =
+            cfg!(unix) && terminal::size().is_ok_and(|(columns, rows)| columns >= 5 && rows >= 11);
+        let (width_probe, width_observation) = if fits_probe {
+            use std::io::Write;
+            let mut output = io::stdout();
+            // Probe only the fresh alternate screen; the two DSR replies are
+            // consumed by the existing input reader without touching keys.
+            output.write_all("\x1b[11;1H·\x1b[6n·\x1b[6n\x1b[2J\x1b[H".as_bytes())?;
+            output.flush()?;
+            (
+                Some(text_width::Probe::new(
+                    Instant::now(),
+                    Duration::from_millis(250),
+                )),
+                None,
+            )
+        } else {
+            (None, Some(text_width::AmbiguousWidth::Unknown))
+        };
         Ok(Self {
             terminal,
             link_snapshot,
             _guard: guard,
             diagnostics: None,
+            width_probe,
+            width_observation,
         })
     }
+}
+
+fn record_terminal_width(
+    diagnostics: &crate::diagnostics::Diagnostics,
+    width: text_width::AmbiguousWidth,
+) {
+    use crate::diagnostics::{DiagnosticEvent, DiagnosticIds};
+    let event = match width {
+        text_width::AmbiguousWidth::One => DiagnosticEvent::UiTerminalWidthOne,
+        text_width::AmbiguousWidth::Two => DiagnosticEvent::UiTerminalWidthTwo,
+        text_width::AmbiguousWidth::Unknown => DiagnosticEvent::UiTerminalWidthUnknown,
+    };
+    diagnostics.record(event, DiagnosticIds::default());
+}
+
+fn poll_terminal_width(
+    probe: &mut Option<text_width::Probe>,
+    observation: &mut Option<text_width::AmbiguousWidth>,
+    diagnostics: &Option<crate::diagnostics::Diagnostics>,
+) -> bool {
+    let Some(pending) = probe.as_mut() else {
+        return true;
+    };
+    for _ in 0..2 {
+        match event::try_read_cursor_position(10) {
+            Ok(Some((column, row))) => pending.observe(column, row, Instant::now()),
+            Ok(None) => break,
+            Err(_) => pending.fail(),
+        }
+    }
+    let Some(result) = pending.finish_if_expired(Instant::now()) else {
+        return false;
+    };
+    unicode_width::set_process_terminal_width(match result {
+        text_width::AmbiguousWidth::One => Some(1),
+        text_width::AmbiguousWidth::Two => Some(2),
+        text_width::AmbiguousWidth::Unknown => None,
+    });
+    *observation = Some(result);
+    *probe = None;
+    if let Some(diagnostics) = diagnostics {
+        record_terminal_width(diagnostics, result);
+    }
+    true
 }
 
 pub fn run_in_session(
@@ -6440,6 +6572,8 @@ fn run_session(
 ) -> io::Result<UiExitReason> {
     let terminal = &mut session.terminal;
     let link_snapshot = &session.link_snapshot;
+    let width_probe = &mut session.width_probe;
+    let width_observation = &mut session.width_observation;
     let mut state = UiState::new(config, PathBuf::new());
     if let Some(diagnostics) = &session.diagnostics {
         state.set_diagnostics(diagnostics.clone());
@@ -6507,11 +6641,15 @@ fn run_session(
                 selecting = state.selection_mode;
             }
             state.animation_tick(Instant::now());
-            if state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
+            let width_ready =
+                poll_terminal_width(width_probe, width_observation, &session.diagnostics);
+            if width_ready && state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
                 redraw::draw_terminal(terminal, &mut state, link_snapshot)?;
                 last_draw = Instant::now();
             }
-            let wait = if state.dirty && (!state.selection_mode || state.full_redraw_requested) {
+            let wait = if !width_ready {
+                Duration::from_millis(10)
+            } else if state.dirty && (!state.selection_mode || state.full_redraw_requested) {
                 frame_time
                     .saturating_sub(last_draw.elapsed())
                     .min(Duration::from_millis(25))
@@ -6871,7 +7009,7 @@ mod layout_cache_tests {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
-        for (epoch, label) in [(1, Some("Revisit 5 · next reserved".to_owned())), (2, None)] {
+        for (epoch, label) in [(1, Some("Revisit 5 | next reserved".to_owned())), (2, None)] {
             ui.apply(UiUpdate::Activity {
                 thread_id: "t".into(),
                 generation,
@@ -6894,7 +7032,7 @@ mod layout_cache_tests {
                 .iter()
                 .map(|c| c.symbol())
                 .collect::<String>();
-            assert_eq!(shown.contains("Revisit 5 · next reserved"), epoch == 1);
+            assert_eq!(shown.contains("Revisit 5 | next reserved"), epoch == 1);
         }
     }
 
@@ -7519,7 +7657,7 @@ mod layout_cache_tests {
         ui.select_thread("t".into());
         let mut first = node("event-0", "context changed");
         first.presentation.kind = crate::presentation::PresentationKind::Event;
-        first.presentation.title = "状態変更 · AGENTS更新".into();
+        first.presentation.title = "状態変更 | AGENTS更新".into();
         let mut second = first.clone();
         second.node_id = "event-1".into();
         ui.apply(UiUpdate::History {

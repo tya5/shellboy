@@ -2,7 +2,7 @@
 use super::*;
 use crate::protocol::ThreadSetArgs;
 
-const FOOTER: &str = "Esc 戻る · Enter 変更\n↑↓ 選択 · Ctrl+R 再取得 · Ctrl+Y コピー";
+const FOOTER: &str = "Esc 戻る | Enter 変更\n^v 選択 | Ctrl+R 再取得 | Ctrl+Y コピー";
 pub(super) struct ModelPicker {
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     filtered_indices: Vec<usize>,
@@ -196,7 +196,7 @@ impl ModelPicker {
             confirmation_enabled: false,
         };
         let context = format!(
-            "{} · 絞込み: {} · {} / {}件",
+            "{} | 絞込み: {} | {} / {}件",
             self.connection,
             self.query,
             if filtered.is_empty() {
@@ -242,7 +242,7 @@ impl ModelPicker {
         );
         if self.loading && self.captured_at.is_none() {
             frame.render_widget(
-                Paragraph::new("モデル一覧を取得中…").style(Style::default().fg(theme::ACCENT)),
+                Paragraph::new("モデル一覧を取得中.").style(Style::default().fg(theme::ACCENT)),
                 body,
             );
         } else if self.captured_at.is_none()
@@ -271,7 +271,7 @@ impl ModelPicker {
                         "{}{}",
                         model,
                         if self.current.as_ref() == Some(*model) {
-                            "  ● 現在"
+                            "  * 現在"
                         } else {
                             ""
                         }

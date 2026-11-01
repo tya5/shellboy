@@ -158,7 +158,7 @@ impl ManagementPopup {
         let mut fields = state.fields.clone();
         fields.truncate(256);
         for field in &mut fields {
-            field.label = format!("取得時 · {}", field.label);
+            field.label = format!("取得時 | {}", field.label);
         }
         inspection.anchors = fields
             .iter()
@@ -379,7 +379,7 @@ impl ManagementPopup {
         };
         let prefix = error.chars().take(512).collect::<String>();
         let message = format!(
-            "{} · {}",
+            "{} | {}",
             observed_at,
             crate::presentation::sanitize_plain(&prefix, 0).0
         );
@@ -719,37 +719,37 @@ impl ManagementPopup {
             IndexPreviewState::Idle => return vec![],
             IndexPreviewState::Loading(args) => (
                 if explicit_index_targets(args) {
-                    "費用preview · 取得中"
+                    "費用preview | 取得中"
                 } else {
-                    "再試行preview · 取得中"
+                    "再試行preview | 取得中"
                 },
-                "件数と文字数を確認中 · API未送信",
+                "件数と文字数を確認中 | API未送信",
             ),
             IndexPreviewState::Ready(args, text) => (
                 if explicit_index_targets(args) {
-                    "費用preview · 取得済み"
+                    "費用preview | 取得済み"
                 } else {
-                    "再試行preview · 取得済み"
+                    "再試行preview | 取得済み"
                 },
                 text.as_str(),
             ),
             IndexPreviewState::Stale(args, text) => (
                 if explicit_index_targets(args) {
-                    "古い費用preview · 再取得が必要"
+                    "古い費用preview | 再取得が必要"
                 } else {
-                    "古い再試行preview · 再取得が必要"
+                    "古い再試行preview | 再取得が必要"
                 },
                 text.as_str(),
             ),
             IndexPreviewState::Failed(args, text) => (
                 if explicit_index_targets(args) {
-                    "費用preview · 取得失敗"
+                    "費用preview | 取得失敗"
                 } else {
-                    "再試行preview · 取得失敗"
+                    "再試行preview | 取得失敗"
                 },
                 text.as_str(),
             ),
-            IndexPreviewState::Hint(text) => ("索引操作 · 未受付", text.as_str()),
+            IndexPreviewState::Hint(text) => ("索引操作 | 未受付", text.as_str()),
         };
         let mut lines =
             vec![Line::from(title.to_owned()).style(Style::default().fg(theme::EMPHASIS))];
@@ -768,11 +768,11 @@ impl ManagementPopup {
             let error = safe.replace('\n', " ");
             let short: String = error.chars().take(160).collect();
             lines.push(Line::from(if error.chars().count() > 160 {
-                format!("{short}…")
+                format!("{short}.")
             } else {
                 short
             }));
-            lines.push(Line::from("前回の結果 · 古い情報（再確認が必要）"));
+            lines.push(Line::from("前回の結果 | 古い情報（再確認が必要）"));
             let safe: String = crate::presentation::sanitize_plain(previous, 0)
                 .0
                 .chars()
@@ -850,28 +850,28 @@ impl ManagementPopup {
         match self.mode {
             ManagementMode::Index => {
                 if self.has_next_inspection_window() {
-                    "Esc 戻る · ↑↓/PgUp/PgDn 閲覧 · Ctrl+R 更新 · N 次window\nS 状態 · P 費用preview · B backfill · T retry · R rebuild"
+                    "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新 | N 次window\nS 状態 | P 費用preview | B backfill | T retry | R rebuild"
                 } else {
-                    "Esc 戻る · ↑↓/PgUp/PgDn 閲覧 · Ctrl+R 更新\nS 状態 · P 費用preview · B backfill · T retry · R rebuild"
+                    "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新\nS 状態 | P 費用preview | B backfill | T retry | R rebuild"
                 }
             }
             ManagementMode::Attachments if list_mode => {
-                "Esc 戻る · Tab 選択 · Enter 詳細 · C コピー\nS 保存済み一覧 · R 再読込 · 選択解除は戻って /detach ID"
+                "Esc 戻る | Tab 選択 | Enter 詳細 | C コピー\nS 保存済み一覧 | R 再読込 | 選択解除は戻って /detach ID"
             }
             ManagementMode::Attachments => {
-                "Esc 戻る · ↑↓/PgUp/PgDn 閲覧\nS 保存済み一覧 · R 再読込 · 解除は戻って /detach ID"
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧\nS 保存済み一覧 | R 再読込 | 解除は戻って /detach ID"
             }
             ManagementMode::Status if list_mode => {
-                "Esc 戻る · ↑↓ 選択 · Enter 詳細 · R 更新 · N 次page\nO 参照 · S 出力原文 · C コピー · A 操作"
+                "Esc 戻る | ^v 選択 | Enter 詳細 | R 更新 | N 次page\nO 参照 | S 出力原文 | C コピー | A 操作"
             }
             ManagementMode::General if list_mode => {
-                "Esc 戻る · Tab/Shift+Tab 選択 · Enter 詳細 · C コピー\nO 参照 · S 出力原文 · A 操作 · PgUp/PgDn 閲覧"
+                "Esc 戻る | Tab/Shift+Tab 選択 | Enter 詳細 | C コピー\nO 参照 | S 出力原文 | A 操作 | PgUp/PgDn 閲覧"
             }
             ManagementMode::Received => {
-                "Esc 戻る · ↑↓ 選択 · Enter 原文／ページ · C IDコピー\n/received ページ番号 で全受信記録を表示"
+                "Esc 戻る | ^v 選択 | Enter 原文／ページ | C IDコピー\n/received ページ番号 で全受信記録を表示"
             }
             ManagementMode::General | ManagementMode::Status => {
-                "Esc 戻る · ↑↓/PgUp/PgDn 閲覧\nW 明示waitの観測取消 · A 操作"
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧\nW 明示waitの観測取消 | A 操作"
             }
         }
     }
@@ -1297,14 +1297,14 @@ impl ManagementPopup {
             let mut reader_scroll = None;
             if let Some(structured) = &content.structured {
                 if let Some(page) = &structured.detail {
-                    let title = format!("{} · 詳細", view.title);
+                    let title = format!("{} | 詳細", view.title);
                     let context = format!(
-                        "参照 {} · 取得 {}{}",
+                        "参照 {} | 取得 {}{}",
                         page.pointer,
                         page.observed_at,
                         page.stale
                             .as_ref()
-                            .map(|reason| format!(" · 旧内容: {reason}"))
+                            .map(|reason| format!(" | 旧内容: {reason}"))
                             .unwrap_or_default()
                     );
                     let body = popup::panel_recorded(
@@ -1330,7 +1330,7 @@ impl ManagementPopup {
                     ));
                 } else {
                     let context = format!(
-                        "{} / {}項目{} · {}",
+                        "{} / {}項目{} | {}",
                         if structured.fields.is_empty() {
                             0
                         } else {
@@ -1338,7 +1338,7 @@ impl ManagementPopup {
                         },
                         structured.fields.len(),
                         if structured.omitted {
-                            " · すべての詳細を見る"
+                            " | すべての詳細を見る"
                         } else {
                             ""
                         },
@@ -1348,12 +1348,12 @@ impl ManagementPopup {
                         }
                     );
                     let context = if let Some(inspection) = &self.inspection {
-                        format!("{} · {context}", inspection.label())
+                        format!("{} | {context}", inspection.label())
                     } else {
                         context
                     };
                     let context = if let Some(error) = &structured.detail_error {
-                        format!("詳細未更新: {error} · {context}")
+                        format!("詳細未更新: {error} | {context}")
                     } else {
                         context
                     };
@@ -1376,7 +1376,7 @@ impl ManagementPopup {
                             .unwrap_or(("", field.label.as_str()));
                         if group != previous_group && !group.is_empty() {
                             items.push(popup::Item::new(
-                                Line::from(format!("── {group} ──"))
+                                Line::from(format!("-- {group} --"))
                                     .style(Style::default().fg(theme::GROUP_HEADING)),
                             ));
                         }
@@ -1408,7 +1408,7 @@ impl ManagementPopup {
                 }
             } else {
                 let context = match self.mode {
-                    ManagementMode::Index => format!("対象 {} · {status}", self.index_label()),
+                    ManagementMode::Index => format!("対象 {} | {status}", self.index_label()),
                     _ => status.to_owned(),
                 };
                 let body =
@@ -1438,7 +1438,7 @@ fn mark_truncated_preview(lines: &mut Vec<Line<'static>>, height: u16) {
     if lines.len() > usize::from(height) {
         lines.truncate(usize::from(height));
         if let Some(last) = lines.last_mut() {
-            *last = Line::from("… 省略（取得時刻を含む場合あり）");
+            *last = Line::from(". 省略（取得時刻を含む場合あり）");
         }
     }
 }
@@ -1456,7 +1456,7 @@ mod preview_notice_tests {
         let mut lines = vec![Line::from("title"), Line::from("time")];
         mark_truncated_preview(&mut lines, 1);
         assert_eq!(lines.len(), 1);
-        assert!(lines[0].to_string().starts_with('…'));
+        assert!(lines[0].to_string().starts_with('.'));
         let mut full = vec![Line::from("time")];
         mark_truncated_preview(&mut full, 1);
         assert_eq!(full[0].to_string(), "time");

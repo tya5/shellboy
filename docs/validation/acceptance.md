@@ -7975,3 +7975,27 @@ Python121 pass. The next-inspection gate's missing-index negative/positive
 control passes; default-off inspection avoids the added selection just like
 the driver. No new skip, ignore, timeout or dependency changes. New exact-head
 full CI and independent review/integration are still pending at this record.
+## UI language and terminal width foundation (#139, 2026-11-01)
+
+On macOS arm64, Darwin 25.3.0, Rust 1.99.1, using a shared `rust-slot`, two
+Cargo jobs/two test threads and an isolated synthetic data directory, the UI run
+passed 540 tests (3 ignored), presentation library 65, integration presentation
+48, integration UI 86 (1 ignored), model picker 11, and real-TUI PTY 2. The
+foreign-CLI recovery/stop case passed separately after correcting its changed
+visible marker. This observation predates the last emoji-modifier/keycap cases;
+it is not final-HEAD or CI evidence. The layout watchdog and 115 Python tests
+passed separately. Final commit and CI evidence belong in the handoff.
+
+The synthetic PTY exercises two measured widths, disagreement, malformed and
+missing replies, keyboard/modified-F3/bracketed-paste preservation and worker
+width propagation. Synthetic TestBackend fixtures exercise the migrated
+confirmation in English/Japanese at 80/120 columns under width one, two and
+unknown, including border integrity. Markdown tables check generated ASCII borders
+without replacing the same character in model text. Configuration checks cover
+both languages, unsupported values and separate locale environments.
+
+These are synthetic fixtures, not real user data or a guarantee for all fonts,
+terminals or multiplexers. Windows uses the documented unknown-width fallback;
+its native DSR is not claimed. Stage A translates only the confirmation and width
+diagnostic; the remaining screens are stage B. CLI/API/saved content and raw
+user/model text remain outside the translation boundary.

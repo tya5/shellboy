@@ -86,7 +86,7 @@ pub(super) fn original_page_lines(body: &HistoryBody) -> Vec<Line<'static>> {
     ORIGINAL_PREPARATIONS.with(|count| count.set(count.get() + 1));
     let mut lines = Vec::new();
     lines.push(Line::from(format!(
-        "{} · {}",
+        "{} | {}",
         safe(&body.kind),
         safe(&body.node_id)
     )));
@@ -175,7 +175,7 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
         .any(|b| b.kind == BlockKind::ToolCall);
     let label = match node.presentation.kind {
         PresentationKind::User => "あなた".to_owned(),
-        PresentationKind::Assistant if has_call => "モデル · shell呼出し".into(),
+        PresentationKind::Assistant if has_call => "モデル | shell呼出し".into(),
         PresentationKind::Assistant
             if node
                 .presentation
@@ -188,12 +188,12 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
                     .iter()
                     .any(|b| b.kind == BlockKind::Prose) =>
         {
-            "モデル · 推論".into()
+            "モデル | 推論".into()
         }
         PresentationKind::Assistant => "モデルの回答".into(),
         PresentationKind::ToolCall => "shell呼出し".into(),
-        PresentationKind::ToolResult => format!("shell結果 · {}", safe(&node.presentation.title)),
-        PresentationKind::Event => format!("状態変更 · {}", safe(&node.presentation.title)),
+        PresentationKind::ToolResult => format!("shell結果 | {}", safe(&node.presentation.title)),
+        PresentationKind::Event => format!("状態変更 | {}", safe(&node.presentation.title)),
         PresentationKind::Summary => "会話の要約".into(),
         PresentationKind::Spill
             if node.presentation.title == crate::presentation::CONTEXT_TRIM_TITLE =>
@@ -250,7 +250,7 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
                 )
             })
             .collect::<Vec<_>>()
-            .join(" · ")
+            .join(" | ")
     } else {
         String::new()
     };
@@ -264,13 +264,13 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
         && matches!(node.role.as_str(), "tool" | "developer" | "system")
         && bounded.trim_start().starts_with('{')
     {
-        preview = "構造化データ · Enterで詳細を確認".into();
+        preview = "構造化データ | Enterで詳細を確認".into();
     }
     if preview.is_empty() {
         preview = if node.total_chars > 0 {
-            "本文未読込 · Oで原文を確認"
+            "本文未読込 | Oで原文を確認"
         } else {
-            "本文なし · Enterで詳細を確認"
+            "本文なし | Enterで詳細を確認"
         }
         .into();
     }
@@ -745,7 +745,7 @@ impl Details {
             }
             Err(error) => {
                 self.links_error = Some(safe(&error));
-                self.sources_stale = Some("取得失敗 · 前回の観測値を表示".into());
+                self.sources_stale = Some("取得失敗 | 前回の観測値を表示".into());
             }
         }
     }
@@ -872,7 +872,7 @@ impl Details {
             .max_by_key(|(_, _, block, _)| super::presentation::tool_observation_rank(block))
             .map(|(_, _, _, tool)| {
                 format!(
-                    "shell · call {} · コマンドpreview {}",
+                    "shell | call {} | コマンドpreview {}",
                     safe(&tool.call_id.chars().take(48).collect::<String>()),
                     safe(&tool.command)
                 )
@@ -880,7 +880,7 @@ impl Details {
     }
     fn shared_original_context(&self, view: &ThreadView) -> String {
         self.described_command_context(view)
-            .map(|s| format!("共有assistant原文（隣接callを含む） · {s} · "))
+            .map(|s| format!("共有assistant原文（隣接callを含む） | {s} | "))
             .unwrap_or_default()
     }
     pub(super) fn open_source(&mut self, node_id: String, next: &mut u64) -> UiAction {
@@ -1197,7 +1197,7 @@ impl Details {
         };
         let context = if matches!(self.mode, Mode::Nodes) {
             format!(
-                "{} / {}件 · 内容を選んでEnterで詳細を表示",
+                "{} / {}件 | 内容を選んでEnterで詳細を表示",
                 self.selected.saturating_add(1).min(count),
                 count
             )
@@ -1209,7 +1209,7 @@ impl Details {
                     .map(|node| {
                         let (label, preview) =
                             entry(node, usize::from(area.width.saturating_sub(16)));
-                        format!("{label} · {preview}")
+                        format!("{label} | {preview}")
                     })
                     .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
             })
@@ -1218,7 +1218,7 @@ impl Details {
                 .as_ref()
                 .map(|body| {
                     format!(
-                        "{}保存 {} · 表示受信 {}",
+                        "{}保存 {} | 表示受信 {}",
                         self.shared_original_context(view),
                         safe(&body.provenance.created_at),
                         self.original_observed_at.as_deref().unwrap_or("未確認")
@@ -1227,7 +1227,7 @@ impl Details {
                 .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
         } else {
             format!(
-                "{} / {}件 · node {}",
+                "{} / {}件 | node {}",
                 self.selected.saturating_add(1).min(count),
                 count,
                 safe(&self.node_id)
@@ -1266,12 +1266,12 @@ impl Details {
                     .iter()
                     .any(|source| source.unavailable_reason.is_some())
                 {
-                    parts.push("参照元が利用不可 · 原文の表示済みコピーとは別".into());
+                    parts.push("参照元が利用不可 | 原文の表示済みコピーとは別".into());
                 }
-                parts.push(format!("観測 {} · R再取得", snapshot.observed_at));
+                parts.push(format!("観測 {} | R再取得", snapshot.observed_at));
             }
             frame.render_widget(
-                ratatui::widgets::Paragraph::new(safe(&parts.join(" · ")))
+                ratatui::widgets::Paragraph::new(safe(&parts.join(" | ")))
                     .style(Style::default().fg(theme::WARNING)),
                 Rect { height: 1, ..body },
             );
@@ -1286,11 +1286,11 @@ impl Details {
                 let p = &node.presentation;
                 if p.metadata_limited {
                     Some(format!(
-                        "詳細{}項目を保持・上限あり · A 対象を照会",
+                        "詳細{}項目を保持・上限あり | A 対象を照会",
                         p.fields.len()
                     ))
                 } else if p.details_omitted && p.body_omitted_chars == 0 && !p.body_extent_unknown {
-                    Some("表示情報の保持範囲は未確認 · A 対象を照会".into())
+                    Some("表示情報の保持範囲は未確認 | A 対象を照会".into())
                 } else {
                     None
                 }
@@ -1317,7 +1317,7 @@ impl Details {
                 .enumerate()
                 .map(|(index, node)| {
                     let (label, preview) = entry(node, usize::from(body.width.saturating_sub(5)));
-                    popup::item(&format!("{} · {label}\n  {preview}", index + 1), body.width)
+                    popup::item(&format!("{} | {label}\n  {preview}", index + 1), body.width)
                 })
                 .collect(),
             Mode::Fields => {
@@ -1328,7 +1328,7 @@ impl Details {
                     let group = crate::presentation::fields::group(&field.key);
                     if previous != Some(group.0) {
                         rows.push(popup::Item::new(
-                            Line::from(format!("── {} ──", group.1))
+                            Line::from(format!("-- {} --", group.1))
                                 .style(Style::default().fg(theme::GROUP_HEADING)),
                         ));
                         previous = Some(group.0);
@@ -1377,7 +1377,7 @@ impl Details {
                 })
                 .collect(),
             Mode::Original => {
-                let loading = [Line::from("原文を取得中…")];
+                let loading = [Line::from("原文を取得中.")];
                 let lines = if self.original.is_some() {
                     self.original_lines.as_slice()
                 } else {
@@ -2022,7 +2022,7 @@ mod tests {
             node.total_chars = text.chars().count();
             node.presentation =
                 crate::presentation::project("interruption_details", &payload, &text, 0);
-            assert_eq!(entry(&node, 80).0, format!("前回の保存記録 · {label}"));
+            assert_eq!(entry(&node, 80).0, format!("前回の保存記録 | {label}"));
             ui.view_mut().nodes_mut_for_test().push(node);
         }
         let mut details = Details::new(ui.view(), false);
@@ -2036,7 +2036,7 @@ mod tests {
         let shown = screen(&terminal);
         for label in ["作業", "応答処理", "コマンド", "子の作業"] {
             assert!(
-                shown.contains(&format!("前回の保存記録 · {label}")),
+                shown.contains(&format!("前回の保存記録 | {label}")),
                 "{shown}"
             );
         }
@@ -2137,7 +2137,7 @@ mod tests {
                 })
                 .unwrap();
             let text = screen(&terminal);
-            for expected in ["本文先頭", "本文末尾", "…", "source-node"] {
+            for expected in ["本文先頭", "本文末尾", ".", "source-node"] {
                 assert!(text.contains(expected), "{width}x{height}: {text}");
             }
             details.selected = details
@@ -2367,7 +2367,7 @@ mod tests {
         node.text = "長い日本語".repeat(300);
         let (_, preview) = entry(&node, 24);
         assert!(unicode_width::UnicodeWidthStr::width(preview.as_str()) <= 24);
-        assert!(preview.ends_with('…'));
+        assert!(preview.ends_with('.'));
         node.text.clear();
         assert!(entry(&node, 80).1.contains("未読込"));
         node.presentation.kind = crate::presentation::PresentationKind::Assistant;

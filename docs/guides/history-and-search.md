@@ -11,7 +11,7 @@ Current `history list` items always include `provenance`, `context`, and `select
 
 ## Finding and reading original content
 
-In the TUI, use F6 to select a history item, O for an original-content page, N for the next page, and P to return to the beginning. Inspect preceding/following and source IDs. To specify another node, use F8's “履歴 · 原文” (History · Original); for paginated relationships, use “履歴 · 関係” (History · Relations). In management views such as search results, Tab selects a field and Enter opens its details. See [Management result fields and detail pages](tui.md#management-result-fields-and-detail-pages) for full results, originals, and copying.
+In the TUI, use F6 to select a history item, O for an original-content page, N for the next page, and P to return to the beginning. Inspect preceding/following and source IDs. To specify another node, use F8's “履歴 | 原文” (History · Original); for paginated relationships, use “履歴 | 関係” (History · Relations). In management views such as search results, Tab selects a field and Enter opens its details. See [Management result fields and detail pages](tui.md#management-result-fields-and-detail-pages) for full results, originals, and copying.
 
 ```sh
 shellboy thread list --limit 20
@@ -134,7 +134,7 @@ shellboy history search --query 'error handling for the current task' --limit 10
 
 Search creates a query embedding in the active IndexSpace and returns excerpts grouped by original node, distances, node IDs, and related fields. Verify results through `history get` on the original node. Embedding API use may cost money. No matches do not necessarily mean the original is absent: check missing indexing, another space, individual failures, and similar causes. Local folders are not automatically ingested.
 
-Filter the scope first through the CLI or F8's “履歴 · 検索” (History · Search):
+Filter the scope first through the CLI or F8's “履歴 | 検索” (History · Search):
 
 ```bash
 shellboy history search --query 'error handling for the current task' --thread THREAD_ID --kind user --kind assistant --exclude-kind tool_result --from '2026-10-01T00:00:00+09:00' --to '2026-11-01T00:00:00+09:00'

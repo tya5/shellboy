@@ -100,7 +100,7 @@ fn event(
             .filter(|state| !p.title.contains(state))
             .collect::<Vec<_>>();
         if !states.is_empty() {
-            p.title = format!("{} · {}", p.title, states.join(" · "));
+            p.title = format!("{} | {}", p.title, states.join(" | "));
         }
         b.text = if body.is_empty() {
             p.title.clone()
@@ -191,7 +191,7 @@ fn call(
     let command = value
         .get("command")
         .and_then(Value::as_str)
-        .unwrap_or("shell呼出し · 詳細");
+        .unwrap_or("shell呼出し | 詳細");
     let (text, omitted) = excerpt(
         &sanitize_plain(command, 0).0,
         b.text.len().max(128),
@@ -218,9 +218,9 @@ fn display_reason(value: &Value) -> String {
         .and_then(Value::as_str)
         .or_else(|| value.pointer("/error/code").and_then(Value::as_str));
     match (message, code) {
-        (Some(message), Some(code)) => format!("{} · {}", tool_reason(message), tool_reason(code)),
+        (Some(message), Some(code)) => format!("{} | {}", tool_reason(message), tool_reason(code)),
         (Some(message), None) => tool_reason(message),
-        (None, Some(code)) => format!("{} · 詳細はF6", tool_reason(code)),
+        (None, Some(code)) => format!("{} | 詳細はF6", tool_reason(code)),
         (None, None) => "エラー詳細はF6".into(),
     }
 }
@@ -291,8 +291,8 @@ fn result(
                 ));
             }
             if !facts.is_empty() {
-                tool.reason.push_str(" · 前提: ");
-                tool.reason.push_str(&facts.join(" · "));
+                tool.reason.push_str(" | 前提: ");
+                tool.reason.push_str(&facts.join(" | "));
             }
         }
         tool.elapsed_ms = value.get("elapsed_ms").and_then(Value::as_u64);
@@ -306,11 +306,11 @@ fn result(
         }
     }
     if let Some(state) = value.get("status").and_then(Value::as_str) {
-        p.title = format!("shell · {state}");
+        p.title = format!("shell | {state}");
     }
     let notes = attention(fields);
     if !notes.is_empty() {
-        p.title = format!("{} · {}", p.title, notes.join(" · "));
+        p.title = format!("{} | {}", p.title, notes.join(" | "));
     }
     let mut streams = Vec::new();
     let count = ["output", "stdout", "stderr"]
@@ -351,7 +351,7 @@ fn result(
             match value.get("status").and_then(Value::as_str) {
             Some("not_started") => "前回の終了時点では未開始でした。自動再実行はしていません。",
             Some("interrupted") => "前回の終了により結果は不確かです。再実行前に保存済みの出力と副作用を確認してください。",
-            _ => "実行結果 · 詳細",
+            _ => "実行結果 | 詳細",
         }.into()
         };
         b.stream = None;

@@ -1007,7 +1007,7 @@ mod tests {
             ("group_id", "exact-group"),
             ("call_id", "same"),
             ("source_node", "exact-result"),
-            ("title", "saved shell · printf CORRECT"),
+            ("title", "saved shell | printf CORRECT"),
         ]
         .into_iter()
         .map(|(key, value)| crate::presentation::PresentationField {

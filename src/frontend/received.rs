@@ -120,9 +120,9 @@ pub(super) fn project(
         EventClass::Attention
     };
     p.title = format!(
-        "{} · /received 一覧",
+        "{} | /received 一覧",
         if observation {
-            "ストリーム差分 · 最終応答は確定済み"
+            "ストリーム差分 | 最終応答は確定済み"
         } else {
             TITLE
         }

@@ -474,7 +474,7 @@ pub(super) fn confirmation_lines(operation: &ClientOperation) -> Vec<Line<'stati
     ];
     match operation {
         ClientOperation::Config(_)=>lines.extend([Line::from("起動時に選択した設定ファイルへ保存します。既存ファイルは上書きしません。"),Line::from("現在の所有者の設定は変えません。編集した設定の反映は再起動時です。")]),
-        ClientOperation::Exec(options)=>lines.extend([Line::from(format!("既存Thread: {}",safe(options.thread_id.as_deref().unwrap_or("なし（新規作成）")))),Line::from(format!("追加修復: 最大{}回 · 全体期限{}ms",options.max_repairs,options.timeout_ms)),Line::from("モデルAPIとtoolの費用・副作用が発生する場合があります。修復は完了済み作用を巻き戻しません。"),Line::from("期限や表示を閉じる操作だけでは対象Runを停止しません。受付IDは結果に個別に示します。")]),
+        ClientOperation::Exec(options)=>lines.extend([Line::from(format!("既存Thread: {}",safe(options.thread_id.as_deref().unwrap_or("なし（新規作成）")))),Line::from(format!("追加修復: 最大{}回 | 全体期限{}ms",options.max_repairs,options.timeout_ms)),Line::from("モデルAPIとtoolの費用・副作用が発生する場合があります。修復は完了済み作用を巻き戻しません。"),Line::from("期限や表示を閉じる操作だけでは対象Runを停止しません。受付IDは結果に個別に示します。")]),
         ClientOperation::Rag{options,..}=>{
             lines.push(Line::from(format!("独立RAG DB: {}",safe(&options.db.as_ref().map(|path|path.to_string_lossy().into_owned()).unwrap_or_else(||"起動時data-dir/rag.db".into())))));
             if matches!(options.command,crate::rag::RagCommand::Index{mode:crate::rag::IndexMode::Semantic,..}){lines.push(Line::from("semantic索引は埋め込みAPIを使用し、費用が発生する場合があります。"));}

@@ -187,7 +187,7 @@ pub(super) fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>) {
             });
         let presentation = &mut nodes[saved.index].presentation;
         let note = format!("再開前にこの応答処理で記録したモデル失敗{}件", saved.count);
-        presentation.title = format!("復旧再開 · {note}");
+        presentation.title = format!("復旧再開 | {note}");
         if let Some(block) = presentation
             .blocks
             .iter_mut()
@@ -200,7 +200,7 @@ pub(super) fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>) {
                     format!("直近の保存理由: {}", {
                         let excerpt = message.chars().take(256).collect::<String>();
                         let suffix = if message.chars().count() > 256 {
-                            "… · 完全な理由はF6 詳細"
+                            ". | 完全な理由はF6 詳細"
                         } else {
                             ""
                         };
@@ -300,7 +300,7 @@ mod tests {
         let p = &nodes[0].presentation;
         assert_eq!(
             p.title,
-            "復旧再開 · 再開前にこの応答処理で記録したモデル失敗2件"
+            "復旧再開 | 再開前にこの応答処理で記録したモデル失敗2件"
         );
         assert_eq!(p.blocks[0].text, "直近の保存理由: 保存済み二回目🦀");
         assert!(

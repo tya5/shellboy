@@ -35,7 +35,7 @@ fn label(node: &UiNode) -> &str {
         return &title.value;
     }
     if node.presentation.kind == PresentationKind::Event {
-        if let Some(fact) = node.presentation.title.strip_prefix("状態変更 · ") {
+        if let Some(fact) = node.presentation.title.strip_prefix("状態変更 | ") {
             return fact;
         }
         if node.presentation.title == "状態変更" {
@@ -84,7 +84,7 @@ fn body_spans<'a>(line: &'a Line<'_>) -> impl Iterator<Item = &'a Span<'a>> {
     line.spans.iter().filter(|span| {
         !matches!(
             span.style.underline_color,
-            Some(INPUT_DECORATION_MARKER | theme::COPY_DECORATION)
+            Some(INPUT_DECORATION_MARKER | OUTPUT_ROW_MARKER | theme::COPY_DECORATION)
         )
     })
 }
@@ -147,7 +147,7 @@ fn node_lines_inner(
             } else {
                 match node.presentation.kind {
                     PresentationKind::Event => format!(
-                        "{} {} · {}",
+                        "{} {} | {}",
                         RowKind::Notice.mark(),
                         RowKind::Notice.spec().1,
                         label(node)
@@ -169,7 +169,7 @@ fn node_lines_inner(
     };
     let mut out = NodeLines::new(header);
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
-        out.push(Line::from("本文未キャッシュ · 詳細から原文を取得"));
+        out.push(Line::from("本文未キャッシュ | 詳細から原文を取得"));
         return out;
     }
     if node.presentation.blocks.is_empty() {
@@ -210,7 +210,7 @@ fn node_lines_inner(
         if block.kind == BlockKind::Reasoning && !expanded {
             out.push(Line::from(Span::styled(
                 format!(
-                    "▸ 推論 {}文字 · 折りたたみ /reasoning",
+                    "▸ 推論 {}文字 | 折りたたみ /reasoning",
                     block.source_end.saturating_sub(block.source_start)
                 ),
                 Style::default().fg(theme::MUTED),
@@ -238,7 +238,7 @@ fn node_lines_inner(
                 if !tool.reason.is_empty() {
                     out.extend(hanging_wrap(
                         vec![Line::from(Span::styled(
-                            format!("  ┊ {}", tool.reason),
+                            format!("  | {}", tool.reason),
                             Style::default().fg(theme::MUTED),
                         ))],
                         width,
@@ -247,7 +247,7 @@ fn node_lines_inner(
             }
             previous_tool = Some(tool.call_id.clone());
             // Commands live in the call heading; do not print them a second time.
-            if block.kind == BlockKind::ToolCall || block.text == "実行結果 · 詳細" {
+            if block.kind == BlockKind::ToolCall || block.text == "実行結果 | 詳細" {
                 continue;
             }
         } else {
@@ -341,7 +341,7 @@ fn node_lines_inner(
                     let tail = output.split_off(count - 2);
                     output.truncate(3);
                     output.push(Line::from(Span::styled(
-                        format!("… 出力抜粋（表示{count}行中{}行省略）· F6 詳細", count - 5),
+                        format!(". 出力抜粋（表示{count}行中{}行省略）| F6 詳細", count - 5),
                         Style::default()
                             .fg(theme::MUTED)
                             .underline_color(EXCERPT_GAP_MARKER),
@@ -364,7 +364,7 @@ fn node_lines_inner(
                     line.spans.insert(
                         0,
                         Span::styled(
-                            "  │ ",
+                            "  | ",
                             Style::default().fg(guide_color).underline_color(marker),
                         ),
                     );
@@ -402,7 +402,7 @@ fn omission_notices(node: &UiNode) -> Vec<String> {
         .min(node.total_chars);
     if node.base_char_offset > 0 || end < node.total_chars {
         parts.push(format!(
-            "{} {}–{end}/{}文字",
+            "{} {}-{end}/{}文字",
             if node.presentation.provisional_stream {
                 "生成中の表示範囲"
             } else {
@@ -431,7 +431,7 @@ fn omission_notices(node: &UiNode) -> Vec<String> {
     if parts.is_empty() {
         Vec::new()
     } else {
-        vec![format!("{} · F6 詳細", parts.join(" · "))]
+        vec![format!("{} | F6 詳細", parts.join(" | "))]
     }
 }
 fn tool_header_lines(
@@ -687,10 +687,10 @@ fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
     }
     vec![Line::from(Span::styled(
         format!(
-            "{} {} · {}",
+            "{} {} | {}",
             RowKind::Notice.mark(),
             RowKind::Notice.spec().1,
-            facts.join(" · ")
+            facts.join(" | ")
         ),
         Style::default().fg(theme::MUTED),
     ))]
@@ -911,7 +911,7 @@ pub(super) fn history_with_cache(
                 hanging_wrap(vec![line.clone()], width.max(1)).len()
             });
             chunk.push(Line::from(Span::styled(
-                format!("  原文{}件 · F6 詳細", index - begin),
+                format!("  原文{}件 | F6 詳細", index - begin),
                 Style::default().fg(theme::MUTED),
             )));
             chunk
@@ -972,7 +972,7 @@ pub(super) fn history_with_cache(
         {
             chunk
         } else {
-            vec![Line::from("… 本文を折りたたみ · Enterで開く")]
+            vec![Line::from(". 本文を折りたたみ | Enterで開く")]
         };
         let mut chunk = hanging_wrap(chunk, width.max(1));
         user_band(&mut chunk, node, width, view.palette);
@@ -1240,7 +1240,7 @@ fn input_metadata(node: &UiNode, palette: theme::Palette) -> Option<Span<'static
     }
     (!parts.is_empty()).then(|| {
         Span::styled(
-            parts.join(" · "),
+            parts.join(" | "),
             Style::default()
                 .fg(palette.muted())
                 .underline_color(INPUT_DECORATION_MARKER),
@@ -1391,7 +1391,7 @@ fn tool_metadata(
     } else if kind == RowKind::Running && tool.started_at.is_some() {
         parts.push("経過未取得".into());
     }
-    (kind, parts.join(" · "), critical)
+    (kind, parts.join(" | "), critical)
 }
 fn tool_text_fit(text: &str, width: usize) -> String {
     use unicode_segmentation::UnicodeSegmentation;
@@ -1411,7 +1411,7 @@ fn tool_text_fit(text: &str, width: usize) -> String {
         result.push_str(glyph);
         used += glyph.width();
     }
-    result.push('…');
+    result.push('.');
     result
 }
 fn tool_row(
@@ -1616,7 +1616,7 @@ fn append_node_cached(
             links,
         )
     } else {
-        vec![Line::from("… 本文を折りたたみ · Enterで開く")]
+        vec![Line::from(". 本文を折りたたみ | Enterで開く")]
     };
     user_band(&mut chunk, node, width, view.palette);
     append_item_rows(
@@ -1889,7 +1889,7 @@ fn typed_history(
                     let focused = view.items.active && view.items.focus.as_ref() == Some(&key);
                     if label.description.is_some() && (focused || open) {
                         chunk.extend(tool_note(
-                            "コマンド（プレビュー） · o コマンド原文（ページ表示）",
+                            "コマンド（プレビュー） | o コマンド原文（ページ表示）",
                             width,
                             view.palette,
                         ));
@@ -1925,30 +1925,30 @@ fn typed_history(
                                 let status = if preview.blocks.is_empty() {
                                     "出力取得に失敗"
                                 } else {
-                                    "更新失敗 · 前回の取得内容を表示"
+                                    "更新失敗 | 前回の取得内容を表示"
                                 };
                                 chunk.extend(tool_note(
-                                    &format!("{status}: {error} · 閉じて開くと再試行"),
+                                    &format!("{status}: {error} | 閉じて開くと再試行"),
                                     width,
                                     view.palette,
                                 ));
                             } else if view.items.preview_loading(&key, &region.outcome) {
                                 chunk.extend(tool_note(
-                                    "再取得中 · 前回の取得内容を表示",
+                                    "再取得中 | 前回の取得内容を表示",
                                     width,
                                     view.palette,
                                 ));
                             }
                         } else if view.items.preview_failed(&key, &region.outcome) {
                             chunk.extend(tool_note(
-                                "出力取得に失敗 · 閉じて開くと再試行 · F6 原文",
+                                "出力取得に失敗 | 閉じて開くと再試行 | F6 原文",
                                 width,
                                 view.palette,
                             ));
                         } else if tool.execution_id.is_some()
                             && (default_open || view.items.preview_loading(&key, &region.outcome))
                         {
-                            chunk.extend(tool_note("出力を取得中 · F6 原文", width, view.palette));
+                            chunk.extend(tool_note("出力を取得中 | F6 原文", width, view.palette));
                         } else if exact_body.source_exact {
                             let mut copy = node.clone();
                             copy.presentation.blocks = vec![exact_body.clone()];
@@ -2018,16 +2018,16 @@ fn typed_history(
                                 })
                         {
                             chunk.extend(tool_note(
-                                "出力を取得できませんでした · F6 原文",
+                                "出力を取得できませんでした | F6 原文",
                                 width,
                                 view.palette,
                             ));
                         } else if tool.execution_id.is_some() {
                             chunk.extend(tool_note(
                                 if view.items.preview_loading(&key, &region.outcome) {
-                                    "出力を取得中 · F6 原文"
+                                    "出力を取得中 | F6 原文"
                                 } else {
-                                    "出力未保持 · 閉じて開くと再取得 · F6 原文"
+                                    "出力未保持 | 閉じて開くと再取得 | F6 原文"
                                 },
                                 width,
                                 view.palette,
@@ -2036,7 +2036,7 @@ fn typed_history(
                             chunk.extend(tool_note(&tool.reason, width, view.palette));
                         } else {
                             chunk.extend(tool_note(
-                                "出力は原文で確認 · F6 詳細",
+                                "出力は原文で確認 | F6 詳細",
                                 width,
                                 view.palette,
                             ));
@@ -2196,7 +2196,7 @@ fn quiet_section_tails(
                 .iter()
                 .map(|(fact, count, _)| {
                     if *count > 1 {
-                        format!("{fact} ×{count}")
+                        format!("{fact} x{count}")
                     } else {
                         fact.clone()
                     }
@@ -2221,10 +2221,10 @@ fn quiet_section_tails(
             for line in hanging_wrap(
                 vec![Line::from(Span::styled(
                     format!(
-                        "{} {} · {}",
+                        "{} {} | {}",
                         RowKind::Notice.mark(),
                         RowKind::Notice.spec().1,
-                        labels.join(" · ")
+                        labels.join(" | ")
                     ),
                     Style::default().fg(view.palette.muted()),
                 ))],
@@ -2397,15 +2397,15 @@ pub(super) fn paint_live_times(
                     && !span.content.trim().is_empty()
             })
             .map(|span| {
-                let mut parts = span.content.split(" · ").collect::<Vec<_>>();
+                let mut parts = span.content.split(" | ").collect::<Vec<_>>();
                 if parts.last().is_some_and(|part| {
                     *part == "経過未取得" || (part.ends_with('秒') || part.ends_with('分'))
                 }) {
                     parts.pop();
                 }
-                let mut value = parts.join(" · ");
+                let mut value = parts.join(" | ");
                 if !value.is_empty() {
-                    value.push_str(" · ");
+                    value.push_str(" | ");
                 }
                 value.push_str(&crate::presentation::elapsed_text(
                     seconds.saturating_mul(1000),
@@ -2588,11 +2588,13 @@ mod tests {
     #[test]
     fn a_generated_gap_never_matches_the_same_text_inside_omitted_stdout() {
         use crate::presentation::{NodePresentation, PresentationBlock};
-        let gap = "… 出力抜粋（表示120行中115行省略）· F6 詳細";
+        let gap = ". 出力抜粋（表示120行中115行省略）| F6 詳細";
         let body = (0..120)
             .map(|index| {
                 if index == 50 {
                     gap.to_owned()
+                } else if index == 2 {
+                    "| LINE002".to_owned()
                 } else {
                     format!("LINE{index:03}")
                 }
@@ -2625,7 +2627,7 @@ mod tests {
             .iter()
             .position(|line| plain(std::slice::from_ref(line)).contains("LINE002"))
             .unwrap();
-        let head_offset = body[..body.find("LINE002").unwrap()].chars().count();
+        let head_offset = body[..body.find("| LINE002").unwrap()].chars().count();
         assert_eq!(sources[head_row].offset, head_offset);
         let gap_rows = lines
             .iter()
@@ -2658,7 +2660,7 @@ mod tests {
     #[test]
     fn excerpt_gap_metadata_survives_wrapping_without_becoming_a_terminal_link() {
         let gap = Line::from(Span::styled(
-            "… 出力抜粋（表示120行中115行省略）· F6 詳細",
+            ". 出力抜粋（表示120行中115行省略）| F6 詳細",
             Style::default()
                 .fg(theme::MUTED)
                 .underline_color(EXCERPT_GAP_MARKER),
@@ -2667,7 +2669,7 @@ mod tests {
         assert!(rows.len() > 1);
         for row in &mut rows {
             row.spans
-                .insert(0, Span::styled("  │ ", Style::default().fg(theme::MUTED)));
+                .insert(0, Span::styled("  | ", Style::default().fg(theme::MUTED)));
         }
         let rows = hanging_wrap(rows, 20);
         assert!(rows.iter().all(|row| {
@@ -2698,7 +2700,7 @@ mod tests {
         let url = "https://example.invalid/output";
         let rows = vec![Line::from(vec![
             Span::styled(
-                "│ ",
+                "| ",
                 Style::default()
                     .fg(theme::MUTED)
                     .underline_color(OUTPUT_ROW_MARKER),
@@ -3425,7 +3427,7 @@ mod tests {
         node.text = "あいうえお".into();
         node.total_chars = 100;
         let notices = omission_notices(&node).join("\n");
-        assert!(notices.contains("原文の取得範囲 51–55/100文字"));
+        assert!(notices.contains("原文の取得範囲 51-55/100文字"));
         node.presentation.body_omitted_chars = 17;
         node.presentation.body_extent_unknown = true;
         let notices = omission_notices(&node);
@@ -3831,7 +3833,7 @@ mod tests {
         let shown = plain(&event_group(&events));
         assert!(!shown.contains("状態変更") && !shown.contains("通常通知"));
         assert!(shown.contains("作業開始") && shown.contains("応答処理を開始"));
-        assert!(shown.contains("モデル: A → B"));
+        assert!(shown.contains("モデル: A > B"));
         assert!(!shown.contains("作業開始 / 応答処理を開始"));
         let payload = serde_json::json!({"text":"要約の本文","source_node_ids":["one","two"]});
         let text = crate::history::text_of_payload(&payload);
@@ -3844,7 +3846,7 @@ mod tests {
         };
         assert!(
             plain(&node_lines(&node, false, 0, 80, &mut Vec::new()))
-                .starts_with("⬦ 要約 · 出典2件")
+                .starts_with("⬦ 要約 | 出典2件")
         );
     }
     #[test]
@@ -3894,7 +3896,7 @@ mod tests {
             reasoning_ranges: vec![],
             presentation: crate::presentation::NodePresentation {
                 kind: PresentationKind::ToolResult,
-                title: "shell · exited · 失敗 exit 101".into(),
+                title: "shell | exited | 失敗 exit 101".into(),
                 fields: vec![crate::presentation::PresentationField {
                     value_omitted: false,
                     display: None,
@@ -3919,7 +3921,7 @@ mod tests {
             assert!(plain(&shown).contains("抜粋") && plain(&shown).contains("F6 詳細"));
             assert!(!plain(&shown[..1]).contains("stdout"));
             assert_eq!(shown[0].spans[0].style.fg, Some(Color::LightRed));
-            assert!(plain(&shown[1..]).starts_with("  │ 出力 00"));
+            assert!(plain(&shown[1..]).starts_with("  | 出力 00"));
             assert!(shown.len() < 10);
         }
         assert_eq!(node.text, output);
@@ -3956,7 +3958,7 @@ mod tests {
             reasoning_ranges: vec![],
             presentation: crate::presentation::NodePresentation {
                 kind: PresentationKind::ToolResult,
-                title: "shell · exited".into(),
+                title: "shell | exited".into(),
                 blocks,
                 ..Default::default()
             },
@@ -3970,7 +3972,7 @@ mod tests {
             .filter_map(|line| {
                 line.spans
                     .first()
-                    .filter(|span| span.content == "  │ ")
+                    .filter(|span| span.content == "  | ")
                     .and_then(|span| span.style.fg)
             })
             .collect::<Vec<_>>();
@@ -4367,7 +4369,7 @@ mod conversation_item_tests {
             .map(|span| span.content.as_ref())
             .collect::<String>();
         assert_eq!(body, "printf synthetic");
-        assert_eq!(line.spans.last().unwrap().content, "背景 · 終了 0 · 12.4秒");
+        assert_eq!(line.spans.last().unwrap().content, "背景 | 終了 0 | 12.4秒");
         assert_eq!(line.width(), 80);
         value.command = "abcdefghijklmnopqrstuvwxyz0123456789".into();
         let line = compact_tool_line(&value, 30, palette);
@@ -4391,9 +4393,9 @@ mod conversation_item_tests {
         let palette =
             theme::Palette::from_capabilities(crate::config::PaletteMode::Dark, false, true);
         for text in [
-            "取得 11:48:32 · 閉じて開くと再取得",
+            "取得 11:48:32 | 閉じて開くと再取得",
             "再取得中",
-            "出力取得に失敗 · 閉じて開くと再試行",
+            "出力取得に失敗 | 閉じて開くと再試行",
             "読込中",
         ] {
             let lines = tool_note(text, 16, palette);
@@ -4494,7 +4496,7 @@ mod conversation_item_tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(shown.contains("⏵ printf synthetic"), "{shown}");
-        assert!(shown.contains("背景（利用者） · 5分23秒"), "{shown}");
+        assert!(shown.contains("背景（利用者） | 5分23秒"), "{shown}");
         assert!(shown.contains("5分23秒"), "{shown}");
         assert_eq!(
             painted
@@ -4739,7 +4741,7 @@ mod conversation_item_tests {
         let (lines, _, sources) = history(&view, 100);
         let shown = plain(&lines);
         assert!(shown.contains("FIRST USER") && shown.contains("FINAL ANSWER"));
-        assert!(shown.contains("AGENTS.md none ×60") && shown.contains("index not configured ×60"));
+        assert!(shown.contains("AGENTS.md none x60") && shown.contains("index not configured x60"));
         let groups = sources
             .iter()
             .filter_map(|source| source.item.as_ref())
@@ -4888,7 +4890,7 @@ mod conversation_item_tests {
                 assert!(body[0].style.add_modifier.contains(Modifier::BOLD));
                 assert_eq!(body[1].style.underline_color, Some(link));
                 assert!(body[1].style.add_modifier.contains(Modifier::UNDERLINED));
-                assert!(plain(&lines).contains("Claude（レビュア） · 12:34"));
+                assert!(plain(&lines).contains("Claude（レビュア） | 12:34"));
                 assert!(!plain(&lines[1..]).contains("Claude"));
                 assert_eq!(
                     lines[0].spans.last().unwrap().style.fg,
@@ -4911,7 +4913,7 @@ mod conversation_item_tests {
             InputSource::OtherModel,
             InputSource::Revisit,
         ] {
-            let mut user = node("input", "first\nClaude · 12:34\nlast", vec![]);
+            let mut user = node("input", "first\nClaude | 12:34\nlast", vec![]);
             user.role = "user".into();
             user.presentation.kind = PresentationKind::User;
             user.presentation.input_source = input;
@@ -4940,7 +4942,7 @@ mod conversation_item_tests {
                     .collect::<Vec<_>>(),
                 [0, 6, 21]
             );
-            assert!(!plain(&lines).contains("入力 ·"));
+            assert!(!plain(&lines).contains("入力 |"));
             assert_eq!(view.nodes()[0].text, original);
             for (i, (line, _)) in rows.iter().enumerate() {
                 let body = body_spans(line)

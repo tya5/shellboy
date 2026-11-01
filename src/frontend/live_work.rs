@@ -359,14 +359,14 @@ pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
                         let others = row.wait_condition_count.unwrap_or(0).saturating_sub(1);
                         let other_threads = row.wait_thread_count.unwrap_or(0).saturating_sub(1);
                         let thread_summary = if other_threads > 0 {
-                            format!(" · 他{other_threads}会話")
+                            format!(" | 他{other_threads}会話")
                         } else {
                             String::new()
                         };
                         format!(
-                            "{kind} · {name}{thread_summary}{}",
+                            "{kind} | {name}{thread_summary}{}",
                             if others > 0 {
-                                format!(" · 他{others}件")
+                                format!(" | 他{others}件")
                             } else {
                                 String::new()
                             }
@@ -529,7 +529,7 @@ mod tests {
         for (condition, expected) in [
             (
                 json!({"type":"thread_settled", "thread_ids":["child","lineage"], "states":["completed"]}),
-                "First child · 他1会話",
+                "First child | 他1会話",
             ),
             (
                 json!({"type":"run_ended", "execution_id":"s-new"}),

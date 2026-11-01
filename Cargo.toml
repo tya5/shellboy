@@ -81,3 +81,9 @@ tempfile = "=3.27.0"
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_Storage_FileSystem", "Win32_System_Environment", "Win32_Globalization", "Win32_System_IO"] }
+
+# Temporary, audited display patches: expose nonblocking DSR input and apply
+# terminal-measured width consistently inside ratatui as well as application code.
+[patch.crates-io]
+crossterm = { path = "vendor/crossterm" }
+unicode-width = { path = "vendor/unicode-width" }

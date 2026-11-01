@@ -106,7 +106,7 @@ def main():
             previous = record(f"up-{index}", lambda text: top(text) is not None and top(text) < old)
         server.commands.put(40)
         arrival()
-        terminal.expect(lambda text: "↓ new" in text, "new tool while paused")
+        terminal.expect(lambda text: "v new" in text, "new tool while paused")
         for index in range(3):
             terminal.send(DOWN)
             old = previous

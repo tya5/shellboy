@@ -176,20 +176,20 @@ impl Form {
             return String::new();
         };
         if field.name == "db" {
-            return "空欄は起動時data-dir/rag.db · 相対パスは起動場所が基準 · F1で説明".into();
+            return "空欄は起動時data-dir/rag.db | 相対パスは起動場所が基準 | F1で説明".into();
         }
         if field.name == "input_mode" {
-            return "fileは本文ファイル、inlineは本文入力。CLI stdin相当でも端末stdinは読みません · F1で説明".into();
+            return "fileは本文ファイル、inlineは本文入力。CLI stdin相当でも端末stdinは読みません | F1で説明".into();
         }
         let Some(metadata) = self.selected_metadata() else {
             return "F1で入力条件を確認できます".into();
         };
         if field.value != field.initial_value {
-            return "編集した値 · F1で入力条件とIDの探し方".into();
+            return "編集した値 | F1で入力条件とIDの探し方".into();
         }
         let discovery = metadata.field.discovery;
         if field.value.is_empty() && discovery != Discovery::None {
-            return format!("未入力 · {}", text(discovery.text()));
+            return format!("未入力 | {}", text(discovery.text()));
         }
         let origin = if !field.initial_value.is_empty()
             && matches!(field.kind, Kind::Choice(_) | Kind::Boolean | Kind::Number)
@@ -198,7 +198,7 @@ impl Form {
         } else {
             self.origin(metadata.default_origin)
         };
-        format!("初期値: {origin} · F1で入力条件とIDの探し方")
+        format!("初期値: {origin} | F1で入力条件とIDの探し方")
     }
     pub(super) fn help_lines(&self) -> Vec<Line<'static>> {
         let id = self.operation.catalogue();
@@ -216,7 +216,7 @@ impl Form {
         {
             let argument = crate::operations::RAG_DB_ARGUMENT;
             lines.push(Line::from(format!(
-                "{} · {}",
+                "{} | {}",
                 argument.label, argument.meaning
             )));
             lines.push(Line::from("空欄は起動時data-dir/rag.db。相対パスはTUI起動場所が基準です。会話履歴DBとは別です。"));
@@ -315,7 +315,7 @@ impl Form {
             let default = argument
                 .default
                 .as_deref()
-                .map(|value| format!(" · 既定 {value}"))
+                .map(|value| format!(" | 既定 {value}"))
                 .unwrap_or_default();
             lines.push(Line::from(format!(
                 "{}{suffix}{default}",
@@ -328,7 +328,7 @@ impl Form {
         ));
         for argument in crate::operations::GLOBAL_ARGUMENTS {
             lines.push(Line::from(format!(
-                "{} · {}: {}",
+                "{} | {}: {}",
                 argument.spelling, argument.label, argument.meaning
             )));
         }
@@ -337,7 +337,7 @@ impl Form {
         if spec.route == crate::operations::Route::Rag {
             let argument = crate::operations::RAG_DB_ARGUMENT;
             lines.push(Line::from(format!(
-                "{} · {}: {}",
+                "{} | {}: {}",
                 argument.spelling, argument.label, argument.meaning
             )));
         }

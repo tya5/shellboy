@@ -45,19 +45,19 @@ fn persisted_result_notifications_explain_continuation_and_keep_the_original_evi
     for (kind, expected) in [
         (
             "shell_ended",
-            "shell 終了 · source-execution · 結果未記録 · モデルに渡した · Enter 参照先",
+            "shell 終了 | source-execution | 結果未記録 | モデルに渡した | Enter 参照先",
         ),
         (
             "child_turn_completed",
-            "子の回答 · source-thread · モデルに渡した · Enter 参照先",
+            "子の回答 | source-thread | モデルに渡した | Enter 参照先",
         ),
         (
             "child_run_ended",
-            "子の作業終了 · source-thread · 結果未記録 · モデルに渡した · Enter 参照先",
+            "子の作業終了 | source-thread | 結果未記録 | モデルに渡した | Enter 参照先",
         ),
         (
             "child_report",
-            "子の途中報告 · source-thread · モデルに渡した · Enter 参照先",
+            "子の途中報告 | source-thread | モデルに渡した | Enter 参照先",
         ),
     ] {
         let event = json!({"event_id":"saved-notification","kind":kind,"payload":{"execution_id":"source-execution","thread_id":"source-thread"}});
@@ -152,7 +152,7 @@ fn mixed_assistant_items_preserve_kind_unicode_source_and_payload() {
 fn persisted_string_events_and_tool_results_become_structured() {
     let event = json!({"content":[{"type":"input_text","text":format!("Shellboy event v1: {}",json!({"kind":"thread_settings","change":{"before":{"model":"A"},"after":{"model":"B"}},"observed_at":"2026-10-24T00:00:00Z"}))}]});
     let p = project("event", &event, &text_of_payload(&event), 0);
-    assert_eq!(p.title, "接続・設定変更 · モデル: A → B");
+    assert_eq!(p.title, "接続・設定変更 | モデル: A > B");
     assert_eq!(p.blocks[0].text, p.title);
     assert!(
         p.fields
@@ -161,7 +161,7 @@ fn persisted_string_events_and_tool_results_become_structured() {
     );
     let result = json!({"item":{"type":"function_call_output","call_id":"c1","output":json!({"status":"failed","exit_code":2,"output_complete":false,"output":"# plain\n* not Markdown","reason":"output_limit"}).to_string()}});
     let p = project("tool_result", &result, &text_of_payload(&result), 0);
-    assert!(p.title.starts_with("shell · failed"));
+    assert!(p.title.starts_with("shell | failed"));
     assert!(p.title.contains("exit 2") && p.title.contains("出力不完全"));
     assert_eq!(p.blocks[0].text, "# plain\n* not Markdown");
     assert_eq!(p.blocks[0].stream, Some(OutputStream::Combined));
@@ -432,7 +432,7 @@ fn oss_tables_reflow_at_worker_width_and_japanese_punctuation_does_not_enter_url
     let table_lines = first
         .lines
         .iter()
-        .filter(|l| l.spans.iter().any(|s| s.content.contains('│')))
+        .filter(|l| l.spans.iter().any(|s| s.content.contains('|')))
         .collect::<Vec<_>>();
     assert!(!table_lines.is_empty());
     assert!(table_lines.iter().all(|l| l.width() <= 22));
@@ -490,7 +490,7 @@ fn oss_code_highlighting_uses_bundled_theme_with_language_caption_and_no_termina
     assert!(visible.contains("keep <every> line") && visible.contains("second line"));
     assert!(!visible.contains("shellboy-code-fence"));
     assert!(!visible.contains('\u{e000}'));
-    assert!(!visible.contains("──"));
+    assert!(!visible.contains("--"));
     let source_line = lines
         .iter()
         .find(|line| line.spans.iter().any(|s| s.content.contains("main")))
@@ -597,7 +597,7 @@ fn known_summary_layout_uses_body_ranges_and_source_counts_without_rewriting_ori
     let saved = payload.clone();
     let canonical = text_of_payload(&payload);
     let p = project("summary", &payload, &canonical, 0);
-    assert_eq!(p.title, "要約 · 置換3件 · 出典3件 · F6→O 原文");
+    assert_eq!(p.title, "要約 | 置換3件 | 出典3件 | F6>O 原文");
     assert_eq!(
         p.blocks
             .iter()
@@ -656,8 +656,8 @@ fn human_events_keep_important_differences_and_unknown_kinds_in_details_only() {
     let p = project("event", &payload, &canonical, 0);
     assert_eq!(p.event_class, EventClass::Attention);
     assert!(p.requires_attention());
-    assert!(p.title.starts_with("/index → T"));
-    assert!(p.blocks[0].text.contains("old-model → new-model"));
+    assert!(p.title.starts_with("/index > T"));
+    assert!(p.blocks[0].text.contains("old-model > new-model"));
     assert!(p.title.contains("停止記録"));
     assert!(p.blocks[0].text.contains("時刻不明"));
     assert!(!p.title.contains("index_state"));
@@ -760,7 +760,7 @@ fn first_observations_are_compact_but_real_null_transitions_and_raw_fields_remai
         "active_space":null,"profile":null,"model":null,"dimension":null,"active_state":null,
         "paused":false,"pause_kind":null}}}),
     );
-    assert_eq!(p.title, "索引の状態 · 未設定");
+    assert_eq!(p.title, "索引の状態 | 未設定");
     assert_eq!(p.event_class, EventClass::Change);
     assert!(
         p.fields
@@ -776,7 +776,7 @@ fn first_observations_are_compact_but_real_null_transitions_and_raw_fields_remai
         assert_eq!(
             p.title,
             format!(
-                "指示ファイル確認 · {}",
+                "指示ファイル確認 | {}",
                 if present { "あり" } else { "なし" }
             )
         );
@@ -795,14 +795,14 @@ fn first_observations_are_compact_but_real_null_transitions_and_raw_fields_remai
     assert_eq!(p.event_class, EventClass::Attention);
     assert!(p.blocks[0].text.contains("configured-model"));
     assert!(p.title.contains("provider_limit"));
-    assert!(p.title.starts_with("/index → T"));
+    assert!(p.title.starts_with("/index > T"));
     assert!(p.fields.iter().any(|f| f.value == "original"));
     let p = project_event(
         json!({"kind":"index_state","change":{"before":{"model":"old-model"},
         "after":{"model":null,"profile":null,"paused":false}}}),
     );
-    assert!(p.title.contains("old-model → 未設定"));
-    assert!(!p.title.contains("未設定 → 未設定"));
+    assert!(p.title.contains("old-model > 未設定"));
+    assert!(!p.title.contains("未設定 > 未設定"));
     // Absent information does not justify the compact all-unconfigured claim.
     let p = project_event(json!({"kind":"index_state","change":{"before":null,"after":{}}}));
     assert_eq!(p.title, "索引の状態");
@@ -843,21 +843,21 @@ fn shell_outcome_marker_and_attention_use_current_code_without_overwriting_saved
         ..Default::default()
     };
     assert!(tool.heading().starts_with("✗"));
-    assert!(tool.heading().contains("終了 7 · 返却時 背景継続"));
+    assert!(tool.heading().contains("終了 7 | 返却時 背景継続"));
     tool.status = "failed".into();
     tool.exit_code = Some(7);
     tool.current_exit_code = Some(0);
-    assert!(tool.heading().contains("終了 0 · 返却時 失敗 7"));
+    assert!(tool.heading().contains("終了 0 | 返却時 失敗 7"));
     assert!(tool.heading().starts_with("✗"));
     tool.current_exit_code = None;
     assert!(
         tool.heading()
-            .contains("終了（コード不明） · 返却時 失敗 7")
+            .contains("終了（コード不明） | 返却時 失敗 7")
     );
     tool.observation_unavailable();
     assert_eq!(tool.current_exit_code, None);
     assert_eq!(tool.exit_code, Some(7));
-    assert!(tool.heading().contains("失敗 7 · 現在状態は未確認"));
+    assert!(tool.heading().contains("失敗 7 | 現在状態は未確認"));
     assert!(!tool.heading().contains("現在 終了"));
     tool.clear_observation();
     assert_eq!(tool.current_state, None);
@@ -1162,13 +1162,13 @@ fn structured_tool_errors_have_readable_summaries_and_preserve_original_fields()
     for (error, expected) in [
         (
             json!({"code":"permission_denied","message":"Cannot open fixture"}),
-            "Cannot open fixture · permission_denied",
+            "Cannot open fixture | permission_denied",
         ),
         (
             json!({"error":{"message":"Nested failure"}}),
             "Nested failure",
         ),
-        (json!({"code":"fixture_code"}), "fixture_code · 詳細はF6"),
+        (json!({"code":"fixture_code"}), "fixture_code | 詳細はF6"),
         (json!([{"message":"unknown array"}]), "エラー詳細はF6"),
         (
             json!({"arbitrary":"private-shaped-detail"}),
@@ -1242,7 +1242,7 @@ fn terminal_tools_plain_code_and_index_readiness_avoid_internal_noise() {
     let payload = json!({"text":format!("Shellboy event v1: {event}")});
     let p = project("event", &payload, &text_of_payload(&payload), 0);
     assert_eq!(p.event_class, EventClass::Routine);
-    assert_eq!(p.title, "検索索引 · 利用可能");
+    assert_eq!(p.title, "検索索引 | 利用可能");
     assert!(
         p.fields.iter().any(|field| field.value == "active"),
         "raw state remains in details"
@@ -1288,7 +1288,7 @@ fn revisit_event_names_the_continuation_and_shows_instruction_without_changing_s
     let original = payload.clone();
     let text = text_of_payload(&payload);
     let projected = project("event", &payload, &text, 0);
-    assert_eq!(projected.title, "Revisit resumed · 5");
+    assert_eq!(projected.title, "Revisit resumed | 5");
     assert_eq!(projected.event_class, EventClass::Change);
     assert!(
         projected
@@ -1444,7 +1444,7 @@ fn index_pause_is_an_actionable_historical_record_with_saved_time() {
     let payload = json!({"text":format!("Shellboy event v1: {event}")});
     let p = project("event", &payload, &text_of_payload(&payload), 0);
     assert_eq!(p.event_class, EventClass::Attention);
-    assert!(p.title.starts_with("/index → T"));
+    assert!(p.title.starts_with("/index > T"));
     assert!(p.title.contains("停止記録"));
     assert!(p.blocks[0].text.contains("2026-10-30T12:00:00Z"));
     assert!(p.blocks[0].text.contains("会話は続行"));
@@ -1490,4 +1490,34 @@ fn shell_descriptions_are_bounded_searchable_and_never_replace_canonical_command
             assert_eq!(response.output[0]["arguments"], args.to_string());
         }
     }
+}
+
+#[test]
+fn markdown_table_borders_are_invariant_without_rewriting_user_glyphs() {
+    let text = "| value | text |\n| --- | --- |\n| \u{2502} | A\u{00b7}B |";
+    for width in [Some(1), Some(2), None] {
+        unicode_width::set_terminal_width(width);
+        let mut projected = project("assistant_response", &json!({"text": text}), text, 0);
+        render_markdown(&mut projected, 22);
+        assert_eq!(projected.blocks[0].text, text);
+        let lines = &projected.blocks[0].rendered.as_ref().unwrap().lines;
+        let rendered = lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            rendered.iter().any(|line| line.starts_with('+')),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains('\u{2502}')),
+            "{rendered:?}"
+        );
+        assert!(
+            rendered.iter().any(|line| line.contains("A\u{00b7}B")),
+            "{rendered:?}"
+        );
+        assert!(lines.iter().all(|line| line.width() <= 22), "{rendered:?}");
+    }
+    unicode_width::clear_terminal_width();
 }

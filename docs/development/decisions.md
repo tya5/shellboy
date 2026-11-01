@@ -2885,3 +2885,21 @@ headers, provider/cache efficacy tests and real API calls remain outside scope.
 Revisit only with an explicitly approved routing or options-extension request.
 
 - D-142 revision (reviewer, 2026-11-01; supersedes the schema20 pointer above): reuse #141 current-scope selection over 33 recent Turns with one completed-index seek per Turn; no witness means no comparison/options, no older-history search, migration, column or derived copy.
+## UI Language Foundation (#139, 2026-11-01, Proposed)
+
+Use one typed complete-message boundary, explicit `[ui] language = "en" | "ja"`
+(default English), and no locale-based inference. The initial force-quit
+confirmation and width diagnostic are examples, not a promise that the rest
+of the UI is already translated. Keep stored/model/user text, API and CLI output
+unchanged. The design and non-overlapping stage B proposal are in
+[UI language foundation](../design/ui-language-stage-a-draft.md).
+
+Observe ambiguous width using two bounded startup cursor-position responses;
+unknown reserves two cells, and user settings do not override it. Apply the same
+policy to UI and asynchronous presentation workers. Emoji sequences are bounded
+conservatively, not asserted to have one font-independent width. Generated UI
+symbols, borders and Markdown table borders must have invariant widths; user
+content is never substituted. Two pinned, licensed dependency patches expose
+nonblocking ordered DSR input and a shared width policy to ratatui. Revisit the
+patches as upstream APIs evolve, and use a translation catalogue instead of the
+Rust enum if the locale/plural surface grows substantially.

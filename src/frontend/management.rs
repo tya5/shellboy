@@ -60,7 +60,7 @@ pub(super) fn completion_text(
         Ok(()) => "受付結果: 成功".to_owned(),
         Err(error) => format!("受付結果: 失敗（{}）", error.message),
     };
-    format!("{status} · {title} · 照会ID {}", id.unwrap_or("未取得"))
+    format!("{status} | {title} | 照会ID {}", id.unwrap_or("未取得"))
 }
 
 pub(super) struct Report {
@@ -248,20 +248,20 @@ fn work_report(safe: Value, budget: usize) -> Report {
                 })
                 .as_ref()
                 .and_then(presentation::revisit_label)
-                .map(|label| format!(" · {label}"))
+                .map(|label| format!(" | {label}"))
                 .unwrap_or_default();
             let marker = match text(item, "state").as_str() {
-                "failed" | "incomplete" => "×",
+                "failed" | "incomplete" => "x",
                 "completed" | "exited" | "applied" => "✓",
                 "held" | "recovery_wait" => "◷",
-                _ => "●",
+                _ => "*",
             };
             fields.push(PresentationField {
                 value_omitted: false,
                 display: None,
                 key: format!("/items/{index}"),
                 label: format!(
-                    "{marker} {} · {}",
+                    "{marker} {} | {}",
                     match text(item, "kind").as_str() {
                         "message" => "依頼",
                         "run" => "作業",
@@ -274,7 +274,7 @@ fn work_report(safe: Value, budget: usize) -> Report {
                     presentation::fields::state_label(&text(item, "state"))
                 ),
                 value: format!(
-                    "{title} · {short} · {}{revisit}",
+                    "{title} | {short} | {}{revisit}",
                     presentation::fields::local_time(&text(item, "activity_at"))
                         .unwrap_or_else(|| text(item, "activity_at"))
                 ),
@@ -513,7 +513,7 @@ pub(super) fn index_preview_text(value: &Value) -> String {
             .unwrap_or_else(|| "未取得".into());
         lines.push(format!("{label}: {count}"));
     }
-    lines.push("API未送信 · 金額は未見積".into());
+    lines.push("API未送信 | 金額は未見積".into());
     lines.join("\n")
 }
 pub(super) fn index_preview_captured_text(
@@ -659,7 +659,7 @@ mod tests {
         let preview = preview_text(&value);
         let index_preview = index_preview_text(&value);
         assert!(index_preview.starts_with("資料数: 5\n区間数: 7\n対象文字数: 0"));
-        assert!(index_preview.contains("API未送信 · 金額は未見積"));
+        assert!(index_preview.contains("API未送信 | 金額は未見積"));
         let captured = chrono::DateTime::parse_from_rfc3339("2026-11-01T12:34:56.789Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
@@ -691,7 +691,7 @@ mod tests {
     fn status_rows_never_have_blank_titles_or_raw_state_labels() {
         let value = serde_json::json!({"filters":{},"items":[{"kind":"message","state":"accepted","thread_title":"","id":"complete-message-id","activity_at":"2026-10-25T00:00:00Z"}]});
         let report = report(value.clone(), MAX_FRAME_BYTES);
-        assert_eq!(report.fields[0].label, "● 依頼 · 受付済み");
+        assert_eq!(report.fields[0].label, "* 依頼 | 受付済み");
         assert!(report.fields[0].value.starts_with("件名未設定"));
         assert!(!report.fields[0].value.contains("T00:00:00Z"));
         assert_eq!(report.detail, Some(value));
@@ -703,7 +703,7 @@ mod tests {
         assert!(
             projected.fields[0]
                 .value
-                .contains("Revisit 5 · next reserved")
+                .contains("Revisit 5 | next reserved")
         );
         assert_eq!(projected.detail, Some(value));
     }

@@ -541,7 +541,7 @@ fn command_title(command: &Command) -> String {
     crate::operations::OperationId::from_owner_command(command)
         .map(|id| id.label())
         .unwrap_or("Owner shutdown")
-        .into()
+        .replace('·', "|")
 }
 // Report operation acceptance separately from presentation: a report-rendering
 // failure must not invite retrying an already-applied mutation.
@@ -1614,7 +1614,7 @@ async fn run_with_delivery(
                             }
                             continue;
                         };
-                        status(&updates, target.clone(), "設定を反映中…").await;
+                        status(&updates, target.clone(), "設定を反映中.").await;
                         let control = control.clone();
                         let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
@@ -1634,7 +1634,7 @@ async fn run_with_delivery(
                                 Ok(details) => {
                                     let thread = details.thread_id.clone();
                                     let message = format!(
-                                        "設定を変更しました · {} / {}",
+                                        "設定を変更しました | {} / {}",
                                         details.connection, details.model
                                     );
                                     update(
@@ -1746,7 +1746,7 @@ async fn run_with_delivery(
                         }
                     }
                     UiAction::ClientOperation(operation) => {
-                        let title = operation.catalogue().spec().label.to_owned();
+                        let title = operation.catalogue().spec().label.replace('·', "|");
                         let mutation = operation.effect() != crate::operations::Effect::Inspect;
                         let notice_owner = management::NoticeOwner::capture(
                             context.as_ref(), submission.as_ref(),
@@ -1783,7 +1783,7 @@ async fn run_with_delivery(
                                     value.get("ok").and_then(Value::as_bool) != Some(false)
                                         && value.get("exit_code").and_then(Value::as_u64).is_none_or(|code| code == 0)
                                 });
-                                update(&outcomes, owner.update(format!("{title} · {}", if success {"処理結果を受信"} else {"失敗 · 詳細を確認してください"}))).await;
+                                update(&outcomes, owner.update(format!("{title} | {}", if success {"処理結果を受信"} else {"失敗 | 詳細を確認してください"}))).await;
                             }
                             let (external, result) = prepare_external(response, control.store.config.cache.body_bytes, external).await;
                             let _ = sender.send(BackgroundResult::Command { external, retained:None,list_command:None, work_status: false, context, generation, title, result }).await;
@@ -1831,7 +1831,7 @@ async fn run_with_delivery(
                                 if let Some(owner) = notice_owner {
                                     update(
                                         &updates,
-                                        owner.update(format!("未受付 · {title} · {}", error.message)),
+                                        owner.update(format!("未受付 | {title} | {}", error.message)),
                                     )
                                     .await;
                                 }
@@ -1906,7 +1906,7 @@ async fn run_with_delivery(
                             if let Some(owner) = notice_owner {
                                 update(
                                     &updates,
-                                    owner.update(format!("未受付 · 添付再読込 · {}", error.message)),
+                                    owner.update(format!("未受付 | 添付再読込 | {}", error.message)),
                                 )
                                 .await;
                             }
@@ -2252,7 +2252,7 @@ async fn run_with_delivery(
                     UiAction::WatchAction(target)=>{
                         let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,selection.active_thread.clone(),"Watchの操作キューが満杯です。再操作してください").await;continue;};
                         let output=target.kind==watch::WatchActionKind::Output;
-                        let title=match target.kind {watch::WatchActionKind::Stop=>"Watch · 停止",watch::WatchActionKind::Retry=>"Watch · 再試行",watch::WatchActionKind::Output=>"Watch · 保存出力"}.to_owned();
+                        let title=match target.kind {watch::WatchActionKind::Stop=>"Watch | 停止",watch::WatchActionKind::Retry=>"Watch | 再試行",watch::WatchActionKind::Output=>"Watch | 保存出力"}.to_owned();
                         let generation=if output {management.next_generation()}else{0};
                         let selected=selection.active_thread.clone();let control=control.clone();let results=background_tx.clone();let outcomes=updates.worker();
                         spawn_work(&mut workers,permit,async move {
@@ -2260,7 +2260,7 @@ async fn run_with_delivery(
                             if output {
                                 let result=prepare_management(response,control.store.config.cache.body_bytes).await;
                                 let _=results.send(BackgroundResult::Command { external:None,retained:None,list_command:None,work_status:false,context:None,generation,title,result}).await;
-                            } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,format!("{title}は未適用 · {error}")).await,}}
+                            } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,format!("{title}は未適用 | {error}")).await,}}
                         });
                     },
                     UiAction::ProgramStatusSeen { thread_id, run_id } => {
@@ -2732,7 +2732,7 @@ async fn run_with_delivery(
                             &updates,
                             UiUpdate::DraftStatus {
                                 draft_id: draft_id.clone(),
-                                text: "クリップボード画像を保存中…".into(),
+                                text: "クリップボード画像を保存中.".into(),
                             },
                         )
                         .await;
@@ -4107,12 +4107,12 @@ fn tool_preview_at(
         // Store the observation label once in the existing budgeted payload.
         // Paint/cache hits must not advance a snapshot's apparent read time.
         notice: Some(format!(
-            "取得 {} UTC · 閉じて開くと再取得{}",
+            "取得 {} UTC | 閉じて開くと再取得{}",
             observed_at.format("%Y-%m-%d %H:%M:%S"),
             if notices.is_empty() {
                 String::new()
             } else {
-                format!(" · {}", notices.join("。"))
+                format!(" | {}", notices.join("。"))
             },
         )),
     }
@@ -4383,7 +4383,7 @@ mod tool_preview_tests {
         );
         assert_eq!(
             preview.notice.as_deref(),
-            Some("取得 2026-10-30 04:05:06 UTC · 閉じて開くと再取得")
+            Some("取得 2026-10-30 04:05:06 UTC | 閉じて開くと再取得")
         );
     }
 

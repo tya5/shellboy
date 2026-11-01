@@ -38,10 +38,10 @@ def main():
             command.extend(["--keys", sequence])
         subprocess.run(command, check=True, timeout=60)
         text = target.read_text()
-        match = re.search(r"┌メッセージ[^\n]*\n(.*?)\n└", text, re.S)
+        match = re.search(r"\+メッセージ[^\n]*\n(.*?)\n\+", text, re.S)
         if not match:
             raise AssertionError(f"Missing composer in {name}")
-        scenes[name] = {"text": text, "draft": "\n".join(line.strip("│ ") for line in match[1].splitlines())}
+        scenes[name] = {"text": text, "draft": "\n".join(line.strip("| ") for line in match[1].splitlines())}
     checks = {
         "all_candidates": all(name in scenes["all"]["text"] for name in ["/help", "/new", "/threads"]),
         "filtered_candidates": "/attachments" in scenes["filtered"]["text"] and "/compact" not in scenes["filtered"]["text"],
