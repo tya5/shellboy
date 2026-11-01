@@ -37,7 +37,10 @@ pub struct ListInspectionScope {
 }
 impl InspectionTarget {
     pub(crate) fn retains_history(&self) -> bool {
-        matches!(self, Self::HistorySources(_) | Self::Lists(_) | Self::RetainedSources(_))
+        matches!(
+            self,
+            Self::HistorySources(_) | Self::Lists(_) | Self::RetainedSources(_)
+        )
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

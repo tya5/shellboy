@@ -7336,3 +7336,20 @@ The previous published branch is retained to preserve the first CI's history;
 a new own task branch carries the rebase rather than force-rewriting it.
 Final #107-main rebase/qualification remains required and release preparation
 preempts this task when #120stage1/#119/#121 integration completes.
+
+## #108 after #107-main author rebase
+
+Rebased the task onto exact03bf8570b0dac5335af7eefc8b8cd16046e7d180 after #107
+admission. Author resolves frontend.rs/inspection_read.rs/ui/inspection.rs while
+retaining both Lists and RetainedSources module/target/capture/read/prepare paths,
+list_command ownership, original request decoration and retention classification.
+A later formatting-only conflict retains both enum branches. No other worktree
+is edited and no counterpart change is discarded. Own source before final record
+is7b1c40ad plus rustfmt-only ui/inspection.rs; runtime semantics are unchanged by
+that final formatting diff.
+
+rust-slot execution428190ae passes check --tests and retained14/raw3/retainedIPC2,
+then existing #107 list adapter7 and registered listIPC1, total27 positive test
+executions. The latter covers all4 list routes and8 real IPC Changed commits.
+Exit0/cleanup is confirmed. The prior source5e20cf1e three-OS CI remains qualified
+only on its older base; latest native3OS checks must qualify the new pushed SHA.
