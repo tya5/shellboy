@@ -1659,7 +1659,7 @@ fn term_for(id: Term, language: crate::config::UiLanguage) -> &'static str {
 
 pub(super) fn text_for(value: Text, language: crate::config::UiLanguage) -> &'static str {
     use crate::operations::{EnterVerb, TextKey};
-    match value.key {
+    let rendered = match value.key {
         TextKey::Label(id) => operation_label_for(id, language),
         TextKey::Meaning(id) => operation_meaning_for(id, language),
         TextKey::FieldLabel(_, field) => field_label_for(field, language),
@@ -1687,7 +1687,9 @@ pub(super) fn text_for(value: Text, language: crate::config::UiLanguage) -> &'st
         TextKey::Enter(EnterVerb::Send) => local!(language, "送信", "Send"),
         TextKey::Term(term) => term_for(term, language),
         TextKey::Discovery(discovery) => discovery_for(discovery, language),
-    }
+    };
+    debug_assert!(language != crate::config::UiLanguage::Ja || rendered == value.fallback);
+    rendered
 }
 
 fn global_argument_text(
