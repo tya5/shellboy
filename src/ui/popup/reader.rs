@@ -380,9 +380,29 @@ mod tests {
     fn limited_help_screen_uses_configured_language_at_standard_widths() {
         fn configure(ui: &mut crate::ui::UiState) {
             ui.show_help(crate::ui::help::Page::info(
-                "Synthetic reader", "Fixture", "x".repeat(300_000),
+                "Synthetic reader",
+                "Fixture",
+                "x".repeat(300_000),
             ));
             ui.help_scroll = u16::MAX;
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Limit: Copy the original"],
+                UiLanguage::Ja => &["上限: 表示キャッシュ上限"],
+            }
+        }
+        crate::ui::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn limited_confirmation_screen_uses_configured_language_at_standard_widths() {
+        fn configure(ui: &mut crate::ui::UiState) {
+            ui.confirmation = Some(crate::ui::Confirmation::Operation {
+                command: crate::protocol::Command::Status(crate::protocol::StatusArgs::default()),
+                detail: "x".repeat(300_000),
+            });
+            ui.confirmation_scroll = u16::MAX;
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
