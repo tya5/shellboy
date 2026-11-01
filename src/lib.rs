@@ -51,3 +51,25 @@ pub(crate) mod readback;
 #[path = "../tests/support/watchdog.rs"]
 pub(crate) mod test_watchdog;
 pub(crate) mod thread_observation;
+
+#[cfg(test)]
+mod shared_ui_message_tests {
+    use crate::{config::UiLanguage, ui::i18n::local};
+
+    #[test]
+    fn fixed_messages_are_available_outside_ui_and_evaluate_language_once() {
+        assert_eq!(local!(UiLanguage::Ja, "日本語", "English"), "日本語");
+        assert_eq!(local!(UiLanguage::En, "日本語", "English"), "English");
+        let mut evaluations = 0;
+        let text = local!(
+            {
+                evaluations += 1;
+                UiLanguage::En
+            },
+            "日本語",
+            "English"
+        );
+        assert_eq!(text, "English");
+        assert_eq!(evaluations, 1);
+    }
+}
