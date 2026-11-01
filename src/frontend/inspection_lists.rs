@@ -591,6 +591,56 @@ mod tests {
         assert_eq!(value["status_membership"]["unconfirmed"], true);
     }
     #[test]
+    fn thread_title_facade_keeps_canonical_fallback_and_marks_over_budget_source() {
+        for oversized in [false, true] {
+            let mut db = rusqlite::Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','  ','/','','p','m','2026-11-01T00:00:00Z')",[]).unwrap();
+            let text = if oversized {
+                "x".repeat(512 * 1024)
+            } else {
+                "Derived question".into()
+            };
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json)VALUES('n','user','now',?1)",
+                [json!({"role":"user","content":text}).to_string()],
+            )
+            .unwrap();
+            db.execute("INSERT INTO thread_path VALUES('t',0,'n')", [])
+                .unwrap();
+            let scope = capture_list_scope(
+                &Command::ThreadList(Default::default()),
+                Arc::new(json!({"items":[{"thread_id":"t","title":"Captured title"}]})),
+                &[],
+            )
+            .unwrap();
+            let tx = db.transaction().unwrap();
+            let raw = read_list_facts_tx(&tx, scope).unwrap();
+            tx.commit().unwrap();
+            db.close().unwrap();
+            let value = prepare_list_facts(raw).unwrap();
+            assert_eq!(value["current"]["items"][0]["thread_id"], "t");
+            assert!(value["metadata_text_bytes"].as_u64().unwrap() <= status::TEXT_BYTES as u64);
+            if oversized {
+                assert!(
+                    value["current"]["unconfirmed_ids"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|id| id == "t")
+                );
+            } else {
+                assert_eq!(value["current"]["items"][0]["title"], "Derived question");
+                assert!(
+                    value["current"]["unconfirmed_ids"]
+                        .as_array()
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+    }
+    #[test]
     fn capture_checks_text_and_structure_before_cloning() {
         let command = Command::ThreadList(serde_json::from_value(json!({})).unwrap());
         let value =
