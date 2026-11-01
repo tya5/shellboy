@@ -199,8 +199,10 @@ Observed in CI (see each case's `model` and `processes` in the JSON): Claude
 Code (`Bash`), Codex (`exec_command`) and jcode (`bash`) made exactly 9 requests
 per session; opencode (`bash`) made 10, its extra one an auxiliary title
 request. Shellboy and jcode run as one process, opencode as one process, Claude
-Code as one process per session; at N=20 Codex left a few extra descendant
-processes alive after the rounds, which are counted. Process-per-session
+Code as one process per session. Codex sometimes still had a few descendant
+processes alive at a sample (seen at N=1 and N=20 in different runs); they are
+counted. GitHub assigns different CPU models to different runs (AMD EPYC 7763
+and 9V45 were both seen), so compare agents within one artifact only. Process-per-session
 agents get no readiness signal before their first turn, so every adapter idles
 3 s before the baseline sample (as jcode's script does).
 
