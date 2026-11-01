@@ -3953,15 +3953,21 @@ mod tests {
                         "OSS syntax colors must remain"
                     );
                 } else {
-                    let body_lines: Vec<_> = lines
-                        .iter()
-                        .filter(|line| {
-                            !line.spans.iter().any(|span| {
-                                span.style.underline_color == Some(theme::COPY_DECORATION)
-                            })
-                        })
-                        .cloned()
-                        .collect();
+                    let mut body_node = node.clone();
+                    let mut captions_removed = 0;
+                    for block in &mut body_node.presentation.blocks {
+                        if let Some(rendered) = &mut block.rendered {
+                            let previous = rendered.lines.len();
+                            rendered.lines.retain(|line| {
+                                !line.spans.iter().any(|span| {
+                                    span.style.underline_color == Some(theme::COPY_DECORATION)
+                                })
+                            });
+                            captions_removed += previous - rendered.lines.len();
+                        }
+                    }
+                    assert!(captions_removed > 0, "generated caption must be excluded");
+                    let body_lines = node_lines(&body_node, false, 0, 50, &mut Vec::new());
                     let mut body_buffer = ratatui::buffer::Buffer::empty(area);
                     Paragraph::new(borrowed(&body_lines))
                         .style(Style::default().fg(terminal_foreground))
