@@ -1,4 +1,5 @@
 //! Typed TUI operation forms. This module never parses arbitrary JSON or runs CLI.
+use super::i18n::local;
 use super::{activity::ActivityPhase, popup, prev_grapheme, theme};
 use crate::config::UiLanguage;
 use crate::operations::{CompactMode, DefaultOrigin, Effect, FieldId, OperationId};
@@ -1195,7 +1196,14 @@ impl Form {
                             "set" => Some(form.owned("title")?),
                             "auto" => Some(String::new()),
                             "keep" => None,
-                            _ => return Err("タイトル操作を選択してください".into()),
+                            _ => {
+                                return Err(local!(
+                                    form.language,
+                                    "タイトル操作を選択してください",
+                                    "Select a title action"
+                                )
+                                .into());
+                            }
                         },
                         thread_id: form.optional("thread")?,
                         cwd: form.target_path("cwd", cwd)?,
@@ -1335,7 +1343,12 @@ impl Form {
                         let mut conditions = form.conditions.clone();
                         if !form.value("target")?.is_empty() {
                             if conditions.len() >= 64 {
-                                return Err("待機条件は最大64件です".into());
+                                return Err(local!(
+                                    form.language,
+                                    "待機条件は最大64件です",
+                                    "At most 64 wait conditions are allowed"
+                                )
+                                .into());
                             }
                             conditions.push(form.condition()?);
                         }
@@ -1488,8 +1501,11 @@ impl Form {
                     Ok(Command::AttachmentAdd(AttachmentAddArgs {
                         thread_id: form.optional("thread")?,
                         path: form.path("path", cwd)?.unwrap_or_default(),
-                        kind: AttachmentKind::parse(form.value("kind")?)
-                            .ok_or("添付kindを選択してください")?,
+                        kind: AttachmentKind::parse(form.value("kind")?).ok_or(local!(
+                            form.language,
+                            "添付kindを選択してください",
+                            "Select an attachment kind"
+                        ))?,
                     }))
                 },
             ),
@@ -1508,64 +1524,74 @@ impl Form {
                     }))
                 },
             ),
-            OpKind::Compact => (
-                vec![
-                    thread(),
-                    f(
-                        "action",
-                        "圧縮・編集方法",
-                        "deferred".into(),
-                        Choice(&[
-                            "deferred", "maximal", "spill", "summary", "trim", "omit", "restore",
-                        ]),
-                    ),
-                    f("from_node", "範囲先頭node ID", String::new(), Text),
-                    f("to_node", "範囲末尾node ID", String::new(), Text),
-                    f(
-                        "max_chars",
-                        "要約文字数上限（空=設定値）",
-                        String::new(),
-                        Number,
-                    ),
-                    f(
-                        "max_percent",
-                        "要約割合上限（空=設定値）",
-                        String::new(),
-                        Number,
-                    ),
-                ],
-                |form, _| {
-                    let action = match form.value("action")? {
-                        "deferred" => {
-                            if form.optional("from_node")?.is_some()
-                                || form.optional("to_node")?.is_some()
-                                || form.optional("max_chars")?.is_some()
-                                || form.optional("max_percent")?.is_some()
-                            {
-                                return Err(
-                                    "範囲を指定するときは圧縮・編集方法を選択してください".into()
+            OpKind::Compact => {
+                (
+                    vec![
+                        thread(),
+                        f(
+                            "action",
+                            "圧縮・編集方法",
+                            "deferred".into(),
+                            Choice(&[
+                                "deferred", "maximal", "spill", "summary", "trim", "omit",
+                                "restore",
+                            ]),
+                        ),
+                        f("from_node", "範囲先頭node ID", String::new(), Text),
+                        f("to_node", "範囲末尾node ID", String::new(), Text),
+                        f(
+                            "max_chars",
+                            "要約文字数上限（空=設定値）",
+                            String::new(),
+                            Number,
+                        ),
+                        f(
+                            "max_percent",
+                            "要約割合上限（空=設定値）",
+                            String::new(),
+                            Number,
+                        ),
+                    ],
+                    |form, _| {
+                        let action = match form.value("action")? {
+                            "deferred" => {
+                                if form.optional("from_node")?.is_some()
+                                    || form.optional("to_node")?.is_some()
+                                    || form.optional("max_chars")?.is_some()
+                                    || form.optional("max_percent")?.is_some()
+                                {
+                                    return Err(
+                                    local!(form.language, "範囲を指定するときは圧縮・編集方法を選択してください", "Select a compaction or editing method when specifying a range").into()
                                 );
+                                }
+                                return Ok(Command::Compact(form.thread_target()?));
                             }
-                            return Ok(Command::Compact(form.thread_target()?));
-                        }
-                        "summary" => ContextEditAction::Summary,
-                        "maximal" => ContextEditAction::Maximal,
-                        "spill" => ContextEditAction::Spill,
-                        "trim" => ContextEditAction::Trim,
-                        "omit" => ContextEditAction::Omit,
-                        "restore" => ContextEditAction::Restore,
-                        _ => return Err("圧縮・編集方法を選択してください".into()),
-                    };
-                    Ok(Command::ContextEdit(ContextEditArgs {
-                        thread_id: form.optional("thread")?,
-                        action,
-                        from_node_id: form.optional("from_node")?,
-                        to_node_id: form.optional("to_node")?,
-                        max_chars: form.optional_number("max_chars")?,
-                        max_percent: form.optional_number("max_percent")?,
-                    }))
-                },
-            ),
+                            "summary" => ContextEditAction::Summary,
+                            "maximal" => ContextEditAction::Maximal,
+                            "spill" => ContextEditAction::Spill,
+                            "trim" => ContextEditAction::Trim,
+                            "omit" => ContextEditAction::Omit,
+                            "restore" => ContextEditAction::Restore,
+                            _ => {
+                                return Err(local!(
+                                    form.language,
+                                    "圧縮・編集方法を選択してください",
+                                    "Select a compaction or editing method"
+                                )
+                                .into());
+                            }
+                        };
+                        Ok(Command::ContextEdit(ContextEditArgs {
+                            thread_id: form.optional("thread")?,
+                            action,
+                            from_node_id: form.optional("from_node")?,
+                            to_node_id: form.optional("to_node")?,
+                            max_chars: form.optional_number("max_chars")?,
+                            max_percent: form.optional_number("max_percent")?,
+                        }))
+                    },
+                )
+            }
             OpKind::IndexStatus => (index_fields(operation), |form, _cwd| {
                 Ok(Command::IndexStatus(form.index_args()?))
             }),
@@ -1649,8 +1675,11 @@ impl Form {
                 |form, _cwd| {
                     Ok(Command::HistoryRelations(HistoryRelationsArgs {
                         node_id: form.owned("node")?,
-                        relation: HistoryRelation::parse(form.value("relation")?)
-                            .ok_or("関係を選択してください")?,
+                        relation: HistoryRelation::parse(form.value("relation")?).ok_or(local!(
+                            form.language,
+                            "関係を選択してください",
+                            "Select a relationship"
+                        ))?,
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
                     }))
@@ -1725,8 +1754,13 @@ impl Form {
             .iter()
             .find(|field| field.name == name)
             .map(|field| field.value.as_str())
-            .ok_or_else(|| {
-                format!("必要な入力欄（{name}）が見つかりません。操作は送信していません")
+            .ok_or_else(|| match self.language {
+                UiLanguage::Ja => {
+                    format!("必要な入力欄（{name}）が見つかりません。操作は送信していません")
+                }
+                UiLanguage::En => {
+                    format!("Required field {name} is missing. The operation was not submitted.")
+                }
             })
     }
     fn optional(&self, name: &str) -> Result<Option<String>, String> {
@@ -1734,23 +1768,26 @@ impl Form {
         Ok((!value.is_empty()).then(|| value.to_owned()))
     }
     fn number<T: std::str::FromStr>(&self, name: &str) -> Result<T, String> {
-        self.value(name)?
-            .parse()
-            .map_err(|_| format!("{name}: 正の数値を入力してください"))
+        self.value(name)?.parse().map_err(|_| match self.language {
+            UiLanguage::Ja => format!("{name}: 正の数値を入力してください"),
+            UiLanguage::En => format!("{name}: Enter a positive number"),
+        })
     }
     fn optional_number<T: std::str::FromStr>(&self, name: &str) -> Result<Option<T>, String> {
         self.optional(name)?
             .map(|value| {
-                value
-                    .parse()
-                    .map_err(|_| format!("{name}: 数値を入力してください"))
+                value.parse().map_err(|_| match self.language {
+                    UiLanguage::Ja => format!("{name}: 数値を入力してください"),
+                    UiLanguage::En => format!("{name}: Enter a number"),
+                })
             })
             .transpose()
     }
     fn boolean(&self, name: &str) -> Result<bool, String> {
-        self.value(name)?
-            .parse()
-            .map_err(|_| format!("{name}: true / false を選択してください"))
+        self.value(name)?.parse().map_err(|_| match self.language {
+            UiLanguage::Ja => format!("{name}: true / false を選択してください"),
+            UiLanguage::En => format!("{name}: Select true or false"),
+        })
     }
     fn path(&self, name: &str, cwd: &Path) -> Result<Option<String>, String> {
         self.optional(name)?
@@ -1759,9 +1796,7 @@ impl Form {
                 crate::input_path::utf8(&path)
                     .map(str::to_owned)
                     .map_err(|_| {
-                        format!(
-                            "{name}: パスはUTF-8で表現できる必要があります。操作は送信していません"
-                        )
+                        match self.language { UiLanguage::Ja => format!("{name}: パスはUTF-8で表現できる必要があります。操作は送信していません"), UiLanguage::En => format!("{name}: The path must be representable as UTF-8. The operation was not submitted.") }
                     })
             })
             .transpose()
@@ -1786,7 +1821,12 @@ impl Form {
     fn condition(&self) -> Result<WaitCondition, String> {
         let id = self.value("target")?.to_owned();
         if id.is_empty() {
-            return Err("待機対象IDが必要です".into());
+            return Err(local!(
+                self.language,
+                "待機対象IDが必要です",
+                "A wait target ID is required"
+            )
+            .into());
         }
         Ok(match self.value("condition")? {
             "thread_settled" => WaitCondition::ThreadSettled {
@@ -1804,7 +1844,14 @@ impl Form {
                 execution_id: id,
                 cursor: self.value("cursor")?.into(),
             },
-            _ => return Err("待機条件typeが無効です".into()),
+            _ => {
+                return Err(local!(
+                    self.language,
+                    "待機条件typeが無効です",
+                    "The wait condition type is invalid"
+                )
+                .into());
+            }
         })
     }
     fn insert(&mut self, text: &str) {
@@ -1813,7 +1860,14 @@ impl Form {
         }
         let bytes = self.fields.iter().map(|f| f.value.len()).sum::<usize>();
         if bytes.saturating_add(text.len()) > 1024 * 1024 {
-            self.error = Some("入力field合計は1MiBまでです。既存内容を保持しました".into());
+            self.error = Some(
+                local!(
+                    self.language,
+                    "入力field合計は1MiBまでです。既存内容を保持しました",
+                    "Total field input is limited to 1 MiB. Existing content was retained."
+                )
+                .into(),
+            );
             return;
         }
         let Some(field) = self.fields.get_mut(self.selected) else {
@@ -1901,7 +1955,16 @@ impl Form {
                         target.value.clear();
                     }
                 }
-                Ok(_) => self.error = Some("待機条件は最大64件です".into()),
+                Ok(_) => {
+                    self.error = Some(
+                        local!(
+                            self.language,
+                            "待機条件は最大64件です",
+                            "At most 64 wait conditions are allowed"
+                        )
+                        .into(),
+                    )
+                }
                 Err(error) => self.error = Some(error),
             },
             KeyCode::F(10) if self.operation == OpKind::Wait => {
@@ -1954,7 +2017,11 @@ impl Form {
             },
             scope: match self.value("scope")? {
                 "" => None,
-                value => Some(IndexScope::parse(value).ok_or("scopeを選択してください")?),
+                value => Some(IndexScope::parse(value).ok_or(local!(
+                    self.language,
+                    "scopeを選択してください",
+                    "Select a scope"
+                ))?),
             },
             space_id: self.optional("space")?,
             thread_ids: self
@@ -1972,8 +2039,11 @@ impl Form {
     fn storage_args(&self) -> Result<StorageArgs, String> {
         Ok(StorageArgs {
             category: Some(
-                StorageCategory::parse(self.value("category")?)
-                    .ok_or("categoryを選択してください")?,
+                StorageCategory::parse(self.value("category")?).ok_or(local!(
+                    self.language,
+                    "categoryを選択してください",
+                    "Select a category"
+                ))?,
             ),
         })
     }
@@ -1988,9 +2058,12 @@ impl Form {
                     .sum::<usize>()
                     > 1024 * 1024
                 {
-                    return Err(
-                        "フォームの入力合計は1MiBまでです。本文ファイル入力も利用できます".into(),
-                    );
+                    return Err(local!(
+                        self.language,
+                        "フォームの入力合計は1MiBまでです。本文ファイル入力も利用できます",
+                        "Total form input is limited to 1 MiB. A text file can also be used."
+                    )
+                    .into());
                 }
                 build(self, cwd).map(Outcome::Client)
             }
@@ -1998,7 +2071,12 @@ impl Form {
     }
     fn command(&self, cwd: &Path) -> Result<Command, String> {
         let FormBuilder::Owner(build) = self.build else {
-            return Err("この操作は独立クライアントとして実行します".into());
+            return Err(local!(
+                self.language,
+                "この操作は独立クライアントとして実行します",
+                "This operation runs as a standalone client"
+            )
+            .into());
         };
         let command = build(self, cwd)?;
         command.validate().map_err(|e| e.to_string())?;
@@ -3060,7 +3138,65 @@ mod entry_tests {
 
 #[cfg(test)]
 mod language_rendering_tests {
+    use super::{Command, Context, Form, OpKind};
     use crate::{config::UiLanguage, ui::UiState};
+    use std::path::Path;
+
+    #[test]
+    fn every_english_form_field_has_an_english_label() {
+        for &operation in OpKind::ALL {
+            let mut form = Form::new(operation, &Context::default());
+            form.language = UiLanguage::En;
+            for field in &form.fields {
+                let label = form.field_label_for(field);
+                assert!(label.is_ascii(), "{operation:?} {}: {label}", field.name);
+            }
+        }
+    }
+
+    #[test]
+    fn localized_validation_and_choices_preserve_command_values() {
+        let mut form = Form::new(OpKind::DocsGet, &Context::default());
+        form.language = UiLanguage::En;
+        let error = match form.invocation(Path::new("/")) {
+            Err(error) => error,
+            Ok(_) => panic!("document is required"),
+        };
+        assert!(
+            error.contains("document") && error.contains("required"),
+            "{error}"
+        );
+        form.language = UiLanguage::Ja;
+        let error = match form.invocation(Path::new("/")) {
+            Err(error) => error,
+            Ok(_) => panic!("document is required"),
+        };
+        assert!(error.contains("入力が必要"), "{error}");
+
+        let mut form = Form::new(
+            OpKind::ThreadDelete,
+            &Context {
+                thread: "thread-fixture".into(),
+                ..Default::default()
+            },
+        );
+        let field = form
+            .fields
+            .iter_mut()
+            .find(|field| field.name == "descendants")
+            .unwrap();
+        field.value = "true".into();
+        assert_eq!(field.displayed_for(UiLanguage::En), "Yes");
+        assert_eq!(field.displayed_for(UiLanguage::Ja), "はい");
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            form.language = language;
+            let Command::ThreadDelete(args) = form.command(Path::new("/")).unwrap() else {
+                panic!("delete command")
+            };
+            assert_eq!(args.thread_id, "thread-fixture");
+            assert!(args.descendants);
+        }
+    }
 
     #[test]
     fn operations_list_is_bilingual_at_standard_widths() {

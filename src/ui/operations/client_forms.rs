@@ -1,4 +1,5 @@
 //! Typed standalone forms. No terminal stdin, subprocess, file or DB access.
+use super::super::i18n::local;
 use super::*;
 use crate::{
     cli::ThreadCreateOptions,
@@ -26,7 +27,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
         }),
         OpKind::DocsList => (vec![docparent(), limit("50"), cursor()], |form, _| {
             let limit = form.number("limit")?;
-            bounded(limit, 1, 200, "件数")?;
+            bounded(limit, 1, 200, "件数", "Count", form.language)?;
             Ok(ClientOperation::Docs(DocsCommand::List {
                 parent: form.optional("doc_parent")?,
                 limit,
@@ -42,7 +43,14 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             ],
             |form, _| {
                 let limit_bytes = form.number("limit")?;
-                bounded(limit_bytes, 1, 65536, "取得byte数")?;
+                bounded(
+                    limit_bytes,
+                    1,
+                    65536,
+                    "取得byte数",
+                    "Read size in bytes",
+                    form.language,
+                )?;
                 Ok(ClientOperation::Docs(DocsCommand::Get {
                     id: required(form, "document")?,
                     section: form.optional("section")?,
@@ -60,7 +68,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             ],
             |form, _| {
                 let limit = form.number("limit")?;
-                bounded(limit, 1, 100, "件数")?;
+                bounded(limit, 1, 100, "件数", "Count", form.language)?;
                 Ok(ClientOperation::Docs(DocsCommand::Search {
                     query: required(form, "query")?,
                     parent: form.optional("doc_parent")?,
@@ -127,19 +135,29 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                         || create.effort.is_some()
                         || create.parent_id.is_some())
                 {
-                    return Err("既存Threadと新規Thread設定は併用できません。対象又は新規設定を消去してください".into());
+                    return Err(local!(form.language, "既存Threadと新規Thread設定は併用できません。対象又は新規設定を消去してください", "An existing Thread cannot be combined with new Thread settings. Clear the target or the new settings.").into());
                 }
                 let text = required(form, "text")?;
                 if text.trim().is_empty() || text.len() > 128 * 1024 {
-                    return Err("依頼本文は空白以外を含む128KiB以内です。Schema込みの上限は実行前にも検証します".into());
+                    return Err(local!(form.language, "依頼本文は空白以外を含む128KiB以内です。Schema込みの上限は実行前にも検証します", "The request must contain non-whitespace text and fit within 128 KiB. The combined schema limit is checked again before execution.").into());
                 }
                 let max_repairs = form.number("max_repairs")?;
                 if max_repairs > 5 {
-                    return Err("修復回数は0〜5です".into());
+                    return Err(local!(
+                        form.language,
+                        "修復回数は0〜5です",
+                        "The repair count must be 0 through 5."
+                    )
+                    .into());
                 }
                 let timeout_ms = form.number("timeout")?;
                 if !(1..=86_400_000).contains(&timeout_ms) {
-                    return Err("全体期限は1〜86400000msです".into());
+                    return Err(local!(
+                        form.language,
+                        "全体期限は1〜86400000msです",
+                        "The total deadline must be 1 through 86400000 ms."
+                    )
+                    .into());
                 }
                 Ok(ClientOperation::Exec(ExecOptions {
                     schema: PathBuf::from(required(form, "schema")?),
@@ -166,7 +184,12 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                 let exclude = lines(form, "excludes")?;
                 let clear_excludes = form.boolean("clear_excludes")?;
                 if clear_excludes && !exclude.is_empty() {
-                    return Err("除外globの指定と既存除外の解除は併用できません".into());
+                    return Err(local!(
+                        form.language,
+                        "除外globの指定と既存除外の解除は併用できません",
+                        "Exclusion globs and clearing existing exclusions cannot be combined."
+                    )
+                    .into());
                 }
                 rag(
                     form,
@@ -231,7 +254,14 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                 let mode = match form.value("search_mode")? {
                     "keyword" => IndexMode::Keyword,
                     "semantic" => IndexMode::Semantic,
-                    _ => return Err("索引方式を選択してください".into()),
+                    _ => {
+                        return Err(local!(
+                            form.language,
+                            "索引方式を選択してください",
+                            "Select an indexing mode."
+                        )
+                        .into());
+                    }
                 };
                 rag(
                     form,
@@ -285,12 +315,24 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     "extracted" => IngestKind::Extracted,
                     "llm-explanation" => IngestKind::LlmExplanation,
                     "summary" => IngestKind::Summary,
-                    _ => return Err("本文の種類を選択してください".into()),
+                    _ => {
+                        return Err(local!(
+                            form.language,
+                            "本文の種類を選択してください",
+                            "Select a text kind."
+                        )
+                        .into());
+                    }
                 };
                 let (text_file, text_stdin, owned) = match form.value("input_mode")? {
                     "file" => {
                         if !form.value("text")?.is_empty() {
-                            return Err("本文ファイルを使うときは本文入力を消去してください".into());
+                            return Err(local!(
+                                form.language,
+                                "本文ファイルを使うときは本文入力を消去してください",
+                                "Clear the inline text when using a text file."
+                            )
+                            .into());
                         }
                         (
                             Some(PathBuf::from(required(form, "text_file")?)),
@@ -300,13 +342,23 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     }
                     "inline" => {
                         if form.optional("text_file")?.is_some() {
-                            return Err(
-                                "本文を入力するときは本文ファイル欄を消去してください".into()
-                            );
+                            return Err(local!(
+                                form.language,
+                                "本文を入力するときは本文ファイル欄を消去してください",
+                                "Clear the text file field when entering inline text."
+                            )
+                            .into());
                         }
                         (None, true, Some(required(form, "text")?))
                     }
-                    _ => return Err("本文の入力元を選択してください".into()),
+                    _ => {
+                        return Err(local!(
+                            form.language,
+                            "本文の入力元を選択してください",
+                            "Select a text input source."
+                        )
+                        .into());
+                    }
                 };
                 rag(
                     form,
@@ -358,11 +410,23 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     "keyword" => SearchMode::Keyword,
                     "semantic" => SearchMode::Semantic,
                     "hybrid" => SearchMode::Hybrid,
-                    _ => return Err("検索方式を選択してください".into()),
+                    _ => {
+                        return Err(local!(
+                            form.language,
+                            "検索方式を選択してください",
+                            "Select a search mode."
+                        )
+                        .into());
+                    }
                 };
                 let limit = form.number("limit")?;
                 if !(1..=100).contains(&limit) {
-                    return Err("検索件数は1〜100です".into());
+                    return Err(local!(
+                        form.language,
+                        "検索件数は1〜100です",
+                        "The search limit must be 1 through 100."
+                    )
+                    .into());
                 }
                 rag(
                     form,
@@ -386,7 +450,12 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
             |form, _| {
                 let limit_bytes = form.number("limit")?;
                 if !(1..=65536).contains(&limit_bytes) {
-                    return Err("取得byte数は1〜65536です".into());
+                    return Err(local!(
+                        form.language,
+                        "取得byte数は1〜65536です",
+                        "The read size must be 1 through 65536 bytes."
+                    )
+                    .into());
                 }
                 rag(
                     form,
@@ -423,9 +492,10 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
 fn required(form: &Form, name: &str) -> Result<String, String> {
     let value = form.value(name)?;
     if value.is_empty() {
-        Err(format!(
-            "{name}: 入力が必要です。F1で条件を確認してください"
-        ))
+        Err(match form.language {
+            UiLanguage::Ja => format!("{name}: 入力が必要です。F1で条件を確認してください"),
+            UiLanguage::En => format!("{name}: A value is required. Press F1 for requirements."),
+        })
     } else {
         Ok(value.into())
     }
@@ -441,11 +511,21 @@ fn lines(form: &Form, name: &str) -> Result<Vec<String>, String> {
         .map(str::to_owned)
         .collect())
 }
-fn bounded(value: usize, min: usize, max: usize, label: &str) -> Result<(), String> {
+fn bounded(
+    value: usize,
+    min: usize,
+    max: usize,
+    ja_label: &str,
+    en_label: &str,
+    language: UiLanguage,
+) -> Result<(), String> {
     if (min..=max).contains(&value) {
         Ok(())
     } else {
-        Err(format!("{label}は{min}〜{max}です"))
+        Err(match language {
+            UiLanguage::Ja => format!("{ja_label}は{min}〜{max}です"),
+            UiLanguage::En => format!("{en_label} must be {min} through {max}"),
+        })
     }
 }
 fn rag(
