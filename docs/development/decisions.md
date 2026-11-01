@@ -2616,3 +2616,12 @@ turn only when the tail is not user (hides the real order and still changes
 saved-vs-sent equivalence), and dropping the notices (loses delivered facts).
 Known limits: two adjacent user messages after mapping are left to the provider
 or gateway to merge. Revisit if a provider rejects consecutive user messages.
+
+## D-018: API-free compact preview (#113, 2026-11-01)
+
+Active. The reviewer authorizes #113 per its issue, after G main. Adopt a narrow
+read-only compact.preview route rather than admitting/rolling back a mutation or
+forking a conversation. Share canonical pure policies; bound collection and label
+coverage failure separately from a predicted execution refusal. Summary after-size
+is unknown without model text. The fixed collection envelope is documented in
+compaction.md and can be revisited with row/byte/query evidence, not timing bins.

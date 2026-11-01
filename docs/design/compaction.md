@@ -254,3 +254,44 @@ to the map budget because their necessity is learned only from the provider.
 The four-round reduce bound remains. Existing #50 rejection handling, cancellation,
 provenance and atomic adoption remain unchanged; an earlier spill may be saved.
 Omission notices do not hardcode size flags: ordinary summary uses user settings.
+
+## Read-only compaction forecast (#113)
+
+`compact --dry-run` selects `compact.preview`, a domain-specific read-only command
+with no receipt, queue admission, model/embedding request, marker/spill/part write
+or path adoption. It supports default spill-then-summary and explicit summary,
+spill, trim, omit and maximal; list/restore combinations are rejected. Existing
+mutation commands and safe-boundary admission are unchanged. Preview uses the
+existing finite presentation pool and one query-only WAL snapshot, never DbWorker
+or the UI thread. No table, worker, queue, polling or generic planner is added.
+
+Use canonical grouping, range/protection policies, spill payload, trim marker,
+replay character measurement, summary segment preflight and successful-part
+validation. A virtual spill precedes default summary, as in real execution.
+Summary text and its final length are unknown: return null after-size plus the
+source size and configured bound, not fabricated text. A deterministic failure
+is returned as forecast facts (code/message/hint), not successful empty targets;
+limits are unavailable forecasts, never predictions that an operation will fail.
+Completed deterministic before/after sizes count replay JSON Unicode characters,
+not SQLite bytes, tokenizer values, fixed instructions or terminal wrapped lines.
+Affected/removed user/assistant message counts refer to replay message records.
+A forecast is not a reservation; actual execution still revalidates its fences.
+
+The collection envelope is 4096 combined selected/hidden nodes, 512 Thread Turns,
+4096 receipts, 4096 tool-call/attachment/ancestry rows each, 16 ancestry layers,
+1MiB per payload/cache entry and 8MiB copied text total. Scalars are checked before
+copy (IDs1024, kinds/states64, paths128KiB). Every query uses literal Thread or
+exact-ID indexes with LIMIT+1; overflow yields InputLimit with unknown coverage.
+Backward replacement ancestry from selected roots avoids scanning lifetime Turn
+seeds; edges/cycles/depth are bounded, never guessed. At most26 SQL statements
+(9 collection/preflight/cache plus16 ancestry layers and one hidden-source read)
+are allowed; counts and indexed plans are tested, not timing thresholds.
+
+Original context markers are rendered via #112's short outbound notice, excluding
+provenance arrays. Explicit summary of one marker/full omitted-source range uses
+its checked saved replacement sources, matching canonical reintroduction behavior;
+a genuinely oversized visible indivisible group forecasts the canonical refusal.
+Default spill's newly-created replacement IDs cannot hit prior summary caches;
+other segments use existing cache validity. Provider/model failures after sending
+and races after the snapshot remain unpredicted. Final output is prepared after
+the read snapshot closes, with current capture revisions and explicit limits.
