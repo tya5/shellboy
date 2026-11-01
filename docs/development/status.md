@@ -7,7 +7,10 @@ read-only client that rebuilds a Thread's next request or a saved attempt's
 request without sending it. Attempt manifests now record the replayed path
 witness and cwd. tests/request_inspect.rs checks byte equality with what a
 loopback model received and that consecutive tool-loop requests repeat the
-previous items except the trailing context line. Branch CI pending at commit.
+previous items except the trailing context line. Used on a copied user database
+for the 2026-11-01 cache stall: all consecutive requests of the two affected
+Threads were append-only (body sizes matched the saved byte counts), so the
+stall is provider-side; see the decision record.
 
 ## Schema 18 release-upgrade validation
 

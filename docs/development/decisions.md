@@ -2791,3 +2791,22 @@ attempts report history as unknown instead of guessing from timestamps. The wire
 form uses the current configuration; a changed connection shows up as a
 `request_body_bytes` mismatch, not silently. Revisit if attachments need
 byte-exact rebuilding or if a TUI view is wanted.
+## 2026-11-01 cache stall on the ChatGPT backend is provider-side
+
+Through LiteLLM to the ChatGPT backend, cached_tokens only grows to the end of
+the most recent user-role input; tool-loop items and developer-role notices
+after it are never served from cache. Today's data: cache grew in 50 of 54
+requests that followed a request carrying a new user message, and in 19 of 919
+otherwise (yesterday 377/416 versus 29/2067). Rebuilding all consecutive
+requests of the two affected Threads with `thread request` showed each request
+repeats the previous one's items except the per-request context line at the
+end, with body sizes equal to the saved byte counts. No Shellboy change between
+811852f and main alters Responses request assembly. The lower ratio follows from
+long tool loops with few user messages plus proactive compaction shrinking the
+cached part below the last user message. A possible mitigation, connection
+`context_role = "user"`, would make the trailing context line the last user
+item but also changes how the model reads notices and may drop in-loop
+reasoning items; it needs a measured single-Thread trial before any default
+changes. Revisit if a provider documents its cache boundary or the trial shows
+a clear gain.
+
