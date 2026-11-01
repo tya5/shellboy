@@ -369,11 +369,8 @@ impl UiState {
                     self.confirmation = None;
                     self.confirmation_scroll = 0;
                 }
-                let count = ids.len();
-                let message = match self.config.ui.language {
-                    UiLanguage::En => format!("Deleted {count} conversations"),
-                    UiLanguage::Ja => format!("{count} 件の会話を削除しました"),
-                };
+                let message = super::i18n::Message::DeletedConversations { count: ids.len() }
+                    .render(self.config.ui.language);
                 self.thread_browser.notice(message);
             }
             Ok(ThreadDeletionReply::Preview(value, captured_at)) if !execute && matches => {

@@ -1,5 +1,7 @@
 //! UI-local management content, request lifetime, index selection and drawing.
+use super::i18n::local;
 use super::*;
+use crate::config::UiLanguage;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ManagementMode {
     General,
@@ -52,6 +54,7 @@ impl IndexPreviewState {
     }
 }
 pub struct ManagementPopup {
+    language: UiLanguage,
     pub(super) inspection: Option<inspection::State>,
     inspection_detail: Option<UiAction>,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
@@ -72,6 +75,7 @@ pub struct ManagementPopup {
 impl Default for ManagementPopup {
     fn default() -> Self {
         Self {
+            language: UiLanguage::Ja,
             inspection: None,
             inspection_detail: None,
             paint: Default::default(),
@@ -103,6 +107,19 @@ pub(super) enum Outcome {
     },
 }
 impl ManagementPopup {
+    pub(super) fn set_language(&mut self, language: UiLanguage) {
+        if self.language != language {
+            self.language = language;
+            self.reader_cache.borrow_mut().clear();
+        }
+    }
+    fn detail_footer(&self) -> &'static str {
+        local!(
+            self.language,
+            "Esc 戻る | ^v/PgUp/PgDn 閲覧\nN 次page | P 先頭 | C このpageをコピー",
+            "Esc Back | ^v/PgUp/PgDn Scroll\nN Next page | P First page | C Copy this page"
+        )
+    }
     pub(super) fn start_inspection(&mut self, target: InspectionTarget, title: String) {
         // Pending cost intents belong to their exact Index selection. Admitted
         // operations are tracked elsewhere and are never cancelled here.
@@ -158,7 +175,10 @@ impl ManagementPopup {
         let mut fields = state.fields.clone();
         fields.truncate(256);
         for field in &mut fields {
-            field.label = format!("取得時 | {}", field.label);
+            field.label = match self.language {
+                UiLanguage::En => format!("At capture | {}", field.label),
+                UiLanguage::Ja => format!("取得時 | {}", field.label),
+            };
         }
         inspection.anchors = fields
             .iter()
@@ -180,6 +200,7 @@ impl ManagementPopup {
         request_id: u64,
         mut snapshot: InspectionSnapshot,
     ) -> bool {
+        let language = self.language;
         let Some(inspection) = self.inspection.as_ref() else {
             return false;
         };
@@ -328,9 +349,17 @@ impl ManagementPopup {
         } else if let Some(detail) = state.detail.as_mut() {
             detail.stale = Some(
                 if mapped.is_some() {
-                    "新しい保存状態の詳細を取得中"
+                    local!(
+                        language,
+                        "新しい保存状態の詳細を取得中",
+                        "Retrieving details for the latest saved state"
+                    )
                 } else {
-                    "参照元が消失・一意に確認できません"
+                    local!(
+                        language,
+                        "参照元が消失・一意に確認できません",
+                        "The source is missing or cannot be identified uniquely"
+                    )
                 }
                 .into(),
             );
@@ -413,7 +442,14 @@ impl ManagementPopup {
             .and_then(|frame| frame.structured.as_mut())
             .and_then(|state| state.detail.as_mut())
         {
-            page.stale = Some("更新に失敗・以前の取得内容".into());
+            page.stale = Some(
+                local!(
+                    self.language,
+                    "更新に失敗・以前の取得内容",
+                    "Refresh failed; showing the previous capture"
+                )
+                .into(),
+            );
         }
         true
     }
@@ -424,6 +460,7 @@ impl ManagementPopup {
         pointer: &str,
         error: &str,
     ) -> bool {
+        let language = self.language;
         let Some(state) = self.structured_mut() else {
             return false;
         };
@@ -439,7 +476,10 @@ impl ManagementPopup {
         state.pending_cursor = None;
         state.detail_error = Some(reason.clone());
         if let Some(page) = &mut state.detail {
-            page.stale = Some(format!("詳細の更新に失敗: {reason}"));
+            page.stale = Some(match language {
+                UiLanguage::En => format!("Failed to refresh details: {reason}"),
+                UiLanguage::Ja => format!("詳細の更新に失敗: {reason}"),
+            });
         }
         true
     }
@@ -662,7 +702,14 @@ impl ManagementPopup {
                     .as_ref()
                     .filter(|(previous, _)| previous == &args)
                     .map(|(_, text)| text.clone())
-                    .unwrap_or_else(|| "取得中の確認は無効になりました".into());
+                    .unwrap_or_else(|| {
+                        local!(
+                            self.language,
+                            "取得中の確認は無効になりました",
+                            "The pending preview was invalidated"
+                        )
+                        .into()
+                    });
                 IndexPreviewState::Stale(args, text)
             }
             other => other,
@@ -719,37 +766,80 @@ impl ManagementPopup {
             IndexPreviewState::Idle => return vec![],
             IndexPreviewState::Loading(args) => (
                 if explicit_index_targets(args) {
-                    "費用preview | 取得中"
+                    local!(
+                        self.language,
+                        "費用preview | 取得中",
+                        "Cost preview | Loading"
+                    )
                 } else {
-                    "再試行preview | 取得中"
+                    local!(
+                        self.language,
+                        "再試行preview | 取得中",
+                        "Retry preview | Loading"
+                    )
                 },
-                "件数と文字数を確認中 | API未送信",
+                local!(
+                    self.language,
+                    "件数と文字数を確認中 | API未送信",
+                    "Checking counts and characters | API not called"
+                ),
             ),
             IndexPreviewState::Ready(args, text) => (
                 if explicit_index_targets(args) {
-                    "費用preview | 取得済み"
+                    local!(
+                        self.language,
+                        "費用preview | 取得済み",
+                        "Cost preview | Captured"
+                    )
                 } else {
-                    "再試行preview | 取得済み"
+                    local!(
+                        self.language,
+                        "再試行preview | 取得済み",
+                        "Retry preview | Captured"
+                    )
                 },
                 text.as_str(),
             ),
             IndexPreviewState::Stale(args, text) => (
                 if explicit_index_targets(args) {
-                    "古い費用preview | 再取得が必要"
+                    local!(
+                        self.language,
+                        "古い費用preview | 再取得が必要",
+                        "Stale cost preview | Refresh required"
+                    )
                 } else {
-                    "古い再試行preview | 再取得が必要"
+                    local!(
+                        self.language,
+                        "古い再試行preview | 再取得が必要",
+                        "Stale retry preview | Refresh required"
+                    )
                 },
                 text.as_str(),
             ),
             IndexPreviewState::Failed(args, text) => (
                 if explicit_index_targets(args) {
-                    "費用preview | 取得失敗"
+                    local!(
+                        self.language,
+                        "費用preview | 取得失敗",
+                        "Cost preview | Failed"
+                    )
                 } else {
-                    "再試行preview | 取得失敗"
+                    local!(
+                        self.language,
+                        "再試行preview | 取得失敗",
+                        "Retry preview | Failed"
+                    )
                 },
                 text.as_str(),
             ),
-            IndexPreviewState::Hint(text) => ("索引操作 | 未受付", text.as_str()),
+            IndexPreviewState::Hint(text) => (
+                local!(
+                    self.language,
+                    "索引操作 | 未受付",
+                    "Index operation | Not submitted"
+                ),
+                text.as_str(),
+            ),
         };
         let mut lines =
             vec![Line::from(title.to_owned()).style(Style::default().fg(theme::EMPHASIS))];
@@ -772,7 +862,11 @@ impl ManagementPopup {
             } else {
                 short
             }));
-            lines.push(Line::from("前回の結果 | 古い情報（再確認が必要）"));
+            lines.push(Line::from(local!(
+                self.language,
+                "前回の結果 | 古い情報（再確認が必要）",
+                "Previous result | Stale (review again)"
+            )));
             let safe: String = crate::presentation::sanitize_plain(previous, 0)
                 .0
                 .chars()
@@ -800,7 +894,7 @@ impl ManagementPopup {
             return area;
         }
         let mut lines = self.preview_lines(area.width);
-        mark_truncated_preview(&mut lines, height);
+        mark_truncated_preview(&mut lines, height, self.language);
         frame.render_widget(
             Paragraph::new(lines),
             Rect::new(area.x, area.y, area.width, height),
@@ -813,23 +907,33 @@ impl ManagementPopup {
         )
     }
     pub(super) fn index_label(&self) -> String {
-        let target = match &self.scope {
-            Some(args) if args.scope == Some(IndexScope::All) => {
-                "全会話 / 保持された出典（all）".into()
+        let space = self
+            .scope
+            .as_ref()
+            .and_then(|args| args.space_id.as_deref())
+            .unwrap_or("active");
+        match (self.language, &self.scope) {
+            (UiLanguage::En, Some(args)) if args.scope == Some(IndexScope::All) => {
+                format!("space={space} / All conversations and retained sources (all)")
             }
-            Some(args) if !args.thread_ids.is_empty() => {
-                format!("会話ID: {}", args.thread_ids.join(", "))
+            (UiLanguage::En, Some(args)) if !args.thread_ids.is_empty() => {
+                let ids = args.thread_ids.join(", ");
+                format!("space={space} / Thread IDs: {ids}")
             }
-            _ => "対象未選択。/index all または /index threads ID...".into(),
-        };
-        format!(
-            "space={} / {}",
-            self.scope
-                .as_ref()
-                .and_then(|args| args.space_id.as_deref())
-                .unwrap_or("active"),
-            target
-        )
+            (UiLanguage::En, _) => format!(
+                "space={space} / No target selected. Use /index all or /index threads ID..."
+            ),
+            (UiLanguage::Ja, Some(args)) if args.scope == Some(IndexScope::All) => {
+                format!("space={space} / 全会話 / 保持された出典（all）")
+            }
+            (UiLanguage::Ja, Some(args)) if !args.thread_ids.is_empty() => {
+                let ids = args.thread_ids.join(", ");
+                format!("space={space} / 会話ID: {ids}")
+            }
+            (UiLanguage::Ja, _) => {
+                format!("space={space} / 対象未選択。/index all または /index threads ID...")
+            }
+        }
     }
     fn has_next_inspection_window(&self) -> bool {
         self.inspection
@@ -844,35 +948,51 @@ impl ManagementPopup {
             })
     }
     fn hints(&self) -> &'static str {
+        use super::i18n::local;
         let list_mode = self
             .structured()
             .is_some_and(|value| value.detail.is_none());
         match self.mode {
-            ManagementMode::Index => {
-                if self.has_next_inspection_window() {
-                    "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新 | N 次window\nS 状態 | P 費用preview | B backfill | T retry | R rebuild"
-                } else {
-                    "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新\nS 状態 | P 費用preview | B backfill | T retry | R rebuild"
-                }
-            }
-            ManagementMode::Attachments if list_mode => {
-                "Esc 戻る | Tab 選択 | Enter 詳細 | C コピー\nS 保存済み一覧 | R 再読込 | 選択解除は戻って /detach ID"
-            }
-            ManagementMode::Attachments => {
-                "Esc 戻る | ^v/PgUp/PgDn 閲覧\nS 保存済み一覧 | R 再読込 | 解除は戻って /detach ID"
-            }
-            ManagementMode::Status if list_mode => {
-                "Esc 戻る | ^v 選択 | Enter 詳細 | R 更新 | N 次page\nO 参照 | S 出力原文 | C コピー | A 操作"
-            }
-            ManagementMode::General if list_mode => {
-                "Esc 戻る | Tab/Shift+Tab 選択 | Enter 詳細 | C コピー\nO 参照 | S 出力原文 | A 操作 | PgUp/PgDn 閲覧"
-            }
-            ManagementMode::Received => {
-                "Esc 戻る | ^v 選択 | Enter 原文／ページ | C IDコピー\n/received ページ番号 で全受信記録を表示"
-            }
-            ManagementMode::General | ManagementMode::Status => {
-                "Esc 戻る | ^v/PgUp/PgDn 閲覧\nW 明示waitの観測取消 | A 操作"
-            }
+            ManagementMode::Index if self.has_next_inspection_window() => local!(
+                self.language,
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新 | N 次window\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
+                "Esc Back | ^v/PgUp/PgDn Scroll | Ctrl+R Refresh | N Next window\nS Status | P Cost preview | B Backfill | T Retry | R Rebuild"
+            ),
+            ManagementMode::Index => local!(
+                self.language,
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
+                "Esc Back | ^v/PgUp/PgDn Scroll | Ctrl+R Refresh\nS Status | P Cost preview | B Backfill | T Retry | R Rebuild"
+            ),
+            ManagementMode::Attachments if list_mode => local!(
+                self.language,
+                "Esc 戻る | Tab 選択 | Enter 詳細 | C コピー\nS 保存済み一覧 | R 再読込 | 選択解除は戻って /detach ID",
+                "Esc Back | Tab Select | Enter Details | C Copy\nS Saved list | R Reload | Return and use /detach ID to deselect"
+            ),
+            ManagementMode::Attachments => local!(
+                self.language,
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧\nS 保存済み一覧 | R 再読込 | 解除は戻って /detach ID",
+                "Esc Back | ^v/PgUp/PgDn Scroll\nS Saved list | R Reload | Return and use /detach ID to deselect"
+            ),
+            ManagementMode::Status if list_mode => local!(
+                self.language,
+                "Esc 戻る | ^v 選択 | Enter 詳細 | R 更新 | N 次page\nO 参照 | S 出力原文 | C コピー | A 操作",
+                "Esc Back | ^v Select | Enter Details | R Refresh | N Next page\nO Reference | S Original output | C Copy | A Actions"
+            ),
+            ManagementMode::General if list_mode => local!(
+                self.language,
+                "Esc 戻る | Tab/Shift+Tab 選択 | Enter 詳細 | C コピー\nO 参照 | S 出力原文 | A 操作 | PgUp/PgDn 閲覧",
+                "Esc Back | Tab/Shift+Tab Select | Enter Details | C Copy\nO Reference | S Original output | A Actions | PgUp/PgDn Scroll"
+            ),
+            ManagementMode::Received => local!(
+                self.language,
+                "Esc 戻る | ^v 選択 | Enter 原文／ページ | C IDコピー\n/received ページ番号 で全受信記録を表示",
+                "Esc Back | ^v Select | Enter Original / page | C Copy ID\n/received PAGE shows all received records"
+            ),
+            ManagementMode::General | ManagementMode::Status => local!(
+                self.language,
+                "Esc 戻る | ^v/PgUp/PgDn 閲覧\nW 明示waitの観測取消 | A 操作",
+                "Esc Back | ^v/PgUp/PgDn Scroll\nW Stop observing explicit wait | A Actions"
+            ),
         }
     }
     pub(super) fn page(&self, viewport: Rect, status: &str) -> u16 {
@@ -880,12 +1000,12 @@ impl ManagementPopup {
             .structured()
             .is_some_and(|value| value.detail.is_some());
         let context = if self.structured().is_some() || self.mode == ManagementMode::Index {
-            "項目"
+            local!(self.language, "項目", "Fields")
         } else {
             status
         };
         let footer = if detailed {
-            MANAGEMENT_DETAIL_FOOTER
+            self.detail_footer()
         } else {
             self.hints()
         };
@@ -986,7 +1106,12 @@ impl ManagementPopup {
             if action != 't' && !explicit_index_targets(&args) {
                 self.pending = None;
                 self.preview = IndexPreviewState::Hint(
-                    "対象を明示してください。Esc後 /index all または /index thread".into(),
+                    local!(
+                        self.language,
+                        "対象を明示してください。Esc後 /index all または /index thread",
+                        "Specify a target. After Esc, use /index all or /index thread"
+                    )
+                    .into(),
                 );
                 return Outcome::Actions(vec![]);
             }
@@ -999,14 +1124,24 @@ impl ManagementPopup {
                 }
                 if !matches!(self.preview, IndexPreviewState::Loading(_)) {
                     self.preview = IndexPreviewState::Hint(
-                        "現在の対象のpreviewが必要です。Pで取得してください。".into(),
+                        local!(
+                            self.language,
+                            "現在の対象のpreviewが必要です。Pで取得してください。",
+                            "A preview of the current target is required. Press P to retrieve it."
+                        )
+                        .into(),
                     );
                 }
                 return Outcome::Actions(vec![]);
             };
             let Some(attempt) = self.ready_preview_attempt else {
                 self.preview = IndexPreviewState::Hint(
-                    "現在の対象のpreviewが必要です。Pで取得してください。".into(),
+                    local!(
+                        self.language,
+                        "現在の対象のpreviewが必要です。Pで取得してください。",
+                        "A preview of the current target is required. Press P to retrieve it."
+                    )
+                    .into(),
                 );
                 return Outcome::Actions(vec![]);
             };
@@ -1015,17 +1150,28 @@ impl ManagementPopup {
                 't' => Command::IndexRetry(args.clone()),
                 _ => Command::IndexRebuild(args.clone()),
             };
+            let target = if action == 't' && !explicit_index_targets(&args) {
+                local!(
+                    self.language,
+                    "失敗した許可済み索引作業（全体）",
+                    "Failed authorized index work (all)"
+                )
+                .to_owned()
+            } else {
+                self.index_label()
+            };
+            let detail = match self.language {
+                UiLanguage::En => format!(
+                    "Cost target: {target}\n{preview}\nThis sends data to an external embedding API and incurs costs. Counts reflect the capture; monetary cost is not estimated."
+                ),
+                UiLanguage::Ja => format!(
+                    "費用対象: {target}\n{preview}\n外部embedding APIへ送信し費用が発生します。見積りは取得時点の対象数で、金額未見積です。"
+                ),
+            };
             Outcome::Confirm {
                 command: Box::new(command),
                 attempt,
-                detail: format!(
-                    "費用対象: {}\n{preview}\n外部embedding APIへ送信し費用が発生します。見積りは取得時点の対象数で、金額未見積です。",
-                    if action == 't' && !explicit_index_targets(&args) {
-                        "失敗した許可済み索引作業（全体）".into()
-                    } else {
-                        self.index_label()
-                    }
-                ),
+                detail,
             }
         } else {
             Outcome::Actions(self.navigate(key, page, thread_id))
@@ -1281,7 +1427,7 @@ impl ManagementPopup {
             KeyCode::Char('p') => {
                 let Some(args) = self.scope.clone().filter(explicit_index_targets) else {
                     self.pending = None;
-                    self.preview = IndexPreviewState::Hint("対象を明示してください。Esc後 /index all または /index thread。失敗分の再試行はTで確認できます。".into());
+                    self.preview = IndexPreviewState::Hint(local!(self.language, "対象を明示してください。Esc後 /index all または /index thread。失敗分の再試行はTで確認できます。", "Specify a target. After Esc, use /index all or /index thread. Press T to review retrying failed work.").into());
                     return vec![];
                 };
                 let attempt = self.begin_preview(args.clone());
@@ -1297,28 +1443,37 @@ impl ManagementPopup {
         status: &str,
         language: crate::config::UiLanguage,
     ) {
+        self.set_language(language);
         if let Some(content) = &self.frame {
             let view = &content.view;
             let hints = self.hints();
             let mut reader_scroll = None;
             if let Some(structured) = &content.structured {
                 if let Some(page) = &structured.detail {
-                    let title = format!("{} | 詳細", view.title);
-                    let context = format!(
-                        "参照 {} | 取得 {}{}",
-                        page.pointer,
-                        page.observed_at,
-                        page.stale
-                            .as_ref()
-                            .map(|reason| format!(" | 旧内容: {reason}"))
-                            .unwrap_or_default()
-                    );
+                    let title = match self.language {
+                        UiLanguage::En => format!("{} | Details", view.title),
+                        UiLanguage::Ja => format!("{} | 詳細", view.title),
+                    };
+                    let pointer = &page.pointer;
+                    let observed_at = &page.observed_at;
+                    let context = match (self.language, &page.stale) {
+                        (UiLanguage::En, Some(reason)) => format!(
+                            "Reference {pointer} | Captured {observed_at} | Stale: {reason}"
+                        ),
+                        (UiLanguage::En, None) => {
+                            format!("Reference {pointer} | Captured {observed_at}")
+                        }
+                        (UiLanguage::Ja, Some(reason)) => {
+                            format!("参照 {pointer} | 取得 {observed_at} | 旧内容: {reason}")
+                        }
+                        (UiLanguage::Ja, None) => format!("参照 {pointer} | 取得 {observed_at}"),
+                    };
                     let body = popup::panel_recorded(
                         frame,
                         area,
                         &title,
                         &context,
-                        MANAGEMENT_DETAIL_FOOTER,
+                        self.detail_footer(),
                         &self.paint,
                     );
                     reader_scroll = Some(self.reader_cache.borrow_mut().render(
@@ -1335,31 +1490,38 @@ impl ManagementPopup {
                         },
                     ));
                 } else {
-                    let context = format!(
-                        "{} / {}項目{} | {}",
-                        if structured.fields.is_empty() {
-                            0
-                        } else {
-                            structured.selected + 1
-                        },
-                        structured.fields.len(),
-                        if structured.omitted {
-                            " | すべての詳細を見る"
-                        } else {
-                            ""
-                        },
-                        match self.mode {
-                            ManagementMode::Index => self.index_label(),
-                            _ => status.to_owned(),
+                    let selected = if structured.fields.is_empty() {
+                        0
+                    } else {
+                        structured.selected + 1
+                    };
+                    let count = structured.fields.len();
+                    let status = match self.mode {
+                        ManagementMode::Index => self.index_label(),
+                        _ => status.to_owned(),
+                    };
+                    let context = match (self.language, structured.omitted) {
+                        (UiLanguage::En, true) => {
+                            format!("{selected} / {count} fields | View all details | {status}")
                         }
-                    );
+                        (UiLanguage::En, false) => {
+                            format!("{selected} / {count} fields | {status}")
+                        }
+                        (UiLanguage::Ja, true) => {
+                            format!("{selected} / {count}項目 | すべての詳細を見る | {status}")
+                        }
+                        (UiLanguage::Ja, false) => format!("{selected} / {count}項目 | {status}"),
+                    };
                     let context = if let Some(inspection) = &self.inspection {
-                        format!("{} | {context}", inspection.label())
+                        format!("{} | {context}", inspection.label_for(self.language))
                     } else {
                         context
                     };
                     let context = if let Some(error) = &structured.detail_error {
-                        format!("詳細未更新: {error} | {context}")
+                        match self.language {
+                            UiLanguage::En => format!("Details not refreshed: {error} | {context}"),
+                            UiLanguage::Ja => format!("詳細未更新: {error} | {context}"),
+                        }
                     } else {
                         context
                     };
@@ -1417,13 +1579,20 @@ impl ManagementPopup {
                         items.push(popup::Item::new(lines));
                     }
                     if items.is_empty() {
-                        items.push(popup::Item::new("表示する項目はありません"));
+                        items.push(popup::Item::new(local!(
+                            self.language,
+                            "表示する項目はありません",
+                            "No fields to display"
+                        )));
                     }
                     popup::list(frame, body, items, selected_row);
                 }
             } else {
                 let context = match self.mode {
-                    ManagementMode::Index => format!("対象 {} | {status}", self.index_label()),
+                    ManagementMode::Index => match self.language {
+                        UiLanguage::En => format!("Target {} | {status}", self.index_label()),
+                        UiLanguage::Ja => format!("対象 {} | {status}", self.index_label()),
+                    },
                     _ => status.to_owned(),
                 };
                 let body =
@@ -1449,11 +1618,15 @@ impl ManagementPopup {
         }
     }
 }
-fn mark_truncated_preview(lines: &mut Vec<Line<'static>>, height: u16) {
+fn mark_truncated_preview(lines: &mut Vec<Line<'static>>, height: u16, language: UiLanguage) {
     if lines.len() > usize::from(height) {
         lines.truncate(usize::from(height));
         if let Some(last) = lines.last_mut() {
-            *last = Line::from(". 省略（取得時刻を含む場合あり）");
+            *last = Line::from(local!(
+                language,
+                ". 省略（取得時刻を含む場合あり）",
+                ". Omitted (may include capture time)"
+            ));
         }
     }
 }
@@ -1465,6 +1638,56 @@ pub(super) fn explicit_index_targets(args: &IndexArgs) -> bool {
 #[cfg(test)]
 mod preview_notice_tests {
     use super::*;
+
+    #[test]
+    fn index_loading_preview_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            let args = IndexArgs {
+                scope: Some(IndexScope::All),
+                ..Default::default()
+            };
+            ui.management
+                .open_structured("Index fixture".into(), 1, vec![], false, false);
+            ui.management.mode = ManagementMode::Index;
+            ui.management.scope = Some(args.clone());
+            ui.management.preview = IndexPreviewState::Loading(args);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Cost preview", "API not called"],
+                UiLanguage::Ja => &["費用preview", "API未送信"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn index_confirmation_preserves_preview_and_cost_warning() {
+        let mut popup = ManagementPopup::default();
+        popup.set_language(UiLanguage::En);
+        let args = IndexArgs {
+            scope: Some(IndexScope::All),
+            ..Default::default()
+        };
+        popup.mode = ManagementMode::Index;
+        popup.scope = Some(args.clone());
+        popup.preview = IndexPreviewState::Ready(args, "PREVIEW-OPAQUE-0123".into());
+        popup.ready_preview_attempt = Some(9);
+        let key = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE);
+        let Outcome::Confirm {
+            command,
+            detail,
+            attempt,
+        } = popup.key(key, 10, None)
+        else {
+            panic!("the ready preview must show confirmation before executing")
+        };
+        assert!(matches!(*command, Command::IndexBackfill(_)));
+        assert_eq!(attempt, 9);
+        assert!(detail.contains("PREVIEW-OPAQUE-0123"));
+        assert!(detail.contains("external embedding API") && detail.contains("costs"));
+        assert!(detail.contains("monetary cost is not estimated"));
+    }
 
     #[test]
     fn status_shows_measured_width_mismatch_in_both_languages() {
@@ -1509,11 +1732,11 @@ mod preview_notice_tests {
     #[test]
     fn truncation_marks_omission_even_when_only_one_row_fits() {
         let mut lines = vec![Line::from("title"), Line::from("time")];
-        mark_truncated_preview(&mut lines, 1);
+        mark_truncated_preview(&mut lines, 1, UiLanguage::Ja);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].to_string().starts_with('.'));
         let mut full = vec![Line::from("time")];
-        mark_truncated_preview(&mut full, 1);
+        mark_truncated_preview(&mut full, 1, UiLanguage::Ja);
         assert_eq!(full[0].to_string(), "time");
     }
 }
