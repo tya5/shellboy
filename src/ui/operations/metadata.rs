@@ -3,19 +3,7 @@ use super::*;
 use crate::operations::{Discovery, FieldType, Term, Text};
 
 pub(super) fn text(value: Text) -> &'static str {
-    // This is the single fallback-text boundary for these typed message keys.
-    // The key remains the cache/localization identity when #35 adds a resolver.
-    match value.key {
-        crate::operations::TextKey::Label(_)
-        | crate::operations::TextKey::Meaning(_)
-        | crate::operations::TextKey::FieldLabel(_, _)
-        | crate::operations::TextKey::FieldHelp(_, _)
-        | crate::operations::TextKey::Effect(_)
-        | crate::operations::TextKey::EffectMarker(_)
-        | crate::operations::TextKey::Enter(_)
-        | crate::operations::TextKey::Term(_)
-        | crate::operations::TextKey::Discovery(_) => value.fallback,
-    }
+    text_for(value, crate::config::UiLanguage::Ja)
 }
 
 impl Form {
@@ -395,611 +383,1169 @@ impl Form {
         lines
     }
 }
-fn operation_label_en(operation: OperationId) -> &'static str {
-    match operation {
-        OperationId::Status => "Work - Status",
-        OperationId::UsageGet => "Usage - Total",
-        OperationId::ModelList => "Models - List",
-        OperationId::ThreadList => "Conversations - List",
-        OperationId::ThreadGet => "Conversation - Details",
-        OperationId::ThreadCreate => "Conversation - Create",
-        OperationId::ThreadFork => "Conversation - Fork",
-        OperationId::ThreadDelete => "Conversation - Delete",
-        OperationId::ThreadDeletePreview => "Conversation - Deletion impact",
-        OperationId::ThreadSet => "Conversation - Settings",
-        OperationId::MessageSend => "Message - Send",
-        OperationId::MessageGet => "Message - Assignment and response",
-        OperationId::MessageCancel => "Message - Cancel unadopted input",
-        OperationId::OperationGet => "Operation - Receipt",
-        OperationId::RunGet => "Run - Details",
-        OperationId::RunRetry => "Run - Retry recovery",
-        OperationId::RunStop => "Run - Stop",
-        OperationId::RevisitSet => "Next instruction - Set",
-        OperationId::RevisitGet => "Next instruction - Inspect",
-        OperationId::RevisitCancel => "Next instruction - Cancel",
-        OperationId::TurnGet => "Turn - Details",
-        OperationId::Wait => "Wait - Observe conditions",
-        OperationId::HistoryList => "History - List",
-        OperationId::HistoryGet => "History - Original",
-        OperationId::HistorySearch => "History - Search",
-        OperationId::HistoryRelations => "History - Relationships",
-        OperationId::ShellList => "Shell - List",
-        OperationId::ShellGet => "Shell - Details",
-        OperationId::ShellRead => "Shell - Saved output",
-        OperationId::ShellWrite => "Shell - Input",
-        OperationId::ShellEof => "Shell - Close input",
-        OperationId::ShellStop => "Shell - Stop",
-        OperationId::AttachmentAdd => "Attachment - Add",
-        OperationId::AttachmentList => "Attachment - List",
-        OperationId::AttachmentRemove => "Attachment - Remove",
-        OperationId::CompactList => "Compaction - Saved history",
-        OperationId::Compact => "History - Compact and edit",
-        OperationId::IndexStatus => "Index - Status",
-        OperationId::IndexPreview => "Index - Cost preview",
-        OperationId::IndexBackfill => "Index - Backfill history",
-        OperationId::IndexRetry => "Index - Retry failures",
-        OperationId::IndexRebuild => "Index - Rebuild",
-        OperationId::IndexProbe => "Index - Probe connection and dimensions",
-        OperationId::StorageStatus => "Storage - Status",
-        OperationId::StorageCollect => "Storage - Collect",
-        OperationId::Exec => "Work - Execute with JSON contract",
-        OperationId::ConfigInit => "Config - Create template",
-        OperationId::ConfigCheck => "Config - Check connection",
-        OperationId::DocsList => "Guides - List",
-        OperationId::DocsGet => "Guides - Text",
-        OperationId::DocsSearch => "Guides - Search",
-        OperationId::RagInit => "RAG - Initialize database",
-        OperationId::RagSourceAdd => "RAG - Register source",
-        OperationId::RagSourceList => "RAG - List sources",
-        OperationId::RagSourceRemove => "RAG - Remove source",
-        OperationId::RagIndex => "RAG - Index sources",
-        OperationId::RagIngest => "RAG - Ingest extracted text",
-        OperationId::RagStatus => "RAG - Status",
-        OperationId::RagInspect => "RAG - Document details",
-        OperationId::RagSearch => "RAG - Search",
-        OperationId::RagGet => "RAG - Original",
-    }
-}
-fn operation_meaning_en(operation: OperationId) -> &'static str {
-    match operation {
-        OperationId::Status => {
-            "Show saved Run, Turn, shell, and input states and related IDs within the specified scope."
-        }
-        OperationId::UsageGet => {
-            "Show saved token usage and processing time for the specified Thread, Run, or Turn."
-        }
-        OperationId::ModelList => {
-            "Fetch models from the API using the specified connection, target Thread connection, or owner default, in that order."
-        }
-        OperationId::ThreadList => {
-            "Filter saved conversation titles, parent-child relationships, and current states."
-        }
-        OperationId::ThreadGet => {
-            "Show the specified Thread's settings, current Run and Turn, owned work, and recovery reasons."
-        }
-        OperationId::ThreadCreate => {
-            "Create a saved Thread. Model processing starts with a separate message."
-        }
-        OperationId::ThreadFork => {
-            "Create a new Thread at the specified history node, retaining provenance."
-        }
-        OperationId::ThreadDelete => {
-            "Delete the specified Thread and selected descendants after rechecking running work and references."
-        }
-        OperationId::ThreadDeletePreview => {
-            "Show work and references blocking deletion and expected reclamation for the specified Thread and selected descendants."
-        }
-        OperationId::ThreadSet => {
-            "Change a Thread's display title, working folder, connection, model, reasoning effort, and instruction file."
-        }
-        OperationId::MessageSend => {
-            "Save input to the specified Thread. Receipt, Run and Turn assignment, and response completion are tracked separately."
-        }
-        OperationId::MessageGet => {
-            "Show the saved message receipt state, immutable Run and Turn assignment, and response references."
-        }
-        OperationId::MessageCancel => {
-            "Cancel explicitly specified unadopted input. Input already adopted into history is not eligible."
-        }
-        OperationId::OperationGet => {
-            "Inspect the saved receipt and subsequent work for an operation_id to assess an uncertain resend."
-        }
-        OperationId::RunGet => {
-            "Show the Run's saved state, current Turn, ownership, child work and shells, and saved recovery reason."
-        }
-        OperationId::RunRetry => {
-            "Resume a recovery-waiting Turn on the specified Run after checking its cause. A finished Run cannot resume."
-        }
-        OperationId::RunStop => {
-            "Request that the specified Run and its owned work stop. Check saved state for actual completion."
-        }
-        OperationId::RevisitSet => {
-            "Replace the instruction to run when the Run completes normally. Stop and shutdown take precedence."
-        }
+use super::super::i18n::local;
+
+fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> &'static str {
+    match id {
+        OperationId::CompactList => local!(
+            language,
+            "圧縮 · 保存済み一覧",
+            "Compaction - Saved history"
+        ),
+        OperationId::ShellList => local!(language, "shell · 一覧", "Shell - List"),
+        OperationId::Status => local!(language, "作業 · 状態一覧", "Work - Status"),
+        OperationId::UsageGet => local!(language, "使用量 · 合計", "Usage - Total"),
+        OperationId::ModelList => local!(language, "モデル · 一覧", "Models - List"),
+        OperationId::ThreadList => local!(language, "会話 · 一覧", "Conversations - List"),
+        OperationId::ThreadGet => local!(language, "会話 · 詳細", "Conversation - Details"),
+        OperationId::ThreadCreate => local!(language, "会話 · 作成", "Conversation - Create"),
+        OperationId::ThreadFork => local!(language, "会話 · 分岐", "Conversation - Fork"),
+        OperationId::ThreadDelete => local!(language, "会話 · 削除", "Conversation - Delete"),
+        OperationId::ThreadDeletePreview => local!(
+            language,
+            "会話 · 削除影響",
+            "Conversation - Deletion impact"
+        ),
+        OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation - Settings"),
+        OperationId::MessageSend => local!(language, "依頼 · 送信", "Message - Send"),
+        OperationId::MessageGet => local!(
+            language,
+            "依頼 · 割当と回答",
+            "Message - Assignment and response"
+        ),
+        OperationId::MessageCancel => local!(
+            language,
+            "依頼 · 未採用入力の取消",
+            "Message - Cancel unadopted input"
+        ),
+        OperationId::OperationGet => local!(language, "操作 · 受付結果", "Operation - Receipt"),
+        OperationId::RunGet => local!(language, "作業 · 詳細", "Run - Details"),
+        OperationId::RunRetry => local!(language, "作業 · 復旧を再試行", "Run - Retry recovery"),
+        OperationId::RunStop => local!(language, "作業 · 停止", "Run - Stop"),
+        OperationId::RevisitSet => local!(language, "次の指示 · 設定", "Next instruction - Set"),
         OperationId::RevisitGet => {
-            "Show the next instruction saved for a Run, who set it, execution count, and last execution time."
+            local!(language, "次の指示 · 確認", "Next instruction - Inspect")
         }
         OperationId::RevisitCancel => {
-            "Cancel the pending instruction to run on normal Run completion. The Run itself continues."
+            local!(language, "次の指示 · 取消", "Next instruction - Cancel")
         }
-        OperationId::TurnGet => {
-            "Show the saved state and response node ID of one Turn. The response body is available from the original history."
-        }
-        OperationId::Wait => {
-            "Observe until any specified condition is met. Target work continues after the observation deadline expires."
-        }
-        OperationId::HistoryList => {
-            "Show a Thread's adopted path filtered by source Run, time, and related shell state."
-        }
-        OperationId::HistoryGet => {
-            "Fetch a node's saved original and provenance. Final-answer-only excludes reasoning and interim explanations."
-        }
-        OperationId::HistorySearch => {
-            "Search conversation history in the specified scope with embeddings and return original and provenance references. API costs may apply."
-        }
-        OperationId::HistoryRelations => {
-            "Show previous, next, source, and replacement relationships, distinguishing the immutable DAG from the adopted path."
-        }
-        OperationId::ShellList => {
-            "List saved shell executions filtered by conversation, time, and state. This does not read output bodies."
-        }
-        OperationId::ShellGet => {
-            "Show the target command's original command and cwd, Run and Turn, saved state, and output completion."
-        }
-        OperationId::ShellRead => {
-            "Read saved stdout and stderr of the specified Execution using an encoding and cursor."
-        }
-        OperationId::ShellWrite => {
-            "Send input to the specified Execution's stdin. Sending and the receiver's completion are checked separately."
-        }
-        OperationId::ShellEof => "Close the specified Execution's stdin, ending further input.",
-        OperationId::ShellStop => {
-            "Request termination of the specified Execution's OS process group. Its scope differs from stopping the whole Run."
-        }
-        OperationId::AttachmentAdd => {
-            "Add a file or image path reference to the target Thread. Existing attachment rules govern reading, updates, and provenance."
-        }
-        OperationId::AttachmentList => {
-            "Show attachment references selected for the target Thread and their states."
-        }
-        OperationId::AttachmentRemove => {
-            "Remove an attachment_id from the Thread's selection. This does not delete the external file."
-        }
-        OperationId::CompactList => {
-            "Show saved compaction history filtered by time. This does not request a new compaction."
-        }
-        OperationId::Compact => {
-            "Request compaction at a safe boundary or spill, summarize, remove, or restore a range. Summarization uses the model API."
-        }
-        OperationId::IndexStatus => {
-            "Show conversation index settings, spaces, processed counts, and stop or failure reasons."
-        }
-        OperationId::IndexPreview => {
-            "Inspect target counts and readable input size without calling the embedding API."
-        }
-        OperationId::IndexBackfill => {
-            "Start embedding indexing for explicitly selected past history. Review the preview and API costs first."
-        }
+        OperationId::TurnGet => local!(language, "応答処理 · 詳細", "Turn - Details"),
+        OperationId::Wait => local!(language, "待機 · 条件を観測", "Wait - Observe conditions"),
+        OperationId::HistoryList => local!(language, "履歴 · 一覧", "History - List"),
+        OperationId::HistoryGet => local!(language, "履歴 · 原文", "History - Original"),
+        OperationId::HistorySearch => local!(language, "履歴 · 検索", "History - Search"),
+        OperationId::HistoryRelations => local!(language, "履歴 · 関係", "History - Relationships"),
+        OperationId::ShellGet => local!(language, "shell · 詳細", "Shell - Details"),
+        OperationId::ShellRead => local!(language, "shell · 保存出力", "Shell - Saved output"),
+        OperationId::ShellWrite => local!(language, "shell · 入力", "Shell - Input"),
+        OperationId::ShellEof => local!(language, "shell · 入力を閉じる", "Shell - Close input"),
+        OperationId::ShellStop => local!(language, "shell · 停止", "Shell - Stop"),
+        OperationId::AttachmentAdd => local!(language, "添付 · 追加", "Attachment - Add"),
+        OperationId::AttachmentList => local!(language, "添付 · 一覧", "Attachment - List"),
+        OperationId::AttachmentRemove => local!(language, "添付 · 除外", "Attachment - Remove"),
+        OperationId::Compact => local!(language, "履歴 · 圧縮と編集", "History - Compact and edit"),
+        OperationId::IndexStatus => local!(language, "索引 · 状態", "Index - Status"),
+        OperationId::IndexPreview => local!(language, "索引 · 費用確認", "Index - Cost preview"),
+        OperationId::IndexBackfill => local!(
+            language,
+            "索引 · 過去履歴を追加",
+            "Index - Backfill history"
+        ),
         OperationId::IndexRetry => {
-            "Retry failed indexing work under current settings. API costs may apply."
+            local!(language, "索引 · 失敗分を再試行", "Index - Retry failures")
         }
-        OperationId::IndexRebuild => {
-            "Build a candidate index for selected sources and optional dimensions. The existing active space remains until validation succeeds."
-        }
-        OperationId::IndexProbe => {
-            "Send one fixed input to the embedding API and save connection and dimension results. API costs may apply."
-        }
-        OperationId::StorageStatus => {
-            "Show saved logical usage, limits, retention, and reclamation information for selected categories."
-        }
-        OperationId::StorageCollect => {
-            "Explicitly collect reclaimable saved data in selected categories. Protected originals and references are retained."
-        }
-        OperationId::Exec => {
-            "Request work on a saved Thread and validate final JSON against a local schema. Additional model and tool processing may run within the repair limit."
-        }
-        OperationId::ConfigInit => {
-            "Create a template at the selected config path. Existing files are not overwritten."
-        }
+        OperationId::IndexRebuild => local!(language, "索引 · 作り直す", "Index - Rebuild"),
+        OperationId::IndexProbe => local!(
+            language,
+            "索引 · 接続と次元を試す",
+            "Index - Probe connection and dimensions"
+        ),
+        OperationId::StorageStatus => local!(language, "保存 · 状態", "Storage - Status"),
+        OperationId::StorageCollect => local!(language, "保存 · 回収", "Storage - Collect"),
+        OperationId::Exec => local!(
+            language,
+            "作業 · JSON契約で実行",
+            "Work - Execute with JSON contract"
+        ),
+        OperationId::ConfigInit => local!(
+            language,
+            "設定 · テンプレート作成",
+            "Config - Create template"
+        ),
         OperationId::ConfigCheck => {
-            "Read config and environment and fetch models from the default connection. Changes reach the running owner on restart."
+            local!(language, "設定 · 接続確認", "Config - Check connection")
         }
-        OperationId::DocsList => "List the bundled guides by hierarchy.",
-        OperationId::DocsGet => {
-            "Read versioned bundled guide text by document ID and optional heading."
-        }
-        OperationId::DocsSearch => "Search bundled guide text without an owner or embedding API.",
-        OperationId::RagInit => {
-            "Initialize the specified independent RAG database without starting the conversation owner."
-        }
+        OperationId::DocsList => local!(language, "ガイド · 一覧", "Guides - List"),
+        OperationId::DocsGet => local!(language, "ガイド · 本文", "Guides - Text"),
+        OperationId::DocsSearch => local!(language, "ガイド · 検索", "Guides - Search"),
+        OperationId::RagInit => local!(language, "資料検索 · DB作成", "RAG - Initialize database"),
         OperationId::RagSourceAdd => {
-            "Register a document folder or file as a named source and save exclusion patterns."
+            local!(language, "資料検索 · ソース登録", "RAG - Register source")
         }
         OperationId::RagSourceList => {
-            "Show registered independent RAG sources and exclusion settings."
+            local!(language, "資料検索 · ソース一覧", "RAG - List sources")
         }
         OperationId::RagSourceRemove => {
-            "Remove a source registration and its independent index. Original external documents are retained."
+            local!(language, "資料検索 · ソース解除", "RAG - Remove source")
         }
-        OperationId::RagIndex => {
-            "Index registered sources with keyword or semantic mode. dry-run shows targets; semantic processing may incur API costs."
-        }
-        OperationId::RagIngest => {
-            "Register externally extracted text with its source file, kind, and optional metadata."
-        }
-        OperationId::RagStatus => {
-            "Show independent RAG sources, index state, and unindexed or failed items."
-        }
+        OperationId::RagIndex => local!(language, "資料検索 · 索引", "RAG - Index sources"),
+        OperationId::RagIngest => local!(
+            language,
+            "資料検索 · 抽出済み本文を登録",
+            "RAG - Ingest extracted text"
+        ),
+        OperationId::RagStatus => local!(language, "資料検索 · 状態", "RAG - Status"),
         OperationId::RagInspect => {
+            local!(language, "資料検索 · 文書詳細", "RAG - Document details")
+        }
+        OperationId::RagSearch => local!(language, "資料検索 · 検索", "RAG - Search"),
+        OperationId::RagGet => local!(language, "資料検索 · 原文", "RAG - Original"),
+    }
+}
+
+fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -> &'static str {
+    match id {
+        OperationId::CompactList => local!(
+            language,
+            "保存された圧縮の履歴を期間で絞って表示します。新しい圧縮は要求しません。",
+            "Show saved compaction history filtered by time. This does not request a new compaction."
+        ),
+        OperationId::ShellList => local!(
+            language,
+            "保存されたshell実行を会話・期間・状態で絞って表示します。出力本文は読みません。",
+            "List saved shell executions filtered by conversation, time, and state. This does not read output bodies."
+        ),
+        OperationId::Status => local!(
+            language,
+            "保存されたRun・Turn・shell・入力の状態と関連IDを指定範囲で表示します。",
+            "Show saved Run, Turn, shell, and input states and related IDs within the specified scope."
+        ),
+        OperationId::UsageGet => local!(
+            language,
+            "指定したThread・Run・Turnの保存済みトークン使用量と処理時間を表示します。",
+            "Show saved token usage and processing time for the specified Thread, Run, or Turn."
+        ),
+        OperationId::ModelList => local!(
+            language,
+            "指定接続、対象Threadの接続、所有者の既定接続の順でモデル一覧をAPIから取得します。",
+            "Fetch models from the API using the specified connection, target Thread connection, or owner default, in that order."
+        ),
+        OperationId::ThreadList => local!(
+            language,
+            "保存された会話のタイトル、親子関係、現在の状態を絞り込んで表示します。",
+            "Filter saved conversation titles, parent-child relationships, and current states."
+        ),
+        OperationId::ThreadGet => local!(
+            language,
+            "指定したThreadの設定、現在のRun・Turn、所有作業と復旧理由を表示します。",
+            "Show the specified Thread's settings, current Run and Turn, owned work, and recovery reasons."
+        ),
+        OperationId::ThreadCreate => local!(
+            language,
+            "保存済みThreadを作成します。モデル処理は別の入力送信で開始します。",
+            "Create a saved Thread. Model processing starts with a separate message."
+        ),
+        OperationId::ThreadFork => local!(
+            language,
+            "指定した履歴ノードを境界に、出典を保持した新しいThreadを作成します。",
+            "Create a new Thread at the specified history node, retaining provenance."
+        ),
+        OperationId::ThreadDelete => local!(
+            language,
+            "指定Threadと選択した子孫を、実行中の作業や参照を再確認して削除します。",
+            "Delete the specified Thread and selected descendants after rechecking running work and references."
+        ),
+        OperationId::ThreadDeletePreview => local!(
+            language,
+            "指定Threadと選択した子孫の削除を妨げる作業・参照・回収見込みを表示します。",
+            "Show work and references blocking deletion and expected reclamation for the specified Thread and selected descendants."
+        ),
+        OperationId::ThreadSet => local!(
+            language,
+            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイルを変更します。",
+            "Change a Thread's display title, working folder, connection, model, reasoning effort, and instruction file."
+        ),
+        OperationId::MessageSend => local!(
+            language,
+            "指定Threadへ入力を保存します。受付、Run・Turnへの採用、回答完了は個別に追跡します。",
+            "Save input to the specified Thread. Receipt, Run and Turn assignment, and response completion are tracked separately."
+        ),
+        OperationId::MessageGet => local!(
+            language,
+            "保存された入力の受付状態と不変のRun・Turn割当、回答への参照を表示します。",
+            "Show the saved message receipt state, immutable Run and Turn assignment, and response references."
+        ),
+        OperationId::MessageCancel => local!(
+            language,
+            "明示した未採用の入力を取り消します。既に履歴へ採用された入力は対象外です。",
+            "Cancel explicitly specified unadopted input. Input already adopted into history is not eligible."
+        ),
+        OperationId::OperationGet => local!(
+            language,
+            "指定operation_idの保存済み受付結果と後続処理を確認し、不確実な再送を判断できます。",
+            "Inspect the saved receipt and subsequent work for an operation_id to assess an uncertain resend."
+        ),
+        OperationId::RunGet => local!(
+            language,
+            "Runの保存状態、現在のTurn、所有関係、子作業・shellと保存された復旧理由を表示します。",
+            "Show the Run's saved state, current Turn, ownership, child work and shells, and saved recovery reason."
+        ),
+        OperationId::RunRetry => local!(
+            language,
+            "原因を確認した復旧待ちTurnを、明示したRunで再開します。終了済みRunは再開できません。",
+            "Resume a recovery-waiting Turn on the specified Run after checking its cause. A finished Run cannot resume."
+        ),
+        OperationId::RunStop => local!(
+            language,
+            "指定Runとその所有作業の停止を要求します。保存状態で実際の終了を確認します。",
+            "Request that the specified Run and its owned work stop. Check saved state for actual completion."
+        ),
+        OperationId::RevisitSet => local!(
+            language,
+            "Runが通常完了するときに実行する指示を置き換えます。停止や終了処理が優先されます。",
+            "Replace the instruction to run when the Run completes normally. Stop and shutdown take precedence."
+        ),
+        OperationId::RevisitGet => local!(
+            language,
+            "指定Runに保存された次の指示、設定者、実行回数と最終実行日時を表示します。",
+            "Show the next instruction saved for a Run, who set it, execution count, and last execution time."
+        ),
+        OperationId::RevisitCancel => local!(
+            language,
+            "Runの通常完了時に実行する未実行の指示を取り消します。Run自体は続行します。",
+            "Cancel the pending instruction to run on normal Run completion. The Run itself continues."
+        ),
+        OperationId::TurnGet => local!(
+            language,
+            "一つのTurnの保存状態と回答ノードIDを表示します。回答本文は履歴原文から参照できます。",
+            "Show the saved state and response node ID of one Turn. The response body is available from the original history."
+        ),
+        OperationId::Wait => local!(
+            language,
+            "指定条件のいずれかが成立するまで観測します。観測の期限切れ後も対象の作業は続行します。",
+            "Observe until any specified condition is met. Target work continues after the observation deadline expires."
+        ),
+        OperationId::HistoryList => local!(
+            language,
+            "指定Threadの採用経路を、出典のRun・日時・関連shell状態で絞り込んで表示します。",
+            "Show a Thread's adopted path filtered by source Run, time, and related shell state."
+        ),
+        OperationId::HistoryGet => local!(
+            language,
+            "指定ノードの保存原文と出典を取得します。最終回答のみを選ぶと推論や途中説明を除きます。",
+            "Fetch a node's saved original and provenance. Final-answer-only excludes reasoning and interim explanations."
+        ),
+        OperationId::HistorySearch => local!(
+            language,
+            "指定範囲の会話履歴を埋め込み検索し、原文と出典への参照を返します。API費用が発生する場合があります。",
+            "Search conversation history in the specified scope with embeddings and return original and provenance references. API costs may apply."
+        ),
+        OperationId::HistoryRelations => local!(
+            language,
+            "履歴ノードの前後、出典、置換関係を、不変DAGと現在の採用経路を区別して表示します。",
+            "Show previous, next, source, and replacement relationships, distinguishing the immutable DAG from the adopted path."
+        ),
+        OperationId::ShellGet => local!(
+            language,
+            "対象コマンドの元のcommand、cwd、Run・Turn、保存状態と出力完了を表示します。",
+            "Show the target command's original command and cwd, Run and Turn, saved state, and output completion."
+        ),
+        OperationId::ShellRead => local!(
+            language,
+            "指定Executionの保存済みstdout・stderrを、文字コードとcursorを指定して読み取ります。",
+            "Read saved stdout and stderr of the specified Execution using an encoding and cursor."
+        ),
+        OperationId::ShellWrite => local!(
+            language,
+            "指定Executionのstdinへ入力を送ります。送信結果と相手の処理完了は別に確認します。",
+            "Send input to the specified Execution's stdin. Sending and the receiver's completion are checked separately."
+        ),
+        OperationId::ShellEof => local!(
+            language,
+            "指定Executionのstdinを閉じ、これ以降の入力を終了します。",
+            "Close the specified Execution's stdin, ending further input."
+        ),
+        OperationId::ShellStop => local!(
+            language,
+            "指定ExecutionのOSプロセス群へ停止を要求します。Run全体の停止とは対象が異なります。",
+            "Request termination of the specified Execution's OS process group. Its scope differs from stopping the whole Run."
+        ),
+        OperationId::AttachmentAdd => local!(
+            language,
+            "対象Threadへファイルまたは画像のパス参照を追加します。読み取り・更新・出典は既存の添付規則に従います。",
+            "Add a file or image path reference to the target Thread. Existing attachment rules govern reading, updates, and provenance."
+        ),
+        OperationId::AttachmentList => local!(
+            language,
+            "対象Threadで選択されている添付参照とその状態を表示します。",
+            "Show attachment references selected for the target Thread and their states."
+        ),
+        OperationId::AttachmentRemove => local!(
+            language,
+            "指定attachment_idをThreadの添付選択から外します。外部ファイルは削除しません。",
+            "Remove an attachment_id from the Thread's selection. This does not delete the external file."
+        ),
+        OperationId::Compact => local!(
+            language,
+            "安全な境界で圧縮を要求するか、指定範囲の退避・要約・削除・復元を行います。要約はモデルAPIを使用します。",
+            "Request compaction at a safe boundary or spill, summarize, remove, or restore a range. Summarization uses the model API."
+        ),
+        OperationId::IndexStatus => local!(
+            language,
+            "会話索引の設定、領域、処理件数と停止・失敗理由を表示します。",
+            "Show conversation index settings, spaces, processed counts, and stop or failure reasons."
+        ),
+        OperationId::IndexPreview => local!(
+            language,
+            "指定資料の索引対象件数と読み取り可能な入力量を、埋め込みAPIを呼ばずに確認します。",
+            "Inspect target counts and readable input size without calling the embedding API."
+        ),
+        OperationId::IndexBackfill => local!(
+            language,
+            "明示した過去履歴の埋め込み索引を開始します。事前確認とAPI費用の確認が必要です。",
+            "Start embedding indexing for explicitly selected past history. Review the preview and API costs first."
+        ),
+        OperationId::IndexRetry => local!(
+            language,
+            "対象の失敗済み索引処理を、現在の設定で再試行します。API費用が発生する場合があります。",
+            "Retry failed indexing work under current settings. API costs may apply."
+        ),
+        OperationId::IndexRebuild => local!(
+            language,
+            "指定した資料と任意の次元数で候補索引を構築します。検証成功まで既存の有効領域を保持します。",
+            "Build a candidate index for selected sources and optional dimensions. The existing active space remains until validation succeeds."
+        ),
+        OperationId::IndexProbe => local!(
+            language,
+            "一つの固定入力を埋め込みAPIへ送り、接続・次元の結果を保存します。API費用が発生する場合があります。",
+            "Send one fixed input to the embedding API and save connection and dimension results. API costs may apply."
+        ),
+        OperationId::StorageStatus => local!(
+            language,
+            "指定カテゴリの論理使用量、上限、保持と回収に関する保存情報を表示します。",
+            "Show saved logical usage, limits, retention, and reclamation information for selected categories."
+        ),
+        OperationId::StorageCollect => local!(
+            language,
+            "指定カテゴリで回収可能な保存データを明示的に回収します。保護された原文と参照は保持します。",
+            "Explicitly collect reclaimable saved data in selected categories. Protected originals and references are retained."
+        ),
+        OperationId::Exec => local!(
+            language,
+            "保存Threadへ依頼し、最終JSON回答をローカルschemaで検証します。修復回数の範囲で追加のモデル・tool処理を行います。",
+            "Request work on a saved Thread and validate final JSON against a local schema. Additional model and tool processing may run within the repair limit."
+        ),
+        OperationId::ConfigInit => local!(
+            language,
+            "選択したconfigパスへテンプレートを作成します。既存ファイルは上書きしません。",
+            "Create a template at the selected config path. Existing files are not overwritten."
+        ),
+        OperationId::ConfigCheck => local!(
+            language,
+            "設定ファイルと環境変数を読み、既定接続のモデル一覧を取得して設定を確認します。実行中の所有者への反映は再起動時です。",
+            "Read config and environment and fetch models from the default connection. Changes reach the running owner on restart."
+        ),
+        OperationId::DocsList => local!(
+            language,
+            "この実行ファイルに同梱されたガイドを階層ごとに表示します。",
+            "List the bundled guides by hierarchy."
+        ),
+        OperationId::DocsGet => local!(
+            language,
+            "同梱ガイドの文書IDと任意の見出しから、版付き本文を読み取ります。",
+            "Read versioned bundled guide text by document ID and optional heading."
+        ),
+        OperationId::DocsSearch => local!(
+            language,
+            "同梱ガイドの文字列を検索します。所有者や埋め込みAPIは不要です。",
+            "Search bundled guide text without an owner or embedding API."
+        ),
+        OperationId::RagInit => local!(
+            language,
+            "指定した独立RAGデータベースを初期化します。会話の所有者は起動しません。",
+            "Initialize the specified independent RAG database without starting the conversation owner."
+        ),
+        OperationId::RagSourceAdd => local!(
+            language,
+            "資料フォルダまたはファイルを名前付きソースとして登録し、除外パターンを保存します。",
+            "Register a document folder or file as a named source and save exclusion patterns."
+        ),
+        OperationId::RagSourceList => local!(
+            language,
+            "独立RAGに登録した資料ソースと除外設定を表示します。",
+            "Show registered independent RAG sources and exclusion settings."
+        ),
+        OperationId::RagSourceRemove => local!(
+            language,
+            "指定した資料ソースの登録と対応する独立索引を削除します。元の外部資料は保持します。",
+            "Remove a source registration and its independent index. Original external documents are retained."
+        ),
+        OperationId::RagIndex => local!(
+            language,
+            "登録資料をkeywordまたはsemanticで索引化します。dry-runは実行対象を表示し、semantic処理はAPI費用が発生する場合があります。",
+            "Index registered sources with keyword or semantic mode. dry-run shows targets; semantic processing may incur API costs."
+        ),
+        OperationId::RagIngest => local!(
+            language,
+            "外部抽出した本文を、元ファイル・種類・任意のメタデータと対応付けて登録します。",
+            "Register externally extracted text with its source file, kind, and optional metadata."
+        ),
+        OperationId::RagStatus => local!(
+            language,
+            "独立RAGの登録ソース、索引状態と未索引・失敗情報を表示します。",
+            "Show independent RAG sources, index state, and unindexed or failed items."
+        ),
+        OperationId::RagInspect => local!(
+            language,
+            "指定文書IDの保存された版、出典、抽出情報と索引情報を表示します。",
             "Show saved versions, provenance, extraction details, and index information for a document ID."
-        }
-        OperationId::RagSearch => {
+        ),
+        OperationId::RagSearch => local!(
+            language,
+            "ガイド、会話、登録資料の明示した範囲を検索します。semantic・hybridではAPI費用が発生する場合があります。",
             "Search explicit scopes of guides, conversations, and registered sources. Semantic and hybrid modes may incur API costs."
-        }
-        OperationId::RagGet => {
+        ),
+        OperationId::RagGet => local!(
+            language,
+            "検索結果の版付きrefを使って、対応する原文を有限ページで取得します。",
             "Fetch corresponding original text in bounded pages using a versioned ref from search results."
-        }
+        ),
     }
 }
-fn field_label_en(field: FieldId) -> &'static str {
-    match field {
-        FieldId::Attempt => "Model attempt ID (alone)",
-        FieldId::Thread => "Thread ID",
-        FieldId::Run => "Run ID",
-        FieldId::Turn => "Turn ID",
-        FieldId::Node => "History node ID",
-        FieldId::Parent => "Parent Thread ID",
-        FieldId::Message => "Message ID",
-        FieldId::Messages => "Message IDs to cancel",
-        FieldId::Operation => "Receipt operation ID",
-        FieldId::Execution => "Command execution ID",
-        FieldId::Query => "Search or filter text",
-        FieldId::GroupBy => "Usage breakdown",
-        FieldId::Timezone => "Breakdown timezone",
-        FieldId::GroupLimit => "Breakdown group limit",
-        FieldId::Limit => "Result count",
-        FieldId::Cursor => "Continuation cursor",
-        FieldId::Since => "Recorded at or after",
-        FieldId::Until => "End time (exclusive)",
-        FieldId::After => "Previous wait cursor",
-        FieldId::Memory => "Memory status",
-        FieldId::CommandContains => "Command contains",
-        FieldId::ExitCode => "Exit code",
-        FieldId::States => "Saved states",
-        FieldId::State => "Saved state of related shell",
-        FieldId::All => "Include terminal states",
-        FieldId::IncludeChildren => "Include child usage",
-        FieldId::Agents => "Instruction file",
-        FieldId::Cwd => "Working folder",
-        FieldId::Connection => "Connection name",
-        FieldId::Model => "Model name",
-        FieldId::Effort => "Reasoning effort",
-        FieldId::Title => "Display title",
-        FieldId::Descendants => "Include descendants",
-        FieldId::SenderLabel => "Sender display name",
-        FieldId::Now => "Release foreground shell wait",
-        FieldId::Text => "Message text",
-        FieldId::Conditions => "Observation conditions",
-        FieldId::SettlementStates => "Conversation observation states",
-        FieldId::Timeout => "Observation or execution limit (ms)",
-        FieldId::ExcerptChars => "Excerpt characters",
-        FieldId::LimitBytes => "Read size in bytes",
-        FieldId::FinalAnswerOnly => "Final answer only",
-        FieldId::Encoding => "Encoding",
-        FieldId::Relation => "History relationship",
-        FieldId::Kinds => "Included node kinds",
-        FieldId::ExcludeKinds => "Excluded node kinds",
-        FieldId::From => "Start time",
-        FieldId::To => "End time",
-        FieldId::Path => "Path",
-        FieldId::AttachmentKind => "Attachment kind",
-        FieldId::Attachment => "Attachment reference ID",
-        FieldId::CompactAction => "Compaction or editing method",
-        FieldId::FromNode => "First node ID in range",
-        FieldId::ToNode => "Last node ID in range",
-        FieldId::SummaryMaxChars => "Summary character limit (empty = configured)",
-        FieldId::SummaryMaxPercent => "Summary percentage limit (empty = configured)",
-        FieldId::IndexScope => "Index scope",
-        FieldId::Space => "Index space ID",
-        FieldId::Threads => "Thread IDs to index",
-        FieldId::Sources => "Source node IDs to index",
-        FieldId::Dimensions => "Requested embedding dimensions",
-        FieldId::Category => "Saved category",
-        FieldId::Schema => "Final JSON schema file",
-        FieldId::MaxRepairs => "Maximum additional repairs",
-        FieldId::DocParent => "Guide parent ID",
-        FieldId::Document => "Document ID",
-        FieldId::Section => "Guide section",
-        FieldId::Source => "Registered source",
-        FieldId::SourceName => "Registered source name",
-        FieldId::Excludes => "Excluded globs",
-        FieldId::ClearExcludes => "Clear existing exclusions",
-        FieldId::DryRun => "Preview targets only",
-        FieldId::SearchMode => "Search or index mode",
-        FieldId::IngestKind => "Ingested content kind",
-        FieldId::SourceFile => "Source material file",
-        FieldId::TextFile => "Text file to ingest",
-        FieldId::MetadataFile => "Supplementary metadata file",
-        FieldId::RagScopes => "Document spaces to search",
-        FieldId::Reference => "Versioned original ref",
-    }
+fn operation_meaning_en(id: OperationId) -> &'static str {
+    operation_meaning_for(id, crate::config::UiLanguage::En)
 }
-fn field_help_en(field: FieldId) -> &'static str {
-    match field {
-        FieldId::Attempt => {
-            "Retrieve saved attempt usage and cache diagnostics. Leave other grouping options empty."
-        }
-        FieldId::Thread => {
-            "Specify the saved target Thread. On CLI, an authenticated model defaults only to its own Thread."
-        }
-        FieldId::Run => {
-            "Specify the target Run. A human CLI must supply an ID; only Revisit can default to the model's own Run."
-        }
-        FieldId::Turn => {
-            "Specify the saved Turn ID for one response interval. This is distinct from a Run ID."
-        }
-        FieldId::Node => "Specify the saved node ID whose original or relationships to inspect.",
-        FieldId::Parent => {
-            "Parent Thread of the new conversation. Omit for a conversation without a parent."
-        }
-        FieldId::Message => "The message_id returned in the message send receipt.",
-        FieldId::Messages => {
-            "Specify unadopted message_id values to cancel. CLI repeats --message; maximum 128."
-        }
-        FieldId::Operation => {
-            "The operation_id returned by the receipt or error, distinct from the request ID of this lookup."
-        }
-        FieldId::Execution => {
-            "Use the execution_id returned by the target work's shell tool, not the observing CLI's own ID."
-        }
-        FieldId::Query => "Search terms or a list filter for this operation.",
-        FieldId::GroupBy => {
-            "Empty gives the traditional total; hour/day/thread give bounded saved breakdowns."
-        }
-        FieldId::Timezone => {
-            "Only with a breakdown. Empty uses owner local; otherwise UTC or a fixed +HH:MM/-HH:MM offset."
-        }
-        FieldId::GroupLimit => {
-            "Only with a breakdown; 1..168. Empty uses effective limit 168; the CLI argument itself has no default."
-        }
-        FieldId::Limit => {
-            "Shows the CLI count default. The separate TUI list display default is 20."
-        }
-        FieldId::Cursor => {
-            "The cursor from the immediately preceding read of the same target and conditions. Empty starts at the beginning."
-        }
-        FieldId::Since => {
-            "RFC3339 with timezone. The meaning of the saved timestamp depends on the operation."
-        }
-        FieldId::Until => {
-            "RFC3339 end boundary. Saved values are selected from the start inclusive to the end exclusive."
-        }
-        FieldId::After => {
-            "Use the previous wait cursor to observe later saved changes under the same conditions."
-        }
-        FieldId::Memory => {
-            "Observe current owner cache and OS values; do not combine with saved work conditions."
-        }
-        FieldId::CommandContains => {
-            "Filter by substring of the saved command. This does not execute it."
-        }
-        FieldId::ExitCode => "Filter by saved exit code; negative values are allowed.",
-        FieldId::States => "List saved native states. CLI repeats --state.",
-        FieldId::State => {
-            "Filter history-related shells by starting/running/stopping/exited/failed/stopped."
-        }
-        FieldId::All => "Show terminal states as well as the usual pending range.",
-        FieldId::IncludeChildren => {
-            "Include child usage in a Thread total. Cannot be combined with a Run or Turn."
-        }
-        FieldId::Agents => {
-            "An instruction file resolved from the effective target cwd. Inheritance and omission follow the create or set operation."
-        }
-        FieldId::Cwd => {
-            "On creation, relative paths use the launch directory; on update, the target Thread's saved cwd. Omission follows the operation's defaults or inheritance."
-        }
-        FieldId::Connection => {
-            "A connection defined in config. model list chooses the Thread connection and then the owner's default."
-        }
-        FieldId::Model => {
-            "Specify a model returned by the connection. No price or capability catalogue is built in."
-        }
-        FieldId::Effort => {
-            "Omission uses defaults or inheritance. An empty CLI value explicitly clears it."
-        }
-        FieldId::Title => "Change the saved title. An empty value restores automatic naming.",
-        FieldId::Descendants => "Include descendant Threads in deletion or its impact preview.",
-        FieldId::SenderLabel => {
-            "A self-declared label; it grants no authority. message send allows at most 64 Unicode characters."
-        }
-        FieldId::Now => {
-            "Save the input and release the foreground shell wait. This does not interrupt response generation."
-        }
-        FieldId::Text => {
-            "The TUI uses the retained text. CLI --text-stdin is not connected to terminal stdin in the TUI."
-        }
-        FieldId::Conditions => {
-            "Use Turn IDs for turn_completed, Run IDs for run_ended, execution IDs for shell_ended and shell_output, and Thread IDs for thread_settled. Specify matching IDs when changing kind. Set the shell cursor for output and previous wait after for resumption separately."
-        }
-        FieldId::SettlementStates => {
-            "Space-separated thread_settled states. The form defaults to completed recovery_wait failed stopped; CLI uses the states array in conditions-json."
-        }
-        FieldId::Timeout => {
-            "The observing client's deadline. Expiry alone does not stop the target Run or shell."
-        }
-        FieldId::ExcerptChars => {
-            "0..4096 Unicode scalars. Zero omits excerpt text; CLI default is 512."
-        }
-        FieldId::LimitBytes => {
-            "Maximum original text fetched in one request, subject to CLI defaults and per-operation limits."
-        }
-        FieldId::FinalAnswerOnly => {
-            "Fetch only the saved final assistant message, excluding reasoning and interim explanations."
-        }
-        FieldId::Encoding => {
-            "An omitted shell read encoding uses the saved value. Continue reading with the same encoding and target."
-        }
-        FieldId::Relation => {
-            "Choose previous/next/sources/replacements. Neighbours and sources are distinct relationships."
-        }
-        FieldId::Kinds => "List saved node kinds to include in search. CLI repeats --kind.",
-        FieldId::ExcludeKinds => {
-            "List saved node kinds to exclude from search. CLI repeats --exclude-kind."
-        }
-        FieldId::From => "Inclusive start boundary in RFC3339 with timezone.",
-        FieldId::To => "Exclusive end boundary in RFC3339 with timezone.",
-        FieldId::Path => {
-            "File or folder resolved by the operation. Existing external sources are not copied into history."
-        }
-        FieldId::AttachmentKind => "Specify file or image.",
-        FieldId::Attachment => "Specify the attachment_id returned by attachment list.",
+
+fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
+    match id {
+        FieldId::SettlementStates => local!(
+            language,
+            "会話の観測状態",
+            "Conversation observation states"
+        ),
+        FieldId::Until => local!(language, "終了日時（未満）", "End time (exclusive)"),
+        FieldId::After => local!(language, "前回の待機cursor", "Previous wait cursor"),
+        FieldId::Memory => local!(language, "メモリ状態", "Memory status"),
+        FieldId::CommandContains => local!(language, "コマンドを含む", "Command contains"),
+        FieldId::ExitCode => local!(language, "終了コード", "Exit code"),
+        FieldId::Thread => local!(language, "会話ID", "Thread ID"),
+        FieldId::Run => local!(language, "作業ID（Run）", "Run ID"),
+        FieldId::Attempt => local!(
+            language,
+            "モデル試行ID（単独指定）",
+            "Model attempt ID (alone)"
+        ),
+        FieldId::Turn => local!(language, "応答処理ID（Turn）", "Turn ID"),
+        FieldId::Node => local!(language, "履歴ノードID", "History node ID"),
+        FieldId::Parent => local!(language, "親の会話ID", "Parent Thread ID"),
+        FieldId::Message => local!(language, "入力ID", "Message ID"),
+        FieldId::Messages => local!(language, "取消対象の入力ID", "Message IDs to cancel"),
+        FieldId::Operation => local!(language, "受付照会のoperation ID", "Receipt operation ID"),
+        FieldId::Execution => local!(language, "コマンド実行ID", "Command execution ID"),
+        FieldId::Query => local!(language, "検索・絞込み文字列", "Search or filter text"),
+        FieldId::GroupBy => local!(language, "使用量の内訳", "Usage breakdown"),
+        FieldId::Timezone => local!(language, "内訳の時間帯", "Breakdown timezone"),
+        FieldId::GroupLimit => local!(language, "内訳の区切り上限", "Breakdown group limit"),
+        FieldId::Limit => local!(language, "取得件数", "Result count"),
+        FieldId::Cursor => local!(language, "続きcursor", "Continuation cursor"),
+        FieldId::Since => local!(language, "記録日時以降", "Recorded at or after"),
+        FieldId::States => local!(language, "保存された状態", "Saved states"),
+        FieldId::State => local!(
+            language,
+            "関連shellの保存状態",
+            "Saved state of related shell"
+        ),
+        FieldId::All => local!(language, "終端状態も含める", "Include terminal states"),
+        FieldId::IncludeChildren => local!(language, "子の使用量も含める", "Include child usage"),
+        FieldId::Agents => local!(language, "指示ファイル", "Instruction file"),
+        FieldId::Cwd => local!(language, "作業フォルダ", "Working folder"),
+        FieldId::Connection => local!(language, "接続名", "Connection name"),
+        FieldId::Model => local!(language, "モデル名", "Model name"),
+        FieldId::Effort => local!(language, "推論設定", "Reasoning effort"),
+        FieldId::Title => local!(language, "表示タイトル", "Display title"),
+        FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
+        FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
+        FieldId::Now => local!(
+            language,
+            "前景shell待ちを解除",
+            "Release foreground shell wait"
+        ),
+        FieldId::Text => local!(language, "入力本文", "Message text"),
+        FieldId::Conditions => local!(language, "観測条件", "Observation conditions"),
+        FieldId::Timeout => local!(
+            language,
+            "観測・実行の上限ms",
+            "Observation or execution limit (ms)"
+        ),
+        FieldId::ExcerptChars => local!(language, "抜粋文字数", "Excerpt characters"),
+        FieldId::LimitBytes => local!(language, "取得byte数", "Read size in bytes"),
+        FieldId::FinalAnswerOnly => local!(language, "最終回答のみ", "Final answer only"),
+        FieldId::Encoding => local!(language, "文字コード", "Encoding"),
+        FieldId::Relation => local!(language, "履歴の関係", "History relationship"),
+        FieldId::Kinds => local!(language, "含めるnode種類", "Included node kinds"),
+        FieldId::ExcludeKinds => local!(language, "除外node種類", "Excluded node kinds"),
+        FieldId::From => local!(language, "開始日時", "Start time"),
+        FieldId::To => local!(language, "終了日時", "End time"),
+        FieldId::Path => local!(language, "参照するパス", "Path"),
+        FieldId::AttachmentKind => local!(language, "添付の種類", "Attachment kind"),
+        FieldId::Attachment => local!(language, "添付参照ID", "Attachment reference ID"),
         FieldId::CompactAction => {
+            local!(language, "圧縮・編集方法", "Compaction or editing method")
+        }
+        FieldId::FromNode => local!(language, "範囲先頭node ID", "First node ID in range"),
+        FieldId::ToNode => local!(language, "範囲末尾node ID", "Last node ID in range"),
+        FieldId::SummaryMaxChars => local!(
+            language,
+            "要約文字数上限（空=設定値）",
+            "Summary character limit (empty = configured)"
+        ),
+        FieldId::SummaryMaxPercent => local!(
+            language,
+            "要約割合上限（空=設定値）",
+            "Summary percentage limit (empty = configured)"
+        ),
+        FieldId::IndexScope => local!(language, "索引対象範囲", "Index scope"),
+        FieldId::Space => local!(language, "索引領域ID", "Index space ID"),
+        FieldId::Threads => local!(language, "索引対象Thread ID", "Thread IDs to index"),
+        FieldId::Sources => local!(
+            language,
+            "索引対象source node ID",
+            "Source node IDs to index"
+        ),
+        FieldId::Dimensions => local!(
+            language,
+            "要求する埋め込み次元",
+            "Requested embedding dimensions"
+        ),
+        FieldId::Category => local!(language, "保存カテゴリ", "Saved category"),
+        FieldId::Schema => local!(
+            language,
+            "最終JSONのschemaファイル",
+            "Final JSON schema file"
+        ),
+        FieldId::MaxRepairs => local!(language, "追加修復の上限", "Maximum additional repairs"),
+        FieldId::DocParent => local!(language, "ガイドの親ID", "Guide parent ID"),
+        FieldId::Document => local!(language, "文書ID", "Document ID"),
+        FieldId::Section => local!(language, "ガイド見出し", "Guide section"),
+        FieldId::Source => local!(language, "登録資料ソース", "Registered source"),
+        FieldId::SourceName => local!(language, "登録ソース名", "Registered source name"),
+        FieldId::Excludes => local!(language, "除外するglob", "Excluded globs"),
+        FieldId::ClearExcludes => local!(
+            language,
+            "既存の除外設定を消去",
+            "Clear existing exclusions"
+        ),
+        FieldId::DryRun => local!(language, "実行対象だけを確認", "Preview targets only"),
+        FieldId::SearchMode => local!(language, "検索・索引方式", "Search or index mode"),
+        FieldId::IngestKind => local!(language, "登録本文の種類", "Ingested content kind"),
+        FieldId::SourceFile => local!(language, "元資料ファイル", "Source material file"),
+        FieldId::TextFile => local!(language, "登録本文のファイル", "Text file to ingest"),
+        FieldId::MetadataFile => local!(
+            language,
+            "補助metadataファイル",
+            "Supplementary metadata file"
+        ),
+        FieldId::RagScopes => local!(language, "検索する資料領域", "Document spaces to search"),
+        FieldId::Reference => local!(language, "原文の版付きref", "Versioned original ref"),
+    }
+}
+fn field_label_en(id: FieldId) -> &'static str {
+    field_label_for(id, crate::config::UiLanguage::En)
+}
+
+fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
+    match id {
+        FieldId::SettlementStates => local!(
+            language,
+            "thread_settledのstatesを空白で区切ります。フォーム初期値はcompleted recovery_wait failed stoppedです。CLIではconditions-jsonのstates配列で明示します。",
+            "Space-separated thread_settled states. The form defaults to completed recovery_wait failed stopped; CLI uses the states array in conditions-json."
+        ),
+        FieldId::Until => local!(
+            language,
+            "RFC3339の終了境界です。開始日時以上・終了日時未満で保存済みの値を選びます。",
+            "RFC3339 end boundary. Saved values are selected from the start inclusive to the end exclusive."
+        ),
+        FieldId::After => local!(
+            language,
+            "前回waitのcursorを指定し、同じ条件で保存された後続の状態変更を観測します。",
+            "Use the previous wait cursor to observe later saved changes under the same conditions."
+        ),
+        FieldId::Memory => local!(
+            language,
+            "保存済み作業の条件とは併用せず、ownerのcacheとOSの現在値を観測します。",
+            "Observe current owner cache and OS values; do not combine with saved work conditions."
+        ),
+        FieldId::CommandContains => local!(
+            language,
+            "保存されたコマンドの部分文字列で絞ります。コマンド自体は実行しません。",
+            "Filter by substring of the saved command. This does not execute it."
+        ),
+        FieldId::ExitCode => local!(
+            language,
+            "保存された終了コードで絞ります。負数も指定できます。",
+            "Filter by saved exit code; negative values are allowed."
+        ),
+        FieldId::Thread => local!(
+            language,
+            "対象の保存Threadを指定します。CLI省略時は認証済みモデルの自分のThreadだけが既定です。",
+            "Specify the saved target Thread. On CLI, an authenticated model defaults only to its own Thread."
+        ),
+        FieldId::Run => local!(
+            language,
+            "対象Runを指定します。人のCLIは明示IDが必要です。Revisitだけはモデルの自分のRunを省略できます。",
+            "Specify the target Run. A human CLI must supply an ID; only Revisit can default to the model's own Run."
+        ),
+        FieldId::Attempt => local!(
+            language,
+            "保存attemptの使用量とキャッシュ診断を取得します。他の集計指定は空にします。",
+            "Retrieve saved attempt usage and cache diagnostics. Leave other grouping options empty."
+        ),
+        FieldId::Turn => local!(
+            language,
+            "一つの回答区間の保存Turn IDを指定します。Run IDとは別です。",
+            "Specify the saved Turn ID for one response interval. This is distinct from a Run ID."
+        ),
+        FieldId::Node => local!(
+            language,
+            "原文または関係を調べる保存ノードIDを指定します。",
+            "Specify the saved node ID whose original or relationships to inspect."
+        ),
+        FieldId::Parent => local!(
+            language,
+            "新しい会話の親Threadです。省略時は親のない会話になります。",
+            "Parent Thread of the new conversation. Omit for a conversation without a parent."
+        ),
+        FieldId::Message => local!(
+            language,
+            "message sendの受付結果に返されたmessage_idです。",
+            "The message_id returned in the message send receipt."
+        ),
+        FieldId::Messages => local!(
+            language,
+            "取消す未採用message_idを明示します。CLIは--messageを繰り返し、最大128件です。",
+            "Specify unadopted message_id values to cancel. CLI repeats --message; maximum 128."
+        ),
+        FieldId::Operation => local!(
+            language,
+            "受付結果またはエラーに返されたoperation_idです。照会自身のrequest IDとは別です。",
+            "The operation_id returned by the receipt or error, distinct from the request ID of this lookup."
+        ),
+        FieldId::Execution => local!(
+            language,
+            "対象作業のshellツールが返したexecution_idを使います。観測CLI自身のexecution_idと区別します。",
+            "Use the execution_id returned by the target work's shell tool, not the observing CLI's own ID."
+        ),
+        FieldId::Query => local!(
+            language,
+            "この操作の検索語または一覧の絞込み文字列です。",
+            "Search terms or a list filter for this operation."
+        ),
+        FieldId::GroupBy => local!(
+            language,
+            "空は従来の合計。hour/day/thread は有界な保存済み内訳です。",
+            "Empty gives the traditional total; hour/day/thread give bounded saved breakdowns."
+        ),
+        FieldId::Timezone => local!(
+            language,
+            "内訳指定時のみ。空は owner local、UTC または固定 +HH:MM/-HH:MM。",
+            "Only with a breakdown. Empty uses owner local; otherwise UTC or a fixed +HH:MM/-HH:MM offset."
+        ),
+        FieldId::GroupLimit => local!(
+            language,
+            "内訳指定時のみ1..168。空は有効上限168で、CLI引数自体の既定値はありません。",
+            "Only with a breakdown; 1..168. Empty uses effective limit 168; the CLI argument itself has no default."
+        ),
+        FieldId::Limit => local!(
+            language,
+            "CLIの件数既定を表示します。一覧のTUI表示既定20件は別に明示します。",
+            "Shows the CLI count default. The separate TUI list display default is 20."
+        ),
+        FieldId::Cursor => local!(
+            language,
+            "直前の同じ対象・条件の読み取り結果cursorです。空は先頭です。",
+            "The cursor from the immediately preceding read of the same target and conditions. Empty starts at the beginning."
+        ),
+        FieldId::Since => local!(
+            language,
+            "タイムゾーン付きRFC3339です。操作の保存時刻の意味に従います。",
+            "RFC3339 with timezone. The meaning of the saved timestamp depends on the operation."
+        ),
+        FieldId::States => local!(
+            language,
+            "保存native stateを列挙します。CLIは--stateを繰り返します。",
+            "List saved native states. CLI repeats --state."
+        ),
+        FieldId::State => local!(
+            language,
+            "履歴に関連したshellのstarting/running/stopping/exited/failed/stoppedを絞り込みます。",
+            "Filter history-related shells by starting/running/stopping/exited/failed/stopped."
+        ),
+        FieldId::All => local!(
+            language,
+            "通常のpending範囲に加えて終端状態も表示します。",
+            "Show terminal states as well as the usual pending range."
+        ),
+        FieldId::IncludeChildren => local!(
+            language,
+            "Thread範囲で子の使用量も合計します。Run/Turn指定とは同時に使えません。",
+            "Include child usage in a Thread total. Cannot be combined with a Run or Turn."
+        ),
+        FieldId::Agents => local!(
+            language,
+            "対象の実効cwdから解決する指示ファイルです。継承・未指定の意味は作成／設定操作に従います。",
+            "An instruction file resolved from the effective target cwd. Inheritance and omission follow the create or set operation."
+        ),
+        FieldId::Cwd => local!(
+            language,
+            "作成時の相対パスは起動場所、設定変更時は対象Threadの保存cwdから解決します。未指定はその操作の既定・継承です。",
+            "On creation, relative paths use the launch directory; on update, the target Thread's saved cwd. Omission follows the operation's defaults or inheritance."
+        ),
+        FieldId::Connection => local!(
+            language,
+            "設定ファイルに定義された接続名です。model listではThread接続、所有者既定の順で選びます。",
+            "A connection defined in config. model list chooses the Thread connection and then the owner's default."
+        ),
+        FieldId::Model => local!(
+            language,
+            "接続から取得したモデル名を指定します。内蔵の価格・能力カタログはありません。",
+            "Specify a model returned by the connection. No price or capability catalogue is built in."
+        ),
+        FieldId::Effort => local!(
+            language,
+            "未指定は既定・継承です。CLIの空文字は明示解除として扱います。",
+            "Omission uses defaults or inheritance. An empty CLI value explicitly clears it."
+        ),
+        FieldId::Title => local!(
+            language,
+            "保存タイトルを変更します。空文字は自動タイトルへ戻します。",
+            "Change the saved title. An empty value restores automatic naming."
+        ),
+        FieldId::Descendants => local!(
+            language,
+            "親子関係上の子孫Threadも削除／削除影響確認へ含めます。",
+            "Include descendant Threads in deletion or its impact preview."
+        ),
+        FieldId::SenderLabel => local!(
+            language,
+            "自己申告の表示名であり権限を与えません。message sendは最大64Unicode文字です。",
+            "A self-declared label; it grants no authority. message send allows at most 64 Unicode characters."
+        ),
+        FieldId::Now => local!(
+            language,
+            "入力を保存し、前景shell待ちを解除します。応答生成そのものの割込みではありません。",
+            "Save the input and release the foreground shell wait. This does not interrupt response generation."
+        ),
+        FieldId::Text => local!(
+            language,
+            "TUIでは保持した本文を使います。CLIの--text-stdinをTUIの端末stdinへ接続しません。",
+            "The TUI uses the retained text. CLI --text-stdin is not connected to terminal stdin in the TUI."
+        ),
+        FieldId::Conditions => local!(
+            language,
+            "turn_completedはTurn ID、run_endedはRun ID、shell_endedとshell_outputは実行ID、thread_settledはThread IDの一覧で観測します。種類を変えたら対応するIDを明示します。出力条件はshellのcursor、再開は前回waitのafterを別々に指定します。",
+            "Use Turn IDs for turn_completed, Run IDs for run_ended, execution IDs for shell_ended and shell_output, and Thread IDs for thread_settled. Specify matching IDs when changing kind. Set the shell cursor for output and previous wait after for resumption separately."
+        ),
+        FieldId::Timeout => local!(
+            language,
+            "期限は観測クライアントの上限です。期限切れだけで対象Runやshellは停止しません。",
+            "The observing client's deadline. Expiry alone does not stop the target Run or shell."
+        ),
+        FieldId::ExcerptChars => local!(
+            language,
+            "0..4096Unicode scalarです。0は抜粋本文を省略し、CLI既定は512です。",
+            "0..4096 Unicode scalars. Zero omits excerpt text; CLI default is 512."
+        ),
+        FieldId::LimitBytes => local!(
+            language,
+            "原文の一回の取得上限です。CLI既定と操作ごとの上限に従います。",
+            "Maximum original text fetched in one request, subject to CLI defaults and per-operation limits."
+        ),
+        FieldId::FinalAnswerOnly => local!(
+            language,
+            "保存された最終assistant messageだけを取得し、推論と途中説明を除きます。",
+            "Fetch only the saved final assistant message, excluding reasoning and interim explanations."
+        ),
+        FieldId::Encoding => local!(
+            language,
+            "shell readの省略は保存値です。継続読み取りは同じ文字コードと対象を保持します。",
+            "An omitted shell read encoding uses the saved value. Continue reading with the same encoding and target."
+        ),
+        FieldId::Relation => local!(
+            language,
+            "previous/next/sources/replacementsを指定します。前後と出典は別の関係です。",
+            "Choose previous/next/sources/replacements. Neighbours and sources are distinct relationships."
+        ),
+        FieldId::Kinds => local!(
+            language,
+            "検索へ含める保存node kindを列挙します。CLIは--kindを繰り返します。",
+            "List saved node kinds to include in search. CLI repeats --kind."
+        ),
+        FieldId::ExcludeKinds => local!(
+            language,
+            "検索から除く保存node kindを列挙します。CLIは--exclude-kindを繰り返します。",
+            "List saved node kinds to exclude from search. CLI repeats --exclude-kind."
+        ),
+        FieldId::From => local!(
+            language,
+            "タイムゾーン付きRFC3339の開始境界を含めます。",
+            "Inclusive start boundary in RFC3339 with timezone."
+        ),
+        FieldId::To => local!(
+            language,
+            "タイムゾーン付きRFC3339の終了境界を含めません。",
+            "Exclusive end boundary in RFC3339 with timezone."
+        ),
+        FieldId::Path => local!(
+            language,
+            "指定操作で解決するファイル／フォルダです。既存外部資料は履歴のために複製しません。",
+            "File or folder resolved by the operation. Existing external sources are not copied into history."
+        ),
+        FieldId::AttachmentKind => local!(
+            language,
+            "fileまたはimageを指定します。",
+            "Specify file or image."
+        ),
+        FieldId::Attachment => local!(
+            language,
+            "attachment listが返したattachment_idを指定します。",
+            "Specify the attachment_id returned by attachment list."
+        ),
+        FieldId::CompactAction => local!(
+            language,
+            "未指定は安全境界での圧縮要求です。maximal/spill/summary/trim/omit/restoreは排他的です。",
             "Omission requests compaction at a safe boundary. maximal/spill/summary/trim/omit/restore are mutually exclusive."
-        }
-        FieldId::FromNode => {
+        ),
+        FieldId::FromNode => local!(
+            language,
+            "編集範囲の先頭を含みます。restoreは選択済みmarkerまたは最初の省略元も指定できます。",
             "Includes the first node in the edit range. restore can also specify the selected marker or first omitted source."
-        }
-        FieldId::ToNode => {
+        ),
+        FieldId::ToNode => local!(
+            language,
+            "編集範囲の末尾を含みます。trimは削除するprefix末尾です。",
             "Includes the last node in the edit range. For trim, this is the last node in the removed prefix."
-        }
-        FieldId::SummaryMaxChars => "Only for summary. Maximum length of the completed summary.",
-        FieldId::SummaryMaxPercent => {
+        ),
+        FieldId::SummaryMaxChars => local!(
+            language,
+            "summaryだけで指定できます。完成した要約の文字数上限です。",
+            "Only for summary. Maximum length of the completed summary."
+        ),
+        FieldId::SummaryMaxPercent => local!(
+            language,
+            "summaryだけで指定できます。元の文字数に対する割合で、0より大きく100以下です。",
             "Only for summary. Percentage of original characters, greater than zero and at most 100."
-        }
-        FieldId::IndexScope => {
+        ),
+        FieldId::IndexScope => local!(
+            language,
+            "threads/allを指定します。実行時は現在のpreviewと明示対象の規則を保持します。",
             "Specify threads or all. Execution retains current preview and explicit target rules."
-        }
-        FieldId::Space => "The current active space or an explicitly specified saved space ID.",
-        FieldId::Threads => "Specify Thread IDs for past history indexing. CLI repeats --thread.",
-        FieldId::Sources => "Specify saved source node IDs. CLI repeats --source.",
-        FieldId::Dimensions => {
+        ),
+        FieldId::Space => local!(
+            language,
+            "現在の有効領域または明示した保存space IDです。",
+            "The current active space or an explicitly specified saved space ID."
+        ),
+        FieldId::Threads => local!(
+            language,
+            "過去履歴を索引化するThread IDを明示します。CLIは--threadを繰り返します。",
+            "Specify Thread IDs for past history indexing. CLI repeats --thread."
+        ),
+        FieldId::Sources => local!(
+            language,
+            "索引元の保存node IDを指定します。CLIは--sourceを繰り返します。",
+            "Specify saved source node IDs. CLI repeats --source."
+        ),
+        FieldId::Dimensions => local!(
+            language,
+            "省略時は現在の設定／領域の契約に従います。モデル側が受け付ける次元を内蔵推測しません。",
             "Omission follows current configuration or space contract. Accepted model dimensions are not guessed."
-        }
-        FieldId::Category => {
+        ),
+        FieldId::Category => local!(
+            language,
+            "回収対象を選びます。保存状態の照会は選択に関係なく全体を表示します。",
             "Select a collection target. Saved-state inspection shows the whole state regardless of selection."
-        }
-        FieldId::Schema => {
+        ),
+        FieldId::Schema => local!(
+            language,
+            "最大64KiBの対応JSON Schemaファイルです。未対応keywordは入力エラーです。",
             "A supported JSON Schema file up to 64 KiB. Unsupported keywords are input errors."
-        }
-        FieldId::MaxRepairs => {
+        ),
+        FieldId::MaxRepairs => local!(
+            language,
+            "0..5回、CLI既定2回です。各追加依頼はモデル・tool費用を生じ得ます。",
             "0..5; CLI default is 2. Each additional request can incur model and tool costs."
-        }
-        FieldId::DocParent => "Bundled guide category ID used to narrow the hierarchy.",
-        FieldId::Document => {
+        ),
+        FieldId::DocParent => local!(
+            language,
+            "階層を絞る同梱ガイドカテゴリIDです。",
+            "Bundled guide category ID used to narrow the hierarchy."
+        ),
+        FieldId::Document => local!(
+            language,
+            "同梱ガイドまたは独立RAGの保存文書IDです。操作の文書領域を確認します。",
             "Saved document ID for bundled guides or independent RAG. Check the operation's document space."
-        }
-        FieldId::Section => "Specify a heading or section returned by docs get.",
-        FieldId::Source => {
+        ),
+        FieldId::Section => local!(
+            language,
+            "docs getが示す見出し・sectionを指定します。",
+            "Specify a heading or section returned by docs get."
+        ),
+        FieldId::Source => local!(
+            language,
+            "登録ソースのIDまたは名前です。rag indexのdocsは同梱ガイドです。",
             "Registered source ID or name. docs in rag index denotes bundled guides."
-        }
-        FieldId::SourceName => "The registered name identifying a source.",
-        FieldId::Excludes => {
+        ),
+        FieldId::SourceName => local!(
+            language,
+            "資料を識別する登録名です。",
+            "The registered name identifying a source."
+        ),
+        FieldId::Excludes => local!(
+            language,
+            "ソース相対globを繰り返します。clear-excludesとは同時に使えません。",
             "Repeat source-relative globs. Cannot be combined with clear-excludes."
-        }
-        FieldId::ClearExcludes => {
+        ),
+        FieldId::ClearExcludes => local!(
+            language,
+            "ソース再登録時の既存除外を明示解除します。excludeとの併用はできません。",
             "Explicitly clear exclusions when re-registering a source. Cannot be combined with exclude."
-        }
-        FieldId::DryRun => "Inspect intended targets and changes without applying the operation.",
-        FieldId::SearchMode => {
+        ),
+        FieldId::DryRun => local!(
+            language,
+            "操作を適用せず、対象や変更の見込みを確認します。",
+            "Inspect intended targets and changes without applying the operation."
+        ),
+        FieldId::SearchMode => local!(
+            language,
+            "操作が対応するkeyword/semantic/hybridから選びます。semantic方式はAPIを使用し得ます。",
             "Choose keyword/semantic/hybrid supported by the operation. Semantic mode can use an API."
-        }
-        FieldId::IngestKind => {
+        ),
+        FieldId::IngestKind => local!(
+            language,
+            "extracted/llm-explanation/summaryを指定し、抽出結果の由来を保持します。",
             "Specify extracted/llm-explanation/summary to retain provenance of extracted content."
-        }
-        FieldId::SourceFile => "Original source file for the extracted text.",
-        FieldId::TextFile => {
+        ),
+        FieldId::SourceFile => local!(
+            language,
+            "抽出済み本文の元となった資料ファイルです。",
+            "Original source file for the extracted text."
+        ),
+        FieldId::TextFile => local!(
+            language,
+            "--text-stdinと排他的なUTF-8本文ファイルです。既存の16MiB上限を保持します。",
             "UTF-8 text file mutually exclusive with --text-stdin. The existing 16 MiB limit applies."
-        }
-        FieldId::MetadataFile => {
+        ),
+        FieldId::MetadataFile => local!(
+            language,
+            "任意の登録metadataファイルです。読み取りと検証はworkerで行います。",
             "Optional registration metadata file. A worker reads and validates it."
-        }
-        FieldId::RagScopes => "Repeat docs/history/history:THREAD/source:ID or names.",
-        FieldId::Reference => {
+        ),
+        FieldId::RagScopes => local!(
+            language,
+            "docs/history/history:THREAD/source:IDまたは名前を繰り返します。",
+            "Repeat docs/history/history:THREAD/source:ID or names."
+        ),
+        FieldId::Reference => local!(
+            language,
+            "rag searchが返したrefを指定します。cursorは同じrefへ束縛されます。",
             "Specify the ref returned by rag search. The cursor is bound to the same ref."
-        }
+        ),
     }
 }
-fn discovery_en(discovery: Discovery) -> &'static str {
-    match discovery {
-        Discovery::None => "Review the operation's input requirements.",
-        Discovery::ThreadList => "Find a Thread ID in thread list or the conversation list.",
-        Discovery::RunFromThread => "Find the target Run ID with thread get or status.",
-        Discovery::TurnFromRun => "Find the target Turn ID with run get.",
-        Discovery::HistoryList => "Find saved node IDs and the adopted path with history list.",
-        Discovery::MessageReceipt => {
+fn field_help_en(id: FieldId) -> &'static str {
+    field_help_for(id, crate::config::UiLanguage::En)
+}
+
+fn discovery_for(id: Discovery, language: crate::config::UiLanguage) -> &'static str {
+    match id {
+        Discovery::None => local!(
+            language,
+            "操作の入力条件を確認してください。",
+            "Review the operation's input requirements."
+        ),
+
+        Discovery::ThreadList => local!(
+            language,
+            "thread listまたは会話一覧でThread IDを確認できます。",
+            "Find a Thread ID in thread list or the conversation list."
+        ),
+
+        Discovery::RunFromThread => local!(
+            language,
+            "thread getまたはstatusで対象のRun IDを確認できます。",
+            "Find the target Run ID with thread get or status."
+        ),
+
+        Discovery::TurnFromRun => local!(
+            language,
+            "run getで対象のTurn IDを確認できます。",
+            "Find the target Turn ID with run get."
+        ),
+
+        Discovery::HistoryList => local!(
+            language,
+            "history listで保存ノードIDと採用経路を確認できます。",
+            "Find saved node IDs and the adopted path with history list."
+        ),
+
+        Discovery::MessageReceipt => local!(
+            language,
+            "message sendの返却message_idまたはキューの入力IDを使います。",
             "Use the message_id returned by message send or the input ID in the queue."
-        }
-        Discovery::OperationReceipt => "Use the operation_id returned by the receipt or error.",
-        Discovery::ShellFromToolOrStatus => {
+        ),
+
+        Discovery::OperationReceipt => local!(
+            language,
+            "受付結果またはエラーのoperation_idを使います。",
+            "Use the operation_id returned by the receipt or error."
+        ),
+
+        Discovery::ShellFromToolOrStatus => local!(
+            language,
+            "shellツールの返却execution_idまたはstatusの作業一覧から確認できます。",
             "Find the execution_id returned by the shell tool or in the status work list."
-        }
-        Discovery::SameReadCursor => {
+        ),
+
+        Discovery::SameReadCursor => local!(
+            language,
+            "直前の同じ対象の読み取り結果にあるcursorを使います。空は先頭です。",
             "Use the cursor from the previous read of the same target. Empty starts at the beginning."
-        }
-        Discovery::Status => "Inspect saved work and related IDs with status.",
-        Discovery::Filesystem => {
+        ),
+
+        Discovery::Status => local!(
+            language,
+            "statusで保存された作業と関連IDを確認できます。",
+            "Inspect saved work and related IDs with status."
+        ),
+
+        Discovery::Filesystem => local!(
+            language,
+            "対象ファイル／フォルダのパスを確認してください。読み取りはworkerで行います。",
             "Check the target file or folder path. A worker performs the read."
-        }
-        Discovery::ConnectionConfig => {
+        ),
+
+        Discovery::ConnectionConfig => local!(
+            language,
+            "設定ファイルのconnections名を確認できます。apiはresponsesまたはchat_completionsです。",
             "Check connection names in config. api is responses or chat_completions."
-        }
-        Discovery::ModelList => {
+        ),
+
+        Discovery::ModelList => local!(
+            language,
+            "model listで接続が返す利用可能モデル名を確認できます。",
             "Find available model names returned by the connection with model list."
-        }
-        Discovery::AttachmentList => "Find attachment_id values with attachment list.",
-        Discovery::IndexStatus => {
+        ),
+
+        Discovery::AttachmentList => local!(
+            language,
+            "attachment listでattachment_idを確認できます。",
+            "Find attachment_id values with attachment list."
+        ),
+
+        Discovery::IndexStatus => local!(
+            language,
+            "index statusで領域ID、現在の設定と次元を確認できます。",
             "Inspect space ID, current settings, and dimensions with index status."
-        }
-        Discovery::DocsList => "Find bundled guide IDs and hierarchy with docs list.",
-        Discovery::DocumentList => {
+        ),
+
+        Discovery::DocsList => local!(
+            language,
+            "docs listで同梱ガイドのIDと階層を確認できます。",
+            "Find bundled guide IDs and hierarchy with docs list."
+        ),
+
+        Discovery::DocumentList => local!(
+            language,
+            "同梱ガイドはdocs list、独立資料はrag searchで文書IDを確認できます。",
             "Find bundled guide IDs with docs list and independent documents with rag search."
-        }
-        Discovery::DocsSections => "Find a section in the headings listed by docs get.",
-        Discovery::RagSourceList => "Find registered source IDs and names with rag source list.",
-        Discovery::RagSearch => "Use the versioned ref returned by rag search.",
+        ),
+
+        Discovery::DocsSections => local!(
+            language,
+            "docs getの見出し一覧からsectionを確認できます。",
+            "Find a section in the headings listed by docs get."
+        ),
+
+        Discovery::RagSourceList => local!(
+            language,
+            "rag source listで登録ソースのID・名前を確認できます。",
+            "Find registered source IDs and names with rag source list."
+        ),
+
+        Discovery::RagSearch => local!(
+            language,
+            "rag searchが返す版付きrefを使います。",
+            "Use the versioned ref returned by rag search."
+        ),
     }
 }
-fn term_en(term: Term) -> &'static str {
-    match term {
-        Term::Run => {
+
+fn discovery_en(id: Discovery) -> &'static str {
+    discovery_for(id, crate::config::UiLanguage::En)
+}
+
+fn term_for(id: Term, language: crate::config::UiLanguage) -> &'static str {
+    match id {
+        Term::Run => local!(
+            language,
+            "作業（Run）は依頼を進める実行単位です。Turnの回答後も、所有するshellや子Runの終了まで続くことがあります。",
             "A Run is a unit of work progressing a request. It may continue after a Turn's response until owned shells and child Runs finish."
-        }
-        Term::Turn => {
+        ),
+
+        Term::Turn => local!(
+            language,
+            "応答処理（Turn）は一つの回答へ進む区間です。複数のモデル要求やtool実行を含み、Runと別に完了・停止・復旧待ちになります。",
             "A Turn is one response interval. It may include multiple model requests and tools, and completes, stops, or awaits recovery separately from its Run."
-        }
-        Term::Message => {
+        ),
+
+        Term::Message => local!(
+            language,
+            "入力（Message）は保存された依頼です。受付、Run・Turnへの採用、回答完了は別の段階です。",
             "A Message is saved input. Receipt, Run and Turn assignment, and response completion are separate stages."
-        }
-        Term::Execution => {
+        ),
+
+        Term::Execution => local!(
+            language,
+            "コマンド実行（Execution）はshellツールが開始した一つのOSプロセス群です。観測CLI自身のIDと対象作業IDを区別します。",
             "An Execution is one OS process group started by a shell tool. Distinguish the observing CLI's ID from the target work's ID."
-        }
+        ),
     }
 }
-#[allow(dead_code)]
+
+fn term_en(id: Term) -> &'static str {
+    term_for(id, crate::config::UiLanguage::En)
+}
+
 pub(super) fn text_for(value: Text, language: crate::config::UiLanguage) -> &'static str {
-    use crate::config::UiLanguage;
     use crate::operations::{EnterVerb, TextKey};
-    if language == UiLanguage::Ja {
-        return value.fallback;
-    }
     match value.key {
-        TextKey::Label(id) => operation_label_en(id),
-        TextKey::Meaning(id) => operation_meaning_en(id),
-        TextKey::FieldLabel(_, field) => field_label_en(field),
-        TextKey::FieldHelp(_, field) => field_help_en(field),
-        TextKey::Effect(Effect::Inspect) => "Show saved state or original text.",
-        TextKey::Effect(Effect::SavedMutation) => "Change saved data or settings.",
-        TextKey::Effect(Effect::RuntimeControl) => {
+        TextKey::Label(id) => operation_label_for(id, language),
+        TextKey::Meaning(id) => operation_meaning_for(id, language),
+        TextKey::FieldLabel(_, field) => field_label_for(field, language),
+        TextKey::FieldHelp(_, field) => field_help_for(field, language),
+        TextKey::Effect(Effect::Inspect) => local!(
+            language,
+            "保存された状態や原文を表示します。",
+            "Show saved state or original text."
+        ),
+        TextKey::Effect(Effect::SavedMutation) => local!(
+            language,
+            "保存データや設定を変更します。",
+            "Change saved data or settings."
+        ),
+        TextKey::Effect(Effect::RuntimeControl) => local!(
+            language,
+            "モデル・shell・索引などの処理を開始、再開、制御します。",
             "Start, resume, or control model, shell, indexing, or other processing."
-        }
-        TextKey::EffectMarker(Effect::Inspect) => "",
-        TextKey::EffectMarker(Effect::SavedMutation) => "[Change] ",
-        TextKey::EffectMarker(Effect::RuntimeControl) => "[Control] ",
-        TextKey::Enter(EnterVerb::Display) => "Show",
-        TextKey::Enter(EnterVerb::Execute) => "Run",
-        TextKey::Enter(EnterVerb::Send) => "Send",
-        TextKey::Term(term) => term_en(term),
-        TextKey::Discovery(discovery) => discovery_en(discovery),
+        ),
+        TextKey::EffectMarker(Effect::Inspect) => local!(language, "", ""),
+        TextKey::EffectMarker(Effect::SavedMutation) => local!(language, "[変更] ", "[Change] "),
+        TextKey::EffectMarker(Effect::RuntimeControl) => local!(language, "[制御] ", "[Control] "),
+        TextKey::Enter(EnterVerb::Display) => local!(language, "表示", "Show"),
+        TextKey::Enter(EnterVerb::Execute) => local!(language, "実行", "Run"),
+        TextKey::Enter(EnterVerb::Send) => local!(language, "送信", "Send"),
+        TextKey::Term(term) => term_for(term, language),
+        TextKey::Discovery(discovery) => discovery_for(discovery, language),
     }
 }
 
@@ -1225,5 +1771,42 @@ impl Form {
             lines.push(Line::from(term_en(term)));
         }
         lines
+    }
+}
+
+#[cfg(test)]
+mod paired_message_tests {
+    use super::*;
+    use crate::config::UiLanguage;
+
+    #[test]
+    fn japanese_catalogue_fallbacks_remain_exact_and_english_is_defined() {
+        fn verify(text: Text) {
+            assert_eq!(
+                text_for(text, UiLanguage::Ja),
+                text.fallback,
+                "{:?}",
+                text.key
+            );
+            let en = text_for(text, UiLanguage::En);
+            assert!(en.is_ascii(), "{:?}: {en}", text.key);
+        }
+        for &id in OperationId::ALL {
+            verify(id.label_text());
+            verify(id.meaning_text());
+            let spec = id.spec();
+            verify(spec.effect.text());
+            verify(spec.effect.list_marker());
+            verify(id.enter_verb(spec.effect).text());
+            for &field in spec.fields {
+                let field = spec.field(field).expect("catalogue field");
+                verify(field.field.label_text(id));
+                verify(field.field.help_text(id));
+                verify(field.field.discovery.text());
+            }
+        }
+        for term in [Term::Run, Term::Turn, Term::Message, Term::Execution] {
+            verify(term.text());
+        }
     }
 }
