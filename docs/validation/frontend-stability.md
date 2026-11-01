@@ -48,3 +48,34 @@ run succeeds. Manual dispatch always executes and cannot reuse an earlier native
 pass. Keep each run URL, SHA, attempt, Windows conclusion and per-case counts;
 any failure stops the consecutive sequence and remains separate evidence.
 No timing observation is a pass threshold and no local full standard run is used.
+
+## macOS paired-observation baseline (#138, CI half)
+
+- Original evidence: run `41301719896`, attempt 1, macOS job `124833906560`.
+  `frontend_reactivity::selected_header_and_open_browser_share_one_changed_snapshot_without_reload`
+  panicked at `tests/frontend_reactivity.rs:989`: `one selected observation`,
+  actual `2`, expected `1`. The first Changed-to-paint observation was 498987 us;
+  this was a count assertion, not a timeout or the informational 1 s target.
+- The fixture's initial header/history readiness can be satisfied by the
+  selection reader's separate `Thread` and `History` updates. It does not prove
+  the initial `CurrentView` refresh has reached the test receiver. Likewise,
+  a browser excerpt only proves the browser consumer is ready. Clearing the
+  observation vectors at that boundary can count a pending setup `CurrentView`
+  together with the first Changed refresh.
+- Wait for both an initial `CurrentView` and the selected browser excerpt before
+  clearing the vectors or issuing the first measured mutation. The readiness
+  regression covers both delivery orders and specifically rejects browser-only
+  readiness. A real-fixture regression also holds initial `CurrentView` updates
+  while allowing `Thread`, `History` and the browser excerpt through, proves
+  that the old readiness boundary can be reached, and releases the held updates
+  explicitly. The baseline consumers need not have the same read sequence: a
+  standalone initial browser observation is valid. Each of the 16 measured
+  mutations still requires exactly one selected observation, a shared browser
+  sequence, unchanged browser generation and unchanged page count.
+- This is the same class of asynchronous fixture-readiness assumption as #124's
+  Windows fixes (particularly awaiting current-view adoption before the first
+  persisted-output delta), not evidence of the same Core or OS-specific defect.
+  No sleeps, retries, timeout increases, assertion relaxation, or product
+  behavior changes are introduced. The original failure is confirmed by CI;
+  local diagnostic repetition did not reproduce it (11 focused passes and one
+  passing related-module run before the fix).

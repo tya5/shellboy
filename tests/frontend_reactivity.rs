@@ -31,6 +31,7 @@ struct Fixture {
     terminal: Terminal<TestBackend>,
     source_snapshots: Vec<shellboy::ui::DetailSourceSnapshot>,
     view_sequences: Vec<u64>,
+    held_initial_views: Option<Vec<UiUpdate>>,
     browser_sequences: Vec<u64>,
     browser_pages: usize,
     browser_trace: std::collections::VecDeque<Value>,
@@ -45,6 +46,9 @@ struct Fixture {
 }
 impl Fixture {
     async fn new(url: &str) -> Self {
+        Self::with_initial_view_hold(url, false).await
+    }
+    async fn with_initial_view_hold(url: &str, hold: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
         let data = root.path().join("data");
@@ -100,6 +104,7 @@ impl Fixture {
             terminal: Terminal::new(TestBackend::new(180, 40)).unwrap(),
             source_snapshots: Vec::new(),
             view_sequences: Vec::new(),
+            held_initial_views: hold.then(Vec::new),
             browser_sequences: Vec::new(),
             browser_pages: 0,
             browser_trace: std::collections::VecDeque::new(),
@@ -120,6 +125,16 @@ impl Fixture {
         fixture
     }
     fn accept_update(&mut self, update: UiUpdate) {
+        if matches!(&update, UiUpdate::CurrentView { .. })
+            && let Some(held) = &mut self.held_initial_views
+        {
+            assert!(
+                held.len() < 512,
+                "initial-view hold exceeds fixture capacity"
+            );
+            held.push(update);
+            return;
+        }
         let index_update = match &update {
             UiUpdate::ScopedManagement { update, .. } => update.as_ref(),
             other => other,
@@ -959,6 +974,60 @@ async fn real_history_gc_preserves_live_fork_sources_then_invalidates_deleted_ch
     fixture.finish().await;
 }
 
+fn initial_selected_browser_ready(current_views: &[u64], browser_selected_ready: bool) -> bool {
+    // Thread + History can paint before the initial CurrentView refresh arrives.
+    // Do not count that pending setup observation as the first Changed refresh.
+    browser_selected_ready && !current_views.is_empty()
+}
+
+#[test]
+fn initial_browser_readiness_waits_for_current_view_in_either_delivery_order() {
+    assert!(!initial_selected_browser_ready(&[], false));
+    assert!(!initial_selected_browser_ready(&[], true));
+    assert!(!initial_selected_browser_ready(&[1], false));
+    assert!(initial_selected_browser_ready(&[1], true));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn initial_browser_excerpt_does_not_complete_a_delayed_selected_view() {
+    let mut fixture = Fixture::with_initial_view_hold("http://127.0.0.1:9/v1", true).await;
+    for action in fixture.ui.event(crossterm::event::Event::Key(
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('t'),
+            crossterm::event::KeyModifiers::CONTROL,
+        ),
+    )) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture
+        .observed_until(
+            "browser excerpt while selected refresh is held",
+            |fixture, _| {
+                fixture.browser_selected_ready
+                    && fixture
+                        .held_initial_views
+                        .as_ref()
+                        .is_some_and(|held| !held.is_empty())
+            },
+        )
+        .await;
+    assert!(fixture.view_sequences.is_empty());
+    assert!(!initial_selected_browser_ready(
+        &fixture.view_sequences,
+        fixture.browser_selected_ready,
+    ));
+    // Release actual initial observations, not a sleep or a synthetic refresh.
+    for update in fixture.held_initial_views.take().unwrap() {
+        fixture.accept_update(update);
+    }
+    fixture
+        .observed_until("both initial consumers have delivered", |fixture, _| {
+            initial_selected_browser_ready(&fixture.view_sequences, fixture.browser_selected_ready)
+        })
+        .await;
+    fixture.finish().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn selected_header_and_open_browser_share_one_changed_snapshot_without_reload() {
     let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
@@ -976,9 +1045,15 @@ async fn selected_header_and_open_browser_share_one_changed_snapshot_without_rel
         })
         .await;
     fixture
-        .observed_until("initial selected browser snapshot", |fixture, _| {
-            fixture.browser_selected_ready
-        })
+        .observed_until(
+            "initial selected view and browser snapshot",
+            |fixture, _| {
+                initial_selected_browser_ready(
+                    &fixture.view_sequences,
+                    fixture.browser_selected_ready,
+                )
+            },
+        )
         .await;
     let generation = fixture.ui.list_generation();
     let pages = fixture.browser_pages;

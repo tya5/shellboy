@@ -7585,3 +7585,18 @@ remain independent; Windows PSS is not supported. Real-provider performance,
 physical display latency, peak memory and cross-agent comparisons are untested
 and outside stage 1. See `scripts/bench/README.md` for the workload discrepancy
 with the upstream reference and the full measurement boundary.
+
+### macOS frontend initial-observation readiness (#138, CI half)
+
+The real-fixture delayed-`CurrentView` regression permits initial `Thread`,
+`History` and browser updates while holding selected refreshes, rejects the
+browser-only baseline, then explicitly releases the actual updates. The pure
+readiness matrix covers both delivery orders. The original paired-observation
+case retains 16 measured CLI mutations and its exact-one/shared-sequence,
+unchanged-generation and unchanged-page-count assertions. Existing watchdogs
+and the informational latency target are unchanged. See
+[frontend stability](frontend-stability.md#macos-paired-observation-baseline-138-ci-half)
+for the source panic and comparison with #124. Local focused repetition and
+three ordinary exact-SHA Linux/macOS workflow runs qualify this change; their
+actual outcomes and URLs belong to the handoff evidence, not a presumed pass
+in this acceptance definition. Windows remains an integration-batch check.
