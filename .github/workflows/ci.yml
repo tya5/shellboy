@@ -67,6 +67,21 @@ jobs:
         with:
           shared-key: native-v1
           cache-on-failure: true
+      - name: Reduce Windows scan and temp-volume overhead
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Ephemeral runner only: skip real-time scanning of freshly built test
+          # executables and fixtures, and keep fixture databases on the work volume.
+          $paths = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup")
+          try {
+            Add-MpPreference -ExclusionPath $paths -ErrorAction Stop
+            Write-Host "Defender exclusions: $($paths -join ', ')"
+          } catch {
+            Write-Warning "Defender exclusions were not applied: $_"
+          }
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Check complete integration layout
         run: python scripts/check-test-layout.py
       - name: Check timing runner failure gates
