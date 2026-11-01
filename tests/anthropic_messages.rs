@@ -53,7 +53,10 @@ fn shell_result(id: &str) -> Value {
 }
 
 /// Feed a whole fixture, split at awkward byte offsets, through the stream reader.
-fn run(body: &str, chunk: usize) -> Result<shellboy::model::ModelResponse, shellboy::model::ModelError> {
+fn run(
+    body: &str,
+    chunk: usize,
+) -> Result<shellboy::model::ModelResponse, shellboy::model::ModelError> {
     let mut stream = Stream::new(Api::AnthropicMessages);
     for piece in body.as_bytes().chunks(chunk) {
         stream.push(piece)?;
@@ -64,17 +67,42 @@ fn run(body: &str, chunk: usize) -> Result<shellboy::model::ModelResponse, shell
 #[test]
 fn request_has_only_what_the_conversation_needs() {
     let wire = dialect::encode_with(Api::AnthropicMessages, request(vec![]), 32768).unwrap();
-    let mut keys: Vec<&str> = wire.as_object().unwrap().keys().map(String::as_str).collect();
+    let mut keys: Vec<&str> = wire
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     keys.sort();
-    assert_eq!(keys, ["max_tokens", "messages", "model", "stream", "system", "tools"]);
+    assert_eq!(
+        keys,
+        [
+            "max_tokens",
+            "messages",
+            "model",
+            "stream",
+            "system",
+            "tools"
+        ]
+    );
     assert_eq!(wire["max_tokens"], 32768);
     assert_eq!(wire["stream"], true);
     assert_eq!(wire["system"], "You are Shellboy.");
     // Nothing optional or provider-specific is added on the user's behalf, and
     // the Shellboy effort setting is not translated into thinking.
     for absent in [
-        "thinking", "temperature", "top_p", "top_k", "tool_choice", "cache_control",
-        "metadata", "stop_sequences", "reasoning", "reasoning_effort", "store", "include",
+        "thinking",
+        "temperature",
+        "top_p",
+        "top_k",
+        "tool_choice",
+        "cache_control",
+        "metadata",
+        "stop_sequences",
+        "reasoning",
+        "reasoning_effort",
+        "store",
+        "include",
     ] {
         assert!(wire.get(absent).is_none(), "{absent} must not be sent");
     }
@@ -117,7 +145,12 @@ fn tool_round_trip_maps_to_tool_use_and_leading_tool_results() {
     assert_eq!(results[0]["tool_use_id"], "toolu_a");
     assert_eq!(results[1]["tool_use_id"], "toolu_b");
     assert_eq!(results[2]["type"], "text");
-    assert!(results[2]["text"].as_str().unwrap().starts_with("Shellboy event v1:"));
+    assert!(
+        results[2]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Shellboy event v1:")
+    );
 }
 
 #[test]
@@ -134,24 +167,33 @@ fn inserted_context_is_a_user_message_and_the_conversation_must_end_with_one() {
     let last = wire["messages"].as_array().unwrap().last().unwrap().clone();
     assert_eq!(last["role"], "user");
     // Replay ending with an assistant message is refused locally: no prefill is sent.
-    let error = dialect::encode_with(Api::AnthropicMessages, request(vec![assistant]), 100).unwrap_err();
+    let error =
+        dialect::encode_with(Api::AnthropicMessages, request(vec![assistant]), 100).unwrap_err();
     assert_eq!(error.kind, "input_invalid");
 }
 
 #[test]
 fn images_map_to_base64_and_url_sources() {
-    let image = |url: &str| {
-        json!({"role":"user","content":[{"type":"input_image","image_url":url}]})
-    };
+    let image =
+        |url: &str| json!({"role":"user","content":[{"type":"input_image","image_url":url}]});
     let wire = dialect::encode_with(
         Api::AnthropicMessages,
-        request(vec![image("data:image/png;base64,AAAA"), image("https://example.test/a.png")]),
+        request(vec![
+            image("data:image/png;base64,AAAA"),
+            image("https://example.test/a.png"),
+        ]),
         100,
     )
     .unwrap();
     let blocks = wire["messages"][0]["content"].as_array().unwrap();
-    assert_eq!(blocks[1]["source"], json!({"type":"base64","media_type":"image/png","data":"AAAA"}));
-    assert_eq!(blocks[2]["source"], json!({"type":"url","url":"https://example.test/a.png"}));
+    assert_eq!(
+        blocks[1]["source"],
+        json!({"type":"base64","media_type":"image/png","data":"AAAA"})
+    );
+    assert_eq!(
+        blocks[2]["source"],
+        json!({"type":"url","url":"https://example.test/a.png"})
+    );
 }
 
 #[test]
@@ -180,12 +222,21 @@ fn tool_use_arguments_are_assembled_and_unknown_blocks_are_kept_in_order_unread(
         assert!(opaque::is_opaque(&output[0]));
         assert_eq!(output[0]["dialect"], "anthropic_messages");
         assert_eq!(output[0]["kind"], "thinking");
-        assert_eq!(output[0]["block"]["thinking"], "Need a shell: 日本語 \"quoted\"\n");
+        assert_eq!(
+            output[0]["block"]["thinking"],
+            "Need a shell: 日本語 \"quoted\"\n"
+        );
         assert_eq!(output[0]["block"]["signature"], "EqQBCgIYAhIM");
         // redacted_thinking and an unknown block type are stored untouched.
-        assert_eq!(output[1]["block"], json!({"type":"redacted_thinking","data":"ENCRYPTED=="}));
+        assert_eq!(
+            output[1]["block"],
+            json!({"type":"redacted_thinking","data":"ENCRYPTED=="})
+        );
         assert_eq!(output[2]["kind"], "future_block");
-        assert_eq!(output[2]["block"], json!({"type":"future_block","payload":{"k":"v"}}));
+        assert_eq!(
+            output[2]["block"],
+            json!({"type":"future_block","payload":{"k":"v"}})
+        );
         assert_eq!(output[3]["type"], "function_call");
         assert_eq!(output[3]["call_id"], "toolu_fixture_1");
         assert_eq!(response.calls.len(), 1);
@@ -198,7 +249,8 @@ fn tool_use_arguments_are_assembled_and_unknown_blocks_are_kept_in_order_unread(
 fn saved_opaque_blocks_return_unchanged_to_the_same_dialect_and_are_skipped_elsewhere() {
     let response = run(TOOL_THINKING, 31).unwrap();
     // Replay exactly what was adopted, through a save/load round trip.
-    let saved: Vec<Value> = serde_json::from_str(&serde_json::to_string(&response.output).unwrap()).unwrap();
+    let saved: Vec<Value> =
+        serde_json::from_str(&serde_json::to_string(&response.output).unwrap()).unwrap();
     let mut replay = vec![
         json!({"role":"system","content":[{"type":"input_text","text":"base"}]}),
         user("run it"),
@@ -217,7 +269,10 @@ fn saved_opaque_blocks_return_unchanged_to_the_same_dialect_and_are_skipped_else
     // Another dialect never sees them.
     for api in [Api::Responses, Api::ChatCompletions] {
         let other = dialect::encode(api, input.clone()).unwrap().to_string();
-        assert!(!other.contains("EqQBCgIYAhIM") && !other.contains("ENCRYPTED"), "{api:?}");
+        assert!(
+            !other.contains("EqQBCgIYAhIM") && !other.contains("ENCRYPTED"),
+            "{api:?}"
+        );
     }
 }
 
@@ -240,8 +295,9 @@ fn stop_reasons_complete_stay_incomplete_or_fail_without_guessing() {
 fn a_stream_without_message_stop_is_incomplete_and_errors_keep_their_type() {
     let cut = TEXT.split("event: message_stop").next().unwrap();
     assert_eq!(run(cut, 64).unwrap_err().kind, "incomplete");
-    let mut stream = Stream::new(Api::AnthropicMessages);
-    let error = stream.push(OVERLOADED.as_bytes()).unwrap_err();
+    // An in-stream error event is a terminal provider failure that keeps the
+    // provider's error type; the stream reports it when it finishes.
+    let error = run(OVERLOADED, 64).unwrap_err();
     assert_eq!(error.kind, "provider");
     assert_eq!(error.provider_code.as_deref(), Some("overloaded_error"));
     assert_eq!(error.message, "Overloaded");
@@ -267,7 +323,10 @@ async fn read_request(stream: &mut tokio::net::TcpStream) -> (String, Value) {
             let head = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
             let length = head
                 .lines()
-                .find_map(|l| l.strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                .find_map(|l| {
+                    l.strip_prefix("content-length:")
+                        .map(|v| v.trim().parse::<usize>().unwrap())
+                })
                 .unwrap_or(0);
             break (end, length);
         }
@@ -284,7 +343,11 @@ async fn read_request(stream: &mut tokio::net::TcpStream) -> (String, Value) {
     )
 }
 
-async fn serve_once(status: u16, kind: &str, body: &'static str) -> (String, tokio::task::JoinHandle<(String, Value)>) {
+async fn serve_once(
+    status: u16,
+    kind: &str,
+    body: &'static str,
+) -> (String, tokio::task::JoinHandle<(String, Value)>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let kind = kind.to_owned();
@@ -309,7 +372,8 @@ async fn loopback_sends_version_header_path_and_only_user_extras() {
         config.max_tokens = Some(2048);
         config.api_key_env = None;
         config.headers = BTreeMap::from([("x-api-key".into(), "fixture-key".into())]);
-        config.extra_body = serde_json::from_value(json!({"cache_control":{"type":"ephemeral"}})).unwrap();
+        config.extra_body =
+            serde_json::from_value(json!({"cache_control":{"type":"ephemeral"}})).unwrap();
         config.extra_headers = BTreeMap::from([("anthropic-beta".into(), "fixture-beta".into())]);
         let client = HttpModelClient::for_connection("claude", config).unwrap();
         let response = client
@@ -341,9 +405,24 @@ async fn without_extra_body_no_optional_field_reaches_the_wire() {
             .await
             .unwrap();
         let (_, body) = task.await.unwrap();
-        let mut keys: Vec<&str> = body.as_object().unwrap().keys().map(String::as_str).collect();
+        let mut keys: Vec<&str> = body
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
         keys.sort();
-        assert_eq!(keys, ["max_tokens", "messages", "model", "stream", "system", "tools"]);
+        assert_eq!(
+            keys,
+            [
+                "max_tokens",
+                "messages",
+                "model",
+                "stream",
+                "system",
+                "tools"
+            ]
+        );
         assert_eq!(body["max_tokens"], 32768);
     })
     .await
@@ -385,26 +464,46 @@ async fn http_errors_keep_their_provider_type_for_retry_decisions() {
 #[test]
 fn configuration_validates_max_tokens_and_the_messages_api() {
     let ok = |extra: &str| {
-        Config::parse(&format!("[connections.c]\nbase_url='https://api.example/v1'\napi='anthropic_messages'\n{extra}"))
+        Config::parse(&format!(
+            "[connections.c]\nbase_url='https://api.example/v1'\napi='anthropic_messages'\n{extra}"
+        ))
     };
     let c = ok("").unwrap();
     assert_eq!(c.connections["c"].api, Api::AnthropicMessages);
     assert_eq!(c.connections["c"].max_tokens, None);
-    assert_eq!(ok("max_tokens=4096").unwrap().connections["c"].max_tokens, Some(4096));
+    assert_eq!(
+        ok("max_tokens=4096").unwrap().connections["c"].max_tokens,
+        Some(4096)
+    );
     assert!(ok("max_tokens=0").is_err());
     assert!(ok("max_tokens=-1").is_err());
     assert!(ok("prompt_cache_key=true").is_err());
     // max_tokens belongs to this dialect only.
     for api in ["responses", "chat_completions"] {
-        let source = format!("[connections.c]\nbase_url='https://api.example/v1'\napi='{api}'\nmax_tokens=10");
+        let source = format!(
+            "[connections.c]\nbase_url='https://api.example/v1'\napi='{api}'\nmax_tokens=10"
+        );
         assert!(Config::parse(&source).is_err(), "{api}");
     }
     // Reserved fields cannot be set through extra_body; anything else can.
-    for key in ["model", "max_tokens", "stream", "messages", "system", "tools"] {
+    for key in [
+        "model",
+        "max_tokens",
+        "stream",
+        "messages",
+        "system",
+        "tools",
+    ] {
         assert!(ok(&format!("extra_body={{ {key} = 1 }}")).is_err(), "{key}");
     }
     ok("extra_body={ thinking = { type = 'enabled', budget_tokens = 1024 }, cache_control = { type = 'ephemeral' } }").unwrap();
     // The endpoint is /messages.
     use shellboy::config::ApiEndpoint;
-    assert_eq!(c.connections["c"].endpoint(ApiEndpoint::Responses).unwrap().path(), "/v1/messages");
+    assert_eq!(
+        c.connections["c"]
+            .endpoint(ApiEndpoint::Responses)
+            .unwrap()
+            .path(),
+        "/v1/messages"
+    );
 }

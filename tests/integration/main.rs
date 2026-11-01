@@ -1,8 +1,8 @@
 //! Integration suites share a harness; file-local fixtures and cfgs remain isolated.
-#[path = "../app_ipc.rs"]
-mod app_ipc;
 #[path = "../anthropic_messages.rs"]
 mod anthropic_messages;
+#[path = "../app_ipc.rs"]
+mod app_ipc;
 #[path = "../attachment_context.rs"]
 mod attachment_context;
 #[path = "../attachment_delivery.rs"]
