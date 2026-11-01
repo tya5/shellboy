@@ -44,6 +44,10 @@ same in both languages; language selection never authorizes an operation.
   Forced exit may leave unsaved data or uncollected owned processes. Restart
   and inspect interrupted work rather than assuming shutdown completed.
 
+Some diagnostic field labels and state/revisit captions still use the shared
+report wording. Their typed UI projection is tracked separately; raw values
+remain unchanged.
+
 An external-observation notice describes facts captured at its recorded time.
 Changing language does not reread configuration during drawing, perform a
 provider/OS probe, renew a confirmation, or repeat a request automatically.
