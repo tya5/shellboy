@@ -1,10 +1,19 @@
 //! A single popup's finite, styled Ratatui-wrap result. Raw sources stay with owners.
 use super::*;
+use crate::config::UiLanguage;
+use crate::ui::i18n::local;
 use std::mem::size_of;
 const MAX_ROWS: usize = 65_536;
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SOURCE_BYTES: usize = 256 * 1024;
-const LIMIT_NOTICE: &str = "表示キャッシュ上限 | 原文のコピー・取得元から全文を確認";
+fn limit_notice(language: UiLanguage) -> Line<'static> {
+    Line::from(local!(
+        language,
+        "上限: 表示キャッシュ上限 | 原文のコピー・取得元から全文を確認",
+        "Limit: Copy the original or inspect the source for full text"
+    ))
+    .style(Style::default().fg(theme::WARNING))
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::ui) struct ReaderBounds {
     pub total: usize,
@@ -13,6 +22,7 @@ pub(in crate::ui) struct ReaderBounds {
 }
 #[derive(Default)]
 pub(in crate::ui) struct ReaderCache {
+    language: Option<UiLanguage>,
     key: Option<(u64, u16)>,
     rows: Vec<Line<'static>>,
     bytes: usize,
@@ -22,6 +32,25 @@ pub(in crate::ui) struct ReaderCache {
     builds: usize,
 }
 impl ReaderCache {
+    #[allow(dead_code)]
+    pub fn set_language(&mut self, language: UiLanguage) {
+        if self.language.unwrap_or(UiLanguage::Ja) == language {
+            self.language = Some(language);
+            return;
+        }
+        self.language = Some(language);
+        if self.limited
+            && let Some(last) = self.rows.last_mut()
+        {
+            let previous = row_bytes(last);
+            *last = limit_notice(language);
+            let replacement = row_bytes(last);
+            self.bytes = self
+                .bytes
+                .saturating_sub(previous)
+                .saturating_add(replacement);
+        }
+    }
     pub fn clear(&mut self) {
         self.key = None;
         self.rows = Vec::new();
@@ -160,7 +189,7 @@ impl ReaderCache {
             }
         }
         if self.limited {
-            let notice = Line::from(LIMIT_NOTICE).style(Style::default().fg(theme::WARNING));
+            let notice = limit_notice(self.language.unwrap_or(UiLanguage::Ja));
             self.bytes += row_bytes(&notice);
             self.rows.push(notice);
         }
@@ -304,6 +333,72 @@ mod tests {
         assert_eq!(cache.retained_bytes(), 0);
         assert_eq!(cache.bounds(), ReaderBounds::default());
     }
+    #[test]
+    fn limited_notice_relocalizes_without_rebuilding_or_modifying_original() {
+        use crate::ui::text_width::UnicodeWidthStr;
+        let original = "RAW ORIGINAL ".repeat(25_000);
+        let lines = vec![Line::from(original.clone())];
+        for policy in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(policy);
+            for width in [80, 120] {
+                let mut cache = ReaderCache::default();
+                let (_, scroll) = paint(&mut cache, &lines, width, 12, 91, u16::MAX);
+                assert!(cache.limited());
+                let builds = cache.build_count();
+                let bounds = cache.bounds();
+                let first = cache.rows.first().unwrap().to_string();
+                for (language, expected) in [
+                    (UiLanguage::En, "Limit: Copy the original"),
+                    (UiLanguage::Ja, "上限: 表示キャッシュ上限"),
+                ] {
+                    cache.set_language(language);
+                    let (buffer, actual_scroll) =
+                        paint(&mut cache, &lines, width, 12, 91, u16::MAX);
+                    let mut screen = String::new();
+                    for y in 0..buffer.area.height {
+                        let mut x = 0;
+                        while x < buffer.area.width {
+                            let symbol = buffer[(x, y)].symbol();
+                            screen.push_str(symbol);
+                            x += symbol.width().max(1) as u16;
+                        }
+                        screen.push('\n');
+                    }
+                    assert!(screen.contains(expected), "{language:?} {width}: {screen}");
+                    assert_eq!(actual_scroll, scroll);
+                    assert_eq!(cache.build_count(), builds);
+                    assert_eq!(cache.bounds(), bounds);
+                    assert_eq!(cache.rows.first().unwrap().to_string(), first);
+                    assert!(cache.retained_bytes() <= MAX_BYTES);
+                }
+                assert_eq!(lines[0].to_string(), original);
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn narrow_limited_reader_keeps_outcome_and_source_unchanged() {
+        use crate::ui::text_width::UnicodeWidthStr;
+        let original = "x".repeat(300_000);
+        let lines = vec![Line::from(original.clone())];
+        for (language, expected) in [(UiLanguage::En, "Limit:"), (UiLanguage::Ja, "上限:")] {
+            let mut cache = ReaderCache::default();
+            cache.set_language(language);
+            let (buffer, _) = paint(&mut cache, &lines, 8, 5, 12, u16::MAX);
+            assert!(cache.limited());
+            let mut final_row = String::new();
+            let mut x = 0;
+            while x < buffer.area.width {
+                let symbol = buffer[(x, buffer.area.height - 1)].symbol();
+                final_row.push_str(symbol);
+                x += symbol.width().max(1) as u16;
+            }
+            assert!(final_row.contains(expected), "{language:?}: {final_row}");
+            assert_eq!(lines[0].to_string(), original);
+        }
+    }
+
     #[test]
     fn lazy_prepare_is_not_called_on_scroll_hit_and_narrow_limit_is_explicit() {
         let mut cache = ReaderCache::default();
