@@ -7510,3 +7510,10 @@ hint, and object details are preserved; non-object details are retained under
 rolled-back transaction cannot replace the prior reason or add an event. The
 original caller-visible error remains unchanged. Older, malformed, and oversized
 reasons still follow Watch's existing bounded unknown-time behavior.
+
+The covered entry paths are: preparation with a new or existing Turn;
+permanent attempt admission failure; capacity failure in the driver; request
+client initialization failure; and a permanent provider failure through the
+retry/overflow path. These converge on the same transaction writer. The tests
+count the saved field and compare the durable event to the saved reason; the
+provider failure is synthetic and does not contact a server.

@@ -517,3 +517,34 @@ async fn capacity_failure_through_drive_persists_one_transition_time() {
         .unwrap();
     preparation_tests::close(control, owner).await;
 }
+
+#[tokio::test]
+async fn existing_turn_preparation_failure_persists_one_transition_time() {
+    let (_root, owner, control, accepted) =
+        preparation_tests::fixture("http://127.0.0.1:9/v1").await;
+    let snapshot = preparation_tests::ready(&control, &accepted).await;
+    let turn = snapshot.turn.clone();
+    let generation = snapshot.generation;
+    recover_preparation(
+        &control,
+        accepted.thread_id,
+        accepted.run_id.unwrap(),
+        ApiError::new(ErrorCode::InvalidArgument, "existing preparation failure"),
+    )
+    .await
+    .unwrap();
+    owner
+        .db
+        .call(move |db| {
+            let reason = assert_reason_and_event(db, &turn, generation);
+            assert_eq!(reason["message"], "existing preparation failure");
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM turn", [], |r| r.get::<_, i64>(0))?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    preparation_tests::close(control, owner).await;
+}
