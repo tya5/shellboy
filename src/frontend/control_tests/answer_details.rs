@@ -1,10 +1,10 @@
+use crate::ui::text_width::UnicodeWidthStr;
 use crate::{
     frontend,
     ui::{UiAction, UiState},
 };
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::TestBackend};
-use unicode_width::UnicodeWidthStr;
 
 fn screen(terminal: &Terminal<TestBackend>) -> String {
     let buffer = terminal.backend().buffer();

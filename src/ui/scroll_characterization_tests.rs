@@ -64,7 +64,7 @@ fn ten(evicted: Option<usize>) -> (UiState, Terminal<TestBackend>, Vec<UiNode>) 
     (ui, terminal, complete)
 }
 fn rows(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
-    use unicode_width::UnicodeWidthStr;
+    use crate::ui::text_width::UnicodeWidthStr;
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
     (2..buffer.area.height - 11)

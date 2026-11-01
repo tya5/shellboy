@@ -1,4 +1,5 @@
 //! OSC 8 transport around Crossterm's cell renderer. Escape sequences never enter a Cell.
+use crate::ui::text_width::UnicodeWidthStr;
 use ratatui::{
     backend::{Backend, ClearType, CrosstermBackend, WindowSize},
     buffer::{Buffer, Cell, CellDiffOption},
@@ -12,7 +13,6 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkRegion {

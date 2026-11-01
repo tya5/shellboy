@@ -1464,7 +1464,7 @@ mod tests {
         ui
     }
     fn screen(terminal: &Terminal<TestBackend>) -> String {
-        use unicode_width::UnicodeWidthStr;
+        use crate::ui::text_width::UnicodeWidthStr;
         let buffer = terminal.backend().buffer();
         (0..buffer.area.height)
             .map(|y| {

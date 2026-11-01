@@ -2899,7 +2899,8 @@ unknown reserves two cells, and user settings do not override it. Apply the same
 policy to UI and asynchronous presentation workers. Emoji sequences are bounded
 conservatively, not asserted to have one font-independent width. Generated UI
 symbols, borders and Markdown table borders must have invariant widths; user
-content is never substituted. Two pinned, licensed dependency patches expose
-nonblocking ordered DSR input and a shared width policy to ratatui. Revisit the
-patches as upstream APIs evolve, and use a translation catalogue instead of the
-Rust enum if the locale/plural surface grows substantially.
+content is never substituted. Review revision: use upstream crossterm cursor
+position in a bounded isolated startup helper; do not fork dependencies or alter
+Ratatui's internal width. Report a measured mismatch with Ratatui in TUI status
+and diagnostics. Consider a translation catalogue if the locale/plural surface
+grows substantially.

@@ -1,7 +1,7 @@
 //! Local operation vocabulary; no source reads or clock-dependent hint formatting.
 use super::{Config, UiState, overlay::Overlay};
+use crate::ui::text_width::UnicodeWidthStr;
 use std::cell::RefCell;
-use unicode_width::UnicodeWidthStr;
 
 pub(super) fn readonly_key(mut key: crossterm::event::KeyEvent) -> crossterm::event::KeyEvent {
     use crossterm::event::{KeyCode, KeyModifiers};

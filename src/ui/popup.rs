@@ -76,7 +76,7 @@ pub(super) fn compact_recorded(
 /// padding and the reader scrollbar have their own cells; no fixed label column
 /// is baked into the translated content.
 pub(super) fn text_viewport(area: Rect, text: &[&str]) -> Rect {
-    use unicode_width::UnicodeWidthStr;
+    use crate::ui::text_width::UnicodeWidthStr;
     let columns = text
         .iter()
         .flat_map(|value| value.lines())
@@ -133,8 +133,8 @@ impl Item {
             self.lines.truncate(usize::from(height > 1));
             let mut tail = tail;
             if let Some(line) = tail.first_mut() {
+                use crate::ui::text_width::UnicodeWidthStr;
                 use unicode_segmentation::UnicodeSegmentation;
-                use unicode_width::UnicodeWidthStr;
                 let mut columns = 2usize;
                 for span in &mut line.spans {
                     let mut byte = 0;
@@ -465,12 +465,12 @@ mod tests {
         assert!(short.width < longer.width);
         assert_eq!(full.width, area.width);
         assert_eq!(short.x + short.width / 2, area.x + area.width / 2);
-        unicode_width::set_terminal_width(Some(1));
+        crate::ui::text_width::set_terminal_width(Some(1));
         let narrow = text_viewport(area, &["\u{00b7}\u{00b7}\u{00b7}\u{00b7}"]);
-        unicode_width::set_terminal_width(Some(2));
+        crate::ui::text_width::set_terminal_width(Some(2));
         let wide = text_viewport(area, &["\u{00b7}\u{00b7}\u{00b7}\u{00b7}"]);
         assert!(narrow.width < wide.width);
-        unicode_width::clear_terminal_width();
+        crate::ui::text_width::clear_terminal_width();
     }
     #[test]
     fn list_focus_and_footer_remain_distinct_at_small_and_normal_sizes() {

@@ -79,6 +79,9 @@ fn cli_parse_error(error: &clap::Error) -> ApiError {
 }
 
 fn main() -> ExitCode {
+    if std::env::var_os("SHELLBOY_INTERNAL_WIDTH_PROBE").is_some() {
+        std::process::exit(shellboy::ui::width_probe_child());
+    }
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error)

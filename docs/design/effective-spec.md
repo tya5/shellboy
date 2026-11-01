@@ -357,22 +357,18 @@ terminal-width diagnostic as examples; other screens remain for stage B. It does
 not translate or rewrite model/user content, saved data, protocol values or CLI
 output.
 
-On TUI startup, the alternate screen issues two cursor-position queries around
-an ambiguous-width character on row 11. The existing terminal event reader
-consumes only matching replies without blocking the UI thread or reordering
-keyboard/paste events. Two agreeing replies identify width one or two; a 250 ms
-timeout, unsupported input path, impossible response or disagreement is unknown.
-A small terminal that cannot host the probe is also unknown. The Windows input
-backend currently falls back to unknown because its cursor reports are not
-exposed through the Unix parser. F1 help and the optional diagnostic event record
-the observation; no user width override or terminal-name/locale guess is used.
+On TUI startup, a bounded isolated helper uses crossterm's public cursor
+position API to measure an ambiguous-width character on the alternate screen,
+before the event loop. Agreeing replies identify width one or two; timeout,
+unsupported input path, impossible response or disagreement is unknown. A small
+terminal that cannot host the probe is also unknown. F1 help reports the result;
+TUI status and diagnostics report a measured mismatch with Ratatui's default.
+No user width override or terminal-name/locale guess is used.
 
-The same process-wide effective policy is applied before presentation workers
-start and is used by both application layout and ratatui. Unknown reserves two
-cells for ambiguous characters. Multi-code-point emoji sequences reserve the
-sum of their component widths (at least two for an emoji-presentation selector),
-which may leave whitespace but avoids assuming a terminal's ligature behavior.
-Generated application symbols use width-invariant forms; generated Markdown
+Shellboy's own layout uses the observation; unknown reserves two cells for
+ambiguous characters, and emoji sequences reserve their component widths.
+Ratatui remains unmodified and uses its default widths, which can differ from
+Shellboy layout on some terminals. Generated application symbols use width-invariant forms; generated Markdown
 borders are marked separately before conversion, so user/model text is not
 rewritten. Source positions, copying and persisted values retain their original
 contents. See [the stage A design and stage B slices](ui-language-stage-a-draft.md).

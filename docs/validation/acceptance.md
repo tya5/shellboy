@@ -7999,3 +7999,13 @@ terminals or multiplexers. Windows uses the documented unknown-width fallback;
 its native DSR is not claimed. Stage A translates only the confirmation and width
 diagnostic; the remaining screens are stage B. CLI/API/saved content and raw
 user/model text remain outside the translation boundary.
+
+### #139 review revision
+
+The original vendor-based implementation described above was superseded by the
+review revision. It removes both crate patches and measures through upstream
+`cursor::position()` in a bounded helper process before the UI loop. PTY tests
+cover width one, width two, disagreement and timeout. Shellboy layout follows
+the observation; Ratatui remains upstream and a measured mismatch is exposed in
+TUI status and diagnostics. Windows behavior depends on the public backend; an
+unsuccessful probe is unknown. Exact candidate CI evidence is in the handoff.

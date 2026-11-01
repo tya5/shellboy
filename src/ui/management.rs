@@ -1290,7 +1290,13 @@ impl ManagementPopup {
             _ => vec![],
         }
     }
-    pub(super) fn draw(&mut self, frame: &mut Frame<'_>, area: Rect, status: &str) {
+    pub(super) fn draw(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        status: &str,
+        language: crate::config::UiLanguage,
+    ) {
         if let Some(content) = &self.frame {
             let view = &content.view;
             let hints = self.hints();
@@ -1367,6 +1373,15 @@ impl ManagementPopup {
                     );
                     let body = self.draw_preview(frame, body);
                     let mut items = Vec::new();
+                    if self.mode == ManagementMode::Status
+                        && super::text_width::terminal_width_observation() == Some(2)
+                    {
+                        let message = super::i18n::Message::TerminalWidth { observed: Some(2) }
+                            .render(language);
+                        items.push(popup::Item::new(
+                            Line::from(message).style(Style::default().fg(theme::EMPHASIS)),
+                        ));
+                    }
                     let mut selected_row = 0;
                     let mut previous_group = "";
                     for (index, field) in structured.fields.iter().enumerate() {
@@ -1450,6 +1465,46 @@ pub(super) fn explicit_index_targets(args: &IndexArgs) -> bool {
 #[cfg(test)]
 mod preview_notice_tests {
     use super::*;
+
+    #[test]
+    fn status_shows_measured_width_mismatch_in_both_languages() {
+        use ratatui::{Terminal, backend::TestBackend};
+        super::super::text_width::set_terminal_width(Some(2));
+        for (language, expected) in [
+            (crate::config::UiLanguage::En, "differs from Ratatui"),
+            (crate::config::UiLanguage::Ja, "Ratatui既定値"),
+        ] {
+            let mut popup = ManagementPopup::default();
+            popup.open_structured(
+                "Status".into(),
+                1,
+                vec![PresentationField {
+                    key: "/state".into(),
+                    label: "State".into(),
+                    value: "ready".into(),
+                    ..Default::default()
+                }],
+                false,
+                true,
+            );
+            let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+            terminal
+                .draw(|frame| popup.draw(frame, frame.area(), "", language))
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(
+                text.replace(' ', "").contains(&expected.replace(' ', "")),
+                "{text}"
+            );
+        }
+        super::super::text_width::clear_terminal_width();
+    }
 
     #[test]
     fn truncation_marks_omission_even_when_only_one_row_fits() {

@@ -58,7 +58,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         self.restore.restore_owner();
-        unicode_width::clear_process_terminal_width();
+        crate::ui::text_width::clear_process_terminal_width();
         // Rust forbids hook replacement from a panicking thread. In that fatal
         // path the installed hook remains an inactive delegate until process exit.
         if !std::thread::panicking() {

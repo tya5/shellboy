@@ -125,7 +125,7 @@ pub fn blank_between(before: RowGroup, after: RowGroup) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use unicode_width::UnicodeWidthStr;
+    use crate::ui::text_width::UnicodeWidthStr;
     #[test]
     fn marks_are_one_column_even_with_cjk_width_rules() {
         for kind in RowKind::ALL {
@@ -136,7 +136,7 @@ mod tests {
                 mark.chars()
                     .all(|value| !matches!(value, '\u{fe0f}' | '\u{200d}')
                         && !('\u{1f000}'..='\u{1faff}').contains(&value)
-                        && !unicode_width::is_emoji_variation_base(value))
+                        && !crate::ui::text_width::is_emoji_variation_base(value))
             );
             assert!(!label.is_empty());
         }

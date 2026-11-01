@@ -514,12 +514,12 @@ fn annotate_links(
     }
 }
 pub(super) fn hanging_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    use crate::ui::text_width::UnicodeWidthStr;
     use ratatui::{
         buffer::Buffer,
         layout::Rect,
         widgets::{Paragraph, Widget, Wrap},
     };
-    use unicode_width::UnicodeWidthStr;
     let mut out = Vec::new();
     for mut line in lines {
         crate::presentation::expand_tabs(&mut line);
@@ -1394,8 +1394,8 @@ fn tool_metadata(
     (kind, parts.join(" | "), critical)
 }
 fn tool_text_fit(text: &str, width: usize) -> String {
+    use crate::ui::text_width::UnicodeWidthStr;
     use unicode_segmentation::UnicodeSegmentation;
-    use unicode_width::UnicodeWidthStr;
     if text.width() <= width {
         return text.to_owned();
     }
@@ -1422,7 +1422,7 @@ fn tool_row(
     width: u16,
     color: Color,
 ) -> Line<'static> {
-    use unicode_width::UnicodeWidthStr;
+    use crate::ui::text_width::UnicodeWidthStr;
     let width_usize = usize::from(width);
     let metadata = if mark.width() + body.width() + metadata.width() + 2 <= width_usize {
         Some(metadata)

@@ -358,7 +358,7 @@ impl Page {
         page.section(&super::i18n::Message::TerminalWidthHeading.render(config.ui.language));
         page.note(
             &super::i18n::Message::TerminalWidth {
-                observed: unicode_width::terminal_width_observation(),
+                observed: crate::ui::text_width::terminal_width_observation(),
             }
             .render(config.ui.language),
         );
@@ -369,7 +369,7 @@ impl Page {
         }
     }
     pub(super) fn lines(&self, width: u16) -> std::borrow::Cow<'_, [Line<'static>]> {
-        use unicode_width::UnicodeWidthStr;
+        use crate::ui::text_width::UnicodeWidthStr;
         match &self.content {
             Content::Fixed(lines) => std::borrow::Cow::Borrowed(lines),
             Content::Guide(rows) => std::borrow::Cow::Owned(
@@ -437,10 +437,10 @@ impl Guide {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::text_width::UnicodeWidthStr;
     use crate::ui::{UiState, draw};
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
-    use unicode_width::UnicodeWidthStr;
 
     fn key(ui: &mut UiState, code: KeyCode) {
         assert!(

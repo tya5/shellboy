@@ -65,7 +65,11 @@ mod redraw;
 pub mod startup;
 mod terminal_guard;
 pub mod termination;
-mod text_width;
+pub(crate) mod text_width;
+#[doc(hidden)]
+pub fn width_probe_child() -> i32 {
+    text_width::probe_child()
+}
 #[cfg(all(test, unix))]
 mod text_width_pty_tests;
 pub(crate) mod theme;
@@ -5466,7 +5470,8 @@ impl UiState {
             .views
             .get(&self.active)
             .map_or("", |view| view.status.as_str());
-        self.management.draw(frame, area, status);
+        self.management
+            .draw(frame, area, status, self.config.ui.language);
         if let Some(details) = &self.details {
             link_regions = details.draw(frame, area, self.view());
         }
@@ -6453,25 +6458,14 @@ pub struct TerminalSession {
     link_snapshot: std::rc::Rc<std::cell::RefCell<crate::terminal_links::LinkSnapshot>>,
     _guard: TerminalGuard,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
-    width_probe: Option<text_width::Probe>,
-    width_observation: Option<text_width::AmbiguousWidth>,
+    width_observation: Option<u8>,
 }
 impl TerminalSession {
     pub fn set_diagnostics(&mut self, diagnostics: crate::diagnostics::Diagnostics) {
-        if let Some(observation) = self.width_observation {
-            record_terminal_width(&diagnostics, observation);
-        }
+        record_terminal_width(&diagnostics, self.width_observation);
         self.diagnostics = Some(diagnostics);
     }
 
-    /// Poll without blocking or consuming keyboard events. True means complete.
-    fn poll_terminal_width(&mut self) -> bool {
-        poll_terminal_width(
-            &mut self.width_probe,
-            &mut self.width_observation,
-            &self.diagnostics,
-        )
-    }
     pub fn enter() -> io::Result<Self> {
         let guard = TerminalGuard::new();
         terminal::enable_raw_mode()?;
@@ -6488,80 +6482,32 @@ impl TerminalSession {
             io::stdout(),
             std::rc::Rc::clone(&link_snapshot),
         ))?;
-        unicode_width::set_process_terminal_width(None);
-        // Row 11 avoids the standard CSI 1;modifier R encoding of modified F3.
-        let fits_probe =
-            cfg!(unix) && terminal::size().is_ok_and(|(columns, rows)| columns >= 5 && rows >= 11);
-        let (width_probe, width_observation) = if fits_probe {
-            use std::io::Write;
-            let mut output = io::stdout();
-            // Probe only the fresh alternate screen; the two DSR replies are
-            // consumed by the existing input reader without touching keys.
-            output.write_all("\x1b[11;1H·\x1b[6n·\x1b[6n\x1b[2J\x1b[H".as_bytes())?;
-            output.flush()?;
-            (
-                Some(text_width::Probe::new(
-                    Instant::now(),
-                    Duration::from_millis(250),
-                )),
-                None,
-            )
-        } else {
-            (None, Some(text_width::AmbiguousWidth::Unknown))
-        };
+        let width_observation = text_width::probe();
+        text_width::set_process_terminal_width(width_observation);
         Ok(Self {
             terminal,
             link_snapshot,
             _guard: guard,
             diagnostics: None,
-            width_probe,
             width_observation,
         })
     }
 }
 
-fn record_terminal_width(
-    diagnostics: &crate::diagnostics::Diagnostics,
-    width: text_width::AmbiguousWidth,
-) {
+fn record_terminal_width(diagnostics: &crate::diagnostics::Diagnostics, width: Option<u8>) {
     use crate::diagnostics::{DiagnosticEvent, DiagnosticIds};
     let event = match width {
-        text_width::AmbiguousWidth::One => DiagnosticEvent::UiTerminalWidthOne,
-        text_width::AmbiguousWidth::Two => DiagnosticEvent::UiTerminalWidthTwo,
-        text_width::AmbiguousWidth::Unknown => DiagnosticEvent::UiTerminalWidthUnknown,
+        Some(1) => DiagnosticEvent::UiTerminalWidthOne,
+        Some(2) => DiagnosticEvent::UiTerminalWidthTwo,
+        _ => DiagnosticEvent::UiTerminalWidthUnknown,
     };
     diagnostics.record(event, DiagnosticIds::default());
-}
-
-fn poll_terminal_width(
-    probe: &mut Option<text_width::Probe>,
-    observation: &mut Option<text_width::AmbiguousWidth>,
-    diagnostics: &Option<crate::diagnostics::Diagnostics>,
-) -> bool {
-    let Some(pending) = probe.as_mut() else {
-        return true;
-    };
-    for _ in 0..2 {
-        match event::try_read_cursor_position(10) {
-            Ok(Some((column, row))) => pending.observe(column, row, Instant::now()),
-            Ok(None) => break,
-            Err(_) => pending.fail(),
-        }
+    if width == Some(2) {
+        diagnostics.record(
+            DiagnosticEvent::UiTerminalWidthMismatch,
+            DiagnosticIds::default(),
+        );
     }
-    let Some(result) = pending.finish_if_expired(Instant::now()) else {
-        return false;
-    };
-    unicode_width::set_process_terminal_width(match result {
-        text_width::AmbiguousWidth::One => Some(1),
-        text_width::AmbiguousWidth::Two => Some(2),
-        text_width::AmbiguousWidth::Unknown => None,
-    });
-    *observation = Some(result);
-    *probe = None;
-    if let Some(diagnostics) = diagnostics {
-        record_terminal_width(diagnostics, result);
-    }
-    true
 }
 
 pub fn run_in_session(
@@ -6590,8 +6536,6 @@ fn run_session(
 ) -> io::Result<UiExitReason> {
     let terminal = &mut session.terminal;
     let link_snapshot = &session.link_snapshot;
-    let width_probe = &mut session.width_probe;
-    let width_observation = &mut session.width_observation;
     let mut state = UiState::new(config, PathBuf::new());
     if let Some(diagnostics) = &session.diagnostics {
         state.set_diagnostics(diagnostics.clone());
@@ -6659,8 +6603,7 @@ fn run_session(
                 selecting = state.selection_mode;
             }
             state.animation_tick(Instant::now());
-            let width_ready =
-                poll_terminal_width(width_probe, width_observation, &session.diagnostics);
+            let width_ready = true;
             if width_ready && state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
                 redraw::draw_terminal(terminal, &mut state, link_snapshot)?;
                 last_draw = Instant::now();
@@ -6848,7 +6791,7 @@ mod layout_cache_tests {
         );
         terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
         assert!(ui.confirmation_scroll > 0);
-        use unicode_width::UnicodeWidthStr;
+        use crate::ui::text_width::UnicodeWidthStr;
         let text = (0..24)
             .map(|y| {
                 let mut row = String::new();
@@ -7056,8 +6999,8 @@ mod layout_cache_tests {
 
     #[test]
     fn retry_footer_renders_saved_counts_and_clears_them_after_success() {
+        use crate::ui::text_width::UnicodeWidthStr;
         use ratatui::{Terminal, backend::TestBackend};
-        use unicode_width::UnicodeWidthStr;
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;

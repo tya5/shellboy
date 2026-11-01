@@ -1,7 +1,7 @@
 //! Pure projection of the current conversation into bounded screen chrome.
 use super::ThreadView;
+use crate::ui::text_width::UnicodeWidthStr;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 /// Fixed header surface; metadata occupies a separate right-aligned region.
 pub(super) fn header_line(

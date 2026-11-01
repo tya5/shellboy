@@ -1,7 +1,7 @@
 //! Regression of key geometry before drawing and across modal/resize transitions.
 use super::*;
+use crate::ui::text_width::UnicodeWidthStr;
 use ratatui::backend::TestBackend;
-use unicode_width::UnicodeWidthStr;
 
 fn rendered_text(terminal: &Terminal<TestBackend>) -> String {
     let buffer = terminal.backend().buffer();

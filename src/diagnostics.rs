@@ -32,6 +32,7 @@ pub enum DiagnosticEvent {
     UiTerminalWidthOne,
     UiTerminalWidthTwo,
     UiTerminalWidthUnknown,
+    UiTerminalWidthMismatch,
 }
 
 /// Fixed frontend observations; never accepts history or shell content.

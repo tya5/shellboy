@@ -1,12 +1,12 @@
 //! Pure composer display and cursor projection; canonical input stays unchanged.
 use super::{DraftSnapshot, draft, theme};
+use crate::ui::text_width::UnicodeWidthStr;
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
 };
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 /// Display representation and byte cursor; folded text remains intact in DraftSnapshot.
 pub(super) struct Display {
@@ -262,7 +262,7 @@ mod tests {
     fn measured_width_preserves_user_content_and_drives_cursor() {
         let text = "A\u{00b7}\u{2192}👩\u{200d}💻";
         for measured in [Some(1), Some(2), None] {
-            unicode_width::set_terminal_width(measured);
+            crate::ui::text_width::set_terminal_width(measured);
             let draft = DraftSnapshot {
                 text: text.into(),
                 cursor: text.len(),
@@ -271,7 +271,10 @@ mod tests {
             let display = display(&draft);
             assert_eq!(display.text, text);
             assert_eq!(visible(&display, 120, 0, 1)[0].to_string(), text);
-            assert_eq!(measure(text, text.len(), 120).cursor, (text.width(), 0));
+            assert_eq!(
+                measure(text, text.len(), 120).cursor,
+                (crate::ui::text_width::UnicodeWidthStr::width(text), 0)
+            );
             for line in visible(&display, 4, 0, 20) {
                 assert!(
                     line.width() <= 4,
@@ -280,7 +283,7 @@ mod tests {
             }
             assert_eq!(draft.text, text);
         }
-        unicode_width::clear_terminal_width();
+        crate::ui::text_width::clear_terminal_width();
     }
 
     #[test]

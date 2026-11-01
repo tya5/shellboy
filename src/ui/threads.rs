@@ -7,6 +7,7 @@ use super::watch::{
 };
 use super::{UiAction, popup};
 use crate::protocol::ThreadSummary;
+use crate::ui::text_width::UnicodeWidthStr;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pulldown_cmark::{Event, Options, Parser, TagEnd};
 use ratatui::{
@@ -22,7 +23,6 @@ use std::{
     time::{Duration, Instant},
 };
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
 /// Reader-prepared wall-clock labels. Raw timestamps remain authoritative.
 #[derive(Clone, Debug)]

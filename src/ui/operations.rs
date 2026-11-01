@@ -1851,16 +1851,16 @@ mod tests {
     use super::*;
     #[test]
     fn all_operation_ui_labels_use_width_invariant_symbols_without_changing_cli_labels() {
-        use unicode_width::UnicodeWidthStr;
+        use crate::ui::text_width::UnicodeWidthStr;
         for &kind in OpKind::ALL {
             let label = kind.label();
-            unicode_width::set_terminal_width(Some(1));
+            crate::ui::text_width::set_terminal_width(Some(1));
             let narrow = label.as_str().width();
-            unicode_width::set_terminal_width(Some(2));
-            let wide = label.as_str().width();
+            crate::ui::text_width::set_terminal_width(Some(2));
+            let wide = label.as_str().width_cjk();
             assert_eq!(narrow, wide, "{}", label);
         }
-        unicode_width::clear_terminal_width();
+        crate::ui::text_width::clear_terminal_width();
         assert_eq!(OpKind::ThreadGet.label(), "会話 | 詳細");
         assert_eq!(OpKind::ThreadGet.catalogue().label(), "会話 · 詳細");
     }

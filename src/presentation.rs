@@ -491,7 +491,7 @@ impl tui_markdown::StyleSheet for ShellboyMarkdownStyle {
 }
 /// Display-only tab stops. Keep immutable source, copy values, and span styles.
 pub(crate) fn expand_tabs(line: &mut Line<'_>) {
-    use unicode_width::UnicodeWidthStr;
+    use crate::ui::text_width::UnicodeWidthStr;
     if !line.spans.iter().any(|span| span.content.contains('\t')) {
         return;
     }

@@ -110,7 +110,7 @@ mod tests {
     use crate::presentation::{
         BlockKind, NodePresentation, PresentationBlock, PresentationKind, ToolPresentation,
     };
-    use unicode_width::UnicodeWidthStr;
+    use crate::ui::text_width::UnicodeWidthStr;
 
     fn shell(id: &str, state: &str, background: bool) -> UiNode {
         UiNode {

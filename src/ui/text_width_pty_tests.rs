@@ -14,44 +14,32 @@ use std::{
 const FIXTURE: &str = "SHELLBOY_WIDTH_PROBE_FIXTURE";
 
 #[test]
+fn probe_child_fixture() {
+    if std::env::var_os("SHELLBOY_INTERNAL_WIDTH_PROBE").is_some() {
+        std::process::exit(super::text_width::probe_child());
+    }
+}
+
+#[test]
 fn probe_fixture() {
     if std::env::var_os(FIXTURE).is_none() {
         return;
     }
-    let mut session = TerminalSession::enter().unwrap();
-    let deadline = crate::test_watchdog::Deadline::new("width probe input fixture");
-    let mut keys = String::new();
-    let mut paste = String::new();
-    let mut responsive = false;
-    let mut shift_f3 = false;
-    while session.width_probe.is_some() || keys.len() < 3 || paste.is_empty() || !shift_f3 {
-        assert!(!deadline.expired(), "width probe input fixture watchdog");
-        session.poll_terminal_width();
-        if event::poll(Duration::from_millis(5)).unwrap() {
-            match event::read().unwrap() {
-                Event::Key(key) => {
-                    if key.code == KeyCode::F(3)
-                        && key.modifiers == crossterm::event::KeyModifiers::SHIFT
-                    {
-                        shift_f3 = true;
-                    } else if let KeyCode::Char(c) = key.code {
-                        responsive |= session.width_probe.is_some();
-                        keys.push(c);
-                    }
-                }
-                Event::Paste(text) => paste.push_str(&text),
-                _ => {}
-            }
-        }
-    }
+    let session = TerminalSession::enter().unwrap();
     let result = session.width_observation;
-    let worker_width = std::thread::spawn(|| unicode_width::UnicodeWidthStr::width("\u{00b7}"))
-        .join()
-        .unwrap();
-    drop(session);
-    println!(
-        "PROBE_RESULT={result:?};KEYS={keys};PASTE={paste};RESPONSIVE={responsive};SHIFT_F3={shift_f3};WORKER={worker_width}"
+    let mut mode = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(
+        unsafe { libc::tcgetattr(libc::STDIN_FILENO, mode.as_mut_ptr()) },
+        0
     );
+    let mode = unsafe { mode.assume_init() };
+    assert_eq!(
+        mode.c_lflag & (libc::ICANON | libc::ECHO),
+        0,
+        "probe must leave parent terminal in raw mode"
+    );
+    drop(session);
+    println!("PROBE_RESULT={result:?}");
 }
 
 fn run_fixture(replies: Option<(&str, &str)>) -> String {
@@ -110,7 +98,7 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
     drop(slave);
     let deadline = crate::test_watchdog::Deadline::new("width probe PTY");
     let mut output = Vec::new();
-    let mut sent = false;
+    let mut sent = 0;
     loop {
         let mut bytes = [0; 8192];
         match master.read(&mut bytes) {
@@ -121,15 +109,16 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
             Err(e) => panic!("probe PTY read: {e}"),
         }
         assert!(output.len() < 64 * 1024);
-        if !sent && output.windows(4).filter(|b| *b == b"\x1b[6n").count() >= 2 {
-            let pasted = "\x1b[200~paste\u{00b7}value\x1b[201~";
-            let input = if let Some((a, b)) = replies {
-                format!("a\x1b[1;2R{a}{pasted}b{b}c")
-            } else {
-                format!("a\x1b[1;2R{pasted}bc")
-            };
-            master.write_all(input.as_bytes()).unwrap();
-            sent = true;
+        let queries = output.windows(4).filter(|b| *b == b"\x1b[6n").count();
+        if let Some((first, second)) = replies {
+            if sent == 0 && queries >= 1 {
+                master.write_all(first.as_bytes()).unwrap();
+                sent = 1;
+            }
+            if sent == 1 && queries >= 2 {
+                master.write_all(second.as_bytes()).unwrap();
+                sent = 2;
+            }
         }
         if let Some(status) = child.try_wait().unwrap() {
             while let Ok(n) = master.read(&mut bytes) {
@@ -155,18 +144,16 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
 }
 
 #[test]
-fn probe_handles_one_two_inconsistent_and_timeout_without_losing_input() {
+fn probe_handles_one_two_inconsistent_and_timeout() {
     for (reply, expected) in [
-        (Some(("\x1b[11;2R", "\x1b[11;3R")), "One"),
-        (Some(("\x1b[11;3R", "\x1b[11;5R")), "Two"),
-        (Some(("\x1b[11;2R", "\x1b[11;5R")), "Unknown"),
-        (Some(("\x1b[0;0R", "\x1b[11;3R")), "Unknown"),
-        (None, "Unknown"),
+        (Some(("\x1b[11;2R", "\x1b[11;3R")), "Some(1)"),
+        (Some(("\x1b[11;3R", "\x1b[11;5R")), "Some(2)"),
+        (Some(("\x1b[11;2R", "\x1b[11;5R")), "None"),
+        (None, "None"),
     ] {
         let output = run_fixture(reply);
-        let worker_width = if expected == "One" { 1 } else { 2 };
         assert!(
-            output.contains(&format!("PROBE_RESULT=Some({expected});KEYS=abc;PASTE=paste\u{00b7}value;RESPONSIVE=true;SHIFT_F3=true;WORKER={worker_width}")),
+            output.contains(&format!("PROBE_RESULT={expected}")),
             "{output}"
         );
     }

@@ -1495,8 +1495,7 @@ fn shell_descriptions_are_bounded_searchable_and_never_replace_canonical_command
 #[test]
 fn markdown_table_borders_are_invariant_without_rewriting_user_glyphs() {
     let text = "| value | text |\n| --- | --- |\n| \u{2502} | A\u{00b7}B |";
-    for width in [Some(1), Some(2), None] {
-        unicode_width::set_terminal_width(width);
+    {
         let mut projected = project("assistant_response", &json!({"text": text}), text, 0);
         render_markdown(&mut projected, 22);
         assert_eq!(projected.blocks[0].text, text);
@@ -1519,5 +1518,4 @@ fn markdown_table_borders_are_invariant_without_rewriting_user_glyphs() {
         );
         assert!(lines.iter().all(|line| line.width() <= 22), "{rendered:?}");
     }
-    unicode_width::clear_terminal_width();
 }

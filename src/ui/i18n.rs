@@ -31,10 +31,10 @@ impl Message {
             (UiLanguage::En, Self::TerminalWidthHeading) => "Terminal display".into(),
             (UiLanguage::Ja, Self::TerminalWidthHeading) => "端末の表示".into(),
             (UiLanguage::En, Self::TerminalWidth { observed: Some(1) }) => "Ambiguous character width: 1 column (measured).".into(),
-            (UiLanguage::En, Self::TerminalWidth { observed: Some(2) }) => "Ambiguous character width: 2 columns (measured).".into(),
+            (UiLanguage::En, Self::TerminalWidth { observed: Some(2) }) => "Ambiguous character width: 2 columns (measured); differs from Ratatui default (1).".into(),
             (UiLanguage::En, Self::TerminalWidth { .. }) => "Ambiguous character width: unknown; reserving 2 columns.".into(),
             (UiLanguage::Ja, Self::TerminalWidth { observed: Some(1) }) => "曖昧な文字の幅: 1列（測定済み）".into(),
-            (UiLanguage::Ja, Self::TerminalWidth { observed: Some(2) }) => "曖昧な文字の幅: 2列（測定済み）".into(),
+            (UiLanguage::Ja, Self::TerminalWidth { observed: Some(2) }) => "曖昧な文字の幅: 2列（測定済み、Ratatui既定値1列と不一致）".into(),
             (UiLanguage::Ja, Self::TerminalWidth { .. }) => "曖昧な文字の幅: 不明（2列を確保）".into(),
             (UiLanguage::En, Self::DeletedConversations { count: 1 }) => "Deleted 1 conversation".into(),
             (UiLanguage::En, Self::DeletedConversations { count }) => format!("Deleted {count} conversations"),
@@ -49,10 +49,11 @@ mod tests {
 
     #[test]
     fn emoji_variation_bases_are_rejected_without_rejecting_ascii_digits() {
-        assert!(unicode_width::is_emoji_variation_base('\u{21aa}'));
-        assert!(unicode_width::is_emoji_variation_base('\u{2764}'));
-        assert!(!unicode_width::is_emoji_variation_base('1'));
-        assert!(!unicode_width::is_emoji_variation_base('▸'));
+        assert!(crate::ui::text_width::is_emoji_variation_base('\u{21aa}'));
+        assert!(crate::ui::text_width::is_emoji_variation_base('\u{2764}'));
+        assert!(crate::ui::text_width::is_emoji_variation_base('\u{231a}'));
+        assert!(!crate::ui::text_width::is_emoji_variation_base('1'));
+        assert!(!crate::ui::text_width::is_emoji_variation_base('▸'));
     }
 
     #[test]
@@ -85,17 +86,17 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
             assert!(
                 !matches!(value, '\u{fe0f}' | '\u{200d}')
                     && !('\u{1f000}'..='\u{1faff}').contains(&value)
-                    && !unicode_width::is_emoji_variation_base(value),
+                    && !crate::ui::text_width::is_emoji_variation_base(value),
                 "emoji in generated UI symbol {value:?}"
             );
-            unicode_width::set_terminal_width(Some(1));
+            crate::ui::text_width::set_terminal_width(Some(1));
             let narrow = value.width();
-            unicode_width::set_terminal_width(Some(2));
-            let wide = value.width();
+            crate::ui::text_width::set_terminal_width(Some(2));
+            let wide = value.width_cjk();
             assert_eq!(narrow, wide, "ambiguous UI symbol {value:?}");
         }
     }
-    unicode_width::set_terminal_width(policy);
+    crate::ui::text_width::set_terminal_width(policy);
 }
 
 /// Register a synthetic UI-only screen and its essential translated phrases.
@@ -105,10 +106,10 @@ pub(super) fn verify_screen(
     configure: fn(&mut super::UiState),
     expected: fn(UiLanguage) -> &'static [&'static str],
 ) {
+    use crate::ui::text_width::UnicodeWidthStr;
     use ratatui::{Terminal, backend::TestBackend};
-    use unicode_width::UnicodeWidthStr;
     for observed in [Some(1), Some(2), None] {
-        unicode_width::set_terminal_width(observed);
+        crate::ui::text_width::set_terminal_width(observed);
         for width in [80, 120] {
             for language in [UiLanguage::En, UiLanguage::Ja] {
                 let mut config = crate::config::Config::default();
@@ -149,7 +150,7 @@ pub(super) fn verify_screen(
             }
         }
     }
-    unicode_width::clear_terminal_width();
+    crate::ui::text_width::clear_terminal_width();
 }
 
 #[cfg(test)]

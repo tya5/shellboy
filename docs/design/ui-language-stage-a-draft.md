@@ -22,27 +22,27 @@ complex plural/gender rules. Do not add an ambient-locale fallback.
 
 ## Terminal width
 
-After raw mode and the alternate screen are active, issue two DSR requests after
-one and two `U+00B7` characters at row 11. Row 11 avoids the ordinary modified
-F3 `CSI 1;modifier R` form. The event reader filters DSR without consuming or
-reordering keyboard/paste input; it restores modified F3 events that crossterm's
-Unix parser otherwise treats as cursor reports. The UI loop polls without
-blocking. Both replies must agree; after 250 ms, a malformed/contradictory reply,
-a terminal smaller than 5x11, or an unsupported input path produces `unknown`.
-No terminal name, locale, override, or user's choice of language determines width.
-Windows currently returns unknown because its crossterm input path does not
-expose these reports; this is an explicit safe fallback, not a claimed
-measurement. F1 reports the result, and optional diagnostics records the result
-without text, paths or user data.
+After raw mode and the alternate screen are active, an isolated helper process
+uses the public crossterm `cursor::position()` API to measure one and two
+`U+00B7` characters on row 11, before the event loop starts. The parent waits
+at most 300 ms and kills and reaps the helper on timeout. Isolation prevents a
+stuck cursor query from holding the UI process's event-reader lock. Crossterm
+may buffer non-position events in the helper during the probe; those events are
+not transferred back to the UI, including when the helper times out. Input
+arriving during the bounded startup interval can therefore be lost. Two agreeing
+responses identify one or two; a timeout, unsupported input path, small terminal,
+error or disagreement is unknown. No terminal name, locale, override, or user's
+choice of language determines width. F1 help reports the result. When measured
+two differs from upstream Ratatui's default of one, TUI status and optional
+diagnostics explicitly record the mismatch.
 
-The `unknown` effective width is two. The policy is established before starting
-presentation workers and is shared across the process; tests may use a local
-thread override. Both ratatui and application wrapping, clipping, scrolling,
-input cursor calculations and worker Markdown layout use that policy. For
-unknown emoji sequences, reserve the sum of constituent widths, with at least
-two cells for an emoji-presentation selector. The terminal may draw a narrower
-ligature; its unused cells are intentional. Raw content and copy/save paths do
-not change.
+Shellboy layout uses the observation, with unknown conservatively reserving two
+cells for ambiguous characters and component widths for emoji sequences.
+Ratatui and upstream renderers retain their own default width behavior, so on a
+mismatching terminal their internal layout can differ from Shellboy's. The
+impact is limited to content rows; generated UI symbols remain width invariant.
+Raw content and copy/save paths do not change. A pluggable Ratatui width policy
+is separate follow-up work.
 
 Application-owned ambiguous symbols use ASCII alternatives. Existing semantic
 row marks/spinners remain only if their narrow and CJK widths agree. Markdown
@@ -50,14 +50,6 @@ borders are renderer-generated decorations: they carry a private style marker
 and are converted to ASCII before drawing; a user-supplied identical character
 is not converted. Source anchor mapping removes the tagged output guide, rather
 than stripping ASCII pipes from user text.
-
-The two vendor patches in `vendor/` are deliberately narrow and include upstream
-licenses. Crossterm needs an event-reader DSR filter that keeps input order;
-its public `cursor::position()` can block the shared event reader and retry
-errors. Ratatui and the application must share `unicode-width` behavior, not
-calculate different widths on opposite sides of the buffer. Reconsider both
-patches on upstream upgrades. The project's desktop binary uses `std` even
-though upstream `unicode-width` is `no_std`.
 
 ## Stage B partition proposal
 
@@ -106,7 +98,7 @@ keep overflow discoverable in the existing detail surface.
 For stage B, register each synthetic screen with `ui::i18n::verify_screen`:
 provide setup and the essential complete phrases for both languages. It renders
 80/120 columns for measured width one/two and unknown, checks generated symbol
-width invariance, emoji-variation bases from the pinned Unicode width table,
+width invariance, emoji characters using the test-only Unicode emoji property dependency,
 popup borders and essential phrases. Fixtures containing user
 or model data need separate source/copy-preservation assertions; never sanitize
 that data merely to satisfy a symbol test.

@@ -196,7 +196,7 @@ fn wait_inner<T>(
         }
         // Keep handling input while the bounded probe runs, but do not start
         // presentation workers with a width that could subsequently change.
-        if ready.is_some() && (detached || session.poll_terminal_width()) {
+        if ready.is_some() {
             return Ok(Ok(ready.take().expect("ready result")));
         }
         if termination.is_some_and(super::termination::Termination::requested)
@@ -226,7 +226,7 @@ fn wait_inner<T>(
                 screen.ignored_input,
                 screen.error.is_some(),
             );
-            if session.poll_terminal_width() && drawn != Some(signature) {
+            if drawn != Some(signature) {
                 let snapshot = &session.link_snapshot;
                 session
                     .terminal
