@@ -649,6 +649,34 @@ pub(super) fn read_titles_tx(
     db: &Connection,
     requests: &[(String, String)],
 ) -> Result<RawTitles, StorageError> {
+    read_titles_with_limits_tx(db, requests, SOURCE_BYTES, WITNESS_BYTES)
+}
+/// Same canonical title discovery with a smaller caller-owned copy channel.
+pub(super) fn read_titles_bounded_tx(
+    db: &Connection,
+    requests: &[(String, String)],
+    bytes: usize,
+) -> Result<(RawTitles, usize), StorageError> {
+    let raw = read_titles_with_limits_tx(
+        db,
+        requests,
+        SOURCE_BYTES.min(bytes),
+        WITNESS_BYTES.min(bytes),
+    )?;
+    let copied = raw
+        .entries
+        .values()
+        .filter_map(|(_, witness)| witness.as_ref())
+        .map(|w| w.path.copied + w.pending.copied)
+        .sum();
+    Ok((raw, copied))
+}
+fn read_titles_with_limits_tx(
+    db: &Connection,
+    requests: &[(String, String)],
+    source_bytes: usize,
+    witness_bytes: usize,
+) -> Result<RawTitles, StorageError> {
     if requests.len() > 128 {
         return Err(
             ApiError::new(ErrorCode::InputLimit, "Browser title scope exceeds128 IDs").into(),
@@ -674,8 +702,8 @@ pub(super) fn read_titles_tx(
     let mut statement = db.prepare(TITLE_BATCH_SQL)?;
     let mut rows = statement.query(rusqlite::params![
         encoded,
-        SOURCE_BYTES as i64,
-        WITNESS_BYTES as i64
+        source_bytes as i64,
+        witness_bytes as i64
     ])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;

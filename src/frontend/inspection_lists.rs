@@ -287,9 +287,9 @@ fn thread_preflight_sql() -> String {
         .collect::<Vec<_>>()
         .join("+");
     let joins = crate::control::db::thread_summary::RUN_TURN_JOINS;
-    // retry JSON <=256 bytes, revisit count <=21 digits and time <=128 scalars.
+    // Three bounded summary/title-request copies, plus retry/revisit/time scalars.
     format!(
-        "SELECT t.id,{cost}+1024,CASE WHEN octet_length(t.title)<=4096 THEN t.title END FROM json_each(?1)j CROSS JOIN thread t ON t.id=j.value {joins} LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1) WHERE t.deleted_at IS NULL"
+        "SELECT t.id,3*({cost})+1024,CASE WHEN octet_length(t.title)<=4096 THEN t.title END FROM json_each(?1)j CROSS JOIN thread t ON t.id=j.value {joins} LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=u.id AND latest.state='live' AND u.state='running' ORDER BY rowid DESC LIMIT 1) WHERE t.deleted_at IS NULL"
     )
 }
 pub(super) fn read_list_facts_tx(
@@ -376,12 +376,8 @@ pub(super) fn read_list_facts_tx(
                     .get_ref(2)?
                     .as_str_or_null()
                     .map_err(|_| rusqlite::Error::InvalidQuery)?;
-                // The F fallback witness has a larger channel than this leaf.
-                // Do not call it without a budget-compatible facade from G.
-                if bytes > 64 * 1024
-                    || named_title.is_none_or(|title| title.trim().is_empty())
-                    || !budget.take(bytes)
-                {
+                // Empty/Unicode-blank titles use the canonical bounded facade below.
+                if bytes > 64 * 1024 || named_title.is_none() || !budget.take(bytes) {
                     unconfirmed.push(id.into());
                 } else {
                     allowed.push(id.to_owned());
@@ -406,9 +402,15 @@ pub(super) fn read_list_facts_tx(
                     .filter(|id| !found.contains(id.as_str()))
                     .cloned()
                     .collect();
-                chunks.push(super::browser_read::read_shared_tx(
-                    db, summaries, missing, None,
-                )?);
+                let remaining = status::TEXT_BYTES.saturating_sub(budget.used);
+                let (raw, copied) =
+                    super::browser_read::read_list_shared_tx(db, summaries, missing, remaining)?;
+                if !budget.take(copied) {
+                    return Err(
+                        bad("Canonical titles exceeded the remaining metadata channel").into(),
+                    );
+                }
+                chunks.push(raw);
             }
             Body::Threads(chunks, unconfirmed)
         }

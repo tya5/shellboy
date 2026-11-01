@@ -106,6 +106,34 @@ pub(super) fn read_shared_tx(
         selected_excerpt: selected.map(|id| read_excerpt(db, id)).transpose()?,
     })
 }
+/// #107 reuses summary/title preparation but never borrows the wider title budget.
+pub(super) fn read_list_shared_tx(
+    db: &Connection,
+    rows: Vec<thread_summary::RawSummary>,
+    missing_ids: Vec<String>,
+    title_bytes: usize,
+) -> Result<(RawPatch, usize), StorageError> {
+    if rows.len() > 128 {
+        return Err(
+            ApiError::new(ErrorCode::InputLimit, "List title scope exceeds128 rows").into(),
+        );
+    }
+    let requests = rows
+        .iter()
+        .map(|row| (row.thread_id.clone(), row.stored_title.clone()))
+        .collect::<Vec<_>>();
+    let (titles, copied) = super::header::read_titles_bounded_tx(db, &requests, title_bytes)?;
+    Ok((
+        RawPatch {
+            rows,
+            titles,
+            missing_ids,
+            selected_excerpt: None,
+        },
+        copied,
+    ))
+}
+
 fn read_excerpt(db: &Connection, id: &str) -> Result<RawExcerpt, StorageError> {
     let mut result = RawExcerpt {
         thread: id.into(),

@@ -1,5 +1,5 @@
 //! Registered frontend/real local IPC list observations, synthetic saved facts.
-use serde_json::{Value, json};
+use serde_json::json;
 use shellboy::{
     app::DataOwner,
     attachments::clipboard::{ClipboardPixels, CopyOutcome},
