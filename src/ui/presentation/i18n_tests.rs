@@ -405,3 +405,137 @@ fn typed_source_error_after_enter_is_visible_on_the_actual_bilingual_screen() {
         UiLanguage::Ja => &["元の結果を参照できません"],
     });
 }
+
+fn activity_fixture(
+    ui: &mut UiState,
+    phase: crate::activity::ActivityPhase,
+    retry: bool,
+    waiting: bool,
+    quota: bool,
+) {
+    history(ui, Vec::new());
+    let mut snapshot = super::super::activity::ActivitySnapshot {
+        phase,
+        run_id: Some("fixture-run".into()),
+        turn_id: Some("fixture-turn".into()),
+        turn_in_progress: !waiting,
+        ..Default::default()
+    };
+    if retry {
+        snapshot.automatic_retry = Some(super::super::activity::AutomaticRetrySnapshot {
+            number: 1,
+            limit: 3,
+            delay_ms: 1501,
+            partial_response_discarded: true,
+        });
+    }
+    if waiting {
+        snapshot.waiting_reason = Some(crate::protocol::RunWaitReason {
+            kind: "context_edit_boundary".into(),
+            operation_id: "fixture-operation".into(),
+            action: "summary".into(),
+            accepted_at: "saved".into(),
+            operation_count: 1,
+        });
+    }
+    if quota {
+        snapshot.recovery = Some(super::super::activity::RecoverySnapshot {
+            stage: "request".into(),
+            message: "Synthetic limit".into(),
+            usage_limit: Some(crate::model::usage_limit::UsageLimit {
+                kind: crate::model::usage_limit::LimitKind::UsageLimitReached,
+                resets_at: 1_800_000_000,
+                limit_window_minutes: Some(60),
+                locally_blocked: true,
+            }),
+            ..Default::default()
+        });
+    }
+    ui.apply(UiUpdate::Activity {
+        thread_id: "fixture-thread".into(),
+        generation: ui.view().generation,
+        epoch: 1,
+        observed_at: std::time::Instant::now(),
+        snapshot,
+    });
+}
+fn preparing(ui: &mut UiState) {
+    activity_fixture(
+        ui,
+        crate::activity::ActivityPhase::Preparing,
+        false,
+        false,
+        false,
+    );
+}
+fn automatic_retry(ui: &mut UiState) {
+    activity_fixture(
+        ui,
+        crate::activity::ActivityPhase::Retrying,
+        true,
+        false,
+        false,
+    );
+}
+fn context_wait(ui: &mut UiState) {
+    activity_fixture(
+        ui,
+        crate::activity::ActivityPhase::Waiting,
+        false,
+        true,
+        false,
+    );
+}
+fn quota_wait(ui: &mut UiState) {
+    activity_fixture(
+        ui,
+        crate::activity::ActivityPhase::Recovery,
+        false,
+        false,
+        true,
+    );
+}
+fn receiving(ui: &mut UiState) {
+    activity_fixture(
+        ui,
+        crate::activity::ActivityPhase::Receiving,
+        false,
+        false,
+        false,
+    );
+}
+#[test]
+fn preparing_run_footer_screen_bilingual() {
+    crate::ui::i18n::verify_screen(preparing, |lang| match lang {
+        UiLanguage::En => &["Preparing", "Observed"],
+        UiLanguage::Ja => &["準備中", "観測"],
+    });
+}
+#[test]
+fn retry_run_footer_keeps_billing_consequence_on_bilingual_screen() {
+    crate::ui::i18n::verify_screen(automatic_retry, |lang| match lang {
+        UiLanguage::En => &["Re-sending may be billed twice"],
+        UiLanguage::Ja => &["再送は重複課金の可能性"],
+    });
+}
+#[test]
+fn context_wait_run_footer_screen_bilingual() {
+    crate::ui::i18n::verify_screen(context_wait, |lang| match lang {
+        UiLanguage::En => &["Waiting for conversation summary"],
+        UiLanguage::Ja => &["会話要約を待機"],
+    });
+}
+#[test]
+fn quota_run_footer_keeps_manual_retry_and_reset_on_bilingual_screen() {
+    crate::ui::i18n::verify_screen(quota_wait, |lang| match lang {
+        UiLanguage::En => &["Usage limit", "UTC", "manual", "/model"],
+        UiLanguage::Ja => &["使用量上限", "UTC", "明示的に再試行", "/model"],
+    });
+}
+#[test]
+fn receiving_run_footer_screen_bilingual() {
+    crate::ui::i18n::verify_screen(receiving, |lang| match lang {
+        UiLanguage::En => &["Receiving answer"],
+        UiLanguage::Ja => &["応答を受信中"],
+    });
+}

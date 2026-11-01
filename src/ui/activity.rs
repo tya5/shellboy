@@ -51,7 +51,7 @@ impl FooterText {
             Self::UsageLimit => "使用量上限",
             Self::RateLimit => "要求頻度の制限",
             Self::RecoveryActions => "待つ・時刻後も明示的に再試行 / /model で接続を選ぶ",
-            Self::EndedUnknown => crate::presentation::TIME_TEXT[3],
+            Self::EndedUnknown => crate::presentation::TIME_TEXT[3].1,
         }
     }
 }
