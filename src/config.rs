@@ -62,12 +62,18 @@ pub enum Api {
     #[default]
     Responses,
     ChatCompletions,
+    AnthropicMessages,
 }
+/// Default `max_tokens` for `anthropic_messages`, which requires one. Below the
+/// documented 128K output cap of current models, and large enough that routine
+/// turns do not stop at the limit.
+pub const DEFAULT_MESSAGES_MAX_TOKENS: u64 = 32_768;
 impl Api {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Responses => "responses",
             Self::ChatCompletions => "chat_completions",
+            Self::AnthropicMessages => "anthropic_messages",
         }
     }
     /// Top-level request-body fields Shellboy itself owns for this dialect.
@@ -93,6 +99,14 @@ impl Api {
                 "stream_options",
                 "reasoning_effort",
             ],
+            Self::AnthropicMessages => &[
+                "model",
+                "max_tokens",
+                "stream",
+                "messages",
+                "system",
+                "tools",
+            ],
         }
     }
     pub fn unavailable_features(self) -> Vec<String> {
@@ -106,6 +120,9 @@ impl Api {
             ]
             .map(str::to_owned)
             .to_vec(),
+            Self::AnthropicMessages => ["reasoning_item_replay", "prompt_cache_key"]
+                .map(str::to_owned)
+                .to_vec(),
         }
     }
 }
@@ -132,6 +149,8 @@ pub struct Connection {
     pub api_key_env: Option<String>,
     pub default_effort: Option<String>,
     pub context_role: ContextRole,
+    /// Required by `anthropic_messages` only; `None` selects the default.
+    pub max_tokens: Option<u64>,
     pub headers: BTreeMap<String, String>,
     /// Provider-specific optional request fields, merged into conversation
     /// request bodies without interpretation. See `validate`.
@@ -157,6 +176,7 @@ impl Default for Connection {
             api_key_env: None,
             default_effort: None,
             context_role: ContextRole::default(),
+            max_tokens: None,
             headers: BTreeMap::new(),
             extra_body: serde_json::Map::new(),
             extra_headers: BTreeMap::new(),
@@ -181,6 +201,7 @@ impl fmt::Debug for Connection {
             .field("api_key_env", &self.api_key_env)
             .field("default_effort", &self.default_effort)
             .field("context_role", &self.context_role)
+            .field("max_tokens", &self.max_tokens)
             .field("headers", &"[redacted]")
             .field("extra_body", &"[redacted]")
             .field("extra_headers", &"[redacted]")
@@ -216,6 +237,7 @@ impl Connection {
             ApiEndpoint::Responses => match self.api {
                 Api::Responses => "responses",
                 Api::ChatCompletions => "chat/completions",
+                Api::AnthropicMessages => "messages",
             },
             ApiEndpoint::Embeddings => "embeddings",
             ApiEndpoint::Models => "models",

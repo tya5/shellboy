@@ -87,8 +87,17 @@ impl HttpModelClient {
         if self.connection.api == crate::config::Api::Responses {
             return Ok(request["input"].to_string().chars().count() as u64);
         }
-        let wire = crate::model::dialect::encode(self.connection.api, request.clone())?;
+        let wire = crate::model::dialect::encode_with(
+            self.connection.api,
+            request.clone(),
+            self.messages_max_tokens(),
+        )?;
         Ok(wire["messages"].to_string().chars().count() as u64)
+    }
+    fn messages_max_tokens(&self) -> u64 {
+        self.connection
+            .max_tokens
+            .unwrap_or(crate::config::DEFAULT_MESSAGES_MAX_TOKENS)
     }
     pub fn new(connection: Connection) -> Result<Self, ModelError> {
         Self::for_connection("selected", connection)
@@ -256,6 +265,15 @@ impl HttpModelClient {
             return Err(cancelled());
         }
         let (mut headers, mut secrets) = self.headers()?;
+        if matches!(endpoint, ApiEndpoint::Responses)
+            && self.connection.api == crate::config::Api::AnthropicMessages
+        {
+            // The API requires this header; Shellboy fixes it and never infers it.
+            headers.insert(
+                "anthropic-version",
+                HeaderValue::from_static(crate::model::dialect::ANTHROPIC_VERSION),
+            );
+        }
         if matches!(endpoint, ApiEndpoint::Responses) {
             for (name, value) in &self.connection.extra_headers {
                 let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {

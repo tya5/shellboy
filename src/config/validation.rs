@@ -89,11 +89,26 @@ impl Config {
 impl Connection {
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         nonempty(&format!("connections.{name}"), name)?;
-        if self.api == Api::ChatCompletions && self.prompt_cache_key {
+        if self.api != Api::Responses && self.prompt_cache_key {
             return Err(invalid(
                 format!("connections.{name}.prompt_cache_key"),
-                "Responses-only setting; omit it for chat_completions",
+                format!("Responses-only setting; omit it for {}", self.api.as_str()),
             ));
+        }
+        match self.max_tokens {
+            Some(_) if self.api != Api::AnthropicMessages => {
+                return Err(invalid(
+                    format!("connections.{name}.max_tokens"),
+                    "only valid with api = \"anthropic_messages\"",
+                ));
+            }
+            Some(0) => {
+                return Err(invalid(
+                    format!("connections.{name}.max_tokens"),
+                    "must be a positive integer",
+                ));
+            }
+            _ => {}
         }
         api_root(&self.base_url).map_err(|_| invalid(format!("connections.{name}.base_url"), "provide an HTTP(S) API root, e.g. https://proxy.example/v1, not https://proxy.example/v1/responses; omit credentials/query/fragment and /responses, /embeddings, /models or /chat/completions suffix"))?;
         if self.response_header_timeout_ms == 0 {

@@ -4,17 +4,25 @@ use crate::config::Api;
 use std::ops::Deref;
 
 mod chat;
+mod messages;
 mod responses;
 use chat::Chat;
+pub use messages::ANTHROPIC_VERSION;
+use messages::Messages;
 
 fn protocol(message: &str) -> ModelError {
     ModelError::new("protocol", message)
 }
 
 pub fn encode(api: Api, request: Value) -> Result<Value, ModelError> {
+    encode_with(api, request, crate::config::DEFAULT_MESSAGES_MAX_TOKENS)
+}
+/// `max_tokens` is used only by `anthropic_messages`, which requires it.
+pub fn encode_with(api: Api, request: Value, max_tokens: u64) -> Result<Value, ModelError> {
     match api {
         Api::Responses => responses::encode(request),
         Api::ChatCompletions => chat::encode(request),
+        Api::AnthropicMessages => messages::encode(request, max_tokens),
     }
 }
 
@@ -44,6 +52,7 @@ pub(super) fn usage(value: &Value) -> Value {
 pub struct Stream {
     inner: ResponseStream,
     chat: Option<Chat>,
+    messages: Option<Messages>,
 }
 impl Deref for Stream {
     type Target = ResponseStream;
@@ -56,9 +65,13 @@ impl Stream {
         Self {
             inner: ResponseStream::default(),
             chat: (api == Api::ChatCompletions).then(Chat::default),
+            messages: (api == Api::AnthropicMessages).then(Messages::default),
         }
     }
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Value>, ModelError> {
+        if self.messages.is_some() {
+            return self.push_messages(bytes);
+        }
         let Some(chat) = &mut self.chat else {
             return self.inner.push(bytes);
         };
@@ -112,7 +125,69 @@ impl Stream {
         }
         Ok(events)
     }
+    fn push_messages(&mut self, bytes: &[u8]) -> Result<Vec<Value>, ModelError> {
+        let messages = self.messages.as_mut().expect("messages stream");
+        if self.inner.is_terminal() {
+            return Ok(vec![]);
+        }
+        let (chunks, error) = match messages.decoder.decode(
+            bytes,
+            |value| value["type"] == "error" || value["type"] == "message_stop",
+            true,
+        ) {
+            Ok(chunks) => (chunks, None),
+            Err(failure) => (failure.events, Some(failure.error)),
+        };
+        let mut events = Vec::new();
+        for chunk in chunks {
+            let converted = messages.item(&chunk);
+            if let Some(usage) = messages.usage() {
+                // Usage can arrive before the end; keep reported facts if the transport ends.
+                self.inner.failed_response = Some(
+                    json!({"status":"incomplete","api":"anthropic_messages","output":[],"usage":usage}),
+                );
+            }
+            for event in converted? {
+                let wire = format!("data: {}\n\n", event);
+                events.extend(self.inner.push(wire.as_bytes())?);
+            }
+        }
+        if let Some(error) = error {
+            return Err(error);
+        }
+        if messages.stopped && !self.inner.is_terminal() {
+            let raw = match messages.completed() {
+                Ok(raw) => raw,
+                Err(error) => {
+                    self.inner.terminal = Some(Err(error.clone()));
+                    return Err(error);
+                }
+            };
+            self.inner.failed_response = None;
+            let kind = if raw["status"] == "completed" {
+                "response.completed"
+            } else {
+                "response.incomplete"
+            };
+            events.extend(
+                self.inner.push(
+                    format!("data: {}\n\n", json!({"type":kind,"response":raw})).as_bytes(),
+                )?,
+            );
+        }
+        Ok(events)
+    }
     pub fn finish(self, tools_enabled: bool) -> Result<ModelResponse, ModelError> {
+        if self
+            .messages
+            .as_ref()
+            .is_some_and(|messages| !messages.decoder.is_at_boundary())
+        {
+            return Err(ModelError::new(
+                "incomplete",
+                "EOF in partial Messages SSE frame",
+            ));
+        }
         if self
             .chat
             .as_ref()
@@ -139,6 +214,9 @@ pub fn decode_json(api: Api, raw: Value) -> Result<Value, ModelError> {
     match api {
         Api::Responses => responses::decode_json(raw),
         Api::ChatCompletions => chat::decode_json(raw),
+        // Messages requests always stream, so a JSON body is a provider error
+        // document, never a message.
+        Api::AnthropicMessages => messages::decode_json(raw),
     }
 }
 
