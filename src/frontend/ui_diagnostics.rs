@@ -41,7 +41,7 @@ pub(super) fn accepted(language: UiLanguage, title: &str) -> String {
 pub(super) fn not_applied(language: UiLanguage, title: &str, error: impl Display) -> String {
     match language {
         UiLanguage::Ja => format!("{title}は未適用 | {error}"),
-        UiLanguage::En => format!("Not applied: {title} | {error}"),
+        UiLanguage::En => format!("{title} not applied | {error}"),
     }
 }
 pub(super) fn save_failed(language: UiLanguage, error: impl Display) -> String {
