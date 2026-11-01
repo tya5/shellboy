@@ -1228,7 +1228,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
     fixture.command("/threads descendants").await;
     fixture
         .observed_until("scoped Watch opens actual candidate page", |f, screen| {
-            f.ui.threads_visible() && screen.contains("子孫の監視") && f.browser_pages > prior_pages
+            f.ui.threads_visible() && screen.contains("Descendant Watch") && f.browser_pages > prior_pages
         })
         .await;
     let generation = fixture.ui.list_generation();
