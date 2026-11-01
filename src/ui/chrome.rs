@@ -703,7 +703,9 @@ mod tests {
         use crate::config::PaletteMode;
         use ratatui::style::{Modifier, Style};
         use ratatui::text::Span;
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/long/synthetic/project"));
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, PathBuf::from("/long/synthetic/project"));
         ui.view_mut().title = "Important conversation".into();
         ui.view_mut().connection = Some("fixture-link".into());
         ui.view_mut().model = Some("fixture-model".into());
@@ -973,7 +975,8 @@ mod context_wait_footer_tests {
     use super::*;
     #[test]
     fn footer_shows_saved_boundary_owner_and_removes_it_on_fresh_empty_snapshot() {
-        let config = crate::config::Config::default();
+        let mut config = crate::config::Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
         let mut view = crate::ui::view::ThreadView::new(&config, std::path::PathBuf::from("/"));
         let reason = crate::protocol::RunWaitReason {
             kind: "context_edit_boundary".into(),
