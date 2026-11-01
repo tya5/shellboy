@@ -107,12 +107,11 @@ Windows x64, macOS Apple Silicon and Linux x64 archives are intended to include
 an executable, LICENSE, configuration example and offline documentation. Verify
 all archives and installer scripts against `SHA256SUMS` when candidates exist.
 
-**Draft snapshot:** main `b12a8291b1950a5f7db58de4dccbb12101a2a074` before
-2026-11-02 08:30 JST. At the cutoff, confirm whether #149, #150, #153 and #156
-landed and update the cut; items not in the cutoff are deferred to the next
-release. Later commits require the user's direction. CI, candidate
-archives/installers/checksums and upgrade verification are separate gates;
-this preparation does not create a tag, publish
+**Draft snapshot:** main `b12a8291b1950a5f7db58de4dccbb12101a2a074`. The release
+cut remains open until #153 and #156 reach main; #149, #150 and remaining #152
+work may also be included if landed by then. Final release-note additions await
+the user's direction. CI, candidate archives/installers/checksums and upgrade
+verification are separate gates; this preparation does not create a tag, publish
 a release, replace an installed binary or modify user data.
 
 After the reviewer builds a candidate, run the synthetic upgrade check on a Unix
