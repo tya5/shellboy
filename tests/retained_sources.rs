@@ -23,7 +23,7 @@ impl Fixture {
         let mut state=UiState::new(&owner.loaded.config,root.path().into());let(send,receive)=ui::actions::channel(64);let(updates,incoming)=std::sync::mpsc::sync_channel(128);
         let bridge=tokio::spawn(frontend::run(control.clone(),receive,updates,root.path().into(),owner,server));
         for action in state.select_thread("t".into()){send.try_send(action).unwrap();}
-        let mut f=Self{_root:root,data,control,ui:state,send,incoming,bridge};f.until(|ui,_|!ui.view().loading).await;f
+        let mut f=Self{_root:root,data,control,ui:state,send,incoming,bridge};let _=f.until(|ui,_|!ui.view().loading).await;f
     }
     fn dispatch(&self,actions:Vec<UiAction>){assert!(self.send.try_send_batch(actions).is_empty());}
     fn key(&mut self,code:KeyCode,modifiers:KeyModifiers){let actions=self.ui.event(Event::Key(KeyEvent::new(code,modifiers)));self.dispatch(actions);}
