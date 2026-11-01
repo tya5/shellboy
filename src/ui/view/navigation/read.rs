@@ -234,12 +234,7 @@ impl ReadIntent {
                 if keep_pending { pending } else { 0 },
                 ReadMotion::Retained,
             ),
-            ReadEvent::Failed => (
-                false,
-                None,
-                if ticket.is_some() { pending } else { 0 },
-                ReadMotion::Retained,
-            ),
+            ReadEvent::Failed => (false, None, 0, ReadMotion::Retained),
             ReadEvent::ReplyConsumed | ReadEvent::DeferredDrained => {
                 effects.pending = pending;
                 if matches!(event, ReadEvent::ReplyConsumed) {
@@ -268,9 +263,7 @@ impl ReadIntent {
             ReadEvent::WaitStarted => (true, ticket, pending, motion),
             ReadEvent::DeliveryObserved => (false, ticket, pending, motion),
             ReadEvent::BodyHydrated => (ticket.is_some(), ticket, pending, motion),
-            ReadEvent::OwnerRejected => {
-                (false, None, pending, motion.with(false, motion.rebasing()))
-            }
+            ReadEvent::OwnerRejected => (false, None, 0, motion.with(false, motion.rebasing())),
             ReadEvent::ThreadSelected => (true, None, 0, motion.with(false, motion.rebasing())),
             #[cfg(test)]
             ReadEvent::SeedTicket(ticket) => (loading, ticket, pending, motion),
@@ -326,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn events_preserve_legacy_failure_delta_and_unowned_hydration() {
+    fn failure_discards_deferred_motion_but_cancel_preserves_unowned_hydration() {
         let mut intent = ReadIntent::default();
         intent.on_event(ReadEvent::WaitStarted);
         intent.on_event(ReadEvent::Cancelled {
@@ -340,9 +333,9 @@ mod tests {
         intent.on_event(ReadEvent::Failed);
         assert!(!intent.is_loading());
         assert!(intent.request().is_none());
-        assert_eq!(intent.pending(), -7);
+        assert_eq!(intent.pending(), 0);
         let effects = intent.on_event(ReadEvent::DeferredDrained);
-        assert_eq!(effects.pending, -7);
+        assert_eq!(effects.pending, 0);
         assert_eq!(intent.pending(), 0);
     }
 }

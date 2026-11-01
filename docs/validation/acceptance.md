@@ -7730,3 +7730,10 @@ The two-gap regression retains +150 rows behind the existing read owner, then
 compares the settled screen with a fully cached reference. Combined91 /
 scroll237 / fields15 (same helper); read helper is four lines shorter. Focused
 Rust tests are queued behind the shared build slot; not yet claimed passed.
+
+### #118 failure/rejection replay
+
+Read failure and admission rejection now discard their deferred displacement;
+the explicit retry assertion requires exactly the original single-input delta,
+not twice that amount. Reducer test expectation changes to zero. Same helper:
+combined91 / scroll237 / fields15. Focused Rust validation pending shared slot.

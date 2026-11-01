@@ -459,13 +459,14 @@ fn ctrl_end_during_a_read_cancels_it_and_the_old_reply_is_ignored() {
 }
 
 #[test]
-fn load_failure_keeps_pending_for_an_explicit_retry_and_rejection_releases_the_read() {
+fn load_failure_and_rejection_discard_pending_so_retry_moves_only_the_new_input() {
     for rejected in [false, true] {
         let (mut ui, mut t, _) = ten(Some(4));
         set_anchor(&mut ui, "n-5", 0);
         rows(&mut ui, &mut t);
         let actions = key(&mut ui, KeyCode::PageUp);
         let pending = ui.view().navigation.pending();
+        assert!(pending < 0);
         if rejected {
             ui.action_rejected(&actions[0]);
         } else {
@@ -483,11 +484,13 @@ fn load_failure_keeps_pending_for_an_explicit_retry_and_rejection_releases_the_r
             !v.navigation.is_loading() && v.navigation.request().is_none(),
             "rejected={rejected}"
         );
-        // characterization: current behaviour, see #118
-        // The deferred movement survives the failure; the next scroll replays it
-        // (added to the new input) and issues a fresh read. No automatic retry.
-        assert_eq!(v.navigation.pending(), pending, "rejected={rejected}");
+        assert_eq!(v.navigation.pending(), 0, "rejected={rejected}");
         let retry = key(&mut ui, KeyCode::PageUp);
+        assert_eq!(
+            ui.view().navigation.pending(),
+            pending,
+            "retry only new input"
+        );
         assert!(
             retry
                 .iter()
