@@ -196,6 +196,65 @@ Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash o
 
 `connections.<name>.headers` is an optional HTTP header dictionary. Names must be unique ignoring case, and invalid control characters in values are rejected. `api_key_env` cannot be combined with an Authorization header. Prefer environment-variable references to writing secrets directly in headers. `default_effort` is an optional nonempty string accepted by the endpoint. There is no built-in catalog of model capacity or effort support.
 
+### Anthropic Messages: `api = "anthropic_messages"`
+
+Use this to talk to Anthropic's own Messages API (`POST {base_url}/messages`),
+for example with an Anthropic Console API key (the way a Claude plan's API credit
+is used), where prompt caching and reasoning continuity work. Through a LiteLLM
+or similar gateway, the gateway's own dialect (`responses`/`chat_completions`) is
+what Shellboy sees; this setting is for the native API.
+
+```toml
+default_connection = "claude"
+default_model = "YOUR_CLAUDE_MODEL_ID"
+
+[connections.claude]
+api = "anthropic_messages"
+base_url = "https://api.anthropic.com/v1"
+headers = { "x-api-key" = "PASTE_NOT_RECOMMENDED" }   # or api_key_env (Bearer)
+# max_tokens = 32768
+# extra_body = { cache_control = { type = "ephemeral" } }     # automatic prompt caching
+# extra_body = { thinking = { type = "adaptive" } }           # provider-specific; see its docs
+# extra_headers = { "anthropic-beta" = "..." }
+```
+
+- Shellboy sends the minimum a conversation needs: `model`, `max_tokens`
+  (required by the API), `stream`, `messages`, a top-level `system` and `tools`,
+  and the fixed header `anthropic-version: 2023-06-01`. **Nothing optional is
+  sent.** Thinking, effort, temperature, `tool_choice`, `cache_control` and beta
+  headers are yours to add with `extra_body` and `extra_headers`. A Thread's
+  effort setting is not translated for this dialect. Newer models reject some
+  parameters (for example `temperature`) with HTTP 400; Shellboy never sends them.
+- `max_tokens` (positive integer, only valid with this dialect) defaults to 32768,
+  below the 128K output cap documented for current models. Raise it for very long
+  answers; a turn that reaches it is reported as incomplete, not as a success.
+- Authentication: `api_key_env` sends `Authorization: Bearer`; to use the
+  `x-api-key` header instead, put it in `headers`.
+- Context Shellboy inserts mid-conversation (event notices) is sent as a user
+  message (the API has no mid-conversation system role), so `context_role` has no
+  effect here. A request must end with a user message; Shellboy refuses to send an
+  assistant prefill (current models reject it) and reports `input_invalid`.
+- Thinking, `redacted_thinking` and block types Shellboy does not know are stored
+  unread and sent back **unchanged** in the same dialect, which the API requires
+  for signed thinking. They are never shown as answer text, never searched or
+  summarized, and never sent to a different dialect or after the Thread's
+  connection or model changes. Key order inside such a block is not preserved;
+  its text and signature are byte-exact.
+- Stop reasons: `end_turn`, `stop_sequence` and `tool_use` finish normally.
+  `max_tokens` and `model_context_window_exceeded` are incomplete. `refusal`,
+  `pause_turn` and any unknown value fail with the original response kept;
+  Shellboy does not guess a continuation.
+- Usage: total input is `input_tokens` + `cache_creation_input_tokens` +
+  `cache_read_input_tokens`; the cached count is `cache_read_input_tokens`; output
+  tokens come from the last (cumulative) report. Missing counters stay unknown.
+  Look at the saved usage to see whether the second request read from the cache.
+- Errors keep the provider's error type as the provider code. HTTP 429, 529 and
+  5xx use the existing retry rules; 400 and 413 are not retried. A spend-limit 429
+  has no retry hint and keeps failing until access resumes.
+- Fixture tests check Shellboy's side of the documented wire format. Real-provider
+  behavior (cache reads, thinking round trips, rate limits) is verified separately
+  and only with your approval.
+
 ### Context role: `context_role`
 
 Shellboy inserts context into a conversation: event notices (`Shellboy event v1: ...`, for example a finished background shell or a changed context) and the per-request context line. By default these are sent as `developer` messages, the meaning OpenAI-style APIs expect, and the saved history is never changed.
@@ -252,9 +311,10 @@ The owner reuses HTTP clients per connection. Restart after changing TOML or HTT
 
 ## Conversation API dialect
 
-Each connection selects `api = "responses"` (the default) or
-`api = "chat_completions"`. Use an API **root**, not its final endpoint: Shellboy
-appends `/responses` or `/chat/completions` for conversations and summaries.
+Each connection selects `api = "responses"` (the default),
+`api = "chat_completions"` or `api = "anthropic_messages"`. Use an API **root**,
+not its final endpoint: Shellboy appends `/responses`, `/chat/completions` or
+`/messages` for conversations and summaries.
 Catalog (`/models`) and embedding (`/embeddings`) paths are unchanged. Changing
 the dialect requires an owner restart. No automatic protocol fallback is tried.
 
@@ -317,9 +377,8 @@ provider caching must be qualified separately with explicit paid-test approval.
 Anthropic's OpenAI-compatible facade is **not a supported target**: Anthropic
 states it is mainly for comparison/testing, lacks prompt caching there and does
 not faithfully support the relevant reasoning controls. Long conversations
-without caching can be much slower/more expensive. Use a suitable proxy for the
-native Anthropic API instead; this feature adds neither native Anthropic Messages
-nor native Gemini APIs. References: [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)
+without caching can be much slower/more expensive. Use `anthropic_messages`
+(next section) for the native Anthropic API. Native Gemini APIs are not added. References: [Gemini OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)
 and [Anthropic compatibility limits](https://platform.claude.com/docs/en/api/openai-sdk).
 
 ## Per-Thread session identity
@@ -439,7 +498,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 |---|---|---|
 | root | `data_dir` = OS default, `default_connection` / `default_model` = unset, `connections` = empty | Storage and new-conversation defaults |
 | `connections.<name>` | `ssl_verify=true`; URL/authentication/effort/headers described above | Per-connection TLS verification, enabled by default |
-| `connections.<name>` | `api="responses"` | `"responses"` or `"chat_completions"`; catalog/embedding endpoints stay unchanged |
+| `connections.<name>` | `api="responses"` | `"responses"`, `"chat_completions"` or `"anthropic_messages"`; catalog/embedding endpoints stay unchanged |
 | `connections.<name>` | `session_header=true`, `prompt_cache_key=false` | Thread identity header and optional cache identity body field for conversations/summaries |
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
 | `connections.<name>` | `auto_trim_on_disconnect=true` | API-free maximum reduction from the second eligible consecutive failure; no preflight |
