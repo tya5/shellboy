@@ -2082,3 +2082,97 @@ mod grouped_usage_reader_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod retained_list_fence_tests {
+    use super::*;
+    use crate::protocol::*;
+    use serde_json::json;
+
+    #[tokio::test(start_paused = true)]
+    async fn all_list_routes_keep_hidden_quiet_one_flight_and_retired_completion_fences() {
+        let context = ManagementContext {
+            epoch: 1,
+            owner_draft: "fixture".into(),
+            owner_thread: None,
+        };
+        for (command, row) in [
+            (
+                Command::Status(serde_json::from_value(json!({"thread_id":"scope"})).unwrap()),
+                json!({"kind":"run","id":"r","thread_id":"scope"}),
+            ),
+            (
+                Command::ThreadList(Default::default()),
+                json!({"thread_id":"scope","title":"stored"}),
+            ),
+            (
+                Command::ShellList(serde_json::from_value(json!({"thread_id":"scope"})).unwrap()),
+                json!({"execution_id":"s","thread_id":"scope"}),
+            ),
+            (
+                Command::CompactList(serde_json::from_value(json!({"thread_id":"scope"})).unwrap()),
+                json!({"event_id":"operation:op","operation_ids":["op"],"thread_id":"scope"}),
+            ),
+        ] {
+            let target = super::super::inspection_lists::capture_target(
+                &command,
+                Arc::new(json!({"items":[row]})),
+            )
+            .unwrap();
+            let mut observation = Observation::default();
+            observation.install(1, context.clone(), target.clone(), None);
+            let now = Instant::now();
+            assert!(
+                observation.take_metadata(now).is_none(),
+                "hidden scope cannot admit"
+            );
+            observation.observe(&context, &target, true);
+            let first = observation.take_metadata(now).unwrap();
+            assert!(
+                observation.take_metadata(now + METADATA_PERIOD).is_none(),
+                "one flight"
+            );
+            let prepared = PreparedInspection {
+                target: target.clone(),
+                dependencies: Dependencies {
+                    thread: "scope".into(),
+                    parent_thread: None,
+                },
+                value: json!({"observed":true}),
+                observed_at: "fixture".into(),
+                limited_fields: vec![],
+            };
+            assert!(matches!(
+                observation.complete_metadata(&first, 1, Ok(prepared)),
+                Completion::Updated
+            ));
+            assert!(
+                observation.take_metadata(now + METADATA_PERIOD).is_none(),
+                "quiet has zero jobs"
+            );
+            observation.changed("scope");
+            let pending = observation.take_metadata(now + METADATA_PERIOD).unwrap();
+            observation.observe(&context, &target, false);
+            assert!(
+                observation
+                    .take_metadata(now + METADATA_PERIOD * 2)
+                    .is_none(),
+                "hidden after dirty"
+            );
+            assert!(matches!(
+                observation.complete_metadata(
+                    &pending,
+                    2,
+                    Err(ApiError::new(ErrorCode::InvalidState, "late"))
+                ),
+                Completion::Retired
+            ));
+            observation.close();
+            assert!(
+                observation
+                    .take_metadata(now + METADATA_PERIOD * 3)
+                    .is_none()
+            );
+        }
+    }
+}
