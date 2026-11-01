@@ -248,7 +248,6 @@ impl ThreadView {
     ) -> Option<Vec<UiAction>> {
         if self.navigation.is_loading() {
             if self.navigation.request().is_some() {
-                let mut reversed = false;
                 if self.navigation.pending() != 0 {
                     if self.navigation.pending().signum() == amount.signum() {
                         self.navigation
@@ -259,7 +258,6 @@ impl ThreadView {
                     // yet be applied, rather than replaying it after the read.
                     self.navigation
                         .on_event(NavEvent::Read(ReadEvent::DeferredDiscarded));
-                    reversed = true;
                 }
                 let (width, height) = (self.navigation.scroll.width, self.navigation.scroll.height);
                 let layout = self.history_layout(view_key, cache, budget, width, height);
@@ -299,10 +297,8 @@ impl ThreadView {
                     });
                     return Some(vec![]);
                 }
-                if !reversed {
-                    self.navigation
-                        .on_event(NavEvent::Read(ReadEvent::Deferred(amount)));
-                }
+                self.navigation
+                    .on_event(NavEvent::Read(ReadEvent::Deferred(amount)));
                 return Some(vec![]);
             }
             // Explicit navigation supersedes presentation-only hydration.

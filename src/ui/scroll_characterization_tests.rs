@@ -388,10 +388,7 @@ fn same_direction_input_while_awaiting_accumulates_without_another_read() {
 }
 
 #[test]
-fn reversing_while_awaiting_drops_the_pending_movement() {
-    // characterization: current behaviour, see #118
-    // Reverse input cancels the deferred movement instead of adding to it, and
-    // that reverse input itself is consumed only when cached rows can move.
+fn reversing_while_awaiting_replaces_obsolete_pending_and_preserves_new_input() {
     let (mut ui, mut t, complete) = ten(Some(4));
     set_anchor(&mut ui, "n-5", 0);
     rows(&mut ui, &mut t);
@@ -407,6 +404,28 @@ fn reversing_while_awaiting_drops_the_pending_movement() {
     node_window(&mut ui, complete[4].clone());
     assert!(ui.view().navigation.request().is_none());
     assert_eq!(ui.view().navigation.pending(), 0);
+
+    // The reverse direction is also uncached: do not silently eat that input.
+    let mut nodes = complete.clone();
+    nodes[4].text.clear();
+    nodes[6].text.clear();
+    let (mut ui, mut t) = fixture(nodes, 10, 0, 60, 33);
+    set_anchor(&mut ui, "n-5", 0);
+    rows(&mut ui, &mut t);
+    key(&mut ui, KeyCode::PageUp);
+    let owner = ui.view().navigation.request().cloned();
+    assert!(ui.scroll(150).is_empty());
+    assert_eq!(ui.view().navigation.request().cloned(), owner);
+    assert_eq!(ui.view().navigation.pending(), 150);
+    node_window(&mut ui, complete[4].clone());
+    assert!(matches!(ui.view().navigation.request(), Some((_, Some(id))) if id == "n-6"));
+    node_window(&mut ui, complete[6].clone());
+    assert_eq!(ui.view().navigation.pending(), 0);
+    let (mut reference, mut rt, _) = ten(None);
+    set_anchor(&mut reference, "n-5", 0);
+    rows(&mut reference, &mut rt);
+    reference.scroll(150);
+    assert_eq!(rows(&mut ui, &mut t), rows(&mut reference, &mut rt));
 }
 
 #[test]

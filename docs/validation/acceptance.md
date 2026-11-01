@@ -7723,3 +7723,10 @@ macOS synthetic TestBackend: `cargo test --locked scroll_characterization_tests
 -- --test-threads=2` passed (19 characterizations); fmt passed. Same metrics
 helper: combined91, scroll237, fields15. Native branch CI follows the six-item
 boundary. No real provider/terminal/clipboard/user-data validation.
+
+### #118 reverse input
+
+The two-gap regression retains +150 rows behind the existing read owner, then
+compares the settled screen with a fully cached reference. Combined91 /
+scroll237 / fields15 (same helper); read helper is four lines shorter. Focused
+Rust tests are queued behind the shared build slot; not yet claimed passed.
