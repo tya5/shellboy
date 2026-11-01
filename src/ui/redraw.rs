@@ -106,7 +106,7 @@ mod tests {
                 node_id: Some("retained".into()),
                 char_offset: 37,
             };
-            ui.view_mut().navigation.follow = false;
+            ui.view_mut().navigation.set_follow(false);
             ui.input_notice = Some("preserve existing notice");
             match owner {
                 "help" => {
@@ -171,7 +171,7 @@ mod tests {
             assert_eq!(ui.thread_selection(), selected, "{owner}");
             assert_eq!(ui.selection_mode, fixed, "{owner}");
             assert_eq!(ui.input_notice, notice, "{owner}");
-            assert!(!ui.view().navigation.follow, "{owner}");
+            assert!(!ui.view().navigation.follow(), "{owner}");
         }
     }
     #[test]
@@ -199,7 +199,7 @@ mod tests {
         draw_terminal(&mut terminal, &mut ui, &links).unwrap();
         let frozen = terminal.backend().buffer().clone();
         let draft = ui.view().draft.clone();
-        let follow = ui.view().navigation.follow;
+        let follow = ui.view().navigation.follow();
         let frame = Duration::from_millis(100);
         ui.dirty = false;
 
@@ -226,7 +226,7 @@ mod tests {
         assert!(shown.contains("表示固定"));
         assert!(!shown.contains("BEFORE_FREEZE"));
         assert_eq!(ui.view().draft, draft);
-        assert_eq!(ui.view().navigation.follow, follow);
+        assert_eq!(ui.view().navigation.follow(), follow);
         assert!(ui.selection_mode);
 
         sender.send(update("AFTER_MANUAL_REDRAW")).unwrap();

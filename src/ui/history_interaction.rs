@@ -171,7 +171,7 @@ impl UiState {
         view.items.active = true;
         view.items.focus = Some(item.key.clone());
         view.history_focus_item = Some(item);
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         if let Some(source) = source
             && let Some(node) = view.nodes().get(source.node)
         {

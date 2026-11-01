@@ -179,8 +179,8 @@ impl ThreadView {
         self.tool_refresh = None;
         self.tool_refresh_dirty = false;
         self.navigation.history_rebase_pending = false;
-        if self.navigation.scroll.request.take().is_some() {
-            self.navigation.loading = false;
+        if self.navigation.take_request().is_some() {
+            self.navigation.set_loading(false);
         }
         self.navigation.scroll.pending = 0;
         self.navigation.scroll.moved_during_read = false;
@@ -202,7 +202,7 @@ impl ThreadView {
         })
     }
     pub(super) fn request_tool_refresh(&mut self) -> Option<UiAction> {
-        if self.navigation.follow {
+        if self.navigation.follow() {
             return self.clear_tool_observation();
         }
         let thread_id = self.thread_id.clone()?;
@@ -270,7 +270,7 @@ impl ThreadView {
             return;
         }
         let mut changed = false;
-        if !self.navigation.follow && observation.view_revision == self.navigation.view_revision {
+        if !self.navigation.follow() && observation.view_revision == self.navigation.view_revision {
             for node in observation.nodes {
                 if let Some(existing) = self
                     .nodes
@@ -354,7 +354,7 @@ impl ThreadView {
         width: u16,
         height: u16,
     ) -> Arc<HistoryLayout> {
-        if self.navigation.scroll.anchor != self.navigation.anchor || self.navigation.follow {
+        if self.navigation.scroll.anchor != self.navigation.anchor || self.navigation.follow() {
             self.navigation.scroll.focus = None;
         }
         if self
@@ -403,7 +403,7 @@ impl ThreadView {
     ) -> usize {
         let view = &mut *self;
         let max = layout.lines.saturating_sub(usize::from(height));
-        if view.navigation.follow {
+        if view.navigation.follow() {
             view.navigation.scroll.row = max;
         } else if !view.navigation.scroll.initialized
             || view.navigation.scroll.width != width
@@ -492,12 +492,12 @@ impl ThreadView {
         cache: &mut HistoryLayoutCache,
         budget: usize,
     ) -> Vec<UiAction> {
-        let amount = if self.navigation.scroll.request.is_none() {
+        let amount = if self.navigation.request().is_none() {
             amount.saturating_add(std::mem::take(&mut self.navigation.scroll.pending))
         } else {
             amount
         };
-        let following = self.navigation.follow;
+        let following = self.navigation.follow();
         if self.navigation.committed_preview.is_some()
             && !self.navigation.history_rebase_pending
             && let Some(action) = self.rebase_preview()
@@ -513,8 +513,8 @@ impl ThreadView {
             if self.nodes.is_empty() {
                 return vec![];
             }
-            if self.navigation.loading {
-                if self.navigation.scroll.request.is_some() {
+            if self.navigation.is_loading() {
+                if self.navigation.request().is_some() {
                     let mut reversed = false;
                     if self.navigation.scroll.pending != 0 {
                         if self.navigation.scroll.pending.signum() == amount.signum() {
@@ -562,7 +562,7 @@ impl ThreadView {
                         self.navigation.scroll.row = target;
                         self.navigation.scroll.anchor = self.navigation.anchor.clone();
                         self.navigation.scroll.moved_during_read = true;
-                        self.navigation.follow = false;
+                        self.navigation.set_follow(false);
                         return vec![];
                     }
                     if !reversed {
@@ -572,9 +572,9 @@ impl ThreadView {
                     return vec![];
                 }
                 // Explicit navigation supersedes presentation-only hydration.
-                self.navigation.loading = false;
+                self.navigation.set_loading(false);
             }
-            if !self.navigation.follow {
+            if !self.navigation.follow() {
                 let view = &mut *self;
                 if let Some(node) = view
                     .nodes
@@ -588,12 +588,14 @@ impl ThreadView {
                         && !view.closed_tool_source(node)
                         && let Some(thread_id) = view.thread_id.clone()
                     {
-                        view.navigation.loading = true;
+                        view.navigation.set_loading(true);
                         view.navigation.scroll.pending = amount;
                         view.navigation.view_revision =
                             view.navigation.view_revision.wrapping_add(1);
-                        view.navigation.scroll.request =
-                            Some((view.navigation.view_revision, Some(node.node_id.clone())));
+                        view.navigation.set_request(Some((
+                            view.navigation.view_revision,
+                            Some(node.node_id.clone()),
+                        )));
                         return vec![UiAction::LoadNodeWindow {
                             thread_id,
                             generation: view.generation,
@@ -628,7 +630,7 @@ impl ThreadView {
             let max = layout.lines.saturating_sub(usize::from(height));
             let view = &mut *self;
             view.navigation.view_revision = view.navigation.view_revision.wrapping_add(1);
-            view.navigation.follow = false;
+            view.navigation.set_follow(false);
             // Empty bodies and missing prefix/suffix ranges have unknown row
             // counts. Stop at the first such range, consume only known rows, and
             // move the source checkpoint beside the next bounded body read.
@@ -706,11 +708,13 @@ impl ThreadView {
                     }
                     view.navigation.scroll.row = checkpoint;
                     view.navigation.scroll.anchor = view.navigation.anchor.clone();
-                    view.navigation.loading = true;
+                    view.navigation.set_loading(true);
                     view.navigation.scroll.pending = target.saturating_sub(checkpoint as isize);
                     let node = &view.nodes[index];
-                    view.navigation.scroll.request =
-                        Some((view.navigation.view_revision, Some(node.node_id.clone())));
+                    view.navigation.set_request(Some((
+                        view.navigation.view_revision,
+                        Some(node.node_id.clone()),
+                    )));
                     let offset = if amount < 0 {
                         if entry || empty {
                             node.total_chars.saturating_sub(8192 - 512)
@@ -765,8 +769,8 @@ impl ThreadView {
                 && end
                 && (following || row > top || (max == 0 && view.first_ordinal == 0))
             {
-                view.navigation.follow = true;
-                view.navigation.unseen = false;
+                view.navigation.set_follow(true);
+                view.navigation.set_unseen(false);
             }
             let boundary = if target < 0 {
                 Some(false)
@@ -790,10 +794,12 @@ impl ThreadView {
                         && ((!forward && node.base_char_offset > 0)
                             || (forward && cached_end < node.total_chars))
                     {
-                        view.navigation.loading = true;
+                        view.navigation.set_loading(true);
                         view.navigation.scroll.pending = amount;
-                        view.navigation.scroll.request =
-                            Some((view.navigation.view_revision, Some(node.node_id.clone())));
+                        view.navigation.set_request(Some((
+                            view.navigation.view_revision,
+                            Some(node.node_id.clone()),
+                        )));
                         view.navigation.anchor = origin.clone();
                         view.navigation.scroll.anchor = origin.clone();
                         view.navigation.scroll.within = within;
@@ -846,9 +852,10 @@ impl ThreadView {
                     view.navigation.anchor = origin;
                     view.navigation.scroll.within = within;
                     view.navigation.scroll.row = top;
-                    view.navigation.loading = true;
+                    view.navigation.set_loading(true);
                     view.navigation.scroll.pending = amount;
-                    view.navigation.scroll.request = Some((view.navigation.view_revision, None));
+                    view.navigation
+                        .set_request(Some((view.navigation.view_revision, None)));
                     view.navigation.scroll.anchor = view.navigation.anchor.clone();
                     return vec![UiAction::LoadHistoryWindow {
                         thread_id,
@@ -869,10 +876,12 @@ impl ThreadView {
                     && !view.closed_tool_source(node)
                     && let Some(thread_id) = view.thread_id.clone()
                 {
-                    view.navigation.loading = true;
+                    view.navigation.set_loading(true);
                     view.navigation.scroll.pending = amount;
-                    view.navigation.scroll.request =
-                        Some((view.navigation.view_revision, Some(node.node_id.clone())));
+                    view.navigation.set_request(Some((
+                        view.navigation.view_revision,
+                        Some(node.node_id.clone()),
+                    )));
                     return vec![UiAction::LoadNodeWindow {
                         thread_id,
                         generation: view.generation,
@@ -945,7 +954,7 @@ impl ThreadView {
         *incoming = ordered.into_values().collect();
     }
     pub(super) fn viewport_node_index(&self) -> usize {
-        if self.navigation.follow {
+        if self.navigation.follow() {
             return self.nodes.len().saturating_sub(1);
         }
         self.navigation
@@ -1044,14 +1053,14 @@ impl ThreadView {
             }
         }
         let mut source_changed = false;
-        if self.navigation.follow && !self.navigation.history_rebase_pending {
+        if self.navigation.follow() && !self.navigation.history_rebase_pending {
             source_changed |= self.retire_committed_preview(&nodes);
         }
         let previous_tail = self.nodes.last().map(|node| node.node_id.clone());
         if self.navigation.history_rebase_pending {
             // A tail refresh cannot replace the frame whose source
             // anchor is being rebound to the selected path.
-            self.navigation.unseen = true;
+            self.navigation.set_unseen(true);
         } else if append {
             if !nodes.is_empty() {
                 source_changed = true;
@@ -1066,10 +1075,10 @@ impl ThreadView {
             });
             previous.append(&mut self.nodes);
             self.nodes = previous;
-        } else if !self.navigation.follow && !self.nodes.is_empty() {
+        } else if !self.navigation.follow() && !self.nodes.is_empty() {
             let incoming_tail = nodes.last().map(|node| node.node_id.as_str());
             if incoming_tail != previous_tail.as_deref() {
-                self.navigation.unseen = true;
+                self.navigation.set_unseen(true);
             }
             // A refresh must retain the original viewport, including its
             // window inside a large node. New output is exposed on follow.
@@ -1144,16 +1153,17 @@ impl ThreadView {
         }
         self.observe_sent_nodes();
         self.total_nodes = total_nodes;
-        if append || self.navigation.follow || previous_tail.is_none() {
+        if append || self.navigation.follow() || previous_tail.is_none() {
             self.before_cursor = before_cursor;
         }
-        self.navigation.loading = self.navigation.scroll.request.is_some();
-        if !self.navigation.follow
+        self.navigation
+            .set_loading(self.navigation.request().is_some());
+        if !self.navigation.follow()
             && !append
             && previous_tail.is_some()
             && previous_tail.as_deref() != self.nodes.last().map(|node| node.node_id.as_str())
         {
-            self.navigation.unseen = true;
+            self.navigation.set_unseen(true);
         }
 
         true
@@ -1201,7 +1211,7 @@ impl ThreadView {
                 return;
             }
             source_changed = true;
-            if self.navigation.follow
+            if self.navigation.follow()
                 || self.navigation.anchor.node_id.as_deref() != Some(&node_id)
                 || (self.navigation.anchor.char_offset >= base_char_offset
                     && self.navigation.anchor.char_offset < base_char_offset + text.chars().count())
@@ -1212,7 +1222,7 @@ impl ThreadView {
                 node.reasoning_ranges = reasoning_ranges;
             }
             node.total_chars = total_chars;
-        } else if self.navigation.follow {
+        } else if self.navigation.follow() {
             source_changed = true;
             self.provisional_nodes.insert(node_id.clone());
             self.nodes.push(UiNode {
@@ -1238,8 +1248,8 @@ impl ThreadView {
                     .saturating_add(updated_cost)
             }));
         }
-        if !self.navigation.follow {
-            self.navigation.unseen = true;
+        if !self.navigation.follow() {
+            self.navigation.set_unseen(true);
         }
     }
     pub(super) fn commit_stream_node(
@@ -1256,12 +1266,13 @@ impl ThreadView {
         // Rebase must not discard or duplicate the preview before hydration.
         self.committed_nodes
             .insert(attempt_id.clone(), node_id.clone());
-        if !self.navigation.follow && self.navigation.anchor.node_id.as_deref() == Some(&attempt_id)
+        if !self.navigation.follow()
+            && self.navigation.anchor.node_id.as_deref() == Some(&attempt_id)
         {
             self.navigation.committed_preview = Some((attempt_id, node_id));
             return self.rebase_preview();
         }
-        if !self.navigation.follow {
+        if !self.navigation.follow() {
             // Retain the whole paused frame, even when its anchor is on a
             // preceding saved node. Canonical history replaces it atomically.
             return self.rebase_committed_stream(thread_id, generation);
@@ -1341,8 +1352,9 @@ impl ThreadView {
         };
         self.rebase_navigation();
         self.navigation.history_rebase_pending = true;
-        self.navigation.loading = true;
-        self.navigation.scroll.request = Some((self.navigation.view_revision, None));
+        self.navigation.set_loading(true);
+        self.navigation
+            .set_request(Some((self.navigation.view_revision, None)));
         Some(UiAction::RebaseStream(Box::new(StreamRebase {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,
@@ -1357,7 +1369,7 @@ impl ThreadView {
         thread_id: String,
         generation: u64,
     ) -> Option<UiAction> {
-        if !self.navigation.follow
+        if !self.navigation.follow()
             && !self.navigation.history_rebase_pending
             && !self
                 .navigation
@@ -1370,8 +1382,9 @@ impl ThreadView {
             // offsets. No provisional ID is sent to history.get.
             self.rebase_navigation();
             self.navigation.history_rebase_pending = true;
-            self.navigation.loading = true;
-            self.navigation.scroll.request = Some((self.navigation.view_revision, None));
+            self.navigation.set_loading(true);
+            self.navigation
+                .set_request(Some((self.navigation.view_revision, None)));
             let action = UiAction::RebaseHistory {
                 thread_id,
                 generation,
@@ -1384,16 +1397,16 @@ impl ThreadView {
     }
     pub(super) fn on_view_state(&mut self, anchor: ViewAnchor, follow: bool) {
         self.navigation.anchor = anchor;
-        self.navigation.follow = follow;
-        self.navigation.unseen = false;
+        self.navigation.set_follow(follow);
+        self.navigation.set_unseen(false);
     }
     pub(super) fn on_load_failed(&mut self, message: String) {
         self.navigation.history_rebase_pending = false;
-        self.navigation.loading = false;
-        if self.navigation.scroll.request.is_none() {
+        self.navigation.set_loading(false);
+        if self.navigation.request().is_none() {
             self.navigation.scroll.pending = 0;
         }
-        self.navigation.scroll.request = None;
+        self.navigation.set_request(None);
         self.navigation.scroll.moved_during_read = false;
         self.status = message;
         self.promote_status_notice(history_interaction::NoticeKind::Failure);
@@ -1429,7 +1442,7 @@ impl ThreadView {
         // may have been evicted while this asynchronous read was pending.
         if installed
             && body_ready
-            && self.navigation.follow
+            && self.navigation.follow()
             && !self.navigation.history_rebase_pending
         {
             let retired = self
@@ -1442,11 +1455,10 @@ impl ThreadView {
                 self.mark_source_changed();
             }
         }
-        if self.navigation.scroll.request.is_none()
-            || self.navigation.scroll.request.as_ref()
-                == Some(&(view_revision, Some(node_id_for_reply.clone())))
+        if self.navigation.request().is_none()
+            || self.navigation.request() == Some(&(view_revision, Some(node_id_for_reply.clone())))
         {
-            self.navigation.loading = false;
+            self.navigation.set_loading(false);
         }
     }
     fn received_anchor_bindings(&self) -> Vec<(String, String)> {
@@ -1495,7 +1507,7 @@ impl ThreadView {
         if selection_revision < self.selection_revision {
             return false;
         }
-        let following = self.navigation.follow;
+        let following = self.navigation.follow();
         let received_bindings = self.received_anchor_bindings();
         if following
             && first_ordinal.saturating_add(nodes.len() as u64) < total_nodes
@@ -1505,7 +1517,7 @@ impl ThreadView {
                 < total_nodes
         {
             self.navigation.history_rebase_pending = false;
-            self.navigation.loading = false;
+            self.navigation.set_loading(false);
             return true;
         }
         if (following || (window_reply && !self.navigation.history_rebase_pending))
@@ -1518,7 +1530,7 @@ impl ThreadView {
             // paid/current frame until a real tail snapshot arrives.
             if first_ordinal.saturating_add(nodes.len() as u64) < total_nodes {
                 self.navigation.history_rebase_pending = false;
-                self.navigation.loading = false;
+                self.navigation.set_loading(false);
                 return true;
             }
             self.navigation.history_rebase_pending = false;
@@ -1578,7 +1590,7 @@ impl ThreadView {
             self.navigation.scroll.within = 0;
         }
         self.before_cursor = None;
-        self.navigation.loading = false;
+        self.navigation.set_loading(false);
         self.navigation.scroll.moved_during_read = false;
         if self.navigation.history_rebase_pending {
             self.navigation.history_rebase_pending = false;
@@ -1600,15 +1612,16 @@ impl ThreadView {
         if self.thread_id.as_deref() != Some(&thread_id)
             || self.generation != generation
             || view_revision.is_some_and(|revision| revision != self.navigation.view_revision)
-            || (view_revision.is_none() && self.navigation.follow)
+            || (view_revision.is_none() && self.navigation.follow())
             || self.navigation.history_rebase_pending
         {
             return None;
         }
         self.rebase_navigation();
         self.navigation.history_rebase_pending = true;
-        self.navigation.loading = true;
-        self.navigation.scroll.request = Some((self.navigation.view_revision, None));
+        self.navigation.set_loading(true);
+        self.navigation
+            .set_request(Some((self.navigation.view_revision, None)));
         self.status = "履歴の表示位置を再取得中…".into();
         let action = UiAction::RebaseHistory {
             thread_id,
@@ -1976,14 +1989,12 @@ impl ThreadView {
             && self.navigation.view_revision == revision
             && self
                 .navigation
-                .scroll
-                .request
-                .as_ref()
+                .request()
                 .is_some_and(|(expected, id)| *expected == revision && id.as_deref() == node)
     }
     pub(super) fn finish_navigation_reply(&mut self) -> isize {
         self.navigation.scroll.initialized = false;
-        self.navigation.scroll.request = None;
+        self.navigation.set_request(None);
         self.navigation.scroll.moved_during_read = false;
         std::mem::take(&mut self.navigation.scroll.pending)
     }
@@ -2023,7 +2034,7 @@ mod owner_tests {
             1,
             1,
         );
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("source".into()),
             char_offset: 0,
@@ -2080,14 +2091,15 @@ impl ThreadView {
         }
         // A transient stream position is not a canonical source offset.
         self.navigation.anchor = ViewAnchor::default();
-        if self.navigation.follow {
+        if self.navigation.follow() {
             self.navigation.scroll.initialized = false;
             return None;
         }
         self.rebase_navigation();
         self.navigation.history_rebase_pending = true;
-        self.navigation.loading = true;
-        self.navigation.scroll.request = Some((self.navigation.view_revision, None));
+        self.navigation.set_loading(true);
+        self.navigation
+            .set_request(Some((self.navigation.view_revision, None)));
         Some(UiAction::RebaseHistory {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,
@@ -2168,7 +2180,7 @@ mod stream_refresh_tests {
         let revision = view.history_revision();
         view.on_stream(stream("前半後半"));
         assert_eq!(view.history_revision(), revision);
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("attempt".into()),
             char_offset: 2,
@@ -2276,9 +2288,9 @@ mod completion_notice_tests {
         ui.select_thread("thread".into());
         let generation = ui.view().generation;
         let revision = ui.view().navigation.view_revision;
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         // Model the accepted HistoryWindow, not the initial selection load.
-        ui.view_mut().navigation.loading = false;
+        ui.view_mut().navigation.set_loading(false);
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 0,
@@ -2290,19 +2302,20 @@ mod completion_notice_tests {
         assert_eq!(ui.view().status, "reader moved to latest path");
         ui.apply(notice(generation, revision, "saved", "verified source"));
         assert_eq!(ui.view().status, "verified source");
-        ui.view_mut().navigation.follow = true;
+        ui.view_mut().navigation.set_follow(true);
         ui.apply(notice(generation, revision, "saved", "stale after follow"));
         assert_eq!(ui.view().status, "verified source");
     }
     #[test]
     fn read_failure_keeps_queued_navigation_for_explicit_retry() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation.loading = true;
-        view.navigation.scroll.request = Some((view.navigation.view_revision, None));
+        view.navigation.set_loading(true);
+        view.navigation
+            .set_request(Some((view.navigation.view_revision, None)));
         view.navigation.scroll.pending = -3;
         view.on_load_failed("read permit unavailable".into());
-        assert!(!view.navigation.loading);
-        assert!(view.navigation.scroll.request.is_none());
+        assert!(!view.navigation.is_loading());
+        assert!(view.navigation.request().is_none());
         assert_eq!(view.navigation.scroll.pending, -3);
         assert_eq!(view.status, "read permit unavailable");
     }
@@ -2312,8 +2325,8 @@ mod completion_notice_tests {
         ui.select_thread("thread".into());
         let generation = ui.view().generation;
         let revision = ui.view().navigation.view_revision;
-        ui.view_mut().navigation.loading = true;
-        ui.view_mut().navigation.scroll.request = Some((revision, None));
+        ui.view_mut().navigation.set_loading(true);
+        ui.view_mut().navigation.set_request(Some((revision, None)));
         ui.view_mut().navigation.scroll.pending = -3;
         ui.apply(UiUpdate::LoadFailed {
             thread_id: "thread".into(),
@@ -2321,16 +2334,17 @@ mod completion_notice_tests {
             view_revision: None,
             message: "background refresh failed".into(),
         });
-        assert!(ui.view().navigation.loading);
-        assert_eq!(ui.view().navigation.scroll.request, Some((revision, None)));
+        assert!(ui.view().navigation.is_loading());
+        assert_eq!(ui.view().navigation.request(), Some(&(revision, None)));
         assert_eq!(ui.view().navigation.scroll.pending, -3);
         assert_eq!(ui.view().status, "background refresh failed");
     }
     #[test]
     fn navigation_read_has_an_explicit_footer_indicator() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation.loading = true;
-        view.navigation.scroll.request = Some((view.navigation.view_revision, None));
+        view.navigation.set_loading(true);
+        view.navigation
+            .set_request(Some((view.navigation.view_revision, None)));
         let palette = crate::ui::theme::Palette::from_capabilities(
             crate::config::PaletteMode::Dark,
             false,
@@ -2364,15 +2378,16 @@ mod completion_notice_tests {
         }];
         view.thread_id = Some("thread".into());
         view.total_nodes = 2;
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: offset,
         };
         view.navigation.scroll.width = 80;
         view.navigation.scroll.height = 10;
-        view.navigation.loading = true;
-        view.navigation.scroll.request = Some((view.navigation.view_revision, None));
+        view.navigation.set_loading(true);
+        view.navigation
+            .set_request(Some((view.navigation.view_revision, None)));
         let mut cache = HistoryLayoutCache::default();
         let actions = view.scroll(-1, "thread", &mut cache, 1024 * 1024);
         assert!(actions.is_empty());
@@ -2381,7 +2396,7 @@ mod completion_notice_tests {
             "cached rows should move during the read"
         );
         assert!(
-            view.navigation.scroll.request.is_some(),
+            view.navigation.request().is_some(),
             "the original read stays owned"
         );
     }
@@ -2402,19 +2417,20 @@ mod completion_notice_tests {
             .collect();
         view.thread_id = Some("thread".into());
         view.total_nodes = 31;
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("node-15".into()),
             char_offset: 0,
         };
         view.navigation.scroll.width = 80;
         view.navigation.scroll.height = 10;
-        view.navigation.loading = true;
-        view.navigation.scroll.request = Some((view.navigation.view_revision, None));
+        view.navigation.set_loading(true);
+        view.navigation
+            .set_request(Some((view.navigation.view_revision, None)));
         let mut cache = HistoryLayoutCache::default();
         view.scroll(-2, "thread", &mut cache, 1024 * 1024);
         assert_ne!(view.navigation.anchor.node_id.as_deref(), Some("node-15"));
-        assert!(view.navigation.scroll.request.is_some());
+        assert!(view.navigation.request().is_some());
     }
     #[test]
     fn stopped_growth_near_tail_keeps_up_navigation_available() {
@@ -2431,7 +2447,7 @@ mod completion_notice_tests {
         }];
         view.thread_id = Some("thread".into());
         view.total_nodes = 1;
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: "cached line 000\n".len() * 80,
@@ -2473,7 +2489,7 @@ mod completion_notice_tests {
             ..Default::default()
         };
         view.nodes = vec![node.clone()];
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 100,
@@ -2502,7 +2518,7 @@ mod completion_notice_tests {
             ..Default::default()
         };
         view.nodes = vec![node.clone()];
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 100,
@@ -2519,13 +2535,14 @@ mod completion_notice_tests {
     fn stream_commit_rebase_does_not_discard_queued_navigation() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
         view.thread_id = Some("thread".into());
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 0,
         };
-        view.navigation.loading = true;
-        view.navigation.scroll.request = Some((view.navigation.view_revision, None));
+        view.navigation.set_loading(true);
+        view.navigation
+            .set_request(Some((view.navigation.view_revision, None)));
         view.navigation.scroll.pending = -4;
         let action = view.rebase_committed_stream("thread".into(), view.generation);
         assert!(matches!(action, Some(UiAction::RebaseHistory { .. })));
@@ -2542,8 +2559,10 @@ mod completion_notice_tests {
             let generation = ui.view().generation;
             let revision = ui.view().navigation.view_revision;
             let node = node_window.then(|| "node".to_owned());
-            ui.view_mut().navigation.loading = true;
-            ui.view_mut().navigation.scroll.request = Some((revision, node.clone()));
+            ui.view_mut().navigation.set_loading(true);
+            ui.view_mut()
+                .navigation
+                .set_request(Some((revision, node.clone())));
             ui.view_mut().navigation.scroll.pending = -3;
             let action = if node_window {
                 UiAction::LoadNodeWindow {
@@ -2566,10 +2585,10 @@ mod completion_notice_tests {
             };
             ui.action_rejected(&action);
             assert!(
-                !ui.view().navigation.loading,
+                !ui.view().navigation.is_loading(),
                 "rejected read must not leave loading set"
             );
-            assert!(ui.view().navigation.scroll.request.is_none());
+            assert!(ui.view().navigation.request().is_none());
             assert!(
                 ui.view().navigation.scroll.pending != 0 || !ui.take_deferred_actions().is_empty(),
                 "unconsumed movement must be retained or retried"
@@ -2597,7 +2616,7 @@ mod completion_notice_tests {
             ack: None,
         });
         let offset = "source line 000\n".len() * 50;
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut().navigation.scroll.width = 80;
         ui.view_mut().navigation.scroll.height = 10;
         ui.view_mut().navigation.anchor = ViewAnchor {
@@ -2642,7 +2661,7 @@ mod completion_notice_tests {
                 char_offset: offset,
             },
         });
-        assert!(!ui.view().navigation.follow);
+        assert!(!ui.view().navigation.follow());
         assert!(
             ui.view().navigation.anchor.char_offset < offset,
             "movement must survive the read"
@@ -2667,7 +2686,7 @@ mod completion_notice_tests {
             presentation: Default::default(),
             ack: None,
         });
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("attempt".into()),
             char_offset: 7,
@@ -2681,7 +2700,7 @@ mod completion_notice_tests {
         ui.apply(commit());
         let action = ui.take_deferred_actions().pop().unwrap();
         ui.action_rejected(&action);
-        assert!(!ui.view().navigation.loading);
+        assert!(!ui.view().navigation.is_loading());
         assert!(ui.view().navigation.committed_preview.is_some());
         let key = ui.active.clone();
         let retry =
@@ -2698,7 +2717,7 @@ mod completion_notice_tests {
             KeyCode::End,
             KeyModifiers::CONTROL,
         )));
-        assert!(ui.view().navigation.follow);
+        assert!(ui.view().navigation.follow());
         assert_ne!(ui.view().navigation.view_revision, old_revision);
         ui.apply(commit());
         assert!(!ui.view().committed_nodes.is_empty());
@@ -2719,7 +2738,7 @@ mod completion_notice_tests {
                 char_offset: 7,
             },
         });
-        assert!(ui.view().navigation.follow);
+        assert!(ui.view().navigation.follow());
     }
 }
 
@@ -2794,7 +2813,7 @@ impl ThreadView {
                 let mut existing = self.nodes.remove(index);
                 if !existing.same_projection(&incoming) {
                     changed = true;
-                    if !self.navigation.follow
+                    if !self.navigation.follow()
                         && self.navigation.anchor.node_id.as_deref() == Some(&incoming.node_id)
                     {
                         existing.total_chars = incoming.total_chars;
@@ -2866,7 +2885,7 @@ mod received_tests {
         ];
         ui.view_mut().selection_revision = 7;
         ui.view_mut().received_revision = 10;
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut().reasoning_expanded.insert("paid".into());
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("paid".into()),
@@ -3137,10 +3156,10 @@ mod received_tests {
             root_revision,
             nodes: vec![("anchor".into(), node("paid", "received_response"))],
         };
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut().selection_revision = 7;
         ui.view_mut().navigation.view_revision = 5;
-        ui.view_mut().navigation.scroll.request = Some((5, None));
+        ui.view_mut().navigation.set_request(Some((5, None)));
         ui.view_mut().navigation.scroll.pending = 1;
         // Before its saved-history window is applied, the corresponding audit
         // must not install a source into an unrelated frame.
@@ -3157,7 +3176,7 @@ mod received_tests {
         assert!(ui.view().nodes.iter().any(|node| node.node_id == "paid"));
         // An in-flight newer request still shows the old applied window. Its
         // received source remains valid until the replacement window arrives.
-        ui.view_mut().navigation.scroll.request = Some((6, None));
+        ui.view_mut().navigation.set_request(Some((6, None)));
         ui.apply(received(5, 11));
         assert_eq!(ui.view().received_revision, 11);
         ui.apply(window(6, 7));
@@ -3457,7 +3476,7 @@ mod body_accounting_tests {
     #[test]
     fn paused_stream_window_extent_changes_render_unit_identity_without_losing_old_text() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation.follow = false;
+        view.navigation.set_follow(false);
         view.navigation.anchor.node_id = Some("live".into());
         view.navigation.anchor.char_offset = 0;
         let mut original = UiNode {
@@ -3553,7 +3572,7 @@ mod retention_regressions {
                 1,
                 61,
             );
-            paused.navigation.follow = false;
+            paused.navigation.set_follow(false);
             paused.navigation.anchor = ViewAnchor {
                 node_id: Some("n0".into()),
                 char_offset: 0,
@@ -3586,7 +3605,7 @@ mod retention_regressions {
             ViewAnchor::default(),
             false
         ));
-        assert!(view.navigation.follow);
+        assert!(view.navigation.follow());
         assert!(
             view.nodes
                 .iter()
@@ -3604,7 +3623,7 @@ mod retention_regressions {
             ViewAnchor::default(),
             false,
         );
-        assert!(view.navigation.follow);
+        assert!(view.navigation.follow());
         assert!(!view.nodes.iter().any(|n| n.node_id == "attempt"));
         assert!(
             view.nodes
@@ -3674,7 +3693,7 @@ mod retention_regressions {
                 ViewAnchor::default(),
                 false,
             );
-            assert!(view.navigation.follow);
+            assert!(view.navigation.follow());
             assert!(
                 view.nodes
                     .iter()
@@ -3704,7 +3723,7 @@ mod retention_regressions {
             false,
         );
         assert!(refresh);
-        assert!(view.navigation.follow);
+        assert!(view.navigation.follow());
         assert!(view.nodes.iter().any(|n| n.node_id == "latest"));
         assert!(view.nodes.iter().any(|n| n.node_id == "stream"));
     }
@@ -3718,8 +3737,8 @@ mod retention_regressions {
         view.on_node_window(0, node("n", "needed hydration", 11));
         assert_eq!(view.nodes[0].text, "needed hydration");
         assert_eq!(view.delivery_read_revision, 100);
-        view.navigation.follow = false;
-        view.navigation.scroll.request = Some((0, Some("n".into())));
+        view.navigation.set_follow(false);
+        view.navigation.set_request(Some((0, Some("n".into()))));
         let mut navigation = node("n", "earlier source offset", 4);
         navigation.base_char_offset = 42;
         view.on_node_window(0, navigation);
@@ -3769,13 +3788,13 @@ mod retention_regressions {
     fn navigation_keeps_newer_queue_snapshot_and_releases_its_slot() {
         let mut ui = UiState::new(&Config::default(), PathBuf::new());
         ui.view_mut().thread_id = Some("thread".into());
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut()
             .on_history(vec![node("n", "body", 20)], None, false, 0, 1, 1);
         ui.view_mut().delivery_read_revision = 20;
         ui.view_mut().pending_messages.total = 7;
-        ui.view_mut().navigation.scroll.request = Some((0, None));
-        ui.view_mut().navigation.loading = true;
+        ui.view_mut().navigation.set_request(Some((0, None)));
+        ui.view_mut().navigation.set_loading(true);
         ui.apply(UiUpdate::HistoryWindow {
             thread_id: "thread".into(),
             generation: 0,
@@ -3793,9 +3812,9 @@ mod retention_regressions {
         });
         assert_eq!(ui.view().pending_messages.total, 7);
         assert_eq!(ui.view().delivery_read_revision, 20);
-        assert!(ui.view().navigation.scroll.request.is_none());
-        assert!(!ui.view().navigation.loading);
-        assert!(!ui.view().navigation.follow);
+        assert!(ui.view().navigation.request().is_none());
+        assert!(!ui.view().navigation.is_loading());
+        assert!(!ui.view().navigation.follow());
         assert_eq!(ui.view().nodes[0].text, "body");
     }
 }
@@ -3836,7 +3855,7 @@ mod received_window_retention_tests {
             ("a".into(), node("paid-a2", "received_response")),
             ("b".into(), node("paid-b", "received_response")),
         ]);
-        view.navigation.follow = follow;
+        view.navigation.set_follow(follow);
         view.navigation.anchor = ViewAnchor {
             node_id: Some("b".into()),
             char_offset: 2,
@@ -3870,7 +3889,7 @@ mod received_window_retention_tests {
             ["a", "paid-a1", "paid-a2", "b", "paid-b", "tail"],
             "known audits stay after their real predecessor, not the new tail"
         );
-        assert_eq!(view.navigation.follow, follow);
+        assert_eq!(view.navigation.follow(), follow);
         if !follow {
             assert_eq!(view.navigation.anchor, anchor);
         }
@@ -3912,7 +3931,7 @@ mod received_window_retention_tests {
             ids(&view),
             ["a", "paid-a1", "paid-a2", "b", "paid-b", "tail", "new-tail"]
         );
-        assert!(view.navigation.follow);
+        assert!(view.navigation.follow());
         assert!(view.on_history(
             vec![node("tail", "assistant"), node("new-tail", "assistant")],
             None,
@@ -3923,7 +3942,7 @@ mod received_window_retention_tests {
         ));
         assert_eq!(ids(&view), ["tail", "new-tail"]);
         assert!(view.provisional_nodes.is_empty());
-        assert!(view.navigation.follow);
+        assert!(view.navigation.follow());
     }
     #[test]
     fn non_tail_fallback_does_not_extract_audits_and_new_window_drops_only_missing_anchors() {

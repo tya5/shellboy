@@ -191,3 +191,13 @@ counted twice. `scripts/dev/scroll-metrics.py` emits the source sites and distin
 mutable takes and visual-anchor writes that the original assignment-only table
 did not count. Its before/after results, not the historical table's narrower
 categories, are the consistent automated comparison.
+
+The representation-only state boundary uses FollowMode's four existing
+combinations and ReadState's Idle / Hydrating / Awaiting(ticket) /
+Delivered(ticket). Delivered retains request identity until the existing UI
+reply dispatcher consumes it; loading=false must not mean no owned ticket.
+Both enums preserve every old combination. The stored-field count is now 18,
+not 20 (7 Navigation members + 12 VisualScroll members minus the aggregate
+scroll member). Independent source/presentation identities are not collapsed.
+Characterization19, navigation-state2 and view-unit41 pass without changing any
+of the six marked expectations. This remains structural, not a bug-fix commit.

@@ -266,7 +266,7 @@
   {
     "file": "src/frontend/control_tests.rs",
     "rule": "raw-timeout",
-    "fingerprint": "543f4a803dcf5f771b61337ef643e399da8785cf41ef49c33c64e95f8e81cdf8",
+    "fingerprint": "bced2e759be4a82ecf46b8fe727b51e228f77ff8644008a398e79100679ef6f5",
     "function": "changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body",
     "count": 1,
     "reason": "Deferred #41/shared-read: this file joined #41 during #77; existing changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_reloading_its_body occurrence only, migrate on #41 integration. #118: Navigation field ownership only; unchanged deadline and guard."

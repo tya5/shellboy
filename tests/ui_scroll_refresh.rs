@@ -83,7 +83,7 @@ fn transient_raw_preview_failure_does_not_jump_up_after_a_downward_wheel() {
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("prior".into()),
         char_offset: 65 * 5,
@@ -141,7 +141,7 @@ fn transient_neighbor_preview_failure_cannot_clamp_a_paused_history_refresh_upwa
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("prior".into()),
         char_offset: 65 * 5,
@@ -192,7 +192,7 @@ fn paused_tool() -> UiState {
         selection_revision: 1,
         total_nodes: 1,
     });
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("tool".into()),
         char_offset: 0,
@@ -287,9 +287,9 @@ fn successful_changed_rendering_and_different_source_ranges_are_accepted() {
 #[test]
 fn following_keeps_paid_raw_after_transient_failure_until_new_successful_preview() {
     let mut ui = paused_tool();
-    ui.view_mut().navigation.follow = true;
+    ui.view_mut().navigation.set_follow(true);
     body_reply(&mut ui, tool_node(false));
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     assert!(
         has_raw(&ui),
         "a temporary read failure must not erase paid output"
@@ -313,7 +313,7 @@ fn following_keeps_paid_raw_after_transient_failure_until_new_successful_preview
         ui.view().nodes()[0].presentation.blocks[0].text,
         "NEW SUCCESSFUL FOLLOWING PREVIEW"
     );
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     assert!(
         !ui.view().nodes()[0]
             .presentation

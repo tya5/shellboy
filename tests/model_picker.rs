@@ -176,14 +176,14 @@ fn modal_paste_and_wheel_do_not_edit_or_scroll_the_background_and_full_id_can_be
     );
     state.event(Event::Paste("long\n".into()));
     assert_eq!(state.view().draft.text, "background draft");
-    let follow = state.view().navigation.follow;
+    let follow = state.view().navigation.follow();
     state.event(Event::Mouse(MouseEvent {
         kind: MouseEventKind::ScrollUp,
         column: 5,
         row: 5,
         modifiers: KeyModifiers::NONE,
     }));
-    assert_eq!(state.view().navigation.follow, follow);
+    assert_eq!(state.view().navigation.follow(), follow);
     let action = state
         .event(Event::Key(KeyEvent::new(
             KeyCode::Char('y'),

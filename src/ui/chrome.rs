@@ -236,8 +236,8 @@ pub(super) fn footer_lines(
     {
         facts.push(super::activity::context_wait_label(reason));
     }
-    if !view.navigation.follow {
-        facts.push(if view.navigation.unseen {
+    if !view.navigation.follow() {
+        facts.push(if view.navigation.unseen() {
             "↓ new".into()
         } else {
             "↓".into()
@@ -318,7 +318,7 @@ pub(super) fn footer_lines(
     if let Some(gap) = view.activity.receive_gap_note(std::time::Instant::now()) {
         facts.push(gap);
     }
-    if view.navigation.loading {
+    if view.navigation.is_loading() {
         facts.push("…".into());
     }
     let facts = fit(
@@ -355,7 +355,7 @@ pub(super) fn footer_lines(
     }
     let (hint, error) = notice.unwrap_or((hints, false));
     let navigation_hint =
-        (view.navigation.loading && view.navigation.scroll.request.is_some() && !error)
+        (view.navigation.is_loading() && view.navigation.request().is_some() && !error)
             .then(|| format!("履歴読込中 · {hint}"));
     let hint = navigation_hint.as_deref().unwrap_or(hint);
     let notice_style = if error && !palette.plain() {
@@ -778,7 +778,7 @@ mod tests {
     fn descendant_count_stays_visible_when_other_footer_facts_fill_the_row() {
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
         ui.select_thread("t".into());
-        ui.view_mut().navigation.loading = false;
+        ui.view_mut().navigation.set_loading(false);
         ui.view_mut().tool_calls = 9999;
         ui.apply(UiUpdate::Activity {
             thread_id: "t".into(),

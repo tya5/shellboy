@@ -16,7 +16,7 @@ impl Signature {
             revision: view.draft.revision,
             cursor: view.draft.cursor,
             anchor: view.navigation.anchor.clone(),
-            follow: view.navigation.follow,
+            follow: view.navigation.follow(),
         }
     }
 }
@@ -84,7 +84,7 @@ impl UiState {
                         thread_id: thread_id.clone(),
                         draft: view.draft.clone(),
                         anchor: view.navigation.anchor.clone(),
-                        follow: view.navigation.follow,
+                        follow: view.navigation.follow(),
                     },
                 });
             }
@@ -138,7 +138,7 @@ impl UiState {
                     thread_id: thread.clone(),
                     draft: view.draft.clone(),
                     anchor: view.navigation.anchor.clone(),
-                    follow: view.navigation.follow,
+                    follow: view.navigation.follow(),
                 })
             })
             .collect()

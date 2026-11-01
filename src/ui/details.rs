@@ -428,7 +428,7 @@ fn conversation_fields(node: &UiNode) -> Vec<PresentationField> {
 
 impl Details {
     pub fn new(view: &ThreadView, links: bool) -> Self {
-        let selected_node = if view.navigation.follow {
+        let selected_node = if view.navigation.follow() {
             view.nodes().len().saturating_sub(1)
         } else {
             view.navigation
@@ -2062,7 +2062,7 @@ mod tests {
         ui.view_mut().nodes_mut_for_test().push(latest);
         ui.view_mut().navigation.anchor.node_id = Some("source-node".into());
         for follow in [true, false] {
-            ui.view_mut().navigation.follow = follow;
+            ui.view_mut().navigation.set_follow(follow);
             let expected = if follow { "latest" } else { "source-node" };
             for links in [false, true] {
                 let mut details = Details::new(ui.view(), links);

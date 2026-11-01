@@ -219,7 +219,7 @@ fn thread_switch_restores_draft_and_anchor_and_rejects_stale_pages() {
         node_id: Some("old-node".into()),
         char_offset: 17,
     };
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     let actions = ui.select_thread("two".into());
     assert!(matches!(&actions[0], UiAction::SaveDraft { thread_id, .. } if thread_id == "one"));
     text(&mut ui, "draft two");
@@ -247,7 +247,7 @@ fn thread_switch_restores_draft_and_anchor_and_rejects_stale_pages() {
     ui.select_thread("one".into());
     assert_eq!(ui.view().draft.text, "draft one");
     assert_eq!(ui.view().navigation.anchor.char_offset, 17);
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
 }
 #[test]
 fn selection_mode_keeps_follow_and_allows_keyboard_release_without_interrupting() {
@@ -269,10 +269,10 @@ fn selection_mode_keeps_follow_and_allows_keyboard_release_without_interrupting(
         ack: None,
     });
     assert_eq!(ui.view().nodes().len(), 1);
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     assert!(ui.event(key(KeyCode::Esc)).is_empty());
     assert!(!ui.selection_mode);
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
 }
 #[test]
 fn configurable_keys_and_interrupt_background_quit_are_explicit_actions() {
@@ -475,7 +475,7 @@ fn restored_view_is_ignored_after_user_navigation_and_osc52_is_deferred() {
         },
         follow: false,
     });
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     ui.apply(UiUpdate::TerminalRequest {
         bytes: b"fixture escape".to_vec(),
     });
@@ -523,7 +523,7 @@ fn original_character_anchor_requests_window_outside_cached_tail() {
     });
     let actions = ui.event(key(KeyCode::PageUp));
     assert!(actions.iter().any(|action| matches!(action, UiAction::LoadNodeWindow { node_id, char_offset, .. } if node_id == "large" && *char_offset == 50_000)));
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
 }
 
 #[test]
@@ -1242,7 +1242,7 @@ fn evicted_history_metadata_recovers_previous_and_next_ordinals() {
     });
     assert_eq!(ui.view().nodes().len(), 3);
     assert_eq!(ui.view().first_ordinal, 7);
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("node-7".into()),
         char_offset: 0,
@@ -1328,7 +1328,7 @@ fn evicted_body_keeps_node_identity_and_reloads_at_original_character_offset() {
     assert_eq!(ui.view().nodes().len(), 5);
     assert!(ui.view().nodes()[0].text.is_empty());
     assert_eq!(ui.view().nodes()[0].total_chars, 10000);
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("node-0".into()),
         char_offset: 10,
@@ -1757,7 +1757,7 @@ fn markdown_resize_and_internal_source_anchor_request_bounded_worker_reprojectio
             presentation: projection,
         }],
     });
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("node".into()),
         char_offset: offset,
@@ -1907,7 +1907,7 @@ fn wheel_burst_preserves_rows_across_overlapping_async_history_windows_and_prefe
                 view_revision,
                 node: actual.view().nodes().last().unwrap().clone(),
             });
-            assert!(actual.view().navigation.loading);
+            assert!(actual.view().navigation.is_loading());
             let first = ordinal.saturating_sub(10) as usize;
             let nodes = all[first..(first + 50).min(all.len())].to_vec();
             let count = all[ordinal as usize].total_chars;
@@ -1935,7 +1935,7 @@ fn wheel_burst_preserves_rows_across_overlapping_async_history_windows_and_prefe
         }
     }
     assert!(reads > 1);
-    assert!(!actual.view().navigation.loading);
+    assert!(!actual.view().navigation.is_loading());
     assert_eq!(
         scroll_cells(&mut actual, &mut a),
         scroll_cells(&mut expected, &mut b)
@@ -1974,7 +1974,7 @@ fn wheel_during_initial_loading_cannot_replay_on_unrelated_node_prefetch() {
         node: ui.view().nodes()[0].clone(),
     });
     assert_eq!(scroll_cells(&mut ui, &mut terminal), before);
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
 }
 #[test]
 fn more_than_u16_wrapped_rows_draw_the_actual_tail_without_scroll_clamping() {
@@ -1986,11 +1986,11 @@ fn more_than_u16_wrapped_rows_draw_the_actual_tail_without_scroll_clamping() {
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("TAIL2"));
     assert!(scroll_wheel(&mut ui, true).is_empty());
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
     assert!(scroll_wheel(&mut ui, false).is_empty());
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("TAIL2"));
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
 }
 
 #[test]
@@ -2042,7 +2042,7 @@ fn long_folded_reasoning_and_inline_markdown_keep_original_body_position_on_resi
     assert_eq!(ui.view().navigation.anchor, anchor);
     assert!(!screen_text(&terminal).contains("非表示の推論。"));
     assert_eq!(ui.view().nodes()[0].text, original);
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
 }
 #[test]
 fn derived_tool_excerpt_moves_by_visible_rows() {
@@ -2141,7 +2141,7 @@ fn derived_tool_excerpt_moves_by_visible_rows() {
     scroll_wheel(&mut ui, false);
     assert_eq!(scroll_cells(&mut ui, &mut terminal), before);
     assert_eq!(ui.view().nodes()[0].text, original);
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
 }
 
 #[test]
@@ -2176,7 +2176,7 @@ fn body_window_boundaries_replay_visible_rows_with_real_frontend_overlap() {
                 node_id: Some("scroll-0".into()),
                 char_offset: offset,
             };
-            ui.view_mut().navigation.follow = false;
+            ui.view_mut().navigation.set_follow(false);
         }
         let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
         let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
@@ -2239,7 +2239,7 @@ fn body_window_boundaries_replay_visible_rows_with_real_frontend_overlap() {
             expected.view().navigation.anchor,
             "up={up}"
         );
-        assert!(!actual.view().navigation.loading);
+        assert!(!actual.view().navigation.is_loading());
     }
 }
 
@@ -2280,7 +2280,7 @@ fn slow_downward_wheels_remain_monotonic_across_settled_body_windows() {
     let mut actual = scroll_fixture(vec![window(40_000)], 0, 1);
     let mut expected = scroll_fixture(vec![scroll_fixture_node(0, source.clone())], 0, 1);
     for ui in [&mut actual, &mut expected] {
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("scroll-0".into()),
             char_offset: 104_650,
@@ -2334,7 +2334,7 @@ fn slow_forward_history_page_keeps_the_visible_rows_until_the_reply() {
     let mut actual = scroll_fixture(all[..50].to_vec(), 0, 120);
     let mut expected = scroll_fixture(all.clone(), 0, 120);
     for ui in [&mut actual, &mut expected] {
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("scroll-30".into()),
             char_offset: 0,
@@ -2347,7 +2347,7 @@ fn slow_forward_history_page_keeps_the_visible_rows_until_the_reply() {
     let actions = scroll_wheel(&mut actual, false);
     scroll_wheel(&mut expected, false);
     assert!(
-        actual.view().navigation.loading,
+        actual.view().navigation.is_loading(),
         "fixture must cross a metadata page"
     );
     assert_eq!(
@@ -2394,7 +2394,7 @@ fn slow_forward_history_page_keeps_the_visible_rows_until_the_reply() {
         }
     }
     assert_eq!(reads, 1);
-    assert!(!actual.view().navigation.loading);
+    assert!(!actual.view().navigation.is_loading());
 }
 
 #[test]
@@ -2458,7 +2458,7 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
             node_id: Some("scroll-0".into()),
             char_offset: 65_000,
         };
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
     }
     let mut a = Terminal::new(TestBackend::new(100, 36)).unwrap();
     let mut b = Terminal::new(TestBackend::new(100, 36)).unwrap();
@@ -2471,7 +2471,7 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
         requests.extend(scroll_wheel(&mut actual, true));
         assert!(scroll_wheel(&mut expected, true).is_empty());
     }
-    assert!(actual.view().navigation.loading);
+    assert!(actual.view().navigation.is_loading());
     a.draw(|frame| draw(frame, &mut actual)).unwrap();
     assert!(
         screen_text(&a)
@@ -2508,7 +2508,7 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
         }
     }
     assert_eq!(reads, 1);
-    assert!(!actual.view().navigation.loading);
+    assert!(!actual.view().navigation.is_loading());
     assert_eq!(
         scroll_cells(&mut actual, &mut a),
         scroll_cells(&mut expected, &mut b)
@@ -2543,7 +2543,7 @@ fn forward_page_loads_the_first_unknown_neighbor_before_using_later_rows() {
     let mut actual = scroll_fixture(nodes, 0, 10);
     let mut expected = scroll_fixture(all.clone(), 0, 10);
     for ui in [&mut actual, &mut expected] {
-        ui.view_mut().navigation.follow = false;
+        ui.view_mut().navigation.set_follow(false);
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("scroll-3".into()),
             char_offset: "N3 row 000\n".chars().count() * 95,
@@ -2575,7 +2575,7 @@ fn forward_page_loads_the_first_unknown_neighbor_before_using_later_rows() {
         view_revision,
         node: all[4].clone(),
     });
-    assert!(!actual.view().navigation.loading);
+    assert!(!actual.view().navigation.is_loading());
     assert_eq!(
         scroll_cells(&mut actual, &mut a),
         scroll_cells(&mut expected, &mut b)
@@ -2599,7 +2599,7 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
     config.cache.body_bytes = 0;
     let mut actual = UiState::new(&config, cwd());
     actual.select_thread("scroll-fixture".into());
-    actual.view_mut().navigation.follow = false;
+    actual.view_mut().navigation.set_follow(false);
     actual.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("scroll-0".into()),
         char_offset: 0,
@@ -2621,7 +2621,7 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
         total_nodes: 80,
     });
     let mut expected = scroll_fixture(all.clone(), 0, 80);
-    expected.view_mut().navigation.follow = false;
+    expected.view_mut().navigation.set_follow(false);
     expected.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("scroll-0".into()),
         char_offset: 0,
@@ -2712,7 +2712,7 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
         reads > body_reads,
         "exercise metadata as well as body loading"
     );
-    assert!(!actual.view().navigation.loading);
+    assert!(!actual.view().navigation.is_loading());
     assert_eq!(
         actual.view().navigation.anchor,
         expected.view().navigation.anchor
@@ -2754,7 +2754,7 @@ fn adjacent_partial_prefix_and_suffix_gaps_preserve_full_reference_page_position
             let mut actual = scroll_fixture(nodes, 0, 3);
             let mut expected = scroll_fixture(all.clone(), 0, 3);
             for ui in [&mut actual, &mut expected] {
-                ui.view_mut().navigation.follow = false;
+                ui.view_mut().navigation.set_follow(false);
                 ui.view_mut().navigation.anchor = ViewAnchor {
                     node_id: Some(if up { "scroll-2" } else { "scroll-0" }.into()),
                     char_offset: if up { 0 } else { 95 * row_chars },
@@ -2790,7 +2790,10 @@ fn adjacent_partial_prefix_and_suffix_gaps_preserve_full_reference_page_position
                 view_revision,
                 node: all[1].clone(),
             });
-            assert!(!actual.view().navigation.loading, "up={up} tail={tail}");
+            assert!(
+                !actual.view().navigation.is_loading(),
+                "up={up} tail={tail}"
+            );
             assert_eq!(
                 scroll_cells(&mut actual, &mut a),
                 scroll_cells(&mut expected, &mut b),
@@ -2834,7 +2837,7 @@ fn cancelling_an_inflight_scroll_allows_later_resize_and_rejects_its_stale_body(
             }
         }
         let (old_generation, old_revision) = request.expect("cross the bounded source window");
-        assert!(ui.view().navigation.loading);
+        assert!(ui.view().navigation.is_loading());
         if switch_thread {
             ui.select_thread("other".into());
             ui.select_thread("scroll-fixture".into());
@@ -2866,7 +2869,7 @@ fn cancelling_an_inflight_scroll_allows_later_resize_and_rejects_its_stale_body(
             node: stale,
         });
         assert_eq!(ui.view().nodes()[0].text, text);
-        assert!(!ui.view().navigation.loading);
+        assert!(!ui.view().navigation.is_loading());
         ui.take_deferred_actions();
         terminal.backend_mut().resize(68, 28);
         scroll_cells(&mut ui, &mut terminal);
@@ -2974,8 +2977,8 @@ fn wheel_down_at_coalesced_event_tail_stays_at_the_true_end() {
     );
     for _ in 0..12 {
         assert!(scroll_wheel(&mut ui, false).is_empty());
-        assert!(ui.view().navigation.follow);
-        assert!(!ui.view().navigation.loading);
+        assert!(ui.view().navigation.follow());
+        assert!(!ui.view().navigation.is_loading());
         assert_eq!(scroll_cells(&mut ui, &mut terminal), before);
     }
 }
@@ -2990,7 +2993,7 @@ fn wheel_crosses_large_coalesced_event_groups_without_recursive_calls_or_skipped
         node_id: Some("scroll-0".into()),
         char_offset: 0,
     };
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     assert!(
         scroll_cells(&mut ui, &mut terminal)
@@ -2998,7 +3001,7 @@ fn wheel_crosses_large_coalesced_event_groups_without_recursive_calls_or_skipped
             .any(|line| line.contains("FIRST USER"))
     );
     assert!(scroll_wheel(&mut ui, false).is_empty());
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     assert!(
         scroll_cells(&mut ui, &mut terminal)
             .iter()
@@ -3010,7 +3013,7 @@ fn wheel_crosses_large_coalesced_event_groups_without_recursive_calls_or_skipped
             .iter()
             .any(|line| line.contains("FIRST USER"))
     );
-    assert!(!ui.view().navigation.loading);
+    assert!(!ui.view().navigation.is_loading());
 }
 
 fn recovery_node(id: &str) -> UiNode {
@@ -3040,7 +3043,7 @@ fn recovery_view() -> UiState {
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("old1".into()),
         char_offset: 0,
@@ -3087,7 +3090,7 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
         view_revision: Some(previous),
         message: "late old failure".into(),
     });
-    assert!(ui.view().navigation.loading);
+    assert!(ui.view().navigation.is_loading());
     ui.apply(UiUpdate::HistoryWindow {
         pending: Default::default(),
         read_revision: 0,
@@ -3119,8 +3122,8 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
     });
     assert_eq!(ui.view().navigation.anchor, anchor);
     assert_eq!(ui.view().selection_revision, 2);
-    assert!(!ui.view().navigation.loading);
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.is_loading());
+    assert!(!ui.view().navigation.follow());
     assert!(ui.view().status.contains("再取得しました"));
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
@@ -3191,7 +3194,7 @@ fn follow_latest_cancels_an_outstanding_history_rebase() {
         KeyCode::End,
         KeyModifiers::CONTROL,
     )));
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     assert_ne!(ui.view().navigation.view_revision, previous);
     ui.apply(UiUpdate::HistoryWindow {
         pending: Default::default(),
@@ -3205,7 +3208,7 @@ fn follow_latest_cancels_an_outstanding_history_rebase() {
         total_nodes: 1,
         anchor: ViewAnchor::default(),
     });
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     assert!(ui.view().nodes().iter().all(|node| node.node_id != "late"));
 }
 
@@ -3239,7 +3242,7 @@ fn history_rebase_adopts_clamped_character_offset_for_a_surviving_node() {
         },
     });
     assert_eq!(ui.view().navigation.anchor.char_offset, clamped);
-    assert!(!ui.view().navigation.loading);
+    assert!(!ui.view().navigation.is_loading());
 }
 
 #[test]
@@ -3261,7 +3264,7 @@ fn sending_cancels_history_rebase_and_later_navigation_can_recover_again() {
             .iter()
             .any(|action| matches!(action, UiAction::Send { .. }))
     );
-    assert!(ui.view().navigation.follow);
+    assert!(ui.view().navigation.follow());
     ui.apply(UiUpdate::HistoryWindow {
         pending: Default::default(),
         read_revision: 0,
@@ -3274,8 +3277,8 @@ fn sending_cancels_history_rebase_and_later_navigation_can_recover_again() {
         total_nodes: 1,
         anchor: ViewAnchor::default(),
     });
-    assert!(ui.view().navigation.follow);
-    ui.view_mut().navigation.follow = false;
+    assert!(ui.view().navigation.follow());
+    ui.view_mut().navigation.set_follow(false);
     ui.apply(UiUpdate::HistoryInvalidated {
         thread_id: "recovery".into(),
         generation,
@@ -3988,10 +3991,10 @@ fn short_collapsed_tail_up_requests_older_without_refollow() {
     let actions = scroll_wheel(&mut ui, true);
     eprintln!(
         "SHORT_TAIL up: follow={} loading={} actions={actions:?}",
-        ui.view().navigation.follow,
-        ui.view().navigation.loading
+        ui.view().navigation.follow(),
+        ui.view().navigation.is_loading()
     );
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
     assert!(
         actions
             .iter()
@@ -4011,7 +4014,7 @@ fn short_collapsed_tail_focus_up_at_edge_requests_older() {
         .collect();
     eprintln!(
         "SHORT_TAIL focus: follow={} actions={actions:?}",
-        ui.view().navigation.follow
+        ui.view().navigation.follow()
     );
     assert!(
         actions
@@ -4030,12 +4033,12 @@ fn short_collapsed_tail_down_without_row_progress_does_not_refollow() {
         70,
         120,
     );
-    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.set_follow(false);
     let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
     scroll_cells(&mut ui, &mut terminal);
     scroll_wheel(&mut ui, false);
     assert!(
-        !ui.view().navigation.follow,
+        !ui.view().navigation.follow(),
         "a zero-distance down event on a partial short window is not reaching the bottom"
     );
 }
@@ -4055,7 +4058,7 @@ fn short_collapsed_large_projection_scrolls_back_without_forward_ping_pong() {
     for _ in 0..30 {
         requests.extend(scroll_wheel(&mut ui, true));
     }
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
     assert!(
         requests
             .iter()
@@ -4077,17 +4080,17 @@ fn short_collapsed_following_down_and_explicit_end_preserve_tail_intent() {
     scroll_cells(&mut ui, &mut terminal);
     scroll_wheel(&mut ui, false);
     assert!(
-        ui.view().navigation.follow,
+        ui.view().navigation.follow(),
         "down while already following must not pause it"
     );
     scroll_wheel(&mut ui, true);
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
     ui.event(Event::Key(KeyEvent::new(
         KeyCode::End,
         KeyModifiers::CONTROL,
     )));
     assert!(
-        ui.view().navigation.follow,
+        ui.view().navigation.follow(),
         "explicit Ctrl+End still returns to the live tail"
     );
 }

@@ -64,7 +64,7 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         row: 5,
         modifiers: KeyModifiers::NONE,
     }));
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let before = visible_history(&terminal);
     selected.push(persisted(100, prose.clone()));
@@ -74,7 +74,7 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         attempt_id: "stream-attempt-id".into(),
         node_id: "node-100".into(),
     });
-    assert!(ui.view().navigation.loading);
+    assert!(ui.view().navigation.is_loading());
     let (view_revision, anchor) = ui
         .take_deferred_actions()
         .into_iter()
@@ -201,7 +201,7 @@ fn paused_new_streams_do_not_enter_the_ordered_history_cache() {
         row: 5,
         modifiers: KeyModifiers::NONE,
     }));
-    assert!(!ui.view().navigation.follow);
+    assert!(!ui.view().navigation.follow());
     ui.take_deferred_actions();
     ui.apply(UiUpdate::Stream {
         thread_id: "fixture".into(),
@@ -229,7 +229,7 @@ fn paused_new_streams_do_not_enter_the_ordered_history_cache() {
             node_id: "node-1".into(),
         });
     }
-    assert!(!ui.view().navigation.loading);
+    assert!(!ui.view().navigation.is_loading());
     assert!(ui.take_deferred_actions().is_empty());
     assert_eq!(ui.view().nodes().len(), 1);
 }

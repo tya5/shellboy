@@ -87,14 +87,14 @@ impl UiState {
         }
         let input_owner = self.active.clone();
         let selection_before = self.selection_mode;
-        let follow_before = self.view().navigation.follow;
+        let follow_before = self.view().navigation.follow();
         let actions = self.event_inner(event);
         if self.selection_mode != selection_before {
             self.selection_frozen_at = self
                 .selection_mode
                 .then(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         }
-        if self.active == input_owner && self.view().navigation.follow != follow_before {
+        if self.active == input_owner && self.view().navigation.follow() != follow_before {
             let view = self.view();
             self.trace_history(crate::diagnostics::UiHistoryTrace {
                 reason: crate::diagnostics::UiHistoryReason::UserFollow,
@@ -102,7 +102,7 @@ impl UiState {
                 view_revision: view.navigation.view_revision,
                 read_revision: view.delivery_read_revision,
                 follow_before,
-                follow_after: view.navigation.follow,
+                follow_after: view.navigation.follow(),
                 before_nodes: view.nodes().len() as u64,
                 after_nodes: view.nodes().len() as u64,
                 ..Default::default()
@@ -367,8 +367,8 @@ impl UiState {
                     view.items.active = false;
                     view.live_work.active = false;
                     view.cancel_navigation();
-                    view.navigation.follow = true;
-                    view.navigation.unseen = false;
+                    view.navigation.set_follow(true);
+                    view.navigation.set_unseen(false);
                     return view
                         .thread_id
                         .clone()
