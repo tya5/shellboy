@@ -183,14 +183,22 @@ def inventory(root, classifications=None):
                 category, reason = 'c', 'review required; not proof this is generated copy'
             if identity in decisions:
                 entry = decisions[identity]
-                if entry.get('category') not in ('a', 'b', 'c') or not entry.get('reason', '').strip():
+                if entry.get('category') not in ('a', 'b', 'c', 'protected') or not entry.get('reason', '').strip():
                     raise ValueError(f'invalid reviewed decision: {identity}')
                 if entry.get('source_tokens_sha256') != fingerprint:
                     raise ValueError(f'reviewed source changed; re-review required: {identity}')
+                if entry['category'] == 'protected' and not all(
+                    isinstance(entry.get(key), str) and entry[key].strip()
+                    for key in ('canonical_evidence', 'projection_evidence')
+                ):
+                    raise ValueError(f'protected token needs canonical and UI projection evidence: {identity}')
                 category, reason = entry['category'], entry['reason']
             records.append(dict(id=identity, path=relative, line=source.count('\n', 0, token.start) + 1,
                                 kind=token.kind, category=category, reason=reason, literal=token.text,
                                 source_tokens_sha256=fingerprint))
+            if category == 'protected':
+                records[-1].update({key: decisions[identity][key]
+                                    for key in ('canonical_evidence', 'projection_evidence')})
     stale = set(decisions) - seen
     if stale:
         raise ValueError('stale reviewed decisions: ' + ', '.join(sorted(stale)))
@@ -199,14 +207,18 @@ def inventory(root, classifications=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        'a: explicit Japanese UI side; b: fixture; c: pending review/English cleanup. '
+        'a: explicit Japanese UI side; b: fixture; c: pending review/English cleanup; '
+        'protected: individually reviewed canonical tokens with canonical and UI projection evidence. '
         'Comments and character literals are not string literals. c is conservative, '
         'never authorization to translate source data. No writes, DB or network access. '
         'Exit 0: inventory (or zero c under --check); 1: remaining c; 2: input error.'))
     parser.add_argument('--repo', type=Path, default=Path('.'))
     parser.add_argument('--classifications', type=Path,
                         help='Reviewed ID -> {category,reason,source_tokens_sha256} JSON map')
-    parser.add_argument('--summary', action='store_true', help='Omit individual literals')
+    formats = parser.add_mutually_exclusive_group()
+    formats.add_argument('--summary', action='store_true', help='Omit individual literals')
+    formats.add_argument('--table', action='store_true', help='Print reproducible per-file Markdown counts')
+    parser.add_argument('--ownership', type=Path, help='Optional path -> owner label JSON map for --table')
     parser.add_argument('--check', action='store_true', help='Fail if any category c remains')
     args = parser.parse_args()
     try:
@@ -216,6 +228,18 @@ def main():
         decisions = json.loads(args.classifications.read_text(encoding='utf-8')) if args.classifications else None
         report = inventory(root, decisions)
         pending = report['counts'].get('c', 0)
+        if args.table:
+            owners = json.loads(args.ownership.read_text(encoding='utf-8')) if args.ownership else {}
+            if not isinstance(owners, dict) or not all(isinstance(v, str) for v in owners.values()):
+                raise ValueError('ownership must be a path -> label JSON object')
+            print('| Source | (a) | (b) | Protected Canonical | (c), Review Pending | Editing Boundary |')
+            print('| --- | ---: | ---: | ---: | ---: | --- |')
+            for path in sorted({r['path'] for r in report['records']}):
+                counts = Counter(r['category'] for r in report['records'] if r['path'] == path)
+                owner = owners.get(path, 'review in C').replace('|', '/')
+                values = ' | '.join(str(counts[c]) for c in ('a', 'b', 'protected', 'c'))
+                print(f'| `{path}` | {values} | {owner} |')
+            return int(args.check and pending > 0)
         if args.summary:
             report['by_file'] = {path: dict(Counter(r['category'] for r in report['records'] if r['path'] == path))
                                  for path in sorted({r['path'] for r in report['records']})}

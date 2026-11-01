@@ -92,6 +92,33 @@ class LanguageAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
             AUDIT['inventory'](self.root, decision)
 
+    def test_protected_tokens_require_both_evidence_fields_and_remain_distinct(self):
+        self.source(f'fn compare(s: &str) -> bool {{ s == "{JA}" }}')
+        row = self.records()[0]
+        entry = {'category': 'protected', 'reason': 'canonical equality operand, not display copy',
+                 'source_tokens_sha256': row['source_tokens_sha256']}
+        for evidence in [{}, {'canonical_evidence': 'src/lib.rs:compare exact comparison'}]:
+            with self.assertRaisesRegex(ValueError, 'canonical and UI projection evidence'):
+                AUDIT['inventory'](self.root, {row['id']: dict(entry, **evidence)})
+        entry.update(canonical_evidence='src/lib.rs:compare exact comparison',
+                     projection_evidence='synthetic renderer consumes enum without changing operand')
+        report = AUDIT['inventory'](self.root, {row['id']: entry})
+        self.assertEqual(report['counts'], {'protected': 1})
+        self.assertEqual(report['records'][0]['canonical_evidence'], entry['canonical_evidence'])
+        self.assertEqual(report['records'][0]['projection_evidence'], entry['projection_evidence'])
+
+    def test_table_is_reproducible_and_ownership_is_not_a_classification_exemption(self):
+        self.source(f'const A: &str = "{JA}";')
+        owner = self.root / 'owners.json'
+        owner.write_text(json.dumps({'src/lib.rs': 'W6'}))
+        command = [sys.executable, str(SCRIPT), '--repo', str(self.root), '--table',
+                   '--ownership', str(owner), '--check']
+        first = subprocess.run(command, capture_output=True, text=True)
+        second = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(first.returncode, 1)
+        self.assertEqual(first.stdout, second.stdout)
+        self.assertIn('| `src/lib.rs` | 0 | 0 | 0 | 1 | W6 |', first.stdout)
+
     def test_pending_gate_and_error_never_modify_inputs(self):
         path = self.source(f'const A: &str = "{JA}";')
         before = path.read_bytes()

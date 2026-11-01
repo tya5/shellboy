@@ -367,7 +367,11 @@ opencode and jcode on the same fake model; the same `footprint` input runs its
 `python3 scripts/dev/language-audit.py --repo . --summary` reads Japanese Rust
 string literals without changing files or contacting providers. Use the full
 JSON output for literal IDs/lines and the `--classifications` reviewed JSON map
-for explicit decisions (`category` a/b/c, `reason`, and `source_tokens_sha256`).
+for explicit decisions (`category` a/b/c/protected, `reason`, and
+`source_tokens_sha256`). Protected canonical tokens additionally require both
+`canonical_evidence` and `projection_evidence`; the report retains them. Use
+`--table --ownership scripts/dev/language-ownership.json` for reproducible
+Markdown counts/owner boundaries. Owners do not exempt literals from review.
 The initial reviewed map is `scripts/dev/language-classifications.json`; add
 `--classifications scripts/dev/language-classifications.json` to reproduce the
 table's reviewed counts. Changed source tokens require re-review even if a

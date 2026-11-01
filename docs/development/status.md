@@ -3726,10 +3726,13 @@ full language-mixing audit and bilingual acceptance belong to later #152 work.
 ## Stage C Language Inventory (#152)
 
 The read-only Rust string inventory and synthetic lexer/classification tests
-are prepared on `issue-152/language-audit`, based on #146 main13d5ac86. Initial
+are prepared on the #152 audit branch, rebased onto #148 main84dc782e. Initial
 classification is recorded in the [Stage C table](../validation/language-audit-stage-c.md).
 Conservative category (c) is not zero and is not a confirmed-defect count.
 B-5/B-6 files remain read-only until #149/#150 land. W6 owns the four
 Core/startup/compaction English-only files; W1 owns this inventory and final
 mixing/rendering/plural/3-OS acceptance, which is not yet claimed. #138's three
-same-SHA Windows observations take priority.
+same-SHA Windows observations passed and #138 is on main. The independent
+protected canonical-token category now requires individual canonical and UI
+projection evidence; no unknown tokens have been reclassified just to reach
+zero. W8/#156 owns the live_work separator restoration; coordinate before edits.
