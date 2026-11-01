@@ -60,8 +60,16 @@ def make_workspace(path):
 
 
 def sample_trees(roots, proc=Path('/proc')):
-    """PSS of the union of each root's transitive descendants (stage-1 rules)."""
-    for _ in range(3):
+    """PSS of the union of each root's transitive descendants (stage-1 rules).
+
+    Some agents keep short-lived helpers running between turns, so up to ten
+    snapshots (50 ms apart) are tried instead of stage 1's three; the number
+    used is recorded, and persistent churn is still an error, never a sample.
+    """
+    changed = set()
+    for attempt in range(10):
+        if attempt:
+            time.sleep(.05)
         before = {}
         for root in roots:
             before.update(footprint.process_tree(root, proc))
@@ -80,10 +88,13 @@ def sample_trees(roots, proc=Path('/proc')):
                 after.update(footprint.process_tree(root, proc))
             if before == after:
                 return {'pss_kib': sum(row['pss_kib'] for row in rows), 'process_count': len(rows),
-                        'processes': rows}
-        except (FileNotFoundError, ProcessLookupError):
+                        'snapshot_attempts': attempt + 1, 'processes': rows}
+            changed |= set(before) ^ set(after)
+        except (FileNotFoundError, ProcessLookupError) as error:
+            changed.add(str(error)[:80])
             continue
-    raise RuntimeError('Process trees changed during all three PSS snapshots')
+    names = sorted({row['comm'] for row in rows if row['pid'] in changed})
+    raise RuntimeError(f'Process trees changed during all ten PSS snapshots: {sorted(map(str, changed))[:10]} {names}')
 
 
 def no_pss(_roots):
@@ -515,6 +526,9 @@ def measure_case(agent, sessions, sampler):
             try:
                 runtime = agent.start(root, env, workspaces)
                 roots = [pid for session in runtime for pid in session.pids]
+                # Process-per-session agents give no readiness signal before the
+                # first turn; let every agent settle for the same 3 s (as jcode's script).
+                time.sleep(3)
                 result = {'n': sessions, 'baseline': sampler(roots), 'rounds': []}
                 with ThreadPoolExecutor(max_workers=sessions) as pool:
                     for index, prompt in enumerate(PROMPTS):
@@ -721,7 +735,7 @@ def main():
             # Observed 2026-11-01: jcode's first macOS TUI start registers a launchd
             # hotkey agent that escapes the temporary HOME. Linux only.
             parser.error('jcode is only driven on Linux by this script')
-        agents.append(cls(Path(path)))
+        agents.append(cls(Path(path).resolve(strict=True)))
     if not agents:
         parser.error('Pass at least one --agent NAME=PATH')
     machine = {'system': platform.system(), 'release': platform.release(), 'machine': platform.machine(),

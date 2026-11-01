@@ -358,3 +358,6 @@ For cost-free, deterministic owner-tree PSS and PTY startup observations, see
 Use `python3 scripts/bench/footprint.py --help` for arguments. The existing
 `ci.yml` workflow has an opt-in `footprint` input and retains a JSON artifact;
 there are no performance thresholds and no cross-agent/provider comparisons.
+Stage 2 (`scripts/bench/compare.py`, same README) adds Claude Code, Codex CLI,
+opencode and jcode on the same fake model; the same `footprint` input runs its
+`compare` job, which installs pinned agents with `install_agents.py`.

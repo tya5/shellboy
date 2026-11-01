@@ -1,9 +1,11 @@
-# Shellboy Resource Observations (#116, Stage 1)
+# Resource Observations (#116)
 
-This standard-library-only benchmark measures Shellboy, not other agents. It
-uses a deterministic loopback Responses SSE fixture, never a provider account.
-There is no real-provider option. Stages 2 (cross-agent comparison) and 3 (a
-published comparison page) are not implemented. No Rust/Core change is needed.
+Stage 1 (`footprint.py`, below) measures Shellboy alone. Stage 2
+(`compare.py`, [Cross-Agent Comparison](#cross-agent-comparison-stage-2)) runs
+Shellboy, Claude Code, Codex CLI, opencode and jcode on one runner against the
+same fake model. Both are standard-library Python, use a deterministic loopback
+model and never a provider account; there is no real-provider option. Stage 3
+(a published comparison page) is not implemented. No Rust/Core change is needed.
 
 ## Reproduce On Linux
 
@@ -110,3 +112,121 @@ A known admission rejection is retried at most 30 times with the **same**
 operation ID, only when the owner explicitly says it was not accepted/applied.
 Uncertain transport/mutation failures are not reissued. Observation/answer and
 shell-exit checks precede each PSS sample and are identical across N values.
+
+## Cross-Agent Comparison (Stage 2)
+
+Decided on #116 (2026-11-01): compare Shellboy with jcode, Codex CLI, Claude
+Code and opencode on **one CI Linux runner**, all pointed at the **same local
+fake model**; no real provider, no cost, no thresholds. The numbers describe
+these exact versions on this fake workload only, never real-model performance.
+
+### Reproduce
+
+On Linux x86_64 with Python 3.11+, Node/npm (CI pins Node 22.23.4) and the
+Shellboy release binary from the stage-1 build:
+
+```sh
+python3 scripts/bench/install_agents.py /tmp/bench-agents      # pinned, no login
+mapfile -t agents < /tmp/bench-agents/agents.args
+python3 scripts/bench/compare.py --agent shellboy=target/release/shellboy "${agents[@]}" \
+  --provenance /tmp/bench-agents/provenance.json --out /tmp/compare.json
+```
+
+Or dispatch `ci.yml` with `footprint=true` (`gh workflow run ci.yml --ref BRANCH -f
+footprint=true`): the `compare` job uploads
+`agent-comparison-linux-<SHA>/result.json` next to the stage-1 artifact.
+`--sessions` and `--startup-runs` (default 1 5 10 20 and 5) shorten a run;
+`--smoke` checks the protocols on any OS without PSS (not a measurement; jcode
+is refused off Linux because its first macOS TUI start registered a launchd
+hotkey agent outside the temporary HOME).
+
+`install_agents.py` installs into a new directory with a private npm prefix,
+cache and HOME, verifies the jcode tarball against its release `SHA256SUMS`,
+and writes `provenance.json` (method, source, npm tarball/integrity, executable
+SHA-256). Pinned versions:
+
+| Agent | Version | Installed from | Executable measured |
+|---|---|---|---|
+| Shellboy | the checked-out commit | `cargo build --locked --release` | `target/release/shellboy` |
+| Claude Code | 2.1.316 | npm `@anthropic-ai/claude-code` | the package's native `claude` |
+| Codex CLI | 0.166.0 | npm `@openai/codex` | native `codex` from `@openai/codex-linux-x64` (the npm `codex` Node launcher is skipped) |
+| opencode | 1.19.5 | npm `opencode-ai` | the package's native `opencode` |
+| jcode | v0.99.1 | GitHub release `jcode-linux-x86_64.tar.gz` | the release binary |
+
+### Fake Model
+
+`fake_model.py` serves the stage-1 workload over three wires: OpenAI Responses
+SSE (`/v1/responses`: Shellboy's stage-1 runner keeps its own equivalent server,
+Codex), Chat Completions SSE (`/v1/chat/completions`: opencode, jcode) and
+Anthropic Messages SSE (`/v1/messages`: Claude Code). Event shapes follow the
+synthetic fixtures under `tests/fixtures/{responses,chat,messages}`. The round
+is the last user message containing one of the five fixed instructions; rounds
+1-4 return one call to the agent's own shell tool (`Bash`, `bash`, `shell`,
+`shell_command` or `exec_command`, arguments shaped by the tool's schema) and,
+after a tool result, the fixed answer; round 5 only answers. Requests without
+a shell tool or fixed instruction (titles, summaries) are **auxiliary** and get
+`ok`. Tool calls are capped at one per session per round (a further request is
+answered instead and counted as `tool_budget_exhausted`), and all requests at
+`40 N + 200`. Usage is reported as 1 token; tokens are not measured here.
+
+A case passes only when every session returned each round's fixed answer to
+its client, `hello.txt` contains `hello world` in every workspace (the tool
+really ran), and the server saw exactly N tool calls and N answers per round
+with no errors. Otherwise the agent's entry is `status: error` with the reason,
+and other agents still run.
+
+### Shapes, Settings And What Each Agent Did
+
+Each agent uses its own documented headless shape (the same shapes as jcode's
+`scripts/bench_headless_memory.py`); PSS is the sum over every root and its
+descendants (stage-1 rules), and `processes` lists each `comm`.
+
+| Agent | Sessions | Pointed at the fake model by | Non-default settings |
+|---|---|---|---|
+| Shellboy | one `serve` owner, N threads (stage-1 runner) | `config.toml` connection `base_url` | `response_max_retries=0`, OSC52 copy, no bell |
+| Claude Code | N `claude -p --input-format stream-json --output-format stream-json --verbose` | `ANTHROPIC_BASE_URL`, dummy `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`/`ANTHROPIC_SMALL_FAST_MODEL` | `--permission-mode bypassPermissions`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `DISABLE_AUTOUPDATER=1` |
+| Codex CLI | N `codex app-server` (JSON-RPC), one thread each | `CODEX_HOME/config.toml` provider `bench` (`wire_api="responses"`, dummy `env_key`) | `approval_policy="never"`, `sandbox_mode="danger-full-access"`, retries 0 |
+| opencode | one `opencode serve`, N sessions (`?directory=` per workspace) | `opencode.json` provider via `@ai-sdk/openai-compatible` `baseURL`, dummy key | `permission` allow, `autoupdate=false`, `share=disabled`, models/LSP download off |
+| jcode | one `jcode serve`, N sessions over its debug socket | `--provider openai-compatible`, `JCODE_OPENAI_COMPAT_API_BASE`, dummy `OPENAI_COMPAT_API_KEY` | `JCODE_MEMORY_ENABLED=0`, `JCODE_NO_TELEMETRY=1`, `--no-update --no-selfdev` |
+
+Every agent gets a new temporary HOME/XDG directories and only `PATH`/locale
+from the environment: no credentials, no login, nothing read from a real home.
+The full settings are recorded in each agent's `config` in the JSON. Sandboxes
+and approvals are off for every agent because the workload writes a file and
+Shellboy has no sandbox; Codex's sandbox helpers therefore do not run.
+
+Recorded in the first complete CI run (see the JSON `model` of each case):
+Claude Code, Codex and jcode made exactly 9 requests per session; opencode made
+10, its extra one an auxiliary title request.
+
+### Startup
+
+For each agent `--startup-runs` interactive launches (default 5) each use a new
+temporary HOME and a 100x36 PTY with kernel echo **off**, so only text the agent
+renders counts. Common terminal queries (cursor position, device attributes,
+colours, kitty keyboard, size) are answered. `first_visible_ms` is spawn to the
+first three alphanumeric characters after removing escape sequences;
+`input_echo_ms` is spawn to the visible echo of a typed probe (`zqxjvk`),
+typed at first visible text and retyped at most once per second
+(`probe_writes`). Nothing is submitted. First-run dialogs are pre-answered so
+the probe reaches the composer: Claude Code's onboarding, dummy-key approval and
+folder trust (`~/.claude.json`) and Codex's project trust. This generic method
+differs from stage 1's Shellboy-specific completed-frame/paste method, so the
+two Shellboy startup numbers are not interchangeable.
+
+### Caveats
+
+- A fake model answers instantly with fixed text; real-model latency, token
+  use, context growth and reasoning are absent. Differences reflect each
+  agent's process model, runtime and history handling under this workload only.
+- Workload: the stage-1 instructions (list, **create file**, grep, **count
+  lines**, done), not jcode's script (list, read README title, grep,
+  summarize, done); jcode's numbers come from real models and its own homes.
+- Shapes differ by design: one server for N sessions (Shellboy, opencode,
+  jcode) versus one process per session (Claude Code, Codex). That is part of
+  what is compared, not a fixable bias.
+- Disabled features (jcode memory, permission/sandbox systems, telemetry) may
+  change memory relative to a default install. opencode loads its provider
+  package at runtime; any network fetch it makes is part of its startup.
+- One runner, sequential agents, shared CI hardware; repeat runs to see
+  variance. PSS is sampled after rounds, not a peak.

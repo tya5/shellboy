@@ -2810,3 +2810,17 @@ reasoning items; it needs a measured single-Thread trial before any default
 changes. Revisit if a provider documents its cache boundary or the trial shows
 a clear gain.
 
+
+## D-116b: Stage-2 Cross-Agent Fake-Model Comparison (2026-11-01)
+
+The user decided stage 2 on #116: compare jcode, Codex CLI, Claude Code and
+opencode with Shellboy on one CI Linux runner against a loopback fake model,
+with no real provider, cost or thresholds. Adopt each agent's own headless
+shape (as in jcode's `bench_headless_memory.py`) rather than forcing one
+process model, keep the stage-1 workload and Shellboy runner unchanged, and
+turn off permission/sandbox systems and jcode memory so every agent can run the
+file-writing workload unattended. Measure the native Codex binary rather than
+its npm Node launcher. Uncertain: whether disabled features or the launcher
+choice materially change PSS. Revisit if stage 3 publishes these numbers, if a
+pinned version changes its headless protocol, or if the user wants
+default-install variants (e.g. jcode memory on) recorded alongside.
