@@ -7222,3 +7222,15 @@ contract case passes1/0 locally through rust-slot after the binding correction
 (execution39e4198e exit0/cleanup). Rebase onto latest main1120c8bb is required;
 that main delta is publication/status/acceptance documentation only. Original
 CI7747290f remains failed; latest exact-SHA3OS CI must pass before handoff.
+
+## #113 after #107/#109 main qualification
+
+Author rebases the approved four-commit forecast change without conflicts onto
+exactbfb501e8275a871b8765812040b752782b497cc9 after #107 and #109 land. Own
+entry-file mtimes are refreshed inside rust-slot to avoid cross-worktree metadata
+reuse. Sourceaddcc6af passes check --tests plus preview14/0, real IPC1/0 and full
+catalogue9/0, total24 positive executions (execution71ebae35 exit0/cleanup).
+No forecast policy/queue/runtime behavior changes during rebase. The earlier
+native greenbe644276 remains old-base evidence; latest exact-SHA native3OS CI
+must qualify this rebase before the coordinator integrates it. Old published
+refs are retained rather than force-rewritten, with owner cleanup after landing.
