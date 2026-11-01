@@ -1,5 +1,6 @@
 //! Pure composer display and cursor projection; canonical input stays unchanged.
-use super::{DraftSnapshot, draft, theme};
+use super::{DraftSnapshot, draft, i18n, theme};
+use crate::config::UiLanguage;
 use crate::ui::text_width::UnicodeWidthStr;
 use ratatui::{
     style::{Modifier, Style},
@@ -15,10 +16,29 @@ pub(super) struct Display {
     chips: Vec<Range<usize>>,
 }
 pub(super) fn draft_display(draft: &DraftSnapshot) -> (String, usize) {
-    let display = display(draft);
+    let display = display(draft, UiLanguage::En);
     (display.text, display.cursor)
 }
-pub(super) fn display(draft: &DraftSnapshot) -> Display {
+fn paste_chip(language: UiLanguage, id: u64, lines: usize, chars: usize) -> String {
+    match language {
+        UiLanguage::Ja => format!("[貼付け{id} | {lines}行/{chars}字]"),
+        UiLanguage::En => match (lines == 1, chars == 1) {
+            (true, true) => format!("[Paste {id} | 1 line/1 char]"),
+            (true, false) => format!("[Paste {id} | 1 line/{chars} chars]"),
+            (false, true) => format!("[Paste {id} | {lines} lines/1 char]"),
+            (false, false) => format!("[Paste {id} | {lines} lines/{chars} chars]"),
+        },
+    }
+}
+fn attachment_chip(language: UiLanguage, image: bool, name: &str) -> String {
+    match (language, image) {
+        (UiLanguage::Ja, true) => format!("[画像: {name}]"),
+        (UiLanguage::Ja, false) => format!("[添付: {name}]"),
+        (UiLanguage::En, true) => format!("[Image: {name}]"),
+        (UiLanguage::En, false) => format!("[Attachment: {name}]"),
+    }
+}
+pub(super) fn display(draft: &DraftSnapshot, language: UiLanguage) -> Display {
     let mut chips = Vec::new();
     let mut text = String::new();
     let mut source = 0;
@@ -32,12 +52,7 @@ pub(super) fn display(draft: &DraftSnapshot) -> Display {
             (
                 fold.start,
                 fold.end,
-                format!(
-                    "[貼付け{} | {}行/{}字]",
-                    fold.id,
-                    content.lines().count(),
-                    content.chars().count()
-                ),
+                paste_chip(language, fold.id, content.lines().count(), content.chars().count()),
             )
         })
         .collect();
@@ -54,15 +69,7 @@ pub(super) fn display(draft: &DraftSnapshot) -> Display {
         Some((
             start,
             start + draft::MARKER.len(),
-            format!(
-                "[{}: {}]",
-                if a.kind == "image" {
-                    "画像"
-                } else {
-                    "添付"
-                },
-                name
-            ),
+            attachment_chip(language, a.kind == "image", &name),
         ))
     }));
     replacements.sort_by_key(|r| r.0);
