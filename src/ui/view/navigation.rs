@@ -1,7 +1,9 @@
 //! Conversation navigation ownership. Structural migration: transitions retain their existing behaviour.
 use super::*;
 
+mod events;
 mod read;
+pub(in crate::ui) use events::NavEvent;
 pub(in crate::ui) use read::ReadEvent;
 
 #[derive(Debug)]
@@ -28,28 +30,26 @@ impl Default for Navigation {
 
 #[derive(Clone, Debug)]
 pub(in crate::ui) struct VisualScroll {
-    pub(in crate::ui) row: usize,
+    position: ProjectionPosition,
     pub(in crate::ui) within: usize,
     pub(in crate::ui) anchor: ViewAnchor,
     pub(in crate::ui) width: u16,
     pub(in crate::ui) height: u16,
     pub(in crate::ui) revision: u64,
     pub(in crate::ui) focus: Option<String>,
-    pub(in crate::ui) initialized: bool,
     pub(in crate::ui) origin: usize,
     pub(in crate::ui) area: Option<Rect>,
 }
 impl Default for VisualScroll {
     fn default() -> Self {
         Self {
-            row: 0,
+            position: ProjectionPosition::Stale(0),
             within: 0,
             anchor: ViewAnchor::default(),
             width: 78,
             height: 18,
             revision: 0,
             focus: None,
-            initialized: false,
             origin: 0,
             area: None,
         }
@@ -67,9 +67,6 @@ enum FollowMode {
 type ReadTicket = (u64, Option<String>);
 
 impl Navigation {
-    pub(in crate::ui) fn read_event(&mut self, event: ReadEvent) -> read::ReadEffects {
-        self.intent.on_event(event)
-    }
     pub(in crate::ui) fn pending(&self) -> isize {
         self.intent.pending()
     }
@@ -81,30 +78,13 @@ impl Navigation {
     }
     #[cfg(test)]
     pub(in crate::ui) fn seed_pending(&mut self, pending: isize) {
-        self.read_event(ReadEvent::SeedPending(pending));
+        self.on_event(NavEvent::Read(ReadEvent::SeedPending(pending)));
     }
     #[cfg(test)]
     pub(in crate::ui) fn seed_rebasing(&mut self, rebasing: bool) {
-        self.read_event(ReadEvent::SeedRebasing(rebasing));
+        self.on_event(NavEvent::Read(ReadEvent::SeedRebasing(rebasing)));
     }
 
-    pub(in crate::ui) fn cancel(&mut self) {
-        self.read_event(ReadEvent::Cancelled {
-            keep_pending: false,
-        });
-        self.view_revision = self.view_revision.wrapping_add(1);
-    }
-    pub(in crate::ui) fn rebase(&mut self) {
-        self.read_event(ReadEvent::Cancelled { keep_pending: true });
-        self.view_revision = self.view_revision.wrapping_add(1);
-    }
-    pub(in crate::ui) fn fail_read(&mut self) {
-        self.read_event(ReadEvent::Failed);
-    }
-    pub(in crate::ui) fn finish_reply(&mut self) -> isize {
-        self.scroll.initialized = false;
-        self.read_event(ReadEvent::ReplyConsumed).pending
-    }
     pub fn follow(&self) -> bool {
         matches!(
             self.mode,
@@ -118,35 +98,12 @@ impl Navigation {
         )
     }
     pub fn set_follow(&mut self, follow: bool) {
-        self.set_mode(follow, self.unseen());
+        self.on_event(NavEvent::FollowingSelected(follow));
     }
     pub fn set_unseen(&mut self, unseen: bool) {
-        self.set_mode(self.follow(), unseen);
+        self.on_event(NavEvent::UnseenSelected(unseen));
     }
-    fn set_mode(&mut self, follow: bool, unseen: bool) {
-        self.mode = match (follow, unseen) {
-            (true, false) => FollowMode::Following,
-            (true, true) => FollowMode::FollowingUnseen,
-            (false, false) => FollowMode::Reading,
-            (false, true) => FollowMode::ReadingUnseen,
-        };
-    }
-    pub(in crate::ui) fn resume_follow(&mut self) {
-        self.mode = FollowMode::Following;
-    }
-    pub(in crate::ui) fn begin_rebase(&mut self) {
-        self.read_event(ReadEvent::RebaseRequested {
-            ticket: (self.view_revision, None),
-            pending: None,
-        });
-    }
-    pub(in crate::ui) fn restore(&mut self, anchor: ViewAnchor, follow: bool) {
-        self.anchor = anchor;
-        self.set_mode(follow, false);
-    }
-    pub(in crate::ui) fn begin_read(&mut self, ticket: ReadTicket, pending: Option<isize>) {
-        self.read_event(ReadEvent::NavigationRequested { ticket, pending });
-    }
+
     pub fn is_loading(&self) -> bool {
         self.intent.is_loading()
     }
@@ -154,19 +111,19 @@ impl Navigation {
         self.intent.request()
     }
     pub fn set_loading(&mut self, loading: bool) {
-        self.read_event(if loading {
+        self.on_event(NavEvent::Read(if loading {
             ReadEvent::WaitStarted
         } else {
             ReadEvent::DeliveryObserved
-        });
+        }));
     }
     #[cfg(test)]
     pub(in crate::ui) fn set_request(&mut self, ticket: Option<ReadTicket>) {
-        self.read_event(ReadEvent::SeedTicket(ticket));
+        self.on_event(NavEvent::Read(ReadEvent::SeedTicket(ticket)));
     }
     #[cfg(test)]
     pub(in crate::ui) fn take_request(&mut self) -> Option<ReadTicket> {
-        self.read_event(ReadEvent::TakeOwned).ticket
+        self.on_event(NavEvent::Read(ReadEvent::TakeOwned)).ticket
     }
 }
 
@@ -183,12 +140,14 @@ impl ThreadView {
                 let mut reversed = false;
                 if self.navigation.pending() != 0 {
                     if self.navigation.pending().signum() == amount.signum() {
-                        self.navigation.read_event(ReadEvent::Deferred(amount));
+                        self.navigation
+                            .on_event(NavEvent::Read(ReadEvent::Deferred(amount)));
                         return Some(vec![]);
                     }
                     // Reversing direction cancels navigation that could not
                     // yet be applied, rather than replaying it after the read.
-                    self.navigation.read_event(ReadEvent::DeferredDiscarded);
+                    self.navigation
+                        .on_event(NavEvent::Read(ReadEvent::DeferredDiscarded));
                     reversed = true;
                 }
                 let (width, height) = (self.navigation.scroll.width, self.navigation.scroll.height);
@@ -212,24 +171,26 @@ impl ThreadView {
                                     && node.text.chars().count() >= node.total_chars)
                         }))
                 {
-                    self.navigation.anchor = ViewAnchor {
+                    let anchor = ViewAnchor {
                         node_id: Some(node.node_id.clone()),
                         char_offset: to.offset,
                     };
                     let first = layout
                         .sources
                         .iter()
-                        .position(|row| row.node == to.node && row.offset == to.offset)
+                        .position(|r| r.node == to.node && r.offset == to.offset)
                         .unwrap_or(target);
-                    self.navigation.scroll.within = target.saturating_sub(first);
-                    self.navigation.scroll.row = target;
-                    self.navigation.scroll.anchor = self.navigation.anchor.clone();
-                    self.navigation.read_event(ReadEvent::PositionMoved);
-                    self.navigation.set_follow(false);
+                    self.navigation.on_event(NavEvent::PositionResolved {
+                        position: Some((anchor, target.saturating_sub(first))),
+                        row: target,
+                        follow_tail: false,
+                        local_read: true,
+                    });
                     return Some(vec![]);
                 }
                 if !reversed {
-                    self.navigation.read_event(ReadEvent::Deferred(amount));
+                    self.navigation
+                        .on_event(NavEvent::Read(ReadEvent::Deferred(amount)));
                 }
                 return Some(vec![]);
             }
@@ -252,11 +213,11 @@ impl ThreadView {
                     && !view.closed_tool_source(node)
                     && let Some(thread_id) = view.thread_id.clone()
                 {
-                    view.navigation.view_revision = view.navigation.view_revision.wrapping_add(1);
-                    view.navigation.begin_read(
-                        (view.navigation.view_revision, Some(node.node_id.clone())),
-                        Some(amount),
-                    );
+                    view.navigation.on_event(NavEvent::ReadRequested {
+                        ticket: (view.navigation.view_revision, Some(node.node_id.clone())),
+                        pending: Some(amount),
+                        new_epoch: true,
+                    });
                     return Some(vec![UiAction::LoadNodeWindow {
                         thread_id,
                         generation: view.generation,
@@ -287,10 +248,11 @@ impl ThreadView {
         height: u16,
     ) -> usize {
         let view = &mut *self;
+        let mut row = view.navigation.scroll.row();
         let max = layout.lines.saturating_sub(usize::from(height));
         if view.navigation.follow() {
-            view.navigation.scroll.row = max;
-        } else if !view.navigation.scroll.initialized
+            row = max;
+        } else if !view.navigation.scroll.initialized()
             || view.navigation.scroll.width != width
             || view.navigation.scroll.revision != view.history_revision
             || view.navigation.scroll.anchor != view.navigation.anchor
@@ -325,22 +287,23 @@ impl ThreadView {
             } else {
                 0
             };
-            view.navigation.scroll.row = first
+            row = first
                 .saturating_add(extra)
                 .min(layout.lines.saturating_sub(1));
         }
         // At a true end the viewport never exposes a mostly blank last page.
         let at_end = view.at_true_tail(layout);
         if at_end {
-            view.navigation.scroll.row = view.navigation.scroll.row.min(max);
+            row = row.min(max);
         }
-        view.navigation.scroll.origin = layout.sources.first().map_or(0, |r| r.node);
-        view.navigation.scroll.width = width;
-        view.navigation.scroll.height = height;
-        view.navigation.scroll.revision = view.history_revision;
-        view.navigation.scroll.anchor = view.navigation.anchor.clone();
-        view.navigation.scroll.initialized = true;
-        view.navigation.scroll.row
+        view.navigation.on_event(NavEvent::FrameProjected {
+            row,
+            width,
+            height,
+            revision: view.history_revision,
+            origin: layout.sources.first().map_or(0, |r| r.node),
+        });
+        row
     }
     pub(in crate::ui) fn scroll(
         &mut self,
@@ -352,7 +315,7 @@ impl ThreadView {
         let amount = if self.navigation.request().is_none() {
             amount.saturating_add(
                 self.navigation
-                    .read_event(ReadEvent::DeferredDrained)
+                    .on_event(NavEvent::Read(ReadEvent::DeferredDrained))
                     .pending,
             )
         } else {
@@ -365,7 +328,8 @@ impl ThreadView {
         {
             // Replay the initiating movement after the committed stream has a
             // durable anchor, just like movement arriving while the read runs.
-            self.navigation.read_event(ReadEvent::Deferred(amount));
+            self.navigation
+                .on_event(NavEvent::Read(ReadEvent::Deferred(amount)));
             return vec![action];
         }
         // Projection changes must advance through cached nodes without nesting
@@ -403,8 +367,7 @@ impl ThreadView {
             let target = top as isize + amount;
             let max = layout.lines.saturating_sub(usize::from(height));
             let view = &mut *self;
-            view.navigation.view_revision = view.navigation.view_revision.wrapping_add(1);
-            view.navigation.set_follow(false);
+            view.navigation.on_event(NavEvent::ScrollInitiated);
             // Empty bodies and missing prefix/suffix ranges have unknown row
             // counts. Stop at the first such range, consume only known rows, and
             // move the source checkpoint beside the next bounded body read.
@@ -468,8 +431,8 @@ impl ThreadView {
                             })
                     }
                     .unwrap_or(top);
-                    if let Some(source) = layout.sources.get(checkpoint) {
-                        view.navigation.anchor = ViewAnchor {
+                    let position = layout.sources.get(checkpoint).map(|source| {
+                        let anchor = ViewAnchor {
                             node_id: Some(view.nodes[source.node].node_id.clone()),
                             char_offset: source.offset,
                         };
@@ -478,15 +441,20 @@ impl ThreadView {
                             .iter()
                             .position(|r| r.node == source.node && r.offset == source.offset)
                             .unwrap_or(checkpoint);
-                        view.navigation.scroll.within = checkpoint.saturating_sub(first);
-                    }
-                    view.navigation.scroll.row = checkpoint;
-                    view.navigation.scroll.anchor = view.navigation.anchor.clone();
+                        (anchor, checkpoint.saturating_sub(first))
+                    });
+                    view.navigation.on_event(NavEvent::PositionResolved {
+                        position,
+                        row: checkpoint,
+                        follow_tail: false,
+                        local_read: false,
+                    });
                     let node = &view.nodes[index];
-                    view.navigation.begin_read(
-                        (view.navigation.view_revision, Some(node.node_id.clone())),
-                        Some(target.saturating_sub(checkpoint as isize)),
-                    );
+                    view.navigation.on_event(NavEvent::ReadRequested {
+                        ticket: (view.navigation.view_revision, Some(node.node_id.clone())),
+                        pending: Some(target.saturating_sub(checkpoint as isize)),
+                        new_epoch: false,
+                    });
                     let offset = if amount < 0 {
                         if entry || empty {
                             node.total_chars.saturating_sub(8192 - 512)
@@ -514,8 +482,8 @@ impl ThreadView {
             } else {
                 row.min(layout.lines.saturating_sub(1))
             };
-            if let Some(source) = layout.sources.get(row) {
-                view.navigation.anchor = ViewAnchor {
+            let position = layout.sources.get(row).map(|source| {
+                let anchor = ViewAnchor {
                     node_id: Some(view.nodes[source.node].node_id.clone()),
                     char_offset: source.offset,
                 };
@@ -524,17 +492,18 @@ impl ThreadView {
                     .iter()
                     .position(|r| r.node == source.node && r.offset == source.offset)
                     .unwrap_or(row);
-                view.navigation.scroll.within = row.saturating_sub(first);
-            }
-            view.navigation.scroll.row = row;
-            view.navigation.scroll.anchor = view.navigation.anchor.clone();
-            if amount > 0
+                (anchor, row.saturating_sub(first))
+            });
+            let follow_tail = amount > 0
                 && target >= max as isize
                 && end
-                && (following || row > top || (max == 0 && view.first_ordinal == 0))
-            {
-                view.navigation.resume_follow();
-            }
+                && (following || row > top || (max == 0 && view.first_ordinal == 0));
+            view.navigation.on_event(NavEvent::PositionResolved {
+                position,
+                row,
+                follow_tail,
+                local_read: false,
+            });
             let boundary = if target < 0 {
                 Some(false)
             } else if amount > 0 && !end && target >= max as isize {
@@ -557,10 +526,11 @@ impl ThreadView {
                         && ((!forward && node.base_char_offset > 0)
                             || (forward && cached_end < node.total_chars))
                     {
-                        view.navigation.begin_read(
-                            (view.navigation.view_revision, Some(node.node_id.clone())),
-                            Some(amount),
-                        );
+                        view.navigation.on_event(NavEvent::ReadRequested {
+                            ticket: (view.navigation.view_revision, Some(node.node_id.clone())),
+                            pending: Some(amount),
+                            new_epoch: false,
+                        });
                         view.navigation.anchor = origin.clone();
                         view.navigation.scroll.anchor = origin.clone();
                         view.navigation.scroll.within = within;
@@ -598,7 +568,7 @@ impl ThreadView {
                         view.navigation.anchor = origin.clone();
                         view.navigation.scroll.anchor = origin;
                         view.navigation.scroll.within = within;
-                        view.navigation.scroll.initialized = false;
+                        view.navigation.on_event(NavEvent::SourceInvalidated);
                         continue;
                     }
                 }
@@ -610,11 +580,17 @@ impl ThreadView {
                 if (forward && ordinal < view.total_nodes) || (!forward && view.first_ordinal > 0) {
                     // Keep the last visible frame while metadata is in flight.
                     // Its source range is retained when the overlapping page arrives.
-                    view.navigation.anchor = origin;
-                    view.navigation.scroll.within = within;
-                    view.navigation.scroll.row = top;
-                    view.navigation
-                        .begin_read((view.navigation.view_revision, None), Some(amount));
+                    view.navigation.on_event(NavEvent::PositionResolved {
+                        position: Some((origin, within)),
+                        row: top,
+                        follow_tail: false,
+                        local_read: false,
+                    });
+                    view.navigation.on_event(NavEvent::ReadRequested {
+                        ticket: (view.navigation.view_revision, None),
+                        pending: Some(amount),
+                        new_epoch: false,
+                    });
                     view.navigation.scroll.anchor = view.navigation.anchor.clone();
                     return vec![UiAction::LoadHistoryWindow {
                         thread_id,
@@ -635,10 +611,11 @@ impl ThreadView {
                     && !view.closed_tool_source(node)
                     && let Some(thread_id) = view.thread_id.clone()
                 {
-                    view.navigation.begin_read(
-                        (view.navigation.view_revision, Some(node.node_id.clone())),
-                        Some(amount),
-                    );
+                    view.navigation.on_event(NavEvent::ReadRequested {
+                        ticket: (view.navigation.view_revision, Some(node.node_id.clone())),
+                        pending: Some(amount),
+                        new_epoch: false,
+                    });
                     return vec![UiAction::LoadNodeWindow {
                         thread_id,
                         generation: view.generation,
@@ -651,6 +628,32 @@ impl ThreadView {
             return vec![];
         }
         vec![]
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ProjectionPosition {
+    Stale(usize),
+    Current(usize),
+}
+impl VisualScroll {
+    pub(in crate::ui) fn row(&self) -> usize {
+        match self.position {
+            ProjectionPosition::Stale(row) | ProjectionPosition::Current(row) => row,
+        }
+    }
+    pub(in crate::ui) fn initialized(&self) -> bool {
+        matches!(self.position, ProjectionPosition::Current(_))
+    }
+}
+impl FollowMode {
+    fn new(follow: bool, unseen: bool) -> Self {
+        match (follow, unseen) {
+            (true, false) => Self::Following,
+            (true, true) => Self::FollowingUnseen,
+            (false, false) => Self::Reading,
+            (false, true) => Self::ReadingUnseen,
+        }
     }
 }
 

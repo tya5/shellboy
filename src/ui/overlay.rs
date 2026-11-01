@@ -374,8 +374,7 @@ impl UiState {
                     let view = self.active_view_mut();
                     view.items.active = false;
                     view.live_work.active = false;
-                    view.cancel_navigation();
-                    view.navigation.resume_follow();
+                    view.follow_tail();
                     return view
                         .thread_id
                         .clone()

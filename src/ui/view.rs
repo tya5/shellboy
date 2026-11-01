@@ -3,7 +3,7 @@ use super::*;
 
 mod navigation;
 pub use navigation::Navigation;
-pub(super) use navigation::ReadEvent;
+pub(super) use navigation::{NavEvent, ReadEvent};
 
 #[derive(Debug)]
 pub struct ThreadView {
@@ -183,13 +183,11 @@ impl ThreadView {
     pub(super) fn cancel_navigation(&mut self) {
         self.tool_refresh = None;
         self.tool_refresh_dirty = false;
-        self.navigation.cancel();
+        self.navigation.on_event(NavEvent::Cancel {
+            keep_pending: false,
+        });
     }
-    pub(super) fn rebase_navigation(&mut self) {
-        self.tool_refresh = None;
-        self.tool_refresh_dirty = false;
-        self.navigation.rebase();
-    }
+
     pub(super) fn clear_tool_observation(&mut self) -> Option<UiAction> {
         let existed = self.tool_observation_scope.take().is_some();
         self.tool_refresh = None;
@@ -285,6 +283,20 @@ impl ThreadView {
         if changed {
             self.mark_source_changed();
         }
+    }
+    pub(super) fn start_rebase_navigation(&mut self) {
+        self.tool_refresh = None;
+        self.tool_refresh_dirty = false;
+        self.navigation.on_event(NavEvent::StartRebase);
+    }
+    pub(super) fn prepare_navigation(&mut self) {
+        self.tool_refresh = None;
+        self.tool_refresh_dirty = false;
+    }
+    pub(super) fn follow_tail(&mut self) {
+        self.tool_refresh = None;
+        self.tool_refresh_dirty = false;
+        self.navigation.on_event(NavEvent::TailRequested);
     }
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
         Self {
@@ -677,7 +689,8 @@ impl ThreadView {
         if append || self.navigation.follow() || previous_tail.is_none() {
             self.before_cursor = before_cursor;
         }
-        self.navigation.read_event(ReadEvent::BodyHydrated);
+        self.navigation
+            .on_event(NavEvent::Read(ReadEvent::BodyHydrated));
         if !self.navigation.follow()
             && !append
             && previous_tail.is_some()
@@ -870,8 +883,7 @@ impl ThreadView {
             reasoning_ranges: node.reasoning_ranges.clone(),
             presentation: Default::default(),
         };
-        self.rebase_navigation();
-        self.navigation.begin_rebase();
+        self.start_rebase_navigation();
         Some(UiAction::RebaseStream(Box::new(StreamRebase {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,
@@ -897,8 +909,7 @@ impl ThreadView {
         {
             // Keep this frame while resolving real ordinals and source
             // offsets. No provisional ID is sent to history.get.
-            self.rebase_navigation();
-            self.navigation.begin_rebase();
+            self.start_rebase_navigation();
             let action = UiAction::RebaseHistory {
                 thread_id,
                 generation,
@@ -910,10 +921,11 @@ impl ThreadView {
         None
     }
     pub(super) fn on_view_state(&mut self, anchor: ViewAnchor, follow: bool) {
-        self.navigation.restore(anchor, follow);
+        self.navigation
+            .on_event(NavEvent::Restored { anchor, follow });
     }
     pub(super) fn on_load_failed(&mut self, message: String) {
-        self.navigation.fail_read();
+        self.navigation.on_event(NavEvent::Read(ReadEvent::Failed));
         self.status = message;
         self.promote_status_notice(history_interaction::NoticeKind::Failure);
     }
@@ -1018,7 +1030,8 @@ impl ThreadView {
                 .saturating_add(self.selected_node_count() as u64)
                 < total_nodes
         {
-            self.navigation.read_event(ReadEvent::RebaseResolved);
+            self.navigation
+                .on_event(NavEvent::Read(ReadEvent::RebaseResolved));
             self.navigation.set_loading(false);
             return true;
         }
@@ -1031,11 +1044,13 @@ impl ThreadView {
             // An anchor window is not necessarily the latest page. Preserve the
             // paid/current frame until a real tail snapshot arrives.
             if first_ordinal.saturating_add(nodes.len() as u64) < total_nodes {
-                self.navigation.read_event(ReadEvent::RebaseResolved);
+                self.navigation
+                    .on_event(NavEvent::Read(ReadEvent::RebaseResolved));
                 self.navigation.set_loading(false);
                 return true;
             }
-            self.navigation.read_event(ReadEvent::RebaseResolved);
+            self.navigation
+                .on_event(NavEvent::Read(ReadEvent::RebaseResolved));
             // A history window is not an authoritative audit snapshot. Keep
             // paid bodies at their surviving selected predecessors until that
             // separately fenced audit reply decides membership.
@@ -1093,9 +1108,11 @@ impl ThreadView {
         }
         self.before_cursor = None;
         self.navigation.set_loading(false);
-        self.navigation.read_event(ReadEvent::PositionSettled);
+        self.navigation
+            .on_event(NavEvent::Read(ReadEvent::PositionSettled));
         if self.navigation.is_rebasing() {
-            self.navigation.read_event(ReadEvent::RebaseResolved);
+            self.navigation
+                .on_event(NavEvent::Read(ReadEvent::RebaseResolved));
             self.status = if relocated {
                 "表示元が選択経路から外れたため、最新ページを表示しました"
             } else {
@@ -1119,8 +1136,7 @@ impl ThreadView {
         {
             return None;
         }
-        self.rebase_navigation();
-        self.navigation.begin_rebase();
+        self.start_rebase_navigation();
         self.status = "履歴の表示位置を再取得中…".into();
         let action = UiAction::RebaseHistory {
             thread_id,
@@ -1492,7 +1508,7 @@ impl ThreadView {
                 .is_some_and(|(expected, id)| *expected == revision && id.as_deref() == node)
     }
     pub(super) fn finish_navigation_reply(&mut self) -> isize {
-        self.navigation.finish_reply()
+        self.navigation.on_event(NavEvent::ReplyConsumed).pending
     }
 }
 impl ThreadView {
@@ -1588,11 +1604,10 @@ impl ThreadView {
         // A transient stream position is not a canonical source offset.
         self.navigation.anchor = ViewAnchor::default();
         if self.navigation.follow() {
-            self.navigation.scroll.initialized = false;
+            self.navigation.on_event(NavEvent::SourceInvalidated);
             return None;
         }
-        self.rebase_navigation();
-        self.navigation.begin_rebase();
+        self.start_rebase_navigation();
         Some(UiAction::RebaseHistory {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,
@@ -1802,8 +1817,11 @@ mod completion_notice_tests {
     #[test]
     fn read_failure_keeps_queued_navigation_for_explicit_retry() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation
-            .begin_read((view.navigation.view_revision, None), None);
+        view.navigation.on_event(NavEvent::ReadRequested {
+            ticket: (view.navigation.view_revision, None),
+            pending: None,
+            new_epoch: false,
+        });
         view.navigation.seed_pending(-3);
         view.on_load_failed("read permit unavailable".into());
         assert!(!view.navigation.is_loading());
@@ -1834,8 +1852,11 @@ mod completion_notice_tests {
     #[test]
     fn navigation_read_has_an_explicit_footer_indicator() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation
-            .begin_read((view.navigation.view_revision, None), None);
+        view.navigation.on_event(NavEvent::ReadRequested {
+            ticket: (view.navigation.view_revision, None),
+            pending: None,
+            new_epoch: false,
+        });
         let palette = crate::ui::theme::Palette::from_capabilities(
             crate::config::PaletteMode::Dark,
             false,
@@ -1876,8 +1897,11 @@ mod completion_notice_tests {
         };
         view.navigation.scroll.width = 80;
         view.navigation.scroll.height = 10;
-        view.navigation
-            .begin_read((view.navigation.view_revision, None), None);
+        view.navigation.on_event(NavEvent::ReadRequested {
+            ticket: (view.navigation.view_revision, None),
+            pending: None,
+            new_epoch: false,
+        });
         let mut cache = HistoryLayoutCache::default();
         let actions = view.scroll(-1, "thread", &mut cache, 1024 * 1024);
         assert!(actions.is_empty());
@@ -1914,8 +1938,11 @@ mod completion_notice_tests {
         };
         view.navigation.scroll.width = 80;
         view.navigation.scroll.height = 10;
-        view.navigation
-            .begin_read((view.navigation.view_revision, None), None);
+        view.navigation.on_event(NavEvent::ReadRequested {
+            ticket: (view.navigation.view_revision, None),
+            pending: None,
+            new_epoch: false,
+        });
         let mut cache = HistoryLayoutCache::default();
         view.scroll(-2, "thread", &mut cache, 1024 * 1024);
         assert_ne!(view.navigation.anchor.node_id.as_deref(), Some("node-15"));
@@ -1985,7 +2012,8 @@ mod completion_notice_tests {
             char_offset: 100,
         };
         view.navigation.seed_rebasing(true);
-        view.navigation.read_event(ReadEvent::PositionMoved);
+        view.navigation
+            .on_event(NavEvent::Read(ReadEvent::PositionMoved));
         let old = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 200,
@@ -2030,8 +2058,11 @@ mod completion_notice_tests {
             node_id: Some("saved".into()),
             char_offset: 0,
         };
-        view.navigation
-            .begin_read((view.navigation.view_revision, None), None);
+        view.navigation.on_event(NavEvent::ReadRequested {
+            ticket: (view.navigation.view_revision, None),
+            pending: None,
+            new_epoch: false,
+        });
         view.navigation.seed_pending(-4);
         let action = view.rebase_committed_stream("thread".into(), view.generation);
         assert!(matches!(action, Some(UiAction::RebaseHistory { .. })));

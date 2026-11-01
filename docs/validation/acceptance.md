@@ -7629,3 +7629,13 @@ Frozen checkpoint 79fb04a7 passes native Linux/macOS and standard branch CI
 scope, not stage-2 completion. Continuation child-module movement passes check,
 characterization19 and view43 (a5f25a6b); no six-case expectation changes. It is
 not contained in the handed-off SHA.
+
+Navigation event boundary before #131 rebase: strict Clippy --tests, unchanged
+characterization19, view45 (including phase16 round-trip and legacy settlement
+checks), scrolling6 and stream/refresh11 pass (237ec764, log
+/tmp/issue118-event-gate2.log). Earlier strict attempt stopped solely on an unused
+fixture seed method; it was removed, not suppressed. Watchdog policy passes with
+no new guard/fingerprint change. Read reducer and projection publish every state
+change via events, measured161 ->90 combined sites and fields20 ->15. Full local
+suite not run; native branch CI and latest-main/#131 qualification still required.
+All six suspect behaviours remain intentionally unchanged.

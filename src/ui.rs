@@ -71,7 +71,7 @@ mod threads;
 mod view;
 use draft::{adjust_folds, prev_grapheme};
 pub use threads::ThreadDisplayTime;
-use view::ReadEvent;
+use view::{NavEvent, ReadEvent};
 pub use view::{Navigation, ThreadView};
 pub use watch::{
     BrowserMode, CompletionIdentity, DescendantCount, PreparedWatchDetail, WatchActionTarget,
@@ -1764,10 +1764,10 @@ struct RenderPreflight {
 impl RenderPreflight {
     fn new(view: &ThreadView) -> Self {
         Self {
-            anchor_changed: !view.navigation.scroll.initialized
+            anchor_changed: !view.navigation.scroll.initialized()
                 || view.navigation.scroll.anchor != view.navigation.anchor
                 || view.navigation.scroll.revision != view.history_revision(),
-            initializing: !view.navigation.scroll.initialized,
+            initializing: !view.navigation.scroll.initialized(),
         }
     }
 }
@@ -1922,7 +1922,7 @@ impl UiState {
             .map(|(_, entry)| {
                 visible_render_nodes(
                     &entry.value,
-                    view.navigation.scroll.row,
+                    view.navigation.scroll.row(),
                     view.navigation.scroll.height,
                     view.nodes().len(),
                 )
@@ -3579,10 +3579,11 @@ impl UiState {
             if retry_window {
                 // Keep the user's unconsumed movement until fresh ordinals
                 // arrive; never apply it against the rejected snapshot.
-                view.navigation.read_event(ReadEvent::RebaseRequested {
-                    ticket: (view.navigation.view_revision, None),
-                    pending: Some(amount),
-                });
+                view.navigation
+                    .on_event(NavEvent::Read(ReadEvent::RebaseRequested {
+                        ticket: (view.navigation.view_revision, None),
+                        pending: Some(amount),
+                    }));
                 self.deferred_actions.push(UiAction::RebaseHistory {
                     thread_id: view
                         .thread_id
@@ -3702,7 +3703,8 @@ impl UiState {
                 .values_mut()
                 .find(|view| view.matches_navigation_reply(thread, generation, revision, node))
             {
-                view.navigation.read_event(ReadEvent::OwnerRejected);
+                view.navigation
+                    .on_event(NavEvent::Read(ReadEvent::OwnerRejected));
                 view.status = "履歴の取得は未受付です。スクロールで再試行できます".into();
                 self.dirty = true;
                 return;
@@ -4133,7 +4135,8 @@ impl UiState {
         view.generation = generation;
         view.activity = Default::default();
         view.live_work.accept(None, Instant::now());
-        view.navigation.read_event(ReadEvent::ThreadSelected);
+        view.navigation
+            .on_event(NavEvent::Read(ReadEvent::ThreadSelected));
         actions.push(UiAction::SelectThread {
             thread_id: thread_id.clone(),
             generation,
@@ -4361,8 +4364,7 @@ impl UiState {
             },
         );
         view.status = "送信要求を受け付け中".into();
-        view.cancel_navigation();
-        view.navigation.resume_follow();
+        view.follow_tail();
         let snapshot = Some(Box::new(draft.clone()));
         if let Some(edit) = draft.edit {
             return vec![UiAction::SendEdited {
@@ -4957,12 +4959,12 @@ impl UiState {
             return vec![];
         }
         view.reasoning_expanded.insert(node_id.clone());
-        view.navigation.anchor = ViewAnchor {
-            node_id: Some(node_id.clone()),
-            char_offset: offset,
-        };
-        view.navigation.set_follow(false);
-        view.navigation.view_revision += 1;
+        view.navigation.on_event(NavEvent::ReasoningExpanded {
+            anchor: ViewAnchor {
+                node_id: Some(node_id.clone()),
+                char_offset: offset,
+            },
+        });
         if (offset < source_start || offset >= source_end)
             && let Some(thread_id) = view.thread_id.clone()
         {

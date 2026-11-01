@@ -93,7 +93,7 @@ impl ReadState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ReadMotion {
     #[default]
     Retained,
@@ -129,6 +129,9 @@ pub(in crate::ui) enum ReadEvent {
     },
     Cancelled {
         keep_pending: bool,
+    },
+    RebaseBoundary {
+        ticket: ReadTicket,
     },
     Failed,
     ReplyConsumed,
@@ -222,6 +225,9 @@ impl ReadIntent {
                 delta.unwrap_or(pending),
                 motion.with(motion.moved(), true),
             ),
+            ReadEvent::RebaseBoundary { ticket } => {
+                (true, Some(ticket), pending, ReadMotion::Rebasing)
+            }
             ReadEvent::Cancelled { keep_pending } => (
                 loading && ticket.is_none(),
                 None,
@@ -285,5 +291,58 @@ impl ReadIntent {
             pending,
         };
         effects
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn phase_tags_round_trip_every_preexisting_flag_combination() {
+        for loading in [false, true] {
+            for owned in [false, true] {
+                for motion in [
+                    ReadMotion::Retained,
+                    ReadMotion::Moved,
+                    ReadMotion::Rebasing,
+                    ReadMotion::RebasingMoved,
+                ] {
+                    let ticket = owned.then(|| (29, Some("node".into())));
+                    let state = ReadState::new(loading, ticket.clone(), motion);
+                    let intent = ReadIntent { state, pending: -3 };
+                    assert_eq!(intent.is_loading(), loading);
+                    assert_eq!(intent.request(), ticket.as_ref());
+                    assert_eq!(intent.moved(), motion.moved());
+                    assert_eq!(intent.rebasing(), motion.rebasing());
+                    let (actual_loading, actual_ticket, actual_motion) = intent.state.into_parts();
+                    assert_eq!(
+                        (actual_loading, actual_ticket, actual_motion),
+                        (loading, ticket, motion)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn events_preserve_legacy_failure_delta_and_unowned_hydration() {
+        let mut intent = ReadIntent::default();
+        intent.on_event(ReadEvent::WaitStarted);
+        intent.on_event(ReadEvent::Cancelled {
+            keep_pending: false,
+        });
+        assert!(intent.is_loading());
+        intent.on_event(ReadEvent::NavigationRequested {
+            ticket: (4, None),
+            pending: Some(-7),
+        });
+        intent.on_event(ReadEvent::Failed);
+        assert!(!intent.is_loading());
+        assert!(intent.request().is_none());
+        assert_eq!(intent.pending(), -7);
+        let effects = intent.on_event(ReadEvent::DeferredDrained);
+        assert_eq!(effects.pending, -7);
+        assert_eq!(intent.pending(), 0);
     }
 }

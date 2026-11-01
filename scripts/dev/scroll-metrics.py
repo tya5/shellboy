@@ -9,9 +9,9 @@ TOKENS = re.compile(r'r(?P<hash>\#*)".*?"(?P=hash)|"(?:\\.|[^"\\])*"|\'(?:\\.|[^
 FIELDS = ('follow', 'loading', 'request', 'pending', 'history_rebase_pending',
           'committed_preview', 'initialized', 'unseen', 'moved_during_read',
           'anchor', 'row', 'within', 'mode', 'read', 'view_revision',
-          'width', 'height', 'revision', 'focus', 'origin', 'area', 'intent')
+          'width', 'height', 'revision', 'focus', 'origin', 'area', 'intent', 'scroll', 'position')
 FILES = ('src/ui.rs', 'src/ui/view.rs', 'src/ui/history_interaction.rs',
-         'src/ui/overlay.rs', 'src/ui/navigation.rs', 'src/ui/view/navigation.rs', 'src/ui/view/navigation/read.rs')
+         'src/ui/overlay.rs', 'src/ui/navigation.rs', 'src/ui/view/navigation.rs', 'src/ui/view/navigation/read.rs', 'src/ui/view/navigation/events.rs')
 
 
 def masked(text):
@@ -71,15 +71,15 @@ def measure(root):
             # Ignore request-builder fields and other UI domains. This is the
             # stage-1 inventory, not an instruction/event execution counter.
             owner = r'(?:self|view|state)\s*(?:\.\s*(?:active_)?view_mut\(\))?'
-            projection_only = name in ('width', 'height', 'revision', 'focus', 'origin', 'area', 'intent')
+            projection_only = name in ('width', 'height', 'revision', 'focus', 'origin', 'area')
             scroll_path = r'scroll\s*\.\s*' if projection_only else r'(?:scroll\s*\.\s*)?'
             path_pattern = owner + r'\s*\.\s*(?:navigation\s*\.\s*)?' + scroll_path
             pattern = path_pattern + rf'{name}(?:\s*\.\s*(?:node_id|char_offset))?\s*(?:=(?!=)|\+=|-=|\.take\(\))'
             for m in re.finditer(pattern, code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
-            for m in re.finditer(rf'&mut\s+{path_pattern}{name}\b', code):
+            for m in re.finditer(rf'&mut\s+{path_pattern}{name}\b(?!\s*\.)', code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
-        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation|set_follow|set_unseen|set_mode|set_loading|set_request|take_request|begin_read|resume_follow|begin_rebase|restore|cancel|rebase|fail_read|finish_reply|read_event|on_event)\(', code):
+        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation|set_follow|set_unseen|set_mode|set_loading|set_request|take_request|begin_read|resume_follow|begin_rebase|restore|cancel|rebase|fail_read|finish_reply|read_event|on_event|start_rebase_navigation|follow_tail)\(', code):
             transitions.append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
         for m in re.finditer(r'\bfn (scroll|scroll_step)\s*\(', code):
             begin = code.index('{', m.end())

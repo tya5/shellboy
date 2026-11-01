@@ -277,3 +277,40 @@ mutation. The helper counts the reducer's `mem::take(self)` and `*self =` plus
 all event calls and recursively counts the intent's three stored fields. At this
 boundary metrics136 / fields17 are still above the review target; next consolidate
 Navigation events and repeated projection settlement, not stop at renamed setters.
+
+### Event-driven boundary (before the six fixes)
+
+NavigationEvent now selects epoch advancement, follow mode, read settlement and
+projection publication in one dispatcher; ReadEvent reduces the read intent
+atomically. Ordinary scroll start/position, bounded read requests, rebase start,
+explicit tail following, source-view restore, history focus and reasoning source
+reveal enter that dispatcher. The source planner still owns bounded node/offset
+lookup and returns the existing UiAction requests; it does not add I/O.
+
+| Event | Epoch | Mode / read / projection |
+| --- | --- | --- |
+| ScrollInitiated | Advance | Pause, retaining unseen and owned context |
+| ReadRequested | New only for anchor hydration | Awaiting(ticket), optional deferred delta |
+| StartRebase | Advance | Rebase owner, preserve delta, clear previous moved marker |
+| TailRequested | Advance | Follow and clear unseen; cancel owned navigation |
+| Restored | Unchanged | Adopt source anchor/mode, clear unseen |
+| PositionResolved | Unchanged | Publish source/frame checkpoint, choose paused or true-tail follow |
+| FrameProjected | Unchanged | Publish derived projection only (legacy render writes retained) |
+| HistoryFocused | Advance | Preserve deferred movement, legacy implicit pause retained |
+| ReasoningExpanded | Advance | Source-position reveal and pause |
+| ReplyConsumed / Failed | Unchanged | Settle owner; legacy failed-read delta retained |
+
+Read phase discriminants encode all 16 previous loading/ownership/moved/rebase
+combinations, including legacy detached/test-seeded states, without independently
+writable moved/rebase fields. ProjectionPosition encodes current/stale rows,
+preserving the stale row instead of an independently writable initialized flag.
+The cache predicate, height behaviour and true-tail clamp are unchanged here.
+No suspicious-case expectation is fixed in this structural commit.
+
+Using the same final helper against archived 5cb06aaa: baseline151 writes +10
+calls=161, current32 writes +58 calls=90; scroll395 ->324 lines; stored fields20
+->15. Payload fields in ReadIntent are counted recursively; aggregate wrappers
+are excluded only once. Both whole-state mem::take and replacement assignments,
+all event/entry calls and reducer internals are included. A mutable child borrow
+is not also charged to its parent aggregate. New helper regression tests cover
+that rule and whole-intent replacement accounting (7 tests total).

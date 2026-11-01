@@ -167,32 +167,32 @@ impl UiState {
         };
         let source = layout.sources.get(top);
         let view = self.active_view_mut();
-        view.rebase_navigation();
+        view.prepare_navigation();
         view.items.active = true;
         view.items.focus = Some(item.key.clone());
         view.history_focus_item = Some(item);
-        view.navigation.set_follow(false);
-        if let Some(source) = source
-            && let Some(node) = view.nodes().get(source.node)
-        {
-            view.navigation.anchor = ViewAnchor {
-                node_id: Some(node.node_id.clone()),
-                char_offset: source.offset,
-            };
-            view.navigation.scroll.anchor = view.navigation.anchor.clone();
-            let first = layout
-                .sources
-                .iter()
-                .position(|candidate| {
-                    candidate.node == source.node && candidate.offset == source.offset
-                })
-                .unwrap_or(top);
-            view.navigation.scroll.within = top.saturating_sub(first);
-            view.navigation.scroll.row = top;
-            view.navigation.scroll.revision = view.history_revision();
-            view.navigation.scroll.origin = layout.sources.first().map_or(0, |source| source.node);
-            view.navigation.scroll.initialized = true;
-        }
+        let position = source.and_then(|source| {
+            view.nodes().get(source.node).map(|node| {
+                let anchor = ViewAnchor {
+                    node_id: Some(node.node_id.clone()),
+                    char_offset: source.offset,
+                };
+                let first = layout
+                    .sources
+                    .iter()
+                    .position(|candidate| {
+                        candidate.node == source.node && candidate.offset == source.offset
+                    })
+                    .unwrap_or(top);
+                (anchor, top.saturating_sub(first))
+            })
+        });
+        view.navigation.on_event(NavEvent::HistoryFocused {
+            position,
+            row: top,
+            revision: view.history_revision(),
+            origin: layout.sources.first().map_or(0, |source| source.node),
+        });
         self.dirty = true;
     }
     pub(super) fn history_focus_key(&mut self, key: KeyEvent) -> Option<Vec<UiAction>> {
@@ -550,7 +550,7 @@ impl UiState {
             return vec![];
         }
         let layout = self.item_layout();
-        let y = self.view().navigation.scroll.row + usize::from(row.saturating_sub(area.y + 1));
+        let y = self.view().navigation.scroll.row() + usize::from(row.saturating_sub(area.y + 1));
         let Some(item) = layout
             .sources
             .get(y)
@@ -979,7 +979,7 @@ mod tests {
         node.total_chars = node.text.chars().count();
         let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
         terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-        assert!(ui.view().navigation.scroll.row > 0);
+        assert!(ui.view().navigation.scroll.row() > 0);
         key(&mut ui, KeyCode::Tab);
         assert!(ui.view().items.active);
         assert_eq!(ui.view().items.focus, Some(ItemKey::Node("source".into())));

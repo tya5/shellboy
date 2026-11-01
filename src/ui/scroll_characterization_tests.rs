@@ -133,7 +133,7 @@ fn snap(ui: &UiState) -> String {
         v.navigation.anchor.char_offset,
         v.navigation.scroll.within,
         v.navigation.moved_during_read(),
-        v.navigation.scroll.initialized,
+        v.navigation.scroll.initialized(),
         v.navigation.view_revision,
     )
 }
@@ -180,7 +180,7 @@ fn following_tail_is_the_initial_state_and_render_does_not_change_it() {
     // The first render is the one that initializes the visual scroll cache.
     assert!(before.contains("initialized=false"), "{before}");
     assert!(after_first.contains("initialized=true"), "{after_first}");
-    assert!(ui.view().navigation.scroll.row > 0 && ui.view().navigation.scroll.height == 33 - 13);
+    assert!(ui.view().navigation.scroll.row() > 0 && ui.view().navigation.scroll.height == 33 - 13);
 }
 
 #[test]
@@ -579,7 +579,7 @@ fn view_state_update_replaces_anchor_and_follow_and_clears_unseen() {
     assert_eq!(v.navigation.anchor.char_offset, 40);
     let screen = rows(&mut ui, &mut t);
     assert!(first_text(&screen).starts_with("R008"), "{screen:?}");
-    assert!(ui.view().navigation.scroll.initialized);
+    assert!(ui.view().navigation.scroll.initialized());
 }
 
 #[test]
@@ -601,7 +601,7 @@ fn tab_into_history_focus_pauses_on_the_visible_top_row_without_a_read() {
             && v.navigation.request().is_none()
             && v.navigation.pending() == 0
     );
-    assert!(v.navigation.scroll.initialized && !v.navigation.unseen());
+    assert!(v.navigation.scroll.initialized() && !v.navigation.unseen());
 }
 
 // ---- resize ----
@@ -627,7 +627,7 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
     rows(&mut ui, &mut t);
     assert_eq!(ui.view().navigation.anchor, anchor);
     assert!(!ui.view().navigation.follow() && ui.view().navigation.request().is_none());
-    assert!(ui.view().navigation.scroll.initialized);
+    assert!(ui.view().navigation.scroll.initialized());
     t.backend_mut().resize(60, 33);
     assert_eq!(
         rows(&mut ui, &mut t),
@@ -649,14 +649,14 @@ fn render_writes_viewport_cache_fields_and_then_settles() {
     let state = |ui: &UiState| {
         let s = &ui.view().navigation.scroll;
         (
-            s.row,
+            s.row(),
             s.within,
             s.origin,
             s.width,
             s.height,
             s.revision,
             s.anchor.clone(),
-            s.initialized,
+            s.initialized(),
         )
     };
     let first = state(&ui);

@@ -55,3 +55,22 @@ fn after() { self.read = state; }
         self.assertIn('delta', code)
         self.assertIn('Event::Real', code)
         self.assertIn('self.read = state', code)
+
+    def test_mutable_child_borrow_is_not_also_a_parent_slot_write(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src/ui').mkdir(parents=True)
+            (root / 'src/ui/view.rs').write_text('fn drain(&mut self) { std::mem::take(&mut self.scroll.pending); }')
+            result = metrics.measure(root)
+            self.assertEqual(result['counts']['pending'], 1)
+            self.assertEqual(result['counts']['scroll'], 0)
+
+    def test_whole_intent_take_and_replacement_are_both_counted(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src/ui/view/navigation').mkdir(parents=True)
+            (root / 'src/ui/view/navigation/read.rs').write_text('fn reduce(&mut self) { let old = std::mem::take(self);\n*self = old; }')
+            result = metrics.measure(root)
+            self.assertEqual(result['counts']['intent'], 2)
