@@ -344,7 +344,8 @@ Finished rows (completed, failed, stopped, and recovery waits) show the saved
 transition time in local time instead of a growing counter: `13:42 完了`, or
 `10/31 22:05 完了` when it is not today. It never changes as time passes. When
 the transition time was not saved (only observed in this UI), the row says
-`時刻不明` rather than inventing one. Running rows keep an elapsed time that
+`時刻不明` rather than inventing one. A recovery wait uses the failure time
+saved in its recovery reason when present. Running rows keep an elapsed time that
 rolls up units (`59秒`, `4分12秒`, `1時間3分`). A completed row is always `完了`;
 an unread one adds a mark (`完了 ●`). When only finished rows are visible, the
 clock never redraws the screen.

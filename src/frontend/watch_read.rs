@@ -237,7 +237,21 @@ pub(super) fn prepare_with_titles(
                 | crate::activity::ActivityPhase::Failed => {
                     saved_age(identity.run_ended_at.as_deref())
                 }
-                // A Turn creation time does not prove when waiting/recovery began.
+                // The saved recovery reason records when the failure happened;
+                // absent (or over the read limit) it is unknown, never Turn creation.
+                crate::activity::ActivityPhase::Recovery => {
+                    let failed_at = (!extra.recovery_limited)
+                        .then_some(extra.recovery.as_deref())
+                        .flatten()
+                        .and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+                        .and_then(|body| {
+                            body.pointer("/details/last_failure_at")
+                                .and_then(|value| value.as_str())
+                                .map(str::to_owned)
+                        });
+                    saved_age(failed_at.as_deref())
+                }
+                // A Turn creation time does not prove when waiting began.
                 _ => None,
             };
             let model_request_age = matches!(
@@ -420,6 +434,31 @@ mod tests {
         let extra = &raw.extras["t"];
         assert!(extra.answer.is_none() && extra.recovery.is_none() && extra.command.is_none());
         assert!(extra.answer_limited && extra.recovery_limited && extra.command_limited);
+    }
+    #[test]
+    fn recovery_row_uses_saved_failure_time_only_when_the_reason_carries_it() {
+        let db = fixture();
+        db.execute_batch("UPDATE shell_execution SET state='exited'; UPDATE turn SET state='recovery_wait' WHERE id='u';").unwrap();
+        let mut states = Vec::new();
+        for body in [
+            r#"{"code":"io_failed","message":"x","details":{"last_failure_at":"2026-10-31T13:05:00Z"}}"#,
+            r#"{"code":"io_failed","message":"x"}"#,
+        ] {
+            db.execute("UPDATE turn SET recovery_reason_json=?1", [body])
+                .unwrap();
+            let rows = prepare(read_tx(&db, &["t".into()]).unwrap());
+            let facts = rows[0].facts();
+            assert_eq!(facts.phase, crate::activity::ActivityPhase::Recovery);
+            states.push(facts.state_age.as_ref().and_then(|age| age.saved_at));
+        }
+        assert_eq!(
+            states[0].map(|at| at.to_rfc3339()).as_deref(),
+            Some("2026-10-31T13:05:00+00:00")
+        );
+        assert!(
+            states[1].is_none(),
+            "absent time is unknown, not Turn creation"
+        );
     }
     #[test]
     fn aggregate_budget_charges_whole_command_sources_and_unicode_is_not_bytes() {
