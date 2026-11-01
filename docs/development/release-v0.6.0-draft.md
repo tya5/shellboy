@@ -34,6 +34,10 @@ Messages support, and new request and resource inspection tools.
   If the terminal does not return consistent measurements, the width is unknown
   and layout reserves two columns. This is a measured terminal capability, not
   a locale guess or a width setting (#139).
+- The symbols `◉`, `›`, `↳` and `⋯` are restored. Branches, separators,
+  vertical lines, arrows and ellipses use box-drawing and other symbols only
+  when their width measures one column at startup; they use ASCII when the
+  measured width is two columns or unavailable (#156).
 
 ## Proactive compaction and usage
 
@@ -43,6 +47,10 @@ Messages support, and new request and resource inspection tools.
   the provider reports no input count, it does not trigger. It does not
   pre-block a large request. Set `auto_at_tokens = 0` under
   `[compaction]` to disable it, or override the threshold per connection (#125).
+- After a rejected proactive summary, Shellboy retries when reported input has
+  grown by at least 10% of the threshold. Even if a summary is rejected, it
+  adopts any spill that reduces input, and records the rejected summary's usage
+  when reported (#153).
 - Summary requests may cost tokens and affect prompt-cache reuse. `compact list`
   and ungrouped `usage get` expose separately recorded summary-request usage;
   missing provider counts remain unknown, not zero (#132, #133).
@@ -88,9 +96,8 @@ Messages support, and new request and resource inspection tools.
 
 - Some Japanese wording remains even when English is selected as the default.
   The remaining mixed-language audit and cleanup are tracked in #152.
-- A rejected or unsafe proactive compaction can suppress further proactive
-  attempts for the same Run. Long Runs can therefore continue to grow; inspect
-  usage and compaction results. A bounded retry fix is tracked in #153.
+- Model text and reasoning within a single long Turn are not covered by normal
+  summarization and can continue to grow the context.
 
 ## Fixes and development
 
@@ -107,11 +114,11 @@ Windows x64, macOS Apple Silicon and Linux x64 archives are intended to include
 an executable, LICENSE, configuration example and offline documentation. Verify
 all archives and installer scripts against `SHA256SUMS` when candidates exist.
 
-**Draft snapshot:** main `b12a8291b1950a5f7db58de4dccbb12101a2a074`. The release
-cut remains open until #153 and #156 reach main; #149, #150 and remaining #152
-work may also be included if landed by then. Final release-note additions await
-the user's direction. CI, candidate archives/installers/checksums and upgrade
-verification are separate gates; this preparation does not create a tag, publish
+**Draft snapshot:** main `b12a8291b1950a5f7db58de4dccbb12101a2a074`; update the
+snapshot SHA after #156 lands on main. #149, #150 and the remaining #152 work
+are deferred beyond v0.6.0. CI, candidate archives/installers/checksums and
+upgrade verification are separate gates; this preparation does not create a tag,
+publish
 a release, replace an installed binary or modify user data.
 
 After the reviewer builds a candidate, run the synthetic upgrade check on a Unix
