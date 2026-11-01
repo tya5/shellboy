@@ -268,10 +268,16 @@ impl BrowserMessage<'_> {
                     descendants: true,
                     loading,
                 },
-            ) => format!(
-                "Descendant Watch | {count} conversations{}",
-                if loading { " | Loading" } else { "" }
-            ),
+            ) => match count {
+                1 => format!(
+                    "Descendant Watch | 1 conversation{}",
+                    if loading { " | Loading" } else { "" }
+                ),
+                _ => format!(
+                    "Descendant Watch | {count} conversations{}",
+                    if loading { " | Loading" } else { "" }
+                ),
+            },
             (
                 En,
                 Self::WatchTitle {
@@ -279,10 +285,16 @@ impl BrowserMessage<'_> {
                     descendants: false,
                     loading,
                 },
-            ) => format!(
-                "Work Watch | {count} conversations{}",
-                if loading { " | Loading" } else { "" }
-            ),
+            ) => match count {
+                1 => format!(
+                    "Work Watch | 1 conversation{}",
+                    if loading { " | Loading" } else { "" }
+                ),
+                _ => format!(
+                    "Work Watch | {count} conversations{}",
+                    if loading { " | Loading" } else { "" }
+                ),
+            },
             (
                 Ja,
                 Self::WatchTitle {
@@ -5596,6 +5608,24 @@ mod language_tests {
         super::super::i18n::verify_screen(descendant, descendant_expected);
         super::super::i18n::verify_screen(stale, stale_expected);
         super::super::i18n::verify_screen(empty, empty_expected);
+    }
+    #[test]
+    fn watch_title_counts_use_complete_singular_and_plural_messages() {
+        for (count, phrase) in [
+            (0, "0 conversations"),
+            (1, "1 conversation"),
+            (2, "2 conversations"),
+        ] {
+            for (descendants, heading) in [(false, "Work Watch"), (true, "Descendant Watch")] {
+                let title = BrowserMessage::WatchTitle {
+                    count,
+                    descendants,
+                    loading: false,
+                }
+                .render(UiLanguage::En);
+                assert_eq!(title, format!("{heading} | {phrase}"));
+            }
+        }
     }
     #[test]
     fn footer_line_budget_preserves_dense_rows_in_both_languages() {
