@@ -6201,7 +6201,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         state.dirty = false;
         return;
     }
-    let input = input::display(&state.view().draft);
+    let input = input::display(&state.view().draft, state.config.ui.language);
     let input_width = area.width.saturating_sub(2).max(1);
     let input_metrics = input::measure(&input.text, input.cursor, input_width);
     let input_height = input_metrics
@@ -6347,7 +6347,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     if let Some(snapshot) = &view.activity.snapshot {
         draw_recovery(frame, recovery_area, snapshot, state.config.ui.language);
     }
-    message_queue::draw_compact(frame, queue_area, view);
+    message_queue::draw_compact(frame, queue_area, view, state.config.ui.language);
     live_work::draw(
         frame,
         live_area,
@@ -6365,9 +6365,12 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         frame.set_cursor_position(cursor);
     }
     let popup_area = popup::viewport(area);
-    state
-        .queue_popup
-        .draw(frame, popup_area, &state.view().pending_messages);
+    state.queue_popup.draw(
+        frame,
+        popup_area,
+        &state.view().pending_messages,
+        state.config.ui.language,
+    );
     if state.thread_browser.visible() {
         let active = state.view().thread_id.as_deref();
         let notice_visible = state.top_overlay() == Some(overlay::Overlay::Threads);

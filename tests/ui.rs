@@ -177,7 +177,7 @@ fn long_paste_folds_inspects_edits_removes_and_sends_full_text() {
     ui.event(Event::Paste(pasted.clone()));
     assert_eq!(ui.view().draft.folds.len(), 1);
     let (display, _) = draft_display(&ui.view().draft);
-    assert!(display.contains("貼付け1"));
+    assert!(display.contains("Paste 1"));
     assert!(!display.contains("long 日本語"));
     ui.event(key(KeyCode::F(3)));
     assert!(ui.view().draft.folds[0].expanded);

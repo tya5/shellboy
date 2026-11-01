@@ -1180,7 +1180,7 @@ impl Details {
         language: crate::config::UiLanguage,
     ) -> Vec<crate::terminal_links::LinkRegion> {
         if let Some(choices) = &self.copy_choices {
-            choices.draw(frame, area, &self.paint);
+            choices.draw(frame, area, &self.paint, language);
             return vec![];
         }
         let count = match self.mode {
