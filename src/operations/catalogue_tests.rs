@@ -112,12 +112,12 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             expected,
             "{path}"
         );
-        for declared in binding.arguments {
+        for declared in &binding.arguments {
             assert!(
                 spec.fields.contains(&declared.field),
                 "{path}: every CLI argument has a typed logical field"
             );
-            let arg = actual[declared.spelling];
+            let arg = actual[declared.spelling.as_str()];
             assert_eq!(
                 arg.get_action().takes_values(),
                 declared.takes_value,
@@ -137,7 +137,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
                 .collect::<Vec<_>>();
             assert_eq!(
                 defaults,
-                declared.default.into_iter().collect::<Vec<_>>(),
+                declared.default.as_deref().into_iter().collect::<Vec<_>>(),
                 "{path} {} default",
                 declared.spelling
             );
@@ -150,7 +150,11 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
                     .iter()
                     .map(|value| value.get_name())
                     .collect::<BTreeSet<_>>();
-                let declared_names = declared.choices.iter().copied().collect::<BTreeSet<_>>();
+                let declared_names = declared
+                    .choices
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<BTreeSet<_>>();
                 assert_eq!(
                     actual_names.len(),
                     actual_choices.len(),

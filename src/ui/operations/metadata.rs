@@ -303,7 +303,7 @@ impl Form {
             }
         }
         lines.push(Line::from("CLIの入力項目"));
-        for argument in id.primary_cli().arguments {
+        for argument in &id.primary_cli().arguments {
             let suffix = if argument.repeat {
                 "（繰り返し指定）"
             } else if argument.takes_value {
@@ -313,6 +313,7 @@ impl Form {
             };
             let default = argument
                 .default
+                .as_deref()
                 .map(|value| format!(" · 既定 {value}"))
                 .unwrap_or_default();
             lines.push(Line::from(format!(
