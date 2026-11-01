@@ -1,5 +1,7 @@
 use super::*;
 use std::collections::BTreeMap;
+mod bounded;
+pub(super) use bounded::read_display;
 const AUTO: &str = "CASE WHEN json_valid(a.error_json) THEN json_type(a.error_json,'$.automatic_trim')='object' OR json_type(a.error_json,'$.automatic_trim_attempt')='object' ELSE 0 END";
 pub(super) const SPILL_COVERAGE_SQL: &str = "SELECT r.output_node_id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1 AND r.format_version='spill-v1' AND usage_saved_start(r.created_at)>=usage_saved_start(?2) AND usage_saved_start(r.created_at)<=usage_saved_start(?3) AND NOT EXISTS(SELECT 1 FROM replacement_source q WHERE q.replacement_id=r.id AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(json_extract(m.value,'$.outcome.result.compact.original_node_ids')) j WHERE m.key=?4 AND j.value=q.source_node_id)) ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?5";
 fn metrics(root: &str) -> String {
@@ -49,6 +51,15 @@ fn enriched(root: &str) -> String {
     )
 }
 pub(super) fn receipt_query(w: &Window) -> String {
+    receipt_source_query(w, false)
+}
+fn receipt_source_query(w: &Window, display: bool) -> String {
+    let join = if display { "CROSS JOIN" } else { "JOIN" };
+    let source = if display {
+        "operation_receipt o"
+    } else {
+        "operation_receipt o INDEXED BY compact_operation_thread"
+    };
     let meta = "CASE WHEN json_valid(m.value) THEN m.value ELSE '{}' END";
     let root = format!(
         "COALESCE(json_extract({meta},'$.outcome.result'),json_extract({meta},'$.outcome.error.details'),'{{}}')"
@@ -63,24 +74,46 @@ pub(super) fn receipt_query(w: &Window) -> String {
         "COALESCE(json_extract({root},'$.compact.spilled_groups'),json_extract({root},'$.spilled_groups'))"
     );
     format!(
-        "SELECT min(o.operation_id),o.created_at,{at},{kind},{},json_extract({meta},'$.state'),count(*),CASE WHEN typeof({spilled})='integer' AND {spilled}>0 THEN {spilled} ELSE 0 END FROM operation_receipt o INDEXED BY compact_operation_thread JOIN app_meta m ON m.key='compact.result.'||o.operation_id LEFT JOIN node n ON n.id={node} AND {kind}<>'restore' WHERE CASE WHEN json_valid(o.result_ref_json) THEN json_extract(o.result_ref_json,'$.result.status')='queued' ELSE 0 END AND json_extract(o.result_ref_json,'$.result.thread_id')=?1 AND json_valid(m.value) AND {} GROUP BY {group} ORDER BY usage_saved_start({at}) DESC,min(o.operation_id) DESC LIMIT ?2",
+        "SELECT min(o.operation_id),o.created_at,{at},{kind},{},json_extract({meta},'$.state'),count(*),CASE WHEN typeof({spilled})='integer' AND {spilled}>0 THEN {spilled} ELSE 0 END FROM {source} {join} app_meta m ON m.key='compact.result.'||o.operation_id LEFT JOIN node n ON n.id={node} AND {kind}<>'restore' WHERE CASE WHEN json_valid(o.result_ref_json) THEN json_extract(o.result_ref_json,'$.result.status')='queued' ELSE 0 END AND json_extract(o.result_ref_json,'$.result.thread_id')=?1 AND json_valid(m.value) AND {} GROUP BY {group} ORDER BY usage_saved_start({at}) DESC,min(o.operation_id) DESC LIMIT ?2",
         enriched(&root),
         w.sql(&at)
     )
 }
 pub(super) fn automatic_query(w: &Window) -> String {
+    automatic_source_query(w, false)
+}
+fn automatic_source_query(w: &Window, display: bool) -> String {
+    let source = if display {
+        "turn u JOIN model_attempt a"
+    } else {
+        "turn u INDEXED BY turns_by_thread JOIN model_attempt a INDEXED BY automatic_compaction_turn"
+    };
+    let failures = if display {
+        "(SELECT CASE WHEN count(*)<201 THEN sum(state IN ('failed','incomplete') AND native_rowid<=a.rowid) END FROM (SELECT rowid native_rowid,state FROM main.model_attempt INDEXED BY attempts_by_turn WHERE turn_id=a.turn_id ORDER BY started_at DESC LIMIT 201))"
+    } else {
+        "(SELECT count(*) FROM model_attempt earlier INDEXED BY attempts_by_turn WHERE earlier.turn_id=a.turn_id AND earlier.rowid<=a.rowid AND earlier.state IN ('failed','incomplete'))"
+    };
     let root = "COALESCE(json_extract(a.error_json,'$.automatic_trim'),json_extract(a.error_json,'$.automatic_trim_attempt.result'),json_extract(a.error_json,'$.automatic_trim_attempt.summary'),json_extract(a.error_json,'$.automatic_trim_attempt.error.details'),'{}')";
     let node = output_node(root);
     let at = "COALESCE(n.created_at,a.ended_at,a.started_at)";
     format!(
-        "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),(SELECT count(*) FROM model_attempt earlier INDEXED BY attempts_by_turn WHERE earlier.turn_id=a.turn_id AND earlier.rowid<=a.rowid AND earlier.state IN ('failed','incomplete')),CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.reason')='text' THEN json_extract(a.error_json,'$.automatic_trim_attempt.reason') END,CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.trigger')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt.trigger') END FROM turn u INDEXED BY turns_by_thread JOIN model_attempt a INDEXED BY automatic_compaction_turn ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
+        "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),{failures},CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.reason')='text' THEN json_extract(a.error_json,'$.automatic_trim_attempt.reason') END,CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.trigger')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt.trigger') END FROM {source} ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
         enriched(root),
         w.sql(at)
     )
 }
 pub(super) fn replacement_query(w: &Window) -> String {
+    replacement_source_query(w, false)
+}
+fn replacement_source_query(w: &Window, display: bool) -> String {
+    let join = if display { "CROSS JOIN" } else { "JOIN" };
+    let source_count = if display {
+        "(SELECT CASE WHEN count(*)<201 THEN count(*) END FROM (SELECT 1 FROM replacement_source q WHERE q.replacement_id=r.id LIMIT 201))"
+    } else {
+        "(SELECT count(*) FROM replacement_source q WHERE q.replacement_id=r.id)"
+    };
     format!(
-        "SELECT r.output_node_id,r.created_at,r.format_version,json_object('source_nodes',(SELECT count(*) FROM replacement_source q WHERE q.replacement_id=r.id),'first_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal LIMIT 1),'last_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal DESC LIMIT 1),'before_characters',json_extract(n.payload_json,'$.context_trim.history_characters'),'omitted_nodes',json_extract(n.payload_json,'$.context_trim.omitted_nodes'),'after_current_request_nodes',json_extract(n.payload_json,'$.context_trim.after_current_request_nodes'),'summary_characters',CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END,'summary_parts',json_array_length(n.payload_json,'$.summary_part_keys'),'summary_usage',json(CASE WHEN n.kind='summary' THEN json_extract(n.payload_json,'$.summary_usage') END),'reason',json_extract(n.payload_json,'$.context_trim.reason')) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND {} ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?2",
+        "SELECT r.output_node_id,r.created_at,r.format_version,json_object('source_nodes',{source_count},'first_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal LIMIT 1),'last_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal DESC LIMIT 1),'before_characters',json_extract(n.payload_json,'$.context_trim.history_characters'),'omitted_nodes',json_extract(n.payload_json,'$.context_trim.omitted_nodes'),'after_current_request_nodes',json_extract(n.payload_json,'$.context_trim.after_current_request_nodes'),'summary_characters',CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END,'summary_parts',json_array_length(n.payload_json,'$.summary_part_keys'),'summary_usage',json(CASE WHEN n.kind='summary' THEN json_extract(n.payload_json,'$.summary_usage') END),'reason',json_extract(n.payload_json,'$.context_trim.reason')) FROM thread_replacement tr {join} replacement r ON r.id=tr.replacement_id {join} node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND {} ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?2",
         w.sql("r.created_at")
     )
 }
@@ -161,6 +194,7 @@ pub(crate) struct RawCompactions {
     automatic: Vec<AutomaticRow>,
     replacements: Vec<ReplacementRow>,
     covered_spills: std::collections::HashSet<String>,
+    display_latest_complete: Option<bool>,
 }
 struct ReceiptRow {
     id: String,
@@ -179,7 +213,7 @@ struct AutomaticRow {
     retry: Option<i64>,
     turn: String,
     outcome: String,
-    failures: i64,
+    failures: Option<i64>,
     reason: Option<String>,
     trigger: Option<String>,
 }
@@ -359,6 +393,7 @@ pub(super) fn collect_tx(
         automatic,
         replacements,
         covered_spills,
+        display_latest_complete: None,
     })
 }
 pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
@@ -372,6 +407,7 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
         automatic,
         replacements,
         covered_spills,
+        display_latest_complete,
     } = raw;
     let mut events = BTreeMap::new();
     for row in receipts {
@@ -452,7 +488,9 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
     });
     let more = items.len() > limit;
     items.truncate(limit);
-    Ok(
-        json!({"items":items,"more":more,"period":window.json(),"coverage":{"source_candidate_limit":cap,"candidate_limit_reached":saturated,"retention":"retained facts only; missing legacy metrics are unknown; expired operation receipts can hide restores and operation associations","failure_count":"retained Turn failures, not an invented consecutive-failure counter"}}),
-    )
+    let mut value = json!({"items":items,"more":more,"period":window.json(),"coverage":{"source_candidate_limit":cap,"candidate_limit_reached":saturated,"retention":"retained facts only; missing legacy metrics are unknown; expired operation receipts can hide restores and operation associations","failure_count":"retained Turn failures, not an invented consecutive-failure counter"}});
+    if let Some(complete) = display_latest_complete {
+        value["coverage"]["latest_complete"] = json!(complete);
+    }
+    Ok(value)
 }

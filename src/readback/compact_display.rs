@@ -1,122 +1,16 @@
-//! Latest-only display resource envelope; canonical CLI reads stay unrestricted.
-use super::{compact, *};
+//! Indexed latest-compaction display; canonical CLI reads remain exact.
+use super::*;
 use crate::storage::StorageError;
-use std::cell::Cell;
-
-const VALUE_BYTES: i32 = 256 * 1024;
-const CALLBACKS: usize = 2500;
-const INTERVAL: i32 = 100;
-
-struct Counter {
-    remaining: Cell<usize>,
-    exhausted: Cell<bool>,
-}
-/// The caller owns a dedicated snapshot connection without another progress hook.
-/// This guard never crosses an await and drops before the shared snapshot continues.
-struct Guard<'a> {
-    db: &'a Connection,
-    old_length: i32,
-    counter: Box<Counter>,
-}
-impl<'a> Guard<'a> {
-    fn install(db: &'a Connection, callbacks: usize) -> Self {
-        let counter = Box::new(Counter {
-            remaining: Cell::new(callbacks),
-            exhausted: Cell::new(false),
-        });
-        unsafe extern "C" fn progress(context: *mut std::ffi::c_void) -> i32 {
-            // SAFETY: the boxed counter is stable and owned by the guard until
-            // Drop removes this hook. The connection runs on this one worker.
-            let counter = unsafe { &*context.cast::<Counter>() };
-            let remaining = counter.remaining.get().saturating_sub(1);
-            counter.remaining.set(remaining);
-            if remaining == 0 {
-                counter.exhausted.set(true);
-                1
-            } else {
-                0
-            }
-        }
-        // SAFETY: this synchronous scope exclusively owns connection execution.
-        // Existing snapshot code installs no hook; the callback never uses DB APIs.
-        let old_length = unsafe {
-            let old =
-                rusqlite::ffi::sqlite3_limit(db.handle(), rusqlite::ffi::SQLITE_LIMIT_LENGTH, -1);
-            rusqlite::ffi::sqlite3_limit(
-                db.handle(),
-                rusqlite::ffi::SQLITE_LIMIT_LENGTH,
-                old.min(VALUE_BYTES),
-            );
-            rusqlite::ffi::sqlite3_progress_handler(
-                db.handle(),
-                INTERVAL,
-                Some(progress),
-                std::ptr::from_ref(counter.as_ref()).cast_mut().cast(),
-            );
-            old
-        };
-        Self {
-            db,
-            old_length,
-            counter,
-        }
-    }
-    fn owns_limit(&self, error: &StorageError) -> bool {
-        match error {
-            StorageError::Operation(error) => error.code == ErrorCode::InputLimit,
-            StorageError::Sqlite(rusqlite::Error::SqliteFailure(code, _)) => {
-                (code.code == rusqlite::ErrorCode::OperationInterrupted
-                    && self.counter.exhausted.get())
-                    || (code.code == rusqlite::ErrorCode::TooBig && self.old_length > VALUE_BYTES)
-            }
-            _ => false,
-        }
-    }
-}
-impl Drop for Guard<'_> {
-    fn drop(&mut self) {
-        // SAFETY: remove the hook before freeing its counter; restore this
-        // connection's previous limit before its owner performs another query.
-        unsafe {
-            rusqlite::ffi::sqlite3_progress_handler(
-                self.db.handle(),
-                0,
-                None,
-                std::ptr::null_mut(),
-            );
-            rusqlite::ffi::sqlite3_limit(
-                self.db.handle(),
-                rusqlite::ffi::SQLITE_LIMIT_LENGTH,
-                self.old_length,
-            );
-        }
-    }
-}
-
 pub(crate) fn read(
     db: &Connection,
     thread: &str,
 ) -> Result<Option<compact::RawCompactions>, ApiError> {
-    read_with_allowance(db, thread, CALLBACKS)
-}
-fn read_with_allowance(
-    db: &Connection,
-    thread: &str,
-    callbacks: usize,
-) -> Result<Option<compact::RawCompactions>, ApiError> {
     if thread.is_empty() || thread.len() > 512 {
         return Err(invalid("Invalid Thread identity for compaction display"));
     }
-    let guard = Guard::install(db, callbacks);
-    let args = CompactListArgs {
-        thread_id: Some(thread.into()),
-        since: None,
-        until: None,
-        limit: 1,
-    };
-    match compact::collect_tx(db, thread, &args, &mut compact::CopyBudget::display()) {
+    match compact::read_display(db, thread) {
         Ok(raw) => Ok(Some(raw)),
-        Err(error) if guard.owns_limit(&error) => Ok(None),
+        Err(StorageError::Operation(error)) if error.code == ErrorCode::InputLimit => Ok(None),
         Err(error) => Err(compact::capture_error(error)),
     }
 }
@@ -172,14 +66,16 @@ mod tests {
         prove_restored(&db, old);
         db.execute_batch("ROLLBACK").unwrap();
         drop(db);
-        assert_eq!(compact::prepare(raw).unwrap(), expected);
+        let displayed = compact::prepare(raw).unwrap();
+        assert_eq!(displayed["items"], expected["items"]);
+        assert_eq!(displayed["coverage"]["source_candidate_limit"], 201);
     }
     #[test]
-    fn owned_work_limit_is_unknown_and_keeps_transaction_source_and_future_queries_usable() {
+    fn indexed_display_keeps_shared_snapshot_and_future_queries_usable() {
         let db = fixture(0);
         let old = length_limit(&db);
         db.execute_batch("BEGIN").unwrap();
-        assert!(read_with_allowance(&db, "t", 1).unwrap().is_none());
+        assert!(read(&db, "t").unwrap().is_some());
         prove_restored(&db, old);
         assert_eq!(
             compact::list(&db, "t", &args()).unwrap()["items"][0]["kind"],

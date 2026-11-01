@@ -243,10 +243,20 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             details.last_input = latest.last_input;
             if let Some(compactions) = compactions {
                 let compactions = crate::readback::prepare_compactions(*compactions)?;
-                details.last_compaction = compactions["items"]
+                let candidate = compactions["items"]
                     .as_array()
                     .and_then(|rows| rows.first())
                     .cloned();
+                if compactions["coverage"]["latest_complete"] == false {
+                    limited_fields.push("last_compaction".into());
+                    details.last_compaction = Some(serde_json::json!({
+                        "bounded_candidate":candidate,
+                        "coverage":compactions["coverage"],
+                        "notice":"Finite retained prefixes; canonical latest compaction is not certified"
+                    }));
+                } else {
+                    details.last_compaction = candidate;
+                }
             } else {
                 limited_fields.push("last_compaction".into());
             }

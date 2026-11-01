@@ -8,10 +8,16 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
+mod bounded;
 pub(crate) type Scope = (String, String, String);
+struct Coverage {
+    latest_complete: bool,
+    pending_complete: bool,
+}
 pub(crate) struct RawContextUsage {
     scope: Scope,
     latest: Option<RawSuccess>,
+    coverage: Option<Coverage>,
 }
 struct RawSuccess {
     attempt_id: String,
@@ -25,6 +31,9 @@ impl RawContextUsage {
     /// CLI reports: its ID, provider-reported input tokens (never estimated),
     /// and whether a replacement was adopted after it started.
     pub(crate) fn latest_reported_input(&self) -> Option<(&str, Option<u64>, bool)> {
+        if self.coverage.is_some() {
+            return None;
+        }
         self.latest.as_ref().map(|latest| {
             (
                 latest.attempt_id.as_str(),
@@ -68,7 +77,7 @@ fn latest_query() -> String {
 }
 
 /// None preserves the canonical CLI scalar contract. Display callers pass512.
-/// Copy bounds are not a claim of constant latest-attempt/replacement SQL work.
+/// Display reads use finite native prefixes and explicit incomplete evidence.
 pub(crate) fn read_context_usage_tx(
     db: &Connection,
     thread: &str,
@@ -106,6 +115,9 @@ pub(crate) fn read_context_usage_tx(
     let (Some(profile), Some(model)) = (profile, model) else {
         return Err(scalar_limit());
     };
+    if scalar_bytes.is_some() {
+        return bounded::read(db, thread, limit, (thread.into(), profile, model));
+    }
     // The exact saved rowid ordering and replacement timestamp semantics are
     // deliberately shared with the CLI. A newer unknown usage never falls back.
     let sql = latest_query();
@@ -143,6 +155,7 @@ pub(crate) fn read_context_usage_tx(
     Ok(RawContextUsage {
         scope: (thread.into(), profile, model),
         latest,
+        coverage: None,
     })
 }
 /// The captured scope is private evidence for settings-aware display adoption.
@@ -158,6 +171,29 @@ pub(crate) fn prepare_context_usage(raw: RawContextUsage) -> (Value, Scope) {
             "next_request_pending": latest.next_request_pending
         })
     });
+    if let Some(coverage) = raw.coverage
+        && (!coverage.latest_complete || !coverage.pending_complete)
+    {
+        let mut candidate = latest;
+        if let Some(value) = candidate.as_mut()
+            && (!coverage.latest_complete
+                || (!coverage.pending_complete && value["next_request_pending"] != true))
+        {
+            value["next_request_pending"] = Value::Null;
+        }
+        return (
+            json!({
+                "last_successful_attempt": if coverage.latest_complete {candidate.clone()} else {None},
+                "bounded_observation": {
+                    "candidate": if coverage.latest_complete {None} else {candidate},
+                    "latest_complete":coverage.latest_complete,
+                    "replacement_coverage_complete":coverage.pending_complete,
+                    "notice":"Finite retained prefixes; unknown is not no saved usage or no pending edit"
+                }
+            }),
+            raw.scope,
+        );
+    }
     (json!({"last_successful_attempt": latest}), raw.scope)
 }
 
@@ -531,10 +567,12 @@ mod query_cost_tests {
         );
         drop(trace);
         let display = prepare_context_usage(raw).0;
-        assert_eq!(
-            display,
-            prepare_context_usage(read_context_usage_tx(db, "t", None).unwrap()).0
-        );
+        let exact = prepare_context_usage(read_context_usage_tx(db, "t", None).unwrap()).0;
+        if display["bounded_observation"].is_null() {
+            assert_eq!(display, exact);
+        } else {
+            assert!(display["bounded_observation"].is_object());
+        }
         display
     }
     fn plan(db: &Connection) -> Vec<String> {
@@ -569,10 +607,14 @@ mod query_cost_tests {
         assert_eq!(own1057.fullscan, 0);
         let details = prepared(&db);
         assert_eq!(
-            details["last_successful_attempt"]["attempt_id"],
+            details["bounded_observation"]["candidate"]["attempt_id"],
             "own-001056"
         );
-        assert_eq!(details["last_successful_attempt"]["input_tokens"], 11);
+        assert_eq!(
+            details["bounded_observation"]["candidate"]["input_tokens"],
+            11
+        );
+        assert!(details["last_successful_attempt"].is_null());
         let plan = plan(&db);
         assert!(
             plan.iter().any(|p| p.contains("turns_by_thread")),
@@ -643,6 +685,102 @@ mod query_cost_tests {
         );
         eprintln!(
             "Context replacement actual query counts: old1={first:?}, foreign5000={foreign:?}, old2048={own2048:?}, positive_witness={witness:?}; negative own work remains unbounded"
+        );
+    }
+}
+#[cfg(test)]
+mod bounded_cost_tests {
+    use super::*;
+    use rusqlite::StatementStatus;
+    fn fixture() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('marker','summary','now','{}');").unwrap();
+        db
+    }
+    fn grow(db: &Connection, from: usize, to: usize) {
+        db.execute_batch("BEGIN").unwrap();
+        for i in from..to {
+            let turn = format!("u{i:06}");
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'t','r','completed',?2)",params![turn,format!("{i:08}")]).unwrap();
+            for a in 0..64 {
+                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'p','m',0,'completed','{}','{\"input_tokens\":11}',?3)",params![format!("a{i:06}-{a:02}"),turn,format!("{a:08}")]).unwrap();
+            }
+            for edit in 0..4 {
+                let id = format!("edit{i:06}-{edit}");
+                db.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,'marker',?1,'summary-v1','fixture','completed','0000')",[&id]).unwrap();
+                db.execute(
+                    "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES('t',?1)",
+                    [id],
+                )
+                .unwrap();
+            }
+        }
+        db.execute_batch("COMMIT").unwrap();
+    }
+    fn measure(db: &Connection) -> (i32, i32) {
+        let mut q = db.prepare(&bounded::query()).unwrap();
+        {
+            let mut rows = q.query(params!["t", 512]).unwrap();
+            assert!(rows.next().unwrap().is_some());
+            assert!(rows.next().unwrap().is_none());
+        }
+        (
+            q.get_status(StatementStatus::VmStep),
+            q.get_status(StatementStatus::FullscanStep),
+        )
+    }
+    #[test]
+    fn tenfold_owned_growth_keeps_actual_display_query_vm_constant() {
+        let db = fixture();
+        grow(&db, 0, 64);
+        let a = measure(&db);
+        grow(&db, 64, 640);
+        let b = measure(&db);
+        assert!(b.0 <= a.0, "VM grew under10x owned history: {a:?}->{b:?}");
+        assert!(
+            a.0 < 200_000 && b.1 < 10_000,
+            "unbounded native work: {a:?} {b:?}"
+        );
+        let v = prepare_context_usage(read_context_usage_tx(&db, "t", Some(512)).unwrap()).0;
+        assert!(v["last_successful_attempt"].is_null());
+        assert_eq!(v["bounded_observation"]["latest_complete"], false);
+        assert!(v["bounded_observation"]["candidate"]["next_request_pending"].is_null());
+        let plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", bounded::query()))
+            .unwrap()
+            .query_map(params!["t", 512], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|s| s.contains("attempts_by_turn")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter().any(|s| s.contains("INTEGER PRIMARY KEY")),
+            "{plan:?}"
+        );
+        assert!(!plan.iter().any(|s| s.contains("AUTOMATIC")), "{plan:?}");
+        eprintln!(
+            "bounded context actual VM/fullscan before/after10x: {a:?}->{b:?}; elapsed is not a gate"
+        );
+    }
+    #[test]
+    fn rollback_rowid_winner_is_not_falsely_claimed_as_timestamp_prefix_latest() {
+        let db = fixture();
+        grow(&db, 0, 1);
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('late-rowid','u000000',0,0,'p','m',0,'completed','{}','00000000')",[]).unwrap();
+        let exact = read_context_usage_tx(&db, "t", None).unwrap();
+        assert_eq!(exact.latest.as_ref().unwrap().attempt_id, "late-rowid");
+        assert!(exact.latest.as_ref().unwrap().usage.input_tokens.is_none());
+        let v = prepare_context_usage(read_context_usage_tx(&db, "t", Some(512)).unwrap()).0;
+        assert!(v["last_successful_attempt"].is_null());
+        assert_eq!(v["bounded_observation"]["latest_complete"], false);
+        assert_ne!(
+            v["bounded_observation"]["candidate"]["attempt_id"],
+            "late-rowid"
         );
     }
 }
