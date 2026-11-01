@@ -5598,6 +5598,36 @@ mod language_tests {
         super::super::i18n::verify_screen(empty, empty_expected);
     }
     #[test]
+    fn actual_browser_borders_remain_aligned_in_both_modes_and_languages() {
+        use ratatui::{Terminal, backend::TestBackend};
+        for policy in [Some(1), Some(2), None] {
+            super::super::text_width::set_terminal_width(policy);
+            for width in [80, 120] {
+                for language in [UiLanguage::En, UiLanguage::Ja] {
+                    for watch in [false, true] {
+                        let mut config = crate::config::Config::default();
+                        config.ui.language = language;
+                        let mut ui = UiState::new(&config, std::path::PathBuf::new());
+                        populate(&mut ui, watch);
+                        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+                        terminal.draw(|frame| super::super::draw(frame, &mut ui)).unwrap();
+                        let bounds = ui.thread_browser.paint_bounds().unwrap().outer;
+                        let buffer = terminal.backend().buffer();
+                        for x in [bounds.x, bounds.right() - 1] {
+                            for y in [bounds.y, bounds.bottom() - 1] {
+                                assert_eq!(buffer[(x, y)].symbol(), "+");
+                            }
+                            for y in bounds.y + 1..bounds.bottom() - 1 {
+                                assert_eq!(buffer[(x, y)].symbol(), "|", "{policy:?} {width} {language:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        super::super::text_width::clear_terminal_width();
+    }
+    #[test]
     fn localized_details_preserve_native_values_and_source_text() {
         let mut row = record("日本語-ID", ActivityPhase::Stopped);
         row.title = "利用者の題名 ◉".into();
