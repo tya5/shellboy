@@ -6975,7 +6975,9 @@ mod layout_cache_tests {
     fn retry_footer_renders_saved_counts_and_clears_them_after_success() {
         use crate::ui::text_width::UnicodeWidthStr;
         use ratatui::{Terminal, backend::TestBackend};
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
         let update = |phase, automatic_retry, epoch| UiUpdate::Activity {
@@ -7236,7 +7238,9 @@ mod layout_cache_tests {
 
     #[test]
     fn draft_and_status_reuse_layout_but_same_length_source_and_reload_invalidate() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         history(&mut ui, "t", "aaaa 日本語");
         let first = ui.history_layout(24, 8);
@@ -7434,7 +7438,9 @@ mod layout_cache_tests {
     #[test]
     fn evicted_empty_tool_and_event_windows_reload_without_prose_blocks() {
         use crate::presentation::{BlockKind, PresentationBlock, PresentationKind};
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
         let mut original = vec![];
