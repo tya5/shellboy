@@ -546,7 +546,9 @@ fn a_second_target_cannot_overlap_an_inflight_deletion() {
 
 #[test]
 fn an_overlay_covering_the_browser_does_not_consume_an_unseen_deletion_notice() {
-    let mut ui = ui();
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, std::env::temp_dir());
     list(&mut ui, &["chosen"]);
     let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
     accept(&mut ui, id, &args, true);

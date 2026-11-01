@@ -776,7 +776,9 @@ mod tests {
     }
     #[test]
     fn descendant_count_stays_visible_when_other_footer_facts_fill_the_row() {
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
         ui.select_thread("t".into());
         ui.view_mut().navigation.set_loading(false);
         ui.view_mut().tool_calls = 9999;
