@@ -194,7 +194,7 @@ mod rendering_tests {
     #[test]
     fn language_configuration_is_strict_and_locale_independent() {
         for locale in ["ja_JP.UTF-8", "en_US.UTF-8", "C"] {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
                 .args([
                     "--exact",
                     "ui::i18n::rendering_tests::locale_subprocess_fixture",
@@ -202,9 +202,15 @@ mod rendering_tests {
                 .env("SHELLBOY_TEST_LOCALE", "1")
                 .env("LANG", locale)
                 .env("LC_ALL", locale)
-                .status()
+                .output()
                 .unwrap();
-            assert!(status.success(), "locale {locale}");
+            // Keep the nested harness summary out of the parent's test output;
+            // the CI timing runner counts one summary per executable.
+            assert!(
+                output.status.success(),
+                "locale {locale}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         assert_eq!(Config::parse("").unwrap().ui.language, UiLanguage::En);
         assert_eq!(
