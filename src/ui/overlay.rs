@@ -624,8 +624,14 @@ mod tests {
     #[test]
     fn changed_edit_confirmation_is_cancelled_in_both_languages() {
         for (language, expected) in [
-            (crate::config::UiLanguage::Ja, "下書きが変更されたため確認を取り消しました。再送してください"),
-            (crate::config::UiLanguage::En, "The draft changed, so confirmation was cancelled. Send again"),
+            (
+                crate::config::UiLanguage::Ja,
+                "下書きが変更されたため確認を取り消しました。再送してください",
+            ),
+            (
+                crate::config::UiLanguage::En,
+                "The draft changed, so confirmation was cancelled. Send again",
+            ),
         ] {
             let mut ui = state();
             ui.config.ui.language = language;
@@ -634,7 +640,10 @@ mod tests {
                 revision: ui.view().draft.revision.wrapping_add(1),
                 run_id: "run-fixture".into(),
             });
-            assert!(ui.confirmation_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)).is_empty());
+            assert!(
+                ui.confirmation_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+                    .is_empty()
+            );
             assert!(ui.confirmation.is_none());
             assert_eq!(ui.view().status, expected);
         }
