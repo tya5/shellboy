@@ -115,10 +115,12 @@ async fn paint_changed(
     actions: &mpsc::Sender<UiAction>,
     expected: &str,
 ) {
-    // Current fields follow the retained page; inspect a bounded traversal, not
-    // just the first viewport. No source/detail command is invoked by Down.
-    gesture(ui, KeyCode::Home, KeyModifiers::NONE);
-    for _ in 0..384 {
+    // The UI caps current plus retained fields at 256. Home does not move this
+    // list, so use its supported Up key before checking every possible viewport.
+    for _ in 0..256 {
+        gesture(ui, KeyCode::Up, KeyModifiers::NONE);
+    }
+    for _ in 0..256 {
         let screen = draw(ui);
         dispatch(actions, ui.take_deferred_actions()).await;
         if screen.contains(expected) {
@@ -205,9 +207,9 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                 let current = state.to_string();
                 // Arrange native retained facts, then deliver the notification through real IPC.
                 control.store.database.call(move |db| {
-                    db.execute("UPDATE run SET state=?1 WHERE id='r'",[&current])?;
-                    db.execute("UPDATE shell_execution SET state=?1 WHERE id='s'",[&current])?;
-                    db.execute("UPDATE app_meta SET value=json_set(value,'$.state',?1) WHERE key='compact.result.compact-op'",[current])?;
+                    assert_eq!(db.execute("UPDATE run SET state=?1 WHERE id='r'",[&current])?,1);
+                    assert_eq!(db.execute("UPDATE shell_execution SET state=?1 WHERE id='s'",[&current])?,1);
+                    assert_eq!(db.execute("UPDATE app_meta SET value=json_set(value,'$.state',?1) WHERE key='compact.result.compact-op'",[current])?,1);
                     Ok(())
                 }).await.unwrap();
                 let title = format!("round-{round}");
@@ -215,14 +217,32 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                 let response = shellboy::ipc::call(&data,mutation.clone(),None,None).await.unwrap();
                 assert!(response.ok,"{response:?}");
                 let expected = if route=="thread" {title.as_str()} else {state};
+                let pointer = match route {
+                    "status" => "/current_source/current/items/0/current/state",
+                    "thread" => "/current_source/current/items/0/title",
+                    "shell" => "/current_source/current/rows/0/state",
+                    _ => "/current_source/current/rows/0/downstream_state",
+                };
                 let s = loop {
                     if let Some(s) = apply(&mut ui,incoming.recv().await.unwrap()) {
                         assert_eq!(s.target,target,"retained scope changed");
-                        if s.metadata_sequence>last_sequence && s.fields.iter().any(|f|f.value.contains(expected)) { break s; }
+                        // Missing/clipped current evidence must fail separately from paint.
+                        let fact = s.fields.iter().find(|f|f.key==pointer)
+                            .unwrap_or_else(||panic!("current field omitted before paint: {pointer}; fields={:?}",s.fields));
+                        if s.metadata_sequence>last_sequence && fact.value==expected { break s; }
                     }
                 };
                 last_sequence=s.metadata_sequence;
-                paint_changed(&mut ui,&actions,expected).await;
+                let fact = s.fields.iter().find(|f|f.key==pointer).unwrap();
+                assert_eq!(fact.value,expected,"native fixture/current fact mismatch");
+                // Common decoration localizes state, but not downstream_state.
+                let displayed = match (route,state) {
+                    ("status" | "shell","failed") => "\u{5931}\u{6557}",
+                    ("status" | "shell","stopped") => "\u{505c}\u{6b62}\u{6e08}\u{307f}",
+                    _ => expected,
+                };
+                assert_eq!(fact.displayed(),displayed,"unexpected display mapping at {pointer}");
+                paint_changed(&mut ui,&actions,displayed).await;
                 let before = control.store.database.call(|db| Ok(db.query_row("SELECT revision,title FROM thread WHERE id='scope'",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?)))?)).await.unwrap();
                 let replay = shellboy::ipc::call(&data,mutation,Some(response.operation_id.clone()),None).await.unwrap();
                 assert!(replay.ok);
