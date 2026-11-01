@@ -71,6 +71,7 @@ mod threads;
 mod view;
 use draft::{adjust_folds, prev_grapheme};
 pub use threads::ThreadDisplayTime;
+use view::ReadEvent;
 pub use view::{Navigation, ThreadView};
 pub use watch::{
     BrowserMode, CompletionIdentity, DescendantCount, PreparedWatchDetail, WatchActionTarget,
@@ -3578,8 +3579,10 @@ impl UiState {
             if retry_window {
                 // Keep the user's unconsumed movement until fresh ordinals
                 // arrive; never apply it against the rejected snapshot.
-                view.navigation.scroll.pending = amount;
-                view.navigation.begin_rebase();
+                view.navigation.read_event(ReadEvent::RebaseRequested {
+                    ticket: (view.navigation.view_revision, None),
+                    pending: Some(amount),
+                });
                 self.deferred_actions.push(UiAction::RebaseHistory {
                     thread_id: view
                         .thread_id
@@ -3699,9 +3702,7 @@ impl UiState {
                 .values_mut()
                 .find(|view| view.matches_navigation_reply(thread, generation, revision, node))
             {
-                view.navigation.set_loading(false);
-                view.navigation.set_request(None);
-                view.navigation.scroll.moved_during_read = false;
+                view.navigation.read_event(ReadEvent::OwnerRejected);
                 view.status = "履歴の取得は未受付です。スクロールで再試行できます".into();
                 self.dirty = true;
                 return;
@@ -4132,10 +4133,7 @@ impl UiState {
         view.generation = generation;
         view.activity = Default::default();
         view.live_work.accept(None, Instant::now());
-        view.navigation.set_request(None);
-        view.navigation.scroll.pending = 0;
-        view.navigation.scroll.moved_during_read = false;
-        view.navigation.set_loading(true);
+        view.navigation.read_event(ReadEvent::ThreadSelected);
         actions.push(UiAction::SelectThread {
             thread_id: thread_id.clone(),
             generation,
@@ -7541,7 +7539,7 @@ mod layout_cache_tests {
         let view_revision = ui.view().navigation.view_revision;
         let view = ui.active_view_mut();
         view.navigation.set_loading(true);
-        view.navigation.scroll.pending = 3;
+        view.navigation.seed_pending(3);
         view.navigation
             .set_request(Some((view_revision, Some(second.node_id.clone()))));
         ui.apply(UiUpdate::NodeWindow {
@@ -7552,7 +7550,7 @@ mod layout_cache_tests {
         });
         assert!(!ui.view().navigation.is_loading());
         assert!(ui.view().navigation.follow());
-        assert_eq!(ui.view().navigation.scroll.pending, 0);
+        assert_eq!(ui.view().navigation.pending(), 0);
         assert!(ui.view().navigation.request().is_none());
         assert!(ui.take_deferred_actions().is_empty());
     }
@@ -8156,7 +8154,7 @@ mod thread_view_boundary_tests {
             },
         });
         assert!(!ui.views[&owner].navigation.is_loading());
-        assert!(!ui.views[&owner].navigation.history_rebase_pending);
+        assert!(!ui.views[&owner].navigation.is_rebasing());
         assert!(ui.views[&owner].navigation.request().is_none());
         assert_eq!(ui.views[&owner].first_ordinal, 3);
         assert_eq!(ui.view().navigation.anchor, current_anchor);
@@ -8184,11 +8182,11 @@ mod thread_view_boundary_tests {
         ui.take_deferred_actions();
         ui.apply(invalidate(generation + 1, revision));
         ui.apply(invalidate(generation, revision + 1));
-        assert!(!ui.views[&owner].navigation.history_rebase_pending);
+        assert!(!ui.views[&owner].navigation.is_rebasing());
         assert!(ui.take_deferred_actions().is_empty());
         ui.apply(invalidate(generation, revision));
-        assert!(ui.views[&owner].navigation.history_rebase_pending);
-        assert!(!ui.view().navigation.history_rebase_pending);
+        assert!(ui.views[&owner].navigation.is_rebasing());
+        assert!(!ui.view().navigation.is_rebasing());
         assert!(
             matches!(ui.take_deferred_actions().as_slice(), [UiAction::RebaseHistory { thread_id, generation: actual, .. }] if thread_id == "old" && *actual == generation)
         );
@@ -8245,9 +8243,9 @@ mod stale_rebase_retry_tests {
             node_id: Some("anchor".into()),
             char_offset: 0,
         };
-        view.navigation.history_rebase_pending = true;
+        view.navigation.seed_rebasing(true);
         view.navigation.set_loading(true);
-        view.navigation.scroll.pending = 7;
+        view.navigation.seed_pending(7);
         view.navigation
             .set_request(Some((view.navigation.view_revision, None)));
         let revision = view.navigation.view_revision;
@@ -8292,9 +8290,9 @@ mod stale_rebase_retry_tests {
         assert_eq!(ui.view().nodes()[0].text, text);
         assert_eq!(ui.view().pending_messages.total, 7);
         assert_eq!(ui.view().delivery_read_revision, 20);
-        assert_eq!(ui.view().navigation.scroll.pending, 7);
+        assert_eq!(ui.view().navigation.pending(), 7);
         assert_eq!(ui.view().navigation.request(), Some(&(revision, None)));
-        assert!(ui.view().navigation.history_rebase_pending && ui.view().navigation.is_loading());
+        assert!(ui.view().navigation.is_rebasing() && ui.view().navigation.is_loading());
         assert!(
             matches!(ui.take_deferred_actions().as_slice(),[UiAction::RebaseHistory{thread_id,generation:g,view_revision:r,anchor:a}] if thread_id=="thread"&&*g==generation&&*r==revision&&a==&anchor)
         );
@@ -8316,10 +8314,10 @@ mod stale_rebase_retry_tests {
         assert_eq!(ui.view().selection_revision, 7);
         assert_eq!(ui.view().delivery_read_revision, 21);
         assert_eq!(ui.view().pending_messages.total, 2);
-        assert!(!ui.view().navigation.history_rebase_pending);
+        assert!(!ui.view().navigation.is_rebasing());
         assert!(!ui.view().navigation.is_loading());
         assert!(ui.view().navigation.request().is_none());
-        assert_eq!(ui.view().navigation.scroll.pending, 0);
+        assert_eq!(ui.view().navigation.pending(), 0);
         assert!(!ui.view().navigation.follow());
         assert_eq!(ui.view().nodes()[0].text, text);
         assert!(ui.take_deferred_actions().is_empty());
@@ -8343,7 +8341,7 @@ mod stale_rebase_retry_tests {
             });
             assert_eq!(ui.view().nodes()[0].text, text);
             assert_eq!(ui.view().navigation.request(), Some(&(revision, None)));
-            assert_eq!(ui.view().navigation.scroll.pending, 7);
+            assert_eq!(ui.view().navigation.pending(), 7);
             assert!(ui.take_deferred_actions().is_empty());
         }
     }

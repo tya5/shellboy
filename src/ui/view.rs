@@ -3,6 +3,7 @@ use super::*;
 
 mod navigation;
 pub use navigation::Navigation;
+pub(super) use navigation::ReadEvent;
 
 #[derive(Debug)]
 pub struct ThreadView {
@@ -573,11 +574,11 @@ impl ThreadView {
             }
         }
         let mut source_changed = false;
-        if self.navigation.follow() && !self.navigation.history_rebase_pending {
+        if self.navigation.follow() && !self.navigation.is_rebasing() {
             source_changed |= self.retire_committed_preview(&nodes);
         }
         let previous_tail = self.nodes.last().map(|node| node.node_id.clone());
-        if self.navigation.history_rebase_pending {
+        if self.navigation.is_rebasing() {
             // A tail refresh cannot replace the frame whose source
             // anchor is being rebound to the selected path.
             self.navigation.set_unseen(true);
@@ -676,8 +677,7 @@ impl ThreadView {
         if append || self.navigation.follow() || previous_tail.is_none() {
             self.before_cursor = before_cursor;
         }
-        self.navigation
-            .set_loading(self.navigation.request().is_some());
+        self.navigation.read_event(ReadEvent::BodyHydrated);
         if !self.navigation.follow()
             && !append
             && previous_tail.is_some()
@@ -853,7 +853,7 @@ impl ThreadView {
         !retired.is_empty()
     }
     fn rebase_preview(&mut self) -> Option<UiAction> {
-        if self.navigation.history_rebase_pending {
+        if self.navigation.is_rebasing() {
             return None;
         }
         let (attempt, node_id) = self.navigation.committed_preview.clone()?;
@@ -887,7 +887,7 @@ impl ThreadView {
         generation: u64,
     ) -> Option<UiAction> {
         if !self.navigation.follow()
-            && !self.navigation.history_rebase_pending
+            && !self.navigation.is_rebasing()
             && !self
                 .navigation
                 .anchor
@@ -946,11 +946,7 @@ impl ThreadView {
         }
         // A source-window response does not install an off-page node. Its slot
         // may have been evicted while this asynchronous read was pending.
-        if installed
-            && body_ready
-            && self.navigation.follow()
-            && !self.navigation.history_rebase_pending
-        {
+        if installed && body_ready && self.navigation.follow() && !self.navigation.is_rebasing() {
             let retired = self
                 .committed_nodes
                 .iter()
@@ -1022,11 +1018,11 @@ impl ThreadView {
                 .saturating_add(self.selected_node_count() as u64)
                 < total_nodes
         {
-            self.navigation.history_rebase_pending = false;
+            self.navigation.read_event(ReadEvent::RebaseResolved);
             self.navigation.set_loading(false);
             return true;
         }
-        if (following || (window_reply && !self.navigation.history_rebase_pending))
+        if (following || (window_reply && !self.navigation.is_rebasing()))
             && selection_revision == self.selection_revision
         {
             merge_navigation_window(self, &mut nodes, &mut first_ordinal);
@@ -1035,11 +1031,11 @@ impl ThreadView {
             // An anchor window is not necessarily the latest page. Preserve the
             // paid/current frame until a real tail snapshot arrives.
             if first_ordinal.saturating_add(nodes.len() as u64) < total_nodes {
-                self.navigation.history_rebase_pending = false;
+                self.navigation.read_event(ReadEvent::RebaseResolved);
                 self.navigation.set_loading(false);
                 return true;
             }
-            self.navigation.history_rebase_pending = false;
+            self.navigation.read_event(ReadEvent::RebaseResolved);
             // A history window is not an authoritative audit snapshot. Keep
             // paid bodies at their surviving selected predecessors until that
             // separately fenced audit reply decides membership.
@@ -1074,7 +1070,7 @@ impl ThreadView {
         self.provisional_nodes
             .retain(|id| self.nodes.iter().any(|node| &node.node_id == id));
         self.on_incomplete_responses(received);
-        let relocated = self.navigation.history_rebase_pending
+        let relocated = self.navigation.is_rebasing()
             && !self
                 .nodes
                 .iter()
@@ -1084,8 +1080,8 @@ impl ThreadView {
         self.selection_revision = selection_revision;
         self.total_nodes = total_nodes;
         if !window_reply
-            || (self.navigation.history_rebase_pending
-                && !self.navigation.scroll.moved_during_read
+            || (self.navigation.is_rebasing()
+                && !self.navigation.moved_during_read()
                 && self.navigation.anchor != anchor)
             || !self
                 .nodes
@@ -1097,9 +1093,9 @@ impl ThreadView {
         }
         self.before_cursor = None;
         self.navigation.set_loading(false);
-        self.navigation.scroll.moved_during_read = false;
-        if self.navigation.history_rebase_pending {
-            self.navigation.history_rebase_pending = false;
+        self.navigation.read_event(ReadEvent::PositionSettled);
+        if self.navigation.is_rebasing() {
+            self.navigation.read_event(ReadEvent::RebaseResolved);
             self.status = if relocated {
                 "表示元が選択経路から外れたため、最新ページを表示しました"
             } else {
@@ -1119,7 +1115,7 @@ impl ThreadView {
             || self.generation != generation
             || view_revision.is_some_and(|revision| revision != self.navigation.view_revision)
             || (view_revision.is_none() && self.navigation.follow())
-            || self.navigation.history_rebase_pending
+            || self.navigation.is_rebasing()
         {
             return None;
         }
@@ -1808,11 +1804,11 @@ mod completion_notice_tests {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
         view.navigation
             .begin_read((view.navigation.view_revision, None), None);
-        view.navigation.scroll.pending = -3;
+        view.navigation.seed_pending(-3);
         view.on_load_failed("read permit unavailable".into());
         assert!(!view.navigation.is_loading());
         assert!(view.navigation.request().is_none());
-        assert_eq!(view.navigation.scroll.pending, -3);
+        assert_eq!(view.navigation.pending(), -3);
         assert_eq!(view.status, "read permit unavailable");
     }
     #[test]
@@ -1823,7 +1819,7 @@ mod completion_notice_tests {
         let revision = ui.view().navigation.view_revision;
         ui.view_mut().navigation.set_loading(true);
         ui.view_mut().navigation.set_request(Some((revision, None)));
-        ui.view_mut().navigation.scroll.pending = -3;
+        ui.view_mut().navigation.seed_pending(-3);
         ui.apply(UiUpdate::LoadFailed {
             thread_id: "thread".into(),
             generation,
@@ -1832,7 +1828,7 @@ mod completion_notice_tests {
         });
         assert!(ui.view().navigation.is_loading());
         assert_eq!(ui.view().navigation.request(), Some(&(revision, None)));
-        assert_eq!(ui.view().navigation.scroll.pending, -3);
+        assert_eq!(ui.view().navigation.pending(), -3);
         assert_eq!(ui.view().status, "background refresh failed");
     }
     #[test]
@@ -1961,7 +1957,8 @@ mod completion_notice_tests {
             "up remains usable before the read returns"
         );
         assert_eq!(
-            view.navigation.scroll.pending, 0,
+            view.navigation.pending(),
+            0,
             "opposite input cancels queued forward movement"
         );
         assert_eq!(
@@ -1987,8 +1984,8 @@ mod completion_notice_tests {
             node_id: Some("saved".into()),
             char_offset: 100,
         };
-        view.navigation.history_rebase_pending = true;
-        view.navigation.scroll.moved_during_read = true;
+        view.navigation.seed_rebasing(true);
+        view.navigation.read_event(ReadEvent::PositionMoved);
         let old = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 200,
@@ -2016,7 +2013,7 @@ mod completion_notice_tests {
             node_id: Some("saved".into()),
             char_offset: 100,
         };
-        view.navigation.history_rebase_pending = true;
+        view.navigation.seed_rebasing(true);
         let mapped = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 200,
@@ -2035,11 +2032,12 @@ mod completion_notice_tests {
         };
         view.navigation
             .begin_read((view.navigation.view_revision, None), None);
-        view.navigation.scroll.pending = -4;
+        view.navigation.seed_pending(-4);
         let action = view.rebase_committed_stream("thread".into(), view.generation);
         assert!(matches!(action, Some(UiAction::RebaseHistory { .. })));
         assert_eq!(
-            view.navigation.scroll.pending, -4,
+            view.navigation.pending(),
+            -4,
             "rebase must preserve queued movement"
         );
     }
@@ -2055,7 +2053,7 @@ mod completion_notice_tests {
             ui.view_mut()
                 .navigation
                 .set_request(Some((revision, node.clone())));
-            ui.view_mut().navigation.scroll.pending = -3;
+            ui.view_mut().navigation.seed_pending(-3);
             let action = if node_window {
                 UiAction::LoadNodeWindow {
                     thread_id: "thread".into(),
@@ -2082,7 +2080,7 @@ mod completion_notice_tests {
             );
             assert!(ui.view().navigation.request().is_none());
             assert!(
-                ui.view().navigation.scroll.pending != 0 || !ui.take_deferred_actions().is_empty(),
+                ui.view().navigation.pending() != 0 || !ui.take_deferred_actions().is_empty(),
                 "unconsumed movement must be retained or retried"
             );
         }
@@ -2158,7 +2156,7 @@ mod completion_notice_tests {
             ui.view().navigation.anchor.char_offset < offset,
             "movement must survive the read"
         );
-        assert_eq!(ui.view().navigation.scroll.pending, 0);
+        assert_eq!(ui.view().navigation.pending(), 0);
     }
     #[test]
     fn rejected_stream_rebase_can_retry_and_follow_completion_releases_its_correspondence() {
@@ -2203,7 +2201,7 @@ mod completion_notice_tests {
         assert!(
             matches!(retry.as_slice(),[UiAction::RebaseStream(request)]if request.source.text=="bounded source"&&request.anchor.char_offset==7)
         );
-        assert_eq!(ui.view().navigation.scroll.pending, 1);
+        assert_eq!(ui.view().navigation.pending(), 1);
         let old_revision = ui.view().navigation.view_revision;
         ui.event(Event::Key(KeyEvent::new(
             KeyCode::End,
@@ -2652,7 +2650,7 @@ mod received_tests {
         ui.view_mut().selection_revision = 7;
         ui.view_mut().navigation.view_revision = 5;
         ui.view_mut().navigation.set_request(Some((5, None)));
-        ui.view_mut().navigation.scroll.pending = 1;
+        ui.view_mut().navigation.seed_pending(1);
         // Before its saved-history window is applied, the corresponding audit
         // must not install a source into an unrelated frame.
         ui.apply(received(5, 10));
@@ -3258,7 +3256,7 @@ mod retention_regressions {
                 ..Default::default()
             }];
             view.on_history(vec![saved], None, false, 0, 1, 1);
-            view.navigation.history_rebase_pending = rebase;
+            view.navigation.seed_rebasing(rebase);
             let mut failed = node("tool", "same canonical source", read);
             failed.presentation.kind = PresentationKind::ToolResult;
             failed.presentation.fields = vec![PresentationField {
@@ -3352,7 +3350,7 @@ mod received_window_retention_tests {
             node_id: Some("b".into()),
             char_offset: 2,
         };
-        view.navigation.history_rebase_pending = !follow;
+        view.navigation.seed_rebasing(!follow);
         view
     }
     fn ids(view: &ThreadView) -> Vec<&str> {

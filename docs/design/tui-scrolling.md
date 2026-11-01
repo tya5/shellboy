@@ -266,3 +266,14 @@ separate behaviour-fix commits. Collapse only demonstrably redundant projection
 identity, not authoritative position or a relocated copy of it. Count new event
 invocations, reducer assignments and all still-stored payloads; do not hide
 writes under a new receiver/tuple or exclude helper internals to pass the gate.
+
+Read intent is now an actual reducer: navigation/rebase requests, delivery,
+cancellation, failure, deferred movement and reply consumption produce a whole
+ReadIntent replacement. Loading/ownership remain distinguished; ReadMotion's
+four variants preserve rebasing/movement combinations without independent bool
+writes. The legacy failure-held delta and reverse-discard behaviour intentionally
+remain until the separate fixes. Test-only seeding is cfg(test), not production
+mutation. The helper counts the reducer's `mem::take(self)` and `*self =` plus
+all event calls and recursively counts the intent's three stored fields. At this
+boundary metrics136 / fields17 are still above the review target; next consolidate
+Navigation events and repeated projection settlement, not stop at renamed setters.

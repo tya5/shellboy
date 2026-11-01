@@ -126,13 +126,13 @@ fn snap(ui: &UiState) -> String {
         v.navigation
             .request()
             .map(|(r, n)| (*r - v.navigation.view_revision.min(*r), n.clone())),
-        v.navigation.scroll.pending,
-        v.navigation.history_rebase_pending,
+        v.navigation.pending(),
+        v.navigation.is_rebasing(),
         v.navigation.unseen(),
         v.navigation.anchor.node_id.as_deref().unwrap_or("-"),
         v.navigation.anchor.char_offset,
         v.navigation.scroll.within,
-        v.navigation.scroll.moved_during_read,
+        v.navigation.moved_during_read(),
         v.navigation.scroll.initialized,
         v.navigation.view_revision,
     )
@@ -246,7 +246,7 @@ fn wheel_up_from_tail_pauses_on_a_source_anchor_with_a_within_row_offset() {
     assert!(
         !v.navigation.follow() && !v.navigation.is_loading() && v.navigation.request().is_none()
     );
-    assert_eq!(v.navigation.scroll.pending, 0);
+    assert_eq!(v.navigation.pending(), 0);
     assert_eq!(v.navigation.anchor.node_id.as_deref(), Some("long"));
     assert!(v.navigation.anchor.char_offset > 0);
     assert_eq!(
@@ -348,16 +348,17 @@ fn page_up_into_an_uncached_neighbour_owns_one_read_and_keeps_the_screen() {
         v.navigation.is_loading() && v.navigation.request().is_some() && !v.navigation.follow()
     );
     assert!(
-        v.navigation.scroll.pending < 0,
+        v.navigation.pending() < 0,
         "movement is retained: {}",
-        v.navigation.scroll.pending
+        v.navigation.pending()
     );
     assert_eq!(rows(&mut ui, &mut t), screen, "old screen until the reply");
     node_window(&mut ui, complete[4].clone());
     let v = ui.view();
     assert!(!v.navigation.is_loading() && v.navigation.request().is_none());
     assert_eq!(
-        v.navigation.scroll.pending, 0,
+        v.navigation.pending(),
+        0,
         "deferred movement consumed on reply"
     );
     assert!(!v.navigation.follow());
@@ -370,7 +371,7 @@ fn same_direction_input_while_awaiting_accumulates_without_another_read() {
     set_anchor(&mut ui, "n-5", 0);
     rows(&mut ui, &mut t);
     key(&mut ui, KeyCode::PageUp);
-    let pending = ui.view().navigation.scroll.pending;
+    let pending = ui.view().navigation.pending();
     let request = ui.view().navigation.request().cloned();
     // The uncached node is the next one up, so cached rows cannot satisfy this.
     let again = key(&mut ui, KeyCode::PageUp);
@@ -381,11 +382,11 @@ fn same_direction_input_while_awaiting_accumulates_without_another_read() {
         "same owner and revision"
     );
     assert!(
-        ui.view().navigation.scroll.pending <= pending,
+        ui.view().navigation.pending() <= pending,
         "movement accumulates"
     );
     node_window(&mut ui, complete[4].clone());
-    assert_eq!(ui.view().navigation.scroll.pending, 0);
+    assert_eq!(ui.view().navigation.pending(), 0);
     // A repeated reply for the same revision finds no owner and changes nothing.
     let settled = snap(&ui);
     let screen = rows(&mut ui, &mut t);
@@ -403,17 +404,17 @@ fn reversing_while_awaiting_drops_the_pending_movement() {
     set_anchor(&mut ui, "n-5", 0);
     rows(&mut ui, &mut t);
     key(&mut ui, KeyCode::PageUp);
-    assert!(ui.view().navigation.scroll.pending < 0);
+    assert!(ui.view().navigation.pending() < 0);
     let actions = key(&mut ui, KeyCode::PageDown);
     assert!(actions.is_empty());
-    assert_eq!(ui.view().navigation.scroll.pending, 0, "{}", snap(&ui));
+    assert_eq!(ui.view().navigation.pending(), 0, "{}", snap(&ui));
     assert!(
         ui.view().navigation.request().is_some(),
         "the read stays owned"
     );
     node_window(&mut ui, complete[4].clone());
     assert!(ui.view().navigation.request().is_none());
-    assert_eq!(ui.view().navigation.scroll.pending, 0);
+    assert_eq!(ui.view().navigation.pending(), 0);
 }
 
 #[test]
@@ -429,7 +430,7 @@ fn ctrl_end_during_a_read_cancels_it_and_the_old_reply_is_ignored() {
     assert!(
         v.navigation.follow() && !v.navigation.is_loading() && v.navigation.request().is_none()
     );
-    assert_eq!(v.navigation.scroll.pending, 0);
+    assert_eq!(v.navigation.pending(), 0);
     assert_ne!(
         v.navigation.view_revision, stale_revision,
         "cancel bumps the fence"
@@ -453,7 +454,7 @@ fn load_failure_keeps_pending_for_an_explicit_retry_and_rejection_releases_the_r
         set_anchor(&mut ui, "n-5", 0);
         rows(&mut ui, &mut t);
         let actions = key(&mut ui, KeyCode::PageUp);
-        let pending = ui.view().navigation.scroll.pending;
+        let pending = ui.view().navigation.pending();
         if rejected {
             ui.action_rejected(&actions[0]);
         } else {
@@ -474,7 +475,7 @@ fn load_failure_keeps_pending_for_an_explicit_retry_and_rejection_releases_the_r
         // characterization: current behaviour, see #118
         // The deferred movement survives the failure; the next scroll replays it
         // (added to the new input) and issues a fresh read. No automatic retry.
-        assert_eq!(v.navigation.scroll.pending, pending, "rejected={rejected}");
+        assert_eq!(v.navigation.pending(), pending, "rejected={rejected}");
         let retry = key(&mut ui, KeyCode::PageUp);
         assert!(
             retry
@@ -528,7 +529,7 @@ fn history_page_before_the_oldest_cached_node_is_requested_and_keeps_the_anchor(
     let v = ui.view();
     assert!(v.navigation.is_loading() && !v.navigation.follow());
     assert!(matches!(v.navigation.request(), Some((_, None))));
-    assert!(v.navigation.scroll.pending < 0);
+    assert!(v.navigation.pending() < 0);
     assert_eq!(v.navigation.anchor.node_id.as_deref(), Some("n-5"));
     assert_eq!(
         rows(&mut ui, &mut t),
@@ -557,7 +558,7 @@ fn history_page_before_the_oldest_cached_node_is_requested_and_keeps_the_anchor(
     assert!(
         !v.navigation.is_loading() && v.navigation.request().is_none() && !v.navigation.follow()
     );
-    assert_eq!(v.navigation.scroll.pending, 0);
+    assert_eq!(v.navigation.pending(), 0);
     assert!(v.first_ordinal <= 3);
     // The retained movement was applied once: the viewport now shows rows that
     // precede the former top, in the older node.
@@ -598,7 +599,7 @@ fn tab_into_history_focus_pauses_on_the_visible_top_row_without_a_read() {
     assert!(
         !v.navigation.is_loading()
             && v.navigation.request().is_none()
-            && v.navigation.scroll.pending == 0
+            && v.navigation.pending() == 0
     );
     assert!(v.navigation.scroll.initialized && !v.navigation.unseen());
 }

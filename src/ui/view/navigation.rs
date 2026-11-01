@@ -1,13 +1,15 @@
 //! Conversation navigation ownership. Structural migration: transitions retain their existing behaviour.
 use super::*;
 
+mod read;
+pub(in crate::ui) use read::ReadEvent;
+
 #[derive(Debug)]
 pub struct Navigation {
     pub(in crate::ui) committed_preview: Option<(String, String)>,
     pub anchor: ViewAnchor,
     mode: FollowMode,
-    read: ReadState,
-    pub(in crate::ui) history_rebase_pending: bool,
+    intent: read::ReadIntent,
     pub view_revision: u64,
     pub(in crate::ui) scroll: VisualScroll,
 }
@@ -17,8 +19,7 @@ impl Default for Navigation {
             committed_preview: None,
             anchor: ViewAnchor::default(),
             mode: FollowMode::Following,
-            read: ReadState::Idle,
-            history_rebase_pending: false,
+            intent: read::ReadIntent::default(),
             view_revision: 0,
             scroll: VisualScroll::default(),
         }
@@ -33,8 +34,6 @@ pub(in crate::ui) struct VisualScroll {
     pub(in crate::ui) width: u16,
     pub(in crate::ui) height: u16,
     pub(in crate::ui) revision: u64,
-    pub(in crate::ui) pending: isize,
-    pub(in crate::ui) moved_during_read: bool,
     pub(in crate::ui) focus: Option<String>,
     pub(in crate::ui) initialized: bool,
     pub(in crate::ui) origin: usize,
@@ -49,8 +48,6 @@ impl Default for VisualScroll {
             width: 78,
             height: 18,
             revision: 0,
-            pending: 0,
-            moved_during_read: false,
             focus: None,
             initialized: false,
             origin: 0,
@@ -69,52 +66,44 @@ enum FollowMode {
 
 type ReadTicket = (u64, Option<String>);
 
-#[derive(Debug)]
-enum ReadState {
-    Idle,
-    Hydrating,
-    Awaiting(ReadTicket),
-    Delivered(ReadTicket),
-}
-impl ReadState {
-    fn new(loading: bool, ticket: Option<ReadTicket>) -> Self {
-        match (loading, ticket) {
-            (false, None) => Self::Idle,
-            (true, None) => Self::Hydrating,
-            (true, Some(ticket)) => Self::Awaiting(ticket),
-            (false, Some(ticket)) => Self::Delivered(ticket),
-        }
-    }
-}
 impl Navigation {
+    pub(in crate::ui) fn read_event(&mut self, event: ReadEvent) -> read::ReadEffects {
+        self.intent.on_event(event)
+    }
+    pub(in crate::ui) fn pending(&self) -> isize {
+        self.intent.pending()
+    }
+    pub(in crate::ui) fn moved_during_read(&self) -> bool {
+        self.intent.moved()
+    }
+    pub(in crate::ui) fn is_rebasing(&self) -> bool {
+        self.intent.rebasing()
+    }
+    #[cfg(test)]
+    pub(in crate::ui) fn seed_pending(&mut self, pending: isize) {
+        self.read_event(ReadEvent::SeedPending(pending));
+    }
+    #[cfg(test)]
+    pub(in crate::ui) fn seed_rebasing(&mut self, rebasing: bool) {
+        self.read_event(ReadEvent::SeedRebasing(rebasing));
+    }
+
     pub(in crate::ui) fn cancel(&mut self) {
-        self.history_rebase_pending = false;
-        if self.take_request().is_some() {
-            self.set_loading(false);
-        }
-        self.scroll.pending = 0;
-        self.scroll.moved_during_read = false;
+        self.read_event(ReadEvent::Cancelled {
+            keep_pending: false,
+        });
         self.view_revision = self.view_revision.wrapping_add(1);
     }
     pub(in crate::ui) fn rebase(&mut self) {
-        let pending = self.scroll.pending;
-        self.cancel();
-        self.scroll.pending = pending;
+        self.read_event(ReadEvent::Cancelled { keep_pending: true });
+        self.view_revision = self.view_revision.wrapping_add(1);
     }
     pub(in crate::ui) fn fail_read(&mut self) {
-        self.history_rebase_pending = false;
-        self.set_loading(false);
-        if self.request().is_none() {
-            self.scroll.pending = 0;
-        }
-        self.set_request(None);
-        self.scroll.moved_during_read = false;
+        self.read_event(ReadEvent::Failed);
     }
     pub(in crate::ui) fn finish_reply(&mut self) -> isize {
         self.scroll.initialized = false;
-        self.set_request(None);
-        self.scroll.moved_during_read = false;
-        std::mem::take(&mut self.scroll.pending)
+        self.read_event(ReadEvent::ReplyConsumed).pending
     }
     pub fn follow(&self) -> bool {
         matches!(
@@ -146,41 +135,38 @@ impl Navigation {
         self.mode = FollowMode::Following;
     }
     pub(in crate::ui) fn begin_rebase(&mut self) {
-        self.history_rebase_pending = true;
-        self.begin_read((self.view_revision, None), None);
+        self.read_event(ReadEvent::RebaseRequested {
+            ticket: (self.view_revision, None),
+            pending: None,
+        });
     }
     pub(in crate::ui) fn restore(&mut self, anchor: ViewAnchor, follow: bool) {
         self.anchor = anchor;
         self.set_mode(follow, false);
     }
     pub(in crate::ui) fn begin_read(&mut self, ticket: ReadTicket, pending: Option<isize>) {
-        self.read = ReadState::Awaiting(ticket);
-        if let Some(pending) = pending {
-            self.scroll.pending = pending;
-        }
+        self.read_event(ReadEvent::NavigationRequested { ticket, pending });
     }
     pub fn is_loading(&self) -> bool {
-        matches!(self.read, ReadState::Hydrating | ReadState::Awaiting(_))
+        self.intent.is_loading()
     }
     pub(in crate::ui) fn request(&self) -> Option<&ReadTicket> {
-        match &self.read {
-            ReadState::Awaiting(ticket) | ReadState::Delivered(ticket) => Some(ticket),
-            ReadState::Idle | ReadState::Hydrating => None,
-        }
+        self.intent.request()
     }
     pub fn set_loading(&mut self, loading: bool) {
-        let ticket = self.take_request();
-        self.read = ReadState::new(loading, ticket);
+        self.read_event(if loading {
+            ReadEvent::WaitStarted
+        } else {
+            ReadEvent::DeliveryObserved
+        });
     }
+    #[cfg(test)]
     pub(in crate::ui) fn set_request(&mut self, ticket: Option<ReadTicket>) {
-        self.read = ReadState::new(self.is_loading(), ticket);
+        self.read_event(ReadEvent::SeedTicket(ticket));
     }
+    #[cfg(test)]
     pub(in crate::ui) fn take_request(&mut self) -> Option<ReadTicket> {
-        let empty = ReadState::new(self.is_loading(), None);
-        match std::mem::replace(&mut self.read, empty) {
-            ReadState::Awaiting(ticket) | ReadState::Delivered(ticket) => Some(ticket),
-            ReadState::Idle | ReadState::Hydrating => None,
-        }
+        self.read_event(ReadEvent::TakeOwned).ticket
     }
 }
 
@@ -195,15 +181,14 @@ impl ThreadView {
         if self.navigation.is_loading() {
             if self.navigation.request().is_some() {
                 let mut reversed = false;
-                if self.navigation.scroll.pending != 0 {
-                    if self.navigation.scroll.pending.signum() == amount.signum() {
-                        self.navigation.scroll.pending =
-                            self.navigation.scroll.pending.saturating_add(amount);
+                if self.navigation.pending() != 0 {
+                    if self.navigation.pending().signum() == amount.signum() {
+                        self.navigation.read_event(ReadEvent::Deferred(amount));
                         return Some(vec![]);
                     }
                     // Reversing direction cancels navigation that could not
                     // yet be applied, rather than replaying it after the read.
-                    self.navigation.scroll.pending = 0;
+                    self.navigation.read_event(ReadEvent::DeferredDiscarded);
                     reversed = true;
                 }
                 let (width, height) = (self.navigation.scroll.width, self.navigation.scroll.height);
@@ -239,13 +224,12 @@ impl ThreadView {
                     self.navigation.scroll.within = target.saturating_sub(first);
                     self.navigation.scroll.row = target;
                     self.navigation.scroll.anchor = self.navigation.anchor.clone();
-                    self.navigation.scroll.moved_during_read = true;
+                    self.navigation.read_event(ReadEvent::PositionMoved);
                     self.navigation.set_follow(false);
                     return Some(vec![]);
                 }
                 if !reversed {
-                    self.navigation.scroll.pending =
-                        self.navigation.scroll.pending.saturating_add(amount);
+                    self.navigation.read_event(ReadEvent::Deferred(amount));
                 }
                 return Some(vec![]);
             }
@@ -366,18 +350,22 @@ impl ThreadView {
         budget: usize,
     ) -> Vec<UiAction> {
         let amount = if self.navigation.request().is_none() {
-            amount.saturating_add(std::mem::take(&mut self.navigation.scroll.pending))
+            amount.saturating_add(
+                self.navigation
+                    .read_event(ReadEvent::DeferredDrained)
+                    .pending,
+            )
         } else {
             amount
         };
         let following = self.navigation.follow();
         if self.navigation.committed_preview.is_some()
-            && !self.navigation.history_rebase_pending
+            && !self.navigation.is_rebasing()
             && let Some(action) = self.rebase_preview()
         {
             // Replay the initiating movement after the committed stream has a
             // durable anchor, just like movement arriving while the read runs.
-            self.navigation.scroll.pending = self.navigation.scroll.pending.saturating_add(amount);
+            self.navigation.read_event(ReadEvent::Deferred(amount));
             return vec![action];
         }
         // Projection changes must advance through cached nodes without nesting

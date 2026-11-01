@@ -42,3 +42,16 @@ impl Navigation { fn start(&mut self) {
             self.assertEqual(result['counts']['loading'], 0)
             self.assertEqual(result['transition_calls'], 1)
             self.assertEqual(result['writes_and_transitions'], 2)
+
+    def test_masks_cfg_fields_variants_and_match_arms_without_losing_production(self):
+        source = '''enum Event { #[cfg(test)] Seed(Option<(u64, String)>), Real }
+struct Effects { #[cfg(test)] ticket: Option<String>, delta: isize }
+fn run(e: Event) { match e { #[cfg(test)] Event::Seed(x) => (x, 0), Event::Real => 1, }; }
+fn after() { self.read = state; }
+'''
+        code = metrics.production(source)
+        self.assertNotIn('Seed', code)
+        self.assertNotIn('ticket', code)
+        self.assertIn('delta', code)
+        self.assertIn('Event::Real', code)
+        self.assertIn('self.read = state', code)
