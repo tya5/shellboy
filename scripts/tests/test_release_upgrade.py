@@ -82,3 +82,37 @@ class ReleaseUpgradeTests(unittest.TestCase):
         db.executescript('DROP INDEX thread_parent; CREATE INDEX thread_parent ON thread(id);')
         with self.assertRaises(AssertionError):
             checks.check_migration(db, before, 16, 17)
+
+    def test_stopped_checkpointed_wal_database_can_be_read_without_sidecars(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            from contextlib import closing
+            source = Path(scratch) / 'source.db'
+            with closing(sqlite3.connect(source)) as db:
+                with closing(db.cursor()) as cursor:
+                    cursor.executescript('PRAGMA journal_mode=WAL; CREATE TABLE sample(value); INSERT INTO sample VALUES(17);')
+                    self.assertEqual(cursor.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone(), (0, 0, 0))
+            # Make the no-sidecar condition explicit, independent of WAL unlink policy.
+            path = Path(scratch) / 'checkpointed.db'
+            path.write_bytes(source.read_bytes())
+            self.assertFalse(Path(str(path) + '-wal').exists())
+            uri = checks.read_only_uri(path, stopped=True)
+            self.assertIn('immutable=1', uri)
+            from contextlib import closing
+            with closing(sqlite3.connect(uri, uri=True)) as reader:
+                self.assertEqual(reader.execute('SELECT * FROM sample').fetchall(), [(17,)])
+            self.assertFalse(Path(str(path) + '-wal').exists())
+            self.assertNotIn('immutable', checks.read_only_uri(path))
+
+    def test_existing_wal_is_never_ignored(self):
+        import tempfile
+        from contextlib import closing
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / 'committed-wal.db'
+            with closing(sqlite3.connect(path)) as writer:
+                writer.executescript('PRAGMA journal_mode=WAL; CREATE TABLE sample(value); INSERT INTO sample VALUES(17);')
+                self.assertTrue(Path(str(path) + '-wal').exists())
+                uri = checks.read_only_uri(path, stopped=True)
+                self.assertNotIn('immutable', uri)
+                with closing(sqlite3.connect(uri, uri=True)) as reader:
+                    self.assertEqual(reader.execute('SELECT * FROM sample').fetchall(), [(17,)])

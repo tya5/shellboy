@@ -15,18 +15,65 @@ Python document-role1 and candidate-installer unit2 (3 tests total), `git diff
 Execution315e7d61 exits0 with group cleanup confirmed. Installer unit tests use
 synthetic fixtures; they do not establish a real candidate installation pass.
 
-Exact-source Rust checks and three-OS CI remain pending. No candidate release
-build, extracted-binary smoke, installer, synthetic upgrade, public download,
-provider request or user-data/installed-binary change has been performed.
+Final-source Rust checks and three-OS CI remain pending. Release-artifact builds,
+installers and public v0.5.0 download checks have not run. The private macOS
+build and synthetic upgrades are qualified separately below. No paid provider,
+user-data or installed-binary change is part of this validation.
 The upgrade helper now accepts public0.4.0, schema17 and `--start-schema 16`.
 The authoritative v0.4.0 tag `dae2ba1f` contains migrations1-14; schema16 is a
 separately labeled synthetic fixture prepared with existing derived SQL15/16,
-not an unmodified published0.4.0 store. Seven Python SQL unit tests pass:
-public14 -> 17, staged16 -> 17, staging preservation, and rejection of rewritten
-originals, changed lineage/ledger prefix and a wrong parent index. These tests
-use production SQL but do not launch the startup migration runner; actual binary
-PTY runs are pending. The [candidate plan](../development/publication.md#candidate-validation-plan-not-results)
-records those remaining gates, not successful observations.
+not an unmodified published0.4.0 store. Nine Python SQL/WAL unit tests pass:
+public14 -> 17, staged16 -> 17, staging preservation, rejection of rewritten
+originals, changed lineage/ledger prefix or a wrong parent index, checkpointed
+no-sidecar reads and preserving committed WAL. SQL tests alone do not qualify
+the startup runner. The private PTY results below do; final release-byte checks
+remain separate in the [candidate plan](../development/publication.md#candidate-validation-plan-not-results).
+
+### Private macOS synthetic upgrade qualification
+
+On native macOS ARM64, explicit slot07027a07 built source
+`0c9535fead401e5d4ff2670b0b927870aa3dcfd8` / base`cdcb70da` using
+`cargo build --locked --bin shellboy -vv`, JOBS2, clean/SHA/base guards and
+own-path compilation evidence. Only own entry-file mtimes changed. Build exited0,
+cleanup confirmed; the executable was copied immediately within the slot to
+`.local-bin/shellboy-v050`, reporting `shellboy 0.5.0`, SHA-256
+`3bb68ed0da956bfcb8457a4247cfe19a09975e1014d8648be28a9d8fe2601291`.
+The shared Rust slot was then released. This is a private debug build, not a
+release archive, tag, installation or exact final-main qualification.
+
+Public v0.4.0 archive SHA-256
+`5e37608162d526825d15af945e418a54cd7b09e4c6234c9c3f209c6f181dcb34`
+was checked against a freshly downloaded public SHA256SUMS before extraction;
+its macOS binary reports0.4.0, SHA-256
+`286f9d1701aae742ea02f82afa5cdd99b36a5c44000ea49215b0f6972b49b19f`.
+Actual old-owner startup confirms schema14. Stopped SQLite backups preserve WAL;
+only the separately labeled16 fixture applies production15/16 SQL before startup.
+
+Final helper SHA-256
+`944a984e404e5248e3a857d2a7b0f92f3c46bd7a82925dd4f08abc036e88d509`
+passes both public14 -> 17 and synthetic16 -> 17 (executionb0ca54e8 exit0/cleanup).
+Each run checks the exact ledger prefix/suffix, parent index, integrity/foreign
+keys, original21 nodes,16 edges,19 path rows,3 output items,1 tool call/result,
+1 output chunk and3 Thread lineage rows. There are no attachment rows in this
+fixture; attachment preservation is not qualified. Original sender, held model
+input, completed usage and RAG3/search remain available. New loopback mock exec
+succeeds; normal owner exit is0, then original-row/ledger checks pass again on
+the stopped store. Each run used5 mock Responses and12 mock embedding requests,
+not paid providers. Private evidence is under
+`/tmp/shellboy-v050-upgrade.05J3be/closed14` and `closed16`.
+
+Failure history is retained: the added post-stop readonly check initially failed
+with `unable to open database file` after checkpoint removed WAL sidecars
+(execution2a568efa). Explicit connection close and stopped/no-WAL immutable reads
+fix that fixture access; existing WAL is never ignored. A subsequent95-test
+Python run failed because the new no-sidecar fixture assumed automatic WAL unlink;
+a standalone9-test run reproduced it. The corrected fixture explicitly checks
+TRUNCATE checkpoint, closes handles and copies the checkpointed main file into a
+fresh synthetic path; it does not delete WAL or weaken preservation assertions.
+Earlier successful startup-only runs do not replace these post-stop results.
+Corrected-source focused9 and full Python95 tests pass (executionbda9f9bf,
+exit0/cleanup), with layout95/watchdog and diff checks successful. Full Rust
+standard/native3OS CI and exact final-candidate upgrade runs remain pending.
 
 ## G latest-main fixture correction and final gate records
 

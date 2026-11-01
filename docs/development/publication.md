@@ -395,6 +395,10 @@ execute with command fallback and verbatim replay.
    public-byte verification and installed-binary replacement remain separate
    reviewer/user-controlled steps; this worker does not perform them.
 
-Preparation has not run candidate builds, installers, synthetic upgrades or
-public download checks. The unmodified release workflow supplies candidate mode;
-no publication permission or workflow change is needed for this preparation.
+No final release-artifact build, installer or public v0.5.0 download check has
+run. Private macOS binary source0c9535fe passes both public14 -> 17 and synthetic
+16 -> 17 PTY upgrades; exact hashes, preservation counts and failure history are
+in [acceptance](../validation/acceptance.md#private-macos-synthetic-upgrade-qualification).
+Rerun against the exact final candidate after #117/main integration; the private
+build does not qualify final release bytes. The unmodified release workflow
+supplies candidate mode; no publication permission/workflow change is needed.

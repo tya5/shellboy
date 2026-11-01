@@ -116,7 +116,7 @@ archives and both installer scripts against `SHA256SUMS`.
 
 Preparation only: #101 is on main; #117 scrolling reversal is pending main
 integration and is not yet claimed in these notes. Finalization requires both.
-Exact-source native CI, candidate archives/installers/checksums and synthetic
-upgrade results remain pending; see the v0.5.0 section in `publication.md`.
+Exact-source native CI, candidate archives/installers/checksums and final-candidate
+upgrade checks remain pending; see the v0.5.0 section in `publication.md`.
 No tag, GitHub Release or installed-binary replacement is performed by this
 preparation. Candidate builds and actual publication remain reviewer-owned.

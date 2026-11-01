@@ -5,6 +5,7 @@ Only supplied binaries, an empty fixture directory and loopback endpoints are
 used. This never locates or modifies a user's owner/store/installed executable.
 """
 import argparse
+from contextlib import closing
 import hashlib
 import http.server
 import json
@@ -22,6 +23,12 @@ import time
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
            for version in (15, 16, 17)}
+
+
+def read_only_uri(path, stopped=False):
+    # Only reaped writers and absent WAL permit immutable read-only access.
+    immutable = stopped and not Path(str(path) + '-wal').exists()
+    return path.as_uri() + '?mode=ro' + ('&immutable=1' if immutable else '')
 
 
 def ledger(db):
@@ -251,21 +258,20 @@ def main():
             # All fixture writers are reaped. A checkpointed WAL-mode RAG file
             # can lack sidecars; immutable permits read-only backup without
             # creating them. Never ignore an existing conversation WAL.
-            immutable = '' if Path(str(source_path) + '-wal').exists() else '&immutable=1'
-            source = sqlite3.connect(source_path.as_uri() + '?mode=ro' + immutable, uri=True)
+            source = sqlite3.connect(read_only_uri(source_path, stopped=True), uri=True)
             destination = sqlite3.connect(upgraded / filename)
             try:
                 source.backup(destination)
             finally:
                 destination.close()
                 source.close()
-        with sqlite3.connect(upgraded / 'shellboy.db') as fixture:
+        with closing(sqlite3.connect(upgraded / 'shellboy.db')) as fixture:
             prepare_schema(fixture, args.start_schema)
             before_ledger, before_records = ledger(fixture), snapshot(fixture)
         current = Owner(new, upgraded)
         owners.append(current)
         ready(new, upgraded)
-        with sqlite3.connect((upgraded / 'shellboy.db').as_uri() + '?mode=ro', uri=True) as fixture:
+        with closing(sqlite3.connect((upgraded / 'shellboy.db').as_uri() + '?mode=ro', uri=True)) as fixture:
             check_migration(fixture, before_ledger, args.start_schema, args.expected_new_schema)
             preserved(fixture, before_records)
             after_ledger = ledger(fixture)
@@ -291,9 +297,11 @@ def main():
         exit_code = current.close()
         owners.remove(current)
         assert exit_code == 0
+        with closing(sqlite3.connect(read_only_uri(upgraded / 'shellboy.db', stopped=True), uri=True)) as fixture:
+            check_migration(fixture, before_ledger, args.start_schema, args.expected_new_schema)
+            preserved(fixture, before_records)
         rag_path = upgraded / 'rag.db'
-        rag_immutable = '' if Path(str(rag_path) + '-wal').exists() else '&immutable=1'
-        rag = sqlite3.connect(rag_path.as_uri() + '?mode=ro' + rag_immutable, uri=True)
+        rag = sqlite3.connect(read_only_uri(rag_path, stopped=True), uri=True)
         try:
             rag_schema = rag.execute('PRAGMA user_version').fetchone()[0]
         finally:

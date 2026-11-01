@@ -7,11 +7,12 @@ Package/lock version is 0.5.0; user-facing notes summarize E/F/G, shell labels,
 headless owners, bounded usage and landed fixes. #117 must land before finalizing.
 The broader #41 and unmerged followups are not claimed complete. Candidate
 validation is planned in [publication](publication.md#candidate-validation-plan-not-results);
-reviewer dispatch and actual publication are separate. Candidate/build/install/
-upgrade checks have not run. The upgrade helper now supports public14 -> 17 and
-staged synthetic16 -> 17 with row/ledger/index preservation checks. Seven SQL
-unit tests pass; actual candidate-binary PTY qualification is pending. Public
-v0.4.0 is schema14 at its release tag, not schema16.
+reviewer dispatch and actual publication are separate. Release-artifact builds
+and installers have not run. Private macOS0.5.0 binary at source0c9535fe passes
+public14 -> 17 and staged synthetic16 -> 17 PTY upgrades, preserving saved data,
+ledger/index facts, pending work, usage and RAG3, plus mock exec/clean shutdown.
+Nine SQL/WAL unit tests pass. Public v0.4.0 is schema14, not16; staging is labeled
+synthetic. Final-source qualification after #117 and native3OS CI remain pending.
 
 ## G latest-main admission batch
 
