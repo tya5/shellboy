@@ -106,3 +106,79 @@ NodeWindowは既に順序が分かっているnodeの本文更新だけを行う
 固定した試験は `src/ui/scroll_characterization_tests.rs`（flagの組を `snap()` で比較し、実際の `UiState` の入力・応答経路を通す）に置く。期待値は現在の振る舞いであり、設計上の正解ではない。疑わしいものは試験内に `// characterization: current behaviour, see #118` を付けた。PTYの手動確認（#117の3件）は自動試験にしていない。
 
 今回の固定で分かった、現状の振る舞いのうち疑わしいもの（修正はしていない）: (1) 追従中の何も動かないwheel下でも `scroll()` がmodel anchorを現在の先頭source行へ書き、`view_revision` を進める。(2) Tabによる履歴項目選択は `scroll()` を通さず follow/anchor/within/row を直接書き、平文だけでも追従を外す。(3) 読取り中の逆方向入力は、保留した移動量を捨てるが、その逆方向入力自体は再生されない。(4) 読取り失敗後の `pending` は残り、次の明示スクロールで新しい入力に加算されて再生される。
+
+## Navigation ownership migration (#118, stage 2)
+
+This section is the adopted implementation plan. Stage-1 characterization is a
+baseline, not the intended behaviour. Do not combine structural movement with a
+behaviour fix in one commit. Existing cache/read budgets, generation and request
+revision fences, selected-path ordering and source-offset anchors remain intact.
+Navigation performs no I/O: ThreadView supplies bounded layouts/source windows
+and returns the existing UiAction values to the frontend.
+
+### Owned state and transitions
+
+One `Navigation` owner replaces the fields split across ThreadView and
+VisualScroll. It owns the source anchor, follow/new-output mode, request revision,
+read lifecycle (including provisional-to-saved rebasing), deferred row movement,
+and the projection checkpoint. Geometry/cache identity is derived state, not a
+second navigation authority. No deref/alias layer will retain writable copies on
+ThreadView. Source windows, provisional ID correspondence and tool observation
+stay on ThreadView; they are not another scroll state machine.
+
+| Region / state | Event | Transition / effect |
+| --- | --- | --- |
+| Following | Up / PageUp | Pause at visible source position, consume display rows |
+| Following | Down at true tail | Remain following; first preserve the characterized revision side effect |
+| Reading / ReadingUnseen | Stream / saved tail refresh | Retain source/frame; mark unseen |
+| Reading | Down reaching true tail / explicit Ctrl+End | Follow, clear unseen; explicit End cancels owned read |
+| Either follow mode | ViewState | Adopt supplied source anchor/mode, clear unseen |
+| Idle / presentation hydration | Scroll needing source | Own one bounded body/metadata read and unconsumed row delta |
+| Awaiting body / metadata | Same-direction scroll | Accumulate delta, issue no duplicate read |
+| Awaiting body / metadata | Reverse scroll | First preserve current cancellation/replay semantics; fix separately |
+| Awaiting read | Matching reply | Adopt window only under existing generation/revision/path fences; replay delta |
+| Awaiting read | Unrelated / stale reply | Do not release the owned read or change its frame |
+| Awaiting read | Failure / action rejection | Release ownership; first preserve current deferred-delta semantics |
+| Provisional anchor | Commit / invalidation | Rebase source correspondence, retain frame and deferred movement |
+| Rebasing | Tail refresh | Retain frame; no provisional ID passed to history.get |
+| Any | Resize / projection revision | Reproject source checkpoint; first preserve render-time settlement |
+| Any | Cancel / replacement view | Fence old replies, discard owned movement as currently specified |
+
+Follow and unseen are initially independent, including the rare following+unseen
+combination possible during rebasing. Structural migration must represent it,
+not silently normalize it. Read ownership must distinguish hydration with no
+navigation ticket from an owned navigation read, and a delivered ticket from a
+still-loading ticket until the existing reply dispatcher consumes it. These
+are orthogonal regions of one Navigation owner, not new workers or queues.
+
+### Commit boundaries and gates
+
+1. Record this design and reproducible baseline counts before moving code.
+2. Move ownership and navigation algorithms into a dedicated module. Keep all
+   19 snap/viewport expectations unchanged; only fixture access paths may move.
+3. Centralize transitions, replace independently writable flags with explicit
+   states, share true-tail detection and split scroll orchestration into named
+   bounded steps. This remains structural: preserve all six marked cases.
+4. After structural migration passes, fix each marked case in its own commit,
+   updating only its expectations and adding regression coverage as needed:
+   tail-down revision side effect; reverse while awaiting; failed-read replay;
+   Tab focus entering history; render-time checkpoint writes; render-time
+   true-tail clamping. A fix must name its intended invariant in this design.
+
+Each structural boundary must pass the 19 characterizations and focused scrolling
+regressions. Behaviour commits also run those gates with the one deliberately
+changed expectation. Branch CI uses its default Linux/macOS jobs; do not request
+Windows-only validation for this platform-independent change. A green structural
+checkpoint may be handed off as partial delivery, explicitly listing remaining
+migration/fixes rather than claiming stage 2 complete.
+
+### Measurement rules
+
+Record source-write sites (assignments, mutable take and transition invocations),
+scroll function physical lines and stored navigation fields before/after each
+checkpoint. Exclude test fixture writes and unrelated UI loading states. Report
+projection-cache fields separately; moving them to another struct is not a field
+reduction. The existing stage-1 table remains the historical reference. Retain
+source references with measurements and do not use timing as an acceptance gate.
+If the complete migration does not reduce write sites, scroll size and stored
+fields, revisit the representation rather than count only relocated wrappers.
