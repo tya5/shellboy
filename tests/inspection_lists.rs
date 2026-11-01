@@ -1,6 +1,6 @@
 //! Registered frontend/real local IPC list observations, synthetic saved facts.
-use serde_json::json;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use serde_json::json;
 use shellboy::{
     app::DataOwner,
     attachments::clipboard::{ClipboardPixels, CopyOutcome},
@@ -36,7 +36,9 @@ impl frontend::ClipboardBackend for NoClipboard {
 }
 fn draw(ui: &mut shellboy::ui::UiState) -> String {
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 40)).unwrap();
-    terminal.draw(|frame| shellboy::ui::draw(frame, ui)).unwrap();
+    terminal
+        .draw(|frame| shellboy::ui::draw(frame, ui))
+        .unwrap();
     let mut text = String::new();
     for y in 0..40 {
         let mut x = 0;
@@ -57,14 +59,25 @@ fn context(action: &UiAction) -> Option<ManagementContext> {
     }
 }
 fn gesture(ui: &mut shellboy::ui::UiState, code: KeyCode, modifiers: KeyModifiers) {
-    assert!(ui.event(Event::Key(KeyEvent::new(code, modifiers))).is_empty());
+    assert!(
+        ui.event(Event::Key(KeyEvent::new(code, modifiers)))
+            .is_empty()
+    );
 }
 fn paste(ui: &mut shellboy::ui::UiState, text: &str) {
     assert!(ui.event(Event::Paste(text.into())).is_empty());
 }
 fn submit_list(ui: &mut shellboy::ui::UiState, route: &str) -> (Vec<UiAction>, ManagementContext) {
     gesture(ui, KeyCode::F(8), KeyModifiers::NONE);
-    paste(ui, match route {"status"=>"/status","thread"=>"thread list","shell"=>"shell list",_=>"compact list"});
+    paste(
+        ui,
+        match route {
+            "status" => "/status",
+            "thread" => "thread list",
+            "shell" => "shell list",
+            _ => "compact list",
+        },
+    );
     gesture(ui, KeyCode::Enter, KeyModifiers::NONE);
     if route == "thread" {
         gesture(ui, KeyCode::Char('u'), KeyModifiers::CONTROL);
@@ -72,7 +85,9 @@ fn submit_list(ui: &mut shellboy::ui::UiState, route: &str) -> (Vec<UiAction>, M
     } else if route == "status" {
         gesture(ui, KeyCode::Tab, KeyModifiers::NONE);
         paste(ui, "scope");
-        for _ in 0..4 { gesture(ui, KeyCode::Tab, KeyModifiers::NONE); }
+        for _ in 0..4 {
+            gesture(ui, KeyCode::Tab, KeyModifiers::NONE);
+        }
         gesture(ui, KeyCode::Right, KeyModifiers::NONE);
         gesture(ui, KeyCode::Tab, KeyModifiers::NONE);
         gesture(ui, KeyCode::Char('u'), KeyModifiers::CONTROL);
@@ -80,21 +95,35 @@ fn submit_list(ui: &mut shellboy::ui::UiState, route: &str) -> (Vec<UiAction>, M
     } else {
         paste(ui, "scope");
     }
-    let pending = ui.event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-    let owner = pending.iter().find_map(context).expect("real F8 form must scope the submitted command");
+    let pending = ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    )));
+    let owner = pending
+        .iter()
+        .find_map(context)
+        .expect("real F8 form must scope the submitted command");
     (pending, owner)
 }
 async fn dispatch(actions: &mpsc::Sender<UiAction>, pending: Vec<UiAction>) {
-    for action in pending { actions.send(action).await.unwrap(); }
+    for action in pending {
+        actions.send(action).await.unwrap();
+    }
 }
-async fn paint_changed(ui: &mut shellboy::ui::UiState, actions: &mpsc::Sender<UiAction>, expected: &str) {
+async fn paint_changed(
+    ui: &mut shellboy::ui::UiState,
+    actions: &mpsc::Sender<UiAction>,
+    expected: &str,
+) {
     // Current fields follow the retained page; inspect a bounded traversal, not
     // just the first viewport. No source/detail command is invoked by Down.
     gesture(ui, KeyCode::Home, KeyModifiers::NONE);
     for _ in 0..384 {
         let screen = draw(ui);
         dispatch(actions, ui.take_deferred_actions()).await;
-        if screen.contains(expected) { return; }
+        if screen.contains(expected) {
+            return;
+        }
         gesture(ui, KeyCode::Down, KeyModifiers::NONE);
     }
     panic!("changed metadata not painted: {expected}\n{}", draw(ui));
