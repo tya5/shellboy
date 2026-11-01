@@ -178,18 +178,12 @@ impl ThreadView {
     pub(super) fn cancel_navigation(&mut self) {
         self.tool_refresh = None;
         self.tool_refresh_dirty = false;
-        self.navigation.history_rebase_pending = false;
-        if self.navigation.take_request().is_some() {
-            self.navigation.set_loading(false);
-        }
-        self.navigation.scroll.pending = 0;
-        self.navigation.scroll.moved_during_read = false;
-        self.navigation.view_revision = self.navigation.view_revision.wrapping_add(1);
+        self.navigation.cancel();
     }
     pub(super) fn rebase_navigation(&mut self) {
-        let pending = self.navigation.scroll.pending;
-        self.cancel_navigation();
-        self.navigation.scroll.pending = pending;
+        self.tool_refresh = None;
+        self.tool_refresh_dirty = false;
+        self.navigation.rebase();
     }
     pub(super) fn clear_tool_observation(&mut self) -> Option<UiAction> {
         let existed = self.tool_observation_scope.take().is_some();
@@ -921,13 +915,7 @@ impl ThreadView {
         self.navigation.set_unseen(false);
     }
     pub(super) fn on_load_failed(&mut self, message: String) {
-        self.navigation.history_rebase_pending = false;
-        self.navigation.set_loading(false);
-        if self.navigation.request().is_none() {
-            self.navigation.scroll.pending = 0;
-        }
-        self.navigation.set_request(None);
-        self.navigation.scroll.moved_during_read = false;
+        self.navigation.fail_read();
         self.status = message;
         self.promote_status_notice(history_interaction::NoticeKind::Failure);
     }
@@ -1512,10 +1500,7 @@ impl ThreadView {
                 .is_some_and(|(expected, id)| *expected == revision && id.as_deref() == node)
     }
     pub(super) fn finish_navigation_reply(&mut self) -> isize {
-        self.navigation.scroll.initialized = false;
-        self.navigation.set_request(None);
-        self.navigation.scroll.moved_during_read = false;
-        std::mem::take(&mut self.navigation.scroll.pending)
+        self.navigation.finish_reply()
     }
 }
 impl ThreadView {

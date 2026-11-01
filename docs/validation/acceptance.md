@@ -7620,3 +7620,6 @@ process lists and startup samples. CI 41306805531 (fac69f4f) completed all five
 agents; the final branch SHA's run is recorded in the #116 handoff. Real-model
 behaviour, tokens, peak memory, physical display latency, Windows/macOS PSS and
 default-install variants (jcode memory, sandboxes) are not measured.
+Continuation-only lifecycle movement passes check --tests / characterization19 /
+navigation2 / view41 (00054e88), still preserving all six marked expectations.
+It is not part of the first frozen checkpoint 3d5dc0fb.

@@ -87,6 +87,35 @@ impl ReadState {
     }
 }
 impl Navigation {
+    pub(super) fn cancel(&mut self) {
+        self.history_rebase_pending = false;
+        if self.take_request().is_some() {
+            self.set_loading(false);
+        }
+        self.scroll.pending = 0;
+        self.scroll.moved_during_read = false;
+        self.view_revision = self.view_revision.wrapping_add(1);
+    }
+    pub(super) fn rebase(&mut self) {
+        let pending = self.scroll.pending;
+        self.cancel();
+        self.scroll.pending = pending;
+    }
+    pub(super) fn fail_read(&mut self) {
+        self.history_rebase_pending = false;
+        self.set_loading(false);
+        if self.request().is_none() {
+            self.scroll.pending = 0;
+        }
+        self.set_request(None);
+        self.scroll.moved_during_read = false;
+    }
+    pub(super) fn finish_reply(&mut self) -> isize {
+        self.scroll.initialized = false;
+        self.set_request(None);
+        self.scroll.moved_during_read = false;
+        std::mem::take(&mut self.scroll.pending)
+    }
     pub fn follow(&self) -> bool {
         matches!(
             self.mode,
