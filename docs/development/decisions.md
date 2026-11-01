@@ -2778,3 +2778,16 @@ difference rather than claiming byte-identical prompts or cross-agent validity.
 Revisit only when stage 2 is separately authorized and one exact common workload
 is agreed. No real provider or comparative performance claim is authorized by
 stage 1. The optional CI job records observations, not performance thresholds.
+## #137: Request inspection as a standalone read-only client
+
+`shellboy thread request` reads the conversation database read-only and never
+starts an owner, so it works on a copied database and cannot disturb live
+Threads. It is not a protocol operation or TUI form; the catalogue test tracks it
+like `serve`/`shutdown`. Assembly reuses the driver's leading items, context line
+and `HttpModelClient::wire_request` (the same function `send` serializes), so a
+fully known rebuild is byte-identical. Attempt manifests gain `replay`
+(path-node count plus SHA-256 over id/revision/tombstone) and `cwd`; older
+attempts report history as unknown instead of guessing from timestamps. The wire
+form uses the current configuration; a changed connection shows up as a
+`request_body_bytes` mismatch, not silently. Revisit if attachments need
+byte-exact rebuilding or if a TUI view is wanted.

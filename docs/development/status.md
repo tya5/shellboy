@@ -1,5 +1,14 @@
 # Development status
 
+## Request inspection (#137)
+
+Branch issue-137/request-inspect adds `shellboy thread request`, a standalone
+read-only client that rebuilds a Thread's next request or a saved attempt's
+request without sending it. Attempt manifests now record the replayed path
+witness and cwd. tests/request_inspect.rs checks byte equality with what a
+loopback model received and that consecutive tool-loop requests repeat the
+previous items except the trailing context line. Branch CI pending at commit.
+
 ## Schema 18 release-upgrade validation
 
 The synthetic upgrade helper defaults to published v0.5.0/schema 17 and candidate

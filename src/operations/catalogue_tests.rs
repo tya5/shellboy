@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 64, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 65, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown"] {
         let lifecycle = leaves
             .remove(name)
@@ -59,6 +59,28 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             "headless lifecycle must not be offered as a TUI form"
         );
     }
+    // A standalone read-only debug client (#137), deliberately not a TUI form:
+    // it reads the database directly and never routes through an owner.
+    let request = leaves
+        .remove("thread request")
+        .expect("tracked standalone debug path");
+    let actual = request
+        .get_arguments()
+        .filter(|arg| !matches!(arg.get_id().as_str(), "help" | "version"))
+        .map(|arg| format!("--{}", arg.get_long().expect("named options only")))
+        .collect::<BTreeSet<_>>();
+    let mut expected = ["--thread", "--attempt", "--compare-attempt", "--body"]
+        .map(str::to_owned)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    expected.extend(GLOBAL_ARGUMENTS.iter().map(|arg| arg.spelling.to_owned()));
+    assert_eq!(actual, expected);
+    assert!(
+        !CLI_BINDINGS
+            .iter()
+            .any(|binding| binding.path == ["thread", "request"]),
+        "the debug client must not be offered as a TUI form"
+    );
     assert_eq!(
         leaves.len(),
         62,

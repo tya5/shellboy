@@ -14,6 +14,7 @@ shellboy thread fork --thread ID --node ID [--cwd PATH]
 shellboy thread delete-preview --thread ID [--descendants]
 shellboy thread delete --thread ID [--descendants]
 shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT]
+shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] (--text TEXT | --text-stdin)
 shellboy message get --message ID
 shellboy operation get --operation ID
@@ -314,3 +315,13 @@ worker, queue or UI adapter. Core review is required before integration.
 
 Owner replacement/reload does not transfer running work in this feature. Keep
 #82 ownership cleanup; no exec handover, UI reconnect or late UI attach is added.
+
+## 送信リクエストの点検（#137）
+
+`thread request` はデバッグ用の単独client（docs/rag/configと同じ扱い、ownerを起動しない、`--operation-id` 不可、TUI formなし）。data-dirの `shellboy.db` を読み取り専用で1つのread transactionとして開き、モデルへ送らず、何も書き込まない。新しい表・worker・queueはない。
+
+- 既定：Threadの最新Turnが現在の保存済みpathから次に送る要求。未配送のevent/messageは含めない。
+- `--attempt A`：attemptのinput manifestから組み立て直す。manifestは送信時のreplay path witness（先頭ノード数とID・payload revision・tombstoneのSHA-256）とcontext行のcwdを記録する。現在のpathの先頭が一致しない、witnessの無い旧attempt、添付内容（送信時にファイルから束ねる）、instruction snapshotの無いTurnは `unknown` として列挙し、推測で埋めない。wire形式は現在の設定のconnectionで、送信と同じ `HttpModelClient::wire_request` を通すため、全項目が既知ならbodyはbyte単位で送信時と一致する。保存済み `request_body_bytes` との一致を `saved.request_body_bytes_match` に示す。
+- 出力：項目ごとの index/type/role/文字数/SHA-256先頭12桁と、全体のSHA-256・byte数・文字数。`--body` のときだけbody JSONを含め、`extra_body` の値はSHA-256だけにする。ヘッダーと資格情報は出さない。
+- `--compare-attempt B`：Bの項目hash列と比べ、共通の先頭項目数と最初に異なる項目indexを返す。同じtool loopの連続要求では、前の要求の末尾にある要求ごとのcontext行だけが異なるのが正常。
+

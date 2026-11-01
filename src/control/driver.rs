@@ -10,6 +10,7 @@ mod trim;
 use adoption::adopt_response;
 use overflow::OverflowBudget;
 use request::{AdmittedRequest, Instructions, prepare_attempt, stream_response};
+pub(crate) use request::{ContextLine, context_item, leading_items};
 use tools::run_tool_group;
 
 use super::state::{now, recover_turn_tx};

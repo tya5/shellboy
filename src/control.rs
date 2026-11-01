@@ -20,6 +20,11 @@ mod attachment_input;
 pub(crate) mod context;
 pub mod db;
 mod driver;
+/// Request assembly parts shared with `shellboy thread request` (#137).
+pub(crate) mod request_parts {
+    pub(crate) use super::attachment_input::{has_attachment_ref, strip_local};
+    pub(crate) use super::driver::{ContextLine, context_item, leading_items};
+}
 pub mod output;
 pub(crate) mod receipt;
 pub mod replay;

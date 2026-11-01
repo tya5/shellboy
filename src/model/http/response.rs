@@ -95,7 +95,7 @@ impl HttpModelClient {
     #[allow(clippy::result_large_err)]
     async fn response_inner(
         &self,
-        mut request: Value,
+        request: Value,
         cancel: CancellationToken,
         events: Option<Events>,
         thread: Option<&str>,
@@ -112,9 +112,14 @@ impl HttpModelClient {
             &self.connection_name,
         )?;
         let mut facts = ResponseFacts::default();
-        let session_header = self.prepare_session(thread, &mut request)?;
+        let tools_enabled = request
+            .get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| !tools.is_empty());
+        let (request, session_header) = self.wire_request(request, thread)?;
         self.response_attempt(
             request,
+            tools_enabled,
             RequestContext {
                 cancel: &cancel,
                 deadline: &mut deadline,
@@ -195,24 +200,24 @@ impl HttpModelClient {
             Ok(None)
         }
     }
-    // Keep the existing bounded recovery payload intact across body parsing.
-    #[allow(clippy::result_large_err)]
-    async fn response_attempt(
+    /// The exact conversation request body this client sends for a canonical
+    /// request, and the session header value. Pure: no I/O, no credentials.
+    /// `shellboy thread request` uses the same function, so an inspected body
+    /// is byte-identical to the one `send` serializes.
+    pub(crate) fn wire_request(
         &self,
         mut request: Value,
-        context: RequestContext<'_>,
-        facts: &mut ResponseFacts,
-        session_header: Option<HeaderValue>,
-    ) -> Result<ModelResponse, AttemptFailure> {
+        thread: Option<&str>,
+    ) -> Result<(Value, Option<HeaderValue>), ModelError> {
+        let session_header = self.prepare_session(thread, &mut request)?;
         let Some(object) = request.as_object_mut() else {
-            return Err(ModelError::new("protocol", "Responses request must be an object").into());
+            return Err(ModelError::new(
+                "protocol",
+                "Responses request must be an object",
+            ));
         };
         object.insert("stream".into(), Value::Bool(true));
         object.insert("store".into(), Value::Bool(false));
-        let tools_enabled = request
-            .get("tools")
-            .and_then(Value::as_array)
-            .is_some_and(|tools| !tools.is_empty());
         // The hint reads Shellboy's own roles, before context_role maps them.
         let cache = self
             .connection
@@ -234,6 +239,18 @@ impl HttpModelClient {
                 object.entry(key.clone()).or_insert_with(|| value.clone());
             }
         }
+        Ok((request, session_header))
+    }
+    // Keep the existing bounded recovery payload intact across body parsing.
+    #[allow(clippy::result_large_err)]
+    async fn response_attempt(
+        &self,
+        request: Value,
+        tools_enabled: bool,
+        context: RequestContext<'_>,
+        facts: &mut ResponseFacts,
+        session_header: Option<HeaderValue>,
+    ) -> Result<ModelResponse, AttemptFailure> {
         let (response, secrets, observation) = self
             .send(
                 ApiEndpoint::Responses,

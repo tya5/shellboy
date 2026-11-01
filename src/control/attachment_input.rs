@@ -10,6 +10,26 @@ fn invalid(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidState, message)
 }
 
+/// Local provenance fields never become unsupported API properties.
+pub(crate) fn strip_local(item: &mut Value) {
+    if let Some(object) = item.as_object_mut() {
+        object.remove("attachments");
+        object.remove("attachment_origin");
+        object.remove("attachment_operation_id");
+        object.remove("attachment_operation");
+    }
+}
+/// Whether a replayed item has attachment content bound only at send time.
+pub(crate) fn has_attachment_ref(item: &Value) -> bool {
+    item.get("content")
+        .and_then(Value::as_array)
+        .is_some_and(|content| {
+            content
+                .iter()
+                .any(|part| part.get("type").and_then(Value::as_str) == Some("attachment_ref"))
+        })
+}
+
 pub(super) fn bind(
     replay: &super::replay::ReplayLease,
     prepared: &mut PreparedAttachments,
@@ -63,13 +83,7 @@ pub(super) fn bind(
             }
             *content = expanded;
         }
-        // Local provenance fields never become unsupported API properties.
-        if let Some(object) = item.as_object_mut() {
-            object.remove("attachments");
-            object.remove("attachment_origin");
-            object.remove("attachment_operation_id");
-            object.remove("attachment_operation");
-        }
+        strip_local(&mut item);
         input.push(item);
     }
     // Replaced sources are absent from replay; report their excluded state at

@@ -183,13 +183,20 @@ fn main() -> ExitCode {
     if cli.operation_id.is_some()
         && matches!(
             cli.command,
-            Some(CliCommand::Docs { .. } | CliCommand::Rag(_) | CliCommand::Config { .. })
+            Some(
+                CliCommand::Docs { .. }
+                    | CliCommand::Rag(_)
+                    | CliCommand::Config { .. }
+                    | CliCommand::Thread {
+                        command: shellboy::cli::ThreadCommand::Request(_)
+                    }
+            )
         )
     {
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidArgument,
-                "--operation-id applies to owner RPCs; docs, rag and config are standalone commands",
+                "--operation-id applies to owner RPCs; docs, rag, config and thread request are standalone commands",
             ),
             cli.operation_id,
         );
@@ -271,6 +278,14 @@ fn main() -> ExitCode {
             }
         }
         Some(CliCommand::Docs { command }) => standalone_response(docs_response(command)),
+        Some(CliCommand::Thread {
+            command: shellboy::cli::ThreadCommand::Request(options),
+        }) => standalone_response(runtime.block_on(shellboy::request_inspect::execute(
+            options,
+            cli.config,
+            cli.data_dir,
+            &cwd,
+        ))),
         Some(CliCommand::Rag(options)) => standalone_response(runtime.block_on(
             shellboy::rag::execute(options, cli.config, cli.data_dir, &cwd),
         )),

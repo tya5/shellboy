@@ -179,6 +179,11 @@ pub enum ThreadCommand {
     /// Inspect deletion blockers and direct references without deleting anything.
     DeletePreview(ThreadDeleteOptions),
     Set(ThreadSetOptions),
+    /// Debug: assemble a saved Thread's request without sending it; read-only, no owner.
+    #[command(
+        after_help = "Inspect what a Thread sends, for example to find where two requests diverge:\n  shellboy thread request --thread THREAD_ID\n  shellboy thread request --thread THREAD_ID --attempt ATTEMPT_ID --compare-attempt NEXT_ATTEMPT_ID\n\nOpens the data directory's database read-only and never calls a model. Items list type, role, characters and a short hash; --body adds the body JSON. Headers and credentials are never shown; configured extra_body values appear as hashes. Parts saved state cannot determine are reported as unknown."
+    )]
+    Request(crate::request_inspect::RequestOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum MessageCommand {
@@ -797,6 +802,7 @@ impl Cli {
                 thread_id: a.thread_id,
             }),
             CliCommand::Thread { command } => match command {
+                ThreadCommand::Request(_) => return Ok(None),
                 ThreadCommand::List(a) => C::ThreadList(wire::ThreadListArgs {
                     limit: a.limit,
                     cursor: a.cursor,

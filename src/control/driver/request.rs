@@ -173,21 +173,55 @@ fn instruction_message(source: &std::path::Path, body: &str) -> Result<String, A
     ))
 }
 
+/// The fields of the per-request `Shellboy context v1` line.
+pub(crate) struct ContextLine<'a> {
+    pub thread: &'a str,
+    pub run: &'a str,
+    pub turn: &'a str,
+    pub cwd: &'a std::path::Path,
+    pub profile: &'a str,
+    pub model: &'a str,
+    pub effort: Option<&'a str>,
+    pub agents: &'a std::path::Path,
+}
+/// Leading system/developer items, before the replayed conversation.
+pub(crate) fn leading_items(
+    agents: &std::path::Path,
+    instruction_body: Option<&str>,
+) -> Result<Vec<Value>, ApiError> {
+    let mut input = vec![
+        json!({"role":"system","content":[{"type":"input_text","text":"You are Shellboy, a native personal agent. A Thread is a continuing conversation; a Turn is one response interval; a Run owns its shells and child Runs, and may outlive a completed Turn. Execute your own commands by calling the shell function directly. shellboy message send delivers conversation text; it does not execute that text as a shell command. Sending to your own Thread adds input to your current conversation, not a separate agent. A shell tool result's execution_id always identifies the process started by that call, including a CLI process; that process's stdout may itself be JSON. For background work, take the returned execution_id and observe it in a later shell call. Use shellboy shell get --execution ID to check the actual command, cwd, Thread, Run and Turn before diagnosing unexpected output. CLI IDs require named flags, not positional arguments; consult the specific subcommand --help before guessing syntax. Guides are bundled with the executable: use shellboy docs list or shellboy docs search --query TEXT, then shellboy docs get --id ID to read the relevant guide before unfamiliar operations, especially delegation. No repository path is required. Use shellboy --help and shellboy history commands to inspect state, send messages, create children, wait, attach files and retrieve original history. Report actual results and errors. Commands share filesystem access; histories and cwd are per Thread."}]}),
+    ];
+    if let Some(body) = instruction_body {
+        input.push(json!({"role":"developer","content":[{"type":"input_text","text":instruction_message(agents, body)?}]}));
+    }
+    Ok(input)
+}
+/// The per-request context item Shellboy appends after the conversation.
+pub(crate) fn context_item(line: &ContextLine<'_>) -> Value {
+    let effort = line.effort.map(str::to_owned);
+    json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy context v1: thread={} run={} turn={} cwd={} connection={} model={} effort={:?}; AGENTS reference={}",line.thread,line.run,line.turn,line.cwd.display(),line.profile,line.model,effort,line.agents.display())}]})
+}
+
 pub(super) fn prepare_request(
     snapshot: &Snapshot,
     instruction_body: Option<&Arc<str>>,
     prepared: &mut crate::attachments::PreparedAttachments,
 ) -> Result<Value, ApiError> {
-    let mut input = vec![
-        json!({"role":"system","content":[{"type":"input_text","text":"You are Shellboy, a native personal agent. A Thread is a continuing conversation; a Turn is one response interval; a Run owns its shells and child Runs, and may outlive a completed Turn. Execute your own commands by calling the shell function directly. shellboy message send delivers conversation text; it does not execute that text as a shell command. Sending to your own Thread adds input to your current conversation, not a separate agent. A shell tool result's execution_id always identifies the process started by that call, including a CLI process; that process's stdout may itself be JSON. For background work, take the returned execution_id and observe it in a later shell call. Use shellboy shell get --execution ID to check the actual command, cwd, Thread, Run and Turn before diagnosing unexpected output. CLI IDs require named flags, not positional arguments; consult the specific subcommand --help before guessing syntax. Guides are bundled with the executable: use shellboy docs list or shellboy docs search --query TEXT, then shellboy docs get --id ID to read the relevant guide before unfamiliar operations, especially delegation. No repository path is required. Use shellboy --help and shellboy history commands to inspect state, send messages, create children, wait, attach files and retrieve original history. Report actual results and errors. Commands share filesystem access; histories and cwd are per Thread."}]}),
-    ];
-    if let Some(body) = instruction_body {
-        input.push(json!({"role":"developer","content":[{"type":"input_text","text":instruction_message(&snapshot.agents, body)?}]}));
-    }
+    let mut input = leading_items(&snapshot.agents, instruction_body.map(|body| &**body))?;
     if let Some(replay) = &snapshot.input {
         crate::control::attachment_input::bind(replay, prepared, &mut input)?;
     }
-    input.push(json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy context v1: thread={} run={} turn={} cwd={} connection={} model={} effort={:?}; AGENTS reference={}",snapshot.thread,snapshot.run,snapshot.turn,snapshot.cwd.display(),snapshot.profile,snapshot.model,snapshot.effort,snapshot.agents.display())}]}));
+    input.push(context_item(&ContextLine {
+        thread: &snapshot.thread,
+        run: &snapshot.run,
+        turn: &snapshot.turn,
+        cwd: &snapshot.cwd,
+        profile: &snapshot.profile,
+        model: &snapshot.model,
+        effort: snapshot.effort.as_deref(),
+        agents: &snapshot.agents,
+    }));
     Ok(model::response_request(
         &snapshot.model,
         input,
@@ -256,6 +290,12 @@ impl Snapshot {
             return Err(ApiError::new(ErrorCode::OperationConflict,"Turn changed before attempt admission").into());
         }
         let mut manifest = json!({"receipts":self.receipts,"events":self.events,"attachments":attempt_attachments.manifest,"input_characters":input_characters,"history_characters":history_characters});
+        // Enough to rebuild this request later from saved state (#137): which
+        // path nodes were replayed, and the cwd its context line named.
+        if let Some(replay) = &self.input {
+            manifest["replay"] = json!(replay.witness());
+        }
+        manifest["cwd"] = json!(self.cwd.to_string_lossy());
         // Only a hash: the contents stay in the user's configuration file.
         if let Some(digest) = extra_digest {
             manifest["extra_digest"] = json!(digest);

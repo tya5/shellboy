@@ -129,6 +129,8 @@ mod rag_thread_scope;
 mod recovery_paths;
 #[path = "../replay_cache.rs"]
 mod replay_cache;
+#[path = "../request_inspect.rs"]
+mod request_inspect;
 #[path = "../response_retries.rs"]
 mod response_retries;
 #[path = "../response_upload_recovery.rs"]

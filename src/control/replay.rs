@@ -65,6 +65,32 @@ impl Drop for Frame {
 }
 struct LeaseFrames {
     frames: Vec<Arc<Frame>>,
+    witness: PathWitness,
+}
+/// Identifies the exact saved path nodes (in path order, with payload
+/// revisions and tombstones) a lease was built from. Recorded in an attempt's
+/// input manifest so `shellboy thread request --attempt` can tell whether the
+/// current saved path still begins with the same nodes.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PathWitness {
+    pub nodes: usize,
+    pub sha256: String,
+}
+impl PathWitness {
+    fn of(frames: &[Arc<Frame>]) -> Self {
+        let mut framed = String::new();
+        for frame in frames {
+            let stamp = &frame.stamp;
+            framed.push_str(&format!(
+                "{}\u{1f}{}\u{1f}{}\u{1e}",
+                stamp.id, stamp.revision, stamp.tombstone as u8
+            ));
+        }
+        Self {
+            nodes: frames.len(),
+            sha256: crate::digest::sha256_hex(framed),
+        }
+    }
 }
 impl Drop for LeaseFrames {
     fn drop(&mut self) {
@@ -80,13 +106,17 @@ impl Drop for LeaseFrames {
 pub struct ReplayLease(Arc<LeaseFrames>);
 impl ReplayLease {
     fn new(frames: Vec<Arc<Frame>>) -> Result<Self, StorageError> {
+        let witness = PathWitness::of(&frames);
         let frames = tool_order::ordered(frames)?;
         for frame in &frames {
             if frame.pins.fetch_add(1, Ordering::AcqRel) == 0 {
                 frame.ledger.pinned.fetch_add(frame.bytes, Ordering::AcqRel);
             }
         }
-        Ok(Self(Arc::new(LeaseFrames { frames })))
+        Ok(Self(Arc::new(LeaseFrames { frames, witness })))
+    }
+    pub fn witness(&self) -> &PathWitness {
+        &self.0.witness
     }
     pub fn items(&self) -> impl Iterator<Item = &Value> {
         self.0.frames.iter().flat_map(|frame| &frame.items)
@@ -258,43 +288,20 @@ impl ReplayCache {
                         StorageError::Schema("replay path changed within its DB snapshot".into())
                     })?
                     .clone();
-                let (group, items) = if stamp.tombstone {
-                    (None, Vec::new())
-                } else {
-                    let body: String = row.get(1)?;
-                    let value: Value = serde_json::from_str(&body)
-                        .map_err(|error| StorageError::Schema(error.to_string()))?;
+                if !stamp.tombstone {
                     state.parsed_nodes += 1;
-                    let group = value
-                        .get("group_id")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    let spill = value.get("spill_version").is_some();
-                    let items = convert(value, context.epoch);
-                    (
-                        group,
-                        if spill {
-                            tool_order::inline_spill(items)?
-                        } else {
-                            items
-                        },
-                    )
+                }
+                let body: Option<String> = if stamp.tombstone {
+                    None
+                } else {
+                    Some(row.get(1)?)
                 };
-                let bytes = size_of::<Frame>()
-                    + 2 * size_of::<usize>()
-                    + stamp.id.capacity()
-                    + group.as_ref().map_or(0, String::capacity)
-                    + items.capacity() * size_of::<Value>()
-                    + items.iter().map(heap_bytes).sum::<usize>();
-                self.ledger.live.fetch_add(bytes, Ordering::AcqRel);
-                frames.push(Arc::new(Frame {
+                frames.push(Arc::new(decode_frame(
                     stamp,
-                    items,
-                    group,
-                    bytes,
-                    pins: AtomicUsize::new(0),
-                    ledger: self.ledger.clone(),
-                }));
+                    body,
+                    context.epoch,
+                    &self.ledger,
+                )?));
                 offset += 1;
             }
             if offset != stamps.len() {
@@ -373,6 +380,75 @@ fn outbound_item(mut item: Value) -> Value {
         object.remove("id");
     }
     item
+}
+fn decode_frame(
+    stamp: Stamp,
+    body: Option<String>,
+    epoch: i64,
+    ledger: &Arc<Ledger>,
+) -> Result<Frame, StorageError> {
+    let (group, items) = match body {
+        None => (None, Vec::new()),
+        Some(body) => {
+            let value: Value = serde_json::from_str(&body)
+                .map_err(|error| StorageError::Schema(error.to_string()))?;
+            let group = value
+                .get("group_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let spill = value.get("spill_version").is_some();
+            let items = convert(value, epoch);
+            (
+                group,
+                if spill {
+                    tool_order::inline_spill(items)?
+                } else {
+                    items
+                },
+            )
+        }
+    };
+    let bytes = size_of::<Frame>()
+        + 2 * size_of::<usize>()
+        + stamp.id.capacity()
+        + group.as_ref().map_or(0, String::capacity)
+        + items.capacity() * size_of::<Value>()
+        + items.iter().map(heap_bytes).sum::<usize>();
+    ledger.live.fetch_add(bytes, Ordering::AcqRel);
+    Ok(Frame {
+        stamp,
+        items,
+        group,
+        bytes,
+        pins: AtomicUsize::new(0),
+        ledger: ledger.clone(),
+    })
+}
+
+/// Uncached read of the first `nodes` saved path nodes (all when `None`),
+/// converted for `epoch`. For read-only inspection; it never touches a cache
+/// and reads only the Thread's own selected path.
+pub(crate) fn load_uncached(
+    db: &Connection,
+    thread: &str,
+    nodes: Option<usize>,
+    epoch: i64,
+) -> Result<ReplayLease, StorageError> {
+    let limit = nodes.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
+    let ledger = Arc::new(Ledger::default());
+    let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.payload_json FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
+    let mut rows = statement.query(rusqlite::params![thread, limit])?;
+    let mut frames = Vec::new();
+    while let Some(row) = rows.next()? {
+        let stamp = Stamp {
+            id: row.get(0)?,
+            revision: row.get(1)?,
+            tombstone: row.get(2)?,
+        };
+        let body: Option<String> = if stamp.tombstone { None } else { row.get(3)? };
+        frames.push(Arc::new(decode_frame(stamp, body, epoch, &ledger)?));
+    }
+    ReplayLease::new(frames)
 }
 // serde_json::Value owns nested strings, Vec capacity and map allocations. The
 // per-map-entry allowance conservatively covers tree-node pointers/alignment.
