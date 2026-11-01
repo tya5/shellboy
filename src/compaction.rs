@@ -21,6 +21,7 @@ pub(crate) mod context_usage;
 use bounded::SummaryBudget;
 mod edit;
 mod keys;
+pub(crate) mod preview;
 pub use edit::ContextEditResult;
 mod policy;
 mod range;

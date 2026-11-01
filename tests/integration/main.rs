@@ -17,6 +17,8 @@ mod chat_completions;
 mod cli;
 #[path = "../cli_process.rs"]
 mod cli_process;
+#[path = "../compact_preview.rs"]
+mod compact_preview;
 #[path = "../composer.rs"]
 mod composer;
 #[path = "../config.rs"]

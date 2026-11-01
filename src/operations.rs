@@ -3804,7 +3804,7 @@ impl OperationId {
             Command::AttachmentAdd(_) => Self::AttachmentAdd,
             Command::AttachmentList(_) => Self::AttachmentList,
             Command::AttachmentRemove(_) => Self::AttachmentRemove,
-            Command::Compact(_) => Self::Compact,
+            Command::Compact(_) | Command::CompactPreview(_) => Self::Compact,
             Command::ContextEdit(_) => Self::Compact,
             Command::IndexStatus(_) => Self::IndexStatus,
             Command::IndexPreview(_) => Self::IndexPreview,

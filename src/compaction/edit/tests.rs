@@ -1,13 +1,13 @@
 //! Real SQLite adoption, restore and rollback boundaries for deterministic edits.
 use super::*;
 
-pub(super) struct Fixture {
+pub(in crate::compaction) struct Fixture {
     root: tempfile::TempDir,
-    pub(super) db: DbWorker,
-    pub(super) compactor: Compactor,
+    pub(in crate::compaction) db: DbWorker,
+    pub(in crate::compaction) compactor: Compactor,
 }
 impl Fixture {
-    pub(super) async fn new() -> Self {
+    pub(in crate::compaction) async fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let db = DbWorker::open(root.path().join("context.db"))
             .await
@@ -23,7 +23,7 @@ impl Fixture {
             compactor,
         }
     }
-    pub(super) async fn append(&self, id: &str, turn: Option<&str>, payload: Value) {
+    pub(in crate::compaction) async fn append(&self, id: &str, turn: Option<&str>, payload: Value) {
         let (id, turn) = (id.to_owned(), turn.map(str::to_owned));
         self.db
             .call(move |db| {
@@ -35,11 +35,11 @@ impl Fixture {
             .await
             .unwrap();
     }
-    pub(super) async fn text(&self, id: &str, text: &str) {
+    pub(in crate::compaction) async fn text(&self, id: &str, text: &str) {
         self.append(id, None, json!({"role":"user","content":text}))
             .await;
     }
-    pub(super) async fn path(&self) -> Vec<String> {
+    pub(in crate::compaction) async fn path(&self) -> Vec<String> {
         self.db
             .call(|db| {
                 Ok(db
@@ -60,7 +60,7 @@ impl Fixture {
             Ok(())
         }).await.unwrap();
     }
-    async fn tools(&self) {
+    pub(in crate::compaction) async fn tools(&self) {
         self.db.call(|db| {
             db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('old-run','t','completed','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old-turn','t','old-run','completed','now');
@@ -108,7 +108,7 @@ impl Fixture {
             panic!("small fixture history GC did not finish");
         }
     }
-    pub(super) async fn close(self) {
+    pub(in crate::compaction) async fn close(self) {
         self.db.shutdown().await.unwrap();
         drop(self.root);
     }

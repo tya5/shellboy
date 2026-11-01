@@ -3,8 +3,9 @@
 use super::*;
 use crate::protocol::{ContextEditAction, ContextEditArgs};
 #[cfg(test)]
-mod tests;
+pub(in crate::compaction) mod tests;
 mod trim;
+pub(super) use trim::preview_trim;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ContextEditResult {

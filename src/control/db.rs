@@ -217,6 +217,28 @@ impl Store {
                 .map_err(storage_error)?
                 .and_then(MutationResult::value);
         }
+        if let Command::CompactPreview(args) = &request.command {
+            let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
+            let args = args.clone();
+            let config = self.config.clone();
+            let path = self.database.path().to_path_buf();
+            return crate::presentation::work(move || {
+                let mut db =
+                    Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                        .map_err(sql_error)?;
+                db.busy_timeout(std::time::Duration::from_millis(250))
+                    .map_err(sql_error)?;
+                db.pragma_update(None, "query_only", true)
+                    .map_err(sql_error)?;
+                let tx = db.transaction().map_err(sql_error)?;
+                let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
+                    .map_err(storage_error)?;
+                tx.commit().map_err(sql_error)?;
+                drop(db);
+                MutationResult::value(crate::compaction::preview::prepare(raw))
+            })
+            .await?;
+        }
         if let Command::AttachmentList(args) = &request.command {
             let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
             let path = self.database.path().to_path_buf();
@@ -1166,6 +1188,10 @@ impl Store {
             }
             Command::RunStop(args) => stop_run(tx, &args.run_id, caller, now),
             Command::RunRetry(args) => retry_run(tx, &args.run_id, caller, now),
+            Command::CompactPreview(_) => Err(error(
+                ErrorCode::InvalidState,
+                "Compact preview uses its dedicated read-only projection",
+            )),
             Command::Compact(args) => {
                 queue_compact_tx(tx, args.thread_id.as_deref(), caller, operation_id, None)
             }

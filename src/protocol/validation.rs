@@ -120,6 +120,38 @@ impl ContextEditArgs {
     }
 }
 
+impl CompactPreviewArgs {
+    pub fn validate(&self) -> Result<(), ApiError> {
+        if let Some(action) = self.action {
+            if action == ContextEditAction::Restore {
+                return Err(invalid("compact --dry-run does not support restore"));
+            }
+            ContextEditArgs {
+                thread_id: self.thread_id.clone(),
+                action,
+                from_node_id: self.from_node_id.clone(),
+                to_node_id: self.to_node_id.clone(),
+                max_chars: self.max_chars,
+                max_percent: self.max_percent,
+            }
+            .validate()
+        } else {
+            optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
+            if self.thread_id.as_ref().is_some_and(|id| id.len() > 1024)
+                || self.from_node_id.is_some()
+                || self.to_node_id.is_some()
+                || self.max_chars.is_some()
+                || self.max_percent.is_some()
+            {
+                return Err(invalid(
+                    "default compact preview accepts only a Thread scope",
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
 impl ThreadCreateArgs {
     fn validate(&self) -> Result<(), ApiError> {
         for (name, value) in [
@@ -372,6 +404,7 @@ impl Command {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")
             }
             Self::ContextEdit(a) => a.validate(),
+            Self::CompactPreview(a) => a.validate(),
             Self::ThreadCreate(a) => a.validate(),
             Self::ThreadFork(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {

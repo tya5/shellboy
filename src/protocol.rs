@@ -406,6 +406,14 @@ args!(ContextEditArgs {
     #[serde(default)] max_chars: Option<u64>,
     #[serde(default)] max_percent: Option<f64>
 });
+args!(#[derive(Default)] CompactPreviewArgs {
+    #[serde(default)] thread_id: Option<String>,
+    #[serde(default)] action: Option<ContextEditAction>,
+    #[serde(default)] from_node_id: Option<String>,
+    #[serde(default)] to_node_id: Option<String>,
+    #[serde(default)] max_chars: Option<u64>,
+    #[serde(default)] max_percent: Option<f64>
+});
 args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String> });
 args!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });
 args!(ThreadCreateArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default)] parent_id: Option<String> });
@@ -644,6 +652,8 @@ pub enum Command {
     AttachmentList(ThreadTarget),
     #[serde(rename = "attachment.remove")]
     AttachmentRemove(AttachmentRemoveArgs),
+    #[serde(rename = "compact.preview")]
+    CompactPreview(Box<CompactPreviewArgs>),
     #[serde(rename = "compact")]
     Compact(ThreadTarget),
     #[serde(rename = "context.edit")]

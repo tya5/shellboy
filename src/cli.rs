@@ -371,6 +371,9 @@ pub struct ThreadOptions {
 #[derive(Debug, Clone, Args)]
 #[command(group(clap::ArgGroup::new("edit_action").args(["spill", "summary", "trim", "omit", "restore", "maximal"]).multiple(false)))]
 pub struct CompactOptions {
+    /// Forecast selection, replay characters and failures without changing saved work or calling a model.
+    #[arg(long, conflicts_with = "restore")]
+    pub dry_run: bool,
     #[command(subcommand)]
     pub command: Option<CompactCommand>,
     /// Override the absolute summary limit (minimum effective limit: 2000 characters).
@@ -964,7 +967,8 @@ impl Cli {
             }),
             CliCommand::Compact(a) => {
                 if let Some(CompactCommand::List(list)) = a.command {
-                    if a.spill
+                    if a.dry_run
+                        || a.spill
                         || a.summary
                         || a.trim
                         || a.omit
@@ -1008,6 +1012,18 @@ impl Cli {
                 } else {
                     None
                 };
+                if a.dry_run {
+                    let cmd = C::CompactPreview(Box::new(wire::CompactPreviewArgs {
+                        thread_id: a.thread_id,
+                        action,
+                        from_node_id: a.from_node_id,
+                        to_node_id: a.to_node_id,
+                        max_chars: a.max_chars,
+                        max_percent: a.max_percent,
+                    }));
+                    cmd.validate()?;
+                    return Ok(Some(cmd));
+                }
                 match action {
                     Some(action) => C::ContextEdit(wire::ContextEditArgs {
                         thread_id: a.thread_id,

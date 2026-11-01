@@ -501,3 +501,70 @@ mod budget_tests {
         );
     }
 }
+
+/// Share the exact deterministic plans with a read-only forecast; never adopt.
+pub(in crate::compaction) fn preview_trim(
+    snapshot: &Snapshot,
+    args: &crate::protocol::CompactPreviewArgs,
+    config: &Config,
+) -> Result<(Snapshot, Vec<String>), ApiError> {
+    use crate::protocol::ContextEditAction;
+    let before = history_characters(snapshot);
+    let plan = if args.action == Some(ContextEditAction::Maximal) {
+        disconnect_plan(
+            snapshot,
+            "manual_maximal",
+            semantic_search_configured(config),
+        )
+    } else {
+        let selected = if args.action == Some(ContextEditAction::Trim) {
+            range::from_prefix_end(snapshot, args.to_node_id.as_deref().unwrap_or(""))?
+        } else {
+            range::from_nodes_for_mode(
+                snapshot,
+                args.from_node_id.as_deref().unwrap_or(""),
+                args.to_node_id.as_deref().unwrap_or(""),
+                range::RangeMode::Trim,
+            )?
+        };
+        range::validate(
+            snapshot,
+            std::slice::from_ref(&selected),
+            range::RangeMode::Trim,
+        )?;
+        let omitted: HashSet<_> = selected.collect();
+        TrimPlan {
+            marker: marker_payload(
+                snapshot,
+                &omitted,
+                before,
+                0,
+                "manual",
+                semantic_search_configured(config),
+            ),
+            omitted,
+            spills: Vec::new(),
+            after: 0,
+            provenance_limited: false,
+        }
+    };
+    let projected = projected(snapshot, &plan);
+    if args.action == Some(ContextEditAction::Maximal)
+        && (plan.omitted.is_empty() || history_characters(&projected) >= before)
+    {
+        return Ok((snapshot.clone(), Vec::new()));
+    }
+    range::validate(
+        snapshot,
+        &omission_ranges(&plan.omitted, snapshot.groups.len()),
+        range::RangeMode::Trim,
+    )?;
+    let ids = snapshot
+        .groups
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| plan.omitted.contains(i))
+        .flat_map(|(_, g)| g.sources.iter().map(|s| s.id.clone()))
+        .collect();
+    Ok((projected, ids))
+}
