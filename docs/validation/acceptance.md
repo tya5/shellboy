@@ -7795,3 +7795,12 @@ The branch handoff carries the exact candidate SHA and successful native CI URL;
 Linux/macOS full standard checks are delegated to CI. Windows belongs to the
 integrator's all-OS batch. No local full-suite, real terminal/clipboard, paid
 provider or user-data validation is claimed.
+
+Native CI run41315488946 (197de69c) failed on both Linux and macOS in the same
+older metadata-eviction regression: it supplied another PageDown after the reply
+and indexed an empty action list, although the retained reverse input had already
+issued the expected next-ordinal read on reply. The test now requires exactly one
+LoadHistoryWindow(ordinal7, from_end=false) in deferred reply actions, without a
+second key. Focused macOS execution of that exact integration test passes. This is
+a test-contract correction for the reverse-input fix, not a production/budget or
+guard change. Combined91 / scroll237 / fields15 stay unchanged; new-SHA CI follows.

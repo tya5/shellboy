@@ -1258,8 +1258,8 @@ fn evicted_history_metadata_recovers_previous_and_next_ordinals() {
         }
     ));
     let view_revision = ui.view().navigation.view_revision;
-    // Opposite input while the boundary read is pending cancels its residual
-    // page displacement without invalidating the accepted source-window reply.
+    // Opposite input cancels the obsolete displacement but is itself retained
+    // if cached rows cannot move. The accepted reply replays it without a new key.
     assert!(ui.event(key(KeyCode::PageDown)).is_empty());
     ui.apply(UiUpdate::HistoryWindow {
         pending: Default::default(),
@@ -1284,15 +1284,18 @@ fn evicted_history_metadata_recovers_previous_and_next_ordinals() {
             char_offset: 0,
         },
     });
-    let actions = ui.event(key(KeyCode::PageDown));
-    assert!(matches!(
-        &actions[0],
-        UiAction::LoadHistoryWindow {
-            ordinal: 7,
-            from_end: false,
-            ..
-        }
-    ));
+    let actions = ui.take_deferred_actions();
+    assert!(
+        matches!(
+            actions.as_slice(),
+            [UiAction::LoadHistoryWindow {
+                ordinal: 7,
+                from_end: false,
+                ..
+            }]
+        ),
+        "reverse input must replay once after reply: {actions:?}"
+    );
 }
 
 #[test]
