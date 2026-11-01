@@ -7813,7 +7813,7 @@ frame nor CurrentView context-usage snapshot. Before changing readiness, the
 fixture now retains the last drawn synthetic frame and the last eight paired
 snapshot identities/usage scalars and includes both in its watchdog failure.
 No user data, raw conversation logs, provider request or watchdog budget change.
-Root cause and state-driven correction are investigated next; no pass claimed.
+This was committed before the state-driven correction described below.
 
 The diagnostics-only original test passed locally once (macOS); that is not a
 reproduction or proof of the Ubuntu cause. Source tracing identifies a concrete
@@ -7830,6 +7830,34 @@ input159534/cache103424 plus rendered input/cache. A pure readiness regression
 rejects absent, old-title and unknown snapshots and a missing footer. It also
 finishes/drains the real bridge. Local focused readiness and owner tests plus
 strict Clippy passed before the additional unknown-before-release assertion;
-final rerun and Linux same-SHA triple are pending. The later #118 batch failure
-41317992047 is being compared in a separate task-owned reproduction worktree,
-not dismissed as unrelated, and the final fix will be validated on that batch.
+final local rerun and same-SHA CI evidence are reported separately at handoff.
+The later #118 batch failure41317992047 was reproduced in a separate task-owned
+worktree, not dismissed as unrelated; the fix branch includes that exact batch.
+
+Batch comparison: the original predicate with diagnostics only on a6fb0eba
+reproduced locally (exit101, /tmp/issue138-batch-diagnostic.log). The last frame
+showed completed / input unknown although the delivered CurrentView contained
+input159534/cache103424, read_revision1, selection_revision1, generation1.
+Thus "no snapshot delivered" alone does not explain this case. An older admitted
+snapshot can be correctly rejected behind a newer initial History watermark;
+a completed selection then has no timer-driven convergence obligation. Extra
+fence diagnostics are collected to distinguish rejection from absent delivery.
+The new state-driven fixture on that exact failed batch passed all17 frontend
+reactivity tests and strict Clippy locally. A deterministic unit regression now
+orders initial History watermark2 -> usage snapshot1 -> repaint -> snapshot3,
+checking unknown until the new observation and preserving the stale-read guard.
+
+Counterfactual confirmed on pre-#118 base acb476bc with diagnostics only:
+/tmp/issue138-baseline-fence.log attempt1 passed (snapshot1 arrived at UI read0),
+attempt2 timed out (snapshot1 arrived at UI read2; selected generation1 and
+selection1 matched). Its screen remained completed / input unknown. This pins
+the read-fence ordering, demonstrates the same failure without the #118 behavior
+commits, and does not equate one earlier pass with no regression. The #118 batch
+was independently reproduced and the correction is tested on that batch. No
+navigation/read guard, production query, poll rate or watchdog was relaxed.
+
+Local final owner/frontend regression:17 passed; deterministic stale-initial
+context regression:1 passed. The first strict lint run found clone_on_copy in
+the new synthetic fixture; the fixture now assigns Copy usage directly and
+strict lint/fmt are rerun before push. CI receipts and the exact candidate SHA
+are supplied in the handoff rather than changing the validated SHA afterward.

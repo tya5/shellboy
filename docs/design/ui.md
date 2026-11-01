@@ -146,8 +146,9 @@ subscribes. SelectThread delivers Thread + History and saved activity; context
 usage arrives only in a paired CurrentView observation. An initial periodic
 progress tick may race completed activity, but an idle/completed thread does
 not continue polling. Header/history readiness therefore does not imply a
-context snapshot is pending. A watchdog cannot turn a missing Changed event
-into a snapshot.
+context snapshot is pending or adoptable: a tick's earlier admitted read can
+arrive behind the initial History's newer delivery watermark and be correctly
+rejected as stale. A watchdog cannot turn either case into a new observation.
 
 The status-usage test must wait for completed initial activity, then use a real
 owner commit/Changed and await the matching selected CurrentView usage scalars

@@ -179,7 +179,7 @@ impl Fixture {
                 } = history.as_ref()
                 {
                     self.view_sequences.push(*read_revision);
-                    self.current_view_trace.push_back(json!({"thread":details.thread_id,"title":details.title,"generation":generation,"read_revision":read_revision,"selection_revision":selection_revision,"input_tokens":context_usage.input_tokens,"cached_tokens":context_usage.cached_tokens,"output_tokens":context_usage.output_tokens}));
+                    self.current_view_trace.push_back(json!({"thread":details.thread_id,"title":details.title,"generation":generation,"read_revision":read_revision,"selection_revision":selection_revision,"input_tokens":context_usage.input_tokens,"cached_tokens":context_usage.cached_tokens,"output_tokens":context_usage.output_tokens,"ui_generation_before":self.ui.view().generation,"ui_read_revision_before":self.ui.view().delivery_read_revision,"ui_selection_revision_before":self.ui.view().selection_revision}));
                     while self.current_view_trace.len() > 8 {
                         self.current_view_trace.pop_front();
                     }
@@ -2010,7 +2010,10 @@ async fn status_bar_shows_saved_context_usage_for_a_long_thread_through_the_real
             ui.view().state == shellboy::activity::ActivityPhase::Completed.label()
         })
         .await;
-    assert!(initial.contains("↑—"), "no context is adopted before CurrentView: {initial}");
+    assert!(
+        initial.contains("↑—"),
+        "no context is adopted before CurrentView: {initial}"
+    );
     assert!(
         fixture.current_view_trace.is_empty(),
         "initial snapshots are held"

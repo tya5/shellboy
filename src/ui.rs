@@ -7801,6 +7801,34 @@ mod tool_refresh_tests {
         assert!(ui.dirty);
         assert_eq!(ui.view().context_usage.input_tokens, Some(150));
     }
+    #[test]
+    fn stale_initial_context_waits_for_a_new_adoptable_observation() {
+        let mut ui = paused();
+        ui.view_mut().delivery_read_revision = 2;
+        let usage = ContextUsage {
+            input_tokens: Some(159534),
+            cached_tokens: Some(103424),
+            output_tokens: None,
+        };
+        let snapshot = |ui: &UiState, revision| {
+            let mut update = frame(ui, revision, None);
+            if let UiUpdate::CurrentView { context_usage, .. } = &mut update {
+                *context_usage = usage;
+            }
+            update
+        };
+        // A startup tick's older snapshot may arrive after the initial page.
+        ui.apply(snapshot(&ui, 1));
+        assert_eq!(ui.view().context_usage, ContextUsage::default());
+        assert_eq!(ui.view().delivery_read_revision, 2);
+        // Repainting alone cannot make stale saved usage authoritative.
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(180, 40)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        assert_eq!(ui.view().context_usage, ContextUsage::default());
+        ui.apply(snapshot(&ui, 3));
+        assert_eq!(ui.view().context_usage, usage);
+        assert_eq!(ui.view().delivery_read_revision, 3);
+    }
     #[tokio::test]
     async fn paired_history_preserves_shrink_and_stale_diagnostics_with_one_retention_pass() {
         let root = tempfile::tempdir().unwrap();
