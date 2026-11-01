@@ -1,4 +1,5 @@
 //! Local operation vocabulary; no source reads or clock-dependent hint formatting.
+use super::i18n::local;
 use super::{Config, UiState, overlay::Overlay};
 use crate::ui::text_width::UnicodeWidthStr;
 use std::cell::RefCell;
@@ -47,106 +48,127 @@ pub(super) enum Action {
     Refresh,
 }
 impl Action {
-    // Bindings are stable input identities; display text is localized separately.
-    pub fn spec(self) -> (&'static str, &'static str) {
+    // Bindings remain input identities, independent of translated descriptions.
+    fn static_binding(self, language: crate::config::UiLanguage) -> &'static str {
         match self {
-            Self::Help => ("F1", "操作ガイド"),
-            Self::Commands => ("/", "コマンド"),
-            Self::History => ("Tab", "履歴"),
-            Self::Threads => ("Ctrl+T", "会話"),
-            Self::Send => ("", "送信"),
-            Self::Newline => ("", "改行"),
-            Self::Interrupt => ("Esc", "中断"),
-            Self::Stop => ("Ctrl+C", "停止"),
-            Self::Toggle => ("Enter/Space", "開閉"),
-            Self::Original => ("o", "原文"),
-            Self::Copy => ("c", "コピー"),
-            Self::Code => ("b", "コードをコピー"),
-            Self::CopyBody => ("0", "本文全体"),
-            Self::Back => ("Esc", "戻る"),
-            Self::SelectionBack => ("F2/Esc", "戻る"),
-            Self::LongCopy => ("会話の履歴で c", "長い回答のコピー"),
-            Self::Move => ("^v", "選択"),
-            Self::NextPage => ("n", "次page"),
-            Self::FirstPage => ("p", "先頭再取得"),
-            Self::Fields => ("v", "要点/内部項目"),
-            Self::Operations => ("a", "操作"),
-            Self::Choose => ("Enter", "選択"),
-            Self::Complete => ("Tab", "補完"),
-            Self::NextField => ("Tab", "次の項目"),
-            Self::Display => (
-                "Enter",
-                crate::operations::EnterVerb::Display.text().fallback,
-            ),
-            Self::Execute => (
-                "Enter",
-                crate::operations::EnterVerb::Execute.text().fallback,
-            ),
-            Self::Submit => ("Enter", crate::operations::EnterVerb::Send.text().fallback),
-            Self::Refresh => ("r", "再取得"),
+            Self::Help => "F1",
+            Self::Commands => "/",
+            Self::History => "Tab",
+            Self::Threads => "Ctrl+T",
+            Self::Send | Self::Newline => "",
+            Self::Interrupt | Self::Back => "Esc",
+            Self::Stop => "Ctrl+C",
+            Self::Toggle => "Enter/Space",
+            Self::Original => "o",
+            Self::Copy => "c",
+            Self::Code => "b",
+            Self::CopyBody => "0",
+            Self::SelectionBack => "F2/Esc",
+            Self::LongCopy => local!(language, "会話の履歴で c", "History c"),
+            Self::Move => "^v",
+            Self::NextPage => "n",
+            Self::FirstPage => "p",
+            Self::Fields => "v",
+            Self::Operations => "a",
+            Self::Choose | Self::Display | Self::Execute | Self::Submit => "Enter",
+            Self::Complete | Self::NextField => "Tab",
+            Self::Refresh => "r",
         }
     }
+    pub fn spec(self) -> (&'static str, &'static str) {
+        (
+            self.static_binding(crate::config::UiLanguage::Ja),
+            self.short_label(crate::config::UiLanguage::Ja),
+        )
+    }
     pub fn description(self, language: crate::config::UiLanguage) -> &'static str {
-        use crate::config::UiLanguage::{En, Ja};
-        match (language, self) {
-            (Ja, Self::Send) => "次の区切りでメッセージを渡す",
-            (Ja, Self::Newline) => "入力中に改行する",
-            (Ja, Self::Interrupt) => "現在のTurnを中断する（Runと背景の停止はCtrl+C）",
-            (Ja, Self::Stop) => "Runと所有する背景の作業を停止する",
-            (Ja, Self::Commands) => "コマンド候補を表示。^vで選び、Tabで補完",
-            (Ja, Self::Code) => "保存された原文のコードの塊を番号で選んでコピーする",
-            (Ja, action) => action.spec().1,
-            (En, Self::Help) => "Open the operation guide",
-            (En, Self::Commands) => "Show commands; select with ^v and complete with Tab",
-            (En, Self::History) => "History",
-            (En, Self::Threads) => "Threads",
-            (En, Self::Send) => "Deliver the message at the next boundary",
-            (En, Self::Newline) => "Insert a newline in the draft",
-            (En, Self::Interrupt) => {
+        match self {
+            Self::Help => local!(language, "操作ガイド", "Open the operation guide"),
+            Self::Commands => local!(
+                language,
+                "コマンド候補を表示。^vで選び、Tabで補完",
+                "Show commands; select with ^v and complete with Tab"
+            ),
+            Self::History => local!(language, "履歴", "History"),
+            Self::Threads => local!(language, "会話", "Threads"),
+            Self::Send => local!(
+                language,
+                "次の区切りでメッセージを渡す",
+                "Deliver the message at the next boundary"
+            ),
+            Self::Newline => local!(
+                language,
+                "入力中に改行する",
+                "Insert a newline in the draft"
+            ),
+            Self::Interrupt => local!(
+                language,
+                "現在のTurnを中断する（Runと背景の停止はCtrl+C）",
                 "Interrupt the current Turn; Ctrl+C stops the Run and its background work"
-            }
-            (En, Self::Stop) => "Stop the Run and its background work",
-            (En, Self::Toggle) => "Toggle",
-            (En, Self::Original) => "Original",
-            (En, Self::Copy) => "Copy",
-            (En, Self::Code) => "Select and copy a numbered code block from the saved original",
-            (En, Self::CopyBody) => "Full text",
-            (En, Self::Back | Self::SelectionBack) => "Back",
-            (En, Self::LongCopy) => "Copy a long answer",
-            (En, Self::Move | Self::Choose) => "Select",
-            (En, Self::NextPage) => "Next page",
-            (En, Self::FirstPage) => "Reload first page",
-            (En, Self::Fields) => "Summary / fields",
-            (En, Self::Operations) => "Actions",
-            (En, Self::Complete) => "Complete",
-            (En, Self::NextField) => "Next field",
-            (En, Self::Display) => "Show",
-            (En, Self::Execute) => "Run",
-            (En, Self::Submit) => "Send",
-            (En, Self::Refresh) => "Refresh",
+            ),
+            Self::Stop => local!(
+                language,
+                "Runと所有する背景の作業を停止する",
+                "Stop the Run and its background work"
+            ),
+            Self::Toggle => local!(language, "開閉", "Toggle"),
+            Self::Original => local!(language, "原文", "Original"),
+            Self::Copy => local!(language, "コピー", "Copy"),
+            Self::Code => local!(
+                language,
+                "保存された原文のコードの塊を番号で選んでコピーする",
+                "Select and copy a numbered code block from the saved original"
+            ),
+            Self::CopyBody => local!(language, "本文全体", "Full text"),
+            Self::Back | Self::SelectionBack => local!(language, "戻る", "Back"),
+            Self::LongCopy => local!(language, "長い回答のコピー", "Copy a long answer"),
+            Self::Move | Self::Choose => local!(language, "選択", "Select"),
+            Self::NextPage => local!(language, "次page", "Next page"),
+            Self::FirstPage => local!(language, "先頭再取得", "Reload first page"),
+            Self::Fields => local!(language, "要点/内部項目", "Summary / fields"),
+            Self::Operations => local!(language, "操作", "Actions"),
+            Self::Complete => local!(language, "補完", "Complete"),
+            Self::NextField => local!(language, "次の項目", "Next field"),
+            Self::Display => local!(language, "表示", "Show"),
+            Self::Execute => local!(language, "実行", "Run"),
+            Self::Submit => local!(language, "送信", "Send"),
+            Self::Refresh => local!(language, "再取得", "Refresh"),
         }
     }
     fn short_label(self, language: crate::config::UiLanguage) -> &'static str {
-        use crate::config::UiLanguage::{En, Ja};
-        match (language, self) {
-            (Ja, action) => action.spec().1,
-            (En, Self::Send | Self::Submit) => "Send",
-            (En, Self::Newline) => "Newline",
-            (En, Self::Interrupt) => "Interrupt",
-            (En, Self::Stop) => "Stop",
-            (En, Self::Commands) => "Commands",
-            (En, Self::Code) => "Copy code",
-            (En, action) => action.description(En),
+        match self {
+            Self::Help => local!(language, "操作ガイド", "Open the operation guide"),
+            Self::Commands => local!(language, "コマンド", "Commands"),
+            Self::History => local!(language, "履歴", "History"),
+            Self::Threads => local!(language, "会話", "Threads"),
+            Self::Send | Self::Submit => local!(language, "送信", "Send"),
+            Self::Newline => local!(language, "改行", "Newline"),
+            Self::Interrupt => local!(language, "中断", "Interrupt"),
+            Self::Stop => local!(language, "停止", "Stop"),
+            Self::Toggle => local!(language, "開閉", "Toggle"),
+            Self::Original => local!(language, "原文", "Original"),
+            Self::Copy => local!(language, "コピー", "Copy"),
+            Self::Code => local!(language, "コードをコピー", "Copy code"),
+            Self::CopyBody => local!(language, "本文全体", "Full text"),
+            Self::Back | Self::SelectionBack => local!(language, "戻る", "Back"),
+            Self::LongCopy => local!(language, "長い回答のコピー", "Copy a long answer"),
+            Self::Move | Self::Choose => local!(language, "選択", "Select"),
+            Self::NextPage => local!(language, "次page", "Next page"),
+            Self::FirstPage => local!(language, "先頭再取得", "Reload first page"),
+            Self::Fields => local!(language, "要点/内部項目", "Summary / fields"),
+            Self::Operations => local!(language, "操作", "Actions"),
+            Self::Complete => local!(language, "補完", "Complete"),
+            Self::NextField => local!(language, "次の項目", "Next field"),
+            Self::Display => local!(language, "表示", "Show"),
+            Self::Execute => local!(language, "実行", "Run"),
+            Self::Refresh => local!(language, "再取得", "Refresh"),
         }
     }
     pub fn binding(self, config: &Config) -> String {
         match self {
             Self::Send => config.ui.send_key.clone(),
             Self::Newline => config.ui.newline_keys.join("/"),
-            Self::LongCopy if config.ui.language == crate::config::UiLanguage::En => {
-                "History c".into()
-            }
-            _ => self.spec().0.into(),
+            _ => self.static_binding(config.ui.language).into(),
         }
     }
     pub fn matches(self, code: crossterm::event::KeyCode) -> bool {
@@ -364,6 +386,46 @@ impl UiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn paired_text_keeps_every_original_binding_and_japanese_short_label() {
+        let cases = [
+            (Action::Help, "F1", "操作ガイド"),
+            (Action::Commands, "/", "コマンド"),
+            (Action::History, "Tab", "履歴"),
+            (Action::Threads, "Ctrl+T", "会話"),
+            (Action::Send, "", "送信"),
+            (Action::Newline, "", "改行"),
+            (Action::Interrupt, "Esc", "中断"),
+            (Action::Stop, "Ctrl+C", "停止"),
+            (Action::Toggle, "Enter/Space", "開閉"),
+            (Action::Original, "o", "原文"),
+            (Action::Copy, "c", "コピー"),
+            (Action::Code, "b", "コードをコピー"),
+            (Action::CopyBody, "0", "本文全体"),
+            (Action::Back, "Esc", "戻る"),
+            (Action::SelectionBack, "F2/Esc", "戻る"),
+            (Action::LongCopy, "会話の履歴で c", "長い回答のコピー"),
+            (Action::Move, "^v", "選択"),
+            (Action::NextPage, "n", "次page"),
+            (Action::FirstPage, "p", "先頭再取得"),
+            (Action::Fields, "v", "要点/内部項目"),
+            (Action::Operations, "a", "操作"),
+            (Action::Choose, "Enter", "選択"),
+            (Action::Complete, "Tab", "補完"),
+            (Action::NextField, "Tab", "次の項目"),
+            (Action::Display, "Enter", "表示"),
+            (Action::Execute, "Enter", "実行"),
+            (Action::Submit, "Enter", "送信"),
+            (Action::Refresh, "r", "再取得"),
+        ];
+        for (action, binding, label) in cases {
+            assert_eq!(action.spec(), (binding, label), "{action:?}");
+        }
+        let mut config = Config::default();
+        assert_eq!(Action::LongCopy.binding(&config), "History c");
+        config.ui.language = crate::config::UiLanguage::Ja;
+        assert_eq!(Action::LongCopy.binding(&config), "会話の履歴で c");
+    }
     #[test]
     fn every_width_keeps_whole_actions_and_help_last() {
         for context in [
