@@ -1854,7 +1854,7 @@ fn scroll_wheel(ui: &mut UiState, up: bool) -> Vec<UiAction> {
 fn scroll_cells(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
-    (2..buffer.area.height - 6)
+    (2..buffer.area.height - 11)
         .map(|y| {
             let mut out = String::new();
             let mut x = 1;
@@ -2069,7 +2069,7 @@ fn derived_tool_excerpt_moves_by_visible_rows() {
         tool.execution_id = Some("excerpt-execution".into());
     }
     let mut ui = scroll_fixture(vec![node], 0, 1);
-    let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(60, 17)).unwrap();
     let closed = scroll_cells(&mut ui, &mut terminal);
     assert!(
         !closed
@@ -2286,8 +2286,8 @@ fn slow_downward_wheels_remain_monotonic_across_settled_body_windows() {
             char_offset: 104_650,
         };
     }
-    let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
     assert_eq!(
         scroll_cells(&mut actual, &mut a),
         scroll_cells(&mut expected, &mut b)
@@ -2340,8 +2340,8 @@ fn slow_forward_history_page_keeps_the_visible_rows_until_the_reply() {
             char_offset: 0,
         };
     }
-    let mut a = Terminal::new(TestBackend::new(60, 48)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(60, 48)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(60, 53)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(60, 53)).unwrap();
     let before = scroll_cells(&mut actual, &mut a);
     scroll_cells(&mut expected, &mut b);
     let actions = scroll_wheel(&mut actual, false);
@@ -2760,8 +2760,8 @@ fn adjacent_partial_prefix_and_suffix_gaps_preserve_full_reference_page_position
                     char_offset: if up { 0 } else { 95 * row_chars },
                 };
             }
-            let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
-            let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
+            let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
+            let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
             scroll_cells(&mut actual, &mut a);
             scroll_cells(&mut expected, &mut b);
             let code = if up {

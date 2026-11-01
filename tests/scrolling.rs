@@ -36,8 +36,8 @@ fn rows(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
     // Empty composer: one header, body with one-cell padding, three composer
-    // rows, two footer rows. Compare only history cells, not changing status.
-    (2..buffer.area.height - 6)
+    // rows, two footer rows, plus the fixed five-row owned-work section (#131).
+    (2..buffer.area.height - 11)
         .map(|y| {
             let mut row = String::new();
             let mut x = 1;
