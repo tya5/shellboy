@@ -7894,3 +7894,18 @@ Not yet confirmed here: post-rebase rerun, exact-SHA Linux/macOS branch CI,
 independent review, Windows/3-OS integration batch, main inclusion, native public
 binary/PTY schema17-to20 upgrade or any physical terminal/provider behavior.
 Sticky headers are deferred and receive no implementation or verification claim.
+
+### #142 Rebase And Verification Delta
+
+Rebase base: `acb476bc8d51745f9d17f2b01877137da88c6e8b`. Main's schema19 belongs
+to #141; this feature uses schema20. Startup bootstrap, ordered migrations,
+release-upgrade helper/default, current-only catalogue guard and historical
+fixtures are updated together, preserving both sides. On the rebased tree:
+Python helpers 122 pass; all-target check; cache library 40 pass/1 existing
+ignored; bounded attempt reader 1; JSON/SSE integration 2; storage integration
+25 + library 4; CLI selector 1 all pass. Shared record delta against origin/main
+is additions-only. Prior all-target warning-clean Clippy and 50 operation/form
+cases remain pre-rebase evidence, not an unrun new CI result.
+
+Explicit task-branch push approval has been requested and is not recorded yet.
+No push or branch CI has occurred; integrator handoff is gated on that CI.

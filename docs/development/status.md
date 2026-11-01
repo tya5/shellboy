@@ -3643,3 +3643,15 @@ that #118 is merged or entirely closed.
   Linux/macOS branch CI and formal integrator handoff. Windows/3-OS batch,
   independent review, main inclusion and physical terminal/provider behavior
   remain unverified. Delivery acceptance is not review or integration approval.
+
+### #142 Post-Rebase Local Evidence
+
+The task rebases onto `acb476bc8d51745f9d17f2b01877137da88c6e8b` and keeps #141's
+schema19 context-attempt index. The diagnostic pointer therefore uses isolated
+migration20; both source changes and both historical fixture sets are retained.
+After that rebase: Python 122 pass; all-target `cargo check`; 40 cache-related
+library cases (one existing ignored), the bounded attempt reader, JSON/SSE
+loopback suites (2), storage integration (25) and library (4), and CLI selector
+all pass again. Worktree is not pushed: explicit task-branch push approval was
+requested; full branch CI and formal integrator handoff remain pending. No
+Windows/native public-binary upgrade/physical-terminal/provider claim is added.

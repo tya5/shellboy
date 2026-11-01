@@ -2868,6 +2868,7 @@ do not infer that all render-time domain mutations are permitted.
 Fix tail no-op anchor/fence writes, lost reverse input, and failed-read replay
 separately. Their reasons, acceptance conditions and measurements are in the
 adopted scrolling design. No I/O, worker, protocol, budget or deadline change.
+
 ## D-142: Opt-in cache diagnostic facts, not routing or inferred usage
 
 2026-11-01, adopted for issue #142 part 1 per reviewer task and issue comment
@@ -2877,7 +2878,8 @@ in existing attempt manifest metadata, not a new counter ledger/table/worker.
 A single-attempt `usage get --attempt` selector avoids adding lifetime-growing
 body lists or new work to aggregate/UI usage reads. Bound/whitelist provider
 fields independently of usage; missing is null. The comparison is same-Thread,
-without invented provider/model identity filters; it spans Turn/restart changes. Reserve the dynamic
-options object rather than silently override a static extra_body value. Sticky
+without invented provider/model identity filters; it spans Turn/restart changes.
+Reserve the dynamic options object rather than silently override a static
+extra_body value. Sticky
 headers, provider/cache efficacy tests and real API calls remain outside scope.
 Revisit only with an explicitly approved routing or options-extension request.
