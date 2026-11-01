@@ -404,6 +404,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
         _ => return Form::new(operation, c),
     };
     Form {
+        language: UiLanguage::Ja,
         operation,
         fields,
         build: FormBuilder::Client(build),
@@ -463,6 +464,15 @@ fn rag(
 
 fn safe(value: &str) -> String {
     crate::presentation::sanitize_plain(&value.chars().take(256).collect::<String>(), 0).0
+}
+pub(super) fn confirmation_lines_for(
+    operation: &ClientOperation,
+    language: UiLanguage,
+) -> Vec<Line<'static>> {
+    match language {
+        UiLanguage::En => confirmation_lines_en(operation),
+        UiLanguage::Ja => confirmation_lines(operation),
+    }
 }
 pub(super) fn confirmation_lines(operation: &ClientOperation) -> Vec<Line<'static>> {
     let id = operation.catalogue();
@@ -786,4 +796,63 @@ mod tests {
         assert!(operations.wheel(isize::MIN));
         assert_eq!(operations.form.as_ref().unwrap().help_scroll.get(), 0);
     }
+}
+
+fn confirmation_lines_en(operation: &ClientOperation) -> Vec<Line<'static>> {
+    let id = operation.catalogue();
+    let mut lines = vec![
+        Line::from(super::metadata::text_for(
+            id.label_text(),
+            crate::config::UiLanguage::En,
+        )),
+        Line::from(super::metadata::text_for(
+            id.meaning_text(),
+            crate::config::UiLanguage::En,
+        )),
+        Line::from(super::metadata::text_for(
+            operation.effect().text(),
+            crate::config::UiLanguage::En,
+        )),
+        Line::from(""),
+    ];
+    match operation {
+        ClientOperation::Config(_) => lines.extend([
+            Line::from("Write to the configuration file selected at launch. Existing files are not overwritten."),
+            Line::from("The running owner's settings do not change. Edited configuration takes effect on restart."),
+        ]),
+        ClientOperation::Exec(options) => {
+            if let Some(thread) = options.thread_id.as_deref() {
+                let thread = safe(thread);
+                lines.push(Line::from(format!("Existing Thread: {thread}")));
+            } else {
+                lines.push(Line::from("Existing Thread: none; create a new Thread"));
+            }
+            let repairs = options.max_repairs;
+            let timeout = options.timeout_ms;
+            lines.extend([
+                Line::from(format!("Additional repairs: at most {repairs}; total deadline: {timeout} ms")),
+                Line::from("Model API calls and tools may incur costs or side effects. Repairs do not undo completed effects."),
+                Line::from("The deadline or closing this screen does not stop the target Run. Its receipt ID is shown separately in the result."),
+            ]);
+        }
+        ClientOperation::Rag { options, .. } => {
+            if let Some(path) = &options.db {
+                let path = safe(&path.to_string_lossy());
+                lines.push(Line::from(format!("Independent RAG DB: {path}")));
+            } else {
+                lines.push(Line::from("Independent RAG DB: launch data-dir/rag.db"));
+            }
+            if matches!(options.command, crate::rag::RagCommand::Index { mode: crate::rag::IndexMode::Semantic, .. }) {
+                lines.push(Line::from("Semantic indexing uses the embedding API and may incur costs."));
+            }
+            lines.push(Line::from("Source documents are not deleted. Registration and index changes are saved in the independent RAG database."));
+        }
+        ClientOperation::Docs(_) => {}
+    }
+    lines.extend([
+        Line::from(""),
+        Line::from("Relative paths use the TUI launch directory. Configuration and data-dir are the selections made at launch."),
+        Line::from("Y submits the request. N/Esc returns with inputs intact. Closing the screen does not cancel accepted work."),
+    ]);
+    lines
 }

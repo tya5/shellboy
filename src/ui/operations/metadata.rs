@@ -37,10 +37,11 @@ impl Form {
         };
         crate::operations::compact_effect(mode)
     }
+    #[cfg(test)]
     pub(super) fn verb(&self) -> &'static str {
         text(self.operation.catalogue().enter_verb(self.effect()).text())
     }
-    fn metadata_id(&self, name: &str) -> Option<FieldId> {
+    pub(super) fn metadata_id(&self, name: &str) -> Option<FieldId> {
         Some(match name {
             "thread" => FieldId::Thread,
             "run" => FieldId::Run,
@@ -172,6 +173,9 @@ impl Form {
         }
     }
     pub(super) fn field_hint(&self) -> String {
+        if self.language == crate::config::UiLanguage::En {
+            return self.field_hint_en();
+        }
         let Some(field) = self.fields.get(self.selected) else {
             return String::new();
         };
@@ -201,6 +205,9 @@ impl Form {
         format!("初期値: {origin} | F1で入力条件とIDの探し方")
     }
     pub(super) fn help_lines(&self) -> Vec<Line<'static>> {
+        if self.language == crate::config::UiLanguage::En {
+            return self.help_lines_en();
+        }
         let id = self.operation.catalogue();
         let spec = id.spec();
         let mut lines = vec![
@@ -993,5 +1000,230 @@ pub(super) fn text_for(value: Text, language: crate::config::UiLanguage) -> &'st
         TextKey::Enter(EnterVerb::Send) => "Send",
         TextKey::Term(term) => term_en(term),
         TextKey::Discovery(discovery) => discovery_en(discovery),
+    }
+}
+
+impl Form {
+    fn origin_en(&self, origin: DefaultOrigin) -> &'static str {
+        if !self.follows_current
+            && matches!(
+                origin,
+                DefaultOrigin::SelectedThread
+                    | DefaultOrigin::SelectedRun
+                    | DefaultOrigin::SelectedTurn
+                    | DefaultOrigin::FocusedNode
+                    | DefaultOrigin::FocusedExecution
+            )
+        {
+            return "The reference when this form was opened; edits are not changed automatically";
+        }
+        match origin {
+            DefaultOrigin::None => "Not specified",
+            DefaultOrigin::Required => "Must be specified explicitly",
+            DefaultOrigin::Literal => "This operation's default",
+            DefaultOrigin::SelectedThread => "The Thread when this form was opened",
+            DefaultOrigin::SelectedRun => "The Run when this form was opened",
+            DefaultOrigin::SelectedTurn => "The Turn when this form was opened",
+            DefaultOrigin::FocusedNode => "The focused history node",
+            DefaultOrigin::FocusedExecution => "The focused Execution",
+            DefaultOrigin::ReferencedMessage => "The referenced input ID",
+            DefaultOrigin::ReferencedOperation => "The referenced operation ID",
+            DefaultOrigin::TargetThreadSettings => "The target Thread's saved settings",
+            DefaultOrigin::ThreadThenOwnerConfig => "The target Thread, then the owner's defaults",
+            DefaultOrigin::ProcessCwd => "The TUI launch directory",
+            DefaultOrigin::ActiveIndexSpace => "The current active index space",
+            DefaultOrigin::ConfiguredEmbedding => "The current embedding configuration",
+            DefaultOrigin::ParentOrOwnerDefaults => "The parent Thread or owner's defaults",
+            DefaultOrigin::SavedShellEncoding => "The target Execution's saved encoding",
+        }
+    }
+    fn field_hint_en(&self) -> String {
+        let Some(field) = self.fields.get(self.selected) else {
+            return String::new();
+        };
+        if field.name == "db" {
+            return "Empty uses the launch data-dir/rag.db; relative paths use the launch directory. F1 opens details.".into();
+        }
+        if field.name == "input_mode" {
+            return "file uses a text file; inline uses this form. The TUI does not read terminal stdin. F1 opens details.".into();
+        }
+        let Some(metadata) = self.selected_metadata() else {
+            return "Press F1 for input requirements.".into();
+        };
+        if field.value != field.initial_value {
+            return "Edited value. F1 shows input requirements and where to find IDs.".into();
+        }
+        let discovery = metadata.field.discovery;
+        if field.value.is_empty() && discovery != Discovery::None {
+            let help = discovery_en(discovery);
+            return format!("No value entered. {help}");
+        }
+        if !field.initial_value.is_empty()
+            && matches!(field.kind, Kind::Choice(_) | Kind::Boolean | Kind::Number)
+        {
+            return "Initial form selection. F1 shows input requirements and where to find IDs."
+                .into();
+        }
+        let origin = self.origin_en(metadata.default_origin);
+        format!("Initial value: {origin}. F1 shows input requirements and where to find IDs.")
+    }
+    fn help_lines_en(&self) -> Vec<Line<'static>> {
+        use crate::operations::{Confirmation, IdKind, RequestIdPolicy, Route};
+        let id = self.operation.catalogue();
+        let spec = id.spec();
+        let mut lines = vec![
+            Line::from(operation_meaning_en(id)),
+            Line::from(text_for(
+                self.effect().text(),
+                crate::config::UiLanguage::En,
+            )),
+            Line::from(self.operation.cli()),
+            Line::from(""),
+        ];
+        if self
+            .fields
+            .get(self.selected)
+            .is_some_and(|field| field.name == "db")
+        {
+            lines.push(Line::from("Independent RAG database: empty uses launch data-dir/rag.db. Relative paths use the TUI launch directory. This is separate from the conversation history database."));
+        }
+        if let Some(field) = self.selected_metadata() {
+            let label = field_label_en(field.field.id);
+            lines.push(Line::from(format!("Selected field: {label}")));
+            lines.push(Line::from(field_help_en(field.field.id)));
+            if let Some(input) = self.fields.get(self.selected)
+                && let Kind::Choice(choices) = input.kind
+            {
+                let choices = choices.join(" / ");
+                lines.push(Line::from(format!("Form choices: {choices}")));
+            }
+            let origin = self.origin_en(field.default_origin);
+            lines.push(Line::from(format!("Initial value source: {origin}")));
+            if let Some(input) = self.fields.get(self.selected)
+                && !matches!(input.kind, Kind::Multiline)
+            {
+                let initial = input.initial_value.chars().take(80).collect::<String>();
+                if initial.is_empty() {
+                    lines.push(Line::from("Value when this form opened: not specified"));
+                } else {
+                    lines.push(Line::from(format!(
+                        "Value when this form opened: {initial}"
+                    )));
+                }
+            }
+            if let Some(value) = field.tui_default {
+                lines.push(Line::from(format!("TUI default: {value}")));
+            }
+            if let Some(value) = field.cli_default {
+                lines.push(Line::from(format!("CLI default: {value}")));
+            }
+            if !field.choices.is_empty() {
+                let choices = field.choices.join(" / ");
+                lines.push(Line::from(format!("Choices: {choices}")));
+            }
+            let kind = match field.field.kind {
+                FieldType::Id(kind) | FieldType::Ids(kind) => match kind {
+                    IdKind::Thread => "Thread ID (conversation)",
+                    IdKind::Run => "Run ID (work)",
+                    IdKind::Turn => "Turn ID (response interval)",
+                    IdKind::Node => "Node ID (history)",
+                    IdKind::Message => "Message ID (saved input)",
+                    IdKind::Operation => "Operation ID (receipt)",
+                    IdKind::Execution => "Execution ID (OS command)",
+                    IdKind::Attachment => "Attachment ID (reference)",
+                    IdKind::Space => "Space ID (index)",
+                },
+                FieldType::Text => "Text",
+                FieldType::TextList => "List of text values",
+                FieldType::Multiline => "Multiline text",
+                FieldType::Path => "File or folder path",
+                FieldType::Signed => "Integer, including negative values",
+                FieldType::Unsigned => "Non-negative integer, subject to operation limits",
+                FieldType::Decimal => "Finite number, subject to operation limits",
+                FieldType::Boolean => "Yes or no",
+                FieldType::Choice => "Choose from the options",
+                FieldType::Conditions => "Observation conditions combining kinds and target IDs",
+                FieldType::Timestamp => "RFC3339 timestamp with timezone",
+                FieldType::Cursor => "Continuation cursor for the same read target",
+            };
+            lines.push(Line::from(kind));
+            lines.push(Line::from(discovery_en(field.field.discovery)));
+        }
+        lines.push(Line::from(""));
+        if matches!(self.build, FormBuilder::Client(_)) {
+            lines.extend([
+                Line::from("Total form input is limited to 1 MiB. Each operation's existing file-input limit also applies."),
+                Line::from("Relative paths use the TUI launch directory, not the current Thread cwd."),
+                Line::from("Config and data-dir are fixed at launch. Configuration changes do not immediately update the running owner."),
+            ]);
+            if self.operation == OpKind::Exec {
+                lines.push(Line::from("The request text comes from this form, not terminal stdin. The schema and request together are limited to 128 KiB."));
+            }
+            if self.operation == OpKind::RagIngest {
+                lines.push(Line::from("file uses text-file; inline uses form text. Clear the other field when changing source. Terminal stdin is not read."));
+            }
+        }
+        lines.push(Line::from("CLI arguments"));
+        for argument in &id.primary_cli().arguments {
+            let spelling = &argument.spelling;
+            let line = match (
+                argument.repeat,
+                argument.takes_value,
+                argument.default.as_deref(),
+            ) {
+                (true, _, Some(default)) => format!("{spelling} (repeatable; default {default})"),
+                (true, _, None) => format!("{spelling} (repeatable)"),
+                (false, true, Some(default)) => format!("{spelling} VALUE (default {default})"),
+                (false, true, None) => format!("{spelling} VALUE"),
+                (false, false, Some(default)) => format!("{spelling} (flag; default {default})"),
+                (false, false, None) => format!("{spelling} (flag)"),
+            };
+            lines.push(Line::from(line));
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(
+            "Owner and configuration paths are fixed to the selection used to start this TUI.",
+        ));
+        lines.push(Line::from("--data-dir PATH: CLI, environment, TOML, then OS default. TUI owner operations use the running owner."));
+        lines.push(Line::from("--config PATH: CLI takes precedence over the OS default. Config changes reach the running owner on restart."));
+        lines.push(Line::from("--operation-id ID: identify an owner-operation resend or lookup request. Not available for exec or standalone config/docs/RAG; operation get uses --operation for its target."));
+        if spec.route == Route::Rag {
+            lines.push(Line::from(
+                "--db PATH: independent RAG database, not the conversation history database.",
+            ));
+        }
+        lines.push(Line::from(match id.request_id_policy() {
+            RequestIdPolicy::OwnerOperation => {
+                "The TUI tracks this request's receipt ID. Enter target IDs separately."
+            }
+            RequestIdPolicy::StandaloneUnavailable => {
+                "A single operation-id is not used for this standalone operation."
+            }
+            RequestIdPolicy::ComposedUnavailable => {
+                "Requests are tracked individually; a single operation-id is not used."
+            }
+        }));
+        lines.push(Line::from(match spec.confirmation {
+            Confirmation::None => "Enter requests the selected operation.",
+            Confirmation::ThreadDeletePreview => "Review deletion targets and running work before deleting.",
+            Confirmation::IndexCostPreview => "Review target counts and estimated cost before starting indexing.",
+            Confirmation::PaidRequest => "Model API use and additional processing may incur costs.",
+            Confirmation::StorageCollect => "Request collection of the specified saved data. Existing rules protect referenced data.",
+            Confirmation::ContextEditPreview => "Review the saved range to edit and protected work before continuing.",
+        }));
+        for binding in crate::operations::CLI_BINDINGS
+            .iter()
+            .filter(|binding| binding.operation == id && binding.alias_of.is_some())
+        {
+            let path = binding.path.join(" ");
+            lines.push(Line::from(format!(
+                "Alias for the same operation: shellboy {path}"
+            )));
+        }
+        lines.push(Line::from(""));
+        for term in [Term::Run, Term::Turn, Term::Message, Term::Execution] {
+            lines.push(Line::from(term_en(term)));
+        }
+        lines
     }
 }

@@ -1,5 +1,6 @@
 //! Typed TUI operation forms. This module never parses arbitrary JSON or runs CLI.
 use super::{activity::ActivityPhase, popup, prev_grapheme, theme};
+use crate::config::UiLanguage;
 use crate::operations::{CompactMode, DefaultOrigin, Effect, FieldId, OperationId};
 use crate::protocol::*;
 mod client_forms;
@@ -139,6 +140,7 @@ impl Context {
     }
 }
 impl OpKind {
+    #[cfg(test)]
     pub fn label(self) -> String {
         metadata::text(self.catalogue().label_text()).replace('·', "|")
     }
@@ -149,6 +151,16 @@ impl OpKind {
             .path
             .join(".")
             .replace('-', "_")
+    }
+    fn label_for(self, language: UiLanguage) -> String {
+        metadata::text_for(self.catalogue().label_text(), language).replace('·', "|")
+    }
+    fn shortcut_for(self, language: UiLanguage) -> Option<&'static str> {
+        if language == UiLanguage::En && self == Self::AttachmentAdd {
+            Some("To draft: /attach")
+        } else {
+            self.shortcut()
+        }
     }
     fn cli(self) -> String {
         format!("shellboy {}", self.catalogue().primary_cli().path.join(" "))
@@ -216,6 +228,44 @@ impl Field {
             kind,
         }
     }
+    fn displayed_for(&self, language: UiLanguage) -> &str {
+        if language == UiLanguage::Ja || !matches!(self.kind, Kind::Boolean | Kind::Choice(_)) {
+            return self.displayed();
+        }
+        match self.value.as_str() {
+            "true" => "Yes",
+            "false" => "No",
+            "" => "Not specified",
+            "thread_settled" => "Conversation completed, awaiting recovery, or stopped",
+            "turn_completed" => "Turn answer completed",
+            "run_ended" => "Run ended",
+            "shell_ended" => "Command ended",
+            "shell_output" => "Command output updated",
+            "threads" => "Specified conversations",
+            "all" => "All",
+            "raw" => "Saved output",
+            "managed_images" => "Managed images",
+            "history" => "History",
+            "index" => "Index",
+            "file" => "File",
+            "image" => "Image",
+            "keep" => "Keep unchanged",
+            "set" => "Set",
+            "auto" => "Automatic",
+            "deferred" => "Compact at next boundary",
+            "maximal" => "Maximum automatic compaction",
+            "spill" => "Spill selected range",
+            "summary" => "Summarize selected range",
+            "trim" => "Trim through selected end",
+            "omit" => "Omit selected range",
+            "restore" => "Restore omitted or spilled range",
+            "previous" => "Previous",
+            "next" => "Next",
+            "sources" => "Sources",
+            "replacements" => "Replacements",
+            _ => &self.value,
+        }
+    }
     fn displayed(&self) -> &str {
         if !matches!(self.kind, Kind::Boolean | Kind::Choice(_)) {
             return &self.value;
@@ -256,6 +306,7 @@ impl Field {
     }
 }
 pub(super) struct Operations {
+    language: UiLanguage,
     selected: usize,
     form: Option<Form>,
     context: Context,
@@ -274,6 +325,7 @@ enum FormBuilder {
 }
 
 struct Form {
+    language: UiLanguage,
     operation: OpKind,
     fields: Vec<Field>,
     build: FormBuilder,
@@ -297,6 +349,7 @@ pub(super) enum Outcome {
 impl Operations {
     pub fn new(context: Context) -> Self {
         let mut result = Self {
+            language: UiLanguage::Ja,
             selected: 0,
             form: None,
             context,
@@ -311,6 +364,20 @@ impl Operations {
             result.selected = OpKind::ALL.iter().position(|kind| kind == first).unwrap();
         }
         result
+    }
+    #[allow(dead_code)]
+    pub(super) fn set_language(&mut self, language: UiLanguage) {
+        if self.language == language {
+            return;
+        }
+        self.language = language;
+        self.cached_rows.take();
+        if let Some(form) = &mut self.form {
+            form.language = language;
+            form.reader.borrow_mut().clear();
+            form.help_revision = form.help_revision.wrapping_add(1);
+        }
+        self.ensure_selection();
     }
     fn suggested(&self) -> &'static [OpKind] {
         use OpKind::*;
@@ -372,10 +439,10 @@ impl Operations {
                 && (query.is_empty()
                     || format!(
                         "{} {} {} {}",
-                        kind.label(),
+                        kind.label_for(self.language),
                         kind.cli(),
-                        kind.shortcut().unwrap_or(""),
-                        kind.catalogue().spec().meaning
+                        kind.shortcut_for(self.language).unwrap_or(""),
+                        metadata::text_for(kind.catalogue().meaning_text(), self.language)
                     )
                     .to_lowercase()
                     .contains(&query))
@@ -424,7 +491,9 @@ impl Operations {
             .iter()
             .position(|kind| *kind == operation)
             .expect("every operation is listed");
-        self.form = Some(Form::new(operation, &self.context));
+        let mut form = Form::new(operation, &self.context);
+        form.language = self.language;
+        self.form = Some(form);
     }
     pub fn paste(&mut self, text: &str) {
         if let Some(form) = &mut self.form {
@@ -522,7 +591,9 @@ impl Operations {
             KeyCode::End => Some(count.saturating_sub(1)),
             KeyCode::Enter => {
                 if let Some(kind) = self.rows().get(selected).copied() {
-                    self.form = Some(Form::new(kind, &self.context));
+                    let mut form = Form::new(kind, &self.context);
+                    form.language = self.language;
+                    self.form = Some(form);
                 }
                 return Outcome::None;
             }
@@ -598,12 +669,23 @@ impl Operations {
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
         if let Some(form) = &self.form {
             if let Some(operation) = &form.client_confirmation {
+                let label = form.operation.label_for(form.language);
+                let (title, footer) = match form.language {
+                    UiLanguage::En => (
+                        format!("{label} | Confirm"),
+                        "Y Run | N/Esc Back to form | ^v/PgUp/PgDn Scroll",
+                    ),
+                    UiLanguage::Ja => (
+                        format!("{label} | 確認"),
+                        "Y 実行 | N/Esc 入力欄へ | ^v/PgUp/PgDn 説明を読む",
+                    ),
+                };
                 let body = popup::panel_recorded(
                     frame,
                     area,
-                    &format!("{} | 確認", form.operation.label()),
+                    &title,
                     &form.operation.cli(),
-                    "Y 実行 | N/Esc 入力欄へ | ^v/PgUp/PgDn 説明を読む",
+                    footer,
                     &self.paint,
                 );
                 form.help_page.set(body.height.max(1));
@@ -612,17 +694,26 @@ impl Operations {
                     body,
                     form.help_revision.wrapping_mul(2).wrapping_add(1),
                     form.help_scroll.get(),
-                    || client_forms::confirmation_lines(operation),
+                    || client_forms::confirmation_lines_for(operation, form.language),
                 ));
                 return;
             }
-            let spec = form.operation.catalogue().spec();
             if form.help {
-                let footer = "Esc/F1 入力欄へ | ^v/PgUp/PgDn 説明を読む";
+                let label = form.operation.label_for(form.language);
+                let (title, footer) = match form.language {
+                    UiLanguage::En => (
+                        format!("{label} | Guide"),
+                        "Esc/F1 Back to form | ^v/PgUp/PgDn Scroll",
+                    ),
+                    UiLanguage::Ja => (
+                        format!("{label} | 使い方"),
+                        "Esc/F1 入力欄へ | ^v/PgUp/PgDn 説明を読む",
+                    ),
+                };
                 let body = popup::panel_recorded(
                     frame,
                     area,
-                    &format!("{} | 使い方", form.operation.label()),
+                    &title,
                     &form.operation.cli(),
                     footer,
                     &self.paint,
@@ -637,31 +728,42 @@ impl Operations {
                 ));
                 return;
             }
-            let field_context = if form.fields.is_empty() {
-                "入力項目なし".into()
-            } else {
-                format!("{}/{}項目", form.selected + 1, form.fields.len())
+            let selected = form.selected + 1;
+            let count = form.fields.len();
+            let field_context = match (form.language, form.fields.is_empty()) {
+                (UiLanguage::En, true) => "No input fields".into(),
+                (UiLanguage::Ja, true) => "入力項目なし".into(),
+                (UiLanguage::En, false) => format!("Field {selected}/{count}"),
+                (UiLanguage::Ja, false) => format!("{selected}/{count}項目"),
             };
-            let context = format!(
-                "{} | {}{}",
-                form.effect().text().fallback,
-                field_context,
-                if form.operation == OpKind::Wait {
-                    format!(" | 観測条件 {}件", form.conditions.len())
-                } else {
-                    String::new()
+            let effect = metadata::text_for(form.effect().text(), form.language);
+            let conditions = form.conditions.len();
+            let context = match (form.language, form.operation == OpKind::Wait) {
+                (UiLanguage::En, true) => {
+                    format!("{effect} | {field_context} | {conditions} observation conditions")
                 }
+                (UiLanguage::Ja, true) => {
+                    format!("{effect} | {field_context} | 観測条件 {conditions}件")
+                }
+                (_, false) => format!("{effect} | {field_context}"),
+            };
+            let verb = metadata::text_for(
+                form.operation.catalogue().enter_verb(form.effect()).text(),
+                form.language,
             );
-            let footer = if form.operation == OpKind::Wait {
-                format!(
-                    "Esc 一覧 | Enter {} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | F9条件追加 | F10削除",
-                    form.verb()
-                )
-            } else {
-                format!(
-                    "Esc 一覧 | Enter {} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | <>選択値 | Ctrl+U消去",
-                    form.verb()
-                )
+            let footer = match (form.language, form.operation == OpKind::Wait) {
+                (UiLanguage::En, true) => format!(
+                    "Esc List | Enter {verb} | F1 Guide and IDs\nTab/^v/PgUp/PgDn Select | F9 Add condition | F10 Remove"
+                ),
+                (UiLanguage::En, false) => format!(
+                    "Esc List | Enter {verb} | F1 Guide and IDs\nTab/^v/PgUp/PgDn Select | <> Change choice | Ctrl+U Clear"
+                ),
+                (UiLanguage::Ja, true) => format!(
+                    "Esc 一覧 | Enter {verb} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | F9条件追加 | F10削除"
+                ),
+                (UiLanguage::Ja, false) => format!(
+                    "Esc 一覧 | Enter {verb} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | <>選択値 | Ctrl+U消去"
+                ),
             };
             let height = form
                 .fields
@@ -672,7 +774,7 @@ impl Operations {
             let mut body = popup::compact_recorded(
                 frame,
                 area,
-                &form.operation.label(),
+                &form.operation.label_for(form.language),
                 &context,
                 &footer,
                 height,
@@ -680,7 +782,13 @@ impl Operations {
             );
             if body.height >= 4 {
                 let info_height = body.height.saturating_sub(2).min(3);
-                let info = vec![Line::from(spec.meaning), Line::from(form.field_hint())];
+                let info = vec![
+                    Line::from(metadata::text_for(
+                        form.operation.catalogue().meaning_text(),
+                        form.language,
+                    )),
+                    Line::from(form.field_hint()),
+                ];
                 frame.render_widget(
                     Paragraph::new(info).wrap(ratatui::widgets::Wrap { trim: false }),
                     Rect {
@@ -712,7 +820,11 @@ impl Operations {
                 .map(|field| {
                     popup::item(
                         &crate::presentation::sanitize_plain(
-                            &format!("{}: {}", field.label, field.displayed()),
+                            &format!(
+                                "{}: {}",
+                                form.field_label_for(field),
+                                field.displayed_for(form.language)
+                            ),
                             0,
                         )
                         .0,
@@ -727,42 +839,63 @@ impl Operations {
                 .iter()
                 .position(|kind| *kind == OpKind::ALL[self.selected])
                 .unwrap_or(0);
-            let source = if self.context.thread.is_empty() {
-                "新しい会話"
-            } else if self.context.phase == ActivityPhase::Recovery {
-                "復旧待ちの会話"
-            } else if self.context.phase.is_active() {
-                "実行中の会話"
-            } else {
-                "この会話"
+            let source = match (
+                self.language,
+                self.context.thread.is_empty(),
+                self.context.phase,
+            ) {
+                (UiLanguage::En, true, _) => "New conversation",
+                (UiLanguage::En, false, ActivityPhase::Recovery) => {
+                    "Conversation awaiting recovery"
+                }
+                (UiLanguage::En, false, phase) if phase.is_active() => "Running conversation",
+                (UiLanguage::En, false, _) => "Current conversation",
+                (UiLanguage::Ja, true, _) => "新しい会話",
+                (UiLanguage::Ja, false, ActivityPhase::Recovery) => "復旧待ちの会話",
+                (UiLanguage::Ja, false, phase) if phase.is_active() => "実行中の会話",
+                (UiLanguage::Ja, false, _) => "この会話",
             };
             let cli = rows
                 .get(selected)
                 .map(|kind| kind.cli())
                 .unwrap_or_default();
-            let context = format!(
-                "{cli} | {}/{}件 | CLIと同じ操作 | {source} | 絞込み: {}",
-                selected + 1,
-                rows.len(),
-                if self.filter.is_empty() {
-                    "未指定"
-                } else {
-                    &self.filter
+            let position = if rows.is_empty() { 0 } else { selected + 1 };
+            let count = rows.len();
+            let context = match (self.language, self.filter.is_empty()) {
+                (UiLanguage::En, true) => {
+                    format!("{cli} | {position}/{count} | CLI actions | {source} | Filter: none")
                 }
-            );
-            let body = popup::panel_recorded(
-                frame,
-                area,
-                "操作",
-                &context,
-                "絞込み | ^v/PgUp/PgDn | Ctrl+U解除 | Esc戻る/F8閉\nEnter 入力フォーム | [変更]保存 [制御]処理",
-                &self.paint,
-            );
+                (UiLanguage::En, false) => format!(
+                    "{cli} | {position}/{count} | CLI actions | {source} | Filter: {}",
+                    self.filter
+                ),
+                (UiLanguage::Ja, true) => format!(
+                    "{cli} | {position}/{count}件 | CLIと同じ操作 | {source} | 絞込み: 未指定"
+                ),
+                (UiLanguage::Ja, false) => format!(
+                    "{cli} | {position}/{count}件 | CLIと同じ操作 | {source} | 絞込み: {}",
+                    self.filter
+                ),
+            };
+            let (title, footer) = match self.language {
+                UiLanguage::En => (
+                    "Actions",
+                    "Filter | ^v/PgUp/PgDn | Ctrl+U Clear | Esc Back/F8 Close\nEnter Form | [Change] Saved data [Control] Work",
+                ),
+                UiLanguage::Ja => (
+                    "操作",
+                    "絞込み | ^v/PgUp/PgDn | Ctrl+U解除 | Esc戻る/F8閉\nEnter 入力フォーム | [変更]保存 [制御]処理",
+                ),
+            };
+            let body = popup::panel_recorded(frame, area, title, &context, footer, &self.paint);
             self.page
                 .set(usize::from(body.height).saturating_sub(1).max(1));
             if rows.is_empty() {
                 frame.render_widget(
-                    Paragraph::new("該当する操作はありません。Ctrl+Uで絞込みを解除できます"),
+                    Paragraph::new(match self.language {
+                        UiLanguage::En => "No actions match. Ctrl+U clears the filter.",
+                        UiLanguage::Ja => "該当する操作はありません。Ctrl+Uで絞込みを解除できます",
+                    }),
                     body,
                 );
             } else {
@@ -772,10 +905,13 @@ impl Operations {
                 for (action, kind) in rows.iter().enumerate() {
                     let section = self.section(*kind);
                     if self.filter.is_empty() && previous != Some(section) {
-                        let header = match section {
-                            0 => "この会話で",
-                            1 => "よく使う",
-                            _ => "その他の操作",
+                        let header = match (self.language, section) {
+                            (UiLanguage::En, 0) => "For this conversation",
+                            (UiLanguage::En, 1) => "Common actions",
+                            (UiLanguage::En, _) => "Other actions",
+                            (UiLanguage::Ja, 0) => "この会話で",
+                            (UiLanguage::Ja, 1) => "よく使う",
+                            (UiLanguage::Ja, _) => "その他の操作",
                         };
                         items.push(ListItem::new(
                             Line::from(header).style(Style::default().fg(theme::MUTED)),
@@ -787,9 +923,12 @@ impl Operations {
                     }
                     let label = format!(
                         "{}{}{}",
-                        metadata::text(kind.catalogue().spec().effect.list_marker()),
-                        kind.label(),
-                        kind.shortcut()
+                        metadata::text_for(
+                            kind.catalogue().spec().effect.list_marker(),
+                            self.language
+                        ),
+                        kind.label_for(self.language),
+                        kind.shortcut_for(self.language)
                             .map(|shortcut| format!("  {shortcut}"))
                             .unwrap_or_default()
                     );
@@ -809,6 +948,26 @@ impl Operations {
     }
 }
 impl Form {
+    fn field_label_for<'a>(&self, field: &'a Field) -> &'a str {
+        if self.language == UiLanguage::Ja {
+            return field.label;
+        }
+        if field.name == "db" {
+            return "Independent RAG DB (empty = launch data-dir/rag.db)";
+        }
+        if field.name == "input_mode" {
+            return "Text input source";
+        }
+        self.metadata_id(field.name)
+            .and_then(|id| self.operation.catalogue().spec().field(id))
+            .map(|field| {
+                metadata::text_for(
+                    field.field.label_text(self.operation.catalogue()),
+                    self.language,
+                )
+            })
+            .unwrap_or(field.label)
+    }
     fn new(operation: OpKind, c: &Context) -> Self {
         use Kind::*;
         let f = |name, label, value, kind| Field::new(name, label, value, kind);
@@ -1545,6 +1704,7 @@ impl Form {
             ),
         };
         Self {
+            language: UiLanguage::Ja,
             operation,
             fields,
             build: FormBuilder::Owner(build),
@@ -2895,5 +3055,24 @@ mod entry_tests {
             panic!()
         };
         assert!(args.descendants);
+    }
+}
+
+#[cfg(test)]
+mod language_rendering_tests {
+    use crate::{config::UiLanguage, ui::UiState};
+
+    #[test]
+    fn operations_list_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.open_operations(None);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Actions", "Esc"],
+                UiLanguage::Ja => &["CLIと同じ操作", "Esc"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
     }
 }
