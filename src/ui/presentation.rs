@@ -1,9 +1,9 @@
-use crate::config::UiLanguage;
-use crate::presentation::messages::{Message, Text, row_label};
 //! Display-only layout of worker-produced typed blocks and Markdown tokens.
 use super::history_items::{ItemKey, ItemRegion};
 use super::theme;
 use super::{ThreadView, UiNode, rendered_node_text};
+use crate::config::UiLanguage;
+use crate::presentation::messages::{Message, Text, row_label};
 use crate::presentation::rows::{RowGroup, RowKind, blank_between};
 use crate::presentation::{BlockKind, OutputStream, PresentationKind};
 use ratatui::{
@@ -28,7 +28,9 @@ fn source_candidate(text: &str) -> &str {
 }
 
 fn label(language: UiLanguage, node: &UiNode) -> String {
-    if let Some(message) = &node.presentation.ui_messages.title {
+    if language == UiLanguage::En
+        && let Some(message) = &node.presentation.ui_messages.title
+    {
         return message.render(language);
     }
     if let Some(title) = node
@@ -56,7 +58,8 @@ fn label(language: UiLanguage, node: &UiNode) -> String {
         "developer" | "system" => Text::Event.render(language),
         "tool" => Text::ToolResult.render(language),
         _ => Text::History.render(language),
-    }.into()
+    }
+    .into()
 }
 fn color(node: &UiNode) -> Color {
     if node.presentation.requires_attention()
@@ -125,7 +128,8 @@ impl NodeLines {
         }
     }
 }
-fn node_lines_inner(language: UiLanguage, 
+fn node_lines_inner(
+    language: UiLanguage,
     node: &UiNode,
     expanded: bool,
     start: usize,
@@ -160,7 +164,9 @@ fn node_lines_inner(language: UiLanguage,
                     PresentationKind::Summary => {
                         format!("{} {}", RowKind::Summary.mark(), label(language, node))
                     }
-                    PresentationKind::Spill => format!("{} {}", RowKind::Spill.mark(), label(language, node)),
+                    PresentationKind::Spill => {
+                        format!("{} {}", RowKind::Spill.mark(), label(language, node))
+                    }
                     PresentationKind::Interrupted => {
                         format!("{} {}", RowKind::Cancelled.mark(), label(language, node))
                     }
@@ -214,7 +220,10 @@ fn node_lines_inner(language: UiLanguage,
         }
         if block.kind == BlockKind::Reasoning && !expanded {
             out.push(Line::from(Span::styled(
-                Message::Reasoning { count: block.source_end.saturating_sub(block.source_start) }.render(language),
+                Message::Reasoning {
+                    count: block.source_end.saturating_sub(block.source_start),
+                }
+                .render(language),
                 Style::default().fg(theme::MUTED),
             )));
             continue;
@@ -230,7 +239,8 @@ fn node_lines_inner(language: UiLanguage,
         }
         if let Some(tool) = &block.tool {
             if previous_tool.as_deref() != Some(tool.call_id.as_str()) {
-                out.extend(tool_header_lines(language, 
+                out.extend(tool_header_lines(
+                    language,
                     tool,
                     block.kind == BlockKind::ToolCall,
                     width,
@@ -240,7 +250,10 @@ fn node_lines_inner(language: UiLanguage,
                 if !tool.reason.is_empty() {
                     out.extend(hanging_wrap(
                         vec![Line::from(Span::styled(
-                            format!("  | {}", crate::presentation::messages::tool_reason(tool, language)),
+                            format!(
+                                "  | {}",
+                                crate::presentation::messages::tool_reason(tool, language)
+                            ),
                             Style::default().fg(theme::MUTED),
                         ))],
                         width,
@@ -289,9 +302,23 @@ fn node_lines_inner(language: UiLanguage,
                     .skip(start - block.source_start)
                     .collect::<String>()
             } else {
-                node.presentation.ui_messages.bodies.iter()
-                    .find(|(index, _)| *index == block_index)
-                    .map(|(_, messages)| messages.iter().map(|m| m.render(language)).collect::<Vec<_>>().join("\n"))
+                node.presentation
+                    .ui_messages
+                    .bodies
+                    .iter()
+                    .find(|(index, _)| {
+                        language == UiLanguage::En
+                            && block.kind == BlockKind::Event
+                            && !block.source_exact
+                            && *index == block_index
+                    })
+                    .map(|(_, messages)| {
+                        messages
+                            .iter()
+                            .map(|m| m.render(language))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
                     .unwrap_or_else(|| block.text.clone())
             };
             if block.kind == BlockKind::ToolCall {
@@ -346,7 +373,11 @@ fn node_lines_inner(language: UiLanguage,
                     let tail = output.split_off(count - 2);
                     output.truncate(3);
                     output.push(Line::from(Span::styled(
-                        Message::Excerpt { rows: count, omitted: count - 5 }.render(language),
+                        Message::Excerpt {
+                            rows: count,
+                            omitted: count - 5,
+                        }
+                        .render(language),
                         Style::default()
                             .fg(theme::MUTED)
                             .underline_color(EXCERPT_GAP_MARKER),
@@ -401,21 +432,51 @@ fn node_lines_inner(language: UiLanguage,
 }
 fn omission_notices(language: UiLanguage, node: &UiNode) -> Vec<String> {
     let mut parts = Vec::new();
-    let end = node.base_char_offset.saturating_add(node.text.chars().count()).min(node.total_chars);
+    let end = node
+        .base_char_offset
+        .saturating_add(node.text.chars().count())
+        .min(node.total_chars);
     if node.base_char_offset > 0 || end < node.total_chars {
-        parts.push(Message::SourceWindow { start: node.base_char_offset.saturating_add(1), end,
-            total: node.total_chars, live: node.presentation.provisional_stream }.render(language));
+        parts.push(
+            Message::SourceWindow {
+                start: node.base_char_offset.saturating_add(1),
+                end,
+                total: node.total_chars,
+                live: node.presentation.provisional_stream,
+            }
+            .render(language),
+        );
     }
     if node.presentation.body_omitted_chars > 0 {
-        parts.push(Message::BodyOmitted { count: node.presentation.body_omitted_chars }.render(language));
+        parts.push(
+            Message::BodyOmitted {
+                count: node.presentation.body_omitted_chars,
+            }
+            .render(language),
+        );
     }
     if node.presentation.body_extent_unknown {
-        parts.push(if node.presentation.provisional_stream { Text::StreamGap } else { Text::UnknownExtent }.render(language).into());
+        parts.push(
+            if node.presentation.provisional_stream {
+                Text::StreamGap
+            } else {
+                Text::UnknownExtent
+            }
+            .render(language)
+            .into(),
+        );
     }
-    if node.presentation.metadata_limited { parts.push(Text::MetadataLimited.render(language).into()); }
-    parts
+    if node.presentation.ui_messages.limited {
+        parts.push(Text::MetadataLimited.render(language).into());
+    }
+    if parts.is_empty() {
+        parts
+    } else {
+        vec![parts.join(" | ")]
+    }
 }
-fn tool_header_lines(language: UiLanguage, 
+fn tool_header_lines(
+    language: UiLanguage,
     tool: &crate::presentation::ToolPresentation,
     request: bool,
     width: u16,
@@ -530,7 +591,8 @@ pub(super) fn hanging_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'s
     }
     out
 }
-fn node_lines(language: UiLanguage, 
+fn node_lines(
+    language: UiLanguage,
     node: &UiNode,
     expanded: bool,
     start: usize,
@@ -539,7 +601,8 @@ fn node_lines(language: UiLanguage,
 ) -> Vec<Line<'static>> {
     node_lines_with_header(language, node, expanded, start, width, links, true)
 }
-fn node_lines_with_header(language: UiLanguage, 
+fn node_lines_with_header(
+    language: UiLanguage,
     node: &UiNode,
     expanded: bool,
     start: usize,
@@ -554,7 +617,8 @@ fn node_lines_with_header(language: UiLanguage,
             .blocks
             .iter()
             .all(|block| block.kind == BlockKind::ToolCall);
-    let mut source = node_lines_inner(language, 
+    let mut source = node_lines_inner(
+        language,
         node,
         expanded,
         start,
@@ -884,12 +948,22 @@ pub(super) fn history_with_cache(
             index += summary + 1;
             rendered_index = index - 1;
             let summary = &view.nodes()[rendered_index];
-            let mut chunk = node_lines(language, summary, false, summary.base_char_offset, width, &mut links);
+            let mut chunk = node_lines(
+                language,
+                summary,
+                false,
+                summary.base_char_offset,
+                width,
+                &mut links,
+            );
             group_header_rows = chunk.first().map_or(0, |line| {
                 hanging_wrap(vec![line.clone()], width.max(1)).len()
             });
             chunk.push(Line::from(Span::styled(
-                Message::SourceCount { count: index - begin }.render(language),
+                Message::SourceCount {
+                    count: index - begin,
+                }
+                .render(language),
                 Style::default().fg(theme::MUTED),
             )));
             chunk
@@ -910,7 +984,8 @@ pub(super) fn history_with_cache(
                 .first()
                 .and_then(|block| block.tool.as_ref())
             {
-                let header = tool_header_lines(language, 
+                let header = tool_header_lines(
+                    language,
                     tool,
                     false,
                     width.saturating_sub(2).max(1),
@@ -919,7 +994,14 @@ pub(super) fn history_with_cache(
                 );
                 group_header_rows = hanging_wrap(header, width.max(1)).len();
             }
-            let mut chunk = node_lines(language, result, false, result.base_char_offset, width, &mut links);
+            let mut chunk = node_lines(
+                language,
+                result,
+                false,
+                result.base_char_offset,
+                width,
+                &mut links,
+            );
             // Result commands are enriched from their exact call source. Retain
             // its explicit URL targets when rendering that shared heading.
             annotate_links(&mut chunk, &node.presentation.links, &mut links);
@@ -932,7 +1014,8 @@ pub(super) fn history_with_cache(
             event_group(language, &view.nodes()[begin..index])
         } else {
             index += 1;
-            node_lines(language, 
+            node_lines(
+                language,
                 node,
                 view.reasoning_expanded.contains(&node.node_id),
                 node.base_char_offset,
@@ -1191,7 +1274,11 @@ impl InputBandRow {
         self.body
     }
 }
-fn input_metadata(language: UiLanguage, node: &UiNode, palette: theme::Palette) -> Option<Span<'static>> {
+fn input_metadata(
+    language: UiLanguage,
+    node: &UiNode,
+    palette: theme::Palette,
+) -> Option<Span<'static>> {
     use crate::presentation::InputSource;
     let mut parts = Vec::new();
     if !matches!(
@@ -1225,7 +1312,13 @@ fn input_metadata(language: UiLanguage, node: &UiNode, palette: theme::Palette) 
         )
     })
 }
-fn user_band(language: UiLanguage, lines: &mut [Line<'static>], node: &UiNode, width: u16, palette: theme::Palette) {
+fn user_band(
+    language: UiLanguage,
+    lines: &mut [Line<'static>],
+    node: &UiNode,
+    width: u16,
+    palette: theme::Palette,
+) {
     if node.role != "user" {
         return;
     }
@@ -1309,7 +1402,8 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     }
 }
 
-fn tool_metadata(language: UiLanguage, 
+fn tool_metadata(
+    language: UiLanguage,
     tool: &crate::presentation::ToolPresentation,
     elapsed: Option<u64>,
 ) -> (RowKind, String, Option<String>) {
@@ -1339,8 +1433,12 @@ fn tool_metadata(language: UiLanguage,
     if background {
         parts.push(
             match tool.reason_kind {
-                crate::presentation::ToolReasonKind::HumanBackgrounded => Text::HumanBackground.render(language),
-                crate::presentation::ToolReasonKind::AdditionalInput => Text::InputBackground.render(language),
+                crate::presentation::ToolReasonKind::HumanBackgrounded => {
+                    Text::HumanBackground.render(language)
+                }
+                crate::presentation::ToolReasonKind::AdditionalInput => {
+                    Text::InputBackground.render(language)
+                }
                 _ => Text::Background.render(language),
             }
             .to_owned(),
@@ -1349,9 +1447,11 @@ fn tool_metadata(language: UiLanguage,
     let outcome = if kind == RowKind::Unknown {
         Some(row_label(kind, language).to_owned())
     } else {
-        code.map(|code| Message::Exit { code }.render(language)).or_else(|| {
-            matches!(kind, RowKind::Failure | RowKind::Cancelled).then(|| row_label(kind, language).to_owned())
-        })
+        code.map(|code| Message::Exit { code }.render(language))
+            .or_else(|| {
+                matches!(kind, RowKind::Failure | RowKind::Cancelled)
+                    .then(|| row_label(kind, language).to_owned())
+            })
     };
     let critical = outcome
         .clone()
@@ -1360,7 +1460,13 @@ fn tool_metadata(language: UiLanguage,
         parts.push(outcome);
     }
     if let Some(seconds) = elapsed {
-        parts.push(Message::Elapsed { ms: seconds.saturating_mul(1000), decimal: false }.render(language));
+        parts.push(
+            Message::Elapsed {
+                ms: seconds.saturating_mul(1000),
+                decimal: false,
+            }
+            .render(language),
+        );
     } else if let Some(ms) = tool.elapsed_ms {
         parts.push(Message::Elapsed { ms, decimal: true }.render(language));
     } else if kind == RowKind::Running && tool.started_at.is_some() {
@@ -1432,7 +1538,8 @@ fn tool_row(
     }
     .into_line(width, Style::default())
 }
-fn compact_tool_line(language: UiLanguage, 
+fn compact_tool_line(
+    language: UiLanguage,
     tool: &crate::presentation::ToolPresentation,
     width: u16,
     palette: theme::Palette,
@@ -1584,7 +1691,8 @@ fn append_node_cached(
     };
     let node = slice.as_ref().unwrap_or(node);
     let mut chunk = if view.items.is_open(&key, true, "") {
-        node_lines(language, 
+        node_lines(
+            language,
             node,
             view.reasoning_expanded.contains(&node.node_id),
             start,
@@ -1722,7 +1830,8 @@ fn typed_history(
         if let Some(summary) = interruption_group(&view.nodes()[index..end]) {
             let summary_index = index + summary;
             let summary_node = &view.nodes()[summary_index];
-            let chunk = node_lines(language, 
+            let chunk = node_lines(
+                language,
                 summary_node,
                 false,
                 summary_node.base_char_offset,
@@ -1770,7 +1879,8 @@ fn typed_history(
                             let mut copy = node.clone();
                             copy.presentation.blocks = vec![block.clone()];
                             copy.presentation.blocks[0].tool = None;
-                            let chunk = node_lines_with_header(language, 
+                            let chunk = node_lines_with_header(
+                                language,
                                 &copy,
                                 false,
                                 block.source_start,
@@ -1892,20 +2002,19 @@ fn typed_history(
                             for block in &mut copy.presentation.blocks {
                                 block.tool = None;
                             }
-                            chunk.extend(node_lines_with_header(language, 
-                                &copy, false, 0, width, &mut links, false,
+                            chunk.extend(node_lines_with_header(
+                                language, &copy, false, 0, width, &mut links, false,
                             ));
                             if let Some(notice) = &preview.notice {
                                 chunk.extend(tool_note(notice, width, view.palette));
                             }
                             if let Some(error) = &preview.refresh_error {
-                                let status = if preview.blocks.is_empty() {
-                                    Text::OutputFailed.render(language)
-                                } else {
-                                    Text::RefreshFailed.render(language)
-                                };
                                 chunk.extend(tool_note(
-                                    &Message::RetryError { refresh: !preview.text.is_empty(), error: error.clone() }.render(language),
+                                    &Message::RetryError {
+                                        refresh: !preview.blocks.is_empty(),
+                                        error: error.clone(),
+                                    }
+                                    .render(language),
                                     width,
                                     view.palette,
                                 ));
@@ -1925,12 +2034,17 @@ fn typed_history(
                         } else if tool.execution_id.is_some()
                             && (default_open || view.items.preview_loading(&key, &region.outcome))
                         {
-                            chunk.extend(tool_note(Text::OutputLoading.render(language), width, view.palette));
+                            chunk.extend(tool_note(
+                                Text::OutputLoading.render(language),
+                                width,
+                                view.palette,
+                            ));
                         } else if exact_body.source_exact {
                             let mut copy = node.clone();
                             copy.presentation.blocks = vec![exact_body.clone()];
                             copy.presentation.blocks[0].tool = None;
-                            chunk.extend(node_lines_with_header(language, 
+                            chunk.extend(node_lines_with_header(
+                                language,
                                 &copy,
                                 false,
                                 exact_body.source_start,
@@ -1976,8 +2090,8 @@ fn typed_history(
                                 ..Default::default()
                             };
                             copy.presentation.links = source.presentation.links.clone();
-                            chunk.extend(node_lines_with_header(language, 
-                                &copy, false, 0, width, &mut links, false,
+                            chunk.extend(node_lines_with_header(
+                                language, &copy, false, 0, width, &mut links, false,
                             ));
                             if let Some(note) = source.presentation.fields.iter().find(|field| {
                                 field.key == format!("/ui_raw_stream_preview/{}", tool.call_id)
@@ -2010,7 +2124,11 @@ fn typed_history(
                                 view.palette,
                             ));
                         } else if !tool.reason.is_empty() {
-                            chunk.extend(tool_note(&tool.reason, width, view.palette));
+                            chunk.extend(tool_note(
+                                &crate::presentation::messages::tool_reason(tool, language),
+                                width,
+                                view.palette,
+                            ));
                         } else {
                             chunk.extend(tool_note(
                                 Text::OutputOriginal.render(language),
@@ -2145,7 +2263,8 @@ fn quiet_section_tails(
         // projection. Coalesce the fact, not every two underlying records.
         let mut facts: Vec<(String, usize, usize)> = Vec::new();
         for index in pending.iter().copied() {
-            let fact = crate::presentation::sanitize_plain(&label(language, &view.nodes()[index]), 0).0;
+            let fact =
+                crate::presentation::sanitize_plain(&label(language, &view.nodes()[index]), 0).0;
             if let Some((_, count, latest)) = facts.iter_mut().find(|(saved, _, _)| saved == &fact)
             {
                 *count += 1;
@@ -2378,7 +2497,10 @@ pub(super) fn paint_live_times(
             .map(|span| {
                 let mut parts = span.content.split(" | ").collect::<Vec<_>>();
                 if parts.last().is_some_and(|part| {
-                    *part == Text::ElapsedUnavailable.render(language) || (part.ends_with('秒') || part.ends_with('分') || (language == UiLanguage::En && part.ends_with('s')))
+                    *part == Text::ElapsedUnavailable.render(language)
+                        || (part.ends_with('秒')
+                            || part.ends_with('分')
+                            || (language == UiLanguage::En && part.ends_with('s')))
                 }) {
                     parts.pop();
                 }
@@ -2386,10 +2508,13 @@ pub(super) fn paint_live_times(
                 if !value.is_empty() {
                     value.push_str(" | ");
                 }
-                value.push_str(&crate::presentation::elapsed_text(
-                    seconds.saturating_mul(1000),
-                    false,
-                ));
+                value.push_str(
+                    &Message::Elapsed {
+                        ms: seconds.saturating_mul(1000),
+                        decimal: false,
+                    }
+                    .render(language),
+                );
                 value
             })
             .unwrap_or(fallback);
@@ -2446,6 +2571,13 @@ pub(super) fn link_regions(
         .scroll((scroll, 0))
         .render(area, &mut buffer);
     crate::terminal_links::collect_regions(&buffer, area, targets, |cell| cell.fg)
+}
+
+#[cfg(test)]
+fn japanese_config() -> crate::config::Config {
+    let mut config = crate::config::Config::default();
+    config.ui.language = UiLanguage::Ja;
+    config
 }
 
 #[cfg(test)]
@@ -2599,7 +2731,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![node];
         let (lines, _, sources) = history(&view, 100);
         let head_row = lines
@@ -2765,7 +2897,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![call, result];
         let tool = view.nodes()[1].presentation.blocks[0]
             .tool
@@ -2930,7 +3062,7 @@ mod tests {
                 },
                 ..Default::default()
             };
-            let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+            let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
             view.thread_id = Some("thread".into());
             *view.nodes_mut_for_test() = vec![leading, rendered];
             view.total_nodes = 2;
@@ -3061,7 +3193,7 @@ mod tests {
                 ..Default::default()
             });
         }
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![call];
         view.nodes_mut_for_test().extend(results);
         let shown = plain(&history(&view, 120).0);
@@ -3123,7 +3255,7 @@ mod tests {
                     }
                 }
             }
-            let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+            let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
             view.describe_calls = true;
             *view.nodes_mut_for_test() = vec![node];
             let shown = plain(&history(&view, 120).0);
@@ -3195,7 +3327,7 @@ mod tests {
             }
         }
         assert_eq!(interruption_group(&[detail.clone(), wrong_section]), None);
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![detail, summary];
         let (lines, _, sources) = history(&view, 100);
         let shown = plain(&lines);
@@ -3267,7 +3399,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![call.clone(), result.clone()];
         let (lines, targets, sources) = history(&view, 100);
         assert_eq!(plain(&lines).matches(url).count(), 1);
@@ -3388,7 +3520,14 @@ mod tests {
         };
         assert!(node.presentation.metadata_limited);
         assert_eq!(node.presentation.body_omitted_chars, 0);
-        let shown = plain(&node_lines(UiLanguage::Ja, &node, false, 0, 80, &mut Vec::new()));
+        let shown = plain(&node_lines(
+            UiLanguage::Ja,
+            &node,
+            false,
+            0,
+            80,
+            &mut Vec::new(),
+        ));
         assert!(!shown.contains("詳細情報は"));
         assert!(omission_notices(UiLanguage::Ja, &node).is_empty());
         assert!(
@@ -3432,7 +3571,14 @@ mod tests {
                 0,
             ),
         };
-        let shown = plain(&node_lines(UiLanguage::Ja, &node, false, 0, 40, &mut Vec::new()));
+        let shown = plain(&node_lines(
+            UiLanguage::Ja,
+            &node,
+            false,
+            0,
+            40,
+            &mut Vec::new(),
+        ));
         assert!(shown.contains("future_node"));
         assert!(
             !shown.contains('▸'),
@@ -3824,8 +3970,15 @@ mod tests {
             ..node
         };
         assert!(
-            plain(&node_lines(UiLanguage::Ja, &node, false, 0, 80, &mut Vec::new()))
-                .starts_with("⬦ 要約 | 出典2件")
+            plain(&node_lines(
+                UiLanguage::Ja,
+                &node,
+                false,
+                0,
+                80,
+                &mut Vec::new()
+            ))
+            .starts_with("⬦ 要約 | 出典2件")
         );
     }
     #[test]
@@ -4052,7 +4205,7 @@ mod conversation_item_tests {
 
     #[test]
     fn boundary_rows_are_unselectable_and_tools_stay_dense() {
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         let call = |group: &str| PresentationBlock {
             kind: BlockKind::ToolCall,
             tool: Some(tool(group, "completed")),
@@ -4111,8 +4264,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn duplicate_result_outcomes_cannot_reopen_a_closed_canonical_header() {
-        use crate::config::Config;
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         let call = tool("shared", "running");
         let mut old = tool("shared", "failed");
         old.exit_code = Some(7);
@@ -4170,8 +4322,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn missing_group_result_uses_its_exact_owner_and_keeps_richer_observed_header() {
-        use crate::config::Config;
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         let mut call = tool("owner", "completed");
         call.result_node_id = Some("legacy".into());
         let key = ItemKey::tool(&call, "call", 0);
@@ -4210,8 +4361,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn empty_exact_result_members_do_not_leave_separate_detail_placeholders() {
-        use crate::config::Config;
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         let mut call = tool("shared", "completed");
         call.result_node_id = Some("empty-result".into());
         let mut result = node("empty-result", "", vec![]);
@@ -4241,7 +4391,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn description_replaces_command_until_existing_focus_or_disclosure_reveals_it() {
-        let config = crate::config::Config::default();
+        let config = japanese_config();
         let mut view = ThreadView::new(&config, std::env::temp_dir());
         let mut value = tool("described", "completed");
         value.description = Some("Inspect repository".into());
@@ -4278,7 +4428,8 @@ mod conversation_item_tests {
         for description in ["", "  ", "\n\t\u{1b}"] {
             let mut value = tool("blank", "completed");
             value.description = Some(description.into());
-            let text = compact_tool_line(UiLanguage::Ja, 
+            let text = compact_tool_line(
+                UiLanguage::Ja,
                 &value,
                 120,
                 theme::Palette::detect(crate::config::PaletteMode::Dark),
@@ -4438,7 +4589,7 @@ mod conversation_item_tests {
         live.started_at = Some("2026-10-31T00:00:00Z".into());
         live.elapsed_observation = Some((std::time::Duration::from_secs(316), now));
         live.reason_kind = crate::presentation::ToolReasonKind::HumanBackgrounded;
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![node(
             "live",
             "",
@@ -4499,7 +4650,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn notification_region_keeps_sources_without_triggering_output_hydration() {
-        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         let live = tool("live", "completed");
         let execution = live.execution_id.clone().unwrap();
         let call_id = live.call_node_id.clone().unwrap();
@@ -4533,10 +4684,7 @@ mod conversation_item_tests {
         assert!(region.source_node_ids.contains(&"notice".into()));
     }
     use super::*;
-    use crate::{
-        config::Config,
-        presentation::{InputSource, NodePresentation, PresentationBlock, ToolPresentation},
-    };
+    use crate::presentation::{InputSource, NodePresentation, PresentationBlock, ToolPresentation};
     fn tool(group: &str, status: &str) -> ToolPresentation {
         ToolPresentation {
             group_id: Some(group.into()),
@@ -4587,7 +4735,7 @@ mod conversation_item_tests {
             text: "SECRET_OUTPUT_CLOSED".into(),
             ..Default::default()
         };
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![
             node(
                 "call",
@@ -4641,7 +4789,7 @@ mod conversation_item_tests {
             tool_outcome(&result),
             "metadata hydration cannot change the observed terminal outcome"
         );
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![
             node(
                 "call",
@@ -4698,7 +4846,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn repeated_quiet_facts_coalesce_with_counts_and_latest_references_without_losing_answers() {
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         let mut first = node("first", "FIRST USER", vec![]);
         first.role = "user".into();
         first.presentation.kind = PresentationKind::User;
@@ -4750,7 +4898,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn canonical_projection_bounds_include_a_quiet_prefix_hidden_by_tail_grouping() {
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         let nodes = (0..270)
             .map(|index| {
                 let mut value = node(
@@ -4790,7 +4938,7 @@ mod conversation_item_tests {
     }
     #[test]
     fn repeated_call_ids_in_other_groups_are_not_collapsed_together() {
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = ["a", "b"]
             .iter()
             .map(|group| {
@@ -4899,7 +5047,7 @@ mod conversation_item_tests {
             user.presentation.input_sender_label = Some("Claude".into());
             user.presentation.created_at = Some("2026-10-31T12:34:00Z".into());
             let original = user.text.clone();
-            let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+            let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
             *view.nodes_mut_for_test() = vec![user];
             let (lines, _, sources) = history(&view, 80);
             let rows = lines
@@ -4959,7 +5107,7 @@ mod conversation_item_tests {
         user.presentation.kind = PresentationKind::User;
         user.presentation.input_source = InputSource::Human;
         user.presentation.created_at = Some("2026-10-30T12:34:56+09:00".into());
-        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
         *view.nodes_mut_for_test() = vec![
             user,
             node(
@@ -5025,4 +5173,89 @@ mod code_caption_anchor_tests {
         );
         assert_eq!(crate::history::text_of_payload(&payload), source);
     }
+}
+
+#[cfg(test)]
+#[path = "presentation/i18n_tests.rs"]
+mod i18n_tests;
+
+/// Shared ui.rs recovery banner bridge. Commands and provider text stay literal.
+pub(super) fn recovery_lines(
+    snapshot: &super::activity::ActivitySnapshot,
+    language: UiLanguage,
+    width: u16,
+    height: u16,
+) -> Vec<Line<'static>> {
+    let Some(recovery) = &snapshot.recovery else {
+        return Vec::new();
+    };
+    let current = snapshot.phase == crate::activity::ActivityPhase::Recovery;
+    let en = language == UiLanguage::En;
+    let title = match (en, current) {
+        (true, true) => "! Awaiting recovery | Waiting for your action".into(),
+        (false, true) => "! 復旧待ち | 操作を待っています".into(),
+        (true, false) => format!(
+            "! Previous recovery wait | {}",
+            crate::presentation::messages::phase_label(snapshot.phase, language)
+        ),
+        (false, false) => format!("! 前回の復旧待ち | {}", snapshot.phase.label()),
+    };
+    let actions = match (en, current) {
+        (true, true) => {
+            "/retry Retry same input | Type new instructions | Ctrl+C Stop | F8 Details"
+        }
+        (false, true) => "/retry 同じ内容で再試行 | 入力で新指示 | Ctrl+C 停止 | F8 詳細",
+        (true, false) => "Type to start new work | F8 Run / turn details",
+        (false, false) => "入力で新しい作業 | F8 作業/応答処理の詳細",
+    };
+    let mut essential = vec![Line::from(title)];
+    essential.push(Line::from(if en {
+        format!(
+            "{} live shells | {} uncollected | Review side effects in details",
+            recovery.live_shells, recovery.uncollected_shells
+        )
+    } else {
+        format!(
+            "動作中shell {}件 | 回収未完了 {}件 | 副作用は詳細で確認",
+            recovery.live_shells, recovery.uncollected_shells
+        )
+    }));
+    // Never let optional provider/context/count detail displace recovery actions.
+    essential.extend(hanging_wrap(vec![Line::from(actions)], width.max(1)));
+    let reason = crate::presentation::sanitize_plain(&recovery.message, 0)
+        .0
+        .replace('\n', " ");
+    let mut details = vec![Line::from(format!("{} | {reason}", recovery.stage))];
+    if let Some(reason) = &recovery.stop_reason {
+        details.push(Line::from(match (en, reason.as_str()) {
+            (true, "explicit_stop") => "Stopped by the user",
+            (false, "explicit_stop") => "人による停止",
+            (true, "shutdown" | "app_shutdown") => "Application shutdown",
+            (false, "shutdown" | "app_shutdown") => "アプリ終了",
+            (true, _) => "Stop reason: F8 Details",
+            (false, _) => "停止理由はF8の詳細で確認",
+        }));
+    }
+    details.push(Line::from(if en {
+        format!(
+            "Request saved | {} pending inputs | {} saved tool results",
+            recovery.pending_messages, recovery.saved_tool_results
+        )
+    } else {
+        format!(
+            "依頼は保存済み | 未反映指示 {}件 | 保存済みツール結果 {}件",
+            recovery.pending_messages, recovery.saved_tool_results
+        )
+    }));
+    if let Some(summary) = &snapshot.context_reduction {
+        details.push(Line::from(summary.clone()));
+    }
+    let mut lines = hanging_wrap(essential, width.max(1));
+    lines.extend(
+        hanging_wrap(details, width.max(1))
+            .into_iter()
+            .take(usize::from(height).saturating_sub(lines.len())),
+    );
+    lines.truncate(usize::from(height));
+    lines
 }

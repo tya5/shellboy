@@ -71,13 +71,17 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
     p.ui_messages.title = Some(match display_kind {
         PresentationKind::User => Message::Text(Text::User),
         PresentationKind::Assistant if kind == "reasoning" => Message::Text(Text::Reasoning),
-        PresentationKind::Assistant => Message::Raw { text: "Shellboy".into() },
+        PresentationKind::Assistant => Message::Raw {
+            text: "Shellboy".into(),
+        },
         PresentationKind::ToolResult => Message::Text(Text::ToolResult),
         PresentationKind::Event => Message::Text(Text::Event),
         PresentationKind::Summary => Message::Text(Text::Summary),
         PresentationKind::Spill => Message::Text(Text::Spill),
         PresentationKind::Interrupted => Message::Text(Text::Interrupted),
-        _ => Message::UnknownTitle { kind: short(kind, 64) },
+        _ => Message::UnknownTitle {
+            kind: short(kind, 64),
+        },
     });
     p.fields = fields_of_value(payload);
     if matches!(kind, "spill" | "context_trim")
@@ -90,7 +94,9 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         p.ui_messages.title = Some(Message::Text(Text::ContextTrim));
     }
     if let Some(reason) = payload.get("tombstone_reason").and_then(Value::as_str) {
-        p.ui_messages.title = Some(Message::Reclaimed { reason: short(reason, 256) });
+        p.ui_messages.title = Some(Message::Reclaimed {
+            reason: short(reason, 256),
+        });
         p.title = format!("原文回収済み | {reason}");
         p.kind = PresentationKind::Unknown;
     }
@@ -205,7 +211,8 @@ fn summary_projection<'a>(
             .filter(|sources| sources.iter().all(Value::is_string))
     {
         p.ui_messages.title = Some(super::messages::Message::Summary {
-            count: sources.len(), replaced: decoded_summary.is_some(),
+            count: sources.len(),
+            replaced: decoded_summary.is_some(),
         });
         p.title = if decoded_summary.is_some() {
             format!(

@@ -55,3 +55,66 @@ pub(super) fn finish(p: &mut NodePresentation, payload: &Value) {
     }
     p.bound_metadata();
 }
+
+#[cfg(test)]
+mod localized_metadata_tests {
+    use super::*;
+    use crate::presentation::messages::{Message, Text};
+
+    #[test]
+    fn combined_metadata_pressure_discards_optional_translation_without_cutting_source_facts() {
+        let source = "自動での再実行はしません\nProvider RAW error 🙂 e\u{301}";
+        let mut p = NodePresentation {
+            title: "saved original".into(),
+            blocks: vec![PresentationBlock {
+                text: source.into(),
+                kind: BlockKind::Event,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let source_before = p.blocks[0].clone();
+        p.ui_messages.title = Some(Message::Text(Text::PreviousRecord));
+        assert!(p.ui_messages.set_body(
+            0,
+            vec![
+                Message::Text(Text::NoReplay),
+                Message::Text(Text::ResultUncertain)
+            ]
+        ));
+        p.fields = (0..MAX_FIELDS)
+            .map(|n| PresentationField {
+                key: format!("/padding/{n}"),
+                label: String::new(),
+                value: "x".repeat(600),
+                display: None,
+                value_omitted: false,
+            })
+            .collect();
+        finish(&mut p, &serde_json::json!({}));
+        assert!(p.metadata_bytes() <= MAX_METADATA_BYTES);
+        assert!(p.ui_messages.title.is_none());
+        assert!(p.ui_messages.bodies.is_empty());
+        assert!(p.metadata_limited && p.details_omitted);
+        assert_eq!(p.blocks[0], source_before);
+    }
+
+    #[test]
+    fn provenance_admission_is_bounded_and_never_clips_a_sentence() {
+        let mut p = NodePresentation::default();
+        let sentence = Message::Raw {
+            text: "e\u{301}".repeat(200),
+        };
+        let mut accepted = 0;
+        for index in 0..128 {
+            if p.ui_messages.set_body(index, vec![sentence.clone()]) {
+                accepted += 1;
+            }
+            assert!(p.ui_messages.retained_bytes() <= 8 * 1024);
+        }
+        assert!(accepted > 0 && accepted < 128);
+        for (_, messages) in &p.ui_messages.bodies {
+            assert_eq!(messages, &[sentence.clone()]);
+        }
+    }
+}

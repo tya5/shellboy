@@ -352,8 +352,11 @@ impl UiState {
                     self.dirty = true;
                     return Some(vec![action]);
                 }
+                let language = self.config.ui.language;
                 self.active_view_mut().status = source_error.unwrap_or_else(|| {
-                    crate::presentation::rows::NOTICE_SOURCE_OUTSIDE_WINDOW.into()
+                    crate::presentation::messages::Text::SourceOutsideWindow
+                        .render(language)
+                        .into()
                 });
                 self.dirty = true;
                 return Some(vec![]);
@@ -653,7 +656,9 @@ mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
     fn fixture() -> UiState {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("thread".into());
         ui.apply(UiUpdate::History {
             thread_id: "thread".into(),

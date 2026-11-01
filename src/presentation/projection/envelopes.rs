@@ -29,9 +29,14 @@ pub(super) fn apply(
                 BlockKind::Event => {
                     event(p, &mut b, &value, &fields, kind);
                     let (title, body) = super::super::messages::event_messages(
-                        &value, kind, p.kind == PresentationKind::Interrupted,
+                        &value,
+                        kind,
+                        p.kind == PresentationKind::Interrupted,
+                        &fields,
                     );
-                    p.ui_messages.title = Some(title);
+                    if !p.ui_messages.set_title(title) {
+                        p.metadata_limited = true;
+                    }
                     if !p.ui_messages.set_body(extra_blocks.len(), body) {
                         p.metadata_limited = true;
                     }
