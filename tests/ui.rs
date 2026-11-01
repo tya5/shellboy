@@ -3894,7 +3894,9 @@ fn shellboy_provenance_fixture() -> shellboy::protocol::NodeProvenance {
 #[test]
 fn index_management_shows_preview_states_and_global_retry_requires_confirmation() {
     use shellboy::protocol::{Command, IndexArgs};
-    let mut ui = state();
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     text(&mut ui, "/index");
     enter(&mut ui);
     let mut terminal = Terminal::new(TestBackend::new(110, 34)).unwrap();
@@ -3953,7 +3955,9 @@ fn index_management_shows_preview_states_and_global_retry_requires_confirmation(
 #[test]
 fn structured_index_status_cannot_hide_ready_preview() {
     use shellboy::protocol::IndexArgs;
-    let mut ui = state();
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     text(&mut ui, "/index all");
     let actions = enter(&mut ui);
     let args = actions

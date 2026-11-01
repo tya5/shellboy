@@ -78,7 +78,9 @@ fn reader_page_is_owned_by_current_popup_not_the_last_drawn_popup() {
 #[test]
 fn confirmation_measures_the_actual_wide_popup_and_keeps_footer_fixed_when_small() {
     for (width, height) in [(120, 40), (200, 45), (35, 18), (8, 5)] {
-        let mut ui = state();
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, PathBuf::new());
         let source = format!("{}a", "日".repeat(53));
         ui.confirmation = Some(Confirmation::Operation {
             command: Command::Status(StatusArgs::default()),
