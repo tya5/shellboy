@@ -27,6 +27,7 @@ fn metrics(root: &str) -> String {
         "reduce_requests",
         "spilled_groups",
         "summary_node_id",
+        "summary_rejected",
         "no_target",
     ] {
         fields.push(format!("'{field}',COALESCE(json_extract({root},'$.compact.{field}'),json_extract({root},'$.{field}'))"));
@@ -139,7 +140,7 @@ fn parse(raw: String) -> Result<Value, ApiError> {
                 }
             } else if key == "summary_usage" {
                 *value = crate::compaction::SummaryUsage::sanitize(value);
-            } else if key == "no_target" {
+            } else if key == "no_target" || key == "summary_rejected" {
                 if let Some(n) = value.as_i64().filter(|n| *n == 0 || *n == 1) {
                     *value = json!(n == 1);
                 } else if !value.is_boolean() {

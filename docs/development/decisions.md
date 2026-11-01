@@ -17,8 +17,14 @@ safe tool groups, then summarizes only that prefix. A long Turn can therefore
 have a tiny summary source despite huge reported input, including when its old
 tool groups are already spilled. Keep the safety contract; this change does
 not make current-Turn text eligible or guarantee input shrinks below threshold.
-The reported 1741-character incident was not reconstructed from private data;
-the likely selection mechanism is established from code and a synthetic policy test.
+Review follow-up: read-only W3 compaction and usage records confirm 44 spill
+replacements were committed before the summary was rejected as `invalid_state`;
+the old automatic result nevertheless reported only `rejected`. The trigger
+reported 202,622 input tokens and the next completed conversation request
+151,601, a 51,021-token difference; the interval can include other changes, so
+this is not a controlled measurement of spill alone. The rejected summary
+reported one map request, input 2,895, cached 0, output 1,051, and unknown
+cache-creation tokens. No private conversation text is included here.
 
 ## Retained-output fixture clock (#41, 2026-11-01)
 

@@ -2,7 +2,18 @@
 
 ## Proactive retry gate (#153, 2026-11-02)
 
-Scope: synthetic temporary data-dir and loopback Responses mock; no user data,
+Review follow-up includes a read-only inspection of the user's W3 compaction and
+usage records (no private text, mutations or provider request). At 18:35 UTC,
+44 spill replacements committed despite the summary's `invalid_state`; the
+result recorded `rejected` and omitted the spill counts. Trigger input was
+202,622 tokens; the next completed request reported 151,601 (51,021 fewer),
+though intervening changes prevent assigning the full difference to spill.
+The rejected summary's `summary_usage`: 1 map / 0 reduce, input 2,895,
+cached 0, cache-creation unknown, output 1,051. This is provider-reported usage,
+not a cost in currency. The synthetic acceptance below additionally tests that
+partial adoption retains failure usage and that the next actual request shrinks.
+
+Test scope: synthetic temporary data-dir and loopback Responses mock; no user data,
 real provider, installed binary or paid API. Every new mock loop is capped at
 nine shell tool calls and four summary requests. Acceptance covers same-Run
 rejected -> adopted at input 150 -> 160 with threshold100, repeated rejection
@@ -19,9 +30,11 @@ execution a859273f-e050-45ac-a0ea-8eb1e7d9cdc1). The strengthened integration te
 tests because the shared build directory reused another worktree's binary.
 After a forced rebuild in rust-slot, execution 3a8af7fd-d438-429b-8dc9-9e8ca30b5c63
 passed `cargo check --tests`, both focused unit tests (one each), and all five
-proactive integration tests after rebase. Linux/macOS branch CI is pending. Real-provider behavior, the private 1741-character incident, and native
-Windows are not locally tested; Windows remains the integrator's three-OS CI
-responsibility.
+proactive integration tests after rebase on the earlier branch revision. The
+review follow-up's tests and CI are reported separately. The W3 record is a
+read-only observation, not an execution of the fix with the real provider or
+reconstruction of private conversation content. Native Windows remains the
+integrator's three-OS CI responsibility.
 
 ## v0.5.0 preparation boundary
 

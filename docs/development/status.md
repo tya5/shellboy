@@ -7,7 +7,11 @@ provider-reported input growth of ceil(auto_at_tokens/10), with all existing
 unknown/stale usage checks and ordinary summary protections unchanged. New
 synthetic loopback tests cap tool calls at nine and check same-Run adoption after
 a rejection, bounded repeated failures, and missing/decreasing/insufficient usage.
-Post-rebase local Rust checks pass; branch CI is pending.
+Review follow-up records reducing spill-only success even if the small summary is
+rejected, retaining summary failure usage and the retry gate. The current Turn's
+model prose and reasoning still cannot be summarized by this path; this is a
+separate unresolved limitation, not a new design decision. Updated tests and CI
+results are recorded separately in acceptance.
 See acceptance for evidence and untested cases.
 
 ## Request inspection (#137)

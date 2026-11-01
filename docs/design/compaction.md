@@ -327,12 +327,27 @@ replay lease and runs the argument-free compact unchanged (spill, then the bound
 summary with the ordinary protections); never maximal omission. Afterwards it
 re-reads the snapshot. No table, worker, queue, timer or HTTP stage is added.
 
+Partial spill adoption (#153 review): proactive compaction spills only whole safe
+eligible tool groups whose exact replay JSON character projection shrinks; this
+is a local reduction check, never a token estimate or trigger. The latest group,
+incomplete groups and protected nodes remain fenced. Spills commit before the
+summary request. If summary subsequently fails for a non-storage reason, an
+already committed spill is recorded as `adopted` with `summary_rejected: true`,
+the original summary error, its provider-reported summary usage and the spill
+counts. No spill plus summary failure remains `rejected`. Storage failures
+propagate; cancellation keeps its existing error behavior. Manual compact keeps
+its existing contract. A partial adoption still advances the failure retry gate:
+a fresh reported input must grow by the interval before another summary attempt,
+preventing repeated paid summary failures merely because another spill succeeded.
+Replayed character reduction is not a guarantee of provider token reduction.
+
 Retry gate (#153): a non-adopted outcome (`rejected`, `no_safe_reduction`)
 remembers the triggering provider-reported input count in ephemeral per-`drive`
 state. Another attempt in that Run requires a fresh, non-stale reported count
 at least `ceil(auto_at_tokens / 10)` tokens above that count, and still at or
 above the threshold. Every non-adopted retry moves this baseline forward;
 unchanged, decreasing, unknown and insufficiently increased usage cannot retry.
+A spill-only adoption with a rejected summary also uses that gate.
 There is no estimate, timer or new setting. For a fixed threshold T > 0 and
 non-adopted baseline B, additional non-adopted attempts up to observed high-water
 H are bounded by `floor((H - B) / ceil(T / 10))`. Subtraction avoids overflow at

@@ -3453,6 +3453,66 @@ async fn proactive_run_ids(control: &Arc<Control>, events: &[Value]) -> Vec<Stri
         )).collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }).await.unwrap()
 }
+#[tokio::test]
+async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
+    crate::test_watchdog::watchdog("proactive partial spill adoption", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        for text in ["hi", "yo"] {
+            send(&control, &target, text).await;
+            incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
+            settled(&control, &target).await;
+        }
+        send(&control, &target, "long current turn").await;
+        let tool_response = |index: u32, tokens: u32| json!({"id":format!("small-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("small-{index}"),"name":"shell","arguments":json!({"command":"echo last"}).to_string()}]});
+        for index in 0..2 {
+            let current = incoming(&control, &mut receive).await;
+            current.reply.send((200, json!({"id":format!("large-{index}"),"status":"completed", "usage":{"input_tokens":100,"output_tokens":1}, "output":[{
+                "type":"function_call","call_id":format!("large-{index}"),"name":"shell",
+                "arguments":json!({"command":"printf '%050000d' 0"}).to_string()
+            }]}))).unwrap();
+        }
+        let before = incoming(&control, &mut receive).await;
+        let before_size = before.body["input"].to_string().len();
+        assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
+        before.reply.send((200, tool_response(2, 200))).unwrap();
+        let summary = incoming(&control, &mut receive).await;
+        assert_eq!(summary.body["tools"], json!([]));
+        let mut rejected = answer(&"too-long-summary ".repeat(400));
+        rejected["usage"] = json!({"input_tokens":321,"output_tokens":123,"total_tokens":444});
+        summary.reply.send((200, rejected)).unwrap();
+        let after = incoming(&control, &mut receive).await;
+        let after_size = after.body["input"].to_string().len();
+        assert!(after_size < before_size / 3, "actual replay input must shrink: {before_size} -> {after_size}");
+        let replay = after.body["input"].to_string();
+        assert!(replay.contains("\\\"omitted\\\":true"), "replacement must be present in replay");
+        after.reply.send((200, tool_response(3, 205))).unwrap();
+        let gated = incoming(&control, &mut receive).await;
+        assert_ne!(gated.body["tools"], json!([]), "partial adoption must not bypass failed-summary retry gate");
+        gated.reply.send((200, answer("finished"))).unwrap();
+        settled(&control, &target).await;
+        let events = proactive_events(&control, &target).await;
+        assert_eq!(events.len(), 1, "{events:#?}");
+        let item = &events[0];
+        assert_eq!(item["state"], "adopted");
+        assert_eq!(item["metrics"]["summary_rejected"], true);
+        assert!(item["metrics"]["spilled_groups"].as_u64().unwrap() >= 2);
+        assert_eq!(item["metrics"]["summary_usage"]["input_tokens"]["known_sum"], 321);
+        assert_eq!(item["metrics"]["summary_usage"]["output_tokens"]["known_sum"], 123);
+        let attempt_id = item["attempt_id"].as_str().unwrap().to_owned();
+        let saved: String = control.store.database.call(move |db| Ok(db.query_row(
+            "SELECT error_json FROM model_attempt WHERE id=?1", [attempt_id], |r| r.get(0)
+        )?)).await.unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["automatic_trim_attempt"]["summary_error"]["code"], "invalid_state");
+        eprintln!("partial-spill replay bytes {before_size} -> {after_size}; summary input=321 output=123");
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+    }).await.unwrap();
+}
+
 /// Two completed Turns (input 50 then `second`), then a third request. Returns
 /// how many summary (tool-free) requests preceded the third ordinary request.
 async fn proactive_third_turn(

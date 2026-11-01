@@ -1,5 +1,5 @@
 //! Proactive threshold compaction (#125): only the trigger decision lives here.
-//! The argument-free compact path and its safe boundaries are reused as-is.
+//! Uses ordinary safe boundaries, recording partial spill adoption separately.
 use super::*;
 
 pub(super) const REASON: &str = "proactive_threshold";
@@ -78,21 +78,52 @@ pub(super) async fn maybe_compact(
     }
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
-    let mut observation = match super::super::compact::argument_free_compact(
-        &control.compactor,
-        &snapshot.thread,
-        slot.stop.clone(),
-    )
-    .await
-    {
-        Ok(result) => {
-            json!({"outcome":if result.no_target {"no_safe_reduction"} else {"adopted"},"summary":result})
-        }
+    let spill = control
+        .compactor
+        .spill_reducing_cancellable(&snapshot.thread, slot.stop.clone())
+        .await;
+    let mut observation = match spill {
         Err(error) if error.is_storage_failure() => return Err(error),
         Err(error) => json!({"outcome":"rejected","error":error}),
+        Ok(spill) => match control
+            .compactor
+            .summarize(&snapshot.thread, false, slot.stop.clone())
+            .await
+        {
+            Ok(mut summary) => {
+                summary.spilled_groups += spill.spilled_groups;
+                summary.source_nodes += spill.source_nodes;
+                summary.original_node_ids.extend(spill.original_node_ids);
+                summary.no_target = summary.no_target && spill.no_target;
+                json!({"outcome":if summary.no_target {"no_safe_reduction"} else {"adopted"},"summary":summary})
+            }
+            Err(error) if error.is_storage_failure() => return Err(error),
+            Err(error) if !spill.no_target && !slot.stop.is_cancelled() => {
+                let mut summary = json!(spill);
+                summary["summary_rejected"] = json!(true);
+                if let Some(details) = error.details.as_ref().and_then(Value::as_object) {
+                    for field in [
+                        "summary_usage",
+                        "source_characters",
+                        "summary_characters",
+                        "summary_limit",
+                        "model_requests",
+                        "map_requests",
+                        "reduce_requests",
+                    ] {
+                        if let Some(value) = details.get(field) {
+                            summary[field] = value.clone();
+                        }
+                    }
+                }
+                json!({"outcome":"adopted","summary":summary,"summary_error":error})
+            }
+            Err(error) => json!({"outcome":"rejected","error":error}),
+        },
     };
     let adopted = observation["outcome"] == "adopted";
-    budget.last_non_adopted_input = (!adopted).then_some(evidence.input_tokens);
+    let summary_rejected = observation.get("summary_error").is_some();
+    budget.last_non_adopted_input = (!adopted || summary_rejected).then_some(evidence.input_tokens);
     observation["reason"] = json!(REASON);
     observation["trigger"] = json!({
         "auto_at_tokens": threshold,

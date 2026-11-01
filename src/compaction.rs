@@ -340,6 +340,30 @@ impl Compactor {
         self.spill_cancellable(thread, include_latest, CancellationToken::new())
             .await
     }
+    /// Proactive spill only adopts groups whose actual replay projection shrinks.
+    pub(crate) async fn spill_reducing_cancellable(
+        &self,
+        thread: &str,
+        cancel: CancellationToken,
+    ) -> Result<CompactResult, ApiError> {
+        let snapshot = self.snapshot(thread, false).await?;
+        let ranges = policy::spill_ranges(&snapshot, false)
+            .into_iter()
+            .filter(|range| {
+                let group = &snapshot.groups[range.start];
+                let before = group
+                    .sources
+                    .iter()
+                    .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
+                    .fold(0u64, u64::saturating_add);
+                spill_payload(group).is_some_and(|payload| {
+                    edit::projection_characters(&payload, snapshot.epoch) < before
+                })
+            })
+            .collect();
+        self.spill_snapshot(snapshot, ranges, cancel).await
+    }
+
     pub async fn spill_cancellable(
         &self,
         thread: &str,
