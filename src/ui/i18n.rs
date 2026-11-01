@@ -75,7 +75,7 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
     for cell in &buffer.content {
         for value in cell.symbol().chars() {
             assert!(
-                !matches!(value, '\u{fe0f}' | '\u{200d}')
+                !matches!(value, '\u{fe0f}' | '\u{200d}' | '\u{21aa}')
                     && !('\u{1f000}'..='\u{1faff}').contains(&value),
                 "emoji in generated UI symbol {value:?}"
             );

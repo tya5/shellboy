@@ -78,7 +78,7 @@ impl RowKind {
             Self::Cancelled => ("⊘", "取消・未開始", theme::ATTENTION),
             Self::Notice => ("⁂", "通知", theme::TEXT),
             Self::Summary => ("⬦", "要約", theme::REPLACEMENT),
-            Self::Spill => ("↪", "退避", theme::REPLACEMENT),
+            Self::Spill => (">", "退避", theme::REPLACEMENT),
             Self::LiveWork => ("◉", "抱えている作業", theme::TOOL),
         }
     }
@@ -132,6 +132,7 @@ mod tests {
             let (mark, label, _) = kind.spec();
             assert_eq!(mark.width(), 1);
             assert_eq!(mark.width_cjk(), 1);
+            assert!(!mark.contains(['\u{21aa}', '\u{fe0f}', '\u{200d}']));
             assert!(!label.is_empty());
         }
         for mark in EXTERNAL_MARK_CANDIDATES {

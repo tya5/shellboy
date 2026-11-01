@@ -528,7 +528,7 @@ No recovery dashboard is added ahead of #41/#58.
 
 The help legend and conversation renderer share one mark table. `▸` is an
 answer, `▹` a request, `⏵` a running tool, `◌` an unavailable observation,
-`✓`/`✗`/`⊘` terminal outcomes, `⁂` a notification, `⬦` a summary and `↪` a
+`✓`/`✗`/`⊘` terminal outcomes, `⁂` a notification, `⬦` a summary and `>` a
 spill. Input-source marks keep their explicit human/parent/model labels.
 Background shell rows say so and show the saved background reason when known;
 live seconds use the saved shell start, not the latest model Turn start.
