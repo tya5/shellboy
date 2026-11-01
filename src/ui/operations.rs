@@ -867,16 +867,12 @@ impl Operations {
                     self.filter
                 ),
             };
-            let (title, footer) = match self.language {
-                UiLanguage::En => (
-                    "Actions",
-                    "Filter | ^v/PgUp/PgDn | Ctrl+U Clear | Esc Back/F8 Close\nEnter Form | [Change] Saved data [Control] Work",
-                ),
-                UiLanguage::Ja => (
-                    "操作",
-                    "絞込み | ^v/PgUp/PgDn | Ctrl+U解除 | Esc戻る/F8閉\nEnter 入力フォーム | [変更]保存 [制御]処理",
-                ),
-            };
+            let title = local!(self.language, "操作", "Actions");
+            let footer = local!(
+                self.language,
+                "絞込み | ^v/PgUp/PgDn | Ctrl+U解除 | Esc戻る/F8閉\nEnter 入力フォーム | [変更]保存 [制御]処理",
+                "Filter | ^v/PgUp/PgDn | Ctrl+U Clear | Esc Back/F8 Close\nEnter Form | [Change] Saved data [Control] Work"
+            );
             let body = popup::panel_recorded(frame, area, title, &context, footer, &self.paint);
             self.page
                 .set(usize::from(body.height).saturating_sub(1).max(1));
