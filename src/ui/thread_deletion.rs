@@ -68,110 +68,65 @@ impl DeletionDialog {
             && matches!(&self.phase,Phase::Ready(value) if value.get("deletable_now").and_then(Value::as_bool)==Some(true))
     }
     pub(super) fn text(&self) -> String {
-        if self.language == UiLanguage::En {
-            return self.text_en();
-        }
-        let mut text = format!(
-            "会話の削除確認\n対象: {}\n会話ID: {}\n子の会話も削除: {}\n",
-            self.title,
-            self.args.thread_id,
-            if self.args.descendants {
-                "する"
-            } else {
-                "しない"
+        let language = self.language;
+        let title = &self.title;
+        let thread = &self.args.thread_id;
+        let mut text = match (language, self.args.descendants) {
+            (UiLanguage::Ja, true) => {
+                format!("会話の削除確認\n対象: {title}\n会話ID: {thread}\n子の会話も削除: する\n")
             }
-        );
-        if let Some(captured_at) = self.captured_at {
-            text.push_str(&format!(
-                "確認時刻: {}\n",
-                captured_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-            ));
-        }
-        match &self.phase {
-            Phase::Loading => text.push_str("\n削除影響を確認中. Y はまだ使えません。"),
-            Phase::Executing => {
-                text.push_str("\n削除を実行中. 閉じても受理済みの処理は継続します。")
+            (UiLanguage::Ja, false) => {
+                format!("会話の削除確認\n対象: {title}\n会話ID: {thread}\n子の会話も削除: しない\n")
             }
-            Phase::Failed(error) => text.push_str(&format!(
-                "\n{}\n閉じてから再度選んでください。",
-                failure_text(error, self.language)
-            )),
-            Phase::InvalidPreview => text.push_str("\n削除できません: 削除影響の対象が一致しません。もう一度開いてください\n閉じてから再度選んでください。"),
-            Phase::Stale(None) => {
-                text.push_str("\n確認が古くなりました。閉じて再確認してください。Y は使えません。")
-            }
-            Phase::Ready(value) | Phase::Stale(Some(value)) => {
-                let number = |pointer: &str| {
-                    value
-                        .pointer(pointer)
-                        .and_then(Value::as_u64)
-                        .map_or_else(|| "不明".to_owned(), |value| value.to_string())
-                };
-                text.push_str(if matches!(self.phase, Phase::Stale(_)) {
-                    "\n確認が古くなりました。閉じて再確認してください。Y は使えません。"
-                } else if self.args.preview_marker.is_none() {
-                    "\n確認の目印を取得できません。対象範囲を狭めて再確認してください。Y は使えません。"
-                } else if self.can_execute() {
-                    "\n削除できます。Y で実行します。"
-                } else {
-                    "\n削除できません。作業を停止してから再度確認してください。"
-                });
-                text.push_str(&format!("\n対象会話: {} | 子の会話: {}\n動作中: {} | 停止中: {}\n共有されている履歴: {}\n置換の出典: {} | 添付参照: {}",
-                    number("/selection/thread_count"),number("/selection/descendant_thread_count"),number("/blockers/live_run_count"),number("/blockers/stopping_run_count"),number("/references/shared_path_nodes"),number("/references/completed_replacement_source_nodes"),number("/references/attachment_reference_count")));
-                if let Some(runs) = value.pointer("/blockers/runs").and_then(Value::as_array) {
-                    for run in runs.iter().take(50) {
-                        if let Some(id) = run.get("id").and_then(Value::as_str) {
-                            text.push_str(&format!(
-                                "\n  作業 {} | {}",
-                                id,
-                                run.get("state").and_then(Value::as_str).unwrap_or("不明")
-                            ));
-                        }
-                    }
-                }
-                text.push_str(
-                    "\n\n削除直前にも状態を確認します。共有元の履歴は即時に破棄されません。",
-                );
-            }
-        }
-        text
-    }
-    fn text_en(&self) -> String {
-        let mut text = if self.args.descendants {
-            format!(
-                "Confirm conversation deletion\nTarget: {}\nConversation ID: {}\nDelete descendants: yes\n",
-                self.title, self.args.thread_id
-            )
-        } else {
-            format!(
-                "Confirm conversation deletion\nTarget: {}\nConversation ID: {}\nDelete descendants: no\n",
-                self.title, self.args.thread_id
-            )
+            (UiLanguage::En, true) => format!(
+                "Confirm conversation deletion\nTarget: {title}\nConversation ID: {thread}\nDelete descendants: yes\n"
+            ),
+            (UiLanguage::En, false) => format!(
+                "Confirm conversation deletion\nTarget: {title}\nConversation ID: {thread}\nDelete descendants: no\n"
+            ),
         };
         if let Some(captured_at) = self.captured_at {
             let timestamp = captured_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            text.push_str(&format!("Reviewed at: {timestamp}\n"));
+            text.push_str(&match language {
+                UiLanguage::Ja => format!("確認時刻: {timestamp}\n"),
+                UiLanguage::En => format!("Reviewed at: {timestamp}\n"),
+            });
         }
         match &self.phase {
-            Phase::Loading => text.push_str("\nChecking deletion impact. Y is not available yet."),
-            Phase::Executing => text.push_str("\nDeleting. Closing this screen does not cancel accepted work."),
+            Phase::Loading => text.push_str(local!(language,
+                "\n削除影響を確認中. Y はまだ使えません。",
+                "\nChecking deletion impact. Y is not available yet.")),
+            Phase::Executing => text.push_str(local!(language,
+                "\n削除を実行中. 閉じても受理済みの処理は継続します。",
+                "\nDeleting. Closing this screen does not cancel accepted work.")),
             Phase::Failed(error) => {
-                let failure = failure_text(error, UiLanguage::En);
-                text.push_str(&format!("\n{failure}\nClose this screen and select the target again."));
+                let uncertain = error.details.as_ref().and_then(|details| details.get("deletion_outcome_uncertain"))
+                    .and_then(Value::as_bool) == Some(true);
+                let message = &error.message;
+                text.push_str(&match (language, uncertain) {
+                    (UiLanguage::Ja, true) => format!("\n削除結果は未確認です: {message}\n閉じてから再度選んでください。"),
+                    (UiLanguage::Ja, false) => format!("\n削除できません: {message}\n閉じてから再度選んでください。"),
+                    (UiLanguage::En, true) => format!("\nDeletion outcome is unknown: {message}\nClose this screen and select the target again."),
+                    (UiLanguage::En, false) => format!("\nCould not delete: {message}\nClose this screen and select the target again."),
+                });
             }
-            Phase::InvalidPreview => text.push_str("\nCould not delete: The deletion preview target does not match. Open it again.\nClose this screen and select the target again."),
-            Phase::Stale(None) => text.push_str("\nThe preview is stale. Close and review again. Y is disabled."),
+            Phase::InvalidPreview => text.push_str(local!(language,
+                "\n削除できません: 削除影響の対象が一致しません。もう一度開いてください\n閉じてから再度選んでください。",
+                "\nCould not delete: The deletion preview target does not match. Open it again.\nClose this screen and select the target again.")),
+            Phase::Stale(None) => text.push_str(local!(language,
+                "\n確認が古くなりました。閉じて再確認してください。Y は使えません。",
+                "\nThe preview is stale. Close and review again. Y is disabled.")),
             Phase::Ready(value) | Phase::Stale(Some(value)) => {
                 let number = |pointer: &str| value.pointer(pointer).and_then(Value::as_u64)
-                    .map_or_else(|| "unknown".to_owned(), |value| value.to_string());
+                    .map_or_else(|| local!(language, "不明", "unknown").to_owned(), |value| value.to_string());
                 text.push_str(if matches!(self.phase, Phase::Stale(_)) {
-                    "\nThe preview is stale. Close and review again. Y is disabled."
+                    local!(language, "\n確認が古くなりました。閉じて再確認してください。Y は使えません。", "\nThe preview is stale. Close and review again. Y is disabled.")
                 } else if self.args.preview_marker.is_none() {
-                    "\nNo preview marker is available. Narrow the scope and review again. Y is disabled."
+                    local!(language, "\n確認の目印を取得できません。対象範囲を狭めて再確認してください。Y は使えません。", "\nNo preview marker is available. Narrow the scope and review again. Y is disabled.")
                 } else if self.can_execute() {
-                    "\nDeletion is available. Press Y to execute."
+                    local!(language, "\n削除できます。Y で実行します。", "\nDeletion is available. Press Y to execute.")
                 } else {
-                    "\nDeletion is not available. Stop active work and review again."
+                    local!(language, "\n削除できません。作業を停止してから再度確認してください。", "\nDeletion is not available. Stop active work and review again.")
                 });
                 let selected = number("/selection/thread_count");
                 let descendants = number("/selection/descendant_thread_count");
@@ -180,16 +135,24 @@ impl DeletionDialog {
                 let shared = number("/references/shared_path_nodes");
                 let sources = number("/references/completed_replacement_source_nodes");
                 let attachments = number("/references/attachment_reference_count");
-                text.push_str(&format!("\nSelected conversations: {selected} | Descendants: {descendants}\nRunning: {running} | Stopping: {stopping}\nShared history: {shared}\nReplacement sources: {sources} | Attachment references: {attachments}"));
+                text.push_str(&match language {
+                    UiLanguage::Ja => format!("\n対象会話: {selected} | 子の会話: {descendants}\n動作中: {running} | 停止中: {stopping}\n共有されている履歴: {shared}\n置換の出典: {sources} | 添付参照: {attachments}"),
+                    UiLanguage::En => format!("\nSelected conversations: {selected} | Descendants: {descendants}\nRunning: {running} | Stopping: {stopping}\nShared history: {shared}\nReplacement sources: {sources} | Attachment references: {attachments}"),
+                });
                 if let Some(runs) = value.pointer("/blockers/runs").and_then(Value::as_array) {
                     for run in runs.iter().take(50) {
                         if let Some(id) = run.get("id").and_then(Value::as_str) {
-                            let state = run.get("state").and_then(Value::as_str).unwrap_or("unknown");
-                            text.push_str(&format!("\n  Run {id} | {state}"));
+                            let state = run.get("state").and_then(Value::as_str).unwrap_or(local!(language, "不明", "unknown"));
+                            text.push_str(&match language {
+                                UiLanguage::Ja => format!("\n  作業 {id} | {state}"),
+                                UiLanguage::En => format!("\n  Run {id} | {state}"),
+                            });
                         }
                     }
                 }
-                text.push_str("\n\nState is checked again immediately before deletion. Shared source history is not immediately discarded.");
+                text.push_str(local!(language,
+                    "\n\n削除直前にも状態を確認します。共有元の履歴は即時に破棄されません。",
+                    "\n\nState is checked again immediately before deletion. Shared source history is not immediately discarded."));
             }
         }
         text
@@ -226,20 +189,20 @@ impl UiState {
         descendants: bool,
     ) -> Vec<UiAction> {
         if thread.starts_with("draft:") {
-            let message = match self.config.ui.language {
-                UiLanguage::En => "An unsaved draft is not a conversation to delete",
-                UiLanguage::Ja => "未保存の下書きは会話の削除対象ではありません",
-            };
+            let message = local!(
+                self.config.ui.language,
+                "未保存の下書きは会話の削除対象ではありません",
+                "An unsaved draft is not a conversation to delete"
+            );
             self.thread_browser.notice(message.into());
             return vec![];
         }
         if !self.thread_deletions_inflight.is_empty() {
-            let message = match self.config.ui.language {
-                UiLanguage::En => {
-                    "Deletion is in progress. Wait for its result before trying again"
-                }
-                UiLanguage::Ja => "削除を実行中です。結果を待ってから再操作してください",
-            }
+            let message = local!(
+                self.config.ui.language,
+                "削除を実行中です。結果を待ってから再操作してください",
+                "Deletion is in progress. Wait for its result before trying again"
+            )
             .to_owned();
             self.thread_browser.notice(message.clone());
             self.active_view_mut().status = message;
@@ -253,10 +216,7 @@ impl UiState {
             .find(|item| item.thread_id == thread)
             .map(|item| crate::presentation::sanitize_plain(&item.title, 0).0)
             .filter(|title| !title.trim().is_empty())
-            .unwrap_or_else(|| match self.config.ui.language {
-                UiLanguage::En => "Untitled".into(),
-                UiLanguage::Ja => "タイトルなし".into(),
-            });
+            .unwrap_or_else(|| local!(self.config.ui.language, "タイトルなし", "Untitled").into());
         let dialog = DeletionDialog {
             language: self.config.ui.language,
             title,
@@ -409,10 +369,11 @@ impl UiState {
                         self.deferred_actions.push(action);
                         self.set_confirmation(Confirmation::ThreadDeletion(dialog));
                     }
-                    let message = match self.config.ui.language {
-                        UiLanguage::En => "The deletion target changed. Review it again",
-                        UiLanguage::Ja => "削除対象が変わりました。再確認してください",
-                    };
+                    let message = local!(
+                        self.config.ui.language,
+                        "削除対象が変わりました。再確認してください",
+                        "The deletion target changed. Review it again"
+                    );
                     self.thread_browser.notice(message.into());
                     self.dirty = true;
                     return;

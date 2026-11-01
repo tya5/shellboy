@@ -549,30 +549,75 @@ pub(super) fn confirmation_lines_for(
     operation: &ClientOperation,
     language: UiLanguage,
 ) -> Vec<Line<'static>> {
-    match language {
-        UiLanguage::En => confirmation_lines_en(operation),
-        UiLanguage::Ja => confirmation_lines(operation),
-    }
-}
-pub(super) fn confirmation_lines(operation: &ClientOperation) -> Vec<Line<'static>> {
     let id = operation.catalogue();
     let mut lines = vec![
-        Line::from(id.label()),
-        Line::from(id.spec().meaning),
-        Line::from(operation.effect().text().fallback),
+        Line::from(super::metadata::text_for(id.label_text(), language).replace('·', "|")),
+        Line::from(super::metadata::text_for(id.meaning_text(), language)),
+        Line::from(super::metadata::text_for(
+            operation.effect().text(),
+            language,
+        )),
         Line::from(""),
     ];
     match operation {
-        ClientOperation::Config(_)=>lines.extend([Line::from("起動時に選択した設定ファイルへ保存します。既存ファイルは上書きしません。"),Line::from("現在の所有者の設定は変えません。編集した設定の反映は再起動時です。")]),
-        ClientOperation::Exec(options)=>lines.extend([Line::from(format!("既存Thread: {}",safe(options.thread_id.as_deref().unwrap_or("なし（新規作成）")))),Line::from(format!("追加修復: 最大{}回 | 全体期限{}ms",options.max_repairs,options.timeout_ms)),Line::from("モデルAPIとtoolの費用・副作用が発生する場合があります。修復は完了済み作用を巻き戻しません。"),Line::from("期限や表示を閉じる操作だけでは対象Runを停止しません。受付IDは結果に個別に示します。")]),
-        ClientOperation::Rag{options,..}=>{
-            lines.push(Line::from(format!("独立RAG DB: {}",safe(&options.db.as_ref().map(|path|path.to_string_lossy().into_owned()).unwrap_or_else(||"起動時data-dir/rag.db".into())))));
-            if matches!(options.command,crate::rag::RagCommand::Index{mode:crate::rag::IndexMode::Semantic,..}){lines.push(Line::from("semantic索引は埋め込みAPIを使用し、費用が発生する場合があります。"));}
-            lines.push(Line::from("資料ファイル自体は削除しません。登録・索引の変更は独立RAG DBへ保存します。"));
-        },
-        ClientOperation::Docs(_)=>{},
+        ClientOperation::Config(_) => lines.extend([
+            Line::from(local!(language,
+                "起動時に選択した設定ファイルへ保存します。既存ファイルは上書きしません。",
+                "Write to the configuration file selected at launch. Existing files are not overwritten.")),
+            Line::from(local!(language,
+                "現在の所有者の設定は変えません。編集した設定の反映は再起動時です。",
+                "The running owner's settings do not change. Edited configuration takes effect on restart.")),
+        ]),
+        ClientOperation::Exec(options) => {
+            let thread = match (language, options.thread_id.as_deref()) {
+                (UiLanguage::Ja, Some(id)) => format!("既存Thread: {}", safe(id)),
+                (UiLanguage::En, Some(id)) => format!("Existing Thread: {}", safe(id)),
+                (_, None) => local!(language, "既存Thread: なし（新規作成）", "Existing Thread: none; create a new Thread").into(),
+            };
+            let repairs = options.max_repairs;
+            let timeout = options.timeout_ms;
+            let limits = match language {
+                UiLanguage::Ja => format!("追加修復: 最大{repairs}回 | 全体期限{timeout}ms"),
+                UiLanguage::En => format!("Additional repairs: at most {repairs}; total deadline: {timeout} ms"),
+            };
+            lines.extend([
+                Line::from(thread),
+                Line::from(limits),
+                Line::from(local!(language,
+                    "モデルAPIとtoolの費用・副作用が発生する場合があります。修復は完了済み作用を巻き戻しません。",
+                    "Model API calls and tools may incur costs or side effects. Repairs do not undo completed effects.")),
+                Line::from(local!(language,
+                    "期限や表示を閉じる操作だけでは対象Runを停止しません。受付IDは結果に個別に示します。",
+                    "The deadline or closing this screen does not stop the target Run. Its receipt ID is shown separately in the result.")),
+            ]);
+        }
+        ClientOperation::Rag { options, .. } => {
+            let database = match (language, &options.db) {
+                (UiLanguage::Ja, Some(path)) => format!("独立RAG DB: {}", safe(&path.to_string_lossy())),
+                (UiLanguage::En, Some(path)) => format!("Independent RAG DB: {}", safe(&path.to_string_lossy())),
+                (_, None) => local!(language, "独立RAG DB: 起動時data-dir/rag.db", "Independent RAG DB: launch data-dir/rag.db").into(),
+            };
+            lines.push(Line::from(database));
+            if matches!(options.command, crate::rag::RagCommand::Index { mode: crate::rag::IndexMode::Semantic, .. }) {
+                lines.push(Line::from(local!(language,
+                    "semantic索引は埋め込みAPIを使用し、費用が発生する場合があります。",
+                    "Semantic indexing uses the embedding API and may incur costs.")));
+            }
+            lines.push(Line::from(local!(language,
+                "資料ファイル自体は削除しません。登録・索引の変更は独立RAG DBへ保存します。",
+                "Source documents are not deleted. Registration and index changes are saved in the independent RAG database.")));
+        }
+        ClientOperation::Docs(_) => {}
     }
-    lines.extend([Line::from(""),Line::from("相対パスはTUI起動場所を基準とします。設定・data-dirは起動時の選択を使います。"),Line::from("Yで要求します。N/Escで入力内容を保ったまま戻ります。受付済みの処理は画面を閉じても取り消しません。")]);
+    lines.extend([
+        Line::from(""),
+        Line::from(local!(language,
+            "相対パスはTUI起動場所を基準とします。設定・data-dirは起動時の選択を使います。",
+            "Relative paths use the TUI launch directory. Configuration and data-dir are the selections made at launch.")),
+        Line::from(local!(language,
+            "Yで要求します。N/Escで入力内容を保ったまま戻ります。受付済みの処理は画面を閉じても取り消しません。",
+            "Y submits the request. N/Esc returns with inputs intact. Closing the screen does not cancel accepted work.")),
+    ]);
     lines
 }
 
@@ -876,63 +921,4 @@ mod tests {
         assert!(operations.wheel(isize::MIN));
         assert_eq!(operations.form.as_ref().unwrap().help_scroll.get(), 0);
     }
-}
-
-fn confirmation_lines_en(operation: &ClientOperation) -> Vec<Line<'static>> {
-    let id = operation.catalogue();
-    let mut lines = vec![
-        Line::from(super::metadata::text_for(
-            id.label_text(),
-            crate::config::UiLanguage::En,
-        )),
-        Line::from(super::metadata::text_for(
-            id.meaning_text(),
-            crate::config::UiLanguage::En,
-        )),
-        Line::from(super::metadata::text_for(
-            operation.effect().text(),
-            crate::config::UiLanguage::En,
-        )),
-        Line::from(""),
-    ];
-    match operation {
-        ClientOperation::Config(_) => lines.extend([
-            Line::from("Write to the configuration file selected at launch. Existing files are not overwritten."),
-            Line::from("The running owner's settings do not change. Edited configuration takes effect on restart."),
-        ]),
-        ClientOperation::Exec(options) => {
-            if let Some(thread) = options.thread_id.as_deref() {
-                let thread = safe(thread);
-                lines.push(Line::from(format!("Existing Thread: {thread}")));
-            } else {
-                lines.push(Line::from("Existing Thread: none; create a new Thread"));
-            }
-            let repairs = options.max_repairs;
-            let timeout = options.timeout_ms;
-            lines.extend([
-                Line::from(format!("Additional repairs: at most {repairs}; total deadline: {timeout} ms")),
-                Line::from("Model API calls and tools may incur costs or side effects. Repairs do not undo completed effects."),
-                Line::from("The deadline or closing this screen does not stop the target Run. Its receipt ID is shown separately in the result."),
-            ]);
-        }
-        ClientOperation::Rag { options, .. } => {
-            if let Some(path) = &options.db {
-                let path = safe(&path.to_string_lossy());
-                lines.push(Line::from(format!("Independent RAG DB: {path}")));
-            } else {
-                lines.push(Line::from("Independent RAG DB: launch data-dir/rag.db"));
-            }
-            if matches!(options.command, crate::rag::RagCommand::Index { mode: crate::rag::IndexMode::Semantic, .. }) {
-                lines.push(Line::from("Semantic indexing uses the embedding API and may incur costs."));
-            }
-            lines.push(Line::from("Source documents are not deleted. Registration and index changes are saved in the independent RAG database."));
-        }
-        ClientOperation::Docs(_) => {}
-    }
-    lines.extend([
-        Line::from(""),
-        Line::from("Relative paths use the TUI launch directory. Configuration and data-dir are the selections made at launch."),
-        Line::from("Y submits the request. N/Esc returns with inputs intact. Closing the screen does not cancel accepted work."),
-    ]);
-    lines
 }

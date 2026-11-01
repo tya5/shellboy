@@ -3174,6 +3174,70 @@ mod language_rendering_tests {
     }
 
     #[test]
+    fn form_guide_is_bilingual_at_standard_widths_and_retains_safety_details() {
+        fn configure(ui: &mut UiState) {
+            use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+            ui.open_operations(Some(OpKind::ThreadDelete));
+            ui.event(Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Guide", "Selected field:", "Thread ID", "Esc"],
+                UiLanguage::Ja => &["使い方", "選択項目:", "会話ID", "Esc"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+        let mut form = Form::new(OpKind::ThreadDelete, &Context::default());
+        for (language, warning) in [
+            (
+                UiLanguage::En,
+                "Review deletion targets and running work before deleting",
+            ),
+            (UiLanguage::Ja, "削除対象と実行状態を確認してから削除します"),
+        ] {
+            form.language = language;
+            let text = form
+                .help_lines()
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(warning), "{text}");
+        }
+    }
+
+    #[test]
+    fn client_confirmation_shows_cost_and_preserves_input_in_both_languages() {
+        fn configure(ui: &mut UiState) {
+            ui.open_operations(Some(OpKind::Exec));
+            let operations = ui.operations.as_mut().expect("operations open");
+            let form = operations.form.as_mut().expect("exec form open");
+            for (name, value) in [("schema", "schema.json"), ("text", "PRIVATE-REQUEST")] {
+                form.fields
+                    .iter_mut()
+                    .find(|field| field.name == name)
+                    .unwrap()
+                    .value = value.into();
+            }
+            let operation = match form.invocation(Path::new("/")) {
+                Ok(super::Outcome::Client(operation)) => operation,
+                _ => panic!("client operation must be prepared"),
+            };
+            assert!(
+                matches!(&operation, super::ClientOperation::Exec(options) if options.text.as_deref() == Some("PRIVATE-REQUEST"))
+            );
+            form.client_confirmation = Some(operation);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Model API calls", "does not stop", "Y Run"],
+                UiLanguage::Ja => &["モデルAPIとtool", "対象Runを停止しません", "Y 実行"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn operations_list_is_bilingual_at_standard_widths() {
         fn configure(ui: &mut UiState) {
             ui.open_operations(None);

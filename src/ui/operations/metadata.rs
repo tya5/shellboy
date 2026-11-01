@@ -2,6 +2,7 @@
 use super::*;
 use crate::operations::{Discovery, FieldType, Term, Text};
 
+#[cfg(test)]
 pub(super) fn text(value: Text) -> &'static str {
     text_for(value, crate::config::UiLanguage::Ja)
 }
@@ -128,6 +129,7 @@ impl Form {
             .field(self.metadata_id(field.name)?)
     }
     fn origin(&self, origin: DefaultOrigin) -> &'static str {
+        let language = self.language;
         if !self.follows_current
             && matches!(
                 origin,
@@ -138,69 +140,148 @@ impl Form {
                     | DefaultOrigin::FocusedExecution
             )
         {
-            return "フォームを開いた参照先（編集値は自動変更しません）";
+            return local!(
+                language,
+                "フォームを開いた参照先（編集値は自動変更しません）",
+                "The reference when this form was opened; edits are not changed automatically"
+            );
         }
         match origin {
-            DefaultOrigin::None => "未指定",
-            DefaultOrigin::Required => "明示指定が必要",
-            DefaultOrigin::Literal => "この操作の既定値",
-            DefaultOrigin::SelectedThread => "フォームを開いた会話",
-            DefaultOrigin::SelectedRun => "フォームを開いたRun",
-            DefaultOrigin::SelectedTurn => "フォームを開いたTurn",
-            DefaultOrigin::FocusedNode => "フォーカスした履歴ノード",
-            DefaultOrigin::FocusedExecution => "フォーカスしたExecution",
-            DefaultOrigin::ReferencedMessage => "参照した入力ID",
-            DefaultOrigin::ReferencedOperation => "参照した受付ID",
-            DefaultOrigin::TargetThreadSettings => "対象Threadの保存設定",
-            DefaultOrigin::ThreadThenOwnerConfig => "対象Thread、所有者の既定設定の順",
-            DefaultOrigin::ProcessCwd => "TUIの起動場所",
-            DefaultOrigin::ActiveIndexSpace => "現在の有効索引領域",
-            DefaultOrigin::ConfiguredEmbedding => "現在の埋め込み設定",
-            DefaultOrigin::ParentOrOwnerDefaults => "親Threadまたは所有者の既定設定",
-            DefaultOrigin::SavedShellEncoding => "対象Executionに保存された文字コード",
+            DefaultOrigin::None => local!(language, "未指定", "Not specified"),
+            DefaultOrigin::Required => {
+                local!(language, "明示指定が必要", "Must be specified explicitly")
+            }
+            DefaultOrigin::Literal => {
+                local!(language, "この操作の既定値", "This operation's default")
+            }
+            DefaultOrigin::SelectedThread => local!(
+                language,
+                "フォームを開いた会話",
+                "The Thread when this form was opened"
+            ),
+            DefaultOrigin::SelectedRun => local!(
+                language,
+                "フォームを開いたRun",
+                "The Run when this form was opened"
+            ),
+            DefaultOrigin::SelectedTurn => local!(
+                language,
+                "フォームを開いたTurn",
+                "The Turn when this form was opened"
+            ),
+            DefaultOrigin::FocusedNode => local!(
+                language,
+                "フォーカスした履歴ノード",
+                "The focused history node"
+            ),
+            DefaultOrigin::FocusedExecution => {
+                local!(language, "フォーカスしたExecution", "The focused Execution")
+            }
+            DefaultOrigin::ReferencedMessage => {
+                local!(language, "参照した入力ID", "The referenced input ID")
+            }
+            DefaultOrigin::ReferencedOperation => {
+                local!(language, "参照した受付ID", "The referenced operation ID")
+            }
+            DefaultOrigin::TargetThreadSettings => local!(
+                language,
+                "対象Threadの保存設定",
+                "The target Thread's saved settings"
+            ),
+            DefaultOrigin::ThreadThenOwnerConfig => local!(
+                language,
+                "対象Thread、所有者の既定設定の順",
+                "The target Thread, then the owner's defaults"
+            ),
+            DefaultOrigin::ProcessCwd => {
+                local!(language, "TUIの起動場所", "The TUI launch directory")
+            }
+            DefaultOrigin::ActiveIndexSpace => local!(
+                language,
+                "現在の有効索引領域",
+                "The current active index space"
+            ),
+            DefaultOrigin::ConfiguredEmbedding => local!(
+                language,
+                "現在の埋め込み設定",
+                "The current embedding configuration"
+            ),
+            DefaultOrigin::ParentOrOwnerDefaults => local!(
+                language,
+                "親Threadまたは所有者の既定設定",
+                "The parent Thread or owner's defaults"
+            ),
+            DefaultOrigin::SavedShellEncoding => local!(
+                language,
+                "対象Executionに保存された文字コード",
+                "The target Execution's saved encoding"
+            ),
         }
     }
     pub(super) fn field_hint(&self) -> String {
-        if self.language == crate::config::UiLanguage::En {
-            return self.field_hint_en();
-        }
+        use crate::config::UiLanguage;
+        let language = self.language;
         let Some(field) = self.fields.get(self.selected) else {
             return String::new();
         };
         if field.name == "db" {
-            return "空欄は起動時data-dir/rag.db | 相対パスは起動場所が基準 | F1で説明".into();
+            return local!(language,
+                "空欄は起動時data-dir/rag.db | 相対パスは起動場所が基準 | F1で説明",
+                "Empty uses the launch data-dir/rag.db; relative paths use the launch directory. F1 opens details.").into();
         }
         if field.name == "input_mode" {
-            return "fileは本文ファイル、inlineは本文入力。CLI stdin相当でも端末stdinは読みません | F1で説明".into();
+            return local!(language,
+                "fileは本文ファイル、inlineは本文入力。CLI stdin相当でも端末stdinは読みません | F1で説明",
+                "file uses a text file; inline uses this form. The TUI does not read terminal stdin. F1 opens details.").into();
         }
         let Some(metadata) = self.selected_metadata() else {
-            return "F1で入力条件を確認できます".into();
+            return local!(
+                language,
+                "F1で入力条件を確認できます",
+                "Press F1 for input requirements."
+            )
+            .into();
         };
         if field.value != field.initial_value {
-            return "編集した値 | F1で入力条件とIDの探し方".into();
+            return local!(
+                language,
+                "編集した値 | F1で入力条件とIDの探し方",
+                "Edited value. F1 shows input requirements and where to find IDs."
+            )
+            .into();
         }
         let discovery = metadata.field.discovery;
         if field.value.is_empty() && discovery != Discovery::None {
-            return format!("未入力 | {}", text(discovery.text()));
+            let help = text_for(discovery.text(), language);
+            return match language {
+                UiLanguage::Ja => format!("未入力 | {help}"),
+                UiLanguage::En => format!("No value entered. {help}"),
+            };
         }
         let origin = if !field.initial_value.is_empty()
             && matches!(field.kind, Kind::Choice(_) | Kind::Boolean | Kind::Number)
         {
-            "このフォームの初期選択"
+            local!(language, "このフォームの初期選択", "Initial form selection")
         } else {
             self.origin(metadata.default_origin)
         };
-        format!("初期値: {origin} | F1で入力条件とIDの探し方")
-    }
-    pub(super) fn help_lines(&self) -> Vec<Line<'static>> {
-        if self.language == crate::config::UiLanguage::En {
-            return self.help_lines_en();
+        match language {
+            UiLanguage::Ja => format!("初期値: {origin} | F1で入力条件とIDの探し方"),
+            UiLanguage::En => format!(
+                "Initial value: {origin}. F1 shows input requirements and where to find IDs."
+            ),
         }
+    }
+
+    pub(super) fn help_lines(&self) -> Vec<Line<'static>> {
+        use crate::config::UiLanguage;
+        use crate::operations::{Confirmation, IdKind, RequestIdPolicy, Route};
+        let language = self.language;
         let id = self.operation.catalogue();
         let spec = id.spec();
         let mut lines = vec![
-            Line::from(text(id.meaning_text())),
-            Line::from(text(self.effect().text())),
+            Line::from(text_for(id.meaning_text(), language)),
+            Line::from(text_for(self.effect().text(), language)),
             Line::from(self.operation.cli()),
             Line::from(""),
         ];
@@ -210,175 +291,252 @@ impl Form {
             .is_some_and(|field| field.name == "db")
         {
             let argument = crate::operations::RAG_DB_ARGUMENT;
-            lines.push(Line::from(format!(
-                "{} | {}",
-                argument.label, argument.meaning
-            )));
-            lines.push(Line::from("空欄は起動時data-dir/rag.db。相対パスはTUI起動場所が基準です。会話履歴DBとは別です。"));
+            lines.push(Line::from(match language {
+                UiLanguage::Ja => format!("{} | {}", argument.label, argument.meaning),
+                UiLanguage::En => "Independent RAG database | An explicit path, or resolved DATA_DIR/rag.db when omitted. This is separate from the owner's conversation database.".into(),
+            }));
+            lines.push(Line::from(local!(language,
+                "空欄は起動時data-dir/rag.db。相対パスはTUI起動場所が基準です。会話履歴DBとは別です。",
+                "Empty uses launch data-dir/rag.db. Relative paths use the TUI launch directory. This is separate from the conversation history database.")));
         }
         if let Some(field) = self.selected_metadata() {
-            lines.push(Line::from(format!(
-                "選択項目: {}",
-                text(field.field.label_text(id))
-            )));
-            lines.push(Line::from(text(field.field.help_text(id))));
+            let label = text_for(field.field.label_text(id), language);
+            lines.push(Line::from(match language {
+                UiLanguage::Ja => format!("選択項目: {label}"),
+                UiLanguage::En => format!("Selected field: {label}"),
+            }));
+            lines.push(Line::from(text_for(field.field.help_text(id), language)));
             if let Some(input) = self.fields.get(self.selected)
                 && let Kind::Choice(choices) = input.kind
             {
-                lines.push(Line::from(format!(
-                    "このフォームの選択値: {}",
-                    choices.join(" / ")
-                )));
+                let choices = choices.join(" / ");
+                lines.push(Line::from(match language {
+                    UiLanguage::Ja => format!("このフォームの選択値: {choices}"),
+                    UiLanguage::En => format!("Form choices: {choices}"),
+                }));
             }
-            lines.push(Line::from(format!(
-                "初期値の出所: {}",
-                self.origin(field.default_origin)
-            )));
+            let origin = self.origin(field.default_origin);
+            lines.push(Line::from(match language {
+                UiLanguage::Ja => format!("初期値の出所: {origin}"),
+                UiLanguage::En => format!("Initial value source: {origin}"),
+            }));
             if let Some(input) = self.fields.get(self.selected)
                 && !matches!(input.kind, Kind::Multiline)
             {
                 let initial = input.initial_value.chars().take(80).collect::<String>();
-                lines.push(Line::from(format!(
-                    "このフォームを開いたときの値: {}",
-                    if initial.is_empty() {
-                        "未指定"
-                    } else {
-                        &initial
-                    }
-                )));
+                lines.push(Line::from(match (language, initial.is_empty()) {
+                    (UiLanguage::Ja, false) => format!("このフォームを開いたときの値: {initial}"),
+                    (UiLanguage::En, false) => format!("Value when this form opened: {initial}"),
+                    (_, true) => local!(
+                        language,
+                        "このフォームを開いたときの値: 未指定",
+                        "Value when this form opened: not specified"
+                    )
+                    .into(),
+                }));
             }
             if let Some(value) = field.tui_default {
-                lines.push(Line::from(format!("TUI既定: {value}")));
+                lines.push(Line::from(match language {
+                    UiLanguage::Ja => format!("TUI既定: {value}"),
+                    UiLanguage::En => format!("TUI default: {value}"),
+                }));
             }
             if let Some(value) = field.cli_default {
-                lines.push(Line::from(format!("CLI既定: {value}")));
+                lines.push(Line::from(match language {
+                    UiLanguage::Ja => format!("CLI既定: {value}"),
+                    UiLanguage::En => format!("CLI default: {value}"),
+                }));
             }
             if !field.choices.is_empty() {
-                lines.push(Line::from(format!("選択値: {}", field.choices.join(" / "))));
+                let choices = field.choices.join(" / ");
+                lines.push(Line::from(match language {
+                    UiLanguage::Ja => format!("選択値: {choices}"),
+                    UiLanguage::En => format!("Choices: {choices}"),
+                }));
             }
             let kind = match field.field.kind {
                 FieldType::Id(kind) | FieldType::Ids(kind) => match kind {
-                    crate::operations::IdKind::Thread => "Thread ID（会話）",
-                    crate::operations::IdKind::Run => "Run ID（作業）",
-                    crate::operations::IdKind::Turn => "Turn ID（応答処理）",
-                    crate::operations::IdKind::Node => "Node ID（履歴ノード）",
-                    crate::operations::IdKind::Message => "Message ID（保存入力）",
-                    crate::operations::IdKind::Operation => "Operation ID（受付要求）",
-                    crate::operations::IdKind::Execution => "Execution ID（OSコマンド実行）",
-                    crate::operations::IdKind::Attachment => "Attachment ID（添付参照）",
-                    crate::operations::IdKind::Space => "Space ID（索引領域）",
+                    IdKind::Thread => {
+                        local!(language, "Thread ID（会話）", "Thread ID (conversation)")
+                    }
+                    IdKind::Run => local!(language, "Run ID（作業）", "Run ID (work)"),
+                    IdKind::Turn => local!(
+                        language,
+                        "Turn ID（応答処理）",
+                        "Turn ID (response interval)"
+                    ),
+                    IdKind::Node => local!(language, "Node ID（履歴ノード）", "Node ID (history)"),
+                    IdKind::Message => local!(
+                        language,
+                        "Message ID（保存入力）",
+                        "Message ID (saved input)"
+                    ),
+                    IdKind::Operation => local!(
+                        language,
+                        "Operation ID（受付要求）",
+                        "Operation ID (receipt)"
+                    ),
+                    IdKind::Execution => local!(
+                        language,
+                        "Execution ID（OSコマンド実行）",
+                        "Execution ID (OS command)"
+                    ),
+                    IdKind::Attachment => local!(
+                        language,
+                        "Attachment ID（添付参照）",
+                        "Attachment ID (reference)"
+                    ),
+                    IdKind::Space => local!(language, "Space ID（索引領域）", "Space ID (index)"),
                 },
-                FieldType::Text => "文字列",
-                FieldType::TextList => "文字列の一覧",
-                FieldType::Multiline => "複数行の本文",
-                FieldType::Path => "ファイル／フォルダのパス",
-                FieldType::Signed => "整数（負数を含みます）",
-                FieldType::Unsigned => "0以上の整数（操作の上限に従います）",
-                FieldType::Decimal => "有限の数値（操作ごとの範囲に従います）",
-                FieldType::Boolean => "はい／いいえ",
-                FieldType::Choice => "候補から選択",
-                FieldType::Conditions => "種類と対象IDを組み合わせた観測条件",
-                FieldType::Timestamp => "タイムゾーン付きRFC3339日時",
-                FieldType::Cursor => "同じ読み取り対象の続きcursor",
+                FieldType::Text => local!(language, "文字列", "Text"),
+                FieldType::TextList => local!(language, "文字列の一覧", "List of text values"),
+                FieldType::Multiline => local!(language, "複数行の本文", "Multiline text"),
+                FieldType::Path => {
+                    local!(language, "ファイル／フォルダのパス", "File or folder path")
+                }
+                FieldType::Signed => local!(
+                    language,
+                    "整数（負数を含みます）",
+                    "Integer, including negative values"
+                ),
+                FieldType::Unsigned => local!(
+                    language,
+                    "0以上の整数（操作の上限に従います）",
+                    "Non-negative integer, subject to operation limits"
+                ),
+                FieldType::Decimal => local!(
+                    language,
+                    "有限の数値（操作ごとの範囲に従います）",
+                    "Finite number, subject to operation limits"
+                ),
+                FieldType::Boolean => local!(language, "はい／いいえ", "Yes or no"),
+                FieldType::Choice => local!(language, "候補から選択", "Choose from the options"),
+                FieldType::Conditions => local!(
+                    language,
+                    "種類と対象IDを組み合わせた観測条件",
+                    "Observation conditions combining kinds and target IDs"
+                ),
+                FieldType::Timestamp => local!(
+                    language,
+                    "タイムゾーン付きRFC3339日時",
+                    "RFC3339 timestamp with timezone"
+                ),
+                FieldType::Cursor => local!(
+                    language,
+                    "同じ読み取り対象の続きcursor",
+                    "Continuation cursor for the same read target"
+                ),
             };
             lines.push(Line::from(kind));
-            lines.push(Line::from(text(field.field.discovery.text())));
+            lines.push(Line::from(text_for(field.field.discovery.text(), language)));
         }
         lines.push(Line::from(""));
         if matches!(self.build, FormBuilder::Client(_)) {
-            lines.push(Line::from("このフォームの入力合計は1MiBまでです。ファイル入力の上限は各操作の既存規則に従います。"));
-            lines.push(Line::from(
-                "相対パスはTUI起動場所が基準です。現在のThread cwdで暗黙に解決しません。",
-            ));
-            lines.push(Line::from("config/data-dirは起動時の選択を使用します。設定の変更は現在の所有者へ即時反映しません。"));
+            lines.extend([
+                Line::from(local!(language, "このフォームの入力合計は1MiBまでです。ファイル入力の上限は各操作の既存規則に従います。", "Total form input is limited to 1 MiB. Each operation's existing file-input limit also applies.")),
+                Line::from(local!(language, "相対パスはTUI起動場所が基準です。現在のThread cwdで暗黙に解決しません。", "Relative paths use the TUI launch directory, not the current Thread cwd.")),
+                Line::from(local!(language, "config/data-dirは起動時の選択を使用します。設定の変更は現在の所有者へ即時反映しません。", "Config and data-dir are fixed at launch. Configuration changes do not immediately update the running owner.")),
+            ]);
             if self.operation == OpKind::Exec {
-                lines.push(Line::from("依頼本文は所有する入力欄から渡します。CLIの--text-stdin相当でも端末stdinは読みません。Schemaと依頼の合計は128KiBまでです。"));
+                lines.push(Line::from(local!(language, "依頼本文は所有する入力欄から渡します。CLIの--text-stdin相当でも端末stdinは読みません。Schemaと依頼の合計は128KiBまでです。", "The request text comes from this form, not terminal stdin. The schema and request together are limited to 128 KiB.")));
             }
             if self.operation == OpKind::RagIngest {
-                lines.push(Line::from("本文入力元fileはtext-file、inlineは所有する本文入力です。切替時はもう一方の本文／ファイル欄を空にします。端末stdinは読みません。"));
+                lines.push(Line::from(local!(language, "本文入力元fileはtext-file、inlineは所有する本文入力です。切替時はもう一方の本文／ファイル欄を空にします。端末stdinは読みません。", "file uses text-file; inline uses form text. Clear the other field when changing source. Terminal stdin is not read.")));
             }
         }
-        lines.push(Line::from("CLIの入力項目"));
+        lines.push(Line::from(local!(
+            language,
+            "CLIの入力項目",
+            "CLI arguments"
+        )));
         for argument in &id.primary_cli().arguments {
-            let suffix = if argument.repeat {
-                "（繰り返し指定）"
-            } else if argument.takes_value {
-                " 値"
-            } else {
-                "（フラグ）"
+            let spelling = &argument.spelling;
+            let line = match (
+                language,
+                argument.repeat,
+                argument.takes_value,
+                argument.default.as_deref(),
+            ) {
+                (UiLanguage::Ja, true, _, Some(default)) => {
+                    format!("{spelling}（繰り返し指定） | 既定 {default}")
+                }
+                (UiLanguage::Ja, true, _, None) => format!("{spelling}（繰り返し指定）"),
+                (UiLanguage::Ja, false, true, Some(default)) => {
+                    format!("{spelling} 値 | 既定 {default}")
+                }
+                (UiLanguage::Ja, false, true, None) => format!("{spelling} 値"),
+                (UiLanguage::Ja, false, false, Some(default)) => {
+                    format!("{spelling}（フラグ） | 既定 {default}")
+                }
+                (UiLanguage::Ja, false, false, None) => format!("{spelling}（フラグ）"),
+                (UiLanguage::En, true, _, Some(default)) => {
+                    format!("{spelling} (repeatable; default {default})")
+                }
+                (UiLanguage::En, true, _, None) => format!("{spelling} (repeatable)"),
+                (UiLanguage::En, false, true, Some(default)) => {
+                    format!("{spelling} VALUE (default {default})")
+                }
+                (UiLanguage::En, false, true, None) => format!("{spelling} VALUE"),
+                (UiLanguage::En, false, false, Some(default)) => {
+                    format!("{spelling} (flag; default {default})")
+                }
+                (UiLanguage::En, false, false, None) => format!("{spelling} (flag)"),
             };
-            let default = argument
-                .default
-                .as_deref()
-                .map(|value| format!(" | 既定 {value}"))
-                .unwrap_or_default();
-            lines.push(Line::from(format!(
-                "{}{suffix}{default}",
-                argument.spelling
-            )));
+            lines.push(Line::from(line));
         }
         lines.push(Line::from(""));
-        lines.push(Line::from(
+        lines.push(Line::from(local!(
+            language,
             "所有者・設定のパスは、このTUIを起動したときの選択に固定されています。",
-        ));
+            "Owner and configuration paths are fixed to the selection used to start this TUI."
+        )));
         for argument in crate::operations::GLOBAL_ARGUMENTS {
-            lines.push(Line::from(format!(
-                "{} | {}: {}",
-                argument.spelling, argument.label, argument.meaning
+            lines.push(Line::from(global_argument_text(argument, language)));
+        }
+        if spec.route == Route::Rag {
+            lines.push(Line::from(global_argument_text(
+                &crate::operations::RAG_DB_ARGUMENT,
+                language,
             )));
         }
-        // Standalone forms use this same help projection once G3 supplies their
-        // typed invocation. No unsupported action is advertised in the G2 list.
-        if spec.route == crate::operations::Route::Rag {
-            let argument = crate::operations::RAG_DB_ARGUMENT;
-            lines.push(Line::from(format!(
-                "{} | {}: {}",
-                argument.spelling, argument.label, argument.meaning
-            )));
-        }
-        let request_help = match id.request_id_policy() {
-            crate::operations::RequestIdPolicy::OwnerOperation => {
-                "この要求の受付IDはTUIが追跡します。参照する対象IDは入力欄で指定します。"
-            }
-            crate::operations::RequestIdPolicy::StandaloneUnavailable => {
-                "この独立操作では単一のoperation-id指定は使用しません。"
-            }
-            crate::operations::RequestIdPolicy::ComposedUnavailable => {
-                "複数の要求を個別に追跡するため、単一のoperation-id指定は使用しません。"
-            }
-        };
-        lines.push(Line::from(request_help));
-        let confirmation = match spec.confirmation {
-            crate::operations::Confirmation::None => "Enterで指定した操作を要求します。",
-            crate::operations::Confirmation::ThreadDeletePreview => {
-                "削除対象と実行状態を確認してから削除します。"
-            }
-            crate::operations::Confirmation::IndexCostPreview => {
-                "対象件数と費用previewを確認してから索引を開始します。"
-            }
-            crate::operations::Confirmation::PaidRequest => {
-                "モデルAPIの利用や追加処理の費用が発生する場合があります。"
-            }
-            crate::operations::Confirmation::StorageCollect => {
-                "指定した保存データの種類について回収を要求します。保護された参照は既存の回収規則に従います。"
-            }
-            crate::operations::Confirmation::ContextEditPreview => {
-                "編集する保存範囲と保護された作業を確認します。"
-            }
-        };
-        lines.push(Line::from(confirmation));
+        lines.push(Line::from(match id.request_id_policy() {
+            RequestIdPolicy::OwnerOperation => local!(
+                language,
+                "この要求の受付IDはTUIが追跡します。参照する対象IDは入力欄で指定します。",
+                "The TUI tracks this request's receipt ID. Enter target IDs separately."
+            ),
+            RequestIdPolicy::StandaloneUnavailable => local!(
+                language,
+                "この独立操作では単一のoperation-id指定は使用しません。",
+                "A single operation-id is not used for this standalone operation."
+            ),
+            RequestIdPolicy::ComposedUnavailable => local!(
+                language,
+                "複数の要求を個別に追跡するため、単一のoperation-id指定は使用しません。",
+                "Requests are tracked individually; a single operation-id is not used."
+            ),
+        }));
+        lines.push(Line::from(match spec.confirmation {
+            Confirmation::None => local!(language, "Enterで指定した操作を要求します。", "Enter requests the selected operation."),
+            Confirmation::ThreadDeletePreview => local!(language, "削除対象と実行状態を確認してから削除します。", "Review deletion targets and running work before deleting."),
+            Confirmation::IndexCostPreview => local!(language, "対象件数と費用previewを確認してから索引を開始します。", "Review target counts and estimated cost before starting indexing."),
+            Confirmation::PaidRequest => local!(language, "モデルAPIの利用や追加処理の費用が発生する場合があります。", "Model API use and additional processing may incur costs."),
+            Confirmation::StorageCollect => local!(language, "指定した保存データの種類について回収を要求します。保護された参照は既存の回収規則に従います。", "Request collection of the specified saved data. Existing rules protect referenced data."),
+            Confirmation::ContextEditPreview => local!(language, "編集する保存範囲と保護された作業を確認します。", "Review the saved range to edit and protected work before continuing."),
+        }));
         for binding in crate::operations::CLI_BINDINGS
             .iter()
             .filter(|binding| binding.operation == id && binding.alias_of.is_some())
         {
-            lines.push(Line::from(format!(
-                "同じ操作の短縮形: shellboy {}",
-                binding.path.join(" ")
-            )));
+            let path = binding.path.join(" ");
+            lines.push(Line::from(match language {
+                UiLanguage::Ja => format!("同じ操作の短縮形: shellboy {path}"),
+                UiLanguage::En => format!("Alias for the same operation: shellboy {path}"),
+            }));
         }
         lines.push(Line::from(""));
         for term in [Term::Run, Term::Turn, Term::Message, Term::Execution] {
-            lines.push(Line::from(text(term.text())));
+            lines.push(Line::from(text_for(term.text(), language)));
         }
         lines
     }
@@ -812,9 +970,6 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
     }
 }
-fn operation_meaning_en(id: OperationId) -> &'static str {
-    operation_meaning_for(id, crate::config::UiLanguage::En)
-}
 
 fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
     match id {
@@ -948,9 +1103,6 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::RagScopes => local!(language, "検索する資料領域", "Document spaces to search"),
         FieldId::Reference => local!(language, "原文の版付きref", "Versioned original ref"),
     }
-}
-fn field_label_en(id: FieldId) -> &'static str {
-    field_label_for(id, crate::config::UiLanguage::En)
 }
 
 fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
@@ -1352,9 +1504,6 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
     }
 }
-fn field_help_en(id: FieldId) -> &'static str {
-    field_help_for(id, crate::config::UiLanguage::En)
-}
 
 fn discovery_for(id: Discovery, language: crate::config::UiLanguage) -> &'static str {
     match id {
@@ -1480,10 +1629,6 @@ fn discovery_for(id: Discovery, language: crate::config::UiLanguage) -> &'static
     }
 }
 
-fn discovery_en(id: Discovery) -> &'static str {
-    discovery_for(id, crate::config::UiLanguage::En)
-}
-
 fn term_for(id: Term, language: crate::config::UiLanguage) -> &'static str {
     match id {
         Term::Run => local!(
@@ -1510,10 +1655,6 @@ fn term_for(id: Term, language: crate::config::UiLanguage) -> &'static str {
             "An Execution is one OS process group started by a shell tool. Distinguish the observing CLI's ID from the target work's ID."
         ),
     }
-}
-
-fn term_en(id: Term) -> &'static str {
-    term_for(id, crate::config::UiLanguage::En)
 }
 
 pub(super) fn text_for(value: Text, language: crate::config::UiLanguage) -> &'static str {
@@ -1549,228 +1690,54 @@ pub(super) fn text_for(value: Text, language: crate::config::UiLanguage) -> &'st
     }
 }
 
-impl Form {
-    fn origin_en(&self, origin: DefaultOrigin) -> &'static str {
-        if !self.follows_current
-            && matches!(
-                origin,
-                DefaultOrigin::SelectedThread
-                    | DefaultOrigin::SelectedRun
-                    | DefaultOrigin::SelectedTurn
-                    | DefaultOrigin::FocusedNode
-                    | DefaultOrigin::FocusedExecution
-            )
-        {
-            return "The reference when this form was opened; edits are not changed automatically";
+fn global_argument_text(
+    argument: &crate::operations::GlobalArgument,
+    language: crate::config::UiLanguage,
+) -> String {
+    let rendered = match argument.spelling {
+        "--data-dir" => Some(local!(
+            language,
+            "--data-dir | 所有者のデータパス: CLI指定、環境変数、TOML、OS既定の優先順です。TUIの所有者操作は現在の所有者へ固定されます。",
+            "--data-dir | Owner data path: CLI, environment, TOML, then OS default. TUI owner operations use the running owner."
+        )),
+        "--config" => Some(local!(
+            language,
+            "--config | 設定ファイル: CLI指定がOS既定より優先されます。config checkはそのファイルの既定接続を確認し、実行中の所有者設定は再起動時に反映します。",
+            "--config | Configuration file: CLI takes precedence over the OS default. config check inspects that file's default connection; owner settings change on restart."
+        )),
+        "--operation-id" => Some(local!(
+            language,
+            "--operation-id | この要求のoperation ID: 所有者操作の再送または照会要求の識別子です。execと独立config/docs/RAGでは使用できません。operation getの照会対象は--operationです。",
+            "--operation-id | This request's operation ID: Identifies an owner-operation resend or lookup. Not available for exec or standalone config/docs/RAG; operation get uses --operation for its target."
+        )),
+        "--db" => Some(local!(
+            language,
+            "--db | 独立RAGデータベース: 明示パス、未指定は解決済みDATA_DIR/rag.dbです。所有者の会話DBとは別です。",
+            "--db | Independent RAG database: An explicit path, or resolved DATA_DIR/rag.db when omitted. This is separate from the owner's conversation database."
+        )),
+        _ => None,
+    };
+    match rendered {
+        Some(message) => {
+            debug_assert!(
+                language != crate::config::UiLanguage::Ja
+                    || message
+                        == format!(
+                            "{} | {}: {}",
+                            argument.spelling, argument.label, argument.meaning
+                        )
+            );
+            message.to_owned()
         }
-        match origin {
-            DefaultOrigin::None => "Not specified",
-            DefaultOrigin::Required => "Must be specified explicitly",
-            DefaultOrigin::Literal => "This operation's default",
-            DefaultOrigin::SelectedThread => "The Thread when this form was opened",
-            DefaultOrigin::SelectedRun => "The Run when this form was opened",
-            DefaultOrigin::SelectedTurn => "The Turn when this form was opened",
-            DefaultOrigin::FocusedNode => "The focused history node",
-            DefaultOrigin::FocusedExecution => "The focused Execution",
-            DefaultOrigin::ReferencedMessage => "The referenced input ID",
-            DefaultOrigin::ReferencedOperation => "The referenced operation ID",
-            DefaultOrigin::TargetThreadSettings => "The target Thread's saved settings",
-            DefaultOrigin::ThreadThenOwnerConfig => "The target Thread, then the owner's defaults",
-            DefaultOrigin::ProcessCwd => "The TUI launch directory",
-            DefaultOrigin::ActiveIndexSpace => "The current active index space",
-            DefaultOrigin::ConfiguredEmbedding => "The current embedding configuration",
-            DefaultOrigin::ParentOrOwnerDefaults => "The parent Thread or owner's defaults",
-            DefaultOrigin::SavedShellEncoding => "The target Execution's saved encoding",
-        }
-    }
-    fn field_hint_en(&self) -> String {
-        let Some(field) = self.fields.get(self.selected) else {
-            return String::new();
-        };
-        if field.name == "db" {
-            return "Empty uses the launch data-dir/rag.db; relative paths use the launch directory. F1 opens details.".into();
-        }
-        if field.name == "input_mode" {
-            return "file uses a text file; inline uses this form. The TUI does not read terminal stdin. F1 opens details.".into();
-        }
-        let Some(metadata) = self.selected_metadata() else {
-            return "Press F1 for input requirements.".into();
-        };
-        if field.value != field.initial_value {
-            return "Edited value. F1 shows input requirements and where to find IDs.".into();
-        }
-        let discovery = metadata.field.discovery;
-        if field.value.is_empty() && discovery != Discovery::None {
-            let help = discovery_en(discovery);
-            return format!("No value entered. {help}");
-        }
-        if !field.initial_value.is_empty()
-            && matches!(field.kind, Kind::Choice(_) | Kind::Boolean | Kind::Number)
-        {
-            return "Initial form selection. F1 shows input requirements and where to find IDs."
-                .into();
-        }
-        let origin = self.origin_en(metadata.default_origin);
-        format!("Initial value: {origin}. F1 shows input requirements and where to find IDs.")
-    }
-    fn help_lines_en(&self) -> Vec<Line<'static>> {
-        use crate::operations::{Confirmation, IdKind, RequestIdPolicy, Route};
-        let id = self.operation.catalogue();
-        let spec = id.spec();
-        let mut lines = vec![
-            Line::from(operation_meaning_en(id)),
-            Line::from(text_for(
-                self.effect().text(),
-                crate::config::UiLanguage::En,
-            )),
-            Line::from(self.operation.cli()),
-            Line::from(""),
-        ];
-        if self
-            .fields
-            .get(self.selected)
-            .is_some_and(|field| field.name == "db")
-        {
-            lines.push(Line::from("Independent RAG database: empty uses launch data-dir/rag.db. Relative paths use the TUI launch directory. This is separate from the conversation history database."));
-        }
-        if let Some(field) = self.selected_metadata() {
-            let label = field_label_en(field.field.id);
-            lines.push(Line::from(format!("Selected field: {label}")));
-            lines.push(Line::from(field_help_en(field.field.id)));
-            if let Some(input) = self.fields.get(self.selected)
-                && let Kind::Choice(choices) = input.kind
-            {
-                let choices = choices.join(" / ");
-                lines.push(Line::from(format!("Form choices: {choices}")));
+        None => match language {
+            crate::config::UiLanguage::Ja => format!(
+                "{} | {}: {}",
+                argument.spelling, argument.label, argument.meaning
+            ),
+            crate::config::UiLanguage::En => {
+                format!("{} | See CLI help for this option", argument.spelling)
             }
-            let origin = self.origin_en(field.default_origin);
-            lines.push(Line::from(format!("Initial value source: {origin}")));
-            if let Some(input) = self.fields.get(self.selected)
-                && !matches!(input.kind, Kind::Multiline)
-            {
-                let initial = input.initial_value.chars().take(80).collect::<String>();
-                if initial.is_empty() {
-                    lines.push(Line::from("Value when this form opened: not specified"));
-                } else {
-                    lines.push(Line::from(format!(
-                        "Value when this form opened: {initial}"
-                    )));
-                }
-            }
-            if let Some(value) = field.tui_default {
-                lines.push(Line::from(format!("TUI default: {value}")));
-            }
-            if let Some(value) = field.cli_default {
-                lines.push(Line::from(format!("CLI default: {value}")));
-            }
-            if !field.choices.is_empty() {
-                let choices = field.choices.join(" / ");
-                lines.push(Line::from(format!("Choices: {choices}")));
-            }
-            let kind = match field.field.kind {
-                FieldType::Id(kind) | FieldType::Ids(kind) => match kind {
-                    IdKind::Thread => "Thread ID (conversation)",
-                    IdKind::Run => "Run ID (work)",
-                    IdKind::Turn => "Turn ID (response interval)",
-                    IdKind::Node => "Node ID (history)",
-                    IdKind::Message => "Message ID (saved input)",
-                    IdKind::Operation => "Operation ID (receipt)",
-                    IdKind::Execution => "Execution ID (OS command)",
-                    IdKind::Attachment => "Attachment ID (reference)",
-                    IdKind::Space => "Space ID (index)",
-                },
-                FieldType::Text => "Text",
-                FieldType::TextList => "List of text values",
-                FieldType::Multiline => "Multiline text",
-                FieldType::Path => "File or folder path",
-                FieldType::Signed => "Integer, including negative values",
-                FieldType::Unsigned => "Non-negative integer, subject to operation limits",
-                FieldType::Decimal => "Finite number, subject to operation limits",
-                FieldType::Boolean => "Yes or no",
-                FieldType::Choice => "Choose from the options",
-                FieldType::Conditions => "Observation conditions combining kinds and target IDs",
-                FieldType::Timestamp => "RFC3339 timestamp with timezone",
-                FieldType::Cursor => "Continuation cursor for the same read target",
-            };
-            lines.push(Line::from(kind));
-            lines.push(Line::from(discovery_en(field.field.discovery)));
-        }
-        lines.push(Line::from(""));
-        if matches!(self.build, FormBuilder::Client(_)) {
-            lines.extend([
-                Line::from("Total form input is limited to 1 MiB. Each operation's existing file-input limit also applies."),
-                Line::from("Relative paths use the TUI launch directory, not the current Thread cwd."),
-                Line::from("Config and data-dir are fixed at launch. Configuration changes do not immediately update the running owner."),
-            ]);
-            if self.operation == OpKind::Exec {
-                lines.push(Line::from("The request text comes from this form, not terminal stdin. The schema and request together are limited to 128 KiB."));
-            }
-            if self.operation == OpKind::RagIngest {
-                lines.push(Line::from("file uses text-file; inline uses form text. Clear the other field when changing source. Terminal stdin is not read."));
-            }
-        }
-        lines.push(Line::from("CLI arguments"));
-        for argument in &id.primary_cli().arguments {
-            let spelling = &argument.spelling;
-            let line = match (
-                argument.repeat,
-                argument.takes_value,
-                argument.default.as_deref(),
-            ) {
-                (true, _, Some(default)) => format!("{spelling} (repeatable; default {default})"),
-                (true, _, None) => format!("{spelling} (repeatable)"),
-                (false, true, Some(default)) => format!("{spelling} VALUE (default {default})"),
-                (false, true, None) => format!("{spelling} VALUE"),
-                (false, false, Some(default)) => format!("{spelling} (flag; default {default})"),
-                (false, false, None) => format!("{spelling} (flag)"),
-            };
-            lines.push(Line::from(line));
-        }
-        lines.push(Line::from(""));
-        lines.push(Line::from(
-            "Owner and configuration paths are fixed to the selection used to start this TUI.",
-        ));
-        lines.push(Line::from("--data-dir PATH: CLI, environment, TOML, then OS default. TUI owner operations use the running owner."));
-        lines.push(Line::from("--config PATH: CLI takes precedence over the OS default. Config changes reach the running owner on restart."));
-        lines.push(Line::from("--operation-id ID: identify an owner-operation resend or lookup request. Not available for exec or standalone config/docs/RAG; operation get uses --operation for its target."));
-        if spec.route == Route::Rag {
-            lines.push(Line::from(
-                "--db PATH: independent RAG database, not the conversation history database.",
-            ));
-        }
-        lines.push(Line::from(match id.request_id_policy() {
-            RequestIdPolicy::OwnerOperation => {
-                "The TUI tracks this request's receipt ID. Enter target IDs separately."
-            }
-            RequestIdPolicy::StandaloneUnavailable => {
-                "A single operation-id is not used for this standalone operation."
-            }
-            RequestIdPolicy::ComposedUnavailable => {
-                "Requests are tracked individually; a single operation-id is not used."
-            }
-        }));
-        lines.push(Line::from(match spec.confirmation {
-            Confirmation::None => "Enter requests the selected operation.",
-            Confirmation::ThreadDeletePreview => "Review deletion targets and running work before deleting.",
-            Confirmation::IndexCostPreview => "Review target counts and estimated cost before starting indexing.",
-            Confirmation::PaidRequest => "Model API use and additional processing may incur costs.",
-            Confirmation::StorageCollect => "Request collection of the specified saved data. Existing rules protect referenced data.",
-            Confirmation::ContextEditPreview => "Review the saved range to edit and protected work before continuing.",
-        }));
-        for binding in crate::operations::CLI_BINDINGS
-            .iter()
-            .filter(|binding| binding.operation == id && binding.alias_of.is_some())
-        {
-            let path = binding.path.join(" ");
-            lines.push(Line::from(format!(
-                "Alias for the same operation: shellboy {path}"
-            )));
-        }
-        lines.push(Line::from(""));
-        for term in [Term::Run, Term::Turn, Term::Message, Term::Execution] {
-            lines.push(Line::from(term_en(term)));
-        }
-        lines
+        },
     }
 }
 
@@ -1778,6 +1745,25 @@ impl Form {
 mod paired_message_tests {
     use super::*;
     use crate::config::UiLanguage;
+
+    #[test]
+    fn global_argument_messages_preserve_cli_spelling_and_japanese_metadata() {
+        for argument in crate::operations::GLOBAL_ARGUMENTS
+            .iter()
+            .chain(std::iter::once(&crate::operations::RAG_DB_ARGUMENT))
+        {
+            assert_eq!(
+                global_argument_text(argument, UiLanguage::Ja),
+                format!(
+                    "{} | {}: {}",
+                    argument.spelling, argument.label, argument.meaning
+                )
+            );
+            let en = global_argument_text(argument, UiLanguage::En);
+            assert!(en.starts_with(argument.spelling), "{en}");
+            assert!(en.is_ascii(), "{en}");
+        }
+    }
 
     #[test]
     fn japanese_catalogue_fallbacks_remain_exact_and_english_is_defined() {

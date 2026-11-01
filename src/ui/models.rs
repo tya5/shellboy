@@ -40,35 +40,89 @@ impl ModelPicker {
         )
     }
     fn notice_text(&self, notice: &super::observation_notice::ObservationNotice) -> String {
-        use super::observation_notice::{Freshness, NextAction};
-        if self.language == UiLanguage::Ja {
-            return notice.text();
-        }
-        let state = match notice.freshness {
-            Freshness::Captured => "The saved model list reflects its capture time.",
-            Freshness::Stale => "The model list may be stale while refresh is running.",
-            Freshness::FailedRefresh => "Refresh failed; the previous model list is shown.",
-            Freshness::Unavailable => "The model list has not been captured.",
+        use super::observation_notice::{Freshness, NextAction, ObservationKind};
+        let language = self.language;
+        let state = match (notice.kind, notice.freshness) {
+            (ObservationKind::Models, Freshness::Captured) => local!(
+                language,
+                "モデル一覧は取得時点の情報です。",
+                "The saved model list reflects its capture time."
+            ),
+            (ObservationKind::Models, Freshness::Stale) => local!(
+                language,
+                "以前のモデル一覧を表示しながら再取得しています。",
+                "The model list may be stale while refresh is running."
+            ),
+            (ObservationKind::Models, Freshness::FailedRefresh) => local!(
+                language,
+                "再取得に失敗しました。以前のモデル一覧を表示しています。",
+                "Refresh failed; the previous model list is shown."
+            ),
+            (ObservationKind::Models, Freshness::Unavailable) => local!(
+                language,
+                "モデル一覧はまだ取得できていません。",
+                "The model list has not been captured."
+            ),
+            (_, Freshness::Captured) => local!(
+                language,
+                "取得時点の情報です。",
+                "The saved result reflects its capture time."
+            ),
+            (_, Freshness::Stale) => local!(
+                language,
+                "取得結果が古くなりました。",
+                "The saved result may be stale."
+            ),
+            (_, Freshness::FailedRefresh) => local!(
+                language,
+                "再取得に失敗しました。以前の結果を表示しています。",
+                "Refresh failed; the previous result is shown."
+            ),
+            (_, Freshness::Unavailable) => local!(
+                language,
+                "確認範囲を取得できません。",
+                "The observed scope is unavailable."
+            ),
         };
         let time = |value: chrono::DateTime<chrono::Utc>| {
             value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
-        let timing = match (notice.captured_at, notice.last_attempt_at) {
-            (Some(captured), Some(attempted)) => {
-                let captured = time(captured);
-                let attempted = time(attempted);
-                format!("Captured at {captured}; last requested at {attempted}.")
+        let timing = match (language, notice.captured_at, notice.last_attempt_at) {
+            (UiLanguage::Ja, Some(captured), Some(attempted)) => format!(
+                "取得 UTC {} | 最終要求 UTC {}。",
+                time(captured),
+                time(attempted)
+            ),
+            (UiLanguage::En, Some(captured), Some(attempted)) => format!(
+                "Captured at {}; last requested at {}.",
+                time(captured),
+                time(attempted)
+            ),
+            (UiLanguage::Ja, Some(captured), None) => format!("取得 UTC {}。", time(captured)),
+            (UiLanguage::En, Some(captured), None) => format!("Captured at {}.", time(captured)),
+            (UiLanguage::Ja, None, Some(attempted)) => {
+                format!("取得時刻なし | 最終要求 UTC {}。", time(attempted))
             }
-            (Some(captured), None) => format!("Captured at {}.", time(captured)),
-            (None, Some(attempted)) => format!(
+            (UiLanguage::En, None, Some(attempted)) => format!(
                 "Capture time unavailable; last requested at {}.",
                 time(attempted)
             ),
-            (None, None) => "Capture and request times are unavailable.".into(),
+            (_, None, None) => local!(
+                language,
+                "取得時刻と要求時刻はありません。",
+                "Capture and request times are unavailable."
+            )
+            .into(),
         };
-        match notice.next_action {
-            NextAction::RefreshModels => format!("{state}\n{timing}\nCtrl+R Refresh"),
-            _ => format!("{state}\n{timing}"),
+        if notice.next_action == NextAction::RefreshModels {
+            let action = local!(
+                language,
+                "Ctrl+R で再取得できます。",
+                "Press Ctrl+R to refresh."
+            );
+            format!("{state}\n{timing}\n{action}")
+        } else {
+            format!("{state}\n{timing}")
         }
     }
     fn key(&mut self, key: KeyEvent, area: Rect) -> Outcome {
@@ -258,10 +312,7 @@ impl ModelPicker {
         let notice_text = self.notice_text(&notice);
         if let Some(scroll) = self.notice_scroll {
             let captured = self.captured_at.map_or_else(
-                || match self.language {
-                    UiLanguage::En => "Capture time unavailable".to_owned(),
-                    UiLanguage::Ja => "取得時刻なし".to_owned(),
-                },
+                || local!(self.language, "取得時刻なし", "Capture time unavailable").to_owned(),
                 |time| {
                     if body.width < 24 {
                         match self.language {
