@@ -7767,3 +7767,31 @@ then passed, including EOF append/partial-window coverage. The next view check
 found two older failure/rejection tests expecting retained movement; those are
 updated to zero pending and no automatic retry, matching the adopted contract.
 No deadline or watchdog assertion changed. Final rerun follows.
+
+### #118 six-case boundary: final local evidence
+
+This supersedes the per-case pending local checks above. macOS, synthetic
+TestBackend/local fixtures, shared rust-slot: fmt; `cargo check --locked --tests`;
+`cargo test --locked --lib scroll_characterization_tests` (19);
+`cargo test --locked --lib ui::view::` (45); integration `scrolling::` (6) and
+`ui_scroll_` (11); `cargo clippy --locked --tests -- -D warnings` all pass.
+Focused tests use `--test-threads=2`. Metrics helper tests7 and watchdog policy
+checker pass. No watchdog allowance, guard, deadline or timing threshold changed.
+
+| Disposition | Combined sites | scroll() lines | Stored fields |
+| --- | ---: | ---: | ---: |
+| Approved structural boundary cd958b4d | 91 | 237 | 15 |
+| Tail no-op fix | 91 | 237 | 15 |
+| Reverse-input fix | 91 | 237 | 15 |
+| Failure/rejection replay fix | 91 | 237 | 15 |
+| Tab pause specified | 91 | 237 | 15 |
+| Derived frame publication specified | 91 | 237 | 15 |
+| True-EOF clamp specified | 91 | 237 | 15 |
+
+Direct writes32 + transition/entry calls59 remain91. UiState scroll wrapper stays
+7 lines. Navigation/read production source is shorter (no relocated writes or new
+stored state); regression test additions do not inflate production orchestration.
+The branch handoff carries the exact candidate SHA and successful native CI URL;
+Linux/macOS full standard checks are delegated to CI. Windows belongs to the
+integrator's all-OS batch. No local full-suite, real terminal/clipboard, paid
+provider or user-data validation is claimed.

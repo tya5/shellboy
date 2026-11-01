@@ -2854,3 +2854,17 @@ the display read takes the exact newest matching Attempt per recent Turn and is
 incomplete only when 33 Turns hold no match. Assumes attempts of an older Turn do
 not outrank a newer Turn's (one open Turn per Thread); revisit if Attempts can be
 added to closed Turns.
+## #118 doubtful-case disposition (2026-11-01)
+
+Retain intentional Tab pause, derived frame-checkpoint publication, and true-EOF
+full-page projection. Focus should not drift under streamed growth; input needs
+actual last-painted geometry; EOF should not waste a viewport while the durable
+source anchor remains unchanged. These are explicit specifications, not bugs
+hidden by dropping assertions. Tests require source/fence/owner stability where
+applicable and distinguish partial windows from true EOF. Revisit if item-focus
+interaction changes or projection publication is moved into a separate preflight;
+do not infer that all render-time domain mutations are permitted.
+
+Fix tail no-op anchor/fence writes, lost reverse input, and failed-read replay
+separately. Their reasons, acceptance conditions and measurements are in the
+adopted scrolling design. No I/O, worker, protocol, budget or deadline change.

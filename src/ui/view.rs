@@ -2110,7 +2110,11 @@ mod completion_notice_tests {
                 "rejected read must not leave loading set"
             );
             assert!(ui.view().navigation.request().is_none());
-            assert_eq!(ui.view().navigation.pending(), 0, "rejected displacement ends");
+            assert_eq!(
+                ui.view().navigation.pending(),
+                0,
+                "rejected displacement ends"
+            );
             assert!(ui.take_deferred_actions().is_empty(), "no automatic retry");
         }
     }

@@ -3591,3 +3591,21 @@ metrics161 ->91 (approved155 ->91), fields20 ->15, scroll395 ->237. Helper
 counts all entry/event calls, payload fields and whole-state take/replacements.
 #131 fixed section height and viewport fixtures are retained on main275eb122.
 Strict/local19+45+6+11 pass; six doubtful behaviours remain for separate commits.
+
+## #118 six doubtful cases: behaviour boundary (2026-11-01)
+
+Three fixes follow the approved 91-site structural boundary: true-tail Down no
+longer rewrites anchor/request fence; reverse input survives an unsatisfied cached
+move; failed/rejected reads no longer add old displacement to an explicit retry.
+Three reviewed contracts are retained with the doubtful markers removed and
+stronger tests: Tab intentionally pauses focused history, frame projection
+publishes derived geometry, and true EOF displays a full page without changing
+the paused source anchor. The mutating operation is named `project_viewport`.
+
+Each case has an isolated commit (test-only followups complete the EOF regression
+and correct Tab's blank-row filling expectation). Same helper after each case:
+combined91 / scroll237 / stored15, versus the approved structural boundary
+91 / 237 / 15. Production navigation/read code shrinks; new lines are regression
+coverage and decision/evidence records. Local focused checks and strict Clippy
+pass; exact-SHA branch CI evidence accompanies the handoff. This is not a claim
+that #118 is merged or entirely closed.

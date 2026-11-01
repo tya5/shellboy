@@ -632,7 +632,10 @@ fn tab_into_history_focus_pauses_on_the_visible_top_row_without_a_read() {
     let after_growth = rows(&mut ui, &mut t);
     for (before, after) in screen.iter().zip(&after_growth) {
         if !before.trim().is_empty() {
-            assert_eq!(before, after, "existing content does not move; blank rows may fill");
+            assert_eq!(
+                before, after,
+                "existing content does not move; blank rows may fill"
+            );
         }
     }
     assert_eq!(ui.view().items.focus, focus);
