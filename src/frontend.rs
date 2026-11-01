@@ -17,6 +17,7 @@ mod inspection_deletion;
 mod inspection_history;
 mod inspection_index;
 mod inspection_lifecycle;
+mod inspection_lists;
 mod inspection_operation;
 mod inspection_physical;
 mod inspection_presentation;
@@ -503,6 +504,7 @@ enum BackgroundResult {
     },
     Command {
         retained: Option<InspectionTarget>,
+        list_command: Option<Command>,
         work_status: bool,
         context: Option<ManagementContext>,
         generation: u64,
@@ -1678,7 +1680,7 @@ async fn run_with_delivery(
                                 update(&outcomes, owner.update(format!("{title} · {}", if success {"処理結果を受信"} else {"失敗 · 詳細を確認してください"}))).await;
                             }
                             let result = prepare_management(response, control.store.config.cache.body_bytes).await;
-                            let _ = sender.send(BackgroundResult::Command { retained:None, work_status: false, context, generation, title, result }).await;
+                            let _ = sender.send(BackgroundResult::Command { retained:None,list_command:None, work_status: false, context, generation, title, result }).await;
                         });
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
@@ -1741,6 +1743,7 @@ async fn run_with_delivery(
                         let observe = management.observe(&command);
                         spawn_work(&mut workers, permit, async move {
                             let retained_command=inspection_history::capture_command(&command);
+                            let list_command=inspection_lists::capture_command(&command);
                             let response = management_request(&control, command, observe).await;
                             let retained=response.as_ref().ok().and_then(|value|retained_command.as_ref().and_then(|command|inspection_history::capture(command,value)));
                             command_outcome(&outcomes, submission, &management_outcome(&response))
@@ -1756,7 +1759,7 @@ async fn run_with_delivery(
                                 prepare_management(response, control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command { retained,
+                                .send(BackgroundResult::Command { retained,list_command,
                                     work_status,
                                     context,
                                     generation,
@@ -1807,7 +1810,7 @@ async fn run_with_delivery(
                                 prepare_management(response, control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command { retained:None,
+                                .send(BackgroundResult::Command { retained:None,list_command:None,
                                     work_status: false,
                                     context,
                                     generation,
@@ -2130,7 +2133,7 @@ async fn run_with_delivery(
                             let response=watch_action::execute(&control,target).await;
                             if output {
                                 let result=prepare_management(response,control.store.config.cache.body_bytes).await;
-                                let _=results.send(BackgroundResult::Command { retained:None,work_status:false,context:None,generation,title,result}).await;
+                                let _=results.send(BackgroundResult::Command { retained:None,list_command:None,work_status:false,context:None,generation,title,result}).await;
                             } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,format!("{title}は未適用 · {error}")).await,}}
                         });
                     },
@@ -2750,6 +2753,7 @@ async fn run_with_delivery(
                                 }
                             }
                             let retained_command=match &target {management::FollowTarget::Command(command)=>inspection_history::capture_command(command),_=>None};
+                            let list_command=match &target {management::FollowTarget::Command(command)=>inspection_lists::capture_command(command),_=>None};
                             let (title,work_status,response)=match target {
                                 management::FollowTarget::Command(command)=> {
                                     let title=command_title(&command);
@@ -2784,7 +2788,7 @@ async fn run_with_delivery(
                                 prepare_management(Ok(observed), control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command { retained,
+                                .send(BackgroundResult::Command { retained,list_command,
                                     work_status,
                                     context,
                                     generation,
@@ -3270,7 +3274,7 @@ async fn run_with_delivery(
                 }
                 Some(BackgroundResult::Copied {
                     result: Err(error), ..
-                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { retained,
+                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { retained,list_command,
                     work_status,
                     context,
                     generation,
@@ -3284,6 +3288,15 @@ async fn run_with_delivery(
                     match result {
                         Ok(report) => {
                             management.detail = report.detail.map(Arc::new);
+                            let retained = if let Some(command) = list_command {
+                                match management.detail.as_ref() {
+                                    Some(original) => match inspection_lists::capture_target(&command, Arc::clone(original)) {
+                                        Ok(target) => Some(target),
+                                        Err(error) => { management_status(&updates,context.clone(),error).await; None },
+                                    },
+                                    None => { management_status(&updates,context.clone(),"一覧の保持予算を超えました。現在状態は未確認です").await; None },
+                                }
+                            } else { retained };
                             management_update(
                                 &updates,
                                 context.clone(),

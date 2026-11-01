@@ -321,6 +321,21 @@ impl Observation {
         if !scope.visible {
             return;
         }
+        if let InspectionTarget::Lists(list) = &scope.target {
+            let global = match &list.command {
+                crate::protocol::Command::Status(args) => {
+                    args.thread_id.is_none() && args.run_id.is_none()
+                }
+                crate::protocol::Command::ThreadList(_) => true,
+                crate::protocol::Command::ShellList(args) => args.thread_id.is_none(),
+                crate::protocol::Command::CompactList(args) => args.thread_id.is_none(),
+                _ => false,
+            };
+            if global || list.threads.iter().any(|id| id == thread) {
+                scope.metadata_dirty = true;
+            }
+            return;
+        }
         if global_saved(&scope.target) {
             scope.metadata_dirty = true;
             if matches!(scope.target, InspectionTarget::Storage) {

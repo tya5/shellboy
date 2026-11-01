@@ -2,6 +2,7 @@
 use super::*;
 #[derive(Clone, Debug, PartialEq)]
 pub enum InspectionTarget {
+    Lists(ListInspectionScope),
     HistorySources(HistorySourceScope),
     Operation(String),
     Usage(crate::protocol::UsageGetArgs),
@@ -26,9 +27,16 @@ pub struct HistorySourceScope {
     pub captured_at: String,
     pub scope_limited: bool,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListInspectionScope {
+    pub(crate) command: crate::protocol::Command,
+    pub(crate) original: std::sync::Arc<serde_json::Value>,
+    pub(crate) threads: Vec<String>,
+    pub(crate) captured_at: String,
+}
 impl InspectionTarget {
     pub(crate) fn retains_history(&self) -> bool {
-        matches!(self, Self::HistorySources(_))
+        matches!(self, Self::HistorySources(_) | Self::Lists(_))
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -117,6 +125,12 @@ impl State {
         if let InspectionTarget::HistorySources(scope) = &self.target {
             text.push_str(&format!(
                 " · 取得時の結果 {} を保持 · 再取得:aから同じ履歴照会",
+                scope.captured_at
+            ));
+        }
+        if let InspectionTarget::Lists(scope) = &self.target {
+            text.push_str(&format!(
+                " · 取得時の一覧 {} を保持 · 新しい行はaから再取得",
                 scope.captured_at
             ));
         }

@@ -39,7 +39,8 @@ mod key_hints;
 mod lifecycle;
 mod management;
 pub use inspection::{
-    HistorySourceScope, InspectionFieldAnchor, InspectionPart, InspectionSnapshot, InspectionTarget,
+    HistorySourceScope, InspectionFieldAnchor, InspectionPart, InspectionSnapshot,
+    InspectionTarget, ListInspectionScope,
 };
 mod message_queue;
 mod models;

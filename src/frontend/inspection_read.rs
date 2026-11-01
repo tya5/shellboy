@@ -26,6 +26,7 @@ pub(super) struct RawInspection {
 }
 enum Body {
     History(crate::history::observation::Raw),
+    Lists(super::inspection_lists::RawLists),
     Thread(
         Arc<header::RawHeader>,
         Box<crate::thread_observation::RawLatest>,
@@ -74,9 +75,29 @@ pub(super) fn read_scoped_tx(
     coverage: Option<&Result<Arc<crate::index::saved_view::PreparedCoverageRequest>, ApiError>>,
 ) -> Result<RawInspection, StorageError> {
     use crate::protocol::*;
+    if let InspectionTarget::Lists(scope) = target {
+        let captured = super::inspection_lists::capture_list_scope(
+            &scope.command,
+            Arc::clone(&scope.original),
+            &scope.threads,
+        )?;
+        return Ok(RawInspection {
+            target: target.clone(),
+            body: Body::Lists(super::inspection_lists::read_list_facts_tx(db, captured)?),
+            at: chrono::Utc::now().to_rfc3339(),
+        });
+    }
     let services = services.ok_or_else(unavailable)?;
     let body =
         match target {
+            InspectionTarget::Lists(scope) => {
+                let captured = super::inspection_lists::capture_list_scope(
+                    &scope.command,
+                    Arc::clone(&scope.original),
+                    &scope.threads,
+                )?;
+                Body::Lists(super::inspection_lists::read_list_facts_tx(db, captured)?)
+            }
             InspectionTarget::HistorySources(scope) => {
                 if scope.scope_limited {
                     return Err(ApiError::new(
@@ -205,6 +226,10 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
     let mut observed_at = raw.at;
     let target = raw.target;
     let (thread, value) = match raw.body {
+        Body::Lists(raw) => (
+            String::new(),
+            super::inspection_lists::prepare_list_facts(raw)?,
+        ),
         Body::Thread(header, latest, compactions) => {
             let (mut details, limited) = header.prepare_inspection();
             limited_fields = limited;

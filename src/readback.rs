@@ -4,6 +4,7 @@ use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 mod compact;
 mod compact_display;
+pub(crate) mod list_observation;
 mod run_wait;
 mod shell;
 mod time;

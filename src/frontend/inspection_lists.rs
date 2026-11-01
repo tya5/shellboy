@@ -461,6 +461,31 @@ pub(super) fn prepare_list_facts(raw: RawLists) -> Result<Value, ApiError> {
     )
 }
 
+pub(super) fn capture_command(command: &Command) -> Option<Command> {
+    match command {
+        Command::Status(args) if !args.memory => Some(command.clone()),
+        Command::ThreadList(_) | Command::ShellList(_) | Command::CompactList(_) => {
+            Some(command.clone())
+        }
+        _ => None,
+    }
+}
+/// Bind the already retained management Arc, never clone its full body.
+pub(super) fn capture_target(
+    command: &Command,
+    original: Arc<Value>,
+) -> Result<crate::ui::InspectionTarget, ApiError> {
+    let scope = capture_list_scope(command, Arc::clone(&original), &[])?;
+    Ok(crate::ui::InspectionTarget::Lists(
+        crate::ui::ListInspectionScope {
+            command: command.clone(),
+            original,
+            threads: scope.threads,
+            captured_at: chrono::Utc::now().to_rfc3339(),
+        },
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,12 +572,14 @@ mod tests {
         .unwrap();
         assert!(read_list_facts_tx(&db, scope.clone()).is_err());
         let tx = db.transaction().unwrap();
-        let raw = super::super::inspection_read::read_retained_list_tx(&tx, scope).unwrap();
+        let target = capture_target(&scope.command, Arc::clone(&scope.original)).unwrap();
+        let raw =
+            super::super::inspection_read::read_scoped_tx(&tx, &target, None, None, None).unwrap();
         tx.commit().unwrap();
         assert!(db.is_autocommit());
         assert_eq!(db.total_changes(), before);
         db.close().unwrap();
-        let value = super::super::inspection_read::prepare_retained_list(raw).unwrap();
+        let value = super::super::inspection_read::prepare(raw).unwrap().value;
         assert_eq!(value["current"]["missing_ids"][0]["id"], "gone");
         assert_eq!(value["current"]["sql_statements"], 1);
         assert_eq!(value["status_membership"]["sql_statements"], 12);
