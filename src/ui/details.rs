@@ -504,7 +504,7 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                 if suffix == "status" {
                     field.label = match (language, numbered) {
                         (UiLanguage::Ja, true) => format!("回答 {ordinal} › 回答の状態"),
-                        (UiLanguage::En, true) => format!("Answer {ordinal} > Answer status"),
+                        (UiLanguage::En, true) => format!("Answer {ordinal} › Answer status"),
                         (_, false) => local!(language, "回答の状態", "Answer status").into(),
                     };
                 }
@@ -521,7 +521,7 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                 if suffix == "content" {
                     field.label = match (language, numbered) {
                         (UiLanguage::Ja, true) => format!("回答 {ordinal} › 内容の数"),
-                        (UiLanguage::En, true) => format!("Answer {ordinal} > Content count"),
+                        (UiLanguage::En, true) => format!("Answer {ordinal} › Content count"),
                         (_, false) => local!(language, "内容の数", "Content count").into(),
                     };
                 }
@@ -548,9 +548,9 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                                     format!("回答 {ordinal} › 本文 {part}")
                                 }
                                 (UiLanguage::Ja, false, false) => format!("本文 {part}"),
-                                (UiLanguage::En, true, true) => format!("Answer {ordinal} > Text"),
+                                (UiLanguage::En, true, true) => format!("Answer {ordinal} › Text"),
                                 (UiLanguage::En, true, false) => {
-                                    format!("Answer {ordinal} > Text {part}")
+                                    format!("Answer {ordinal} › Text {part}")
                                 }
                                 (UiLanguage::En, false, false) => format!("Text {part}"),
                                 (_, false, true) => local!(language, "本文", "Text").into(),
@@ -1732,7 +1732,7 @@ mod tests {
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Answer 1 > Text", "RAW-ANSWER-ONE"],
+                UiLanguage::En => &["Answer 1 › Text", "RAW-ANSWER-ONE"],
                 UiLanguage::Ja => &["回答 1 › 本文", "RAW-ANSWER-ONE"],
             }
         }
