@@ -515,9 +515,17 @@ pub(super) fn decorate_original(value:&mut serde_json::Value,target:&Option<crat
 }
 
 pub(super) fn request_fits(command:&crate::protocol::Command)->bool {command_bytes(command).is_some()}
-pub(super) fn limited_scope()->crate::ui::InspectionTarget {
+pub(super) fn route(command:&crate::protocol::Command)->RetainedRoute {
+    match command {
+        crate::protocol::Command::HistoryRelations(_)=>RetainedRoute::Relations,
+        crate::protocol::Command::ShellRead(_)=>RetainedRoute::ShellPage,
+        crate::protocol::Command::Wait(_)=>RetainedRoute::CompletedWait,
+        _=>RetainedRoute::SearchReferences,
+    }
+}
+pub(super) fn limited_scope(route:RetainedRoute)->crate::ui::InspectionTarget {
     let identity=uuid::Uuid::new_v4().to_string();
-    let mut scope=capture_retained_scope(CaptureInput{result_identity:&identity,route:RetainedRoute::SearchReferences,targets:&[]}).expect("generated identity is bounded");
+    let mut scope=capture_retained_scope(CaptureInput{result_identity:&identity,route,targets:&[]}).expect("generated identity is bounded");
     scope.unobserved_targets=1;scope.captured_at=Arc::from(chrono::Utc::now().to_rfc3339());
     crate::ui::InspectionTarget::RetainedSources(Box::new(scope))
 }
@@ -573,7 +581,7 @@ mod registered_reader_tests {
     #[test]
     fn capture_limits_are_explicit_and_do_not_clone_an_oversized_query() {
         let command=Command::HistorySearch(HistorySearchArgs{query:"q".repeat(1024*1024),..Default::default()});
-        assert!(matches!(super::super::inspection_history::capture_command(&command),Some(super::super::inspection_history::CapturedCommand::Limited)));
+        assert!(matches!(super::super::inspection_history::capture_command(&command),Some(super::super::inspection_history::CapturedCommand::Limited(_))));
         let rows=(0..300).map(|i|json!({"node_id":format!("n-{i}")})).collect::<Vec<_>>();
         let captured=scope(capture_response(&relation(),&json!({"items":rows})).unwrap());assert_eq!(captured.targets.len(),200);assert_eq!(captured.unobserved_targets,101);
         let command=Command::HistorySearch(HistorySearchArgs{query:"q".into(),..Default::default()});

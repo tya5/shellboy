@@ -133,7 +133,7 @@ pub(crate) struct RetainedExecutionFacts {
     pub(crate) metadata_limited: bool,
 }
 impl RawWitness {
-    /// One batch statement, at most 200 exact requests. No bytes cross into Rust;
+    /// One batch statement, at most 200 exact requests. No raw-output bytes cross into Rust;
     /// cursor authorization stays with control::output's authoritative rules.
     pub(crate) fn for_retained_execution(
         db: &Connection,

@@ -6,7 +6,7 @@ use crate::{
 use serde_json::Value;
 pub(super) enum CapturedCommand {
     Full(Command),
-    Limited,
+    Limited(super::inspection_retained::RetainedRoute),
 }
 pub(super) fn capture_command(command: &Command) -> Option<CapturedCommand> {
     if !(matches!(command, Command::HistoryGet(_) | Command::HistoryList(_))
@@ -14,12 +14,12 @@ pub(super) fn capture_command(command: &Command) -> Option<CapturedCommand> {
     // Count borrowed JSON before cloning the request's query/filter strings.
     Some(if super::inspection_retained::request_fits(command) {
         CapturedCommand::Full(command.clone())
-    }else{CapturedCommand::Limited})
+    }else{CapturedCommand::Limited(super::inspection_retained::route(command))})
 }
 pub(super) fn capture_saved(command:&CapturedCommand,value:&Value)->Option<InspectionTarget> {
     match command {
         CapturedCommand::Full(command)=>capture(command,value),
-        CapturedCommand::Limited if value.get("error").is_none()=>Some(super::inspection_retained::limited_scope()),
+        CapturedCommand::Limited(route) if value.get("error").is_none()=>Some(super::inspection_retained::limited_scope(*route)),
         _=>None,
     }
 }
