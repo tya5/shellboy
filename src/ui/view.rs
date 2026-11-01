@@ -1815,7 +1815,7 @@ mod completion_notice_tests {
         assert_eq!(ui.view().status, "verified source");
     }
     #[test]
-    fn read_failure_keeps_queued_navigation_for_explicit_retry() {
+    fn read_failure_discards_queued_motion_without_automatic_retry() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
         view.navigation.on_event(NavEvent::ReadRequested {
             ticket: (view.navigation.view_revision, None),
@@ -1826,7 +1826,7 @@ mod completion_notice_tests {
         view.on_load_failed("read permit unavailable".into());
         assert!(!view.navigation.is_loading());
         assert!(view.navigation.request().is_none());
-        assert_eq!(view.navigation.pending(), -3);
+        assert_eq!(view.navigation.pending(), 0);
         assert_eq!(view.status, "read permit unavailable");
     }
     #[test]
@@ -2073,7 +2073,7 @@ mod completion_notice_tests {
         );
     }
     #[test]
-    fn rejected_navigation_releases_only_the_matching_read_and_keeps_movement() {
+    fn rejected_navigation_releases_matching_read_and_discards_its_movement() {
         for node_window in [false, true] {
             let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
             ui.select_thread("thread".into());
@@ -2110,10 +2110,8 @@ mod completion_notice_tests {
                 "rejected read must not leave loading set"
             );
             assert!(ui.view().navigation.request().is_none());
-            assert!(
-                ui.view().navigation.pending() != 0 || !ui.take_deferred_actions().is_empty(),
-                "unconsumed movement must be retained or retried"
-            );
+            assert_eq!(ui.view().navigation.pending(), 0, "rejected displacement ends");
+            assert!(ui.take_deferred_actions().is_empty(), "no automatic retry");
         }
     }
     #[test]

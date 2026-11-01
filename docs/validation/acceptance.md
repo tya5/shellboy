@@ -7759,3 +7759,11 @@ Doubtful marker removed. Regression now requires the source anchor and request
 revision to survive clamping, appended growth to remain paused at that source,
 and partial body windows not to clamp as EOF. No production code added.
 Same helper: combined91 / scroll237 / fields15. Final focused checks/CI pending.
+
+Focused-check corrections: the stronger Tab growth test initially rejected new
+text filling a previously blank last row; it now requires every existing content
+row to stay fixed, while allowing blank rows to fill. All19 characterizations
+then passed, including EOF append/partial-window coverage. The next view check
+found two older failure/rejection tests expecting retained movement; those are
+updated to zero pending and no automatic retry, matching the adopted contract.
+No deadline or watchdog assertion changed. Final rerun follows.
