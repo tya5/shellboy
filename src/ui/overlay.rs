@@ -622,6 +622,56 @@ mod tests {
         UiState::new(&config, PathBuf::from("/"))
     }
     #[test]
+    fn invalid_watch_confirmation_shows_localized_notice_without_action() {
+        use super::super::text_width::UnicodeWidthStr;
+        use ratatui::{Terminal, backend::TestBackend};
+        for (language, expected) in [
+            (
+                crate::config::UiLanguage::Ja,
+                "対象が変わったため確認を取り消しました。選び直してください",
+            ),
+            (
+                crate::config::UiLanguage::En,
+                "The target changed, so confirmation was cancelled. Select it again",
+            ),
+        ] {
+            let mut ui = state();
+            ui.config.ui.language = language;
+            ui.confirmation = Some(Confirmation::Watch(watch::WatchActionTarget {
+                browser_generation: u64::MAX,
+                thread_id: "thread-fixture".into(),
+                run_id: "run-fixture".into(),
+                turn_id: None,
+                turn_generation: None,
+                phase: crate::activity::ActivityPhase::Running,
+                execution_id: None,
+                kind: watch::WatchActionKind::Stop,
+            }));
+            assert!(
+                ui.confirmation_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+                    .is_empty()
+            );
+            assert!(ui.confirmation.is_none());
+            let mut terminal = Terminal::new(TestBackend::new(160, 30)).unwrap();
+            terminal
+                .draw(|frame| ui.thread_browser.draw(frame, frame.area(), None, true))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let mut text = String::new();
+            for y in 0..30 {
+                let mut x = 0;
+                while x < 160 {
+                    let symbol = buffer[(x, y)].symbol();
+                    text.push_str(symbol);
+                    x += symbol.width().max(1) as u16;
+                }
+                text.push('\n');
+            }
+            assert!(text.contains(expected), "{language:?}: {text}");
+        }
+    }
+
+    #[test]
     fn changed_edit_confirmation_is_cancelled_in_both_languages() {
         for (language, expected) in [
             (
