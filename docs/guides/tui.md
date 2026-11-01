@@ -340,6 +340,15 @@ Turn; Alt+O reads saved output. Confirmation retains the actual Run/Turn/generat
 a changed target is rejected rather than retargeted. Typing filters; deletion
 stays in List. Esc closes the browser without stopping work.
 
+Finished rows (completed, failed, stopped, and recovery waits) show the saved
+transition time in local time instead of a growing counter: `13:42 完了`, or
+`10/31 22:05 完了` when it is not today. It never changes as time passes. When
+the transition time was not saved (only observed in this UI), the row says
+`時刻不明` rather than inventing one. Running rows keep an elapsed time that
+rolls up units (`59秒`, `4分12秒`, `1時間3分`). A completed row is always `完了`;
+an unread one adds a mark (`完了 ●`). When only finished rows are visible, the
+clock never redraws the screen.
+
 Unread tracks completed Run/answer identities only in this UI process. Opening
 a completion marks it seen. Read rows already painted stay until the Watch
 session closes. The bounded 2000-identity history may become uncertain after

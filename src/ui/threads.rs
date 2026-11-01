@@ -4737,6 +4737,7 @@ mod watch_integration_tests {
                         elapsed_base: Duration::from_secs(123),
                         observed_at: Instant::now(),
                         origin: WatchAgeOrigin::SavedTransition,
+                        saved_at: Some(chrono::Utc::now()),
                     });
                     facts.recovery_reason = Some("LONG_RECOVERY_REASON_".repeat(40));
                 } else {
@@ -4772,8 +4773,8 @@ mod watch_integration_tests {
                 if phase == ActivityPhase::Recovery {
                     assert!(text.contains("LONG_TITLE"), "title disappeared: {text}");
                     assert!(
-                        text.lines().any(|line| line.contains("状態")
-                            && line.contains("秒")
+                        text.lines().any(|line| line.contains("復旧待ち")
+                            && line.contains(':')
                             && line.contains("LONG_RECOVERY")),
                         "recovery age/detail disappeared: {text}"
                     );

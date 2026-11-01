@@ -220,6 +220,9 @@ pub(super) fn prepare_with_titles(
             elapsed_base,
             observed_at,
             origin: WatchAgeOrigin::SavedTransition,
+            saved_at: value
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|at| at.with_timezone(&chrono::Utc)),
         })
     };
     summaries

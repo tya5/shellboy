@@ -45,6 +45,8 @@ pub struct WatchAge {
     pub elapsed_base: Duration,
     pub observed_at: Instant,
     pub origin: WatchAgeOrigin,
+    /// Saved wall-clock transition time; absent for observed-only ages.
+    pub saved_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 #[derive(Clone, Debug)]
 pub struct WatchDetail {
@@ -204,11 +206,7 @@ impl WatchDetail {
             secondary.push_str(&label);
         }
         let now = Instant::now();
-        let initial_state_clock = self
-            .state_age
-            .as_ref()
-            .map(|age| age_label(age, now))
-            .unwrap_or_default();
+        let initial_state_clock = state_label(self.phase, self.state_age.as_ref(), now);
         let initial_secondary_clock =
             secondary_age_label(self.model_request_age.as_ref(), work_clocks.as_ref(), now);
         PreparedWatchDetail {
@@ -667,18 +665,12 @@ impl WatchState {
         let entry = self.entries.get(id)?;
         let detail = entry.detail.as_ref();
         let status = match entry.category {
-            WatchCategory::Unread => "未読の完了",
+            WatchCategory::Unread => "完了 ●",
             WatchCategory::Confirming if entry.identity().is_some() && self.seen_overflow => {
                 "確認履歴の保持範囲外"
             }
             WatchCategory::Confirming => "確認中",
-            WatchCategory::Read => {
-                if entry.summary.phase == ActivityPhase::Completed {
-                    "既読の完了"
-                } else {
-                    entry.summary.phase.column_label()
-                }
-            }
+            WatchCategory::Read => entry.summary.phase.column_label(),
             _ => entry.summary.phase.column_label(),
         };
         Some(WatchRow {
@@ -745,12 +737,12 @@ impl WatchState {
             let Some(detail) = &entry.detail else {
                 continue;
             };
-            let label = detail
-                .facts
-                .state_age
-                .as_ref()
-                .map(|age| age_label(age, now))
-                .unwrap_or_default();
+            // A saved transition time never changes, so it is not recomputed.
+            let label = if is_terminal(detail.facts.phase) {
+                entry.state_clock.clone()
+            } else {
+                state_label(detail.facts.phase, detail.facts.state_age.as_ref(), now)
+            };
             let secondary = secondary_age_label(
                 detail.facts.model_request_age.as_ref(),
                 detail.work_clocks.as_ref(),
@@ -815,13 +807,56 @@ impl WatchState {
                 || current.execution_id == target.execution_id)
     }
 }
+/// Stopped/finished states and recovery waits show a saved transition time.
+fn is_terminal(phase: ActivityPhase) -> bool {
+    matches!(
+        phase,
+        ActivityPhase::Completed
+            | ActivityPhase::Failed
+            | ActivityPhase::Stopped
+            | ActivityPhase::Recovery
+    )
+}
+fn state_label(phase: ActivityPhase, age: Option<&WatchAge>, now: Instant) -> String {
+    if is_terminal(phase) {
+        transition_label(
+            phase,
+            age,
+            chrono::Utc::now(),
+            *chrono::Local::now().offset(),
+        )
+    } else {
+        age.map(|age| age_label(age, now)).unwrap_or_default()
+    }
+}
+/// "13:42 完了" today, "10/31 22:05 完了" otherwise; never an invented time.
+fn transition_label(
+    phase: ActivityPhase,
+    age: Option<&WatchAge>,
+    now: chrono::DateTime<chrono::Utc>,
+    offset: chrono::FixedOffset,
+) -> String {
+    let Some(at) = age.and_then(|age| age.saved_at) else {
+        return "時刻不明".into();
+    };
+    let local = at.with_timezone(&offset);
+    let format = if local.date_naive() == now.with_timezone(&offset).date_naive() {
+        "%H:%M"
+    } else {
+        "%m/%d %H:%M"
+    };
+    format!("{} {}", local.format(format), phase.column_label())
+}
+fn elapsed(duration: Duration) -> String {
+    crate::presentation::elapsed_text(duration.as_secs().saturating_mul(1000), false)
+}
 fn age_label(age: &WatchAge, now: Instant) -> String {
-    let seconds = age
-        .elapsed_base
-        .saturating_add(now.saturating_duration_since(age.observed_at))
-        .as_secs();
+    let elapsed = elapsed(
+        age.elapsed_base
+            .saturating_add(now.saturating_duration_since(age.observed_at)),
+    );
     format!(
-        "{} {seconds}秒",
+        "{} {elapsed}",
         match age.origin {
             WatchAgeOrigin::SavedTransition => "状態",
             WatchAgeOrigin::Observed => "観測",
@@ -836,12 +871,12 @@ fn secondary_age_label(
 ) -> String {
     let mut labels = Vec::with_capacity(3);
     if let Some(age) = model {
-        let seconds = age
-            .elapsed_base
-            .saturating_add(now.saturating_duration_since(age.observed_at))
-            .as_secs();
+        let elapsed = elapsed(
+            age.elapsed_base
+                .saturating_add(now.saturating_duration_since(age.observed_at)),
+        );
         labels.push(format!(
-            "モデル要求{} {seconds}秒",
+            "モデル要求{} {elapsed}",
             if age.origin == WatchAgeOrigin::Observed {
                 "の観測"
             } else {
@@ -853,14 +888,14 @@ fn secondary_age_label(
         let since = now.saturating_duration_since(work.observed_at);
         if let Some(age) = work.oldest {
             labels.push(format!(
-                "表示内最古の作業 {}秒",
-                age.saturating_add(since).as_secs()
+                "表示内最古の作業 {}",
+                elapsed(age.saturating_add(since))
             ));
         }
         if let Some(age) = work.latest_output {
             labels.push(format!(
-                "表示内の保存出力 {}秒前",
-                age.saturating_add(since).as_secs()
+                "表示内の保存出力 {}前",
+                elapsed(age.saturating_add(since))
             ));
         }
     }
@@ -1123,22 +1158,25 @@ mod tests {
     #[test]
     fn visible_clocks_distinguish_saved_transition_from_observed_age_and_are_bounded() {
         let at = Instant::now();
-        let mut facts = detail("t", "r", None, ActivityPhase::Recovery);
-        facts.state_age = Some(WatchAge {
+        let observed = WatchAge {
             elapsed_base: Duration::from_secs(90),
             observed_at: at,
             origin: WatchAgeOrigin::Observed,
-        });
+            saved_at: None,
+        };
+        let mut facts = detail("t", "r", None, ActivityPhase::Background);
+        facts.state_age = Some(observed.clone());
         let mut state = WatchState::default();
-        state.open(1, vec![summary("t", ActivityPhase::Recovery)]);
+        state.open(1, vec![summary("t", ActivityPhase::Background)]);
         state.apply_detail(1, 1, facts.prepare());
-        assert!(state.row("t").unwrap().state_age.starts_with("観測"));
+        assert_eq!(state.row("t").unwrap().state_age, "観測 1分30秒");
         let visible = state.visible_scope(0, 129);
         assert!(visible.limited);
         assert!(visible.ids.len() <= 128);
         state.tick(&visible.ids, at);
         assert!(!state.tick(&visible.ids, at + Duration::from_millis(500)));
         assert!(state.tick(&visible.ids, at + Duration::from_secs(1)));
+        assert_eq!(state.row("t").unwrap().state_age, "観測 1分31秒");
         let label = state.row("t").unwrap().state_age.to_owned();
         assert!(!state.tick(&[], at + Duration::from_secs(100)));
         assert_eq!(state.row("t").unwrap().state_age, label);
@@ -1149,6 +1187,79 @@ mod tests {
             prepared.facts().state_age.is_none(),
             "missing transition cannot invent recovery age"
         );
+        assert_eq!(prepared.initial_state_clock, "時刻不明");
+        let mut facts = detail("o", "r", None, ActivityPhase::Failed);
+        facts.state_age = Some(observed);
+        assert_eq!(
+            facts.prepare().initial_state_clock,
+            "時刻不明",
+            "an observed age is never shown as a transition time"
+        );
+    }
+    #[test]
+    fn transition_times_are_local_dated_when_not_today_and_never_run_on() {
+        use chrono::{FixedOffset, TimeZone, Utc};
+        let jst = FixedOffset::east_opt(9 * 3600).unwrap();
+        let age = |at| WatchAge {
+            elapsed_base: Duration::ZERO,
+            observed_at: Instant::now(),
+            origin: WatchAgeOrigin::SavedTransition,
+            saved_at: Some(at),
+        };
+        let done = Utc.with_ymd_and_hms(2026, 11, 1, 4, 42, 0).unwrap();
+        let late = Utc.with_ymd_and_hms(2026, 10, 31, 13, 5, 0).unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 11, 1, 5, 0, 0).unwrap();
+        let label = |phase, at, now| transition_label(phase, Some(&age(at)), now, jst);
+        assert_eq!(label(ActivityPhase::Completed, done, now), "13:42 完了");
+        assert_eq!(
+            label(ActivityPhase::Failed, late, now),
+            "10/31 22:05 異常終了"
+        );
+        // A virtual clock a day later changes nothing the row already holds.
+        assert_eq!(
+            transition_label(ActivityPhase::Completed, None, now, jst),
+            "時刻不明"
+        );
+    }
+    #[test]
+    fn terminal_rows_stay_fixed_and_cause_no_clock_redraws_while_running_rows_roll_up() {
+        let at = Instant::now();
+        let saved = |secs| WatchAge {
+            elapsed_base: Duration::from_secs(secs),
+            observed_at: at,
+            origin: WatchAgeOrigin::SavedTransition,
+            saved_at: Some(chrono::Utc::now() - chrono::Duration::seconds(secs as i64)),
+        };
+        let mut done = detail("d", "r", None, ActivityPhase::Completed);
+        done.state_age = Some(saved(3600));
+        let mut running = detail("r", "r", None, ActivityPhase::Background);
+        running.state_age = Some(saved(59));
+        let mut state = WatchState::default();
+        state.open(
+            1,
+            vec![
+                summary("d", ActivityPhase::Completed),
+                summary("r", ActivityPhase::Background),
+            ],
+        );
+        state.apply_details(1, 1, vec![done.prepare(), running.prepare()]);
+        let label = state.row("d").unwrap().state_age.to_owned();
+        assert!(label.ends_with(" 完了") && label.contains(':'), "{label}");
+        assert_eq!(state.row("r").unwrap().state_age, "状態 59秒");
+        let ids = vec!["d".to_string()];
+        state.tick(&ids, at);
+        for second in 1..=7200 {
+            assert!(
+                !state.tick(&ids, at + Duration::from_secs(second)),
+                "terminal-only visibility must not redraw"
+            );
+        }
+        assert_eq!(state.row("d").unwrap().state_age, label);
+        let ids = vec!["r".to_string()];
+        assert!(state.tick(&ids, at + Duration::from_secs(1)));
+        assert_eq!(state.row("r").unwrap().state_age, "状態 1分0秒");
+        state.tick(&ids, at + Duration::from_secs(3721));
+        assert_eq!(state.row("r").unwrap().state_age, "状態 1時間3分");
     }
     #[test]
     fn seen_lru_overflow_is_uncertain_until_opened_or_a_new_completion_is_observed() {
@@ -1293,7 +1404,7 @@ mod tests {
                 .row("t")
                 .unwrap()
                 .secondary_age
-                .contains("最古の作業 90秒")
+                .contains("最古の作業 1分30秒")
         );
         assert!(
             state
@@ -1317,7 +1428,7 @@ mod tests {
             "offscreen row clocks do not update"
         );
         let label = state.row("t").unwrap().secondary_age.to_owned();
-        assert!(label.contains("最古の作業 150秒") && label.contains("保存出力 65秒前"));
+        assert!(label.contains("最古の作業 2分30秒") && label.contains("保存出力 1分5秒前"));
         assert!(!state.tick(&[], at + Duration::from_secs(600)));
         assert_eq!(state.row("t").unwrap().secondary_age, label);
         let mut unknown = detail("t", "t", None, ActivityPhase::Background);
