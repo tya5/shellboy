@@ -7924,3 +7924,21 @@ The CI-wait self-check also adds the exclusive attempt selector to the public
 operation dictionary (the detailed guide section already describes it). The
 final handoff must reference the subsequent exact-head CI, not a run started
 before this documentation correction.
+
+### #142 Branch-CI Failure And Fixture Repair
+
+- Run 41321728888 (`5379d828`) and run 41321966358 (`6f1b27ba`) fail on both
+  OSes at Tests. Do not treat either as successful CI. Layout, format and
+  warning-clean Clippy pass in both OS jobs of the latter run.
+- Rooted failures: seven old-version fixture preparations forgot schema20's
+  column/index; the F8 foreign-run fixture traversed one field too few after
+  adding the attempt selector. Repair fixture setup/navigation, not production
+  migration idempotence, usage contracts, timeout limits or skip/ignore policy.
+- Focused repair log: owner migration cancellation1, F8 foreign-run1,
+  storage-hot-query5, index reset1, pre-marker recovery1, readonly-history1 pass.
+  The combined command then exits101 on the unchanged #141 status-bar watchdog.
+- The same status-bar test passes a separate temporary screen-observed run
+  (`2fd5adf1-a3be-423e-bb84-5180c140f27f`, exit0); that instrumentation is removed.
+  Its timing sensitivity is unresolved, not proven pre-existing and not hidden
+  as a fixture-repair success. Final uninstrumented tests/CI must be separate
+  evidence; the failure history belongs in the handoff even if those pass.

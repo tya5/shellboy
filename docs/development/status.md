@@ -3665,3 +3665,20 @@ existing ignored), and both loopback suites again before push. This record-only
 follow-up admits the branch to Linux/macOS CI; success, independent review and
 integration are not claimed by this pending-CI record. Main remains exclusively
 the integrator's responsibility.
+
+### #142 First Branch-CI Findings
+
+Both initial Linux/macOS dispatches fail tests, not formatting/Clippy: seven
+historical-version fixture preparations retain the new schema20 column/index
+while rewinding their ledger/version, and one F8 fixture still tabs through the
+old field positions. Remove schema20 assets when synthesizing old fixtures and
+account for the new optional selector in that F8 test. Production migration,
+reader, UI behavior and timeouts are not loosened. Focused cancellation/startup,
+F8, hot-query upgrade/rollback, index reset, recovery and read-only RAG cases now
+pass (10 cases). Full exact-head CI is still required on the repair.
+
+The unchanged #141 long-thread status-bar test also hits its 60-second watchdog
+in one branch-CI run and one local invocation; a separate temporary-screen
+observation passes with the expected saved usage. The observation is removed;
+this timing-sensitive failure is not claimed fixed and is retained as a limit
+for the final uninstrumented focused run, branch CI and integration batch.

@@ -1121,9 +1121,9 @@ async fn f8_standalone_usage_reads_foreign_run_root_and_follows_real_saved_stop(
     dispatch(&sender, ui.event(Event::Paste("usage get".into())));
     assert!(draw(&mut ui).contains("1/1件"));
     key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
-    // Clear current Thread and pass the optional since/until fields to Run.
+    // Clear current Thread and pass attempt/since/until fields to Run.
     key(&mut ui, &sender, KeyCode::Char('u'), KeyModifiers::CONTROL);
-    for _ in 0..3 {
+    for _ in 0..4 {
         key(&mut ui, &sender, KeyCode::Tab, KeyModifiers::NONE);
     }
     dispatch(&sender, ui.event(Event::Paste("independent-run".into())));
