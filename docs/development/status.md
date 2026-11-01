@@ -1,6 +1,17 @@
 # Development status
 
-## v0.5.0 release preparation
+## v0.5.0 published
+
+The reviewer published annotated tag `v0.5.0` at main `02fda155` on 2026-11-01.
+Native release builds, assembly and publication passed; candidate installer
+checks passed on four OS/shell combinations. Public checksums verify all five
+files. The reviewer replaced the installed binary after backing up data.
+[Publication](publication.md#v050-publication-2026-11-01) records the runs and
+byte comparisons; [acceptance](../validation/acceptance.md#v050-publication-validation)
+records the macOS synthetic upgrades and untested public installer/Linux/Windows
+upgrade paths.
+
+## Historical v0.5.0 release preparation
 
 Preparation is rebased without conflicts onto main `a3e00bed` with #101, #117,
 #120 stage1, #119 extras and #121 context role included. Package/lock version is

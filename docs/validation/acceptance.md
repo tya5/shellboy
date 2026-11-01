@@ -7120,3 +7120,18 @@ Complete-cut build-free checks pass at the final preparation tree: Python95
 TOML agreement at0.5.0 and `git diff --check`. Executione78698fd exits0 with cleanup
 confirmed. No Rust slot is used while the shared cache is being cleared; standard
 Rust/native3OS checks run only on the pushed preparation SHA in GitHub CI.
+
+## v0.5.0 publication validation
+
+On macOS arm64, the reviewer ran `check-release-upgrade.py` twice against the
+candidate binary, whose bytes match the published macOS executable. Both PTY
+runs exited 0, using synthetic data and loopback only: verified public v0.4.0
+(old binary SHA-256 prefix `286f9d17`, checked against its SHA256SUMS), schema
+14 -> 17; and a staged synthetic schema 16 -> 17 with `--start-schema 16`.
+Both passed ledger entries 15/16/17, RAG 3, search, mock exec and clean stop.
+
+Candidate installer checks passed on macOS sh, Ubuntu sh, and Windows
+PowerShell 5.1 and 7 in run 41269475088. Installer checks against the published
+files and upgrades on Linux and Windows were not performed. See
+[publication](../development/publication.md#v050-publication-2026-11-01) for
+the exact source, public checksums, release runs and executable comparisons.

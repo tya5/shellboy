@@ -326,7 +326,34 @@ new-main synthetic upgrade checks, `scripts/check-release-upgrade.py` defaults t
 repeat the historical v0.4.0/schema14 qualification. This script change itself is
 not a new release build or an executed public-binary upgrade qualification.
 
-## v0.5.0 preparation (2026-11-01, not published)
+## v0.5.0 publication (2026-11-01)
+
+The reviewer pushed annotated tag `v0.5.0` (message `Shellboy v0.5.0`) from a
+scratch clone at main `02fda1555d239f3a671c57a4d8af879ee815129b`, whose
+ordinary main CI passed. Tag-push [release run 41270992277](https://github.com/tya5/shellboy/actions/runs/41270992277)
+passed all three OS builds, assembly and publication; the published release body
+was replaced with [the draft notes](release-v0.5.0-draft.md).
+
+[Candidate run 41269475088](https://github.com/tya5/shellboy/actions/runs/41269475088)
+used `release_tag=v0.5.0` and `candidate_ref=02fda155`: three builds, assembly
+and all four installer checks (macOS sh, Ubuntu sh, Windows PowerShell 5.1 and
+7) passed; publication was skipped. Candidate attempt
+[41269371120](https://github.com/tya5/shellboy/actions/runs/41269371120) failed
+the tag/version assertion because the reviewer supplied `v0.4.0`.
+
+Downloaded public `SHA256SUMS` has SHA-256
+`aea7d859cac885293c082ae63c8aec387514c9bf9846e01ded8b81cdbc67b409`; all
+five listed files verified. macOS and Linux executable bytes match the candidate
+(abbreviated hashes `06a25d8c` and `66d31015`); Windows executables differ
+(public `9a5f4457`, candidate `2d83a11d`). All three archive hashes differ.
+The reviewer backed up data before replacing the installed binary with the
+candidate. Public-asset installer checks and Linux/Windows upgrade checks were
+not performed; workflow `installer_checks=true` applies to v0.3.0.
+
+The macOS arm64 PTY upgrade results and their scope are recorded in
+[acceptance](../validation/acceptance.md#v050-publication-validation).
+
+## Historical v0.5.0 preparation (before publication)
 
 The reviewer requested release preparation with push approval, using the
 [v0.5.0 notes](release-v0.5.0-draft.md) and package version 0.5.0. Both required
@@ -402,9 +429,9 @@ execute with command fallback and verbatim replay.
    public-byte verification and installed-binary replacement remain separate
    reviewer/user-controlled steps; this worker does not perform them.
 
-No final release-artifact build, installer or public v0.5.0 download check has
-run. Private macOS binary source0c9535fe passes both public14 -> 17 and synthetic
-16 -> 17 PTY upgrades; exact hashes, preservation counts and failure history are
+At preparation time, no final release-artifact build, installer or public v0.5.0
+download check had run. Private macOS binary source0c9535fe passed both
+public14 -> 17 and synthetic16 -> 17 PTY upgrades; exact hashes, preservation counts and failure history are
 in [acceptance](../validation/acceptance.md#private-macos-synthetic-upgrade-qualification).
 Rerun against the exact final candidate after preparation/main integration; the
 private pre-#117 build does not qualify final release bytes. Build, release, tag
