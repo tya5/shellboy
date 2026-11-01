@@ -48,6 +48,8 @@ mod models;
 pub(crate) mod observation_notice;
 pub use message_queue::{PendingMessage, PendingMessages, SubmittedMessage};
 #[cfg(test)]
+mod scroll_characterization_tests;
+#[cfg(test)]
 mod send_tests;
 pub use management::ManagementPopup;
 mod motion;

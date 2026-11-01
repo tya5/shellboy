@@ -78,3 +78,31 @@ NodeWindowは既に順序が分かっているnodeの本文更新だけを行う
 一時IDをUI内で明示的に追跡する。非追従時の新たなStreamは新着として扱い、保存履歴cacheへ追加しない。既存output_itemのattempt→node参照を既存履歴読取時に取得し、UI内部の確定通知を履歴pageより先に送る。本文の一致から同一性を推測せず、コア状態・EngineEvent・DB schema・公開protocolは変更しない。
 
 閲覧中の一時項目が確定した場合はnode IDとanchor/focusの参照を引き継ぎ、既存RebaseHistoryで現在の選択経路・ordinalを再取得する。取得完了まで表示済みframeを保持し、旧取得を無効にして新たなスクロール量は復旧後へ適用する。追従時は従来の正式tail置換を用いる。復旧中のtail refreshで旧frameだけを整形し直したり、一時IDをhistory getへ渡したりしない。一時IDの追跡も保持中nodeの範囲へ制限する。
+
+## スクロール状態のフラグと書込み箇所の棚卸し（#118 第1段、2026-11-01）
+
+リファクタ前の基準として、`origin/main` `a1b3d086` の本番コード（`#[cfg(test)]` を除く）で、会話履歴のスクロール状態を書き換える箇所を数えた。数え方は `src/ui.rs`（試験module手前）、`src/ui/view.rs`（試験を除く）、`history_interaction.rs`、`overlay.rs` の代入と状態遷移メソッド呼出しの行で、読取り・試験の準備・スレッド一覧や modelの別の `loading` は含めない。issueの当初の数（約90）とは範囲が異なるため、各段の測定は同じ数え方で比較する。
+
+| 状態 | 持ち主 | 本番の書込み箇所 |
+| --- | --- | --- |
+| `follow` | ThreadView | 8 |
+| `loading` | ThreadView | 22 |
+| `scroll.request` | VisualScroll | 11 |
+| `scroll.pending` | VisualScroll | 14 |
+| `history_rebase_pending` | ThreadView | 11 |
+| `committed_preview` | ThreadView | 6 |
+| `scroll.initialized` | VisualScroll | 4 |
+| `unseen` | ThreadView | 8 |
+| `moved_during_read` | VisualScroll | 6 |
+| `anchor`（model側） | ThreadView | 11 |
+| `scroll.row` / `scroll.within` | VisualScroll | 8 / 8 |
+| `cancel_navigation()` 呼出し | - | 5 |
+| `rebase_navigation()` 呼出し | - | 5 |
+
+書込み箇所は `view.rs` の `scroll`/`viewport_row`/各応答（`on_history`、`on_history_window`、`on_node_window`、`on_load_failed`）/`cancel_navigation`、`ui.rs` の `action_rejected`・Send・reasoning展開、`history_interaction.rs` の `select_history_item`、`overlay.rs` のCtrl+Endに集中する。行番号は `grep -n` で再現でき、各段で同じ数え方を使う。
+
+構造の事実（変更前）: `scroll()` は `src/ui/view.rs:527` から約395行で、読取り・早期returnの分岐は、読取り中の同方向/逆方向、アンカー位置の本文窓、キャッシュ内の隙間、前後ページ、metadataのみの行の5系統に分かれる。「本当の末尾」判定（`covered_end` と選択ordinal合計と最後のnodeの文字範囲の3項）は `viewport_row` と `scroll` の2か所に重複する。`viewport_row` は問い合わせでありながら row/origin/width/height/revision/anchor/initialized を更新し、render・scroll・Tab選択から呼ばれる。
+
+固定した試験は `src/ui/scroll_characterization_tests.rs`（flagの組を `snap()` で比較し、実際の `UiState` の入力・応答経路を通す）に置く。期待値は現在の振る舞いであり、設計上の正解ではない。疑わしいものは試験内に `// characterization: current behaviour, see #118` を付けた。PTYの手動確認（#117の3件）は自動試験にしていない。
+
+今回の固定で分かった、現状の振る舞いのうち疑わしいもの（修正はしていない）: (1) 追従中の何も動かないwheel下でも `scroll()` がmodel anchorを現在の先頭source行へ書き、`view_revision` を進める。(2) Tabによる履歴項目選択は `scroll()` を通さず follow/anchor/within/row を直接書き、平文だけでも追従を外す。(3) 読取り中の逆方向入力は、保留した移動量を捨てるが、その逆方向入力自体は再生されない。(4) 読取り失敗後の `pending` は残り、次の明示スクロールで新しい入力に加算されて再生される。
