@@ -2722,7 +2722,11 @@ mod entry_tests {
         assert!(!actual(wrong[1]));
         let mut documents = crate::docs::documents();
         assert_eq!(documents.len(), 14);
-        assert!(documents.iter().any(|doc| doc.id == "shellboy/resource-usage"));
+        assert!(
+            documents
+                .iter()
+                .any(|doc| doc.id == "shellboy/resource-usage")
+        );
         documents.push(crate::docs::Document {
             id: "user-guide.ja.md".into(),
             parent_id: String::new(),
