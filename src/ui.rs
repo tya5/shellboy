@@ -71,9 +71,7 @@ mod threads;
 mod view;
 use draft::{adjust_folds, prev_grapheme};
 pub use threads::ThreadDisplayTime;
-mod navigation;
-pub use navigation::Navigation;
-pub use view::ThreadView;
+pub use view::{Navigation, ThreadView};
 pub use watch::{
     BrowserMode, CompletionIdentity, DescendantCount, PreparedWatchDetail, WatchActionTarget,
     WatchPageInfo, WatchSummary,

@@ -7623,3 +7623,9 @@ default-install variants (jcode memory, sandboxes) are not measured.
 Continuation-only lifecycle movement passes check --tests / characterization19 /
 navigation2 / view41 (00054e88), still preserving all six marked expectations.
 It is not part of the first frozen checkpoint 3d5dc0fb.
+
+Frozen checkpoint 79fb04a7 passes native Linux/macOS and standard branch CI
+41301714398, replacing the failed 3d5dc0fb run. Handed to integration as partial
+scope, not stage-2 completion. Continuation child-module movement passes check,
+characterization19 and view43 (a5f25a6b); no six-case expectation changes. It is
+not contained in the handed-off SHA.

@@ -11,7 +11,7 @@ FIELDS = ('follow', 'loading', 'request', 'pending', 'history_rebase_pending',
           'anchor', 'row', 'within', 'mode', 'read', 'view_revision',
           'width', 'height', 'revision', 'focus', 'origin', 'area')
 FILES = ('src/ui.rs', 'src/ui/view.rs', 'src/ui/history_interaction.rs',
-         'src/ui/overlay.rs', 'src/ui/navigation.rs')
+         'src/ui/overlay.rs', 'src/ui/navigation.rs', 'src/ui/view/navigation.rs')
 
 
 def masked(text):
@@ -62,7 +62,7 @@ def measure(root):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
             for m in re.finditer(rf'&mut\s+{path_pattern}{name}\b', code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
-        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation|set_follow|set_unseen|set_mode|set_loading|set_request|take_request|begin_read|resume_follow)\(', code):
+        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation|set_follow|set_unseen|set_mode|set_loading|set_request|take_request|begin_read|resume_follow|cancel|rebase|fail_read|finish_reply)\(', code):
             transitions.append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
         for m in re.finditer(r'\bfn (scroll|scroll_step)\s*\(', code):
             begin = code.index('{', m.end())

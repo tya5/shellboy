@@ -240,3 +240,13 @@ The earlier 147/141 figures describe the narrower stage-1 inventory categories;
 they are not mixed with this full-field comparison. Four metrics-helper tests
 cover source masking, interleaved test modules and counting both enum writes and
 transition invocations without unrelated loading fields.
+
+Continuation: Navigation is now a child of the source-owning view module
+(`src/ui/view/navigation.rs`). This restores private nodes/history_revision and
+private source helpers rather than granting every UI sibling mutable access to
+source windows. Navigation operations retain their previous UI-only visibility;
+`ui::Navigation` remains the public re-export. Lifecycle cancel/rebase/failure/
+reply settlement is delegated to the owner; the failed-read pending-delta quirk
+remains deliberately intact. Conservative full-field counts now159 vs baseline
+161 (including the new lifecycle invocations), fields18 vs20 and scroll307 vs395.
+Characterization19 and view43 (including the two Navigation state tests) pass.

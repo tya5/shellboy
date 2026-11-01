@@ -3,13 +3,13 @@ use super::*;
 
 #[derive(Debug)]
 pub struct Navigation {
-    pub(super) committed_preview: Option<(String, String)>,
+    pub(in crate::ui) committed_preview: Option<(String, String)>,
     pub anchor: ViewAnchor,
     mode: FollowMode,
     read: ReadState,
-    pub(super) history_rebase_pending: bool,
+    pub(in crate::ui) history_rebase_pending: bool,
     pub view_revision: u64,
-    pub(super) scroll: VisualScroll,
+    pub(in crate::ui) scroll: VisualScroll,
 }
 impl Default for Navigation {
     fn default() -> Self {
@@ -26,19 +26,19 @@ impl Default for Navigation {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct VisualScroll {
-    pub(super) row: usize,
-    pub(super) within: usize,
-    pub(super) anchor: ViewAnchor,
-    pub(super) width: u16,
-    pub(super) height: u16,
-    pub(super) revision: u64,
-    pub(super) pending: isize,
-    pub(super) moved_during_read: bool,
-    pub(super) focus: Option<String>,
-    pub(super) initialized: bool,
-    pub(super) origin: usize,
-    pub(super) area: Option<Rect>,
+pub(in crate::ui) struct VisualScroll {
+    pub(in crate::ui) row: usize,
+    pub(in crate::ui) within: usize,
+    pub(in crate::ui) anchor: ViewAnchor,
+    pub(in crate::ui) width: u16,
+    pub(in crate::ui) height: u16,
+    pub(in crate::ui) revision: u64,
+    pub(in crate::ui) pending: isize,
+    pub(in crate::ui) moved_during_read: bool,
+    pub(in crate::ui) focus: Option<String>,
+    pub(in crate::ui) initialized: bool,
+    pub(in crate::ui) origin: usize,
+    pub(in crate::ui) area: Option<Rect>,
 }
 impl Default for VisualScroll {
     fn default() -> Self {
@@ -87,7 +87,7 @@ impl ReadState {
     }
 }
 impl Navigation {
-    pub(super) fn cancel(&mut self) {
+    pub(in crate::ui) fn cancel(&mut self) {
         self.history_rebase_pending = false;
         if self.take_request().is_some() {
             self.set_loading(false);
@@ -96,12 +96,12 @@ impl Navigation {
         self.scroll.moved_during_read = false;
         self.view_revision = self.view_revision.wrapping_add(1);
     }
-    pub(super) fn rebase(&mut self) {
+    pub(in crate::ui) fn rebase(&mut self) {
         let pending = self.scroll.pending;
         self.cancel();
         self.scroll.pending = pending;
     }
-    pub(super) fn fail_read(&mut self) {
+    pub(in crate::ui) fn fail_read(&mut self) {
         self.history_rebase_pending = false;
         self.set_loading(false);
         if self.request().is_none() {
@@ -110,7 +110,7 @@ impl Navigation {
         self.set_request(None);
         self.scroll.moved_during_read = false;
     }
-    pub(super) fn finish_reply(&mut self) -> isize {
+    pub(in crate::ui) fn finish_reply(&mut self) -> isize {
         self.scroll.initialized = false;
         self.set_request(None);
         self.scroll.moved_during_read = false;
@@ -142,7 +142,7 @@ impl Navigation {
             (false, true) => FollowMode::ReadingUnseen,
         };
     }
-    pub(super) fn begin_read(&mut self, ticket: ReadTicket, pending: Option<isize>) {
+    pub(in crate::ui) fn begin_read(&mut self, ticket: ReadTicket, pending: Option<isize>) {
         self.read = ReadState::Awaiting(ticket);
         if let Some(pending) = pending {
             self.scroll.pending = pending;
@@ -151,7 +151,7 @@ impl Navigation {
     pub fn is_loading(&self) -> bool {
         matches!(self.read, ReadState::Hydrating | ReadState::Awaiting(_))
     }
-    pub(super) fn request(&self) -> Option<&ReadTicket> {
+    pub(in crate::ui) fn request(&self) -> Option<&ReadTicket> {
         match &self.read {
             ReadState::Awaiting(ticket) | ReadState::Delivered(ticket) => Some(ticket),
             ReadState::Idle | ReadState::Hydrating => None,
@@ -161,10 +161,10 @@ impl Navigation {
         let ticket = self.take_request();
         self.read = ReadState::new(loading, ticket);
     }
-    pub(super) fn set_request(&mut self, ticket: Option<ReadTicket>) {
+    pub(in crate::ui) fn set_request(&mut self, ticket: Option<ReadTicket>) {
         self.read = ReadState::new(self.is_loading(), ticket);
     }
-    pub(super) fn take_request(&mut self) -> Option<ReadTicket> {
+    pub(in crate::ui) fn take_request(&mut self) -> Option<ReadTicket> {
         let empty = ReadState::new(self.is_loading(), None);
         match std::mem::replace(&mut self.read, empty) {
             ReadState::Awaiting(ticket) | ReadState::Delivered(ticket) => Some(ticket),
@@ -285,7 +285,7 @@ impl ThreadView {
                 .last()
                 .is_none_or(|n| n.base_char_offset + n.text.chars().count() >= n.total_chars)
     }
-    pub(super) fn viewport_row(
+    pub(in crate::ui) fn viewport_row(
         &mut self,
         layout: &HistoryLayout,
         width: u16,
@@ -347,7 +347,7 @@ impl ThreadView {
         view.navigation.scroll.initialized = true;
         view.navigation.scroll.row
     }
-    pub(super) fn scroll(
+    pub(in crate::ui) fn scroll(
         &mut self,
         amount: isize,
         view_key: &str,

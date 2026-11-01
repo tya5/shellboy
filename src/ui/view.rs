@@ -1,5 +1,9 @@
 //! One Thread generation's source windows and navigation. No I/O or new workers.
 use super::*;
+
+mod navigation;
+pub use navigation::Navigation;
+
 #[derive(Debug)]
 pub struct ThreadView {
     pub(super) palette: theme::Palette,
@@ -22,7 +26,7 @@ pub struct ThreadView {
     pub state: String,
     pub draft: DraftSnapshot,
     pub generation: u64,
-    pub(super) nodes: Vec<UiNode>,
+    nodes: Vec<UiNode>,
     pub(super) provisional_nodes: BTreeSet<String>,
     // At most one saved correspondence per retained provisional node.
     committed_nodes: BTreeMap<String, String>,
@@ -51,7 +55,7 @@ pub struct ThreadView {
     pub tool_calls: u64,
     pub cancelled_calls: u64,
     pub reasoning_expanded: BTreeSet<String>,
-    pub(super) history_revision: u64,
+    history_revision: u64,
     body_storage_bytes: std::cell::Cell<Option<usize>>,
     pub navigation: Navigation,
     pub(super) composer: composer::Composer,
@@ -411,7 +415,7 @@ impl ThreadView {
                 })
     }
 
-    pub(super) fn selected_node_count(&self) -> usize {
+    fn selected_node_count(&self) -> usize {
         self.nodes
             .iter()
             .filter(|node| !self.provisional_nodes.contains(&node.node_id))
@@ -848,7 +852,7 @@ impl ThreadView {
         }
         !retired.is_empty()
     }
-    pub(super) fn rebase_preview(&mut self) -> Option<UiAction> {
+    fn rebase_preview(&mut self) -> Option<UiAction> {
         if self.navigation.history_rebase_pending {
             return None;
         }
