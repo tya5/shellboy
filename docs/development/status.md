@@ -7,7 +7,10 @@ macOS2328/0/35 and Windows2191/0/26. Reviewer6550616411 and the user's latest
 instruction approve the single G main batch after latest-main standard and
 exact-integrated-SHA3OS checks. Mergef96f5a2 includes main4035457 with
 #72/#97/#112/#114, without textual conflicts. This merge is not qualified by
-54e377b's older results. Current qualification and the authoritative admission
+54e377b's older results. A fixed-date navigation fixture crossed the normal seven-day GC cutoff in
+v32/v33; test-onlyfbf0d5c uses one fresh captured UTC instant without changing
+GC, retention, assertions or watchdogs. Its focused verification passes1/0.
+Final full-standard/exact-SHA qualification and the authoritative admission
 transition are reported on [#41](https://github.com/tya5/shellboy/issues/41).
 
 Known context/latest-compaction lifetime growth and query/catalogue followups

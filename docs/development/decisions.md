@@ -1,5 +1,23 @@
 # 開発判断
 
+## Retained-output fixture clock (#41, 2026-11-01)
+
+The latest-main standard exposed a real calendar dependency in the existing
+work-overview navigation test. Its raw output ended2026-10-25T00:01Z; at the
+2026-11-01T00:10Z diagnostic run, the unchanged seven-day policy legitimately
+reclaimed it. The UI received OutputExpired, but the test discarded unmatched
+updates and eventually hit the unchanged60s watchdog. Earlier G CI ran before
+expiry, so its success is not evidence against this diagnosis.
+
+Use one captured UTC instant for the synthetic end/output timestamps and a
+one-minute-earlier start in this navigation fixture. Keep normal GC, retention,
+assertions and watchdog limits unchanged; expiry tests own expired-source cases.
+Temporary trace instrumentation is removed. Focused native verification passes
+1/0 atfbf0d5c; v32/v33 failures and private trace remain recorded. This is a
+fixture correction, not a product GC workaround or an unproven flaky-test retry.
+Revisit other fixtures if another retained-output navigation test fails after
+crossing a literal calendar date; do not globally disable retention to hide it.
+
 ## Scoped resource envelope for latest-compaction display (#41, 2026-11-01)
 
 Use the existing canonical readback queries under a private readonly display

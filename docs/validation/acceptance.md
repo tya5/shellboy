@@ -1,5 +1,24 @@
 # Validation record
 
+## G latest-main fixture correction and final gate records
+
+At main4035457 integration351e5f4, standard v32 passes Python86/layout95/
+watchdog/fmt/strict all-target Clippy and library1359/0/15, then fails integration
+957/1/17 in work_overview_follows_the_saved_execution_to_get_and_raw_output.
+The diagnostic v33 reproduces Inspect success followed by a raw-read Status:
+original shell output is no longer fully retained. The fixed2026-10-25 output
+crossed the normal seven-day GC cutoff at the2026-11-01 run. Neither run is
+claimed successful; v32/v33 logs and trace are private local evidence.
+
+Test-onlyfbf0d5c replaces that fixture's calendar literals with one captured
+current UTC instant and a one-minute-earlier start. Native focused verification
+exits0:1 passed/0 failed (v34). GC/retention/watchdog/assertions and product source
+are unchanged. No test is ignored, deleted or weakened; temporary trace removed.
+The final full-standard and exact-integrated-SHA3OS outcomes, main admission and
+transferred residual report are recorded on
+[#41](https://github.com/tya5/shellboy/issues/41). Older checkpoint successes below
+do not qualify this new merge or the fixture correction.
+
 ## G54e377b exact-source CI and final integration boundary
 
 Ordinary native3OS CI41251630243 succeeds at exact source
