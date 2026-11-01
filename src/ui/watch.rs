@@ -1898,11 +1898,13 @@ mod tests {
         state.open(7, vec![summary("t", ActivityPhase::Completed)]);
         let mut raw = detail("t", "r", Some("a"), ActivityPhase::Completed);
         raw.answer_preview = Some("**原文の回答** / model-code".into());
+        raw.work = output_detail("r", 5).facts().work.clone();
         raw.pending_messages = 2;
         let prepared = raw.prepare_in(UiLanguage::En);
         let source = prepared.facts().answer_preview.clone();
         assert!(state.apply_detail(7, 11, prepared));
         let before = state.action_target("t", WatchActionKind::Output);
+        assert!(before.is_some(), "exercise a valid owner, not None == None");
         assert!(
             state
                 .row("t")
