@@ -18,6 +18,7 @@ Operation guides for people using Shellboy and models working inside it. Start w
 | Attach files or images | [Attachments](attachments.md) |
 | Recover, stop, reclaim capacity, or diagnose errors | [Recovery and storage](recovery-and-storage.md) |
 | Look up command syntax and returned JSON | [CLI reference](cli-reference.md) |
+| Read memory/startup observations and reproduce the fake-model workload | [Resource usage](resource-usage.md) |
 
 For people: User Guide → TUI operations → task-specific guides. For models: Agent Guide → delegation/shell → CLI reference. Both audiences share the feature guides.
 

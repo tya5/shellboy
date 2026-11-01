@@ -148,6 +148,13 @@ pub fn documents() -> Vec<Document> {
             include_str!("../docs/guides/rag.md"),
         ),
         document(
+            "shellboy/resource-usage",
+            "shellboy/reference",
+            "Resource usage",
+            "Fake-model PSS and startup observations, process differences and reproduction",
+            include_str!("../docs/guides/resource-usage.md"),
+        ),
+        document(
             "shellboy/cli-reference",
             "shellboy/reference",
             "CLI reference",
@@ -378,6 +385,7 @@ fn link_target(path: &str) -> Option<&'static str> {
         "attachments.md" => "shellboy/attachments",
         "recovery-and-storage.md" => "shellboy/recovery-and-storage",
         "configuration.md" => "shellboy/configuration",
+        "resource-usage.md" => "shellboy/resource-usage",
         "tui.md" => "shellboy/tui",
         "cli-reference.md" => "shellboy/cli-reference",
         "rag.md" => "shellboy/rag",

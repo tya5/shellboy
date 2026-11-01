@@ -5,7 +5,9 @@ Stage 1 (`footprint.py`, below) measures Shellboy alone. Stage 2
 Shellboy, Claude Code, Codex CLI, opencode and jcode on one runner against the
 same fake model. Both are standard-library Python, use a deterministic loopback
 model and never a provider account; there is no real-provider option. Stage 3
-(a published comparison page) is not implemented. No Rust/Core change is needed.
+is published in the [Resource usage guide](../../docs/guides/resource-usage.md),
+with source artifacts, observed numbers, differences and reproduction. The
+measurement runners do not change Rust/Core behavior.
 
 ## Reproduce On Linux
 
@@ -203,8 +205,9 @@ Code as one process per session. Codex sometimes still had a few descendant
 processes alive at a sample (seen at N=1 and N=20 in different runs); they are
 counted. GitHub assigns different CPU models to different runs (AMD EPYC 7763
 and 9V45 were both seen), so compare agents within one artifact only. Process-per-session
-agents get no readiness signal before their first turn, so every adapter idles
-3 s before the baseline sample (as jcode's script does).
+agents get no readiness signal before their first turn, so the four external-agent
+adapters idle 3 s before the baseline sample (as jcode's script does). Shellboy
+reuses stage 1's ready-owner/created-Threads baseline without that fixed delay.
 
 ### Startup
 

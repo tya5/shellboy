@@ -7649,3 +7649,48 @@ boundary-planner extraction then passes strict Clippy --tests and the same19/
 are161 ->91 overall (approved checkpoint155 ->91), fields20 ->15 (approved18
 ->15), scroll395 ->237 (approved307 ->237). Native branch CI still pending;
 no local full-suite claim. No marked behaviour fix is included.
+
+## Resource-usage guide publication (#116 stage 3)
+
+Source: successful public workflow run
+[41307629104](https://github.com/tya5/shellboy/actions/runs/41307629104), measured
+SHA `5a2e8474a52928eaafd35d64c3eb29dfd6c34626`; documentation prerequisite
+`issue-116/compare` at `4d6f128a604170ff2bc4ece19b02d8adba04ce86`.
+`footprint` job 124851174890 produced artifact 13084027318 and `compare` job
+124851174914 produced artifact 13084610570. Both contain `status=complete`;
+the comparison is not a smoke run. The two jobs are separate runners even
+though their CPU model matches. The published guide uses the fresh stage-1
+observation in this workflow, not a mix of historical measurements.
+
+Downloaded public JSON was cross-checked offline against every published row:
+four stage-1 baseline/five-round rows, five round-5 comparison rows, and five
+startup median/min/max rows (five observations each). Source SHA, executable
+hash, KiB units, agent completion, N matrix and recorded Node 22.23.4/npm 10.9.9
+were checked. The generic startup definition is not stage 1's completed-frame/
+pasted-echo method. The guide preserves fake-model, process-shape, disabled
+approvals/sandboxes, feature-scope and same-comparison-run limitations. Source
+inspection corrected the README's blanket 3-second baseline claim: only the
+four external-agent adapters have that delay; Shellboy reuses stage 1 unchanged.
+No measurement code, installed agent, provider account or user data is changed.
+
+Qualification: existing bundled-doc tests cover links, sections, UTF-8,
+pagination, cursors and keyword search. A new real CLI regression retrieves and
+searches `shellboy/resource-usage` with missing config and an uncreated data-dir,
+checks provenance/caveats, and verifies that no files/owner are created. The
+resource page is a fourteenth English logical guide under the existing reference
+category, with its relative link registered. Adding it changes the existing docs
+version/hash; a previously indexed docs corpus can require explicit reindexing,
+never an automatic embedding call. Native focused checks and ordinary branch
+CI qualify the commit; actual commands/results and exact-SHA CI URL are handed
+off after completion, not inferred from the measurement run above. Windows is
+reserved for integration-batch checks. This task does not repeat measurements
+or establish real-provider, physical-terminal, IME or cross-run performance.
+
+Native macOS qualification: `cargo check --locked --all-targets` passed;
+`cargo test --locked --lib docs::` passed 8/8; `cargo test --locked --test
+integration docs_cli::` passed 7/7 including the new page regression.
+`docs_proxy::` was intentionally ignored (0 passed, 1 ignored): that opt-in test
+would call an actual model API and is not evidence here. Python script tests
+passed 94/94; `scripts/check-test-layout.py` passed 100 suites and watchdog
+policy. Formatting and final post-fetch focused verification are repeated
+before push. No new test suite or target is introduced.

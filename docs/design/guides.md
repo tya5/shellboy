@@ -23,6 +23,7 @@
 | `guides/attachments.md` | ファイル/画像入力 | 外部参照とmanaged画像、追加/除外/更新/欠落、上限/モデル依存を説明する |
 | `guides/recovery-and-storage.md` | 状態確認・復旧・運用 | 受付と完了、retry、通常/強制終了、保持/GC、代表errorへの対処を説明する |
 | `guides/cli-reference.md` | 人間/モデルのコマンド辞書 | 全35操作、alias、共通接続/JSON/exit、wait/cursor/冪等性を参照できる |
+| `guides/resource-usage.md` | Resource measurements for people and models | Immutable source run/artifacts, versions, runners, date, methods, limitations, feature/process differences and reproduction; no ranking or real-model claim. Bundled as `shellboy/resource-usage` under reference. |
 
 User Guide → TUI/設定 → 必要な機能別文書。Agent Guide → 委譲/shell → CLI reference。各文書の冒頭に入口へのリンクを置き、実行例はBashと明示する。PowerShellでは必要な引数形式の違いを併記し、未実機検証を隠さない。モデルIDは架空の既定値にせず、接続例と実行保証を区別する。
 

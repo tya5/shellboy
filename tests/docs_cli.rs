@@ -259,3 +259,52 @@ async fn bundled_agent_guide_explains_thread_wait_continuation_without_an_owner(
     .await
     .unwrap();
 }
+
+#[test]
+fn resource_usage_guide_is_bundled_searchable_and_offline() {
+    let root = tempfile::tempdir().unwrap();
+    let (success, page) = call(
+        root.path(),
+        &["docs", "get", "--id", "shellboy/resource-usage"],
+    );
+    assert!(success && page["ok"] == true, "{page}");
+    let text = page["result"]["text"].as_str().unwrap();
+    for required in [
+        "workflow run 41307629104",
+        "5a2e8474a52928eaafd35d64c3eb29dfd6c34626",
+        "Stage 1: Shellboy alone",
+        "Stage 2: same-run agent comparison",
+        "PSS in KiB",
+        "2026-11-01",
+        "within the same comparison run and artifact",
+        "Approvals and sandboxes are disabled",
+        "not an internal ready timestamp",
+        "not interchangeable",
+        "JCODE_MEMORY_ENABLED=0",
+        "Embeddings use a configured external API",
+        "scripts/bench/compare.py",
+    ] {
+        assert!(text.contains(required), "resource guide missing {required}");
+    }
+    assert!(page["result"].get("next_cursor").is_none());
+    let (success, search) = call(
+        root.path(),
+        &[
+            "docs",
+            "search",
+            "--parent",
+            "shellboy/reference",
+            "--query",
+            "JCODE_MEMORY_ENABLED",
+        ],
+    );
+    assert!(success && search["ok"] == true, "{search}");
+    assert!(
+        search["result"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| { item["id"] == "shellboy/resource-usage" })
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+}

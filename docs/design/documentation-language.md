@@ -13,7 +13,7 @@
 
 ## Bundled docs and RAG
 
-Keep the existing 13 logical guide IDs and three categories. `docs list/get/search` and the `docs` RAG scope use English bodies, titles, summaries, and category introductions. The system prompt already directs models to these stable IDs in English and does not require a new prompt or language state.
+Retain existing logical guide IDs and the three categories. The resource-usage guide added for #116 stage 3 is the fourteenth guide, `shellboy/resource-usage`, under `shellboy/reference`; this is an additive catalogue entry, not an ID rename or language selector. `docs list/get/search` and the `docs` RAG scope use English bodies, titles, summaries, and category introductions. The system prompt already directs models to these stable IDs in English and does not require a new prompt or language state.
 
 The Japanese User Guide remains readable from the source and release archives. It is not an additional bundled catalogue entry. Links to `.ja.md` are repository links, not falsely reported as resolvable bundled IDs. No `--lang` flag, per-Thread locale, dual-language search index, schema, worker, or dependency is added. `docs search` performs literal search, not query translation. Unicode matching and UTF-8-safe pagination remain supported for quoted text and user-provided RAG/history content.
 

@@ -21,6 +21,16 @@ No timeout or product behavior changes. Qualification and original CI panic
 are tracked in [frontend stability](../validation/frontend-stability.md);
 repeated exact-SHA Linux/macOS CI must pass before integration. W3's separate
 local-only investigation is outside this change.
+## Resource-usage guide (#116 stage 3)
+
+The English `shellboy/resource-usage` guide publishes stage-1 and stage-2
+observations from run 41307629104 with exact measured source, binary hash,
+agent versions, runner/date, process/feature differences and reproduction.
+It separates the two jobs' runners and startup definitions; it makes no ranking
+or real-model claim. The new bundled reference guide retains existing IDs and
+requires no owner or API. Source measurements are verified public artifacts,
+not new benchmark executions; branch qualification is recorded in acceptance
+and the exact-SHA CI handoff. Stage 2 at `4d6f128a` is the branch prerequisite.
 
 ## Schema 18 release-upgrade validation
 
