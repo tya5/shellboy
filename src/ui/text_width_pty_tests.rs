@@ -70,7 +70,7 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
                 &mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                &mut size,
+                std::ptr::addr_of_mut!(size),
             )
         },
         0

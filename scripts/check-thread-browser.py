@@ -43,7 +43,7 @@ def main():
         cells[name] = out.with_suffix('.txt').read_text()
     checks = {
         'aligned_columns': all(label in cells['wide'] for label in ('会話', '作業場所', '状態', '更新')),
-        'known_tree_branches': '+-' in cells['wide'] and '▾' in cells['wide'],
+        'known_tree_branches': '+-' in cells['wide'] and '\\-' in cells['wide'] and '▾' in cells['wide'],
         'unknown_parent_explicit': '[親未取得]' in cells['wide'],
         'collapsed_hides_children': '▸' in cells['collapsed'] and '調査タスク 37' not in cells['collapsed'],
         'expanded_nested_child': '折り返しと結合文字' in cells['expanded'],

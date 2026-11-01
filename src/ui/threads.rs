@@ -1801,7 +1801,7 @@ impl ThreadBrowser {
             label.push_str(". ");
         }
         if row.depth > 0 {
-            label.push_str(if row.last { "+-" } else { "+-" });
+            label.push_str(if row.last { "\\-" } else { "+-" });
         }
         label.push_str(if row.children {
             if self.collapsed.contains(&thread.thread_id) {
@@ -2291,6 +2291,31 @@ pub(super) fn plain_preview(text: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sibling_tree_rows_distinguish_middle_and_last_with_invariant_marks() {
+        let browser = ThreadBrowser {
+            items: vec![
+                thread("parent", None),
+                thread("first", Some("parent")),
+                thread("last", Some("parent")),
+            ],
+            ..Default::default()
+        };
+        let rows = browser.rows();
+        let first = rows
+            .iter()
+            .find(|row| browser.items[row.index].thread_id == "first")
+            .unwrap();
+        let last = rows
+            .iter()
+            .find(|row| browser.items[row.index].thread_id == "last")
+            .unwrap();
+        let first_label = browser.label(first, &browser.items[first.index], false, false, 100);
+        let last_label = browser.label(last, &browser.items[last.index], false, false, 100);
+        assert!(first_label.contains("+-"), "{first_label}");
+        assert!(last_label.contains("\\-"), "{last_label}");
+    }
 
     #[test]
     fn ux_title_uses_the_same_conversation_term_as_its_rows() {
