@@ -80,16 +80,18 @@ fn request_has_only_what_the_conversation_needs() {
             "max_tokens",
             "messages",
             "model",
+            "output_config",
             "stream",
             "system",
             "tools"
         ]
     );
+    assert_eq!(wire["output_config"], json!({"effort":"low"}));
     assert_eq!(wire["max_tokens"], 32768);
     assert_eq!(wire["stream"], true);
     assert_eq!(wire["system"], "You are Shellboy.");
     // Nothing optional or provider-specific is added on the user's behalf, and
-    // the Shellboy effort setting is not translated into thinking.
+    // the Shellboy effort setting is sent only as output_config.effort.
     for absent in [
         "thinking",
         "temperature",
@@ -112,6 +114,26 @@ fn request_has_only_what_the_conversation_needs() {
     assert_eq!(tool["name"], "shell");
     assert!(tool["input_schema"].is_object());
     assert!(tool.get("parameters").is_none() && tool.get("type").is_none());
+}
+
+#[test]
+fn effort_is_sent_only_when_set_and_uses_one_mapping() {
+    let none = response_request("claude-fixture", vec![user("hi")], None, false);
+    let wire = dialect::encode_with(Api::AnthropicMessages, none, 32768).unwrap();
+    assert!(wire.get("output_config").is_none());
+    for (given, sent) in [
+        ("minimal", "low"),
+        ("low", "low"),
+        ("medium", "medium"),
+        ("high", "high"),
+        ("xhigh", "xhigh"),
+        ("max", "max"),
+    ] {
+        let req = response_request("claude-fixture", vec![user("hi")], Some(given), false);
+        let wire = dialect::encode_with(Api::AnthropicMessages, req, 32768).unwrap();
+        assert_eq!(wire["output_config"], json!({"effort":sent}), "{given}");
+        assert!(wire.get("thinking").is_none() && wire.get("reasoning").is_none());
+    }
 }
 
 #[test]
@@ -405,6 +427,8 @@ async fn without_extra_body_no_optional_field_reaches_the_wire() {
             .await
             .unwrap();
         let (_, body) = task.await.unwrap();
+        // The Thread effort reaches the wire as output_config.effort.
+        assert_eq!(body["output_config"], json!({"effort":"low"}));
         let mut keys: Vec<&str> = body
             .as_object()
             .unwrap()
@@ -418,6 +442,7 @@ async fn without_extra_body_no_optional_field_reaches_the_wire() {
                 "max_tokens",
                 "messages",
                 "model",
+                "output_config",
                 "stream",
                 "system",
                 "tools"
@@ -493,6 +518,7 @@ fn configuration_validates_max_tokens_and_the_messages_api() {
         "messages",
         "system",
         "tools",
+        "output_config",
     ] {
         assert!(ok(&format!("extra_body={{ {key} = 1 }}")).is_err(), "{key}");
     }

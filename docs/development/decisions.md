@@ -2602,6 +2602,20 @@ requests, not to model-list or embedding requests. Revisit if a provider needs a
 non-top-level merge, per-model extras, or a header that the credential filter
 wrongly rejects.
 
+## #126: Three tiers of provider settings; effort reaches Messages (2026-11-01)
+
+Provider settings are (1) Shellboy concepts converted per dialect, (2) opaque
+`extra_body`/`extra_headers`, (3) opaque response blocks returned unchanged. A
+setting is promoted from tier 2 to tier 1 only when (a) correct placement needs
+structure only Shellboy knows, or (b) it varies per Thread/Turn and Shellboy
+already holds that state. Thread effort meets (b), so Messages now sends it as
+`output_config.effort` (reserved key, rejected in `extra_body`); unset sends
+nothing. One mapping function in the encoder: `minimal` -> `low`, other strings
+unchanged, because there is no model catalog and the endpoint is the judge.
+Thinking on/off stays tier 2. Real-API confirmation is pending approval and
+balance. Revisit if a provider rejects `minimal`-style names we pass through or
+a second per-Thread knob appears.
+
 ## #121: context_role maps inserted context at send time (2026-11-01)
 
 Add `connections.<name>.context_role = "developer" | "user"` (default

@@ -106,6 +106,7 @@ impl Api {
                 "messages",
                 "system",
                 "tools",
+                "output_config",
             ],
         }
     }

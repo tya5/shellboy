@@ -230,9 +230,16 @@ described below; synthetic fixtures are not evidence of a real provider cache hi
 - Shellboy sends the minimum a conversation needs: `model`, `max_tokens`
   (required by the API), `stream`, `messages`, a top-level `system` and `tools`,
   and the fixed header `anthropic-version: 2023-06-01`. **Nothing optional is
-  sent.** Thinking, effort, temperature, `tool_choice`, `cache_control` and beta
-  headers are yours to add with `extra_body` and `extra_headers`. A Thread's
-  effort setting is not translated for this dialect. Newer models reject some
+  sent except the Thread effort**, which goes as `output_config.effort` when one
+  is set (`minimal` is sent as `low`; other values unchanged) and is omitted
+  otherwise. `output_config` is reserved, so `extra_body` cannot set it.
+  Thinking, temperature, `tool_choice`, `cache_control` and beta headers are
+  yours to add with `extra_body` and `extra_headers`. Thinking on/off is not
+  tied to effort: `output_config.effort` guides how much the model works, while
+  `thinking` (for example `{ type = 'enabled', budget_tokens = ... }`) is a
+  separate setting, and some models accept only certain combinations or reject
+  one of them with HTTP 400. Check the provider's documentation for the model.
+  Newer models reject some
   parameters (for example `temperature`) with HTTP 400; Shellboy never sends them.
 - `max_tokens` (positive integer, only valid with this dialect) defaults to 32768,
   below the 128K output cap documented for current models. Raise it for very long
@@ -305,9 +312,9 @@ extra_headers = { "X-Beta-Feature" = "alpha" }
 - `extra_headers` is a table of strings added to each conversation and summary request. It is not sent to model-list or embedding requests.
 - Both apply to every dialect (`responses`, `chat_completions`, and later ones). With neither set, the request is exactly what it was before.
 - Shellboy checks only three things: the value is representable as JSON (no TOML dates or times), it is small (`extra_body` at most 64 KiB serialized, `extra_headers` at most 32 entries of at most 8 KiB each), and it does not collide with a field Shellboy owns. Anything else is passed through and judged by the provider. A rejected value reports `config_invalid` at `shellboy config check` and at startup.
-- Reserved `extra_body` top-level keys (rejected, not overridden). `responses`: `model`, `input`, `tools`, `stream`, `store`, `include`, `reasoning`, `previous_response_id`, `prompt_cache_key`. `chat_completions`: `model`, `messages`, `tools`, `stream`, `stream_options`, `reasoning_effort`. A name reserved for one dialect is ordinary for the other.
+- Reserved `extra_body` top-level keys (rejected, not overridden). `responses`: `model`, `input`, `tools`, `stream`, `store`, `include`, `reasoning`, `previous_response_id`, `prompt_cache_key`. `chat_completions`: `model`, `messages`, `tools`, `stream`, `stream_options`, `reasoning_effort`. `anthropic_messages`: `model`, `max_tokens`, `stream`, `messages`, `system`, `tools`, `output_config`. A name reserved for one dialect is ordinary for the other.
 - `extra_headers` rejects credential-like and transport-owned names (`Authorization`, `Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, `Accept`, `X-Shellboy-Session-Id`, and any name containing `api-key`, `apikey`, `secret`, `token` or `credential`). Use `api_key_env` or `headers` for credentials. A name may not repeat an entry of `headers`.
-- Effort: `default_effort` (and a Thread's effort) is sent as `reasoning` (Responses) or `reasoning_effort` (Chat). Those keys are reserved, so `extra_body` cannot also set them; there is nothing to prioritize. Provider-specific reasoning shapes (for example `thinking`) go in `extra_body`.
+- Effort: `default_effort` (and a Thread's effort) is sent as `reasoning` (Responses), `reasoning_effort` (Chat) or `output_config.effort` (Messages). Those keys are reserved, so `extra_body` cannot also set them; there is nothing to prioritize. Provider-specific reasoning shapes (for example `thinking`) go in `extra_body`.
 - Each model attempt records only a SHA-256 hash of the extra fields it sent (`extra_digest` in its input manifest), so you can later tell whether two attempts used the same settings. The contents stay in your configuration file; they are not copied into the database. Treat `extra_body` values as non-secret: use `api_key_env` for keys.
 - Restart the owner after changing either setting. The provider's own documentation, not Shellboy, says which values are valid; add and remove entries as the provider changes.
 

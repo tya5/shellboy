@@ -831,6 +831,7 @@ fn extra_body_rejects_fields_shellboy_owns_per_dialect() {
         ("chat_completions", "stream"),
         ("chat_completions", "stream_options"),
         ("chat_completions", "reasoning_effort"),
+        ("anthropic_messages", "output_config"),
     ] {
         let error = connection_with(&format!("api='{api}'\nextra_body = {{ {field} = 1 }}"))
             .unwrap_err()

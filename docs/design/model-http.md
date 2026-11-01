@@ -264,10 +264,21 @@ models) read on 2026-11-01; no real provider call has been made.
   All resolved values use the existing sensitive-header/redaction path. Real
   Anthropic Bearer authentication remains unverified, not assumed compatible.
 - Request: `model`, `max_tokens` (required by the API), `stream: true`,
-  `messages`, a top-level `system` string, and `tools`. Nothing optional is sent:
-  no `thinking`, effort, temperature, `tool_choice`, `cache_control` or beta
-  header; the user adds them with `extra_body` and `extra_headers` (#119). Reserved
-  `extra_body` keys: `model`, `max_tokens`, `stream`, `messages`, `system`, `tools`.
+  `messages`, a top-level `system` string, and `tools`. The only
+  optional field is the Thread effort, sent as `output_config.effort` when set
+  and absent otherwise (#126). The mapping lives in one function of the
+  dialect: `minimal` becomes `low`, every other string is sent unchanged (no
+  model catalog). No `thinking`, temperature, `tool_choice`, `cache_control` or
+  beta header; the user adds them with `extra_body` and `extra_headers` (#119).
+  Reserved `extra_body` keys: `model`, `max_tokens`, `stream`, `messages`,
+  `system`, `tools`, `output_config`.
+- Provider settings have three tiers (#126). (1) Shellboy concepts, converted by
+  each dialect's encoder; (2) opaque passthrough, `extra_body`/`extra_headers`;
+  (3) opaque response blocks stored and returned unchanged. A setting moves from
+  tier 2 to tier 1 only if (a) placing it correctly needs structure only
+  Shellboy knows, or (b) it varies per Thread or Turn and Shellboy already holds
+  that state. Otherwise it stays in tier 2. Thread effort satisfies (b);
+  thinking on/off does not, so it stays in `extra_body`.
 - `max_tokens`: connection setting `max_tokens` (positive integer), default 32768,
   chosen to be below the documented 128K output cap of current models and large
   enough that routine coding turns do not stop at `max_tokens`. It is only valid

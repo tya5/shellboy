@@ -1,6 +1,7 @@
 //! Anthropic Messages wire adapter (#120 stage 3). Sources: the public Anthropic
 //! documentation read on 2026-11-01; no real provider call has been made.
-//! Nothing optional is sent: thinking, effort, sampling, tool_choice and
+//! The only optional field Shellboy sends is the Thread effort, as
+//! `output_config.effort` (#126). Thinking, sampling, tool_choice and
 //! cache_control are the user's, through `extra_body` (#119).
 use super::*;
 use crate::model::opaque;
@@ -98,6 +99,17 @@ fn push(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
     messages.push(json!({"role":role,"content":blocks}));
 }
 
+/// The single effort mapping for this dialect (#126). Shellboy's effort is an
+/// opaque endpoint string; only names known to differ are translated, and every
+/// other value (`low`, `medium`, `high`, `xhigh`, `max`, ...) goes unchanged.
+fn effort_name(effort: &str) -> &str {
+    match effort {
+        // Responses' lowest tier; Messages has no `minimal`.
+        "minimal" => "low",
+        other => other,
+    }
+}
+
 pub(super) fn encode(request: Value, max_tokens: u64) -> Result<Value, ModelError> {
     let input = request["input"]
         .as_array()
@@ -179,6 +191,9 @@ pub(super) fn encode(request: Value, max_tokens: u64) -> Result<Value, ModelErro
         "stream":true,
         "messages":messages,
     });
+    if let Some(effort) = request.pointer("/reasoning/effort").and_then(Value::as_str) {
+        result["output_config"] = json!({"effort":effort_name(effort)});
+    }
     if !system.is_empty() {
         result["system"] = json!(system.join("\n\n"));
     }
