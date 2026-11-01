@@ -45,6 +45,8 @@ struct Delivery {
     pending: Mutex<Pending>,
     closed: AtomicBool,
     ready: tokio::sync::Notify,
+    #[cfg(test)]
+    observed_attempt: tokio::sync::Notify,
 }
 pub(super) struct BufferedUpdates {
     delivery: Arc<Delivery>,
@@ -65,6 +67,8 @@ impl BufferedUpdates {
                 pending: Mutex::new(Pending::default()),
                 closed: AtomicBool::new(false),
                 ready: tokio::sync::Notify::new(),
+                #[cfg(test)]
+                observed_attempt: tokio::sync::Notify::new(),
             }),
         }
     }
@@ -204,6 +208,16 @@ impl UpdateTarget for BufferedUpdates {
     #[allow(clippy::result_large_err)] // Preserve ownership on bounded-channel rejection, without allocation.
     fn try_send(&self, value: UiUpdate) -> Result<(), std::sync::mpsc::TrySendError<UiUpdate>> {
         use std::sync::mpsc::TrySendError;
+        #[cfg(test)]
+        let _observed_attempt = {
+            struct WakeOnReturn<'a>(&'a tokio::sync::Notify);
+            impl Drop for WakeOnReturn<'_> {
+                fn drop(&mut self) {
+                    self.0.notify_waiters();
+                }
+            }
+            WakeOnReturn(&self.delivery.observed_attempt)
+        };
         if self.closed() {
             return Err(TrySendError::Disconnected(value));
         }
@@ -499,6 +513,7 @@ mod tests {
             Arc::new(Semaphore::new(32)),
             Some(receipt_startup()),
         ));
+        let mut committed_changes = control.subscribe();
         sender
             .try_send(UiAction::Cancel {
                 thread_id: "thread".into(),
@@ -521,7 +536,10 @@ mod tests {
                 if state == "stopped" {
                     break;
                 }
-                tokio::time::sleep(Duration::from_millis(5)).await;
+                match committed_changes.recv().await {
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(error) => panic!("committed cancellation notifications closed: {error}"),
+                }
             }
         })
         .await
@@ -575,11 +593,20 @@ mod tests {
         .unwrap();
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
+                let attempted=observer.delivery.observed_attempt.notified();
+                tokio::pin!(attempted);
+                attempted.as_mut().enable();
                 let saved: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE id='closing-draft' AND revision=99)", [], |r| r.get(0)).unwrap();
                 let sent: i64 = db.query_row("SELECT count(*) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE n.kind='user' AND r.target_thread_id GLOB 'closing-thread-*' AND n.payload_json LIKE '%synthetic queued closing request%'", [], |r| r.get(0)).unwrap();
                 if saved && sent == 40 { break; }
                 assert!(!bridge.is_finished(), "shutdown must retain pending UI results");
-                tokio::time::sleep(Duration::from_millis(5)).await;
+                tokio::select! {
+                    _=&mut attempted=>{},
+                    change=committed_changes.recv()=>match change {
+                        Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{},
+                        Err(error)=>panic!("committed closing notifications closed: {error}"),
+                    },
+                }
             }
         }).await.unwrap_or_else(|error| {
             let draft: Option<i64> = db.query_row("SELECT max(revision) FROM draft WHERE id='closing-draft'", [], |r| r.get(0)).unwrap();
@@ -591,6 +618,9 @@ mod tests {
         });
         tokio::time::timeout(Duration::from_secs(15), async {
             loop {
+                let attempted = observer.delivery.observed_attempt.notified();
+                tokio::pin!(attempted);
+                attempted.as_mut().enable();
                 if observer
                     .delivery
                     .pending
@@ -614,7 +644,7 @@ mod tests {
                     !bridge.is_finished(),
                     "ordinary Quit cannot discard retained results"
                 );
-                tokio::time::sleep(Duration::from_millis(5)).await;
+                attempted.await;
             }
         })
         .await

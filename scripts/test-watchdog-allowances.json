@@ -384,30 +384,6 @@
     "reason": "Deferred #41 D2 integrated from main4a6b839: exact existing external_settings_notify_after_commit_and_refresh_metadata_without_resuming_recovery occurrence; migrate with shared-read integration, no whole-file exemption."
   },
   {
-    "file": "src/frontend/control_tests/thread_settings.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "4375aecb133d887e9a6c6974750431b64b35e51281a65fb6268ae0d42f1782d1",
-    "function": "unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/control_tests/thread_settings.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "f02a8bb35738d45aa57589e5593bfb348970442a57fbbcb975b45b58a43150aa",
-    "function": "unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/control_tests/thread_settings.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "f9f5d83c5d0ae6edb2ed1e41ff1f5e3acd23ced2a35ceaa1dd6f4173de855c6c",
-    "function": "unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_thread test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
     "file": "src/frontend/delivery_performance.rs",
     "rule": "wall-deadline",
     "fingerprint": "bee1420ae697e7a36a03f217375ba6428e38446e0e6d9d80aa45ed16c7212ed1",
@@ -454,22 +430,6 @@
     "function": "accepted_force_at_full_reserve_never_waits_for_ui_or_second_force",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing accepted_force_at_full_reserve_never_waits_for_ui_or_second_force test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "21bd53bc0adedae778ad9646f7ec6727d14f60fa7b3b928c2a87c3c68f2f9d11",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "321aa6309ad0d27003a250c203b2291c933400065a7b7dce559e70a626234d5f",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
@@ -530,26 +490,10 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "c82139c30fee17666285194f1de07342702e921627fdd48e722d33ac82718d58",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
     "fingerprint": "d15dd1a8e62fa3b398e6fd941d1208e522d71f745b5bea9f1423e55416fd41e4",
     "function": "accepted_force_at_full_reserve_never_waits_for_ui_or_second_force",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing accepted_force_at_full_reserve_never_waits_for_ui_or_second_force test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "ee8dc4f3fe788e9a78ee1cb9a16f0cdfe6660b8a8ac2cb32af0529f00a6d5268",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "src/frontend/update_delivery.rs",
@@ -738,26 +682,10 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "235650b64cd872388939b7b8239027c41f5405c845f186cb3d64514e4e8cac88",
-    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing structured_history_pages_details_url_copy_and_wait_cancel_keep_originals test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
     "fingerprint": "3d70e4e0df6366ec0d94c859c74b7c7ba496631a537af39b3a029c87b9b54f26",
     "function": "direct_database_read_failure_also_stops_new_execution",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing direct_database_read_failure_also_stops_new_execution test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "4ce645a61ac7997239c709fe4ead298d7e3b0cb45ff56b4fc5cb1f67f9f2711b",
-    "function": "persisted_output_identity_is_delivered_before_each_history_window",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/frontend.rs",
@@ -778,14 +706,6 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "69d90c596f6bdd4d11ae3ba7184e5e9cda7e9e74240d1f3c80a6b39c1ed259f0",
-    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing structured_history_pages_details_url_copy_and_wait_cancel_keep_originals test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
     "fingerprint": "7a96bfd34ba329080a13d8320c21b5919ae33c10c7b4927d21e08fe66706d558",
     "function": "work_overview_follows_the_saved_execution_to_get_and_raw_output",
     "count": 1,
@@ -794,26 +714,10 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "7bfeb90cc3180bbbdace2fc79e75037a2af79b4d8605e75beeb686c427594eb5",
-    "function": "persisted_output_identity_is_delivered_before_each_history_window",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
     "fingerprint": "7f88ca4b7853a553d4355c2800ed24fa43d62b7cc2d17dfb63d16335d85e3af7",
     "function": "draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing draft_database_save_failure_stops_admission_and_owned_shell_but_retains_input test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "99cc906df920b0581427487c16ba3bb6963843e9ae59473785a8f6f4d9df01e9",
-    "function": "persisted_output_identity_is_delivered_before_each_history_window",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing persisted_output_identity_is_delivered_before_each_history_window test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/frontend.rs",
@@ -838,14 +742,6 @@
     "function": "stale_history_navigation_recovers_after_path_change",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing stale_history_navigation_recovers_after_path_change test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "fa8b46e55923ad6dc691d101d626b96b90d121c8c19d1b6183fa2be266cede4b",
-    "function": "edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/index.rs",
@@ -1102,5 +998,85 @@
     "function": "multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "06edcf76e59127e156c37e5624884cee0f97487bd03a0be2253a746a0aceda11",
+    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "07ecc41f202f42a05857f3c184e7bac80b37b4bfac757565336ed87b688b5d7a",
+    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "321aa6309ad0d27003a250c203b2291c933400065a7b7dce559e70a626234d5f",
+    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "3c590dc30393a4f2e3a78bbd76596cb02e7e74ae8c092be74a1134bc195a3edd",
+    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "235650b64cd872388939b7b8239027c41f5405c845f186cb3d64514e4e8cac88",
+    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "9bd56d39f3ea74cd2445c405269ffd11897c914fc6c0c39eeec552ee195f4008",
+    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "c8906b5753da88f28a548e50b5c921bcaa1272a9fdf9f587f432c7d785435260",
+    "function": "persisted_output_identity_is_delivered_before_each_history_window",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "d43522e257136698b971ea474a7d44d34b2295871a28732e1a060c26a0e2f048",
+    "function": "edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/support/watchdog.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "face92f8f13654300be24c83c07129112580fcbe48557b10e32e5498a336c680",
+    "function": "receive_until",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/support/watchdog.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "a9253f434d18a83c4404a830650bc0f1b6786deec3086e59f0cc490727880ac1",
+    "function": "receive_until",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
   }
 ]

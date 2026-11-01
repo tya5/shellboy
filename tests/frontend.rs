@@ -709,6 +709,38 @@ async fn next_update<T>(
     .unwrap()
 }
 
+// Targeted state-driven receiver: the existing shared diagnostic budget is
+// unchanged, but no scheduler polling delay is part of progress.
+async fn next_state_update<T>(
+    receive: &mut std::sync::mpsc::Receiver<UiUpdate>,
+    mut select: impl FnMut(UiUpdate) -> Option<T>,
+) -> T {
+    crate::test_watchdog::receive_until(
+        "frontend state update",
+        receive,
+        crate::test_watchdog::WATCHDOG,
+        |update| match update {
+            UiUpdate::SavedMessage {
+                draft_id,
+                revision,
+                thread_id,
+                status,
+                history,
+                ..
+            } => select(UiUpdate::Receipt {
+                draft_id,
+                revision,
+                thread_id: Some(thread_id),
+                status,
+                message: None,
+            })
+            .or_else(|| select(*history)),
+            update => select(update),
+        },
+    )
+    .await
+}
+
 #[tokio::test]
 async fn terminal_progress_reports_completion_without_inventing_elapsed_time() {
     let root = tempfile::tempdir().unwrap();
@@ -877,7 +909,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     )))
     .await
     .unwrap();
-    next_update(&mut incoming, |u| {
+    next_state_update(&mut incoming, |u| {
         matches!(u,UiUpdate::StructuredManagement{ref title,..}if title.contains("添付 · 追加"))
             .then_some(())
     })
@@ -887,7 +919,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await
     .unwrap();
-    let before = next_update(&mut incoming, |u| match u {
+    let before = next_state_update(&mut incoming, |u| match u {
         UiUpdate::StructuredManagement { title, fields, .. } if title.contains("明示再読込み") => {
             Some(fields)
         }
@@ -909,7 +941,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await
     .unwrap();
-    let after = next_update(&mut incoming, |u| match u {
+    let after = next_state_update(&mut incoming, |u| match u {
         UiUpdate::StructuredManagement { title, fields, .. } if title.contains("明示再読込み") => {
             Some(fields)
         }
@@ -948,7 +980,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await
     .unwrap();
-    let loaded = next_update(&mut incoming, |u| match u {
+    let loaded = next_state_update(&mut incoming, |u| match u {
         UiUpdate::EditRequestLoaded {
             thread_id,
             node_id,
@@ -987,7 +1019,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await
     .unwrap();
-    let preview = next_update(&mut incoming, |u| match u {
+    let preview = next_state_update(&mut incoming, |u| match u {
         UiUpdate::IndexPreviewReady {
             args,
             text,
@@ -1110,7 +1142,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await
     .unwrap();
-    next_update(&mut incoming, |u| match u {
+    next_state_update(&mut incoming, |u| match u {
         UiUpdate::EditConfirmationRequired {
             draft_id,
             revision,
@@ -1124,7 +1156,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         _ => None,
     })
     .await;
-    next_update(&mut incoming, |u| {
+    next_state_update(&mut incoming, |u| {
         matches!(
             u,
             UiUpdate::Receipt {
@@ -1170,7 +1202,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await
     .unwrap();
-    let fork = next_update(&mut incoming, |u| match u {
+    let fork = next_state_update(&mut incoming, |u| match u {
         UiUpdate::Receipt {
             draft_id,
             thread_id: Some(id),
@@ -1214,7 +1246,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })))
     .await
     .unwrap();
-    let shown = next_update(&mut incoming, |u| match u {
+    let shown = next_state_update(&mut incoming, |u| match u {
         UiUpdate::StructuredManagement { title, fields, .. } if title.contains("保存 · 状態") => {
             Some(fields)
         }
@@ -1236,7 +1268,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })))
     .await
     .unwrap();
-    let managed = next_update(&mut incoming, |u| match u {
+    let managed = next_state_update(&mut incoming, |u| match u {
         UiUpdate::StructuredManagement { title, fields, .. } if title.contains("索引 · 状態") => {
             Some(fields)
         }
@@ -1261,7 +1293,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })))
     .await
     .unwrap();
-    next_update(&mut incoming, |u| match u {
+    next_state_update(&mut incoming, |u| match u {
         UiUpdate::StructuredManagement { title, fields, .. } if title.contains("会話 · 詳細") =>
         {
             assert_eq!(field(&fields, "/model"), "fixture-model");
@@ -1271,11 +1303,14 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await;
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(5), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        crate::test_watchdog::drain_to_completion(bridge, &incoming),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 
 #[tokio::test]
@@ -1699,7 +1734,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let (nodes, selection_revision) = next_update(&mut incoming, |update| match update {
+    let (nodes, selection_revision) = next_state_update(&mut incoming, |update| match update {
         UiUpdate::History {
             nodes,
             selection_revision,
@@ -1747,7 +1782,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let preview = next_update(&mut incoming, |update| match update {
+    let preview = next_state_update(&mut incoming, |update| match update {
         UiUpdate::ToolPreview {
             thread_id,
             generation,
@@ -1802,7 +1837,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let copied_raw = next_update(&mut incoming, |update| match update {
+    let copied_raw = next_state_update(&mut incoming, |update| match update {
         UiUpdate::TerminalRequest { bytes } => Some(bytes),
         _ => None,
     })
@@ -1916,7 +1951,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let start = next_update(&mut incoming, |update| match update {
+    let start = next_state_update(&mut incoming, |update| match update {
         UiUpdate::NodeWindow { node, .. } => Some(node),
         _ => None,
     })
@@ -1950,7 +1985,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let (window, anchor) = next_update(&mut incoming, |update| match update {
+    let (window, anchor) = next_state_update(&mut incoming, |update| match update {
         UiUpdate::HistoryWindow { nodes, anchor, .. } => Some((nodes, anchor)),
         _ => None,
     })
@@ -1967,7 +2002,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let first = next_update(&mut incoming, |update| match update {
+    let first = next_state_update(&mut incoming, |update| match update {
         UiUpdate::OriginalPage {
             request_id: 40,
             body,
@@ -1986,7 +2021,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let second = next_update(&mut incoming, |update| match update {
+    let second = next_state_update(&mut incoming, |update| match update {
         UiUpdate::OriginalPage {
             request_id: 41,
             body,
@@ -2005,7 +2040,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })))
     .await
     .unwrap();
-    let (report_id, fields, omitted) = next_update(&mut incoming, |update| match update {
+    let (report_id, fields, omitted) = next_state_update(&mut incoming, |update| match update {
         UiUpdate::StructuredManagement {
             request_id,
             fields,
@@ -2031,7 +2066,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let detail = next_update(&mut incoming, |update| match update {
+    let detail = next_state_update(&mut incoming, |update| match update {
         UiUpdate::ManagementDetail {
             request_id,
             text,
@@ -2052,7 +2087,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     )))
     .await
     .unwrap();
-    let empty = next_update(&mut incoming, |update| match update {
+    let empty = next_state_update(&mut incoming, |update| match update {
         UiUpdate::StructuredManagement { title, fields, .. } if title == "履歴 · 検索" => {
             Some(fields)
         }
@@ -2073,7 +2108,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })))
     .await
     .unwrap();
-    let raw = next_update(&mut incoming, |update| match update {
+    let raw = next_state_update(&mut incoming, |update| match update {
         UiUpdate::StructuredManagement { title, fields, .. } if title == "shell · 保存出力" => {
             Some(fields)
         }
@@ -2091,7 +2126,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let copied = next_update(&mut incoming, |update| match update {
+    let copied = next_state_update(&mut incoming, |update| match update {
         UiUpdate::TerminalRequest { bytes } => Some(bytes),
         _ => None,
     })
@@ -2110,7 +2145,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let fallback = next_update(&mut incoming, |update| match update {
+    let fallback = next_state_update(&mut incoming, |update| match update {
         UiUpdate::NodeWindow { node, .. } if node.node_id == "stream-node" => Some(node),
         _ => None,
     })
@@ -2143,7 +2178,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    let expired = next_update(&mut incoming, |update| match update {
+    let expired = next_state_update(&mut incoming, |update| match update {
         UiUpdate::ToolPreview {
             request_revision: 18,
             result,
@@ -2209,7 +2244,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     .await
     .unwrap();
     send.send(UiAction::CancelWait).await.unwrap();
-    let outcome = next_update(&mut incoming, |update| match update {
+    let outcome = next_state_update(&mut incoming, |update| match update {
         UiUpdate::StructuredManagement { title, fields, .. } if title == "待機 · 条件を観測" => {
             Some(fields)
         }
@@ -2225,7 +2260,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     })
     .await
     .unwrap();
-    next_update(&mut incoming, |update| match update {
+    next_state_update(&mut incoming, |update| match update {
         UiUpdate::ManagementDetailFailure {
             request_id,
             detail_request_id: 1,
@@ -2266,11 +2301,14 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         .await
         .unwrap();
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(8), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(8),
+        crate::test_watchdog::drain_to_completion(bridge, &incoming),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
 }
 
 // Exercise the real asynchronous bridge without sending a message or starting
@@ -2534,15 +2572,13 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         );
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",delta.len()+continuation.len()+final_event.len()).as_bytes()).await.unwrap();
         socket.write_all(delta.as_bytes()).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(10), next_delta)
+        next_delta
             .await
-            .unwrap()
-            .unwrap();
+            .expect("consumer dropped before requesting the next delta");
         socket.write_all(continuation.as_bytes()).await.unwrap();
-        tokio::time::timeout(Duration::from_secs(10), ready)
+        ready
             .await
-            .unwrap()
-            .unwrap();
+            .expect("consumer dropped before allowing response completion");
         socket.write_all(final_event.as_bytes()).await.unwrap();
     });
     let owner = DataOwner::start(
@@ -2584,7 +2620,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     })
     .await
     .unwrap();
-    let (thread, generation, attempt) = next_update(&mut incoming, |update| match update {
+    let (thread, generation, attempt) = next_state_update(&mut incoming, |update| match update {
         UiUpdate::Stream {
             thread_id,
             generation,
@@ -2618,7 +2654,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         .await;
     assert!(response.ok);
     // Wait until the metadata-triggered refresh actually reached the UI queue.
-    next_update(&mut incoming, |update| match update {
+    next_state_update(&mut incoming, |update| match update {
         UiUpdate::CurrentView {
             details, history, ..
         } if details.thread_id == thread && details.title == "metadata during stream" => {
@@ -2633,7 +2669,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     })
     .await;
     more.send(()).unwrap();
-    next_update(&mut incoming, |update| match update {
+    next_state_update(&mut incoming, |update| match update {
         UiUpdate::Stream {
             text,
             base_char_offset,
@@ -2678,7 +2714,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     );
     complete.send(()).unwrap();
     let mut observed = None;
-    let (node, revision, total) = next_update(&mut incoming, |update| match update {
+    let (node, revision, total) = next_state_update(&mut incoming, |update| match update {
         UiUpdate::CurrentView {
             generation: actual,
             details,
@@ -2786,7 +2822,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         )))
         .await
         .unwrap();
-        next_update(&mut incoming, |update| match update {
+        next_state_update(&mut incoming, |update| match update {
             UiUpdate::HistoryWindow {
                 view_revision: 42,
                 anchor,
@@ -2799,7 +2835,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
             _ => None,
         })
         .await;
-        next_update(&mut incoming, |update| match update {
+        next_state_update(&mut incoming, |update| match update {
             UiUpdate::HistoryRebaseNotice {
                 message,
                 anchor,
@@ -2840,7 +2876,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         };
         send.send(action).await.unwrap();
         let mut mappings = Vec::new();
-        next_update(&mut incoming, |update| match update {
+        next_state_update(&mut incoming, |update| match update {
             UiUpdate::StreamCommitted {
                 attempt_id,
                 node_id,
@@ -2890,7 +2926,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     })
     .await
     .unwrap();
-    next_update(&mut incoming, |update| match update {
+    next_state_update(&mut incoming, |update| match update {
         UiUpdate::StreamCommitted { generation: 17, .. } => {
             panic!("ambiguous output ledger must not choose an identity")
         }
@@ -2899,11 +2935,14 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     })
     .await;
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(10), bridge)
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        crate::test_watchdog::drain_to_completion(bridge, &incoming),
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .unwrap();
     proxy.await.unwrap();
 }
 

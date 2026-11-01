@@ -175,20 +175,17 @@ async fn unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_t
             server,
         ));
         // Process startup before issuing a draft-bound selection.
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if let Ok(update) = incoming.try_recv() {
-                    let initialized = matches!(update, UiUpdate::Initialize { .. });
-                    ui.apply(update);
-                    if initialized {
-                        break;
-                    }
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+        crate::test_watchdog::receive_until(
+            "draft Initialize",
+            &incoming,
+            std::time::Duration::from_secs(5),
+            |update| {
+                let initialized = matches!(update, UiUpdate::Initialize { .. });
+                ui.apply(update);
+                initialized.then_some(())
+            },
+        )
+        .await;
         let origin = ui.view().draft.draft_id.clone();
         sender
             .try_send(UiAction::ActivateDraft {
@@ -211,19 +208,20 @@ async fn unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_t
             .is_empty(),
             "normal send cannot race unsaved Thread creation"
         );
-        let selected = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if let Ok(update) = incoming.try_recv() {
-                    if matches!(update, UiUpdate::AgentsSelected { .. }) {
-                        break update;
-                    }
+        let selected = crate::test_watchdog::receive_until(
+            "origin-draft AgentsSelected",
+            &incoming,
+            std::time::Duration::from_secs(5),
+            |update| {
+                if matches!(update, UiUpdate::AgentsSelected { .. }) {
+                    Some(update)
+                } else {
                     ui.apply(update);
+                    None
                 }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
+            },
+        )
+        .await;
         let thread = match &selected {
             UiUpdate::AgentsSelected {
                 draft_id,
@@ -269,15 +267,16 @@ async fn unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_t
         for action in send {
             sender.try_send(action).unwrap();
         }
+        crate::test_watchdog::receive_until("same-Thread saved message",&incoming,std::time::Duration::from_secs(5),|update| {
+            let saved=matches!(&update,UiUpdate::SavedMessage{thread_id,draft_id,status:crate::ui::ReceiptStatus::Completed,..} if thread_id==&thread && draft_id==&origin);
+            ui.apply(update);saved.then_some(())
+        }).await;
         let target = thread.clone();
-        tokio::time::timeout(std::time::Duration::from_secs(5),async {
-            loop {
-                let target=target.clone();
-                if control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND n.payload_json LIKE '%kept while reference%')",[target],|r|r.get::<_,bool>(0))?)).await.unwrap(){break;}
-                while let Ok(update)=incoming.try_recv(){ui.apply(update);}
-                tokio::task::yield_now().await;
-            }
-        }).await.unwrap();
+        let saved=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND n.payload_json LIKE '%kept while reference%')",[target],|r|r.get::<_,bool>(0))?)).await.unwrap();
+        assert!(
+            saved,
+            "the observed receipt must name the saved instruction"
+        );
         let count: i64 = control
             .store
             .database
