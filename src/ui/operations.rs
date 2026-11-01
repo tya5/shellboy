@@ -882,10 +882,11 @@ impl Operations {
                 .set(usize::from(body.height).saturating_sub(1).max(1));
             if rows.is_empty() {
                 frame.render_widget(
-                    Paragraph::new(match self.language {
-                        UiLanguage::En => "No actions match. Ctrl+U clears the filter.",
-                        UiLanguage::Ja => "該当する操作はありません。Ctrl+Uで絞込みを解除できます",
-                    }),
+                    Paragraph::new(local!(
+                        self.language,
+                        "該当する操作はありません。Ctrl+Uで絞込みを解除できます",
+                        "No actions match. Ctrl+U clears the filter."
+                    )),
                     body,
                 );
             } else {
