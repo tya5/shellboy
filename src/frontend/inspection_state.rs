@@ -79,7 +79,7 @@ pub(super) struct Failure {
 pub(super) enum Completion {
     Retired,
     Updated,
-    Failed(Failure),
+    Failed(Box<Failure>),
 }
 #[derive(Clone)]
 pub(super) struct Presentation {
@@ -724,13 +724,13 @@ impl Observation {
                 scope.version = scope.version.wrapping_add(1);
                 Completion::Updated
             }
-            Err(error) => Completion::Failed(Failure {
+            Err(error) => Completion::Failed(Box::new(Failure {
                 target: ticket.target.clone(),
                 part: ticket.part,
                 read_sequence: sequence,
                 observed_at: chrono::Utc::now().to_rfc3339(),
                 error: error.to_string(),
-            }),
+            })),
         }
     }
     pub fn complete_usage(
@@ -788,13 +788,13 @@ impl Observation {
                 scope.version = scope.version.wrapping_add(1);
                 Completion::Updated
             }
-            Err(error) => Completion::Failed(Failure {
+            Err(error) => Completion::Failed(Box::new(Failure {
                 target: identity.target.clone(),
                 part: identity.part,
                 read_sequence: sequence,
                 observed_at: chrono::Utc::now().to_rfc3339(),
                 error: error.to_string(),
-            }),
+            })),
         }
     }
     pub fn take_presentation(&mut self) -> Option<Presentation> {
@@ -1952,5 +1952,31 @@ mod visibility_order_tests {
         assert_eq!(metadata.target, usage.identity.target);
         assert!(metadata.submission.is_some());
         assert!(usage.identity.submission.is_none());
+    }
+}
+
+#[cfg(test)]
+mod completion_size_tests {
+    use super::*;
+    #[test]
+    fn boxed_failure_keeps_the_completion_enum_small_and_preserves_owned_facts() {
+        assert!(std::mem::size_of::<Completion>() <= 2 * std::mem::size_of::<usize>());
+        for part in [InspectionPart::Metadata, InspectionPart::Usage] {
+            let target = InspectionTarget::Usage(crate::protocol::UsageGetArgs {
+                group_by: Some("thread".into()), timezone: Some("UTC".into()),
+                cursor: Some("original cursor".into()), ..Default::default()
+            });
+            let completion = Completion::Failed(Box::new(Failure {
+                target: target.clone(), part, read_sequence: 42,
+                observed_at: "captured failure time".into(), error: "original failure".into(),
+            }));
+            let Completion::Failed(failure) = completion else { panic!("failure variant"); };
+            let failure = *failure;
+            assert_eq!(failure.target, target);
+            assert_eq!(failure.part, part);
+            assert_eq!(failure.read_sequence, 42);
+            assert_eq!(failure.observed_at, "captured failure time");
+            assert_eq!(failure.error, "original failure");
+        }
     }
 }

@@ -228,6 +228,7 @@ pub(super) async fn complete(
         if let inspection_state::Completion::Failed(failure) =
             inspection.complete_metadata(&ticket, sequence, result)
         {
+            let failure = *failure;
             super::management_update(
                 updates,
                 Some(ticket.context),
@@ -254,6 +255,7 @@ pub(super) async fn complete(
         if let inspection_state::Completion::Failed(failure) =
             inspection.complete_usage(&ticket, sequence, result)
         {
+            let failure = *failure;
             super::management_update(
                 updates,
                 Some(ticket.identity.context),
