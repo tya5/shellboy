@@ -130,7 +130,10 @@ async fn a_live_socket_is_preserved_when_bind_is_called_twice() {
     let address = endpoint(&owner).address;
     let error = bind_error(&owner).await;
     assert_eq!(error.code, ErrorCode::IoFailed);
-    assert!(error.message.contains("応答"));
+    assert_eq!(
+        error.message,
+        "Startup was aborted because the existing endpoint is responding."
+    );
     assert_eq!(
         error.details.as_ref().unwrap()["reason"],
         "existing_socket_live"
