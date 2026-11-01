@@ -311,6 +311,26 @@ impl ModelPicker {
                 self.connection, self.query
             ),
         };
+        use super::text_width::UnicodeWidthStr;
+        let available = popup::body_area(area, &context, self.footer(), None).width as usize;
+        let context = if context.as_str().width() > available {
+            match (self.language, count) {
+                (UiLanguage::En, 1) => format!(
+                    "{position} / 1 model | {} | Filter: {}",
+                    self.connection, self.query
+                ),
+                (UiLanguage::En, _) => format!(
+                    "{position} / {count} models | {} | Filter: {}",
+                    self.connection, self.query
+                ),
+                (UiLanguage::Ja, _) => format!(
+                    "{position} / {count}件 | {} | 絞込み: {}",
+                    self.connection, self.query
+                ),
+            }
+        } else {
+            context
+        };
         let title = local!(self.language, "Ctrl+T 情報", "Ctrl+T Details");
         let body = popup::panel_recorded(frame, area, title, &context, self.footer(), &self.paint);
         let notice_text = self.notice_text(&notice);
@@ -646,6 +666,59 @@ mod language_rendering_tests {
             }
         }
         super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn narrow_model_picker_keeps_count_and_primary_actions_visible() {
+        use crate::ui::text_width::UnicodeWidthStr;
+        use ratatui::{Terminal, backend::TestBackend};
+        for observed in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(observed);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let picker = ModelPicker {
+                    language,
+                    paint: Default::default(),
+                    filtered_indices: vec![0, 1],
+                    request: 1,
+                    connection: "proxy".into(),
+                    current: None,
+                    models: vec!["model-a".into(), "model-b".into()],
+                    query: String::new(),
+                    selected: 1,
+                    loading: false,
+                    error: None,
+                    captured_at: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+                    last_attempt_at: None,
+                    notice_scroll: None,
+                };
+                let mut terminal = Terminal::new(TestBackend::new(35, 18)).unwrap();
+                terminal
+                    .draw(|frame| picker.draw(frame, frame.area()))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let mut screen = String::new();
+                for y in 0..18 {
+                    let mut x = 0;
+                    while x < 35 {
+                        let symbol = buffer[(x, y)].symbol();
+                        screen.push_str(symbol);
+                        x += symbol.width().max(1) as u16;
+                    }
+                    screen.push('\n');
+                }
+                let (count, back, select) = match language {
+                    UiLanguage::En => ("2 / 2 models", "Esc Back", "Enter Change"),
+                    UiLanguage::Ja => ("2 / 2件", "Esc 戻る", "Enter 変更"),
+                };
+                for phrase in [count, back, select] {
+                    assert!(
+                        screen.contains(phrase),
+                        "{observed:?} {language:?}: missing {phrase:?}: {screen}"
+                    );
+                }
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
     }
 
     #[test]
