@@ -333,7 +333,8 @@ impl Observation {
             return;
         }
         if matches!(&scope.target, InspectionTarget::Usage(args) if args.group_by.is_some())
-            && scope.dependencies.is_none() {
+            && scope.dependencies.is_none()
+        {
             // Grouped all-conversation usage has no fabricated viewer Thread.
             scope.usage_dirty = true;
             return;
@@ -880,12 +881,21 @@ pub(super) fn read_usage_tx(
     instance: Option<&str>,
 ) -> Result<RawUsage, crate::storage::StorageError> {
     use crate::usage_totals::Scope;
-    if let InspectionTarget::Usage(args)=&ticket.identity.target
-        && args.group_by.is_some() {
+    if let InspectionTarget::Usage(args) = &ticket.identity.target
+        && args.group_by.is_some()
+    {
         crate::protocol::Command::UsageGet(args.clone()).validate()?;
-        let instance=instance.ok_or_else(||ApiError::new(ErrorCode::InvalidState,"Grouped usage owner identity is unavailable"))?;
-        return Ok(RawUsage { value:crate::usage_totals::breakdown::read(db,args,instance)?,
-            context_usage:None,observed_at:chrono::Utc::now().to_rfc3339() });
+        let instance = instance.ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "Grouped usage owner identity is unavailable",
+            )
+        })?;
+        return Ok(RawUsage {
+            value: crate::usage_totals::breakdown::read(db, args, instance)?,
+            context_usage: None,
+            observed_at: chrono::Utc::now().to_rfc3339(),
+        });
     }
     let scope = match &ticket.identity.target {
         InspectionTarget::Usage(args) => {
@@ -2007,28 +2017,53 @@ mod grouped_usage_reader_tests {
     use super::*;
     #[tokio::test(start_paused = true)]
     async fn grouped_usage_uses_owner_bound_bounded_reader_and_stays_notification_driven() {
-        let root=tempfile::tempdir().unwrap();
-        let diagnostics=Diagnostics::start(root.path().into(),crate::config::Logging::default());
-        let args=crate::protocol::UsageGetArgs {group_by:Some("thread".into()),timezone:Some("UTC".into()),
-            since:Some("2026-10-31T00:00:00Z".into()),until:Some("2026-11-01T00:00:00Z".into()),..Default::default()};
-        let target=InspectionTarget::Usage(args);
-        let context=ManagementContext{epoch:1,owner_draft:"draft".into(),owner_thread:Some("viewer-is-not-scope".into())};
-        let mut observation=Observation::default();
-        observation.install(1,context.clone(),target.clone(),None);
-        observation.observe(&context,&target,true);
-        let ticket=observation.take_initial_usage(Instant::now(),diagnostics.clone()).unwrap();
-        let db=rusqlite::Connection::open_in_memory().unwrap();db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), crate::config::Logging::default());
+        let args = crate::protocol::UsageGetArgs {
+            group_by: Some("thread".into()),
+            timezone: Some("UTC".into()),
+            since: Some("2026-10-31T00:00:00Z".into()),
+            until: Some("2026-11-01T00:00:00Z".into()),
+            ..Default::default()
+        };
+        let target = InspectionTarget::Usage(args);
+        let context = ManagementContext {
+            epoch: 1,
+            owner_draft: "draft".into(),
+            owner_thread: Some("viewer-is-not-scope".into()),
+        };
+        let mut observation = Observation::default();
+        observation.install(1, context.clone(), target.clone(), None);
+        observation.observe(&context, &target, true);
+        let ticket = observation
+            .take_initial_usage(Instant::now(), diagnostics.clone())
+            .unwrap();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
           INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
           INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');
           INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','{\"input_tokens\":100}','2026-10-31T00:00:00+00:00');").unwrap();
-        db.pragma_update(None,"query_only",true).unwrap();
-        assert!(read_usage_tx(&db,&ticket,None).is_err());
-        let raw=read_usage_tx(&db,&ticket,Some("owner-instance")).unwrap();
-        assert_eq!(raw.value["items"][0]["key"],"t");assert_eq!(raw.value["items"][0]["input_per_request"]["mean"],100.0);
-        assert!(matches!(observation.complete_usage(&ticket,1,Ok(prepare_usage(raw))),Completion::Updated));
+        db.pragma_update(None, "query_only", true).unwrap();
+        assert!(read_usage_tx(&db, &ticket, None).is_err());
+        let raw = read_usage_tx(&db, &ticket, Some("owner-instance")).unwrap();
+        assert_eq!(raw.value["items"][0]["key"], "t");
+        assert_eq!(raw.value["items"][0]["input_per_request"]["mean"], 100.0);
+        assert!(matches!(
+            observation.complete_usage(&ticket, 1, Ok(prepare_usage(raw))),
+            Completion::Updated
+        ));
         tokio::time::advance(std::time::Duration::from_secs(60)).await;
-        assert!(observation.take_usage(Instant::now(),diagnostics.clone()).is_none());
-        observation.changed("t");assert!(observation.take_usage(Instant::now(),diagnostics).is_some());
+        assert!(
+            observation
+                .take_usage(Instant::now(), diagnostics.clone())
+                .is_none()
+        );
+        observation.changed("t");
+        assert!(
+            observation
+                .take_usage(Instant::now(), diagnostics)
+                .is_some()
+        );
     }
 }

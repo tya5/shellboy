@@ -1264,7 +1264,7 @@ async fn standalone_usage_reads_canonical_run_turn_and_children_scope_without_wa
         let raw = snapshot::read(
             owner.db.path().to_path_buf(),
             CancellationToken::new(),
-            move |db| inspection_state::read_usage_tx(db, &ticket),
+            move |db| inspection_state::read_usage_tx(db, &ticket, None),
         )
         .await
         .unwrap();

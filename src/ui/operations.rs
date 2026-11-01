@@ -927,7 +927,12 @@ impl Form {
                         Text,
                     ),
                     f("children", "子会話を含む", "false".into(), Boolean),
-                    f("group_by", "内訳（空=合計）", String::new(), Choice(&["", "hour", "day", "thread"])),
+                    f(
+                        "group_by",
+                        "内訳（空=合計）",
+                        String::new(),
+                        Choice(&["", "hour", "day", "thread"]),
+                    ),
                     f("timezone", "時間帯（内訳指定時）", String::new(), Text),
                     f("limit", "区切り上限（内訳指定時）", String::new(), Number),
                     f("cursor", "続きcursor（同じ内訳）", String::new(), Text),

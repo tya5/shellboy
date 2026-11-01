@@ -367,14 +367,35 @@ fn readback_periods_memory_and_resumable_settlement_use_current_typed_args() {
 
 #[test]
 fn grouped_usage_form_preserves_catalogue_fields_optional_defaults_and_typed_values() {
-    let context=Context::default();
-    let mut form=Form::new(OpKind::UsageGet,&context);
-    let Command::UsageGet(default)=form.command(std::path::Path::new(".")).unwrap() else {panic!("usage")};
-    assert!(default.group_by.is_none() && default.timezone.is_none() && default.limit.is_none() && default.cursor.is_none());
-    for (field,value) in [("group_by","thread"),("timezone","UTC"),("limit","12"),("cursor","opaque")] {
-        form.fields.iter_mut().find(|f|f.name==field).unwrap().value=value.into();
+    let context = Context::default();
+    let mut form = Form::new(OpKind::UsageGet, &context);
+    let Command::UsageGet(default) = form.command(std::path::Path::new(".")).unwrap() else {
+        panic!("usage")
+    };
+    assert!(
+        default.group_by.is_none()
+            && default.timezone.is_none()
+            && default.limit.is_none()
+            && default.cursor.is_none()
+    );
+    for (field, value) in [
+        ("group_by", "thread"),
+        ("timezone", "UTC"),
+        ("limit", "12"),
+        ("cursor", "opaque"),
+    ] {
+        form.fields
+            .iter_mut()
+            .find(|f| f.name == field)
+            .unwrap()
+            .value = value.into();
     }
-    let Command::UsageGet(args)=form.command(std::path::Path::new(".")).unwrap() else {panic!("usage")};
-    assert_eq!(args.group_by.as_deref(),Some("thread"));assert_eq!(args.timezone.as_deref(),Some("UTC"));
-    assert_eq!(args.limit,Some(12));assert_eq!(args.cursor.as_deref(),Some("opaque"));assert!(args.thread_id.is_none());
+    let Command::UsageGet(args) = form.command(std::path::Path::new(".")).unwrap() else {
+        panic!("usage")
+    };
+    assert_eq!(args.group_by.as_deref(), Some("thread"));
+    assert_eq!(args.timezone.as_deref(), Some("UTC"));
+    assert_eq!(args.limit, Some(12));
+    assert_eq!(args.cursor.as_deref(), Some("opaque"));
+    assert!(args.thread_id.is_none());
 }
