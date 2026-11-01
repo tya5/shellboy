@@ -7321,3 +7321,18 @@ The #108 author owns resolving the rebase while retaining both list and retained
 source dispatch/targets. Final acceptance requires that #107-main rebase plus
 refreshed checks; preliminary branch CI cannot replace it. #117-main release
 preparation remains the reviewer's priority interrupt.
+
+## #108 preliminary native CI lint correction
+
+Ordinary CI41266443031 at source6fdb980e fails on all three OSes in strict Clippy:
+collapsible_if in retained capture and original-request decoration. This is
+related task code, not an intermittent Windows failure; no same-SHA retry or
+successful standard/native result is claimed. The corrected let-chains preserve
+short-circuit ordering and both target limits/serialization behavior, without
+lint suppression. The reviewer authorizes build-free correction/push/CI; no local
+compiler/build/test rerun is made. Preparation rebases onto main1f519332 with
+#117 before pushing; latest native CI must qualify that exact resulting source.
+The previous published branch is retained to preserve the first CI's history;
+a new own task branch carries the rebase rather than force-rewriting it.
+Final #107-main rebase/qualification remains required and release preparation
+preempts this task when #120stage1/#119/#121 integration completes.

@@ -1038,17 +1038,17 @@ pub(super) fn capture_response(
                         None
                     }
                 };
-                if let Some((kind, id)) = found {
-                    if targets.len() < MAX_TARGETS + 1 {
-                        targets.push(CaptureTarget {
-                            kind,
-                            id,
-                            selecting_thread: None,
-                            source_revision: None,
-                            source_hash: None,
-                            raw: None,
-                        });
-                    }
+                if let Some((kind, id)) = found
+                    && targets.len() < MAX_TARGETS + 1
+                {
+                    targets.push(CaptureTarget {
+                        kind,
+                        id,
+                        selecting_thread: None,
+                        source_revision: None,
+                        source_hash: None,
+                        raw: None,
+                    });
                 }
             }
             RetainedRoute::CompletedWait
@@ -1162,10 +1162,10 @@ pub(super) fn decorate_original(
     if let Some(crate::ui::InspectionTarget::RetainedSources(scope)) = target
         && let Some(object) = value.as_object_mut()
     {
-        if let Some(request) = &scope.original_request {
-            if let Ok(request) = serde_json::to_value(request.as_ref()) {
-                object.insert("captured_request".into(), request);
-            }
+        if let Some(request) = &scope.original_request
+            && let Ok(request) = serde_json::to_value(request.as_ref())
+        {
+            object.insert("captured_request".into(), request);
         }
         object.insert(
             "captured_result_identity".into(),
