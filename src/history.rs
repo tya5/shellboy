@@ -16,7 +16,7 @@ pub(crate) use node_row::NodeRow;
 pub(crate) mod reachability;
 mod relations;
 mod thread;
-pub(crate) use raw_witness::RawWitness;
+pub(crate) use raw_witness::{RawWitness, RetainedExecutionFacts, RetainedExecutionRequest};
 pub(crate) use thread::{ThreadScope, selection_revision};
 mod search_bodies;
 pub(crate) mod search_scope;

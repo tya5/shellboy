@@ -71,6 +71,17 @@ pub(crate) fn read_tx(
     ids: &[String],
     thread: Option<&str>,
 ) -> Result<Raw, StorageError> {
+    read_bounded_tx(db, ids, thread, CHANNEL)
+}
+/// Share the caller's aggregate metadata channel with other retained sources.
+/// Existing callers retain the exact default budget through read_tx.
+pub(crate) fn read_bounded_tx(
+    db: &Connection,
+    ids: &[String],
+    thread: Option<&str>,
+    channel: usize,
+) -> Result<Raw, StorageError> {
+    if channel > CHANNEL { return Err(limit()); }
     if ids.len() > 200
         || ids.iter().any(|id| id.is_empty() || id.len() > 512)
         || thread.is_some_and(|id| id.is_empty() || id.len() > 512)
@@ -82,7 +93,7 @@ pub(crate) fn read_tx(
         return Err(limit());
     }
     let overhead = encoded.len() + ids.len() * 512 + 4096 + thread.map_or(0, |id| id.len() * 6);
-    let mut remaining = CHANNEL.checked_sub(overhead).ok_or_else(limit)?;
+    let mut remaining = channel.checked_sub(overhead).ok_or_else(limit)?;
     let selection = thread
         .map(|id| {
             let facts = db

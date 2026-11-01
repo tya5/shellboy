@@ -121,7 +121,7 @@ pub(crate) struct RetainedExecutionRequest {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RetainedExecutionFacts {
-    pub(crate) execution: String,
+    pub(crate) request_index: usize,
     pub(crate) exists: bool,
     pub(crate) generation: Option<i64>,
     pub(crate) saved_sequence: Option<i64>,
@@ -138,6 +138,7 @@ impl RawWitness {
     pub(crate) fn for_retained_execution(
         db: &Connection,
         requests: &[RetainedExecutionRequest],
+        remaining: &mut usize,
     ) -> rusqlite::Result<Vec<RetainedExecutionFacts>> {
         if requests.len() > 200 || requests.iter().any(|r| {
             r.execution.is_empty() || r.execution.len() > 128
@@ -150,10 +151,20 @@ impl RawWitness {
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         db.prepare(RETAINED_EXECUTION_FACTS_SQL)?.query_map([parameter], |row| {
             let ordinal = row.get::<_,usize>(0)?;
-            let request = requests.get(ordinal).ok_or(rusqlite::Error::InvalidQuery)?;
+            let _request = requests.get(ordinal).ok_or(rusqlite::Error::InvalidQuery)?;
+            let mut limited = row.get::<_,bool>(9)?;
+            let mut bounded_text = |column| -> rusqlite::Result<Option<String>> {
+                if let rusqlite::types::ValueRef::Text(bytes)=row.get_ref(column)? {
+                    let charge=bytes.iter().map(|b|match b { b'"'|b'\\'=>2,0..=31=>6,_=>1 }).sum::<usize>();
+                    if charge>*remaining { limited=true; return Ok(None); }
+                    *remaining-=charge;
+                }
+                row.get(column)
+            };
+            let encoding=bounded_text(4)?;let state=bounded_text(5)?;
             Ok(RetainedExecutionFacts {
-                execution:request.execution.clone(),exists:row.get(1)?,generation:row.get(2)?,saved_sequence:row.get(3)?,
-                encoding:row.get(4)?,state:row.get(5)?,tombstone:row.get(6)?,cursor_chunk_length:row.get(7)?,oldest_sequence:row.get(8)?,metadata_limited:row.get(9)?,
+                request_index:ordinal,exists:row.get(1)?,generation:row.get(2)?,saved_sequence:row.get(3)?,
+                encoding,state,tombstone:row.get(6)?,cursor_chunk_length:row.get(7)?,oldest_sequence:row.get(8)?,metadata_limited:limited,
             })
         })?.collect()
     }
@@ -173,14 +184,14 @@ mod retained_execution_tests {
     #[test]
     fn retained_metadata_growth_terminal_and_tombstone_do_not_read_output_bytes() {
         let db=fixture();let requests=[RetainedExecutionRequest { execution:"e".into(),cursor_sequence:Some(0) }];
-        let original=RawWitness::for_retained_execution(&db,&requests).unwrap().remove(0);
+        let original=RawWitness::for_retained_execution(&db,&requests,&mut (256*1024)).unwrap().remove(0);
         assert!(original.exists);assert_eq!(original.cursor_chunk_length,Some(3));assert_eq!(original.oldest_sequence,Some(0));
         db.execute_batch("INSERT INTO output_chunk VALUES('e',1,x'646566');UPDATE shell_execution SET saved_sequence=2,state='exited';").unwrap();
-        let next=RawWitness::for_retained_execution(&db,&requests).unwrap().remove(0);
+        let next=RawWitness::for_retained_execution(&db,&requests,&mut (256*1024)).unwrap().remove(0);
         assert_eq!(next.generation,original.generation);assert_eq!(next.saved_sequence,Some(2));assert_eq!(next.cursor_chunk_length,Some(3));
         assert_eq!(next.state.as_deref(),Some("exited"));assert!(!next.tombstone);
         db.execute_batch("INSERT INTO app_meta VALUES('raw_tombstone.e','corrupt marker deliberately not decoded');DELETE FROM output_chunk WHERE sequence=0;").unwrap();
-        let gone=RawWitness::for_retained_execution(&db,&requests).unwrap().remove(0);
+        let gone=RawWitness::for_retained_execution(&db,&requests,&mut (256*1024)).unwrap().remove(0);
         assert!(gone.tombstone);assert_eq!(gone.cursor_chunk_length,None);assert_eq!(gone.oldest_sequence,Some(1));
         assert_eq!(original.cursor_chunk_length,Some(3));
     }
@@ -189,11 +200,11 @@ mod retained_execution_tests {
         let db=fixture();
         let requests=[RetainedExecutionRequest{execution:"e".into(),cursor_sequence:None},RetainedExecutionRequest{execution:"missing".into(),cursor_sequence:None}];
         let before=db.total_changes();db.pragma_update(None,"query_only",true).unwrap();
-        let facts=RawWitness::for_retained_execution(&db,&requests).unwrap();
+        let facts=RawWitness::for_retained_execution(&db,&requests,&mut (256*1024)).unwrap();
         assert_eq!(facts.len(),2);assert!(!facts[1].exists);assert_eq!(db.total_changes(),before);
         let plan=db.prepare(&format!("EXPLAIN QUERY PLAN {RETAINED_EXECUTION_FACTS_SQL}")).unwrap().query_map([serde_json::to_string(&requests).unwrap()],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap().join("\n");
         for index in ["sqlite_autoindex_shell_execution_1","sqlite_autoindex_app_meta_1","sqlite_autoindex_output_chunk_1"] {assert!(plan.contains(index),"{plan}");}
-        assert!(RawWitness::for_retained_execution(&db,&vec![requests[0].clone();201]).is_err());
-        assert!(RawWitness::for_retained_execution(&db,&[RetainedExecutionRequest{execution:"x".repeat(129),cursor_sequence:None}]).is_err());
+        assert!(RawWitness::for_retained_execution(&db,&vec![requests[0].clone();201],&mut (256*1024)).is_err());
+        assert!(RawWitness::for_retained_execution(&db,&[RetainedExecutionRequest{execution:"x".repeat(129),cursor_sequence:None}],&mut (256*1024)).is_err());
     }
 }
