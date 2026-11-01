@@ -106,7 +106,7 @@ that a particular provider/model implements every feature.
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME] [--group-by hour\|day\|thread] [--timezone ZONE] [--limit N] [--cursor CURSOR]` | Saved usage totals or bounded grouped request-size/cache statistics. At most one scope ID. Ungrouped default is the caller's Thread; grouped default spans non-deleted Threads. Children require Thread scope. Group-only flags and partial/cursor semantics are described under bounded usage breakdowns. No provider call or receipt. |
+| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME] [--group-by hour\|day\|thread] [--timezone ZONE] [--limit N] [--cursor CURSOR]` | Saved usage totals or bounded grouped request-size/cache statistics. At most one scope ID. Ungrouped default is the caller's Thread; grouped default spans non-deleted Threads. Children require Thread scope. Ungrouped results keep conversation requests in `model_attempts` and compaction summary requests in `compaction` (`compactions`, `requests`, map/reduce counts, input/cached/cache-creation/output tokens; coverage `summary: recorded`); Turn/Run scope counts compactions run while that Turn/Run was current. Grouped results count conversation requests only. Group-only flags and partial/cursor semantics are described under bounded usage breakdowns. No provider call or receipt. |
 
 `thread get`, `run get` and `turn get` also include `usage_totals`. Counts use saved
 completed/failed/incomplete model attempts, not proof of client transmission.
@@ -564,7 +564,11 @@ and retained replacements, newest first. Automatic records carry `reason`:
 `failure` (failure-driven reduction) or `proactive_threshold` (#125, with
 `trigger.auto_at_tokens` and the reported `trigger.input_tokens`). Replacement creation is the timestamp
 when available; otherwise operation completion or attempt end/start is identified
-by timestamp_basis. Restore is a distinct operation, not its old omission. A
+by timestamp_basis. Each summarizing event has `metrics.summary_usage`:
+`requests`, `map_requests`, `reduce_requests` and `input_tokens`,
+`cached_tokens`, `cache_creation_tokens`, `output_tokens` as
+`{known_sum, unknown_count, overflow}` (provider-reported only; `requests: 0`
+when every part came from the cache; null for older events). Restore is a distinct operation, not its old omission. A
 coalesced shared replacement has one representative operation ID and the saved
 operation count. Missing legacy counts/sizes remain null; after receipts expire,
 restores and operation associations may be unavailable. Coverage indicates the

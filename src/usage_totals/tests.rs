@@ -78,7 +78,7 @@ fn saved_state_totals_are_exact_read_only_and_missing_is_not_zero() {
     assert_eq!(v["model_duration_ms"]["known_sum"], 1000);
     assert_eq!(v["shell"]["duration_ms"]["known_sum"], 50);
     assert_eq!(v["run"]["status"], "not_applicable");
-    assert_eq!(v["coverage"]["summary"], "not_recorded");
+    assert_eq!(v["coverage"]["summary"], "recorded");
     assert_eq!(db.total_changes(), before);
     let all = read(
         &db,
@@ -637,7 +637,19 @@ fn requested_periods_use_saved_start_boundaries_and_keep_whole_lifetimes() {
             } else {
                 "t0"
             };
-            let p = if st.parameter_count() == 2 {
+            let p = if st.parameter_count() == 3 {
+                st.query_map(
+                    params![
+                        parameter,
+                        crate::compaction::SUMMARY_USAGE_PREFIX,
+                        crate::compaction::SUMMARY_USAGE_MAX_BYTES
+                    ],
+                    |r| r.get::<_, String>(3),
+                )
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+            } else if st.parameter_count() == 2 {
                 st.query_map(params![parameter, END], |r| r.get::<_, String>(3))
                     .unwrap()
                     .collect::<rusqlite::Result<Vec<_>>>()
@@ -663,7 +675,9 @@ fn requested_periods_use_saved_start_boundaries_and_keep_whole_lifetimes() {
                             "turn",
                             "model_attempt",
                             "shell_execution",
-                            "run"
+                            "run",
+                            "m",
+                            "app_meta"
                         ]
                         .contains(s))),
                     "{d}"

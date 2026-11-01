@@ -683,7 +683,11 @@ the request continues unchanged and no further proactive attempt is made in the
 same Run. `compact list` shows each attempt as `automatic_reduction` with
 `reason: "proactive_threshold"`, its `state`, and `trigger.auto_at_tokens` /
 `trigger.input_tokens`. Summaries call the model and may cost tokens; compaction
-can also reduce prompt-cache hits. To keep a persistently large context, set
+can also reduce prompt-cache hits. Each event's `metrics.summary_usage` and the
+`compaction` section of `shellboy usage get` show the provider-reported tokens of
+those summary requests (input, cached, cache-creation, output), separate from
+conversation requests, so you can judge whether the threshold pays off. Values a
+provider does not report stay unknown; reused cached summary parts send nothing. To keep a persistently large context, set
 `auto_at_tokens = 0` globally or for one connection, then restart the owner.
 
 ### Shell call descriptions

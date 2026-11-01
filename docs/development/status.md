@@ -11,6 +11,16 @@ byte comparisons; [acceptance](../validation/acceptance.md#v050-publication-vali
 records the macOS synthetic upgrades and untested public installer/Linux/Windows
 upgrade paths.
 
+## Compaction summary request usage (#133)
+
+Branch issue-133/summary-usage records provider-reported usage (input, cached,
+cache_creation, output; unknown stays unknown) of every compaction summary
+request in one `app_meta summary.usage.<thread>.<uuid>` record per compaction
+(D-020; migration 0018 only extends the GC accounting index). `usage get` adds a
+separate `compaction` section (coverage `summary: recorded`); `compact list`
+events carry `metrics.summary_usage`. Design in compaction.md, evidence in
+acceptance. Resume point: review and integration of that branch.
+
 ## Prompt caching hint (#127)
 
 Branch issue-127/cache adds the common cache hint (`dialect::CacheHint`) and

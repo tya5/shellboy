@@ -395,7 +395,7 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         "items":items,"more":more,"next_cursor":next_cursor,"scanned_candidates":scanned,"matched_attempts":matched,
         "excluded_time_count":excluded_times,"outside_period_count":outside_period,"row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || continued,
         "scope_complete":selection.as_ref().is_none_or(|s|s.complete),"statistics_scope":"current_candidate_window",
-        "coverage":{"unknown_starts":"excluded_time_count includes missing, malformed and non-current UTC formats","summary_and_embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}),
+        "coverage":{"unknown_starts":"excluded_time_count includes missing, malformed and non-current UTC formats","summary":"ungrouped_only","embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}),
     )
 }
 

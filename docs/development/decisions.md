@@ -2732,3 +2732,30 @@ Y is always required. Revisit only if preview admission limits or traversal
 semantics change, in which case both consumers must change together. Verification
 is synthetic database/protocol/UI tests plus exact-SHA native three-OS CI; no
 user data, provider calls, installed binaries or live deletion are used.
+## D-020: Summary request usage in app_meta records (#133, 2026-11-01)
+
+Active. Compaction summary requests record provider-reported input, cached,
+cache_creation and output tokens; unreported values stay unknown (no estimate).
+`usage get` shows them as a separate `compaction` section and `compact list`
+per event (`metrics.summary_usage`).
+
+Storage choice: no new table. Considered and rejected: (a) only the existing
+compaction results: `compact.result.*` expires with its operation receipt
+(24 h), coalesced queued operations share one body (double counting), a proactive
+record can be overwritten by a later Run on the same attempt, and failed manual
+compactions leave no durable trace, so lifetime totals would silently shrink;
+(b) `model_attempt` rows: they require a Turn and would mix compaction into
+conversation totals; (c) a dedicated table: possible, but `app_meta` with a
+Thread-keyed prefix already gives an indexed range read and has precedent
+(`revisit.*` metadata, migration 0012). Chosen: one `summary.usage.<thread>.<uuid>`
+record per summarizing compaction (owner: Compactor via DbWorker; bound: one
+record per compaction, a few hundred bytes, readers skip >16 KiB; GC: retained
+like attempt usage and counted in logical history bytes by extending the
+`gc_bytes_app_meta_history` partial index in migration 0018). The results and
+summary node payload also carry the same counters for per-event display.
+
+Attribution: Turn/Run scope uses the Turn/Run that was current in the compaction
+snapshot; a manual compaction between Runs belongs to Thread scope only.
+Revisit if per-request (not per-compaction) rows are needed for grouped
+breakdowns, if record counts per Thread grow enough that the range read matters,
+or if a provider reports summary usage only in a form `StandardUsage` ignores.

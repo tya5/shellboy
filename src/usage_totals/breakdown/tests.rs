@@ -370,7 +370,7 @@ fn existing_rowid_query_plan_and_bounded_scan_counts() {
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        17
+        crate::storage::SCHEMA_VERSION
     );
 }
 

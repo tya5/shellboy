@@ -250,6 +250,8 @@ newest first. Unknown legacy metrics remain null and retention gaps are explicit
 attempts by started_at, shells by started_at and Runs by created_at. Selected
 lifetimes are counted whole, not prorated; unknown start times are excluded only
 when a period is requested. Existing usage state/unknown/overflow rules remain.
+Compaction summary requests are reported separately as `compaction`, selected by
+their first request time ([compaction](compaction.md#summary-request-usage-133--d-020)).
 
 `shell list` defaults to all conversations, with optional thread, period, command
 substring (literal/case-sensitive), native state and exit-code filters. Maximum

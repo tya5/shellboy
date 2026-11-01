@@ -1136,7 +1136,7 @@ async fn schema_twelve_extends_revisit_byte_accounting_without_rewriting_metadat
         assert_eq!(db.query_row("SELECT value FROM app_meta WHERE key='revisit.fixture'",[],|r|r.get::<_,String>(0))?,"preserve bounded metadata");
         let index:String=db.query_row("SELECT sql FROM sqlite_schema WHERE name='gc_bytes_app_meta_history'",[],|r|r.get(0))?;
         assert!(index.contains("revisit.%"));
-        let size:i64=db.query_row("SELECT sum(octet_length(value)) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",[],|r|r.get(0))?;
+        let size:i64=db.query_row("SELECT sum(octet_length(value)) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",[],|r|r.get(0))?;
         assert_eq!(size,"preserve bounded metadata".len() as i64);
         Ok(())
     }).await.unwrap();

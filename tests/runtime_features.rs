@@ -3490,7 +3490,11 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
         &mut receive,
         &thread,
         150,
-        (200, answer("## 目的\nSummarized earlier turns")),
+        (200, {
+            let mut reply = answer("## 目的\nSummarized earlier turns");
+            reply["usage"] = json!({"input_tokens":120,"input_tokens_details":{"cached_tokens":30,"cache_creation_tokens":4},"output_tokens":6});
+            reply
+        }),
     )
     .await;
     assert_eq!(summaries, 1);
@@ -3504,6 +3508,30 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
     assert_eq!(events[0]["trigger"]["input_tokens"], 150);
     assert!(events[0]["metrics"]["summary_node_id"].is_string());
+    // #133: the summary request's reported usage, per event and in usage get.
+    let usage = &events[0]["metrics"]["summary_usage"];
+    assert_eq!(usage["requests"], 1, "{usage}");
+    assert_eq!(usage["input_tokens"]["known_sum"], 120);
+    assert_eq!(usage["output_tokens"]["known_sum"], 6);
+    assert_eq!(usage["cached_tokens"]["known_sum"], 30);
+    assert_eq!(usage["cache_creation_tokens"]["known_sum"], 4);
+    let totals = request(
+        &control,
+        Command::UsageGet(UsageGetArgs {
+            thread_id: Some(thread.clone()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert_eq!(totals["coverage"]["summary"], "recorded");
+    assert_eq!(totals["compaction"]["requests"], 1);
+    assert_eq!(totals["compaction"]["input_tokens"]["known_sum"], 120);
+    assert_eq!(totals["compaction"]["output_tokens"]["known_sum"], 6);
+    // Conversation attempts (inputs 50, 150, 10) exclude the summary request.
+    assert_eq!(
+        totals["model_attempts"]["completed"]["input_tokens"]["known_sum"],
+        210
+    );
     let summary_nodes = control
         .store
         .database

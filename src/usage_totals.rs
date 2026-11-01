@@ -53,7 +53,7 @@ pub struct Number {
     pub overflow: bool,
 }
 impl Number {
-    fn add(&mut self, sum: Option<u128>, unknown: u64) {
+    pub(crate) fn add(&mut self, sum: Option<u128>, unknown: u64) {
         self.unknown_count = self.unknown_count.saturating_add(unknown);
         if let Some(sum) = sum {
             let sum = self.known_sum.unwrap_or(0) as u128 + sum;
@@ -368,6 +368,58 @@ fn timing(
     }
     unreachable!("wide timing aggregation returns or fails")
 }
+/// Summary requests of compaction (#133), read from their per-compaction
+/// `app_meta` records by a primary-key range per selected Thread. Turn and Run
+/// scopes keep records whose snapshot saw that Turn/Run as current. A record
+/// belongs to the period of its first summary request.
+pub(crate) const COMPACTION_USAGE_SQL: &str = "SELECT j.value,m.value FROM json_each(?1) j JOIN app_meta m ON m.key>=?2||j.value||'.' AND m.key<?2||j.value||'/' WHERE octet_length(m.value)<=?3";
+fn compaction_usage(
+    db: &Connection,
+    scope: &Scope,
+    s: &Selection,
+    trace: &mut Trace,
+) -> rusqlite::Result<Value> {
+    let threads = serde_json::to_string(&s.threads).expect("IDs serialize");
+    let mut statement = db.prepare(COMPACTION_USAGE_SQL)?;
+    let mut total = crate::compaction::SummaryUsage::default();
+    let (mut compactions, mut skipped) = (0u64, 0u64);
+    {
+        let mut rows = statement.query(params![
+            threads,
+            crate::compaction::SUMMARY_USAGE_PREFIX,
+            crate::compaction::SUMMARY_USAGE_MAX_BYTES
+        ])?;
+        while let Some(row) = rows.next()? {
+            let thread: String = row.get(0)?;
+            let body: String = row.get(1)?;
+            let Ok(record) = serde_json::from_str::<crate::compaction::SummaryUsageRecord>(&body)
+            else {
+                skipped += 1;
+                continue;
+            };
+            let selected = record.thread_id == thread
+                && match scope {
+                    Scope::Turn(id) => record.turn_id.as_ref() == Some(id),
+                    Scope::Run(id) => record.run_id.as_ref() == Some(id),
+                    Scope::Thread { .. } => true,
+                }
+                && s.window.includes(Some(&record.started_at));
+            if selected {
+                compactions += 1;
+                total.merge(&record.usage);
+            }
+        }
+    }
+    trace.statements.push((
+        COMPACTION_USAGE_SQL.into(),
+        statement.get_status(StatementStatus::VmStep) as u64,
+    ));
+    let mut value = json!({"compactions":compactions,"malformed_records":skipped});
+    if let (Value::Object(target), Value::Object(fields)) = (&mut value, json!(total)) {
+        target.extend(fields);
+    }
+    Ok(value)
+}
 fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, ApiError> {
     inspect_period(db, scope, trace, &Default::default())
 }
@@ -476,6 +528,7 @@ fn inspect_period(
     } else {
         None
     };
+    let compaction = compaction_usage(db, scope, &s, trace).map_err(error)?;
     let scope_id = match scope {
         Scope::Turn(id) | Scope::Run(id) | Scope::Thread { id, .. } => id,
     };
@@ -492,7 +545,7 @@ fn inspect_period(
         None
     };
     Ok(
-        json!({"scope":s.kind,"scope_id":scope_id,"thread_id":s.threads.first(),"include_children":matches!(scope,Scope::Thread{children:true,..}),"turn_lifetime_ms":own_turn_lifetime,"attempt_period":{"first_known_started_at":start_value(first),"last_known_started_at":start_value(last),"unknown_start_count":unknown_starts},"selected_threads":s.threads.len(),"coverage":{"scope_complete":s.complete,"descendants":if s.complete{"complete"}else{"thread_limit"},"summary":"not_recorded","embedding":"out_of_scope","rag":"out_of_scope","excluded_attempt_states":["cancelled"]},"model_attempts":attempts,"model_duration_ms":total_model_time,"run":run,"shell":shell,"active":{"observed_at":active_observed,"model_attempts":active,"run":active_run,"shell":active_shell}}),
+        json!({"scope":s.kind,"scope_id":scope_id,"thread_id":s.threads.first(),"include_children":matches!(scope,Scope::Thread{children:true,..}),"turn_lifetime_ms":own_turn_lifetime,"attempt_period":{"first_known_started_at":start_value(first),"last_known_started_at":start_value(last),"unknown_start_count":unknown_starts},"selected_threads":s.threads.len(),"coverage":{"scope_complete":s.complete,"descendants":if s.complete{"complete"}else{"thread_limit"},"summary":"recorded","embedding":"out_of_scope","rag":"out_of_scope","excluded_attempt_states":["cancelled"]},"model_attempts":attempts,"compaction":compaction,"model_duration_ms":total_model_time,"run":run,"shell":shell,"active":{"observed_at":active_observed,"model_attempts":active,"run":active_run,"shell":active_shell}}),
     )
 }
 

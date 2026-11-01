@@ -340,3 +340,43 @@ field and `automatic_compaction_turn` partial index) with `reason =
 list` shows it as `automatic_reduction` with `reason` (`failure` for existing
 failure-driven records) and those trigger values. A second Run triggered by the
 same measurement overwrites the earlier record on that attempt.
+
+## Summary request usage (#133 / D-020)
+
+Every summary request (map and reduce, from explicit `--summary`, argument-free
+compact, #50 stage 2 and #125 proactive compaction; all share
+`summarize_with_policy`) records the provider-reported usage. Values kept:
+`input_tokens`, `cached_tokens`, `cache_creation_tokens` (#127) and
+`output_tokens`, each as `{known_sum, unknown_count, overflow}`. A request is
+counted durably before it is sent with all four values unknown; a response (or a
+failed response carrying usage) resolves the values it reports. Values the
+provider does not report, transport failures and interrupted requests stay
+unknown. No estimate is made. Cached parts send nothing and add nothing.
+
+Storage: one `app_meta` record per summarizing compaction, key
+`summary.usage.<thread_id>.<uuid>`, written by the Compactor through DbWorker
+(before and after each request). The record holds thread, the snapshot's current
+Turn/Run (null outside a live Run), connection/model, the first-request time,
+and the counters. No record exists when a compaction sent no request. Size is a
+few hundred bytes and bounded by the per-compaction map/reduce request limits;
+readers skip values above 16 KiB. Records are retained like
+`model_attempt.usage_json` (lifetime accounting facts; soft-deleted Threads keep
+them, unread). They are counted in logical history bytes through the existing
+`gc_bytes_app_meta_history` partial index (schema 18 adds the prefix). No table,
+worker, queue or event is added.
+
+Per event: `CompactResult.summary_usage` carries the same counters, so queued
+compaction results, `automatic_trim_attempt` summaries and the summary node's
+out-of-band payload metadata (`summary_usage`, never sent to the model) expose
+them. A rejected compaction that already sent requests attaches
+`summary_usage` to its error details. `compact list` reads it per event from the
+row it already selects (result, error details, or the summary node), with no
+additional query.
+
+`usage get` (ungrouped) adds `compaction`: `compactions`, `requests`,
+`map_requests`, `reduce_requests`, the four counters and `malformed_records`.
+It reads the selected Threads' records by primary-key range (one join over the
+selected Thread list). Turn/Run scopes keep records whose snapshot saw that
+Turn/Run as current; a period selects by first-request time. `model_attempts`
+remains conversation requests only. Coverage `summary` is `recorded`. Grouped
+`usage get --group-by` stays attempt-only (`coverage.summary: ungrouped_only`).

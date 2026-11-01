@@ -7369,6 +7369,33 @@ Related `cargo test --lib -- readback compact context_usage driver` passes
 GitHub CI on the pushed branch. Providers that omit usage are only covered by
 the unknown-usage rule, not by a live provider.
 
+## #133 compaction summary request usage
+
+Environment: macOS (darwin) sandbox worktree issue-133-sumusage from main
+48a85799, temporary data dirs and loopback mock Responses endpoints; no real
+provider or user data. Commands via rust-slot: `cargo check --all-targets`,
+`cargo clippy --all-targets -- -D warnings` (clean), `cargo test --lib --
+compaction:: usage readback:: gc:: storage:: driver` and `cargo test --test
+integration -- storage proactive compact usage` (61/0). Evidence: N=3 summary
+requests (2 map, 1 reduce) with mock-reported usage give `usage get`
+`compaction.requests=3`, `compactions=1`, input 350, output 37, cached 80 with
+1 unknown, cache_creation 5 with 2 unknown, `coverage.summary=recorded`, and an
+empty `model_attempts`; the same range repeated from cached parts sends 0
+requests, adds no record and lists `summary_usage.requests=0` on its event,
+while the first event lists 3/350/37 (`compact list` via the retained summary
+node). The record range read uses the app_meta primary-key index. A typed
+refusal keeps `summary_usage` (1 request, unknown values) in the error details.
+The #125 proactive path over a real owner shows `metrics.summary_usage`
+(1 request, input 120, output 6, cached 30, cache_creation 4) and `usage get`
+`compaction` 1/120/6 with conversation input 210 unchanged. Schema 18 upgrade
+matches a fresh schema and counts `summary.usage.*` bytes.
+Not verified: real provider usage reports for summary requests; Linux/Windows
+and the full standard check run in GitHub CI on the pushed branch. In one local
+batch, unrelated `control::driver::shell_output::drain_tests::successful_incomplete_output_is_saved_and_cancels_unexecuted_calls`
+failed once under concurrent sandbox load and passed on an isolated rerun.
+`scripts/error_catalog.py` now requires schema 18; `python3 -m unittest discover
+-s scripts/tests` passes (95).
+
 ## #127 prompt caching hint
 
 Environment: macOS (darwin) sandbox worktree issue-127-cache from main eca1b81b,

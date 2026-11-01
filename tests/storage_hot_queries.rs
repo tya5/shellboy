@@ -130,7 +130,7 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
     }).await.unwrap();
     worker.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX thread_parent; DELETE FROM schema_migration WHERE version=17; PRAGMA user_version=16;
+    db.execute_batch("DROP INDEX thread_parent; DELETE FROM schema_migration WHERE version>=17; PRAGMA user_version=16;
         CREATE TRIGGER reject_parent_ledger BEFORE INSERT ON schema_migration WHEN NEW.version=17
         BEGIN SELECT RAISE(ABORT,'injected ledger failure after index creation'); END;").unwrap();
     db.close().unwrap();
@@ -193,4 +193,37 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
         upgraded.shutdown().await.unwrap();
     }
     }).await.expect("parent index migration watchdog");
+}
+
+// #133: per-compaction summary usage records join the logical-history byte
+// accounting through the existing partial index; the upgrade preserves data.
+#[tokio::test]
+async fn summary_usage_accounting_migration_matches_fresh_schema() {
+    crate::test_watchdog::watchdog("summary usage accounting migration", async {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("summary-usage-upgrade.sqlite");
+        DbWorker::open(&path).await.unwrap().shutdown().await.unwrap();
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'; DELETE FROM schema_migration WHERE version>=18; PRAGMA user_version=17; INSERT INTO app_meta(key,value)VALUES('summary.usage.t.x','{\"requests\":1}');").unwrap();
+        db.close().unwrap();
+        let fresh = DbWorker::open(root.path().join("fresh-summary-usage.sqlite"))
+            .await
+            .unwrap();
+        let expected = fresh.call(|db| Ok(schema(db)?)).await.unwrap();
+        fresh.shutdown().await.unwrap();
+        let upgraded = DbWorker::open(&path).await.unwrap();
+        upgraded
+            .call(move |db| {
+                assert_eq!(schema(db)?, expected);
+                assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=18", [], |r| r.get::<_, String>(0))?, "0018_summary_usage_metadata");
+                let bytes: i64 = db.query_row("SELECT sum(octet_length(value)) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'", [], |r| r.get(0))?;
+                assert_eq!(bytes, "{\"requests\":1}".len() as i64);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        upgraded.shutdown().await.unwrap();
+    })
+    .await
+    .expect("summary usage migration watchdog");
 }

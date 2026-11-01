@@ -26,11 +26,17 @@ pub use edit::ContextEditResult;
 mod policy;
 mod range;
 mod summary;
+mod usage;
 pub(crate) use keys::CompactionKeys;
 #[cfg(test)]
 use policy::*;
 use std::ops::Range;
 use summary::SummaryAdoption;
+pub use usage::SummaryUsage;
+pub(crate) use usage::{
+    RECORD_MAX_BYTES as SUMMARY_USAGE_MAX_BYTES, RECORD_PREFIX as SUMMARY_USAGE_PREFIX,
+    UsageRecord as SummaryUsageRecord,
+};
 
 const SEGMENT_CHARS: usize = 64_000;
 // A graph-work bound, independent of provider context capacity.
@@ -107,6 +113,9 @@ pub struct CompactResult {
     pub summary_node_id: Option<String>,
     pub original_node_ids: Vec<String>,
     pub no_target: bool,
+    /// Provider-reported usage of this compaction's summary requests (#133).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_usage: Option<SummaryUsage>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct CachedPart {
@@ -445,6 +454,19 @@ impl Compactor {
         cancel: CancellationToken,
         policy: crate::config::Compaction,
     ) -> Result<CompactResult, ApiError> {
+        let mut ledger = usage::UsageLedger::new(&snapshot);
+        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger)
+            .await
+            .map_err(|error| usage::annotate(error, ledger.usage()))
+    }
+    async fn summarize_recorded(
+        &self,
+        snapshot: Snapshot,
+        range: Range<usize>,
+        cancel: CancellationToken,
+        policy: crate::config::Compaction,
+        ledger: &mut usage::UsageLedger,
+    ) -> Result<CompactResult, ApiError> {
         range::validate(
             &snapshot,
             std::slice::from_ref(&range),
@@ -468,7 +490,9 @@ impl Compactor {
             reduce_requests: 0,
             map_limit: policy.summary_map_max_requests,
             reduce_limit: policy.summary_reduce_max_requests,
+            usage: ledger,
         };
+        let budget = &mut budget;
         self.config
             .connections
             .get(&snapshot.profile)
@@ -553,12 +577,26 @@ impl Compactor {
                 false,
             );
             budget.request_map()?;
+            budget.usage.begin(&self.database, false).await?;
             let response = match client
                 .response_for_thread(&snapshot.thread, request, cancel.clone(), None)
                 .await
             {
-                Ok(response) => response,
+                Ok(response) => {
+                    budget
+                        .usage
+                        .observe(&self.database, usage::usage_of(Some(&response.raw)))
+                        .await?;
+                    response
+                }
                 Err(failure) => {
+                    budget
+                        .usage
+                        .observe(
+                            &self.database,
+                            usage::usage_of(failure.raw_response.as_ref()),
+                        )
+                        .await?;
                     if failure.error.is_context_limit() && end - start > 1 && depth < 8 {
                         let middle = start + (end - start) / 2;
                         segments.push((middle, end, depth + 1));
@@ -603,9 +641,11 @@ impl Compactor {
         let sources: Vec<Source> = groups.iter().flat_map(|g| g.sources.clone()).collect();
         let originals: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
         let body = self
-            .reduce_summary(&snapshot, &parts, &mut budget, &cancel)
+            .reduce_summary(&snapshot, &parts, budget, &cancel)
             .await?;
-        let payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":body}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_part_keys":parts.iter().filter_map(|p|p.cache_key.as_deref()).collect::<Vec<_>>()});
+        let summary_usage = budget.usage.usage().clone();
+        // Out-of-band metadata like summary_part_keys: replay sends only `item`.
+        let payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":body}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_part_keys":parts.iter().filter_map(|p|p.cache_key.as_deref()).collect::<Vec<_>>(),"summary_usage":summary_usage});
         if edit::projection_characters(&payload, snapshot.epoch) >= budget.source_characters {
             return Err(budget.error(
                 "Summary does not shrink its original source projection; original path retained",
@@ -626,6 +666,7 @@ impl Compactor {
                 created_parts: created,
                 reused_parts: reused,
                 original_node_ids: originals,
+                summary_usage: Some(summary_usage),
                 ..Default::default()
             },
         };
@@ -1866,6 +1907,161 @@ mod tests {
         db.shutdown().await.unwrap();
     }
 
+    // #133: N summary requests are recorded with exactly the reported numbers;
+    // a fully cached repeat sends nothing and adds no record.
+    #[tokio::test]
+    async fn summary_request_usage_is_recorded_and_cached_reuse_adds_none() {
+        let reply = |text: &str, usage: Value| json!({"status":"completed","usage":usage,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}]});
+        let (url, server) = summary_proxy(vec![
+            reply("part a", json!({"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"cache_creation_tokens":5},"output_tokens":10})),
+            reply("part b", json!({"input_tokens":200,"output_tokens":20})),
+            reply("final summary", json!({"input_tokens":50,"input_tokens_details":{"cached_tokens":0},"output_tokens":7})),
+        ])
+        .await;
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            for (id, size) in [("a", 40_000), ("b", 40_000), ("tail", 10)] {
+                history::append_node(
+                    &tx,
+                    "t",
+                    id,
+                    None,
+                    "message",
+                    &json!({"role":"user","content":id.repeat(size)}),
+                    "now",
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let snapshot = compactor.snapshot("t", true).await.unwrap();
+        let first = compactor
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new())
+            .await
+            .unwrap();
+        let usage = first.summary_usage.clone().unwrap();
+        assert_eq!(
+            (usage.requests, usage.map_requests, usage.reduce_requests),
+            (3, 2, 1)
+        );
+        assert_eq!(first.model_requests, Some(3));
+        assert_eq!(server.await.unwrap(), 3);
+        // Put the originals back on the path; the same range now hits the cache.
+        db.call(|db| {
+            let tx = db.transaction()?;
+            let revision =
+                history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
+            history::select_path(
+                &tx,
+                "t",
+                revision,
+                &["a".into(), "b".into(), "tail".into()],
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let snapshot = compactor.snapshot("t", true).await.unwrap();
+        let second = compactor
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!((second.created_parts, second.reused_parts), (0, 2));
+        assert_eq!(second.summary_usage.as_ref().unwrap().requests, 0);
+        let first_node = first.summary_node_id.unwrap();
+        let second_node = second.summary_node_id.unwrap();
+        db.call(move |db| {
+            let totals = crate::usage_totals::read(
+                db,
+                &crate::usage_totals::Scope::Thread {
+                    id: "t".into(),
+                    children: false,
+                },
+            )
+            .unwrap();
+            assert_eq!(totals["coverage"]["summary"], "recorded");
+            let c = &totals["compaction"];
+            assert_eq!(
+                (c["compactions"].as_u64(), c["requests"].as_u64()),
+                (Some(1), Some(3))
+            );
+            assert_eq!(
+                (c["map_requests"].as_u64(), c["reduce_requests"].as_u64()),
+                (Some(2), Some(1))
+            );
+            assert_eq!(
+                c["input_tokens"],
+                json!({"known_sum":350,"unknown_count":0,"overflow":false})
+            );
+            assert_eq!(
+                c["output_tokens"],
+                json!({"known_sum":37,"unknown_count":0,"overflow":false})
+            );
+            assert_eq!(
+                c["cached_tokens"],
+                json!({"known_sum":80,"unknown_count":1,"overflow":false})
+            );
+            assert_eq!(
+                c["cache_creation_tokens"],
+                json!({"known_sum":5,"unknown_count":2,"overflow":false})
+            );
+            // Conversation attempts stay separate.
+            assert_eq!(totals["model_attempts"], json!({}));
+            let plan = db
+                .prepare(&format!(
+                    "EXPLAIN QUERY PLAN {}",
+                    crate::usage_totals::COMPACTION_USAGE_SQL
+                ))?
+                .query_map(
+                    params![
+                        r#"["t"]"#,
+                        crate::compaction::SUMMARY_USAGE_PREFIX,
+                        crate::compaction::SUMMARY_USAGE_MAX_BYTES
+                    ],
+                    |r| r.get::<_, String>(3),
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            assert!(
+                plan.iter()
+                    .any(|line| line.starts_with("SEARCH m USING INDEX")
+                        && line.contains("key>? AND key<?")),
+                "{plan:?}"
+            );
+            let args: crate::protocol::CompactListArgs =
+                serde_json::from_value(json!({"thread_id":"t"})).unwrap();
+            let listed = crate::readback::compactions(db, "t", &args).unwrap();
+            let usage_of = |node: &str| {
+                listed["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["event_id"] == node)
+                    .unwrap()["metrics"]["summary_usage"]
+                    .clone()
+            };
+            let first = usage_of(&first_node);
+            assert_eq!(
+                (
+                    first["requests"].as_u64(),
+                    first["input_tokens"]["known_sum"].as_u64(),
+                    first["output_tokens"]["known_sum"].as_u64()
+                ),
+                (Some(3), Some(350), Some(37))
+            );
+            assert_eq!(usage_of(&second_node)["requests"], 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn successful_summary_cached_and_adopted_atomically_without_losing_originals() {
         let(url,server)=summary_proxy(vec![json!({"id":"summary","status":"completed","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"extra":"x".repeat(128*1024)},"output_tokens":10,"attribution":"x".repeat(128*1024)},"output":[
@@ -2209,6 +2405,14 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(error.code, ErrorCode::InvalidState);
+            // #133: the sent request stays visible on the rejected compaction;
+            // the provider reported no usage, so its values remain unknown.
+            let usage = &error.details.as_ref().unwrap()["summary_usage"];
+            assert_eq!(usage["requests"], 1);
+            assert_eq!(
+                usage["input_tokens"],
+                json!({"known_sum":null,"unknown_count":1,"overflow":false})
+            );
             let lookup = error.details.unwrap()["summary_part_key"]
                 .as_str()
                 .unwrap()

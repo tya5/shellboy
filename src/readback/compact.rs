@@ -29,6 +29,9 @@ fn metrics(root: &str) -> String {
     ] {
         fields.push(format!("'{field}',COALESCE(json_extract({root},'$.compact.{field}'),json_extract({root},'$.{field}'))"));
     }
+    // #133: per-compaction summary request usage, an object (copied, then
+    // re-encoded by `parse`).
+    fields.push(format!("'summary_usage',json(COALESCE(json_extract({root},'$.compact.summary_usage'),json_extract({root},'$.summary_usage')))"));
     for (key, path) in [("first_node_id", "[0]"), ("last_node_id", "[#-1]")] {
         fields.push(format!("'{key}',COALESCE(json_extract({root},'$.compact.original_node_ids{path}'),json_extract({root},'$.original_node_ids{path}'))"));
     }
@@ -42,7 +45,7 @@ fn output_node(root: &str) -> String {
 fn enriched(root: &str) -> String {
     let base = metrics(root);
     format!(
-        "json_set({base},'$.after_current_request_nodes',CASE WHEN json_extract({root},'$.omitted_nodes')=0 THEN 0 ELSE json_extract(n.payload_json,'$.context_trim.after_current_request_nodes') END,'$.summary_characters',COALESCE(json_extract({root},'$.compact.summary_characters'),json_extract({root},'$.summary_characters'),CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END),'$.summary_parts',COALESCE(json_array_length(n.payload_json,'$.summary_part_keys'),json_extract({root},'$.compact.created_parts')+json_extract({root},'$.compact.reused_parts'),json_extract({root},'$.created_parts')+json_extract({root},'$.reused_parts')))"
+        "json_set({base},'$.after_current_request_nodes',CASE WHEN json_extract({root},'$.omitted_nodes')=0 THEN 0 ELSE json_extract(n.payload_json,'$.context_trim.after_current_request_nodes') END,'$.summary_characters',COALESCE(json_extract({root},'$.compact.summary_characters'),json_extract({root},'$.summary_characters'),CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END),'$.summary_parts',COALESCE(json_array_length(n.payload_json,'$.summary_part_keys'),json_extract({root},'$.compact.created_parts')+json_extract({root},'$.compact.reused_parts'),json_extract({root},'$.created_parts')+json_extract({root},'$.reused_parts')),'$.summary_usage',json(COALESCE(json_extract({root},'$.compact.summary_usage'),json_extract({root},'$.summary_usage'),CASE WHEN n.kind='summary' THEN json_extract(n.payload_json,'$.summary_usage') END)))"
     )
 }
 pub(super) fn receipt_query(w: &Window) -> String {
@@ -77,7 +80,7 @@ pub(super) fn automatic_query(w: &Window) -> String {
 }
 pub(super) fn replacement_query(w: &Window) -> String {
     format!(
-        "SELECT r.output_node_id,r.created_at,r.format_version,json_object('source_nodes',(SELECT count(*) FROM replacement_source q WHERE q.replacement_id=r.id),'first_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal LIMIT 1),'last_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal DESC LIMIT 1),'before_characters',json_extract(n.payload_json,'$.context_trim.history_characters'),'omitted_nodes',json_extract(n.payload_json,'$.context_trim.omitted_nodes'),'after_current_request_nodes',json_extract(n.payload_json,'$.context_trim.after_current_request_nodes'),'summary_characters',CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END,'summary_parts',json_array_length(n.payload_json,'$.summary_part_keys'),'reason',json_extract(n.payload_json,'$.context_trim.reason')) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND {} ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?2",
+        "SELECT r.output_node_id,r.created_at,r.format_version,json_object('source_nodes',(SELECT count(*) FROM replacement_source q WHERE q.replacement_id=r.id),'first_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal LIMIT 1),'last_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal DESC LIMIT 1),'before_characters',json_extract(n.payload_json,'$.context_trim.history_characters'),'omitted_nodes',json_extract(n.payload_json,'$.context_trim.omitted_nodes'),'after_current_request_nodes',json_extract(n.payload_json,'$.context_trim.after_current_request_nodes'),'summary_characters',CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END,'summary_parts',json_array_length(n.payload_json,'$.summary_part_keys'),'summary_usage',json(CASE WHEN n.kind='summary' THEN json_extract(n.payload_json,'$.summary_usage') END),'reason',json_extract(n.payload_json,'$.context_trim.reason')) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND {} ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?2",
         w.sql("r.created_at")
     )
 }
@@ -101,6 +104,8 @@ fn parse(raw: String) -> Result<Value, ApiError> {
                 if value.as_str().is_none_or(|s| s.len() > 1024) {
                     *value = Value::Null;
                 }
+            } else if key == "summary_usage" {
+                *value = crate::compaction::SummaryUsage::sanitize(value);
             } else if key == "no_target" {
                 if let Some(n) = value.as_i64().filter(|n| *n == 0 || *n == 1) {
                     *value = json!(n == 1);

@@ -344,7 +344,7 @@ CREATE INDEX gc_bytes_operation_receipt ON operation_receipt(octet_length(origin
 
 CREATE INDEX gc_bytes_tool_call ON tool_call(octet_length(arguments_json));
 
-CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%';
+CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%';
 
 CREATE INDEX gc_bytes_output_chunk ON output_chunk(length(bytes));
 
@@ -406,3 +406,6 @@ PRAGMA user_version=16;
 CREATE INDEX thread_parent ON thread(parent_thread_id,id);
 INSERT INTO schema_migration(version,name) VALUES(17,'0017_thread_parent');
 PRAGMA user_version=17;
+
+INSERT INTO schema_migration(version,name) VALUES(18,'0018_summary_usage_metadata');
+PRAGMA user_version=18;

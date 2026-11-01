@@ -156,7 +156,7 @@ const SCALARS: [(&str, &str, &str, &str, Category); 13] = [
         "app_meta",
         "gc_bytes_app_meta_history",
         "octet_length(value)",
-        "key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",
+        "key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",
         Category::History,
     ),
     (

@@ -38,7 +38,7 @@ const HISTORY_QUERIES: [&str; 10] = [
     "SELECT COALESCE(SUM(octet_length(sender_json)+COALESCE(octet_length(result_json),0)),0) FROM receipt INDEXED BY gc_bytes_receipt",
     "SELECT COALESCE(SUM(octet_length(origin_json)+COALESCE(octet_length(result_ref_json),0)),0) FROM operation_receipt INDEXED BY gc_bytes_operation_receipt",
     "SELECT COALESCE(SUM(octet_length(arguments_json)),0) FROM tool_call INDEXED BY gc_bytes_tool_call",
-    "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",
+    "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",
 ];
 const RAW_QUERY: &str =
     "SELECT COALESCE(SUM(length(bytes)),0) FROM output_chunk INDEXED BY gc_bytes_output_chunk";
@@ -116,7 +116,7 @@ mod tests {
         "SELECT COALESCE(SUM(length(CAST(sender_json AS BLOB))+COALESCE(length(CAST(result_json AS BLOB)),0)),0) FROM receipt",
         "SELECT COALESCE(SUM(length(CAST(origin_json AS BLOB))+COALESCE(length(CAST(result_ref_json AS BLOB)),0)),0) FROM operation_receipt",
         "SELECT COALESCE(SUM(length(CAST(arguments_json AS BLOB))),0) FROM tool_call",
-        "SELECT COALESCE(SUM(length(CAST(value AS BLOB))),0) FROM app_meta WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'",
+        "SELECT COALESCE(SUM(length(CAST(value AS BLOB))),0) FROM app_meta WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",
         "SELECT COALESCE(SUM(length(bytes)),0) FROM output_chunk",
         "SELECT COALESCE(SUM(raw_size),0) FROM managed_file WHERE state<>'deleted'",
         "SELECT COALESCE(SUM(s.dimension*4),0) FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id",
