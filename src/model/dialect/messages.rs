@@ -251,23 +251,29 @@ impl Messages {
         ] {
             // message_delta usage is cumulative; a field that is absent keeps
             // the earlier value, a present one replaces it.
-            if let Some(n) = count(usage, key) {
-                *slot = Some(n);
+            if usage.get(key).is_some() {
+                *slot = count(usage, key);
             }
         }
     }
 
     /// The Responses-shaped usage for the counters reported so far.
     pub(super) fn usage(&self) -> Option<Value> {
-        let reported = [self.input, self.cache_creation, self.cache_read]
-            .iter()
-            .any(Option::is_some);
-        let total_input = reported.then(|| {
-            self.input.unwrap_or(0)
-                + self.cache_creation.unwrap_or(0)
-                + self.cache_read.unwrap_or(0)
-        });
-        if total_input.is_none() && self.output.is_none() {
+        let reported = [
+            self.input,
+            self.cache_creation,
+            self.cache_read,
+            self.output,
+        ]
+        .iter()
+        .any(Option::is_some);
+        let total_input = self
+            .input
+            .zip(self.cache_creation)
+            .zip(self.cache_read)
+            .and_then(|((input, creation), read)| input.checked_add(creation)?.checked_add(read))
+            .filter(|total| *total <= i64::MAX as u64);
+        if !reported {
             return None;
         }
         let mut usage = serde_json::Map::new();
@@ -513,4 +519,79 @@ pub(super) fn provider_error(raw: &Value) -> ModelError {
         None,
         &json!({"error":{"message":error["message"],"code":error["type"]}}),
     )
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use super::*;
+
+    #[test]
+    fn partial_counters_do_not_invent_input_totals_and_zero_is_known() {
+        let mut stream = Messages::default();
+        assert!(stream.usage().is_none());
+        stream.take_usage(&json!({"input_tokens":7}));
+        assert!(stream.usage().unwrap().get("input_tokens").is_none());
+        stream.take_usage(&json!({"cache_read_input_tokens":2,"output_tokens":3}));
+        let partial = stream.usage().unwrap();
+        assert!(partial.get("input_tokens").is_none());
+        assert_eq!(partial["input_tokens_details"]["cached_tokens"], 2);
+        assert_eq!(partial["output_tokens"], 3);
+        stream.take_usage(&json!({"cache_creation_input_tokens":1}));
+        assert_eq!(stream.usage().unwrap()["input_tokens"], 10);
+
+        let mut zero = Messages::default();
+        zero.take_usage(&json!({"input_tokens":0,"cache_creation_input_tokens":0,
+            "cache_read_input_tokens":0,"output_tokens":0}));
+        assert_eq!(
+            zero.usage().unwrap(),
+            json!({"input_tokens":0,
+            "input_tokens_details":{"cached_tokens":0},"output_tokens":0})
+        );
+    }
+
+    #[test]
+    fn summed_counters_are_checked_and_keep_independent_known_facts() {
+        let max = i64::MAX as u64;
+        for (input, creation, read, expected) in [
+            (max, 0, 0, Some(max)),
+            (max - 2, 1, 1, Some(max)),
+            (max, 0, 1, None),
+            (max, max, max, None),
+        ] {
+            let mut stream = Messages::default();
+            stream.take_usage(&json!({"input_tokens":input,
+                "cache_creation_input_tokens":creation,"cache_read_input_tokens":read,
+                "output_tokens":5}));
+            let usage = stream.usage().unwrap();
+            assert_eq!(usage.get("input_tokens").and_then(Value::as_u64), expected);
+            assert_eq!(usage["input_tokens_details"]["cached_tokens"], read);
+            assert_eq!(usage["output_tokens"], 5);
+        }
+    }
+
+    #[test]
+    fn absent_delta_keeps_prior_usage_but_present_invalid_replaces_it_with_unknown() {
+        let mut stream = Messages::default();
+        stream.take_usage(&json!({"input_tokens":7,"cache_creation_input_tokens":1,
+            "cache_read_input_tokens":2,"output_tokens":4}));
+        let complete = stream.usage().unwrap();
+        stream.take_usage(&json!({}));
+        assert_eq!(stream.usage().unwrap(), complete);
+        stream.take_usage(&json!({"output_tokens":null}));
+        assert!(stream.usage().unwrap().get("output_tokens").is_none());
+        for invalid in [
+            json!(-1),
+            json!(2.0),
+            json!("2"),
+            json!(u64::MAX),
+            Value::Null,
+        ] {
+            stream.take_usage(&json!({"cache_read_input_tokens":2}));
+            assert_eq!(stream.usage().unwrap()["input_tokens"], 10);
+            stream.take_usage(&json!({"cache_read_input_tokens":invalid}));
+            let unknown = stream.usage().unwrap();
+            assert!(unknown.get("input_tokens").is_none());
+            assert!(unknown.get("input_tokens_details").is_none());
+        }
+    }
 }

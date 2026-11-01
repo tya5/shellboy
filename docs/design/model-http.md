@@ -296,7 +296,12 @@ models) read on 2026-11-01; no real provider call has been made.
 - Usage: `input_tokens` plus `cache_creation_input_tokens` plus
   `cache_read_input_tokens` is the total input; `cached_tokens` is
   `cache_read_input_tokens`; `output_tokens` is taken from the last (cumulative)
-  `message_delta`. Missing counters stay unknown. Totals are not invented.
+  `message_delta`. Missing counters stay unknown. Totals are not invented:
+  input totals require all three components and checked addition within the
+  shared signed-64-bit counter range. Independently known cache-read/output
+  counters are retained even when the total is unknown. An absent delta counter
+  keeps its previous cumulative fact; a present invalid counter replaces it
+  with unknown rather than retaining an obsolete value.
 - Errors: an in-stream `error` event and an HTTP error body
   `{"type":"error","error":{"type","message"}}` map `error.type` to the provider
   code. `overloaded_error` (529) and `rate_limit_error` (429) are retried by the
