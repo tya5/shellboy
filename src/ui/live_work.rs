@@ -609,7 +609,7 @@ pub(super) fn draw(
         };
         let last_item = index + 1 == view.visible_rows;
         let connector = if last_item && !separate_overflow {
-            "+-"
+            "\\-"
         } else {
             "+-"
         };
@@ -725,7 +725,7 @@ pub(super) fn draw(
     }
     if separate_overflow {
         lines.push(Line::styled(
-            format!("+- 他{hidden}件"),
+            format!("\\- 他{hidden}件"),
             palette.live_work(),
         ));
     }
@@ -1683,7 +1683,10 @@ mod tests {
     fn body_lines(ui: &mut UiState) -> Vec<String> {
         let (text, _) = screen(ui);
         text.lines()
-            .filter(|l| l.trim_start().starts_with("+-[") || l.trim_start().starts_with("+- 他"))
+            .filter(|l| {
+                let row = l.trim_start();
+                row.starts_with("+-[") || row.starts_with("\\-[") || row.starts_with("\\- 他")
+            })
             .map(str::to_owned)
             .collect()
     }
@@ -1699,7 +1702,7 @@ mod tests {
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(
-            lines[0].starts_with("+-[1]") && lines[0].contains("$ printf"),
+            lines[0].starts_with("\\-[1]") && lines[0].contains("$ printf"),
             "{lines:?}"
         );
         assert!(!lines[0].contains("shell "), "{lines:?}");
@@ -1710,7 +1713,7 @@ mod tests {
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[0].starts_with("+-[1]") && lines[0].contains("$ "));
         assert!(lines[1].starts_with("+-[2]") && lines[1].contains("↳ child task"));
-        assert!(lines[2].starts_with("+-[3]") && lines[2].contains("⋯ saved wait"));
+        assert!(lines[2].starts_with("\\-[3]") && lines[2].contains("⋯ saved wait"));
         // Padding rows carry no connector: same count with fewer items.
         let mut two = snapshot(at);
         two.rows.truncate(2);
@@ -1718,7 +1721,7 @@ mod tests {
         set_work(&mut ui, Some(two), 3, at);
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 2, "{lines:?}");
-        assert!(lines[1].starts_with("+-[2]"));
+        assert!(lines[1].starts_with("\\-[2]"));
         // Overflow is its own last line.
         let mut many = snapshot(at);
         many.overflow = 4;
@@ -1726,6 +1729,6 @@ mod tests {
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[0].starts_with("+-[1]") && lines[1].starts_with("+-[2]"));
-        assert!(lines[2].starts_with("+- 他5件"), "{lines:?}");
+        assert!(lines[2].starts_with("\\- 他5件"), "{lines:?}");
     }
 }

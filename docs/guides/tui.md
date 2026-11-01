@@ -106,11 +106,11 @@ state is kept while the UI runs and starts open. An open body is always exactly
 only when you toggle it or resize the terminal. Alt+W is skipped if it is bound
 as the send or newline key.
 
-Each work row is drawn as a tree entry: `├─[1] $ label` with the state and elapsed time at the right edge, with
-`└─` on the last item row. The one-column kind glyph is `$` for a shell, `↳`
+Each work row is drawn as a tree entry: `+-[1] $ label` with the state and elapsed time at the right edge, with
+`\-` on the last item row. The one-column kind glyph is `$` for a shell, `↳`
 for a child Run and `⋯` for a saved wait; the same characters are used under
 `NO_COLOR` and `TERM=vt100`. A `他N件` (N more) overflow line, when shown, is the
-last row (`└─`). Blank padding rows have no connector.
+last row (`\-`). Blank padding rows have no connector.
 
 The composer follows displayed line count, normally limited to one quarter of screen height and at most eight lines; small screens prioritize a three-line control area. Folded pastes become short numbered chips; expand/edit/remove with `/paste NUMBER show|edit|remove`.
 
@@ -286,7 +286,7 @@ Omitting the node in `/fork` suggests the anchor or tail; `/edit` suggests the a
 
 ## Overlays and selection mode
 
-Popups share a frame, heading, explanation, body, and bottom controls. `›` plus background color marks selection; controls remain visible while scrolling. `…` indicates omitted middle content when an item cannot fit, but source, copy values, and execution arguments remain intact. Read full content through details/source. Forms expose the end of input and submit its whole value.
+Popups share a frame, heading, explanation, body, and bottom controls. `›` plus background color marks selection; controls remain visible while scrolling. `.` indicates omitted middle content when an item cannot fit, but source, copy values, and execution arguments remain intact. Read full content through details/source. Forms expose the end of input and submit its whole value.
 
 Ordinary lists, detail fields, and forms use Up/Down for selection and PgUp/PgDn for viewport-sized selection movement. Source, help, and result bodies scroll one display row with Up/Down and one page with PgUp/PgDn. PgDn in the conversation list continues fetching the next page. Confirmation screens scroll long explanations with Up/Down/PgUp/PgDn; only Y executes, while N/Esc return.
 
@@ -541,13 +541,13 @@ The `◉` work-region heading is reserved for #86, not drawn by this change.
 ## Context size in the footer
 
 The footer's first row ends with the current Thread's latest adopted model
-attempt, for example `↑140K/200K ↓20K キャッシュ86%`.
+attempt, for example `^140K/200K v20K キャッシュ86%`.
 
-- `↑` is the provider-reported input tokens, `↓` the output tokens, and
+- `^` is the provider-reported input tokens, `v` the output tokens, and
   `キャッシュN%` is cached tokens divided by input tokens. Nothing is estimated:
-  an unreported value shows `—`, the percentage is omitted when either side is
-  unknown, and `↑—` stays until the first response is adopted. After `/model`
-  the value is `↑—` again until the new model answers.
+  an unreported value shows `-`, the percentage is omitted when either side is
+  unknown, and `^-` stays until the first response is adopted. After `/model`
+  the value is `^-` again until the new model answers.
 - `/200K` is the effective `auto_at_tokens` of the Thread's connection (the
   connection's own setting, else `[compaction] auto_at_tokens`). When it is `0`
   (proactive compaction off) the denominator is not shown.
@@ -555,8 +555,8 @@ attempt, for example `↑140K/200K ↓20K キャッシュ86%`.
 - At 80% or more of the threshold the text is drawn in the attention color; with
   `NO_COLOR` it is prefixed with `!` instead.
 - Narrow terminals follow the footer's existing rule (other facts keep their
-  space; this text uses what is left) and drop `キャッシュ%`, then `↓`, then
-  `/閾値`, then `↑`.
+  space; this text uses what is left) and drop `キャッシュ%`, then `v`, then
+  `/閾値`, then `^`.
 - The value comes from the saved usage already read with each current-view
   snapshot (`context.last_successful_attempt`). It changes only when a response
   is adopted; no clock redraw, extra query or table is involved.
@@ -579,7 +579,7 @@ connection's remembered limit; original reason/details remain available.
 Elapsed labels share one formatter: `45秒`, `5分12秒`, then `1時間3分`.
 Tool rows keep tenths below a minute (for example `0.4秒`). Numeric saved facts
 and originals remain unchanged. Terminal activity labels show the saved Run end
-time, for example 完了 · 21:16 (or a date on other local days), not a new observation time;
+time, for example 完了 | 21:16 (or a date on other local days), not a new observation time;
 missing/invalid end facts are marked unavailable. Live/recovery phases do not
 reuse a previous end time. An idle clock does not trigger a redraw just for dates.
 
