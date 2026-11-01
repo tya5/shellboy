@@ -297,3 +297,46 @@ Default spill's newly-created replacement IDs cannot hit prior summary caches;
 other segments use existing cache validity. Provider/model failures after sending
 and races after the snapshot remain unpredicted. Final output is prepared after
 the read snapshot closes, with current capture revisions and explicit limits.
+
+## Proactive threshold compaction (#125 / D-019)
+
+Positioning: in normal operation the conversation stays at a low token count.
+A momentarily huge input is never blocked or pre-checked; it is sent. Only after
+its response reports input tokens at or above the threshold does the Driver
+compact, at the next safe request boundary (one step late is accepted). The
+existing explicit-overflow reduction (#50) remains the last-resort fallback, so
+the conversation always continues. Users who want a persistently large context
+opt out with `auto_at_tokens = 0`.
+
+Setting: `[compaction] auto_at_tokens` (default 200,000; 0 disables) with an
+optional `connections.<name>.auto_at_tokens` override (the connection value wins,
+0 disables for that connection). A section containing only this key keeps the
+default summary limits.
+
+Trigger: only the provider-reported `input_tokens` of the Thread's latest
+completed attempt for its current connection/model, read with the same query as
+`context_usage.last_successful_attempt`. No character or token estimate is used.
+Missing/unknown usage never triggers. Usage measured before a later adopted
+replacement (`next_request_pending`) is stale and never triggers, so a successful
+compaction is not repeated until a new request reports usage again.
+
+Boundary and path: in the Driver loop after the next Turn snapshot is ready, the
+Thread boundary guard is held, all tool groups are complete and no request is in
+flight, i.e. the same boundary as queued `/compact`. The Driver releases its
+replay lease and runs the argument-free compact unchanged (spill, then the bounded
+summary with the ordinary protections); never maximal omission. Afterwards it
+re-reads the snapshot. No table, worker, queue, timer or HTTP stage is added.
+
+Failure cap: a non-adopted outcome (`rejected`, `no_safe_reduction`) ends proactive
+attempts for the rest of the Run (an ephemeral per-`drive` flag; one Driver owns
+one Run). The request continues normally; the failure is not a Turn failure.
+Storage failures still propagate. So per Run at most one non-adopted attempt
+occurs, and adopted ones need a fresh reported measurement each time.
+
+Record: `automatic_trim_attempt` on the triggering completed attempt (existing
+field and `automatic_compaction_turn` partial index) with `reason =
+"proactive_threshold"`, `outcome`, `summary`/`error` like stage 2, and
+`trigger.auto_at_tokens` / `trigger.input_tokens` / `trigger.run_id`. `compact
+list` shows it as `automatic_reduction` with `reason` (`failure` for existing
+failure-driven records) and those trigger values. A second Run triggered by the
+same measurement overwrites the earlier record on that attempt.

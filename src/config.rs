@@ -169,6 +169,8 @@ pub struct Connection {
     pub response_retry_max_delay_ms: u64,
     pub response_retry_partial: bool,
     pub auto_trim_on_disconnect: bool,
+    /// Overrides `[compaction] auto_at_tokens` for this connection; 0 disables.
+    pub auto_at_tokens: Option<u64>,
 }
 impl Default for Connection {
     fn default() -> Self {
@@ -193,6 +195,7 @@ impl Default for Connection {
             response_retry_max_delay_ms: 60_000,
             response_retry_partial: true,
             auto_trim_on_disconnect: true,
+            auto_at_tokens: None,
         }
     }
 }
@@ -225,6 +228,7 @@ impl fmt::Debug for Connection {
             )
             .field("response_retry_partial", &self.response_retry_partial)
             .field("auto_trim_on_disconnect", &self.auto_trim_on_disconnect)
+            .field("auto_at_tokens", &self.auto_at_tokens)
             .finish()
     }
 }
@@ -834,6 +838,9 @@ pub struct Compaction {
     pub summary_max_percent: Option<f64>,
     pub summary_map_max_requests: usize,
     pub summary_reduce_max_requests: usize,
+    /// Proactive compaction threshold on the provider-reported input tokens of
+    /// the last adopted attempt. 0 disables; connections may override it.
+    pub auto_at_tokens: u64,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -842,12 +849,15 @@ struct CompactionFields {
     summary_max_percent: Option<f64>,
     summary_map_max_requests: Option<usize>,
     summary_reduce_max_requests: Option<usize>,
+    auto_at_tokens: Option<u64>,
 }
 impl From<CompactionFields> for Compaction {
     fn from(f: CompactionFields) -> Self {
         let request_only = f.summary_max_chars.is_none()
             && f.summary_max_percent.is_none()
-            && (f.summary_map_max_requests.is_some() || f.summary_reduce_max_requests.is_some());
+            && (f.summary_map_max_requests.is_some()
+                || f.summary_reduce_max_requests.is_some()
+                || f.auto_at_tokens.is_some());
         Self {
             summary_max_chars: if request_only {
                 Some(20_000)
@@ -861,6 +871,7 @@ impl From<CompactionFields> for Compaction {
             },
             summary_map_max_requests: f.summary_map_max_requests.unwrap_or(128),
             summary_reduce_max_requests: f.summary_reduce_max_requests.unwrap_or(16),
+            auto_at_tokens: f.auto_at_tokens.unwrap_or(DEFAULT_AUTO_AT_TOKENS),
         }
     }
 }
@@ -871,9 +882,11 @@ impl Default for Compaction {
             summary_max_percent: Some(5.0),
             summary_map_max_requests: 128,
             summary_reduce_max_requests: 16,
+            auto_at_tokens: DEFAULT_AUTO_AT_TOKENS,
         }
     }
 }
+pub const DEFAULT_AUTO_AT_TOKENS: u64 = 200_000;
 impl Compaction {
     pub fn valid(&self) -> bool {
         (self.summary_max_chars.is_some() || self.summary_max_percent.is_some())
@@ -883,6 +896,12 @@ impl Compaction {
                 .is_none_or(|p| p.is_finite() && p > 0.0 && p <= 100.0)
             && (1..=4096).contains(&self.summary_map_max_requests)
             && (1..=4096).contains(&self.summary_reduce_max_requests)
+    }
+    /// The connection override wins; 0 means proactive compaction is off.
+    pub fn auto_at_tokens_for(&self, connection: Option<&Connection>) -> u64 {
+        connection
+            .and_then(|c| c.auto_at_tokens)
+            .unwrap_or(self.auto_at_tokens)
     }
     pub fn summary_limit(&self, source: u64) -> u64 {
         self.summary_max_chars

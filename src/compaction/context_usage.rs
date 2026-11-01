@@ -20,6 +20,20 @@ struct RawSuccess {
     ended_at: Option<String>,
     next_request_pending: bool,
 }
+impl RawContextUsage {
+    /// Proactive-compaction evidence from the same latest completed attempt the
+    /// CLI reports: its ID, provider-reported input tokens (never estimated),
+    /// and whether a replacement was adopted after it started.
+    pub(crate) fn latest_reported_input(&self) -> Option<(&str, Option<u64>, bool)> {
+        self.latest.as_ref().map(|latest| {
+            (
+                latest.attempt_id.as_str(),
+                latest.usage.input_tokens,
+                latest.next_request_pending,
+            )
+        })
+    }
+}
 #[cfg(test)]
 impl RawContextUsage {
     fn scope(&self) -> (&str, &str, &str) {

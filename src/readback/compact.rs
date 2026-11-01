@@ -70,7 +70,7 @@ pub(super) fn automatic_query(w: &Window) -> String {
     let node = output_node(root);
     let at = "COALESCE(n.created_at,a.ended_at,a.started_at)";
     format!(
-        "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),(SELECT count(*) FROM model_attempt earlier INDEXED BY attempts_by_turn WHERE earlier.turn_id=a.turn_id AND earlier.rowid<=a.rowid AND earlier.state IN ('failed','incomplete')) FROM turn u INDEXED BY turns_by_thread JOIN model_attempt a INDEXED BY automatic_compaction_turn ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
+        "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),(SELECT count(*) FROM model_attempt earlier INDEXED BY attempts_by_turn WHERE earlier.turn_id=a.turn_id AND earlier.rowid<=a.rowid AND earlier.state IN ('failed','incomplete')),CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.reason')='text' THEN json_extract(a.error_json,'$.automatic_trim_attempt.reason') END,CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.trigger')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt.trigger') END FROM turn u INDEXED BY turns_by_thread JOIN model_attempt a INDEXED BY automatic_compaction_turn ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
         enriched(root),
         w.sql(at)
     )
@@ -175,6 +175,8 @@ struct AutomaticRow {
     turn: String,
     outcome: String,
     failures: i64,
+    reason: Option<String>,
+    trigger: Option<String>,
 }
 struct ReplacementRow {
     id: String,
@@ -324,6 +326,8 @@ pub(super) fn collect_tx(
             turn: budget.text(row, 5, false)?,
             outcome: budget.text(row, 6, false)?,
             failures: row.get(7)?,
+            reason: budget.optional(row, 8)?,
+            trigger: budget.optional(row, 9)?,
         });
     }
     drop(rows);
@@ -387,10 +391,29 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
             continue;
         }
         let key = event_id(&stats, &format!("attempt:{}", row.id));
+        let mut trigger = json!({"failure_kind":row.failure,"retry_number":row.retry,"retained_failures_in_turn_through_attempt":row.failures});
+        // Proactive records (#125) add their saved threshold and the provider-
+        // reported input tokens; only unsigned integers are copied.
+        if let Some(saved) = row
+            .trigger
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        {
+            for field in ["auto_at_tokens", "input_tokens"] {
+                let value = &saved[field];
+                if value.as_u64().is_some() {
+                    trigger[field] = value.clone();
+                }
+            }
+        }
+        let reason = row
+            .reason
+            .filter(|reason| reason.len() <= 64)
+            .unwrap_or_else(|| "failure".into());
         insert(
             &mut events,
             key.clone(),
-            json!({"event_id":key,"thread_id":thread,"kind":"automatic_reduction","at":row.at,"timestamp_basis":"replacement_created_at_or_attempt_ended_or_started_at","attempt_id":row.id,"turn_id":row.turn,"trigger":{"failure_kind":row.failure,"retry_number":row.retry,"retained_failures_in_turn_through_attempt":row.failures},"state":row.outcome,"metrics":stats}),
+            json!({"event_id":key,"thread_id":thread,"kind":"automatic_reduction","reason":reason,"at":row.at,"timestamp_basis":"replacement_created_at_or_attempt_ended_or_started_at","attempt_id":row.id,"turn_id":row.turn,"trigger":trigger,"state":row.outcome,"metrics":stats}),
         );
     }
     for row in replacements {

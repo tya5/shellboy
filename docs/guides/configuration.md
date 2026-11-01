@@ -183,6 +183,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # response_retry_max_delay_ms = 60000
 # response_retry_partial = true
 # auto_trim_on_disconnect = true
+# auto_at_tokens = 200000   # overrides [compaction] auto_at_tokens; 0 disables
 
 # Optional. Specify both fields if enabled.
 # [embedding]
@@ -523,6 +524,8 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `connections.<name>` | `api="responses"` | `"responses"`, `"chat_completions"` or `"anthropic_messages"`; catalog/embedding endpoints stay unchanged |
 | `connections.<name>` | `session_header=true`, `prompt_cache_key=false` | Thread identity header and optional cache identity body field for conversations/summaries |
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
+| `connections.<name>` | `auto_at_tokens` = unset (uses `[compaction]`) | Per-connection proactive compaction threshold; 0 disables |
+| `compaction` | `auto_at_tokens=200000` | Proactive compaction when the last reported input reaches this; 0 disables |
 | `connections.<name>` | `auto_trim_on_disconnect=true` | API-free maximum reduction from the second eligible consecutive failure; no preflight |
 | `connections.<name>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | Consecutive temporary conversation failure retries (0–20, 0 disables), backoff cap (1–300000ms), and retry after partial reception |
 | `embedding` | `connection` / `model` = unset; `batch_max_inputs=1`, `batch_max_chars=64000` | Indexing and search API; bounded synchronous history batches |
@@ -566,7 +569,8 @@ from the second eligible consecutive failure; false leaves ordinary retries.
 `response_max_retries` (default eight) bounds every automatic resend including
 a reduced request. `compact_hint_tokens` is removed and rejected as an unknown
 field; remove it from configuration before restarting. There is no pre-POST
-activation or token estimate. See [failure-driven reduction](recovery-and-storage.md#failure-driven-reduction-50).
+activation or token estimate; the proactive threshold below acts only after a
+response has reported its input tokens. See [failure-driven reduction](recovery-and-storage.md#failure-driven-reduction-50).
 
 
 ## Stop only automatic history indexing
@@ -637,6 +641,33 @@ when embeddings are configured, `history search` can help with differently worde
 facts but sends a potentially paid query embedding. Only summarize omitted
 history to reintroduce key facts. Summarizing an omitted range can
 increase the selected context even when it is much shorter than its originals.
+
+## Proactive compaction threshold
+
+```toml
+[compaction]
+auto_at_tokens = 200000   # default; 0 disables
+
+[connections.proxy]
+auto_at_tokens = 120000   # optional per-connection override; 0 disables
+```
+
+Shellboy keeps conversations small during normal operation. It never blocks or
+pre-checks a large input: the request is sent. When the provider reports in that
+response's usage that the input was at least `auto_at_tokens` tokens, Shellboy
+runs the argument-free `compact` (spill, then bounded summary; never maximal
+omission) at the next safe boundary, before the following request. Reaction is
+therefore one request late by design. Only the provider-reported count is used;
+there is no estimate, and providers or gateways that report no input tokens never
+trigger it. Context-overflow reduction remains the last-resort fallback.
+
+If the compaction is not adopted (summary failure, nothing safely compactable),
+the request continues unchanged and no further proactive attempt is made in the
+same Run. `compact list` shows each attempt as `automatic_reduction` with
+`reason: "proactive_threshold"`, its `state`, and `trigger.auto_at_tokens` /
+`trigger.input_tokens`. Summaries call the model and may cost tokens; compaction
+can also reduce prompt-cache hits. To keep a persistently large context, set
+`auto_at_tokens = 0` globally or for one connection, then restart the owner.
 
 ### Shell call descriptions
 

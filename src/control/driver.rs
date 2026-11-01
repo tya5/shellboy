@@ -1,6 +1,7 @@
 //! Per-Thread model/tool loop. Long waits never occupy operation admission.
 mod adoption;
 mod overflow;
+mod proactive;
 mod request;
 mod retry;
 mod shell_output;
@@ -112,6 +113,7 @@ pub(super) async fn drive(
     let boundary = control.boundary(&thread).await;
     let mut overflow = OverflowBudget::default();
     let mut retry_budget = retry::RetryBudget::default();
+    let mut proactive_budget = proactive::ProactiveBudget::default();
     let mut instructions = Instructions::default();
     loop {
         if slot.stop.is_cancelled() {
@@ -141,6 +143,20 @@ pub(super) async fn drive(
         retry_budget.observe(&snapshot.turn, snapshot.generation);
         if let Err(error) = control.gc.require_capacity().await {
             return fail_turn(&control, &snapshot, error).await;
+        }
+        // Safe request boundary: tool groups are complete and no request is in
+        // flight. A reported input over the threshold compacts here, one step
+        // after the large request; the new snapshot is then read again.
+        let mut snapshot = snapshot;
+        if proactive::maybe_compact(
+            &control,
+            &mut snapshot,
+            &request_slot,
+            &mut proactive_budget,
+        )
+        .await?
+        {
+            continue;
         }
         let refreshed = instructions
             .refresh(&control, snapshot, &request_slot)

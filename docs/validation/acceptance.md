@@ -7353,3 +7353,18 @@ then existing #107 list adapter7 and registered listIPC1, total27 positive test
 executions. The latter covers all4 list routes and8 real IPC Changed commits.
 Exit0/cleanup is confirmed. The prior source5e20cf1e three-OS CI remains qualified
 only on its older base; latest native3OS checks must qualify the new pushed SHA.
+## #125 proactive threshold compaction
+
+Environment: macOS (darwin) sandbox worktree issue-125-proactive from main
+0d922b9e, temporary data dirs and a loopback mock Responses endpoint; no real
+provider or user data. Commands via rust-slot: `cargo check --tests`,
+`cargo test --test integration -- proactive` (4/0: config defaults/override/
+rejection; adopted once with exactly one summary request and one
+`compact list` event `reason=proactive_threshold`, `state=adopted`, trigger
+100/150; no summary request or event below threshold, with global 0, or with a
+connection 0 override; a rejected summary is recorded once and not retried at
+the later boundary of the same Run, Turn completes, zero summary nodes).
+Related `cargo test --lib -- readback compact context_usage driver` passes
+180/0. Not run locally: the full standard check and Linux/Windows; those run in
+GitHub CI on the pushed branch. Providers that omit usage are only covered by
+the unknown-usage rule, not by a live provider.

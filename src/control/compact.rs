@@ -220,21 +220,30 @@ impl Control {
                 "Cannot encode context edit result",
             );
         }
-        let spill = self
-            .compactor
-            .spill_cancellable(thread, false, cancel.clone())
-            .await?;
-        let mut summary = self.compactor.summarize(thread, false, cancel).await?;
-        summary.spilled_groups += spill.spilled_groups;
-        summary.source_nodes += spill.source_nodes;
-        summary.original_node_ids.extend(spill.original_node_ids);
-        summary.no_target = summary.no_target && spill.no_target;
         encode_result(
-            summary,
+            argument_free_compact(&self.compactor, thread, cancel).await?,
             ErrorCode::InvalidState,
             "Cannot encode compact result",
         )
     }
+}
+
+/// The argument-free `compact` (spill, then bounded summary with the ordinary
+/// protections). Proactive threshold compaction reuses it unchanged.
+pub(super) async fn argument_free_compact(
+    compactor: &crate::compaction::Compactor,
+    thread: &str,
+    cancel: CancellationToken,
+) -> Result<crate::compaction::CompactResult, ApiError> {
+    let spill = compactor
+        .spill_cancellable(thread, false, cancel.clone())
+        .await?;
+    let mut summary = compactor.summarize(thread, false, cancel).await?;
+    summary.spilled_groups += spill.spilled_groups;
+    summary.source_nodes += spill.source_nodes;
+    summary.original_node_ids.extend(spill.original_node_ids);
+    summary.no_target = summary.no_target && spill.no_target;
+    Ok(summary)
 }
 
 #[cfg(test)]

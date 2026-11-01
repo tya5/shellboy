@@ -271,6 +271,7 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
                 value["result"]["compaction"]["summary_reduce_max_requests"],
                 16
             );
+            assert_eq!(value["result"]["compaction"]["auto_at_tokens"], 200000);
         }
         if ok && !advertised {
             assert_eq!(value["result"]["model_advertised"], false);

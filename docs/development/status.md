@@ -11,6 +11,18 @@ byte comparisons; [acceptance](../validation/acceptance.md#v050-publication-vali
 records the macOS synthetic upgrades and untested public installer/Linux/Windows
 upgrade paths.
 
+## Proactive threshold compaction (#125)
+
+Branch issue-125/proactive adds `[compaction] auto_at_tokens` (default 200,000,
+connection override, 0 disables). At the next safe request boundary after a
+completed attempt whose provider-reported input tokens reach it, the Driver runs
+the argument-free compact; one non-adopted attempt ends proactive tries for the
+Run. Records reuse `automatic_trim_attempt` with `reason=proactive_threshold`,
+visible in `compact list`. No estimate, table, worker, queue or timer. Design in
+compaction.md, D-019 in decisions. Local evidence is recorded in acceptance;
+3-OS CI on the pushed branch is the remaining qualification. Resume point:
+review and integration of that branch.
+
 ## Historical v0.5.0 release preparation
 ## Compact read-only forecast (#113)
 

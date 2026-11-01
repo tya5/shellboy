@@ -3406,3 +3406,221 @@ async fn required_description_schema_keeps_missing_and_empty_model_output_execut
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
     }).await.unwrap();
 }
+
+// #125 proactive compaction: reported input tokens of the last adopted attempt
+// at or above `auto_at_tokens` compact once at the next request boundary.
+async fn proactive_owner(root: &std::path::Path, url: &str, extra: &str) -> DataOwner {
+    let config = root.join("config.toml");
+    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n{extra}")).unwrap();
+    DataOwner::start(Some(config), Some(root.join("data")), root.into())
+        .await
+        .unwrap()
+}
+fn answer_with_usage(text: &str, input_tokens: u64) -> Value {
+    let mut body = answer(text);
+    body["usage"] =
+        json!({"input_tokens":input_tokens,"output_tokens":1,"total_tokens":input_tokens+1});
+    body
+}
+async fn proactive_events(control: &Arc<Control>, thread: &str) -> Vec<Value> {
+    let listed = request(
+        control,
+        Command::CompactList(CompactListArgs {
+            thread_id: Some(thread.into()),
+            since: None,
+            until: None,
+            limit: 50,
+        }),
+    )
+    .await;
+    listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["reason"] == "proactive_threshold")
+        .cloned()
+        .collect()
+}
+/// Two completed Turns (input 50 then `second`), then a third request. Returns
+/// how many summary (tool-free) requests preceded the third ordinary request.
+async fn proactive_third_turn(
+    control: &Arc<Control>,
+    receive: &mut mpsc::Receiver<Incoming>,
+    thread: &str,
+    second: u64,
+    summary_reply: (u16, Value),
+) -> usize {
+    for (n, tokens) in [(0, 50), (1, second)] {
+        send(control, thread, &format!("task {n}")).await;
+        incoming(control, receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("saved answer", tokens)))
+            .unwrap();
+        settled(control, thread).await;
+    }
+    send(control, thread, "current task").await;
+    let mut summaries = 0;
+    loop {
+        let next = incoming(control, receive).await;
+        if next.body["tools"] == json!([]) {
+            summaries += 1;
+            assert!(summaries <= 4, "bounded summary requests");
+            next.reply.send(summary_reply.clone()).unwrap();
+            continue;
+        }
+        next.reply
+            .send((200, answer_with_usage("last answer", 10)))
+            .unwrap();
+        break;
+    }
+    settled(control, thread).await;
+    summaries
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_threshold_compacts_once_at_the_next_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    let summaries = proactive_third_turn(
+        &control,
+        &mut receive,
+        &thread,
+        150,
+        (200, answer("## 目的\nSummarized earlier turns")),
+    )
+    .await;
+    assert_eq!(summaries, 1);
+    assert!(
+        receive.try_recv().is_err(),
+        "no further request after settling"
+    );
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["state"], "adopted");
+    assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
+    assert_eq!(events[0]["trigger"]["input_tokens"], 150);
+    assert!(events[0]["metrics"]["summary_node_id"].is_string());
+    let summary_nodes = control
+        .store
+        .database
+        .call(|db| {
+            Ok(
+                db.query_row("SELECT count(*) FROM node WHERE kind='summary'", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(summary_nodes, 1);
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_threshold_does_not_fire_below_threshold_or_when_disabled() {
+    for (extra, second) in [
+        // Below the threshold.
+        ("[compaction]\nauto_at_tokens=100\n", 99),
+        // Global 0 disables.
+        ("[compaction]\nauto_at_tokens=0\n", 150),
+        // Per-connection 0 overrides an enabled global threshold.
+        ("auto_at_tokens=0\n[compaction]\nauto_at_tokens=100\n", 150),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, extra).await;
+        let control = Control::new(&owner, root.path().into());
+        let thread = thread(&control).await;
+        let summaries =
+            proactive_third_turn(&control, &mut receive, &thread, second, (500, json!({}))).await;
+        assert_eq!(summaries, 0, "{extra}");
+        assert!(
+            proactive_events(&control, &thread).await.is_empty(),
+            "{extra}"
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_summary_failure_is_recorded_and_not_repeated_in_the_run() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    for (n, tokens) in [(0, 50), (1, 150)] {
+        send(&control, &thread, &format!("task {n}")).await;
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("saved answer", tokens)))
+            .unwrap();
+        settled(&control, &thread).await;
+    }
+    send(&control, &thread, "current task").await;
+    let mut summaries = 0;
+    // Ordinary replies: a tool call (still over the threshold), then an answer.
+    // The boundary after the tool would trigger again without the Run cap.
+    let mut ordinary = vec![answer_with_usage("done", 150), {
+        let mut body = json!({"id":"tool","status":"completed","output":[{"type":"function_call","call_id":"proactive-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]});
+        body["usage"] = json!({"input_tokens":160,"output_tokens":1});
+        body
+    }];
+    while let Some(reply) = ordinary.last().cloned() {
+        let next = incoming(&control, &mut receive).await;
+        if next.body["tools"] == json!([]) {
+            summaries += 1;
+            assert!(summaries <= 4, "bounded summary requests");
+            next.reply
+                .send((400, json!({"error":{"code":"invalid_request_error","message":"fixture summary failure"}})))
+                .unwrap();
+            continue;
+        }
+        ordinary.pop();
+        next.reply.send((200, reply)).unwrap();
+    }
+    settled(&control, &thread).await;
+    assert_eq!(
+        summaries, 1,
+        "one proactive attempt per Run after a failure"
+    );
+    assert!(receive.try_recv().is_err());
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["state"], "rejected");
+    assert_eq!(events[0]["trigger"]["input_tokens"], 150);
+    let (summary_nodes, turn_state) = control
+        .store
+        .database
+        .call(|db| {
+            Ok((
+                db.query_row("SELECT count(*) FROM node WHERE kind='summary'", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
+                db.query_row(
+                    "SELECT state FROM turn ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )?,
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(summary_nodes, 0);
+    assert_eq!(
+        turn_state, "completed",
+        "a failed proactive attempt never blocks the Turn"
+    );
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}

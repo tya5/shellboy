@@ -559,8 +559,10 @@ belong wholly to their start side, without splitting. Selected durations are who
 prorated overlap. Unknown start times are excluded only when time filtering; saved
 usage states/unknowns/overflow still apply. Totals are not invoices or prices.
 
-Compaction observations merge known operation results, automatic-failure records
-and retained replacements, newest first. Replacement creation is the timestamp
+Compaction observations merge known operation results, automatic records
+and retained replacements, newest first. Automatic records carry `reason`:
+`failure` (failure-driven reduction) or `proactive_threshold` (#125, with
+`trigger.auto_at_tokens` and the reported `trigger.input_tokens`). Replacement creation is the timestamp
 when available; otherwise operation completion or attempt end/start is identified
 by timestamp_basis. Restore is a distinct operation, not its old omission. A
 coalesced shared replacement has one representative operation ID and the saved

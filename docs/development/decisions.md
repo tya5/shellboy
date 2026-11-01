@@ -2640,3 +2640,26 @@ to the model and a connection or model change must not resend them. Provider
 tools cannot be enabled (`tools` is a reserved `extra_body` key), so provider
 executed blocks that must be returned are not expected. Revisit if a provider
 requires blocks to survive a model change, or key order.
+
+## D-019: Proactive threshold compaction on reported tokens (#125, 2026-11-01)
+
+Active. User decision: compact before the provider limit, enabled by default
+(opt-out). Positioning (user): normal operation keeps the conversation small; a
+single huge input is sent, not blocked or pre-checked; only a response reporting
+input tokens >= `auto_at_tokens` (default 200,000, connection override, 0
+disables) triggers the argument-free compact at the next safe boundary, one step
+late. Explicit-overflow reduction (#50) remains the last-resort fallback;
+persistent large-context users set 0. This narrows #50's "no token activation":
+there is still no pre-POST check or estimate, only a post-response reported
+count. Spec change (user): no character estimate; unknown usage never triggers.
+
+Choices: the trigger reads the same latest-completed-attempt usage as
+`context_usage` and ignores usage older than an adopted replacement, which bounds
+repeats without new state. Failure cap: one non-adopted proactive attempt per Run
+(in-memory per Driver; restart creates a new Run anyway). The record reuses
+`automatic_trim_attempt` on the triggering completed attempt rather than a new
+table/event. Measured motivation: workers averaging 440–570k input tokens per
+request and $100 in about two hours via LiteLLM. Revisit if Runs are long enough
+that one failed attempt per Run leaves them large, if a provider omits usage
+(feature then inert), or if recording on completed attempts confuses consumers
+that assume error_json implies failure.

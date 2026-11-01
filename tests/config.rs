@@ -761,6 +761,30 @@ fn summary_request_budgets_are_independent_configurable_and_positive() {
     }
 }
 
+#[test]
+fn proactive_compaction_threshold_defaults_on_and_connections_override_it() {
+    let c = Config::default();
+    assert_eq!(c.compaction.auto_at_tokens, 200_000);
+    assert_eq!(c.compaction.auto_at_tokens_for(None), 200_000);
+    // A section with only the threshold keeps the default summary limits.
+    let c = Config::parse("[compaction]\nauto_at_tokens=0").unwrap();
+    assert_eq!(c.compaction.auto_at_tokens, 0);
+    assert_eq!(c.compaction.summary_max_chars, Some(20000));
+    let c = connection_with("auto_at_tokens=50000").unwrap();
+    assert_eq!(
+        c.compaction.auto_at_tokens_for(c.connections.get("proxy")),
+        50_000
+    );
+    let c = connection_with("auto_at_tokens=0").unwrap();
+    assert_eq!(
+        c.compaction.auto_at_tokens_for(c.connections.get("proxy")),
+        0
+    );
+    for value in ["-1", "1.5", "'x'"] {
+        assert!(Config::parse(&format!("[compaction]\nauto_at_tokens={value}")).is_err());
+    }
+}
+
 fn connection_with(extra: &str) -> Result<Config, ConfigError> {
     Config::parse(&format!(
         "[connections.proxy]\nbase_url='https://example.com'\n{extra}"
