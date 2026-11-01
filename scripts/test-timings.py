@@ -13,7 +13,9 @@ import time
 def run(command, log):
     started = time.monotonic()
     with log.open('w', encoding='utf-8') as output:
-        result = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, check=False)
+        # RUSTC_BOOTSTRAP only lets libtest accept --report-time; no test is selected or skipped.
+        result = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, check=False,
+                                env={**os.environ, 'RUSTC_BOOTSTRAP': '1'})
     return {'command': command, 'seconds': time.monotonic() - started,
             'exit_code': result.returncode, 'log': log.name}
 
@@ -104,10 +106,13 @@ def main():
             all_ignored.extend(identities(target, ignored))
             if not (args.inventory_only or args.profile_only):
                 print(f'Running {target} ({len(names)} tests, {len(ignored)} ignored)', flush=True)
-                item.update(run([binary], args.output / f'harness-{number:03d}.log'))
+                item.update(run([binary, '-Zunstable-options', '--report-time'], args.output / f'harness-{number:03d}.log'))
                 # A successful process running zero tests must not replace a suite.
                 text = (args.output / item['log']).read_text(encoding='utf-8', errors='replace')
                 summary = re.search(r'test result: (\w+)\. (\d+) passed; (\d+) failed; (\d+) ignored;', text)
+                durations = re.findall(r'^test (\S+) \.\.\. \w+ <([\d.]+)s>$', text, re.M)
+                item['slowest'] = [{'test': name, 'seconds': float(seconds)}
+                                   for name, seconds in sorted(durations, key=lambda d: -float(d[1]))[:60]]
                 if summary:
                     item['passed'], item['failed'] = int(summary[2]), int(summary[3])
                     reported_ignored = int(summary[4])
