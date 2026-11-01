@@ -5,7 +5,6 @@ use super::ReadTicket;
 pub(super) struct ReadIntent {
     state: ReadState,
     pending: isize,
-    motion: ReadMotion,
 }
 
 #[derive(Debug, Default)]
@@ -15,22 +14,81 @@ enum ReadState {
     Hydrating,
     Awaiting(ReadTicket),
     Delivered(ReadTicket),
+    IdleMoved,
+    HydratingMoved,
+    AwaitingMoved(ReadTicket),
+    DeliveredMoved(ReadTicket),
+    IdleRebasing,
+    HydratingRebasing,
+    AwaitingRebasing(ReadTicket),
+    DeliveredRebasing(ReadTicket),
+    IdleRebasingMoved,
+    HydratingRebasingMoved,
+    AwaitingRebasingMoved(ReadTicket),
+    DeliveredRebasingMoved(ReadTicket),
 }
 impl ReadState {
-    fn new(loading: bool, ticket: Option<ReadTicket>) -> Self {
-        match (loading, ticket) {
-            (false, None) => Self::Idle,
-            (true, None) => Self::Hydrating,
-            (true, Some(ticket)) => Self::Awaiting(ticket),
-            (false, Some(ticket)) => Self::Delivered(ticket),
+    fn new(loading: bool, ticket: Option<ReadTicket>, motion: ReadMotion) -> Self {
+        match (loading, ticket, motion) {
+            (false, None, ReadMotion::Retained) => Self::Idle,
+            (true, None, ReadMotion::Retained) => Self::Hydrating,
+            (true, Some(ticket), ReadMotion::Retained) => Self::Awaiting(ticket),
+            (false, Some(ticket), ReadMotion::Retained) => Self::Delivered(ticket),
+            (false, None, ReadMotion::Moved) => Self::IdleMoved,
+            (true, None, ReadMotion::Moved) => Self::HydratingMoved,
+            (true, Some(ticket), ReadMotion::Moved) => Self::AwaitingMoved(ticket),
+            (false, Some(ticket), ReadMotion::Moved) => Self::DeliveredMoved(ticket),
+            (false, None, ReadMotion::Rebasing) => Self::IdleRebasing,
+            (true, None, ReadMotion::Rebasing) => Self::HydratingRebasing,
+            (true, Some(ticket), ReadMotion::Rebasing) => Self::AwaitingRebasing(ticket),
+            (false, Some(ticket), ReadMotion::Rebasing) => Self::DeliveredRebasing(ticket),
+            (false, None, ReadMotion::RebasingMoved) => Self::IdleRebasingMoved,
+            (true, None, ReadMotion::RebasingMoved) => Self::HydratingRebasingMoved,
+            (true, Some(ticket), ReadMotion::RebasingMoved) => Self::AwaitingRebasingMoved(ticket),
+            (false, Some(ticket), ReadMotion::RebasingMoved) => {
+                Self::DeliveredRebasingMoved(ticket)
+            }
         }
     }
-    fn into_parts(self) -> (bool, Option<ReadTicket>) {
+    fn into_parts(self) -> (bool, Option<ReadTicket>, ReadMotion) {
         match self {
-            Self::Idle => (false, None),
-            Self::Hydrating => (true, None),
-            Self::Awaiting(ticket) => (true, Some(ticket)),
-            Self::Delivered(ticket) => (false, Some(ticket)),
+            Self::Idle => (false, None, ReadMotion::Retained),
+            Self::Hydrating => (true, None, ReadMotion::Retained),
+            Self::Awaiting(ticket) => (true, Some(ticket), ReadMotion::Retained),
+            Self::Delivered(ticket) => (false, Some(ticket), ReadMotion::Retained),
+            Self::IdleMoved => (false, None, ReadMotion::Moved),
+            Self::HydratingMoved => (true, None, ReadMotion::Moved),
+            Self::AwaitingMoved(ticket) => (true, Some(ticket), ReadMotion::Moved),
+            Self::DeliveredMoved(ticket) => (false, Some(ticket), ReadMotion::Moved),
+            Self::IdleRebasing => (false, None, ReadMotion::Rebasing),
+            Self::HydratingRebasing => (true, None, ReadMotion::Rebasing),
+            Self::AwaitingRebasing(ticket) => (true, Some(ticket), ReadMotion::Rebasing),
+            Self::DeliveredRebasing(ticket) => (false, Some(ticket), ReadMotion::Rebasing),
+            Self::IdleRebasingMoved => (false, None, ReadMotion::RebasingMoved),
+            Self::HydratingRebasingMoved => (true, None, ReadMotion::RebasingMoved),
+            Self::AwaitingRebasingMoved(ticket) => (true, Some(ticket), ReadMotion::RebasingMoved),
+            Self::DeliveredRebasingMoved(ticket) => {
+                (false, Some(ticket), ReadMotion::RebasingMoved)
+            }
+        }
+    }
+    fn motion(&self) -> ReadMotion {
+        match self {
+            Self::Idle | Self::Hydrating | Self::Awaiting(_) | Self::Delivered(_) => {
+                ReadMotion::Retained
+            }
+            Self::IdleMoved
+            | Self::HydratingMoved
+            | Self::AwaitingMoved(_)
+            | Self::DeliveredMoved(_) => ReadMotion::Moved,
+            Self::IdleRebasing
+            | Self::HydratingRebasing
+            | Self::AwaitingRebasing(_)
+            | Self::DeliveredRebasing(_) => ReadMotion::Rebasing,
+            Self::IdleRebasingMoved
+            | Self::HydratingRebasingMoved
+            | Self::AwaitingRebasingMoved(_)
+            | Self::DeliveredRebasingMoved(_) => ReadMotion::RebasingMoved,
         }
     }
 }
@@ -103,37 +161,49 @@ pub(in crate::ui) struct ReadEffects {
 }
 impl ReadIntent {
     pub(super) fn is_loading(&self) -> bool {
-        matches!(self.state, ReadState::Hydrating | ReadState::Awaiting(_))
+        matches!(
+            self.state,
+            ReadState::Hydrating
+                | ReadState::Awaiting(_)
+                | ReadState::HydratingMoved
+                | ReadState::AwaitingMoved(_)
+                | ReadState::HydratingRebasing
+                | ReadState::AwaitingRebasing(_)
+                | ReadState::HydratingRebasingMoved
+                | ReadState::AwaitingRebasingMoved(_)
+        )
     }
     pub(super) fn request(&self) -> Option<&ReadTicket> {
         match &self.state {
-            ReadState::Awaiting(ticket) | ReadState::Delivered(ticket) => Some(ticket),
-            ReadState::Idle | ReadState::Hydrating => None,
+            ReadState::Awaiting(ticket)
+            | ReadState::Delivered(ticket)
+            | ReadState::AwaitingMoved(ticket)
+            | ReadState::DeliveredMoved(ticket)
+            | ReadState::AwaitingRebasing(ticket)
+            | ReadState::DeliveredRebasing(ticket)
+            | ReadState::AwaitingRebasingMoved(ticket)
+            | ReadState::DeliveredRebasingMoved(ticket) => Some(ticket),
+            _ => None,
         }
     }
     pub(super) fn pending(&self) -> isize {
         self.pending
     }
     pub(super) fn moved(&self) -> bool {
-        self.motion.moved()
+        self.state.motion().moved()
     }
     pub(super) fn rebasing(&self) -> bool {
-        self.motion.rebasing()
+        self.state.motion().rebasing()
     }
 
     pub(super) fn on_event(&mut self, event: ReadEvent) -> ReadEffects {
-        let Self {
-            state,
-            pending,
-            motion,
-        } = std::mem::take(self);
-        let (loading, ticket) = state.into_parts();
+        let Self { state, pending } = std::mem::take(self);
+        let (loading, ticket, motion) = state.into_parts();
         #[cfg(test)]
         if matches!(&event, ReadEvent::TakeOwned) {
             *self = Self {
-                state: ReadState::new(loading, None),
+                state: ReadState::new(loading, None, motion),
                 pending,
-                motion,
             };
             return ReadEffects { pending: 0, ticket };
         }
@@ -211,9 +281,8 @@ impl ReadIntent {
             ReadEvent::TakeOwned => unreachable!(),
         };
         *self = Self {
-            state: ReadState::new(loading, ticket),
+            state: ReadState::new(loading, ticket, motion),
             pending,
-            motion,
         };
         effects
     }
