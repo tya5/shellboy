@@ -2625,3 +2625,18 @@ forking a conversation. Share canonical pure policies; bound collection and labe
 coverage failure separately from a predicted execution refusal. Summary after-size
 is unknown without model text. The fixed collection envelope is documented in
 compaction.md and can be revisited with row/byte/query evidence, not timing bins.
+## #120 stage 2: opaque provider items (2026-11-01)
+
+Keep provider-specific, uninterpreted content (Anthropic thinking with
+signature, redacted_thinking, future block types) as one envelope item
+`provider_opaque{dialect,kind,block}` inside the existing assistant output array.
+Considered and rejected: a new side table (new bounds, owner and GC path for no
+gain), per-dialect item types in the core (the core would track every provider),
+and storing raw bytes (the whole conversation path is `serde_json::Value`).
+Consequence accepted: object key order inside `block` is not preserved; strings
+(text, signature) are byte-exact, which is what providers verify. Replay uses the
+existing reasoning-epoch rule for all opaque items, because signatures are bound
+to the model and a connection or model change must not resend them. Provider
+tools cannot be enabled (`tools` is a reserved `extra_body` key), so provider
+executed blocks that must be returned are not expected. Revisit if a provider
+requires blocks to survive a model change, or key order.

@@ -201,6 +201,44 @@ provider tests are authorized (#68 D-003); Gemini and all real providers remain
 unverified. Provider extra_body/cached_content controls are deferred.
 
 
+### Opaque provider items (#120 stage 2)
+
+The saved conversation is a list of Responses-shaped items. A provider can
+return content Shellboy must keep and return but must not interpret: Anthropic
+`thinking` (with `signature`), `redacted_thinking`, and block types that do not
+exist yet. Such content is stored as one **opaque item**, an envelope that says
+which dialect it belongs to:
+
+```json
+{"type":"provider_opaque","dialect":"anthropic_messages","kind":"thinking","block":{...as received...}}
+```
+
+- `dialect` (non-empty ASCII, at most 64 bytes) names the wire dialect that
+  produced the block; `kind` (at most 64 bytes) is the provider's own block type,
+  kept for display and diagnostics only; `block` is a JSON object. Shellboy never
+  reads inside `block`. The envelope is the only shape the core validates.
+- Sending: an encoder for dialect D unwraps only items whose `dialect` is D and
+  puts `block` back on the wire unchanged. Every other encoder skips them. This
+  generalizes "Chat skips Responses reasoning items": Responses and Chat now drop
+  all `provider_opaque` items, and a dialect-D encoder drops items of other
+  dialects. Native Responses `reasoning` items keep their current handling.
+- Lifetime: the existing reasoning-epoch rule applies to every opaque item. It is
+  replayed only while the Thread's connection and model are unchanged, because
+  providers bind signatures to the model. Changing either leaves the saved item
+  untouched but no longer sent.
+- Storage and round trip: the item lives in the assistant output array of the
+  adopted node, so adoption, replay, deletion, GC and RAG scoping need no new
+  table, queue or worker. Strings inside `block` (thinking text, signature) are
+  byte-exact through save and replay. JSON object key order is not preserved
+  (`serde_json::Value` orders keys) and numbers use `f64` beyond `u64`; providers
+  ignore key order, and no current block carries such numbers.
+- Not shown or indexed as body text. History search and compaction summary
+  material skip opaque items (like reasoning, never resurrected into summaries).
+  The screen shows the item as `kind` only.
+- Unknown item types are still `unsupported_item` failures for every dialect.
+  A dialect decoder is what turns an unknown provider block into this envelope,
+  so the rule "keep the original, never guess" lives with the dialect, not here.
+
 ### D-010 fact-preserving Chat tolerances (#64 review)
 
 Accept stop with calls only when every call has a nonempty name and identity
