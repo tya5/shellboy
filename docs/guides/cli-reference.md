@@ -106,6 +106,7 @@ that a particular provider/model implements every feature.
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
+| `usage get --attempt ATTEMPT_ID` | One saved model attempt's IDs/state, bounded standard usage scalars and reported `prompt_cache_diagnostics` or JSON null. Exclusive with aggregate scope/time/group/pagination options; read-only and no provider call. |
 | `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME] [--group-by hour\|day\|thread] [--timezone ZONE] [--limit N] [--cursor CURSOR]` | Saved usage totals or bounded grouped request-size/cache statistics. At most one scope ID. Ungrouped default is the caller's Thread; grouped default spans non-deleted Threads. Children require Thread scope. Ungrouped results keep conversation requests in `model_attempts` and compaction summary requests in `compaction` (`compactions`, `requests`, map/reduce counts, input/cached/cache-creation/output tokens; coverage `summary: recorded`); Turn/Run scope counts compactions run while that Turn/Run was current. Grouped results count conversation requests only. Group-only flags and partial/cursor semantics are described under bounded usage breakdowns. No provider call or receipt. |
 
 `thread get`, `run get` and `turn get` also include `usage_totals`. Counts use saved

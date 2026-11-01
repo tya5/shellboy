@@ -7919,3 +7919,8 @@ all-target check, cache library 40 pass/1 existing ignored and JSON/SSE suites
 Linux/macOS full standard CI; Windows, review and main inclusion remain separate.
 The resulting exact-SHA CI URL/conclusion will accompany the formal handoff;
 this pending-dispatch record is not CI success evidence.
+
+The CI-wait self-check also adds the exclusive attempt selector to the public
+operation dictionary (the detailed guide section already describes it). The
+final handoff must reference the subsequent exact-head CI, not a run started
+before this documentation correction.
