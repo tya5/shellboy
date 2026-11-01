@@ -227,8 +227,11 @@ mod rendering_tests {
                 UiLanguage::Ja => &["よく使う操作", "F1 戻る"],
             }
         }
-        fn operations_expected(_: UiLanguage) -> &'static [&'static str] {
-            &["CLIと同じ操作", "Esc"]
+        fn operations_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Actions", "Enter"],
+                UiLanguage::Ja => &["CLIと同じ操作", "Esc"],
+            }
         }
         super::verify_screen(show_help, help_expected);
         super::verify_screen(show_operations, operations_expected);

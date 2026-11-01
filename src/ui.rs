@@ -5199,6 +5199,7 @@ impl UiState {
         let context = self.operation_context(selected.is_some());
         self.invalidate_management();
         let mut operations = operations::Operations::new(context);
+        operations.set_language(self.config.ui.language);
         if let Some(selected) = selected {
             operations.select(selected);
         }

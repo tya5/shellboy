@@ -106,7 +106,9 @@ fn screen(ui: &mut UiState) -> String {
         .join("\n")
 }
 fn ui() -> UiState {
-    UiState::new(&Config::default(), std::env::temp_dir())
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    UiState::new(&config, std::env::temp_dir())
 }
 
 #[test]
