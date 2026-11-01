@@ -81,7 +81,7 @@ fn performance_long_history_stream_layout_and_resize() {
         let started = Instant::now();
         let layout = ui.history_layout(120, 30);
         layout_times.push(started.elapsed());
-        ui.active_view_mut().viewport_row(&layout, 120, 30);
+        ui.active_view_mut().project_viewport(&layout, 120, 30);
     }
     let layout = ui.history_layout(120, 30);
     let (lines, targets, sources) = presentation::history(ui.view(), 120);
@@ -302,7 +302,7 @@ fn resize_reprojects_every_visible_short_node_and_defers_offscreen_nodes() {
         total_nodes: 30,
     });
     let layout = ui.history_layout(122, 55);
-    let row = ui.viewport_row(&layout, 122, 55);
+    let row = ui.project_viewport(&layout, 122, 55);
     let visible = visible_render_nodes(&layout, row, 55, ui.view().nodes().len());
     assert!(
         visible.len() > 20,
@@ -325,7 +325,7 @@ fn resize_reprojects_every_visible_short_node_and_defers_offscreen_nodes() {
     for _ in 0..30 {
         let preflight = RenderPreflight::new(ui.view());
         let projected = ui.history_layout(82, 55);
-        let row = ui.viewport_row(&projected, 82, 55);
+        let row = ui.project_viewport(&projected, 82, 55);
         let visible = visible_render_nodes(&projected, row, 55, ui.view().nodes().len());
         ui.prepare_visible_render_width(80, &visible, preflight);
         let requests = ui
@@ -369,7 +369,7 @@ fn resize_reprojects_every_visible_short_node_and_defers_offscreen_nodes() {
     let taller = ui.history_layout(82, 65);
     assert!(Arc::ptr_eq(&before, &taller));
     assert_eq!(ui.layout_cache.builds, builds);
-    let row = ui.viewport_row(&taller, 82, 65);
+    let row = ui.project_viewport(&taller, 82, 65);
     let taller_visible = visible_render_nodes(&taller, row, 65, ui.view().nodes().len());
     assert!(
         taller_visible.len() > visible.len(),

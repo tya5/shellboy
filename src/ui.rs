@@ -5522,9 +5522,9 @@ impl UiState {
             }
         }
     }
-    /// Reconcile a transient wrapped row against a durable source anchor.
-    fn viewport_row(&mut self, layout: &HistoryLayout, width: u16, height: u16) -> usize {
-        self.active_view_mut().viewport_row(layout, width, height)
+    /// Publish derived frame geometry without changing the durable source anchor.
+    fn project_viewport(&mut self, layout: &HistoryLayout, width: u16, height: u16) -> usize {
+        self.active_view_mut().project_viewport(layout, width, height)
     }
     fn scroll(&mut self, amount: isize) -> Vec<UiAction> {
         let budget = usize::try_from(self.config.cache.layout_bytes).unwrap_or(usize::MAX);
@@ -6225,7 +6225,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         body_area.width.saturating_sub(2),
         body_area.height.saturating_sub(2),
     );
-    let scroll = state.viewport_row(
+    let scroll = state.project_viewport(
         &history,
         body_area.width.saturating_sub(2),
         body_area.height.saturating_sub(2),
@@ -6845,7 +6845,7 @@ mod layout_cache_tests {
             let mut previous = (0, 0, 0);
             for step in 0..80 {
                 let layout = ui.history_layout(80, height);
-                let top = ui.viewport_row(&layout, 80, height);
+                let top = ui.project_viewport(&layout, 80, height);
                 let source = &layout.sources[top];
                 let first = layout
                     .sources
@@ -7505,7 +7505,7 @@ mod layout_cache_tests {
             .collect();
         ui.view_mut().total_nodes = 20;
         let first = ui.history_layout(20, 8);
-        ui.viewport_row(&first, 20, 8);
+        ui.project_viewport(&first, 20, 8);
         assert!(ui.scroll(-3).is_empty());
         let next = ui.history_layout(20, 8);
         assert!(Arc::ptr_eq(&first, &next));
@@ -7534,7 +7534,7 @@ mod layout_cache_tests {
             total_nodes: 2,
         });
         let layout = ui.history_layout(80, 16);
-        ui.viewport_row(&layout, 80, 16);
+        ui.project_viewport(&layout, 80, 16);
         assert_eq!(layout.sources.last().unwrap().node, 0);
         assert_eq!(layout.sources.last().unwrap().covered_end, 2);
         let generation = ui.view().generation;

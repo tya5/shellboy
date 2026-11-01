@@ -7744,3 +7744,11 @@ Doubtful marker removed: focus is explicit history navigation, unlike a no-op
 wheel. Regression now checks selected-item identity, source anchor and rows stay
 fixed across streamed growth, with unseen set. No production code added.
 Same helper: combined91 / scroll237 / fields15. Rust validation pending slot.
+
+### #118 projection-cache review: retain derived publication
+
+`viewport_row` is renamed `project_viewport` throughout callers and fixtures to
+make mutation explicit. The regression now checks width/height publication on
+resize while authoritative navigation stays equal; the existing repeated-frame
+check remains. Same helper: combined91 / scroll237 / fields15. No production
+lines added and no watchdog allowance/deadline changes. Final Rust checks pending.

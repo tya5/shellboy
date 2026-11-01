@@ -1554,11 +1554,11 @@ mod owner_tests {
         let mut cache = HistoryLayoutCache::default();
         let budget = 1024 * 1024;
         let layout = view.history_layout("owner", &mut cache, budget, 35, 8);
-        let mut previous = view.viewport_row(&layout, 35, 8);
+        let mut previous = view.project_viewport(&layout, 35, 8);
         for _ in 0..30 {
             assert!(view.scroll(1, "owner", &mut cache, budget).is_empty());
             let layout = view.history_layout("owner", &mut cache, budget, 35, 8);
-            let row = view.viewport_row(&layout, 35, 8);
+            let row = view.project_viewport(&layout, 35, 8);
             assert_eq!(
                 row,
                 previous + 1,
@@ -1572,7 +1572,7 @@ mod owner_tests {
         }
         let anchor = view.navigation.anchor.clone();
         let resized = view.history_layout("owner", &mut cache, budget, 55, 8);
-        let row = view.viewport_row(&resized, 55, 8);
+        let row = view.project_viewport(&resized, 55, 8);
         assert_eq!(view.navigation.anchor, anchor);
         assert!(resized.sources[row].offset <= anchor.char_offset);
         assert!(cache.bytes <= budget);

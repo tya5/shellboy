@@ -261,7 +261,7 @@ impl ThreadView {
                 }
                 let (width, height) = (self.navigation.scroll.width, self.navigation.scroll.height);
                 let layout = self.history_layout(view_key, cache, budget, width, height);
-                let top = self.viewport_row(&layout, width, height);
+                let top = self.project_viewport(&layout, width, height);
                 let max = layout.lines.saturating_sub(usize::from(height));
                 let target = top.saturating_add_signed(amount).min(max.max(top));
                 if target != top
@@ -348,7 +348,7 @@ impl ThreadView {
                 .last()
                 .is_none_or(|n| n.base_char_offset + n.text.chars().count() >= n.total_chars)
     }
-    pub(in crate::ui) fn viewport_row(
+    pub(in crate::ui) fn project_viewport(
         &mut self,
         layout: &HistoryLayout,
         width: u16,
@@ -453,7 +453,7 @@ impl ThreadView {
             }
             let (width, height) = (self.navigation.scroll.width, self.navigation.scroll.height);
             let layout = self.history_layout(view_key, cache, budget, width, height);
-            let top = self.viewport_row(&layout, width, height);
+            let top = self.project_viewport(&layout, width, height);
             if following && amount > 0 && self.at_true_tail(&layout) {
                 return vec![];
             }

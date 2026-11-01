@@ -125,7 +125,7 @@ impl UiState {
                 return Some(Arc::clone(item));
             }
         }
-        let row = self.viewport_row(
+        let row = self.project_viewport(
             &layout,
             self.view().navigation.scroll.width,
             self.view().navigation.scroll.height,
@@ -156,7 +156,7 @@ impl UiState {
     fn select_history_item(&mut self, row: usize, item: Arc<ItemRegion>, layout: &HistoryLayout) {
         let width = self.view().navigation.scroll.width;
         let height = self.view().navigation.scroll.height;
-        let current = self.viewport_row(layout, width, height);
+        let current = self.project_viewport(layout, width, height);
         let height = usize::from(height).max(1);
         let top = if row < current {
             row
@@ -211,7 +211,7 @@ impl UiState {
                 return None;
             }
             let layout = self.item_layout();
-            let row = self.viewport_row(
+            let row = self.project_viewport(
                 &layout,
                 self.view().navigation.scroll.width,
                 self.view().navigation.scroll.height,

@@ -668,11 +668,8 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
 }
 
 #[test]
-fn render_writes_viewport_cache_fields_and_then_settles() {
-    // characterization: current behaviour, see #118
-    // `viewport_row` is a query that also writes row/origin/width/height/
-    // revision/anchor/initialized. Pin the written values, then pin that a
-    // second identical render writes the same ones.
+fn render_publishes_only_derived_viewport_cache_and_then_settles() {
+    // Projection publication is intentional, not an authoritative navigation write.
     let (mut ui, mut t) = single(200);
     rows(&mut ui, &mut t);
     up(&mut ui);
@@ -691,6 +688,7 @@ fn render_writes_viewport_cache_fields_and_then_settles() {
         )
     };
     let first = state(&ui);
+    let authoritative = (ui.view().navigation.anchor.clone(), snap(&ui));
     assert_eq!(first.3, 58, "text width excludes the border and scrollbar");
     assert_eq!(first.4, 20);
     assert_eq!(first.5, ui.view().history_revision());
@@ -698,6 +696,11 @@ fn render_writes_viewport_cache_fields_and_then_settles() {
     assert!(first.7);
     rows(&mut ui, &mut t);
     assert_eq!(state(&ui), first);
+    t.backend_mut().resize(40, 39);
+    rows(&mut ui, &mut t);
+    assert_eq!(ui.view().navigation.scroll.width, 38);
+    assert_eq!(ui.view().navigation.scroll.height, 26);
+    assert_eq!((ui.view().navigation.anchor.clone(), snap(&ui)), authoritative);
 }
 
 #[test]
@@ -705,7 +708,7 @@ fn paused_anchor_beyond_a_true_end_is_clamped_to_a_full_last_page_on_render() {
     // characterization: current behaviour, see #118
     // A paused anchor near the end of a fully cached thread leaves a blank
     // tail; render pulls the row back to `lines - height` (the "true end" clamp
-    // duplicated in viewport_row and scroll), but leaves `follow` false.
+    // duplicated in project_viewport and scroll), but leaves `follow` false.
     let (mut ui, mut t) = single(200);
     let tail = rows(&mut ui, &mut t);
     set_anchor(&mut ui, "long", numbered("R", 199).chars().count());

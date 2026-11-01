@@ -2995,7 +2995,7 @@ mod tests {
             let mut cache = super::super::HistoryLayoutCache::default();
             let budget = 1024 * 1024;
             let layout = view.history_layout("fixture", &mut cache, budget, 100, 2);
-            view.viewport_row(&layout, 100, 2);
+            view.project_viewport(&layout, 100, 2);
             assert!(view.scroll(1, "fixture", &mut cache, budget).is_empty());
             assert_eq!(view.navigation.anchor.node_id.as_deref(), Some(actual));
             let expected_next = base + body[..body.find(next).unwrap()].chars().count();
