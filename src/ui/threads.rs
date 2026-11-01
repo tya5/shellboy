@@ -5598,6 +5598,20 @@ mod language_tests {
         super::super::i18n::verify_screen(empty, empty_expected);
     }
     #[test]
+    fn footer_line_budget_preserves_dense_rows_in_both_languages() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let wide = BrowserText::ListFullKeys.render(language);
+            assert_eq!(wide.lines().count(), 1, "{language:?}: {wide}");
+            assert!(wide.width() <= 108, "{language:?}: {wide}");
+            for key in ["Esc", "Enter", "Ctrl+D", "Tab", "F1", "Ctrl+R"] {
+                assert!(wide.contains(key), "{language:?}: {wide}");
+            }
+            let medium = BrowserText::ListKeys.render(language);
+            assert_eq!(medium.lines().count(), 2);
+            assert!(medium.lines().all(|line| line.width() <= 68));
+        }
+    }
+    #[test]
     fn actual_browser_borders_remain_aligned_in_both_modes_and_languages() {
         use ratatui::{Terminal, backend::TestBackend};
         for policy in [Some(1), Some(2), None] {
