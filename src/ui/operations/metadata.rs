@@ -1748,7 +1748,10 @@ mod paired_message_tests {
             crate::ui::text_width::set_terminal_width(observed);
             for language in [UiLanguage::Ja, UiLanguage::En] {
                 let label = display_label(OperationId::ConfigInit, language);
-                assert!(label.contains(separator), "{observed:?} {language:?}: {label}");
+                assert!(
+                    label.contains(separator),
+                    "{observed:?} {language:?}: {label}"
+                );
             }
         }
         crate::ui::text_width::clear_terminal_width();
