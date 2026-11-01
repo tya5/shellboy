@@ -354,3 +354,54 @@ fn typed_current_notice_caption_preserves_raw_command_and_title_in_both_language
         .set_notice(Message::Text(Text::NoticeDeletedThread), None);
     assert!(label(UiLanguage::En, &value).contains("Referenced conversation was deleted"));
 }
+
+fn source_error_after_enter(ui: &mut UiState) {
+    use crate::presentation::messages::{Message, Text};
+    let saved = json!({"kind":"shell_ended","payload":{"execution_id":"missing-execution"}});
+    let mut value = node("event", "notice", json!({"text":saved.to_string()}));
+    for (key, text) in [
+        ("execution_id", "missing-execution"),
+        ("source_error", "元の結果を参照できません"),
+        ("title", "Synthetic saved notice"),
+    ] {
+        value
+            .presentation
+            .fields
+            .push(crate::presentation::PresentationField {
+                key: format!("/ui_notice/{key}"),
+                value: text.into(),
+                ..Default::default()
+            });
+    }
+    value.presentation.ui_messages.set_notice(
+        Message::Text(Text::NoticeCallUnavailable),
+        Some(Text::NoticeSourceUnavailable),
+    );
+    history(ui, vec![value]);
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 28)).unwrap();
+    terminal.draw(|frame| crate::ui::draw(frame, ui)).unwrap();
+    for code in [
+        crossterm::event::KeyCode::Tab,
+        crossterm::event::KeyCode::Enter,
+    ] {
+        assert!(
+            ui.event(crossterm::event::Event::Key(
+                crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE)
+            ))
+            .is_empty()
+        );
+    }
+    assert_eq!(
+        ui.view().status,
+        Text::NoticeSourceUnavailable.render(ui.config.ui.language)
+    );
+    assert!(ui.view().operation_notice.is_some());
+    assert!(ui.details.is_none());
+}
+#[test]
+fn typed_source_error_after_enter_is_visible_on_the_actual_bilingual_screen() {
+    crate::ui::i18n::verify_screen(source_error_after_enter, |lang| match lang {
+        UiLanguage::En => &["Source result is unavailable"],
+        UiLanguage::Ja => &["元の結果を参照できません"],
+    });
+}

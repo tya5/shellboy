@@ -122,24 +122,25 @@ impl PhaseClock {
     pub fn commit(&mut self, at: Instant) {
         self.committed_at = self.committed_at.max(at);
     }
-    pub fn note(&self, now: Instant) -> String {
+    pub fn note_localized(&self, now: Instant, language: UiLanguage) -> String {
         let now = now.max(self.committed_at);
         match self.base {
-            Some(base) => format!(
-                "{}{}",
-                if self.observed {
-                    FooterText::Observed.text()
-                } else {
-                    ""
-                },
-                crate::presentation::elapsed_text(
-                    base.saturating_add(now.saturating_duration_since(self.at))
+            Some(base) => {
+                let elapsed = Message::Elapsed {
+                    ms: base
+                        .saturating_add(now.saturating_duration_since(self.at))
                         .as_secs()
                         .saturating_mul(1000),
-                    false
-                )
-            ),
-            None => FooterText::UnknownAge.text().into(),
+                    decimal: false,
+                }
+                .render(language);
+                match (language, self.observed) {
+                    (UiLanguage::En, true) => format!("Observed {elapsed}"),
+                    (UiLanguage::Ja, true) => format!("観測 {elapsed}"),
+                    (_, false) => elapsed,
+                }
+            }
+            None => FooterText::UnknownAge.localized(language).into(),
         }
     }
 }

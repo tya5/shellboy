@@ -1,6 +1,8 @@
 //! Display facts and a local animation clock. No lifecycle writes, I/O or tasks.
 mod timing;
 use super::theme;
+use crate::config::UiLanguage;
+use crate::presentation::messages::{Message, phase_label};
 use ratatui::{style::Style, text::Span};
 use std::time::{Duration, Instant};
 use timing::PhaseClock;
@@ -16,6 +18,7 @@ pub enum FooterText {
     UsageLimit,
     RateLimit,
     RecoveryActions,
+    EndedUnknown,
 }
 impl FooterText {
     pub fn key(self) -> &'static str {
@@ -25,6 +28,20 @@ impl FooterText {
             Self::UsageLimit => "ui.activity.limit.usage",
             Self::RateLimit => "ui.activity.limit.rate",
             Self::RecoveryActions => "ui.activity.limit.actions",
+            Self::EndedUnknown => "ui.activity.ended_unknown",
+        }
+    }
+    pub fn localized(self, language: UiLanguage) -> &'static str {
+        if language == UiLanguage::Ja {
+            return self.text();
+        }
+        match self {
+            Self::Observed => "Observed ",
+            Self::UnknownAge => "Elapsed time unavailable",
+            Self::UsageLimit => "Usage limit",
+            Self::RateLimit => "Rate limit",
+            Self::RecoveryActions => "Retry is manual after reset | /model to switch connection",
+            Self::EndedUnknown => "End time unavailable",
         }
     }
     pub fn text(self) -> &'static str {
@@ -34,11 +51,13 @@ impl FooterText {
             Self::UsageLimit => "使用量上限",
             Self::RateLimit => "要求頻度の制限",
             Self::RecoveryActions => "待つ・時刻後も明示的に再試行 / /model で接続を選ぶ",
+            Self::EndedUnknown => crate::presentation::TIME_TEXT[3],
         }
     }
 }
 
 pub(super) use wait::label as context_wait_label;
+pub(super) use wait::label_localized as context_wait_label_localized;
 impl ActivityPhase {
     pub fn is_active(self) -> bool {
         self.motion() != Motion::Still
@@ -81,6 +100,25 @@ pub struct RecoverySnapshot {
     pub stop_reason: Option<String>,
 }
 impl RecoverySnapshot {
+    pub fn limit_summary_localized(&self, language: UiLanguage) -> Option<String> {
+        if language == UiLanguage::Ja {
+            return self.limit_summary();
+        }
+        let limit = self.usage_limit?;
+        let at = chrono::DateTime::from_timestamp(limit.resets_at, 0)?;
+        let kind = match limit.kind {
+            crate::model::usage_limit::LimitKind::UsageLimitReached => FooterText::UsageLimit,
+            crate::model::usage_limit::LimitKind::RateLimitRetryAfter => FooterText::RateLimit,
+        }
+        .localized(language);
+        Some(match limit.limit_window_minutes {
+            Some(n) => format!(
+                "{kind} | Resets {} UTC | {n}-minute window",
+                at.format("%m-%d %H:%M")
+            ),
+            None => format!("{kind} | Resets {} UTC", at.format("%m-%d %H:%M")),
+        })
+    }
     pub fn limit_summary(&self) -> Option<String> {
         let limit = self.usage_limit?;
         let at = chrono::DateTime::from_timestamp(limit.resets_at, 0)?;
@@ -107,6 +145,32 @@ pub struct AutomaticRetrySnapshot {
     pub partial_response_discarded: bool,
 }
 impl AutomaticRetrySnapshot {
+    pub(super) fn label_localized(&self, language: UiLanguage) -> String {
+        let wait = Message::Elapsed {
+            ms: self.delay_ms.div_ceil(1000).saturating_mul(1000),
+            decimal: false,
+        }
+        .render(language);
+        // Consequences precede optional progress counts in constrained footers.
+        match (language, self.partial_response_discarded) {
+            (UiLanguage::En, true) => format!(
+                "Re-sending may be billed twice | Retry {}/{} in {wait} | Partial response saved; starting over",
+                self.number, self.limit
+            ),
+            (UiLanguage::En, false) => format!(
+                "Re-sending may be billed twice | Retry {}/{} in {wait}",
+                self.number, self.limit
+            ),
+            (UiLanguage::Ja, true) => format!(
+                "再送は重複課金の可能性 | 再試行 {}/{} | {wait}待機 | 途中応答を保存して作り直し",
+                self.number, self.limit
+            ),
+            (UiLanguage::Ja, false) => format!(
+                "再送は重複課金の可能性 | 再試行 {}/{} | {wait}待機",
+                self.number, self.limit
+            ),
+        }
+    }
     pub(super) fn label(&self) -> String {
         format!(
             "（{}/{}） | {}待機{} | 再送は重複課金の可能性",
@@ -338,7 +402,12 @@ impl ActivityView {
     }
 
     pub fn phase_time_note(&self, at: Instant) -> Option<String> {
-        self.phase_clock.as_ref().map(|clock| clock.note(at))
+        self.phase_time_note_localized(at, UiLanguage::Ja)
+    }
+    pub fn phase_time_note_localized(&self, at: Instant, language: UiLanguage) -> Option<String> {
+        self.phase_clock
+            .as_ref()
+            .map(|clock| clock.note_localized(at, language))
     }
     pub fn secondary_phase(&self) -> Option<ActivityPhase> {
         let s = self.snapshot.as_ref()?;
@@ -354,18 +423,24 @@ impl ActivityView {
     }
 
     pub fn secondary_note(&self, at: Instant) -> Option<String> {
+        self.secondary_note_localized(at, UiLanguage::Ja)
+    }
+    pub fn secondary_note_localized(&self, at: Instant, language: UiLanguage) -> Option<String> {
         let phase = self.secondary_phase()?;
         Some(format!(
             "{} | {}",
-            phase.label(),
+            phase_label(phase, language),
             self.request_clock.as_ref().map_or_else(
-                || FooterText::UnknownAge.text().to_owned(),
-                |clock| clock.note(at)
+                || FooterText::UnknownAge.localized(language).to_owned(),
+                |clock| clock.note_localized(at, language)
             )
         ))
     }
 
     pub fn receive_gap_note(&self, now: Instant) -> Option<String> {
+        self.receive_gap_note_localized(now, UiLanguage::Ja)
+    }
+    pub fn receive_gap_note_localized(&self, now: Instant, language: UiLanguage) -> Option<String> {
         let snapshot = self.snapshot.as_ref()?;
         let receive = self.receive.as_ref()?;
         if snapshot.phase != ActivityPhase::AwaitingModel
@@ -377,11 +452,18 @@ impl ActivityView {
         if seconds < 30 {
             return None;
         }
-        let elapsed = crate::presentation::elapsed_text(seconds.saturating_mul(1000), false);
-        Some(if receive.received {
-            format!("最後の受信から{elapsed}")
-        } else {
-            format!("受信待ち{elapsed}（画面の観測開始から）")
+        let elapsed = Message::Elapsed {
+            ms: seconds.saturating_mul(1000),
+            decimal: false,
+        }
+        .render(language);
+        Some(match (language, receive.received) {
+            (UiLanguage::En, true) => format!("{elapsed} since last receive"),
+            (UiLanguage::En, false) => {
+                format!("Waiting to receive for {elapsed} (observed on this screen)")
+            }
+            (UiLanguage::Ja, true) => format!("最後の受信から{elapsed}"),
+            (UiLanguage::Ja, false) => format!("受信待ち{elapsed}（画面の観測開始から）"),
         })
     }
 
@@ -589,7 +671,16 @@ impl Animation {
         self.demand.is_some()
     }
     pub fn spans(&self, phase: ActivityPhase, base: Style, now: Instant) -> Vec<Span<'static>> {
-        let text = format!("{} {}", phase.marker(), phase.label());
+        self.spans_localized(phase, base, now, UiLanguage::Ja)
+    }
+    pub fn spans_localized(
+        &self,
+        phase: ActivityPhase,
+        base: Style,
+        now: Instant,
+        language: UiLanguage,
+    ) -> Vec<Span<'static>> {
+        let text = format!("{} {}", phase.marker(), phase_label(phase, language));
         let elapsed = now.saturating_duration_since(self.origin).as_secs_f64();
         let motion = if self.footer_moves() {
             phase.motion()
@@ -605,7 +696,7 @@ impl Animation {
                         phase.marker().to_owned(),
                         base.fg(theme::activity_pulse(level)),
                     ),
-                    Span::styled(format!(" {}", phase.label()), base),
+                    Span::styled(format!(" {}", phase_label(phase, language)), base),
                 ]
             }
             Motion::Shimmer => {
@@ -1038,3 +1129,7 @@ mod tests {
         assert_eq!(view.elapsed_ms(at + Duration::from_secs(12)), Some(12_000));
     }
 }
+
+#[cfg(test)]
+#[path = "activity/i18n_tests.rs"]
+mod i18n_tests;

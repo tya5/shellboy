@@ -10,6 +10,23 @@ pub(crate) fn label(reason: &crate::protocol::RunWaitReason) -> String {
     text.into()
 }
 
+pub(crate) fn label_localized(
+    reason: &crate::protocol::RunWaitReason,
+    language: crate::config::UiLanguage,
+) -> String {
+    if language == crate::config::UiLanguage::Ja {
+        return label(reason);
+    }
+    match reason.action.as_str() {
+        "summary" => "Waiting for conversation summary",
+        "spill" => "Waiting for output spill",
+        "restore" => "Waiting for history restoration",
+        "omit" | "trim" | "maximal" => "Waiting for history editing",
+        _ => "Waiting for conversation compaction",
+    }
+    .into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

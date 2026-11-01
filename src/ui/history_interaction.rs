@@ -332,6 +332,8 @@ impl UiState {
         if let Some((execution, thread, source, group, call, unavailable, source_error)) = notice {
             if let Some(reason) = unavailable {
                 self.active_view_mut().status = reason;
+                self.active_view_mut()
+                    .promote_status_notice(NoticeKind::Failure);
                 self.dirty = true;
                 return Some(vec![]);
             }
@@ -371,6 +373,8 @@ impl UiState {
                         .render(language)
                         .into()
                 });
+                self.active_view_mut()
+                    .promote_status_notice(NoticeKind::Failure);
                 self.dirty = true;
                 return Some(vec![]);
             }
