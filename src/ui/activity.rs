@@ -56,6 +56,7 @@ impl FooterText {
     }
 }
 
+#[cfg(test)]
 pub(super) use wait::label as context_wait_label;
 pub(super) use wait::label_localized as context_wait_label_localized;
 impl ActivityPhase {
@@ -170,22 +171,6 @@ impl AutomaticRetrySnapshot {
                 self.number, self.limit
             ),
         }
-    }
-    pub(super) fn label(&self) -> String {
-        format!(
-            "（{}/{}） | {}待機{} | 再送は重複課金の可能性",
-            self.number,
-            self.limit,
-            crate::presentation::elapsed_text(
-                self.delay_ms.div_ceil(1000).saturating_mul(1000),
-                false
-            ),
-            if self.partial_response_discarded {
-                " | 途中応答を保存して作り直し"
-            } else {
-                ""
-            }
-        )
     }
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -401,6 +386,7 @@ impl ActivityView {
         was_visible || before != self.phase() || before_secondary != self.secondary_phase()
     }
 
+    #[cfg(test)]
     pub fn phase_time_note(&self, at: Instant) -> Option<String> {
         self.phase_time_note_localized(at, UiLanguage::Ja)
     }
@@ -422,6 +408,7 @@ impl ActivityView {
         )
     }
 
+    #[cfg(test)]
     pub fn secondary_note(&self, at: Instant) -> Option<String> {
         self.secondary_note_localized(at, UiLanguage::Ja)
     }
@@ -670,6 +657,7 @@ impl Animation {
     pub fn footer_moves(&self) -> bool {
         self.demand.is_some()
     }
+    #[cfg(test)]
     pub fn spans(&self, phase: ActivityPhase, base: Style, now: Instant) -> Vec<Span<'static>> {
         self.spans_localized(phase, base, now, UiLanguage::Ja)
     }

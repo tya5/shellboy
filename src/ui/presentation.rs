@@ -5232,6 +5232,10 @@ pub(super) fn recovery_lines(
     }));
     // Never let optional provider/context/count detail displace recovery actions.
     essential.extend(hanging_wrap(vec![Line::from(actions)], width.max(1)));
+    // A long retry footer must not conceal a saved quota/reset deadline.
+    if let Some(limit) = recovery.limit_summary_localized(language) {
+        essential.extend(hanging_wrap(vec![Line::from(limit)], width.max(1)));
+    }
     let reason = crate::presentation::sanitize_plain(&recovery.message, 0)
         .0
         .replace('\n', " ");

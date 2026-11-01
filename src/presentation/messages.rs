@@ -208,6 +208,10 @@ impl Message {
                 }
             }
             Self::Summary { count, replaced } => match (en, replaced) {
+                (true, true) if *count == 1 => {
+                    "Summary | 1 replaced | 1 source | F6>O Original".into()
+                }
+                (true, false) if *count == 1 => "Summary | 1 source | F6>O Original".into(),
                 (true, true) => {
                     format!("Summary | {count} replaced | {count} sources | F6>O Original")
                 }
@@ -221,7 +225,9 @@ impl Message {
                 (false, _) => format!("  原文{count}件 | F6 詳細"),
             },
             Self::Excerpt { rows, omitted } => {
-                if en {
+                if en && *rows == 1 {
+                    format!(". Output excerpt ({omitted} of 1 row omitted) | F6 Details")
+                } else if en {
                     format!(". Output excerpt ({omitted} of {rows} rows omitted) | F6 Details")
                 } else {
                     format!(". 出力抜粋（表示{rows}行中{omitted}行省略）| F6 詳細")
@@ -233,6 +239,12 @@ impl Message {
                 total,
                 live,
             } => match (en, live) {
+                (true, true) if *total == 1 => {
+                    format!("Live display window {start}-{end}/1 character | F6 Details")
+                }
+                (true, false) if *total == 1 => {
+                    format!("Original window {start}-{end}/1 character | F6 Details")
+                }
                 (true, true) => {
                     format!("Live display window {start}-{end}/{total} characters | F6 Details")
                 }
@@ -243,14 +255,18 @@ impl Message {
                 (false, false) => format!("原文の取得範囲 {start}-{end}/{total}文字 | F6 詳細"),
             },
             Self::BodyOmitted { count } => {
-                if en {
+                if en && *count == 1 {
+                    "1 body/output character omitted | F6 Details".into()
+                } else if en {
                     format!("{count} body/output characters omitted | F6 Details")
                 } else {
                     format!("本文・出力{count}文字省略 | F6 詳細")
                 }
             }
             Self::Reasoning { count } => {
-                if en {
+                if en && *count == 1 {
+                    "▸ Reasoning 1 character | Collapsed /reasoning".into()
+                } else if en {
                     format!("▸ Reasoning {count} characters | Collapsed /reasoning")
                 } else {
                     format!("▸ 推論 {count}文字 | 折りたたみ /reasoning")
@@ -297,14 +313,18 @@ impl Message {
                 }
             }
             Self::DetailCount { count } => {
-                if en {
+                if en && *count == 1 {
+                    "1 item in this original | F6 Target details".into()
+                } else if en {
                     format!("{count} items in this original | F6 Target details")
                 } else {
                     format!("この原文に{count}件 | 個別の対象はF6 詳細")
                 }
             }
             Self::WaitCount { count } => {
-                if en {
+                if en && *count == 1 {
+                    "1 wait condition | F6 Referenced targets for current state".into()
+                } else if en {
                     format!("{count} wait conditions | F6 Referenced targets for current state")
                 } else {
                     format!("待機条件{count}件 | 対象の現在状態はF6の参照先で確認")
@@ -980,6 +1000,45 @@ mod tests {
                     .render(UiLanguage::Ja)
                     .contains(&format!("原文{count}件"))
             );
+        }
+    }
+    #[test]
+    fn dynamic_sentences_use_singular_only_for_one() {
+        for count in [0, 1, 2] {
+            let singular = count == 1;
+            for (message, one, many) in [
+                (
+                    Message::Summary {
+                        count,
+                        replaced: false,
+                    },
+                    "1 source |",
+                    "sources |",
+                ),
+                (Message::DetailCount { count }, "1 item in", "items in"),
+                (
+                    Message::WaitCount { count },
+                    "1 wait condition |",
+                    "wait conditions |",
+                ),
+                (
+                    Message::BodyOmitted { count },
+                    "1 body/output character omitted",
+                    "characters omitted",
+                ),
+                (
+                    Message::Reasoning { count },
+                    "1 character |",
+                    "characters |",
+                ),
+            ] {
+                assert!(
+                    message
+                        .render(UiLanguage::En)
+                        .contains(if singular { one } else { many })
+                );
+                assert!(message.render(UiLanguage::Ja).contains(&count.to_string()));
+            }
         }
     }
     #[test]

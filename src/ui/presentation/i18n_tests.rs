@@ -522,7 +522,7 @@ fn retry_run_footer_keeps_billing_consequence_on_bilingual_screen() {
 fn context_wait_run_footer_screen_bilingual() {
     crate::ui::i18n::verify_screen(context_wait, |lang| match lang {
         UiLanguage::En => &["Waiting for conversation summary"],
-        UiLanguage::Ja => &["会話要約を待機"],
+        UiLanguage::Ja => &["会話要約の完了待ち"],
     });
 }
 #[test]
@@ -536,6 +536,23 @@ fn quota_run_footer_keeps_manual_retry_and_reset_on_bilingual_screen() {
 fn receiving_run_footer_screen_bilingual() {
     crate::ui::i18n::verify_screen(receiving, |lang| match lang {
         UiLanguage::En => &["Receiving answer"],
-        UiLanguage::Ja => &["応答を受信中"],
+        UiLanguage::Ja => &["応答受信中"],
+    });
+}
+
+fn quota_and_retry(ui: &mut UiState) {
+    activity_fixture(
+        ui,
+        crate::activity::ActivityPhase::Recovery,
+        true,
+        false,
+        true,
+    );
+}
+#[test]
+fn simultaneous_quota_and_retry_keep_both_critical_facts_visible_bilingually() {
+    crate::ui::i18n::verify_screen(quota_and_retry, |lang| match lang {
+        UiLanguage::En => &["Re-sending may be billed twice", "UTC", "manual"],
+        UiLanguage::Ja => &["再送は重複課金の可能性", "UTC", "明示的に再試行"],
     });
 }
