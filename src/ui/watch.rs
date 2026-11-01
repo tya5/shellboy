@@ -1313,10 +1313,6 @@ impl DescendantView {
         self.error = error;
         changed
     }
-    #[cfg(test)]
-    fn label(&self, root: &str) -> Option<String> {
-        self.label_in(root, UiLanguage::Ja)
-    }
     pub(super) fn label_in(&self, root: &str, language: UiLanguage) -> Option<String> {
         let count = self.get(root)?;
         if self.error.is_some() {
