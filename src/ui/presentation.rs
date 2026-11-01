@@ -5209,7 +5209,7 @@ mod code_caption_anchor_tests {
         let lines = &projected.blocks[0].rendered.as_ref().unwrap().lines;
         let caption = lines
             .iter()
-            .find(|l| l.spans.iter().any(|s| s.content.contains("[1] コピー")))
+            .find(|l| l.spans.iter().any(|s| s.content.contains("[1] Copy")))
             .unwrap();
         assert_eq!(body_spans(caption).count(), 0);
         let shown = borrowed(std::slice::from_ref(caption));
@@ -5217,7 +5217,7 @@ mod code_caption_anchor_tests {
             shown[0]
                 .spans
                 .iter()
-                .any(|s| s.content.contains("[1] コピー"))
+                .any(|s| s.content.contains("[1] Copy"))
         );
         assert!(
             shown[0]

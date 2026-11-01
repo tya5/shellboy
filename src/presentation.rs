@@ -1427,7 +1427,7 @@ mod copy_caption_tests {
         };
         let shown = rendered(&p);
         assert!(
-            shown.contains("[1] コピー") && shown.contains("[2] コピー"),
+            shown.contains("[1] Copy") && shown.contains("[2] Copy"),
             "{shown}"
         );
         assert_eq!(
@@ -1436,7 +1436,7 @@ mod copy_caption_tests {
         );
         p.body_extent_unknown = true;
         render_markdown(&mut p, 78);
-        assert!(!rendered(&p).contains("[1] コピー"));
+        assert!(!rendered(&p).contains("[1] Copy"));
         let tail = "```\ntwo\n```\n";
         let offset = text[..text.find(tail).unwrap()].chars().count();
         let mut partial = project(
@@ -1446,6 +1446,6 @@ mod copy_caption_tests {
             offset,
         );
         render_markdown(&mut partial, 78);
-        assert!(!rendered(&partial).contains("[1] コピー"));
+        assert!(!rendered(&partial).contains("[1] Copy"));
     }
 }
