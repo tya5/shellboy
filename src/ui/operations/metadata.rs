@@ -543,6 +543,10 @@ impl Form {
 }
 use super::super::i18n::local;
 
+pub(super) fn display_label(id: OperationId, language: crate::config::UiLanguage) -> String {
+    text_for(id.label_text(), language).replace(" · ", crate::ui::text_width::glyphs::separator())
+}
+
 fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> &'static str {
     match id {
         OperationId::CompactList => local!(
@@ -1737,6 +1741,18 @@ fn global_argument_text(
 mod paired_message_tests {
     use super::*;
     use crate::config::UiLanguage;
+
+    #[test]
+    fn catalogue_display_preserves_separator_when_terminal_measures_one_cell() {
+        for (observed, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            crate::ui::text_width::set_terminal_width(observed);
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                let label = display_label(OperationId::ConfigInit, language);
+                assert!(label.contains(separator), "{observed:?} {language:?}: {label}");
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
 
     #[test]
     fn global_argument_messages_preserve_cli_spelling_and_japanese_metadata() {
