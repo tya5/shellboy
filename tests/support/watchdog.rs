@@ -116,16 +116,24 @@ pub async fn receive_until<T, R>(
 /// The caller keeps its existing timeout; no delay or time-success test lives here.
 #[allow(dead_code)]
 pub async fn drain_to_completion<T, R>(
-    mut task: tokio::task::JoinHandle<R>,
+    task: tokio::task::JoinHandle<R>,
     receiver: &std::sync::mpsc::Receiver<T>,
+    budget: Duration,
 ) -> Result<R, tokio::task::JoinError> {
+    let deadline = std::time::Instant::now() + budget;
     loop {
-        for _ in 0..128 {
-            if receiver.try_recv().is_err() {
-                break;
-            }
+        if task.is_finished() {
+            return task.await;
         }
-        tokio::select! {result=&mut task=>return result,_=tokio::task::yield_now()=>{}}
+        // The frontend owns its producers; normal termination closes the channel.
+        let received = tokio::task::block_in_place(|| {
+            receiver.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+        });
+        match received {
+            Ok(_) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return task.await,
+            Err(error) => panic!("frontend delivery completion: {error}"),
+        }
     }
 }
 
@@ -191,7 +199,7 @@ mod tests {
         });
         let result = watchdog(
             "bounded producer completion",
-            drain_to_completion(producer, &receive),
+            drain_to_completion(producer, &receive, WATCHDOG),
         )
         .await
         .unwrap()

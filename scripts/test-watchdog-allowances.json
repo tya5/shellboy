@@ -1002,14 +1002,6 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "06edcf76e59127e156c37e5624884cee0f97487bd03a0be2253a746a0aceda11",
-    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
-    "count": 1,
-    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
-  },
-  {
-    "file": "src/frontend/update_delivery.rs",
-    "rule": "raw-timeout",
     "fingerprint": "07ecc41f202f42a05857f3c184e7bac80b37b4bfac757565336ed87b688b5d7a",
     "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
     "count": 1,
@@ -1032,6 +1024,22 @@
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
   },
   {
+    "file": "src/frontend/update_delivery.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "63195a73774baea32848f7215609874d929fe211be71f9774a1ccc09765a934c",
+    "function": "real_frontend_cancel_quit_and_one_force_survive_full_reserve_and_retained_batch",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/frontend.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "201a6f72f045b86715110fca8e25a44851dbf653f38850504a82b2a26d613076",
+    "function": "edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
     "fingerprint": "235650b64cd872388939b7b8239027c41f5405c845f186cb3d64514e4e8cac88",
@@ -1042,15 +1050,7 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "9bd56d39f3ea74cd2445c405269ffd11897c914fc6c0c39eeec552ee195f4008",
-    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
-    "count": 1,
-    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "c8906b5753da88f28a548e50b5c921bcaa1272a9fdf9f587f432c7d785435260",
+    "fingerprint": "5a9351f075688b338f56a4d9046865c4f240755fdcc17fe03b81de817cccf359",
     "function": "persisted_output_identity_is_delivered_before_each_history_window",
     "count": 1,
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
@@ -1058,8 +1058,16 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "d43522e257136698b971ea474a7d44d34b2295871a28732e1a060c26a0e2f048",
-    "function": "edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results",
+    "fingerprint": "c8681dd9e87b12439600ff5f096bc669bd3849b0b751bb850090e38b819b351c",
+    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/support/watchdog.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "0fbf512923356eae4bb32a4283f88c2e09446b7c5b9ef261ee9149a324af0230",
+    "function": "drain_to_completion",
     "count": 1,
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
   },
@@ -1068,6 +1076,14 @@
     "rule": "raw-timeout",
     "fingerprint": "face92f8f13654300be24c83c07129112580fcbe48557b10e32e5498a336c680",
     "function": "receive_until",
+    "count": 1,
+    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
+  },
+  {
+    "file": "tests/support/watchdog.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "5b2d7bd674a142bc162fe1873f225fe79ab75b51d1d6864b0ad1c66931c5855b",
+    "function": "drain_to_completion",
     "count": 1,
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
   },

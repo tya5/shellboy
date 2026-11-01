@@ -7393,3 +7393,28 @@ credit returns: second request `cache_read_input_tokens > 0`, record
 Local `runtime_features::headless_stop_boundaries_*` failed in this sandbox with
 the restarted owner reporting the data-directory lock unavailable; it does not
 use the Messages dialect and is left to CI.
+## #124 state-driven frontend fixture preparation
+
+Historical Windows cd86d259/run41272742726 attempt1 fails at shutdown joins5/8s
+and the proxy's independent10s phase gate. The issue records additional107/109
+same-SHA intermittent failures. Keep those failures distinct from later reruns.
+The changes and per-case conditions/budgets are documented in frontend-stability.
+All original5/8/10s shutdown bounds, draft phases5s, saturated-outbox5/10/15/2s
+and the shared60s diagnostic watchdog remain at their original values. Proxy
+phase progress now follows consumer oneshots instead of an independent10s speed
+requirement; missing consumer progress still has its unchanged state watchdog.
+No runtime deadline, queue capacity or production observer is changed.
+
+Local rust-slot check --tests passes. New receive/drain helper regressions and
+the retained-batch cancel/quit/force case pass. The initial same-Thread rewrite
+incorrectly demanded a completed model answer from a no-provider fixture and
+failed its existing5s guard; corrected matching uses the actual submitted draft
+and Thread durable-acceptance event plus the original saved-instruction SQL check,
+not model completion. That correction and edit_adapter/persisted_output_identity/
+structured_history each pass1/0 locally. No timing cap is enlarged or assertion
+removed. A later Clippy attempt selected library metadata without Lists after
+rebase, even though own source includes that variant; it is unqualified. Force
+own entry-path recompilation rather than changing the source API to fit stale
+shared artifacts. Final source will be checked again before Windows qualification.
+Five consecutive actual Windows4-thread CI passes at one frozen SHA remain the
+acceptance gate; build/OS/CI results are not inferred from macOS focused passes.

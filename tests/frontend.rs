@@ -1305,7 +1305,11 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     send.send(UiAction::Quit).await.unwrap();
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        crate::test_watchdog::drain_to_completion(bridge, &incoming),
+        crate::test_watchdog::drain_to_completion(
+            bridge,
+            &incoming,
+            std::time::Duration::from_secs(5),
+        ),
     )
     .await
     .unwrap()
@@ -2303,7 +2307,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     send.send(UiAction::Quit).await.unwrap();
     tokio::time::timeout(
         Duration::from_secs(8),
-        crate::test_watchdog::drain_to_completion(bridge, &incoming),
+        crate::test_watchdog::drain_to_completion(bridge, &incoming, Duration::from_secs(8)),
     )
     .await
     .unwrap()
@@ -2937,7 +2941,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     send.send(UiAction::Quit).await.unwrap();
     tokio::time::timeout(
         Duration::from_secs(10),
-        crate::test_watchdog::drain_to_completion(bridge, &incoming),
+        crate::test_watchdog::drain_to_completion(bridge, &incoming, Duration::from_secs(10)),
     )
     .await
     .unwrap()
