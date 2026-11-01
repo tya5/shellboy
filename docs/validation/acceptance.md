@@ -7942,3 +7942,36 @@ before this documentation correction.
   Its timing sensitivity is unresolved, not proven pre-existing and not hidden
   as a fixture-repair success. Final uninstrumented tests/CI must be separate
   evidence; the failure history belongs in the handoff even if those pass.
+
+### #142 Review Revision Admission (Schema19)
+
+- Supersedes prior schema20/pointer claims: reviewer rejects `6b687296`; shared
+  #141 context selection over 33 recent Turns is the replacement. Missing
+  in-window adoption omits comparison/options. Uses the context display's
+  current connection/model scope; no older-history scan. Record D-142 revision.
+- Rebased onto main `6a3291a`. Bootstrap, migrations, adoption implementation,
+  old-schema fixtures and release-upgrade/error-catalogue support are restored
+  byte-for-byte to main; no schema change, backfill or redundant adoption write.
+- Initial source check/cache40+ignored1/context10/JSON-SSE2 pass before adding
+  the two dedicated Native window/cost tests. The final expanded source checks
+  and new exact-SHA CI remain pending here; do not cite the rejected head's
+  successful run as evidence for this revision.
+- New test contract: 33rd Turn available / 34th excluded; no request options
+  for absent/invalid IDs; no older-ID fallback; excluded noncompleted states;
+  exact shared scope; query-only/no mutations; existing three-key completed
+  index seek and VM work insensitive to 5000 older Turns and attempt depth.
+- No Windows, integration batch, provider efficacy/API, installed binary/user
+  data, physical terminal or native published-release upgrade claim. Earlier
+  unchanged status-bar watchdog failure history is retained, not erased or
+  claimed fixed by this lookup revision; latest main includes #138 follow-up.
+
+Review-revision local evidence now observed (macOS, disposable fixtures, every
+Cargo invocation serialized): execution438be45f exits0 with check/cache42+one
+existing ignored/context10/JSON-SSE2/storage24/hot-query5; execution0a28b58e
+exits0 after final disabled-inspection gate with fmt/all-target check/cache43+
+one existing ignored/JSON-SSE2/original #137 inspection1. Both new window/cost
+cases pass, including the three-key plan and growth-independent VM bound.
+Python121 pass. The next-inspection gate's missing-index negative/positive
+control passes; default-off inspection avoids the added selection just like
+the driver. No new skip, ignore, timeout or dependency changes. New exact-head
+full CI and independent review/integration are still pending at this record.

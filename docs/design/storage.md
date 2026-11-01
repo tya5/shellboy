@@ -201,9 +201,7 @@ against independent work. This primitive alone does not expose descendant UI.
 
 ## Last adopted attempt lookup (#142 part 1)
 
-Conversation schema 20 adds the nullable derived Thread pointer described in
-[cache diagnostics](cache-diagnostics.md). Existing attempts own the identities;
-the pointer changes only with guarded response adoption and clears on referenced
-attempt deletion. A startup-only migration backfills completed attempts; runtime
-readers do not carry historical schema branches. Diagnostic bytes remain in the
-existing bounded attempt manifest and existing GC accounting.
+Cache diagnostics reuses the context display's bounded completed-attempt
+selection over at most 33 recent Turns and the existing schema19 indexes.
+There is no new migration, derived pointer, index or adoption write. Bounded
+reported facts remain in the existing attempt manifest and GC accounting.

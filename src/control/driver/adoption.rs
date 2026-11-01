@@ -39,7 +39,6 @@ pub(super) async fn adopt_response(
                 != crate::control::state::AttemptTransition::Applied {
                 return Ok(false);
             }
-            tx.execute("UPDATE thread SET last_adopted_attempt_id=?2 WHERE id=?1", params![current.thread,attempt_id])?;
             if let Some(observation) = &http_observation {
                 tx.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.http_observation',json(?2)) WHERE id=?1",params![attempt_id,observation])?;
             }

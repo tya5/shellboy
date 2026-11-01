@@ -6,9 +6,8 @@
 //! is incomplete; a full window that found a witness is not.
 use super::*;
 
-pub(super) fn query() -> String {
-    format!(
-        "WITH recent_turns AS MATERIALIZED (
+pub(crate) fn latest_completed_cte() -> &'static str {
+    "recent_turns AS MATERIALIZED (
  SELECT id FROM turn INDEXED BY turns_by_thread WHERE thread_id=?1
  ORDER BY created_at DESC, rowid DESC LIMIT 33
 ), per_turn AS MATERIALIZED (
@@ -19,7 +18,12 @@ pub(super) fn query() -> String {
 ), selected AS MATERIALIZED (
  SELECT native_rowid FROM per_turn WHERE native_rowid IS NOT NULL
  ORDER BY native_rowid DESC LIMIT 1
-), audit AS MATERIALIZED (
+)"
+}
+
+pub(super) fn query() -> String {
+    format!(
+        "WITH {}, audit AS MATERIALIZED (
  SELECT replacement_id FROM thread_replacement WHERE thread_id=?1
  ORDER BY replacement_id DESC LIMIT 201
 ), edits AS MATERIALIZED (
@@ -36,6 +40,7 @@ pub(super) fn query() -> String {
  selected.native_rowid IS NOT NULL
  FROM (SELECT 1) root LEFT JOIN selected ON 1
  LEFT JOIN model_attempt a ON a.rowid=selected.native_rowid",
+        latest_completed_cte(),
         usage::sql_projection("a.usage_json")
     )
 }

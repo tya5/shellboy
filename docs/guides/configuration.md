@@ -706,12 +706,14 @@ Saved history and command provenance are not deleted by opting out.
 
 Set `connections.<name>.prompt_cache_diagnostics = true` only on a Responses
 connection with `prompt_caching = true`. The default is false. When enabled and
-a usable previous adopted response ID exists on the same Thread, Shellboy sends
-it as `prompt_cache_options.comparison_response_id`. The first request or a
-missing ID omits this field. The identity follows accepted responses across
-Turns/restarts; failures and cancelled/stale results do not replace it. A fork
-starts without an adoption of its own. Model/connection changes do not invent a
-replacement ID or a provider-specific comparison rule.
+a usable previous adopted response ID exists in the context display's current
+connection/model scope within the same Thread's 33 most recent Turns, Shellboy
+sends it as `prompt_cache_options.comparison_response_id`. No matching attempt
+in that finite window, or a missing ID on the selected attempt, omits the entire
+options object; there is no older-window or older-ID fallback. Selection uses
+saved rows across Turns/restarts; failures and cancelled/stale results are not
+adoptions. Forks have no own adopted attempt. No new schema or sticky state is
+created and no provider-specific compatibility rule is guessed.
 
 `prompt_cache_options` is now a Shellboy-owned dynamic Responses body field;
 it cannot be set in `extra_body` (including for a static TTL). No sticky headers

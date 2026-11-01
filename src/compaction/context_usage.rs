@@ -9,6 +9,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
 mod bounded;
+pub(crate) use bounded::latest_completed_cte;
 pub(crate) type Scope = (String, String, String);
 struct Coverage {
     latest_complete: bool,

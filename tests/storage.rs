@@ -864,7 +864,7 @@ async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
     let db = Connection::open(&path).unwrap();
     // Batch historical fixture setup; the production upgrade below still commits normally.
     db.execute_batch("BEGIN IMMEDIATE").unwrap();
-    db.execute_batch("DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX thread_last_adopted_attempt; ALTER TABLE thread DROP COLUMN last_adopted_attempt_id; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
+    db.execute_batch("DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
     db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     assert!(matches!(
@@ -919,7 +919,7 @@ async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without
     db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch(
         "DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source;
-        DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX thread_last_adopted_attempt; ALTER TABLE thread DROP COLUMN last_adopted_attempt_id; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=9; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=8;
+        DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=9; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; PRAGMA user_version=8;
         CREATE TABLE receipt_turn_source(blocker INTEGER);",
     )
     .unwrap();
@@ -1065,7 +1065,7 @@ async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
     let db = Connection::open(&path).unwrap();
     // Batch historical fixture setup; the production upgrade below still commits normally.
     db.execute_batch("BEGIN IMMEDIATE").unwrap();
-    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX thread_last_adopted_attempt; ALTER TABLE thread DROP COLUMN last_adopted_attempt_id; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10;").unwrap();
+    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10;").unwrap();
     for (name, value) in [
         ("integer", "0"),
         ("invalid", "not json"),
@@ -1127,7 +1127,7 @@ async fn schema_twelve_extends_revisit_byte_accounting_without_rewriting_metadat
     let db = Connection::open(&path).unwrap();
     // Batch historical fixture setup; the production upgrade below still commits normally.
     db.execute_batch("BEGIN IMMEDIATE").unwrap();
-    db.execute_batch("DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX thread_last_adopted_attempt; ALTER TABLE thread DROP COLUMN last_adopted_attempt_id; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=12; PRAGMA user_version=11; DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%'; INSERT INTO app_meta(key,value)VALUES('revisit.fixture','preserve bounded metadata');").unwrap();
+    db.execute_batch("DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=12; PRAGMA user_version=11; DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%'; INSERT INTO app_meta(key,value)VALUES('revisit.fixture','preserve bounded metadata');").unwrap();
     db.execute_batch("COMMIT").unwrap();
     db.close().unwrap();
     let writer = DbWorker::open(&path).await.unwrap();
@@ -1150,7 +1150,7 @@ async fn schema_thirteen_records_positive_admission_evidence_and_keeps_uncertain
     let writer = DbWorker::open(&path).await.unwrap();
     writer.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("BEGIN IMMEDIATE; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX thread_last_adopted_attempt; ALTER TABLE thread DROP COLUMN last_adopted_attempt_id; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=13; PRAGMA user_version=12;").unwrap();
+    db.execute_batch("BEGIN IMMEDIATE; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version>=13; PRAGMA user_version=12;").unwrap();
     seed_thread(&db, "t").unwrap();
     db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','stopped','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','stopped','0');").unwrap();
     for (id, state) in [
@@ -1179,83 +1179,4 @@ async fn schema_thirteen_records_positive_admission_evidence_and_keeps_uncertain
         }).await.unwrap();
         writer.shutdown().await.unwrap();
     }
-}
-
-#[tokio::test]
-async fn schema_twenty_backfills_only_adopted_attempts_and_clears_deleted_identity() {
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("cache.sqlite");
-    let db = Connection::open(&path).unwrap();
-    let (schema19, _) = include_str!("../src/storage/current.sql")
-        .split_once("ALTER TABLE thread ADD COLUMN last_adopted_attempt_id")
-        .unwrap();
-    db.execute_batch(schema19).unwrap();
-    for thread in ["t1", "t2", "t3"] {
-        seed_thread(&db, thread).unwrap();
-        db.execute(
-            "INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?1,'live','now')",
-            [thread],
-        )
-        .unwrap();
-        db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?1,?1,'running','now')",[thread]).unwrap();
-    }
-    for (id, thread, state, response) in [
-        ("old", "t1", "completed", Some("old-response")),
-        ("last", "t1", "completed", Some("last-response")),
-        ("bad", "t1", "failed", Some("not-adopted")),
-        ("cancelled", "t1", "cancelled", Some("not-adopted")),
-        ("other-old", "t2", "completed", Some("not-last")),
-        ("missing-id", "t2", "completed", None),
-        ("inflight", "t3", "inflight", Some("not-adopted")),
-    ] {
-        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,response_id,started_at)VALUES(?1,?2,0,0,'test','fixture',0,?3,'{}',?4,'now')",params![id,thread,state,response]).unwrap();
-    }
-    db.close().unwrap();
-    let writer = DbWorker::open(&path).await.unwrap();
-    writer
-        .call(|db| {
-            let get = |t: &str| {
-                db.query_row(
-                    "SELECT last_adopted_attempt_id FROM thread WHERE id=?1",
-                    [t],
-                    |r| r.get::<_, Option<String>>(0),
-                )
-            };
-            assert_eq!(get("t1")?.as_deref(), Some("last"));
-            assert_eq!(get("t2")?.as_deref(), Some("missing-id"));
-            assert_eq!(get("t3")?, None);
-            let plans = db
-                .prepare("EXPLAIN QUERY PLAN DELETE FROM model_attempt WHERE id='last'")?
-                .query_map([], |r| r.get::<_, String>(3))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            assert!(
-                plans
-                    .iter()
-                    .any(|p| p.contains("thread_last_adopted_attempt")),
-                "{plans:?}"
-            );
-            db.execute("DELETE FROM model_attempt WHERE id='last'", [])?;
-            assert_eq!(get("t1")?, None);
-            assert!(!db.prepare("PRAGMA foreign_key_check")?.exists([])?);
-            Ok(())
-        })
-        .await
-        .unwrap();
-    writer.shutdown().await.unwrap();
-    let writer = DbWorker::open(&path).await.unwrap();
-    writer
-        .call(|db| {
-            assert_eq!(
-                db.query_row(
-                    "SELECT last_adopted_attempt_id FROM thread WHERE id='t1'",
-                    [],
-                    |r| r.get::<_, Option<String>>(0)
-                )?,
-                None
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
-    writer.shutdown().await.unwrap();
 }

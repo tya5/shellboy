@@ -11,32 +11,28 @@ behavior is added. Verification uses loopback fixtures, never a real provider.
 valid when enabled only for `api = "responses"`. It requires `prompt_caching`
 (the existing master cache opt-out). Responses owns `prompt_cache_options` as
 a dynamic request field; `extra_body` cannot set it. Other static provider
-extensions remain unchanged. No TTL/mode or provider/model-specific rules are
-introduced. The first request, or a missing/invalid comparison identity, omits
+extensions remain unchanged. No TTL/mode or provider-specific compatibility
+guesses are introduced. The first request, or a missing/invalid comparison identity, omits
 the options object rather than inventing an identity.
 
 ## Identity And Adoption
 
 When enabled, send the immediately preceding adopted response's opaque ID in
 `prompt_cache_options.comparison_response_id`, on the same Thread.
-Connection or model changes do not discard a reported opaque identity: only the
-provider can determine whether that comparison is meaningful. Turns and
-owner restarts do not reset it. Forked Threads start without an adopted response
-of their own. Failed, incomplete, cancelled and stale attempts cannot replace
-this identity. An adopted response without a usable ID clears it; never fall
-back to an older response. IDs must be nonempty and at most 1024 UTF-8 bytes;
-never truncate or hash an opaque identity into a request.
+Use exactly the context display's current connection/model scope and finite
+recent-Turn selection: at most 33 Turns, with one completed-attempt index seek
+per Turn. The shared selection CTE uses existing `turns_by_thread` and
+`attempts_completed_scope`, then chooses the newest native attempt rowid among
+those at most 33 witnesses. No history-length scan or persisted derived pointer
+is added. No matching adopted attempt in that window means no comparison and
+no `prompt_cache_options`; do not search an older window or manufacture evidence.
 
-Conversation schema 20 adds one nullable Thread pointer,
-`last_adopted_attempt_id REFERENCES model_attempt(id) ON DELETE SET NULL`.
-The pointer is set in the existing response-adoption transaction, after its
-live-generation/attempt CAS. It is derived lookup state, not a second response
-ledger: the attempt already owns response ID and connection. PK lookups provide
-the comparison without scanning conversation history or sorting growing attempt
-sets. Startup-only migration initializes each Thread from its last completed
-attempt (admission row order; completed means accepted by the adoption CAS).
-The runtime uses only current schema. Deletion/GC can clear the FK naturally;
-there is no worker, queue, table, event, dependency or lifetime-growing cache.
+Failed, incomplete, cancelled and stale attempts cannot replace an adopted
+identity. An adopted response with a missing/invalid ID never falls back to an
+older response. IDs must be nonempty and at most 1024 UTF-8 bytes. Turns and
+owner restarts use saved attempt rows; forks have no own completed attempt.
+Conversation schema remains 19, unchanged from main; no migration, column,
+index, extra adoption write, compatibility path or persistent cache is added.
 
 ## Bounded Observations
 
@@ -55,7 +51,7 @@ Save it as bounded metadata in `model_attempt.input_manifest_json`, like the
 existing post-response HTTP observation, on the same guarded terminal attempt
 transition. The manifest also records whether diagnosis was enabled and the
 actual comparison ID at admission, even when absent. Failed/incomplete terminal
-responses may supply reported facts, but do not change the Thread pointer.
+responses may supply reported facts, but are excluded from completed-attempt selection.
 Late/cancelled results do not bypass transition guards. Existing manifest byte
 accounting and GC already own these bytes; no second usage ledger is added.
 
@@ -64,7 +60,7 @@ accounting and GC already own these bytes; no second usage ledger is added.
 `thread request --attempt` exposes saved diagnostics and uses the saved
 comparison identity, not the Thread's current last response. Its rebuilt wire
 body must remain byte-identical to the loopback request under unchanged config.
-The next-request inspection uses the current Thread pointer. A changed diagnosis
+The next-request inspection uses the current bounded selection. A changed diagnosis
 setting or missing historical request witness must be reported as unknown when
 it prevents exact reconstruction, not filled from the current Thread.
 
@@ -84,19 +80,16 @@ Thread isolation, restart/fork, missing IDs, failed/stale adoption, JSON/SSE
 response facts, missing/malformed/oversized diagnostics, preserved zero and
 unknown reasons, usage/attempt request visibility and exact wire reconstruction.
 Config tests cover defaults, strict boolean, dialect/master-opt-out conflicts
-and reserved extension fields. Migration validates fresh/upgrade equivalence,
-known last-completed backfill and FK deletion. No provider/cache effectiveness,
-LiteLLM behavior, sticky routing, real network model or physical terminal claim.
+and reserved extension fields. Bounded-query tests cover the 33/34-Turn boundary,
+missing ID, scope, read-only behavior, index plan and work independent of older
+history. No provider/cache effectiveness, LiteLLM behavior, sticky routing, real
+network model or physical terminal claim.
 
 ## Supporting Surface Maintenance
 
 The rare F8 confirmation result boxes its `Command` payload so the additive
 usage selector does not enlarge every management result past the enum size
-bound; confirmation behavior is unchanged. The synthetic release-upgrade helper
-now defaults to schema 20 (public v0.5.0/schema 17 remains the source), retaining
-explicit historical targets. Python migration tests do not claim a native
-published-binary/PTY 17-to-20 upgrade run.
-
-The final rebase preserves main's independent schema 19 context-attempt-scope
-index (#141); this feature therefore uses migration 20, not the draft's 19.
-Both startup upgrade steps and both sides' historical test fixtures are kept.
+bound; confirmation behavior is unchanged. Storage bootstrap, migrations,
+historical fixtures and release-upgrade/error-catalogue helpers remain identical
+to main's schema19. Prior schema20 validation records are superseded, not current
+upgrade requirements.

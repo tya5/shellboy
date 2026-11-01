@@ -112,7 +112,7 @@ pub fn inspect(loaded: &LoadedConfig, options: &RequestOptions) -> Result<Value>
     let thread = &options.thread_id;
     let primary = match &options.attempt_id {
         Some(attempt) => attempt_plan(&tx, thread, attempt)?,
-        None => next_plan(&tx, thread)?,
+        None => next_plan(&tx, thread, &loaded.config)?,
     };
     let primary = assemble(&loaded.config, &tx, primary)?;
     let mut result = primary.describe(options.body, &loaded.config);
@@ -252,7 +252,7 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
 
 /// The next request of the Thread's latest Turn from the current saved path.
 /// Pending deliveries not yet appended to the path are not included.
-fn next_plan(tx: &Connection, thread: &str) -> Result<Plan> {
+fn next_plan(tx: &Connection, thread: &str, config: &Config) -> Result<Plan> {
     let row: Option<(String, String, Option<String>, i64, String)> = tx
         .query_row(
             "SELECT profile_id,model_id,effort,reasoning_epoch,cwd FROM thread WHERE id=?1 AND deleted_at IS NULL",
@@ -283,9 +283,17 @@ fn next_plan(tx: &Connection, thread: &str) -> Result<Plan> {
         |r| r.get(0),
     )?;
     Ok(Plan {
-        cache: CacheInput::Current(crate::model::cache_diagnostics::last_response_id(
-            tx, thread,
-        )?),
+        cache: CacheInput::Current(
+            if config
+                .connections
+                .get(&profile)
+                .is_some_and(|c| c.prompt_cache_diagnostics)
+            {
+                crate::model::cache_diagnostics::last_response_id(tx, thread)?
+            } else {
+                None
+            },
+        ),
         source: "next",
         attempt: None,
         thread: thread.to_owned(),
@@ -649,5 +657,31 @@ mod cache_witness_tests {
         assert!(
             matches!(cache_input(&json!({"prompt_cache":{"diagnostics_enabled":true,"comparison_response_id":"opaque"}})),CacheInput::Saved {enabled:true,id:Some(id)} if id=="opaque")
         );
+    }
+}
+
+#[cfg(test)]
+mod cache_lookup_gate_tests {
+    use super::*;
+    #[test]
+    fn disabled_cache_diagnostics_next_inspection_never_prepares_the_index_lookup() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now'); DROP INDEX attempts_completed_scope;").unwrap();
+        let mut config = Config::default();
+        config
+            .connections
+            .insert("p".into(), crate::config::Connection::default());
+        assert!(matches!(
+            next_plan(&db, "t", &config).unwrap().cache,
+            CacheInput::Current(None)
+        ));
+        config
+            .connections
+            .get_mut("p")
+            .unwrap()
+            .prompt_cache_diagnostics = true;
+        // Positive control: this otherwise valid fixture detects a lookup.
+        assert!(next_plan(&db, "t", &config).is_err());
     }
 }

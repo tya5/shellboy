@@ -3682,3 +3682,29 @@ in one branch-CI run and one local invocation; a separate temporary-screen
 observation passes with the expected saved usage. The observation is removed;
 this timing-sensitive failure is not claimed fixed and is retained as a limit
 for the final uninstrumented focused run, branch CI and integration batch.
+
+### #142 Review Revision: No Derived Identity State
+
+Reviewer returns `6b687296` and replaces the derived-pointer design: remove
+migration0020, the Thread column/index, adoption write, backfill and every
+schema20-specific helper/fixture change. Schema/bootstrap/migrations and those
+support files now match main schema19 exactly. Rebase onto `6a3291a` succeeds.
+Use the same extracted selection CTE as #141 context display, including its
+current connection/model scope: at most 33 recent Turns, one completed-index
+seek per Turn and a bounded reduction of witnesses. No witness in that window
+means no comparison/options; no older-window scan or identity guess. The
+one-line D-142 revision supersedes the former pointer and cross-scope contract.
+Reported fact normalization, saved request witness, attempt reader/F8, default
+opt-out and sticky deferral remain unchanged. New Native tests cover 33/34,
+missing/oversized ID without fallback, scope/read-only behavior, index keys and
+VM work after 5000 older Turns plus retained completed/failed attempt depth.
+Final focused verification and new exact-head CI/handoff are pending at this
+record. The previous successful branch CI is evidence only for the rejected
+head. A fresh review branch will be pushed without rewriting its old remote.
+
+The final review source passes local fmt/all-target check, cache43+one existing
+ignored, JSON/SSE2 and original #137 inspection1; the preceding focused revision
+also passes context10/storage24/hot-query5. Python121, layout102 and diff checks
+pass. Next inspection now skips comparison selection when disabled, with a
+missing-index positive/negative control. Push the non-force review1 branch and
+require its new exact-SHA CI, not the prior rejected head's success.

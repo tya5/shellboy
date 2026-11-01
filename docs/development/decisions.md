@@ -2883,3 +2883,5 @@ Reserve the dynamic options object rather than silently override a static
 extra_body value. Sticky
 headers, provider/cache efficacy tests and real API calls remain outside scope.
 Revisit only with an explicitly approved routing or options-extension request.
+
+- D-142 revision (reviewer, 2026-11-01; supersedes the schema20 pointer above): reuse #141 current-scope selection over 33 recent Turns with one completed-index seek per Turn; no witness means no comparison/options, no older-history search, migration, column or derived copy.
