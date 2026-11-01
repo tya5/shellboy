@@ -526,14 +526,14 @@ impl<'a> HistoryReader<'a> {
                     let field=|key:String,label:&str,value:String| crate::presentation::PresentationField {
                         key,label:label.into(),value,display:None,value_omitted:false,
                     };
-                    fields.push(field("/ui/detail_preview_bounds".into(),"詳細の取得範囲","最大16呼出し・128項目・128リンク、既存metadata上限内 · O原文で確認".into()));
+                    fields.push(field("/ui/detail_preview_bounds".into(),"詳細の取得範囲","最大16呼出し・128項目・128リンク、既存metadata上限内 | O原文で確認".into()));
                     if current.len()>16 {
-                        fields.push(field("/current_tools/truncated".into(),"現在の実行情報","先頭16呼出しまで · 詳細はCLIで確認".into()));
+                        fields.push(field("/current_tools/truncated".into(),"現在の実行情報","先頭16呼出しまで | 詳細はCLIで確認".into()));
                     }
                     for (index,(call,execution,state,code,complete,retention,has_output)) in current.into_iter().take(16).enumerate() {
                         let prefix=format!("/current_tools/{index}");
                         let mut call_field=field(format!("{prefix}/call_id"),"呼出しID",call.clone().unwrap_or_default());
-                        if call.is_none() {call_field.display=Some("IDが表示上限を超えています · O原文".into());call_field.value_omitted=true;}
+                        if call.is_none() {call_field.display=Some("IDが表示上限を超えています | O原文".into());call_field.value_omitted=true;}
                         fields.push(call_field);
                         fields.push(field(format!("{prefix}/execution_id"),"実行ID",execution.unwrap_or_else(||"未取得".into())));
                         fields.push(field(format!("{prefix}/state"),"現在の実行状態",state.unwrap_or_else(||"利用不可・未実行".into())));

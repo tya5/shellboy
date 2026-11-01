@@ -909,9 +909,9 @@ impl ThreadBrowser {
                 .map(|(_, error)| format!("取得失敗: {error}"))
                 .unwrap_or_else(|| "更新を取得中".into());
             if thread.excerpt.is_empty() {
-                return format!("抜粋は未取得 · {reason}");
+                return format!("抜粋は未取得 | {reason}");
             }
-            return format!("以前の抜粋（未更新） · {reason}\n{}", thread.excerpt);
+            return format!("以前の抜粋（未更新） | {reason}\n{}", thread.excerpt);
         }
         thread.excerpt.clone()
     }
@@ -1612,7 +1612,7 @@ impl ThreadBrowser {
         let error = self.error.as_deref().or(self.patch_error.as_deref());
         let rows = self.rows();
         let title = format!(
-            "会話一覧 · {}件{}{}",
+            "会話一覧 | {}件{}{}",
             rows.len(),
             if rows.len() != threads.len() {
                 format!(" / 取得{}件", threads.len())
@@ -1620,9 +1620,9 @@ impl ThreadBrowser {
                 String::new()
             },
             if loading {
-                " · 読込み中"
+                " | 読込み中"
             } else if error.is_some() {
-                " · 取得失敗"
+                " | 取得失敗"
             } else {
                 ""
             }
@@ -1630,18 +1630,18 @@ impl ThreadBrowser {
         let footer_width = usize::from(area.width.saturating_sub(8).min(108));
         let footer_text = if let Some(error) = error.filter(|error| error.starts_with("表示上限"))
         {
-            format!("Esc戻る · {}", one_line(error))
+            format!("Esc戻る | {}", one_line(error))
         } else if let Some(error) = error {
-            format!("取得失敗 · Esc戻る\nCtrl+R再取得 · {}", one_line(error))
+            format!("取得失敗 | Esc戻る\nCtrl+R再取得 | {}", one_line(error))
         } else {
             let mut keys = if footer_width >= 90 {
-                "Esc戻る ↑↓選択 ←→展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得"
+                "Esc戻る ^v選択 <>展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得"
                     .to_owned()
             } else if footer_width >= 45 {
-                "Esc戻る Enter切替 Delete/Ctrl+D削除\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得"
+                "Esc戻る Enter切替 Delete/Ctrl+D削除\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得"
                     .to_owned()
             } else if footer_width >= 30 {
-                "Esc戻る Enter切替 Ctrl+D削除\n↑↓選択 ←→開閉 F1情報".to_owned()
+                "Esc戻る Enter切替 Ctrl+D削除\n^v選択 <>開閉 F1情報".to_owned()
             } else if footer_width >= 17 {
                 "Esc戻る Enter切替\nCtrl+D削除 F1情報".to_owned()
             } else {
@@ -1656,9 +1656,9 @@ impl ThreadBrowser {
             keys
         };
         let mut context = match error {
-            Some(error) => format!("取得失敗 {} · 検索 › {}", one_line(error), one_line(filter)),
+            Some(error) => format!("取得失敗 {} | 検索 › {}", one_line(error), one_line(filter)),
             None => match &self.notice {
-                Some(notice) => format!("{} · 検索 › {}", one_line(notice), one_line(filter)),
+                Some(notice) => format!("{} | 検索 › {}", one_line(notice), one_line(filter)),
                 None => format!("検索 › {}", one_line(filter)),
             },
         };
@@ -1667,9 +1667,9 @@ impl ThreadBrowser {
             .as_ref()
             .is_some_and(|id| !id.starts_with("draft:"))
         {
-            context.push_str(" · 選択先を再確認中");
+            context.push_str(" | 選択先を再確認中");
         } else if self.reconfirming_row.is_some() {
-            context.push_str(" · 前回の行を再確認中");
+            context.push_str(" | 前回の行を再確認中");
         }
         let inner = popup::panel_recorded(frame, area, &title, &context, &footer_text, &self.paint);
         // Tiny popups omit their context row. Use the shared geometry rather
@@ -1788,20 +1788,20 @@ impl ThreadBrowser {
         let mut label = format!(
             "{}{}",
             if selected { "›" } else { " " },
-            if current { "●" } else { " " }
+            if current { "*" } else { " " }
         );
         // Reserve enough room for a title at narrow widths. The ellipsis marks
         // omitted ancestor indentation while the local branch stays visible.
         let depth_budget = width.saturating_sub(14).min(16) / 2;
         let take = row.ancestors.len().min(depth_budget);
         for &continues in row.ancestors.iter().take(take) {
-            label.push_str(if continues { "│ " } else { "  " });
+            label.push_str(if continues { "| " } else { "  " });
         }
         if row.depth > take + 1 {
-            label.push_str("… ");
+            label.push_str(". ");
         }
         if row.depth > 0 {
-            label.push_str(if row.last { "└─" } else { "├─" });
+            label.push_str(if row.last { "+-" } else { "+-" });
         }
         label.push_str(if row.children {
             if self.collapsed.contains(&thread.thread_id) {
@@ -1852,7 +1852,7 @@ impl ThreadBrowser {
             let reserve = revisit.width().saturating_add(3);
             if width > reserve + 4 && (!interrupted_by_app_exit(thread) || width >= 32) {
                 label = fit(&label, width - reserve);
-                label.push_str(" · ");
+                label.push_str(" | ");
                 label.push_str(&revisit);
             }
         }
@@ -1862,30 +1862,30 @@ impl ThreadBrowser {
     fn draw_watch(&self, frame: &mut Frame<'_>, area: Rect, active_thread: Option<&str>) {
         let count = self.rows().len();
         let title = format!(
-            "{} · {}件{}",
+            "{} | {}件{}",
             if self.descendant_root.is_some() {
                 "子孫の監視"
             } else {
                 "作業の監視"
             },
             count,
-            if self.loading { " · 読込み中" } else { "" }
+            if self.loading { " | 読込み中" } else { "" }
         );
         let mut context = format!("検索 › {}", one_line(&self.filter));
         if let Some(error) = self.error.as_deref().or(self.patch_error.as_deref()) {
-            context = format!("取得失敗 {} · {context}", one_line(error));
+            context = format!("取得失敗 {} | {context}", one_line(error));
         } else if let Some(notice) = &self.notice {
-            context = format!("{} · {context}", one_line(notice));
+            context = format!("{} | {context}", one_line(notice));
         }
         if let Some(label) = self.descendant_status.clone().or_else(|| {
             self.descendant_count
                 .as_ref()
                 .and_then(super::watch::DescendantCount::label)
         }) {
-            context.push_str(" · ");
+            context.push_str(" | ");
             context.push_str(&label);
         }
-        let footer = "Tab 一覧 · Enter 開く · Ctrl+S 停止確認 · Alt+R 再試行確認\nAlt+O 出力詳細 · Ctrl+R 更新 · PgDn 続き · 詳細は表示128件まで";
+        let footer = "Tab 一覧 | Enter 開く | Ctrl+S 停止確認 | Alt+R 再試行確認\nAlt+O 出力詳細 | Ctrl+R 更新 | PgDn 続き | 詳細は表示128件まで";
         let inner = popup::panel_recorded(frame, area, &title, &context, footer, &self.paint);
         if inner.height == 0 || inner.width == 0 {
             self.watch_visible_ids.borrow_mut().clear();
@@ -1938,9 +1938,9 @@ impl ThreadBrowser {
                     let prefix = if chosen {
                         "›"
                     } else if current {
-                        "●"
+                        "*"
                     } else {
-                        "·"
+                        "|"
                     };
                     let pending = if self.preferred.as_deref() == Some(summary.thread_id.as_str())
                         || self.reconfirming_row.as_deref() == Some(summary.thread_id.as_str())
@@ -2005,9 +2005,9 @@ impl ThreadBrowser {
                                 .as_ref()
                                 .is_some_and(|info| info.continuation_limited)
                         {
-                            "続きの候補があります · PgDnで確認"
+                            "続きの候補があります | PgDnで確認"
                         } else if self.loading {
-                            "監視対象を取得中…"
+                            "監視対象を取得中."
                         } else {
                             "現在表示する作業はありません"
                         },
@@ -2027,7 +2027,9 @@ impl ThreadBrowser {
         *self.watch_visible_ids.borrow_mut() = scope.ids;
     }
     fn draw_detail(&self, frame: &mut Frame<'_>, area: Rect, thread: Option<&ThreadSummary>) {
-        let block = Block::default().borders(Borders::TOP);
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_set(popup::ASCII_BORDER);
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let Some(thread) = thread else {
@@ -2039,12 +2041,12 @@ impl ThreadBrowser {
             Line::from(fit(&format!("cwd {}", one_line(&thread.cwd)), width)),
             Line::from(fit(
                 &format!(
-                    "{}ID {} · 親 {} · {}{}",
+                    "{}ID {} | 親 {} | {}{}",
                     thread
                         .revisit
                         .as_ref()
                         .and_then(crate::presentation::revisit_label)
-                        .map(|label| format!("{label} · "))
+                        .map(|label| format!("{label} | "))
                         .unwrap_or_default(),
                     one_line(&thread.thread_id),
                     thread
@@ -2054,7 +2056,7 @@ impl ThreadBrowser {
                         .unwrap_or_else(|| "なし".into()),
                     one_line(activity_label(thread)),
                     if interrupted_by_app_exit(thread) {
-                        " · Interrupted by app exit"
+                        " | Interrupted by app exit"
                     } else {
                         ""
                     }
@@ -2128,19 +2130,19 @@ fn watch_lines(
     let mut first = vec![
         Span::raw(marker),
         Span::styled(status, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" · "),
+        Span::raw(" | "),
         Span::raw(title),
     ];
     if !parent.is_empty() {
         first.push(Span::styled(
-            format!("{} · {parent}", " ".repeat(title_padding)),
+            format!("{} | {parent}", " ".repeat(title_padding)),
             Style::default().fg(theme::MUTED),
         ));
     }
     let clocks = match (row.secondary_age.is_empty(), row.state_age.is_empty()) {
         (true, _) => row.state_age.to_owned(),
         (_, true) => row.secondary_age.to_owned(),
-        _ => format!("{} · {}", row.secondary_age, row.state_age),
+        _ => format!("{} | {}", row.secondary_age, row.state_age),
     };
     let available = width.saturating_sub(2);
     let clocks = fit(&clocks, (width / 2).min(available));
@@ -2150,7 +2152,7 @@ fn watch_lines(
     } else {
         let used = clocks.width() + 3;
         second.push(Span::styled(clocks, Style::default().fg(theme::MUTED)));
-        second.push(Span::raw(" · "));
+        second.push(Span::raw(" | "));
         available.saturating_sub(used)
     };
     second.push(Span::styled(
@@ -2177,7 +2179,7 @@ fn fit(text: &str, width: usize) -> String {
         out.push_str(grapheme);
         used += cells;
     }
-    out.push('…');
+    out.push('.');
     out
 }
 
@@ -2199,7 +2201,7 @@ fn tail_path(path: &str, width: usize) -> String {
         suffix.push(grapheme);
         used += cells;
     }
-    format!("…{}", suffix.into_iter().rev().collect::<String>())
+    format!(".{}", suffix.into_iter().rev().collect::<String>())
 }
 
 fn activity_column_label(thread: &ThreadSummary) -> &str {
@@ -2282,7 +2284,7 @@ pub(super) fn plain_preview(text: &str, width: usize) -> String {
         preview.push_str(grapheme);
         cells += next;
     }
-    preview.push('…');
+    preview.push('.');
     preview
 }
 
@@ -2293,7 +2295,7 @@ mod tests {
     #[test]
     fn ux_title_uses_the_same_conversation_term_as_its_rows() {
         let shown = text(&capture(&[thread("fixture", None)], 0, 60, 18, None));
-        assert!(shown.contains("会話一覧 ·"), "{shown}");
+        assert!(shown.contains("会話一覧 |"), "{shown}");
         assert!(!shown.contains("スレッド"));
         let mut browser = ThreadBrowser::default();
         browser.open_watch(String::new(), None, None);
@@ -2303,9 +2305,9 @@ mod tests {
             .draw(|frame| browser.draw(frame, frame.area(), None, true))
             .unwrap();
         let watch = text(terminal.backend().buffer());
-        assert!(watch.contains("作業の監視 ·"), "{watch}");
+        assert!(watch.contains("作業の監視 |"), "{watch}");
         assert!(
-            !watch.contains("会話一覧 ·"),
+            !watch.contains("会話一覧 |"),
             "List and Watch have distinct task meanings"
         );
     }
@@ -2608,7 +2610,7 @@ mod tests {
                         phase.column_label(),
                         "{phase:?} {width}x{height}"
                     );
-                    assert!(!shown.contains('…'));
+                    assert!(!shown.contains('.'));
                 }
             }
         }
@@ -2720,7 +2722,7 @@ mod tests {
         assert!(
             browser
                 .label(row, &item, true, false, 90)
-                .contains("Revisit 5 · next reserved")
+                .contains("Revisit 5 | next reserved")
         );
         assert!(
             browser
@@ -3103,7 +3105,7 @@ mod tests {
             .unwrap();
         let label = tree.label(last, &threads[last.index], true, false, 30);
         assert!(label.width() <= 30);
-        assert!(label.contains('…'));
+        assert!(label.contains('.'));
     }
 
     fn capture(
@@ -3180,7 +3182,7 @@ mod tests {
         assert_eq!(rendered.matches("ID t03").count(), 1);
         let selected = rendered
             .lines()
-            .position(|line| line.contains("›●"))
+            .position(|line| line.contains("›*"))
             .unwrap() as u16;
         assert_eq!(
             buffer[(60, selected)].bg,
@@ -3272,11 +3274,11 @@ mod tests {
         let text = "e\u{301}".repeat(81);
         let preview = plain_preview(&text, 200);
         assert_eq!(preview.graphemes(true).count(), 80);
-        assert_eq!(preview, format!("{}…", "e\u{301}".repeat(79)));
+        assert_eq!(preview, format!("{}.", "e\u{301}".repeat(79)));
         assert_eq!(plain_preview(&"x".repeat(80), 80), "x".repeat(80));
-        assert_eq!(plain_preview("日本語🙂", 5), "日本…");
-        assert_eq!(plain_preview("👨‍👩‍👧‍👦 日本語", 3), "👨‍👩‍👧‍👦…");
-        assert_eq!(plain_preview("日本語", 1), "…");
+        assert_eq!(plain_preview("日本語🙂", 5), "日本.");
+        assert_eq!(plain_preview("👨‍👩‍👧‍👦 日本語", 3), "👨‍👩‍👧‍👦.");
+        assert_eq!(plain_preview("日本語", 1), ".");
         assert_eq!(plain_preview("abc", 0), "");
         assert_eq!(plain_preview("abc", 3), "abc");
     }

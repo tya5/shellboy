@@ -2854,3 +2854,21 @@ the display read takes the exact newest matching Attempt per recent Turn and is
 incomplete only when 33 Turns hold no match. Assumes attempts of an older Turn do
 not outrank a newer Turn's (one open Turn per Thread); revisit if Attempts can be
 added to closed Turns.
+## UI Language Foundation (#139, 2026-11-01, Proposed)
+
+Use one typed complete-message boundary, explicit `[ui] language = "en" | "ja"`
+(default English), and no locale-based inference. The initial force-quit
+confirmation and width diagnostic are examples, not a promise that the rest
+of the UI is already translated. Keep stored/model/user text, API and CLI output
+unchanged. The design and non-overlapping stage B proposal are in
+[UI language foundation](../design/ui-language-stage-a-draft.md).
+
+Observe ambiguous width using two bounded startup cursor-position responses;
+unknown reserves two cells, and user settings do not override it. Apply the same
+policy to UI and asynchronous presentation workers. Emoji sequences are bounded
+conservatively, not asserted to have one font-independent width. Generated UI
+symbols, borders and Markdown table borders must have invariant widths; user
+content is never substituted. Two pinned, licensed dependency patches expose
+nonblocking ordered DSR input and a shared width policy to ratatui. Revisit the
+patches as upstream APIs evolve, and use a translation catalogue instead of the
+Rust enum if the locale/plural surface grows substantially.

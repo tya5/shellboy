@@ -16,9 +16,9 @@ fn failure_text(error: &crate::protocol::ApiError) -> String {
     format!("{prefix}: {}", error.message)
 }
 const FOOTER_READY: &str =
-    "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 削除 · ↑↓/PgUp/PgDn 閲覧";
+    "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧";
 const FOOTER_DISABLED: &str =
-    "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 使用不可 · ↑↓/PgUp/PgDn 閲覧";
+    "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧";
 #[derive(Clone, Debug)]
 enum Phase {
     Loading,
@@ -77,9 +77,9 @@ impl DeletionDialog {
             ));
         }
         match &self.phase {
-            Phase::Loading => text.push_str("\n削除影響を確認中… Y はまだ使えません。"),
+            Phase::Loading => text.push_str("\n削除影響を確認中. Y はまだ使えません。"),
             Phase::Executing => {
-                text.push_str("\n削除を実行中… 閉じても受理済みの処理は継続します。")
+                text.push_str("\n削除を実行中. 閉じても受理済みの処理は継続します。")
             }
             Phase::Failed(error) => text.push_str(&format!(
                 "\n{}\n閉じてから再度選んでください。",
@@ -104,13 +104,13 @@ impl DeletionDialog {
                 } else {
                     "\n削除できません。作業を停止してから再度確認してください。"
                 });
-                text.push_str(&format!("\n対象会話: {} · 子の会話: {}\n動作中: {} · 停止中: {}\n共有されている履歴: {}\n置換の出典: {} · 添付参照: {}",
+                text.push_str(&format!("\n対象会話: {} | 子の会話: {}\n動作中: {} | 停止中: {}\n共有されている履歴: {}\n置換の出典: {} | 添付参照: {}",
                     number("/selection/thread_count"),number("/selection/descendant_thread_count"),number("/blockers/live_run_count"),number("/blockers/stopping_run_count"),number("/references/shared_path_nodes"),number("/references/completed_replacement_source_nodes"),number("/references/attachment_reference_count")));
                 if let Some(runs) = value.pointer("/blockers/runs").and_then(Value::as_array) {
                     for run in runs.iter().take(50) {
                         if let Some(id) = run.get("id").and_then(Value::as_str) {
                             text.push_str(&format!(
-                                "\n  作業 {} · {}",
+                                "\n  作業 {} | {}",
                                 id,
                                 run.get("state").and_then(Value::as_str).unwrap_or("不明")
                             ));
@@ -206,10 +206,9 @@ impl UiState {
             self.dirty = true;
             return vec![];
         }
-        let page = self
-            .confirmation
-            .as_ref()
-            .map_or(1, |dialog| dialog.page(popup::viewport(self.viewport)));
+        let page = self.confirmation.as_ref().map_or(1, |dialog| {
+            dialog.page(popup::viewport(self.viewport), self.config.ui.language)
+        });
         if let Some(scroll) = popup::reader_key(key.code, self.confirmation_scroll, page) {
             self.confirmation_scroll = scroll;
             self.dirty = true;

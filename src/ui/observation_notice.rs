@@ -203,12 +203,12 @@ impl ObservationNotice {
         };
         let attempt = self.last_attempt_at.map_or_else(String::new, |time| {
             format!(
-                " · 最終要求 UTC {}",
+                " | 最終要求 UTC {}",
                 time.to_rfc3339_opts(SecondsFormat::Millis, true)
             )
         });
         format!(
-            "{} · {captured} · {state}{attempt} · {}",
+            "{} | {captured} | {state}{attempt} | {}",
             self.kind.label(),
             self.next_action.label()
         )

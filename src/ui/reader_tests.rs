@@ -85,7 +85,11 @@ fn confirmation_measures_the_actual_wide_popup_and_keeps_footer_fixed_when_small
             detail: source.clone(),
         });
         let area = Rect::new(0, 0, width, height);
-        let (text, requested_height) = ui.confirmation.as_ref().unwrap().layout(area);
+        let (text, requested_height) = ui
+            .confirmation
+            .as_ref()
+            .unwrap()
+            .layout(area, ui.config.ui.language);
         assert_eq!(text, source);
         let body = popup::body_area(
             area,
@@ -133,7 +137,7 @@ fn confirmation_line_measurement_includes_the_reserved_scrollbar_column() {
         detail: source,
     };
     let area = Rect::new(0, 0, 120, 40);
-    let (_, height) = confirmation.layout(area);
+    let (_, height) = confirmation.layout(area, crate::config::UiLanguage::Ja);
     assert_eq!(
         height, 10,
         "three actual reader rows plus seven framing rows"

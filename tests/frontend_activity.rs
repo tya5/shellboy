@@ -38,7 +38,7 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
     let summary = observed.snapshot.context_reduction.clone().unwrap();
     assert!(summary.contains("spill 3組"));
     assert!(summary.contains("省略 7件"));
-    assert!(summary.contains("90000→40000"));
+    assert!(summary.contains("90000>40000"));
     assert!(
         summary.len() < 256,
         "only bounded numeric facts are projected"

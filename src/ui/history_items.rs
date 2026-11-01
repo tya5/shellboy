@@ -640,7 +640,7 @@ mod tests {
                 text: "KNOWN_PAID_OUTPUT".into(),
                 ..Default::default()
             }],
-            notice: Some("取得 OLD UTC · 閉じて開くと再取得".into()),
+            notice: Some("取得 OLD UTC | 閉じて開くと再取得".into()),
             refresh_error: None,
         };
         assert!(state.accept_preview(&key, first, preview, 4096));
@@ -658,7 +658,7 @@ mod tests {
         assert_eq!(kept.blocks[0].text, "KNOWN_PAID_OUTPUT");
         assert_eq!(
             kept.notice.as_deref(),
-            Some("取得 OLD UTC · 閉じて開くと再取得")
+            Some("取得 OLD UTC | 閉じて開くと再取得")
         );
         assert_eq!(kept.refresh_error.as_deref(), Some("read failed"));
     }

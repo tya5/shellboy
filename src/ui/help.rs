@@ -71,7 +71,7 @@ impl Page {
         page.section("回答をコピーする");
         page.entry(
             &format!(
-                "{} → {}",
+                "{} > {}",
                 Action::History.binding(config),
                 Action::Copy.binding(config)
             ),
@@ -79,14 +79,14 @@ impl Page {
         );
         page.entry(
             &format!(
-                "{} → {}",
+                "{} > {}",
                 Action::History.binding(config),
                 Action::Code.binding(config)
             ),
             Action::Code.description(),
         );
         page.entry(
-            "o → c",
+            "o > c",
             "詳細から原文を開き、表示中の原文ページをコピーする",
         );
         page.entry(
@@ -121,7 +121,7 @@ impl Page {
         }
         page.entry("Ctrl+C", "Runと所有する背景の作業を停止する");
         page.entry("Ctrl+Q / /quit", "保存・停止処理をしてアプリを終了する");
-        page.entry("/", "コマンド候補を表示。↑↓で選び、Tabで補完");
+        page.entry("/", "コマンド候補を表示。^vで選び、Tabで補完");
 
         page.section("会話を読む・切り替える");
         page.entry("ホイール", "会話を上下にスクロールする");
@@ -173,14 +173,14 @@ impl Page {
         );
         page.entry("Ctrl+N", "新しい会話の下書きを作る（/new）");
         page.entry("/switch ID", "指定した会話へ切り替える");
-        page.entry("↑ / ↓", "入力の先頭行で送信履歴を呼び出す。↓で新しい履歴へ");
-        page.note("送信履歴の最新からさらに↓で、書きかけの下書きに戻ります。");
+        page.entry("^ / v", "入力の先頭行で送信履歴を呼び出す。vで新しい履歴へ");
+        page.note("送信履歴の最新からさらにvで、書きかけの下書きに戻ります。");
 
         page.section("反映待ち・中断・復元");
         if !config.ui.send_key.eq_ignore_ascii_case("Ctrl+Enter") {
             page.entry("Ctrl+Enter", "すぐ渡す（応答生成は中断しない）");
         }
-        page.entry("Ctrl+X → Ctrl+S", "すぐ渡す。前景shellの待機だけを解除する");
+        page.entry("Ctrl+X > Ctrl+S", "すぐ渡す。前景shellの待機だけを解除する");
         page.entry("/queue", "保存済みの反映待ち・保留入力を確認／取消");
         page.entry(
             "/restore list / /restore draft ID",
@@ -191,7 +191,7 @@ impl Page {
         page.section(crate::presentation::rows::RowKind::LiveWork.spec().1);
         page.entry(
             "Shift+Tab / クリック",
-            "入力欄の上にある作業を選ぶ。↑↓で移動",
+            "入力欄の上にある作業を選ぶ。^vで移動",
         );
         page.entry(
             "Alt+W / 見出しクリック",
@@ -223,7 +223,7 @@ impl Page {
             "/received [ページ]",
             "失敗・ストリーム差分の受信記録を一覧し、原文を読む",
         );
-        page.note("詳細画面: ↑↓で選択 → Enterで詳細。Oで原文、Cでコピー。");
+        page.note("詳細画面: ^vで選択 > Enterで詳細。Oで原文、Cでコピー。");
         page.note("回答が終わっても背景処理が続く場合があります。受付と処理完了は別です。");
 
         page.section("失敗・復旧待ち");
@@ -323,7 +323,7 @@ impl Page {
         page.entry("/index status", "検索索引の進み具合を確認する");
         page.entry("/index thread", "現在の会話を索引管理の対象にする");
         page.entry("/index all", "全会話を索引管理の対象にする");
-        page.entry("/index threads ID…", "指定した会話を索引管理の対象にする");
+        page.entry("/index threads ID.", "指定した会話を索引管理の対象にする");
         page.entry(
             "/index space ID [対象]",
             "指定した埋め込み空間の索引を管理する",
@@ -355,6 +355,13 @@ impl Page {
             + u128::from(cache.attachment_base64_bytes);
         page.entry("合計", &format!("{total} bytes"));
         page.note("保持量の設定です。処理中の作業領域などを含むアプリ全体の使用量ではありません。");
+        page.section(&super::i18n::Message::TerminalWidthHeading.render(config.ui.language));
+        page.note(
+            &super::i18n::Message::TerminalWidth {
+                observed: unicode_width::terminal_width_observation(),
+            }
+            .render(config.ui.language),
+        );
         Self {
             title: "ヘルプ",
             context: super::HELP,
@@ -584,7 +591,7 @@ mod tests {
             // Ignore frame/scrollbar cells between the sentence's wrapped rows.
             let compact = text
                 .chars()
-                .filter(|ch| !ch.is_whitespace() && !matches!(ch, '│' | '║' | '█'))
+                .filter(|ch| !ch.is_whitespace() && !matches!(ch, '|' | '-' | '#'))
                 .collect::<String>();
             assert!(
                 compact.contains("アプリ全体の使用量ではありません。"),

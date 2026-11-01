@@ -114,7 +114,7 @@ pub(super) async fn archives(
     let result=control.store.database.call(move|db|{
         let mut stmt=db.prepare(&format!("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {submission_fence}) ORDER BY updated_at DESC,id DESC LIMIT 128"))?;
         let rows=stmt.query_map([thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
-        let result=rows.into_iter().map(|(id,kind,source,text)|{let label=if kind.as_deref()==Some("cancelled_message") {format!("取消した入力 · {}",source.as_deref().unwrap_or("不明"))} else {format!("未確定の送信 · {}",text.as_deref().unwrap_or(""))};(id,label)}).collect();
+        let result=rows.into_iter().map(|(id,kind,source,text)|{let label=if kind.as_deref()==Some("cancelled_message") {format!("取消した入力 | {}",source.as_deref().unwrap_or("不明"))} else {format!("未確定の送信 | {}",text.as_deref().unwrap_or(""))};(id,label)}).collect();
         Ok(result)
     }).await.map_err(storage_error);
     checked_storage(control, result).await
@@ -351,11 +351,11 @@ pub(super) async fn cancel(
         .into_iter()
         .map(|(label, count)| format!("{label} {count}件"))
         .collect::<Vec<_>>()
-        .join(" · ");
+        .join(" | ");
     let message = if newly_cancelled == 0 {
         outcomes
     } else {
-        format!("{outcomes} · /restore list に保存済み。編集中の入力は保持します")
+        format!("{outcomes} | /restore list に保存済み。編集中の入力は保持します")
     };
     update(
         updates,

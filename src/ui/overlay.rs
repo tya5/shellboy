@@ -736,7 +736,7 @@ mod tests {
                 .unwrap();
             let explanation = rendered(&terminal);
             assert!(
-                explanation.contains("作業 · 詳細 · 使い方"),
+                explanation.contains("作業 | 詳細 | 使い方"),
                 "{explanation}"
             );
             assert!(explanation.contains("Run ID"), "{explanation}");

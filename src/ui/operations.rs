@@ -139,8 +139,8 @@ impl Context {
     }
 }
 impl OpKind {
-    pub fn label(self) -> &'static str {
-        metadata::text(self.catalogue().label_text())
+    pub fn label(self) -> String {
+        metadata::text(self.catalogue().label_text()).replace('·', "|")
     }
     #[cfg(test)]
     fn wire_name(self) -> String {
@@ -157,19 +157,19 @@ impl OpKind {
         match self {
             Self::ThreadList => Some("/threads"),
             Self::ThreadFork => Some("/fork"),
-            Self::ThreadSet => Some("/model · /effort"),
+            Self::ThreadSet => Some("/model | /effort"),
             Self::MessageSend => Some("Enter"),
             Self::RunRetry => Some("/retry"),
-            Self::RunStop => Some("/stop · Ctrl+C"),
+            Self::RunStop => Some("/stop | Ctrl+C"),
             Self::HistorySearch => Some("/search"),
             Self::Compact => Some("/compact"),
             Self::AttachmentAdd => Some("下書きへ: /attach"),
             Self::AttachmentList => Some("/attachments"),
             Self::AttachmentRemove => Some("/detach"),
             Self::IndexStatus => Some("/index"),
-            Self::IndexBackfill => Some("/index → B"),
-            Self::IndexRetry => Some("/index → T"),
-            Self::IndexRebuild => Some("/index → R"),
+            Self::IndexBackfill => Some("/index > B"),
+            Self::IndexRetry => Some("/index > T"),
+            Self::IndexRebuild => Some("/index > R"),
             Self::ModelList => Some("/models"),
             Self::Status => Some("/status"),
             _ => None,
@@ -601,9 +601,9 @@ impl Operations {
                 let body = popup::panel_recorded(
                     frame,
                     area,
-                    &format!("{} · 確認", form.operation.label()),
+                    &format!("{} | 確認", form.operation.label()),
                     &form.operation.cli(),
-                    "Y 実行 · N/Esc 入力欄へ · ↑↓/PgUp/PgDn 説明を読む",
+                    "Y 実行 | N/Esc 入力欄へ | ^v/PgUp/PgDn 説明を読む",
                     &self.paint,
                 );
                 form.help_page.set(body.height.max(1));
@@ -618,11 +618,11 @@ impl Operations {
             }
             let spec = form.operation.catalogue().spec();
             if form.help {
-                let footer = "Esc/F1 入力欄へ · ↑↓/PgUp/PgDn 説明を読む";
+                let footer = "Esc/F1 入力欄へ | ^v/PgUp/PgDn 説明を読む";
                 let body = popup::panel_recorded(
                     frame,
                     area,
-                    &format!("{} · 使い方", form.operation.label()),
+                    &format!("{} | 使い方", form.operation.label()),
                     &form.operation.cli(),
                     footer,
                     &self.paint,
@@ -643,23 +643,23 @@ impl Operations {
                 format!("{}/{}項目", form.selected + 1, form.fields.len())
             };
             let context = format!(
-                "{} · {}{}",
+                "{} | {}{}",
                 form.effect().text().fallback,
                 field_context,
                 if form.operation == OpKind::Wait {
-                    format!(" · 観測条件 {}件", form.conditions.len())
+                    format!(" | 観測条件 {}件", form.conditions.len())
                 } else {
                     String::new()
                 }
             );
             let footer = if form.operation == OpKind::Wait {
                 format!(
-                    "Esc 一覧 · Enter {} · F1 説明とIDの探し方\nTab/↑↓/PgUp/PgDn 選択 · F9条件追加 · F10削除",
+                    "Esc 一覧 | Enter {} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | F9条件追加 | F10削除",
                     form.verb()
                 )
             } else {
                 format!(
-                    "Esc 一覧 · Enter {} · F1 説明とIDの探し方\nTab/↑↓/PgUp/PgDn 選択 · ←→選択値 · Ctrl+U消去",
+                    "Esc 一覧 | Enter {} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | <>選択値 | Ctrl+U消去",
                     form.verb()
                 )
             };
@@ -672,7 +672,7 @@ impl Operations {
             let mut body = popup::compact_recorded(
                 frame,
                 area,
-                form.operation.label(),
+                &form.operation.label(),
                 &context,
                 &footer,
                 height,
@@ -741,7 +741,7 @@ impl Operations {
                 .map(|kind| kind.cli())
                 .unwrap_or_default();
             let context = format!(
-                "{cli} · {}/{}件 · CLIと同じ操作 · {source} · 絞込み: {}",
+                "{cli} | {}/{}件 | CLIと同じ操作 | {source} | 絞込み: {}",
                 selected + 1,
                 rows.len(),
                 if self.filter.is_empty() {
@@ -755,7 +755,7 @@ impl Operations {
                 area,
                 "操作",
                 &context,
-                "絞込み · ↑↓/PgUp/PgDn · Ctrl+U解除 · Esc戻る/F8閉\nEnter 入力フォーム · [変更]保存 [制御]処理",
+                "絞込み | ^v/PgUp/PgDn | Ctrl+U解除 | Esc戻る/F8閉\nEnter 入力フォーム | [変更]保存 [制御]処理",
                 &self.paint,
             );
             self.page
@@ -1843,12 +1843,28 @@ impl Form {
 mod tests {
     use super::*;
     #[test]
+    fn all_operation_ui_labels_use_width_invariant_symbols_without_changing_cli_labels() {
+        use unicode_width::UnicodeWidthStr;
+        for &kind in OpKind::ALL {
+            let label = kind.label();
+            unicode_width::set_terminal_width(Some(1));
+            let narrow = label.as_str().width();
+            unicode_width::set_terminal_width(Some(2));
+            let wide = label.as_str().width();
+            assert_eq!(narrow, wide, "{}", label);
+        }
+        unicode_width::clear_terminal_width();
+        assert_eq!(OpKind::ThreadGet.label(), "会話 | 詳細");
+        assert_eq!(OpKind::ThreadGet.catalogue().label(), "会話 · 詳細");
+    }
+
+    #[test]
     fn human_terms_do_not_replace_cli_operation_identity() {
         for (kind, label, wire) in [
-            (OpKind::ThreadGet, "会話 · 詳細", "thread.get"),
-            (OpKind::UsageGet, "使用量 · 合計", "usage.get"),
-            (OpKind::RunGet, "作業 · 詳細", "run.get"),
-            (OpKind::TurnGet, "応答処理 · 詳細", "turn.get"),
+            (OpKind::ThreadGet, "会話 | 詳細", "thread.get"),
+            (OpKind::UsageGet, "使用量 | 合計", "usage.get"),
+            (OpKind::RunGet, "作業 | 詳細", "run.get"),
+            (OpKind::TurnGet, "応答処理 | 詳細", "turn.get"),
         ] {
             assert_eq!(kind.label(), label);
             assert_eq!(kind.wire_name(), wire);
@@ -2691,7 +2707,10 @@ mod entry_tests {
                         rest = &rest[start + open.len_utf8()..];
                         let Some(end) = rest.find(close) else { break };
                         let quoted = &rest[..end];
-                        if quoted.contains(" · ") {
+                        // A CLI usage alternative is not an F8 caption.
+                        if (quoted.contains(" | ") || quoted.contains(" · "))
+                            && !quoted.contains("--")
+                        {
                             found.push(quoted);
                         }
                         rest = &rest[end + close.len_utf8()..];
@@ -2717,7 +2736,7 @@ mod entry_tests {
         };
         // A wrong caption must be rejected even if another correct caption is
         // present elsewhere in the same guide (the old test's blind spot).
-        let wrong = captions("Use `会話 · 詳細`, never `Thread · 詳細`.");
+        let wrong = captions("Use `会話 | 詳細`, never `Thread | 詳細`.");
         assert!(actual(wrong[0]));
         assert!(!actual(wrong[1]));
         let mut documents = crate::docs::documents();
@@ -2838,7 +2857,7 @@ mod entry_tests {
             }
             operations.select(OpKind::RunGet);
             let text = screen(&operations, width, height);
-            assert!(text.contains("作業 · 詳細"));
+            assert!(text.contains("作業 | 詳細"));
             assert!(text.contains("Esc 一覧"));
             assert!(text.contains("Enter 表示"));
             if height > 20 {

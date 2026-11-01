@@ -4,9 +4,9 @@ use super::*;
 pub(crate) fn caption(index: usize, language: &str) -> String {
     let key = key_hints::Action::Code.spec().0;
     if language.is_empty() {
-        format!("[{}] コピー · {key}で番号を選ぶ", index + 1)
+        format!("[{}] コピー | {key}で番号を選ぶ", index + 1)
     } else {
-        format!("[{}] コピー · {key}で番号を選ぶ · {language}", index + 1)
+        format!("[{}] コピー | {key}で番号を選ぶ | {language}", index + 1)
     }
 }
 #[derive(Clone, Debug)]
@@ -170,11 +170,11 @@ impl Choices {
             frame,
             area,
             "コードの塊をコピー",
-            "保存された原文から取得 · 表示の折返しはコピーしません",
+            "保存された原文から取得 | 表示の折返しはコピーしません",
             match self.hint_context() {
                 key_hints::Context::CodePending => "Esc 戻る",
-                key_hints::Context::CodeBody => "0 本文全体 · Esc 戻る",
-                _ => "↑↓ 選択 · Enter/c コピー · 1-9 番号でコピー\n0 本文全体 · Esc 戻る",
+                key_hints::Context::CodeBody => "0 本文全体 | Esc 戻る",
+                _ => "^v 選択 | Enter/c コピー | 1-9 番号でコピー\n0 本文全体 | Esc 戻る",
             },
             paint,
         );
@@ -203,7 +203,7 @@ impl Choices {
                         .iter()
                         .map(|b| {
                             popup::Item::new(format!(
-                                "[{}] コピー · {}文字 · {}",
+                                "[{}] コピー | {}文字 | {}",
                                 b.index + 1,
                                 b.chars,
                                 b.preview

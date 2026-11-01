@@ -36,7 +36,7 @@ impl PendingMessage {
     }
     fn label(&self) -> String {
         format!(
-            "{} · {}{}{}",
+            "{} | {}{}{}",
             self.sender(),
             if self.uncertain {
                 "反映状況不明"
@@ -45,11 +45,11 @@ impl PendingMessage {
             } else {
                 "反映待ち"
             },
-            if self.now { " · すぐ渡す" } else { "" },
+            if self.now { " | すぐ渡す" } else { "" },
             self.hold_reason
                 .as_deref()
                 .map(|r| format!(
-                    " · {}",
+                    " | {}",
                     match r {
                         "terminal_before_path_admission" => "中断前の未反映",
                         "uncertain_path_admission" => "反映状況を確認できません",
@@ -93,8 +93,8 @@ impl QueuePopup {
                 frame,
                 area,
                 "保存した下書き",
-                &format!("{}件 · /restore draft ID", archives.len()),
-                "Esc 戻る · ↑↓ 選択 · Enter 入力欄へ復元 · R 再取得",
+                &format!("{}件 | /restore draft ID", archives.len()),
+                "Esc 戻る | ^v 選択 | Enter 入力欄へ復元 | R 再取得",
                 &self.paint,
             );
             let items = if archives.is_empty() {
@@ -102,7 +102,7 @@ impl QueuePopup {
                     "読込み中です".into()
                 } else if let Some(error) = &self.archive_error {
                     format!(
-                        "取得できません: {} · Rで再取得",
+                        "取得できません: {} | Rで再取得",
                         crate::presentation::sanitize_plain(error, 0).0
                     )
                 } else {
@@ -129,7 +129,7 @@ impl QueuePopup {
             return;
         }
         let context = format!(
-            "{}件 / 表示{}件 · 保存済みの入力",
+            "{}件 / 表示{}件 | 保存済みの入力",
             pending.total,
             pending.items.len()
         );
@@ -138,7 +138,7 @@ impl QueuePopup {
             area,
             "反映待ち",
             &context,
-            "Esc 戻る · ↑↓ 選択 · Enter 状態 · O 原文\nD 選択を取消 · A 表示中のIDを取消",
+            "Esc 戻る | ^v 選択 | Enter 状態 | O 原文\nD 選択を取消 | A 表示中のIDを取消",
             &self.paint,
         );
         let items = if pending.items.is_empty() {
@@ -192,7 +192,7 @@ fn accepting_excerpt(text: &str) -> String {
         .0
         .replace('\n', " ");
     if end < text.len() {
-        preview.push('…');
+        preview.push('.');
     }
     preview
 }
@@ -226,7 +226,7 @@ pub(super) fn draw_compact(frame: &mut Frame<'_>, area: Rect, view: &ThreadView)
     }
     lines.truncate(usize::from(area.height.saturating_sub(1)));
     lines.push(Line::from(format!(
-        "/queue · 保存済み{}件",
+        "/queue | 保存済み{}件",
         view.pending_messages.total
     )));
     frame.render_widget(
@@ -1045,7 +1045,7 @@ mod tests {
         );
         let preview = accepting_excerpt(&body);
         assert!(preview.starts_with("VISIBLE"));
-        assert!(preview.ends_with('…'));
+        assert!(preview.ends_with('.'));
         assert!(preview.len() < 4096);
         assert!(!preview.contains("TAIL_MUST_NOT_APPEAR"));
         assert!(!preview.contains('\x1b'));

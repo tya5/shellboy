@@ -49,7 +49,7 @@ pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String
     }
     let mut label = format!("Revisit {}", summary.consumed_count);
     if summary.pending {
-        label.push_str(" · next reserved");
+        label.push_str(" | next reserved");
     }
     Some(label)
 }
@@ -227,7 +227,7 @@ impl ToolPresentation {
         } else {
             ""
         };
-        let mut heading = format!("{mark} {identity_command} · {observed}{state_text}");
+        let mut heading = format!("{mark} {identity_command} | {observed}{state_text}");
         if let Some(current) = current {
             let same_state = current == self.status
                 || (matches!(current, "running_current" | "background_current")
@@ -240,18 +240,18 @@ impl ToolPresentation {
             {
                 let returned = tool_state_text(&self.status, self.exit_code);
                 heading.push_str(&format!(
-                    " · 返却時 {}",
+                    " | 返却時 {}",
                     returned.strip_suffix("（返却時）").unwrap_or(&returned)
                 ));
             }
         } else if self.current_state.as_deref() == Some("observation_unavailable") {
-            heading.push_str(" · 現在状態は未確認");
+            heading.push_str(" | 現在状態は未確認");
         }
         if let Some(ms) = self.elapsed_ms {
-            heading.push_str(&format!(" · {}.{:01}秒", ms / 1000, (ms % 1000) / 100));
+            heading.push_str(&format!(" | {}.{:01}秒", ms / 1000, (ms % 1000) / 100));
         }
         if let Some(id) = &self.execution_id {
-            heading.push_str(&format!(" · 実行 {} · F6", compact_tool_label(id, 8)));
+            heading.push_str(&format!(" | 実行 {} | F6", compact_tool_label(id, 8)));
         }
         heading
     }
@@ -283,7 +283,7 @@ impl ToolPresentation {
             )
         });
         let state = live
-            .map(|state| format!(" · {}", tool_state_text(state, None)))
+            .map(|state| format!(" | {}", tool_state_text(state, None)))
             .unwrap_or_default();
         format!(
             "{} {}{state}",
@@ -332,7 +332,7 @@ impl ToolPresentation {
 fn compact_tool_label(text: &str, limit: usize) -> String {
     let mut value: String = text.chars().take(limit).collect();
     if text.chars().count() > limit {
-        value.push('…');
+        value.push('.');
     }
     value
 }
@@ -441,6 +441,7 @@ impl RenderedMarkdown {
                 .sum::<usize>()
     }
 }
+const TABLE_BORDER_MARKER: ratatui::style::Color = ratatui::style::Color::Indexed(250);
 #[derive(Clone)]
 struct ShellboyMarkdownStyle {
     code_marker: String,
@@ -455,10 +456,18 @@ impl tui_markdown::StyleSheet for ShellboyMarkdownStyle {
     fn blockquote(&self) -> Style {
         Style::default().fg(crate::ui::theme::TEXT)
     }
+    fn alert_icon(&self, _kind: tui_markdown::AlertKind) -> &str {
+        "!"
+    }
     fn table_header(&self) -> Style {
         Style::default()
             .fg(crate::ui::theme::EMPHASIS)
             .add_modifier(Modifier::BOLD)
+    }
+    fn table_border(&self) -> Style {
+        Style::default()
+            .fg(crate::ui::theme::MUTED)
+            .underline_color(TABLE_BORDER_MARKER)
     }
     fn heading_marker(&self, _level: u8) -> &str {
         ""
@@ -713,9 +722,29 @@ pub fn render_markdown(presentation: &mut NodePresentation, width: u16) {
                 spans: line
                     .spans
                     .into_iter()
-                    .map(|span| Span {
-                        style: span.style,
-                        content: Cow::Owned(span.content.into_owned()),
+                    .map(|span| {
+                        let mut style = span.style;
+                        let mut text = span.content.into_owned();
+                        if style.underline_color == Some(TABLE_BORDER_MARKER) {
+                            // Only renderer-generated table borders have this
+                            // marker; model/user text and links are untouched.
+                            text = text
+                                .chars()
+                                .map(|c| match c {
+                                    '─' => '-',
+                                    '│' => '|',
+                                    '┌' | '┐' | '└' | '┘' | '├' | '┤' | '┬' | '┴' | '┼' => {
+                                        '+'
+                                    }
+                                    other => other,
+                                })
+                                .collect();
+                            style.underline_color = None;
+                        }
+                        Span {
+                            style,
+                            content: Cow::Owned(text),
+                        }
                     })
                     .collect(),
             })
@@ -951,7 +980,7 @@ fn secret(key: &str) -> bool {
 fn short(text: &str, limit: usize) -> String {
     let mut out: String = text.chars().take(limit).collect();
     if out.len() < text.len() {
-        out.push_str("… [詳細は原文参照]");
+        out.push_str(". [詳細は原文参照]");
     }
     out
 }
@@ -976,7 +1005,7 @@ fn parse_container_detail(text: &str) -> Option<Value> {
 pub fn safe_detail_value(value: Value) -> Value {
     fn safe(value: Value, depth: usize) -> Value {
         if depth > 32 {
-            return Value::String("[深い構造 · 詳細は元の参照先で確認]".into());
+            return Value::String("[深い構造 | 詳細は元の参照先で確認]".into());
         }
         match value {
             Value::Object(object) => Value::Object(

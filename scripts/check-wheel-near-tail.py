@@ -91,7 +91,7 @@ def run(binary, out, live):
             above = record(f"up-{index}", lambda text: top(text) is not None and top(text) < previous)
         if live:
             server.commands.put(80)
-            terminal.expect(lambda text: "↓ new" in text, "live update while paused")
+            terminal.expect(lambda text: "v new" in text, "live update while paused")
         near = above
         for index in range(3):
             terminal.send(DOWN)

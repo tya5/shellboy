@@ -105,7 +105,7 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
     } else {
         format!(
             "{} {}",
-            ["·", "··", "···", "··"][tick % 4],
+            ["|", "||", "|||", "||"][tick % 4],
             stage_text(stage)
         )
     };
@@ -115,7 +115,7 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
     } else if screen.stopping {
         "開始済み処理を中断せず、安全な終了を待っています"
     } else if screen.ignored_input {
-        "起動完了まで入力できません · Esc / Ctrl+C / Ctrl+Q 終了"
+        "起動完了まで入力できません | Esc / Ctrl+C / Ctrl+Q 終了"
     } else {
         "Esc / Ctrl+C / Ctrl+Q 終了"
     };
@@ -167,6 +167,7 @@ fn wait_inner<T>(
     };
     let start = Instant::now();
     let mut drawn = None;
+    let mut ready = None;
     loop {
         if let Some(termination) = termination {
             if termination.forced() {
@@ -180,9 +181,9 @@ fn wait_inner<T>(
                 screen.stopping = true;
             }
         }
-        if screen.error.is_none() {
+        if screen.error.is_none() && ready.is_none() {
             match result.try_recv() {
-                Ok(Ok(value)) => return Ok(Ok(value)),
+                Ok(Ok(value)) => ready = Some(value),
                 Ok(Err(error)) => screen.error = Some(error),
                 Err(TryRecvError::Disconnected) => {
                     screen.error = Some(ApiError::new(
@@ -192,6 +193,11 @@ fn wait_inner<T>(
                 }
                 Err(TryRecvError::Empty) => {}
             }
+        }
+        // Keep handling input while the bounded probe runs, but do not start
+        // presentation workers with a width that could subsequently change.
+        if ready.is_some() && (detached || session.poll_terminal_width()) {
+            return Ok(Ok(ready.take().expect("ready result")));
         }
         if termination.is_some_and(super::termination::Termination::requested)
             && screen.error.is_some()
@@ -220,7 +226,7 @@ fn wait_inner<T>(
                 screen.ignored_input,
                 screen.error.is_some(),
             );
-            if drawn != Some(signature) {
+            if session.poll_terminal_width() && drawn != Some(signature) {
                 let snapshot = &session.link_snapshot;
                 session
                     .terminal

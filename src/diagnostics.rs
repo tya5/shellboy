@@ -29,6 +29,9 @@ pub enum DiagnosticEvent {
     UsageTotalsSlow,
     LineageQuerySlow,
     UiHistory,
+    UiTerminalWidthOne,
+    UiTerminalWidthTwo,
+    UiTerminalWidthUnknown,
 }
 
 /// Fixed frontend observations; never accepts history or shell content.

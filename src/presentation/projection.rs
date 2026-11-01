@@ -77,7 +77,7 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         p.title = CONTEXT_TRIM_TITLE.into();
     }
     if let Some(reason) = payload.get("tombstone_reason").and_then(Value::as_str) {
-        p.title = format!("原文回収済み · {reason}");
+        p.title = format!("原文回収済み | {reason}");
         p.kind = PresentationKind::Unknown;
     }
     if p.kind == PresentationKind::Unknown && payload.get("tombstone_reason").is_none() {
@@ -192,12 +192,12 @@ fn summary_projection<'a>(
     {
         p.title = if decoded_summary.is_some() {
             format!(
-                "要約 · 置換{}件 · 出典{}件 · F6→O 原文",
+                "要約 | 置換{}件 | 出典{}件 | F6>O 原文",
                 sources.len(),
                 sources.len()
             )
         } else {
-            format!("要約 · 出典{}件 · F6→O 原文", sources.len())
+            format!("要約 | 出典{}件 | F6>O 原文", sources.len())
         };
     }
     decoded_summary

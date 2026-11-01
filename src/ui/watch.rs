@@ -153,7 +153,7 @@ impl WatchDetail {
         });
         let mut secondary = match self.phase {
             ActivityPhase::Recovery => format!(
-                "{} · 詳細で復旧を確認",
+                "{} | 詳細で復旧を確認",
                 self.recovery_reason
                     .as_deref()
                     .unwrap_or("復旧理由は未取得")
@@ -161,7 +161,7 @@ impl WatchDetail {
             ActivityPhase::Failed => self
                 .recovery_reason
                 .clone()
-                .unwrap_or_else(|| "失敗理由は未取得 · 詳細で確認".into()),
+                .unwrap_or_else(|| "失敗理由は未取得 | 詳細で確認".into()),
             ActivityPhase::Completed => self
                 .answer_preview
                 .clone()
@@ -172,7 +172,7 @@ impl WatchDetail {
                 .as_ref()
                 .map(|work| {
                     format!(
-                        "shell {} · 子 {} · 待機 {}{}",
+                        "shell {} | 子 {} | 待機 {}{}",
                         work.shells,
                         work.children,
                         work.waits
@@ -180,7 +180,7 @@ impl WatchDetail {
                             .unwrap_or_else(|| "未取得".into()),
                         work.rows
                             .first()
-                            .map(|row| format!(" · {}", row.label))
+                            .map(|row| format!(" | {}", row.label))
                             .unwrap_or_default()
                     )
                 })
@@ -197,14 +197,14 @@ impl WatchDetail {
                 .unwrap_or_else(|| self.phase.label().into()),
         };
         if self.pending_messages > 0 {
-            secondary.push_str(&format!(" · 待ち {}", self.pending_messages));
+            secondary.push_str(&format!(" | 待ち {}", self.pending_messages));
         }
         if let Some(label) = self
             .revisit
             .as_ref()
             .and_then(crate::presentation::revisit_label)
         {
-            secondary.push_str(" · ");
+            secondary.push_str(" | ");
             secondary.push_str(&label);
         }
         let now = Instant::now();
@@ -669,7 +669,7 @@ impl WatchState {
         let entry = self.entries.get(id)?;
         let detail = entry.detail.as_ref();
         let status = match entry.category {
-            WatchCategory::Unread => "完了 ●",
+            WatchCategory::Unread => "完了 *",
             WatchCategory::Confirming if entry.identity().is_some() && self.seen_overflow => {
                 "確認履歴の保持範囲外"
             }
@@ -905,7 +905,7 @@ fn secondary_age_label(
             ));
         }
     }
-    labels.join(" · ")
+    labels.join(" | ")
 }
 
 /// Candidate-page provenance, distinct from later reactive per-row facts.
@@ -939,7 +939,7 @@ impl DescendantCount {
             };
         }
         let lower = if self.truncated || self.cycle {
-            "≥"
+            ">="
         } else {
             ""
         };
@@ -952,8 +952,8 @@ impl DescendantCount {
         }
         Some(format!(
             "子孫 {}{}",
-            labels.join(" · "),
-            if self.cycle { " · 循環あり" } else { "" }
+            labels.join(" | "),
+            if self.cycle { " | 循環あり" } else { "" }
         ))
     }
 }
@@ -1578,6 +1578,6 @@ mod tests {
         count.recovery = 1;
         count.cycle = true;
         let label = count.label().unwrap();
-        assert!(label.contains("稼働≥2") && label.contains("復旧≥1") && label.contains("循環"));
+        assert!(label.contains("稼働>=2") && label.contains("復旧>=1") && label.contains("循環"));
     }
 }

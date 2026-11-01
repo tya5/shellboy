@@ -43,7 +43,7 @@ def main():
         cells[name] = out.with_suffix('.txt').read_text()
     checks = {
         'aligned_columns': all(label in cells['wide'] for label in ('会話', '作業場所', '状態', '更新')),
-        'known_tree_branches': '├─' in cells['wide'] and '▾' in cells['wide'],
+        'known_tree_branches': '+-' in cells['wide'] and '▾' in cells['wide'],
         'unknown_parent_explicit': '[親未取得]' in cells['wide'],
         'collapsed_hides_children': '▸' in cells['collapsed'] and '調査タスク 37' not in cells['collapsed'],
         'expanded_nested_child': '折り返しと結合文字' in cells['expanded'],
@@ -51,7 +51,7 @@ def main():
         'page_merges_parent': '[親未取得]' not in cells['page'] and '別プロジェクトの親' in cells['page'] and '親が次ページにある子' in cells['page'],
         'narrow_selection_visible': any('›' in line and '親が次ページにある子' in line for line in cells['narrow'].splitlines()),
         'filter_keeps_missing_parent_explicit': '[親未取得]' in cells['filter'] and '調査タスク 0' in cells['filter'],
-        'normal_conversation': '調査結果' in cells['conversation'] and 'スレッド ·' not in cells['conversation'],
+        'normal_conversation': '調査結果' in cells['conversation'] and 'スレッド |' not in cells['conversation'],
         'no_raw_multiline_preview': all('```' not in cells[name] and '**構造化データ**' not in cells[name] for name in cases if name != 'conversation'),
     }
     (args.out / 'checks.json').write_text(json.dumps(checks, ensure_ascii=False, indent=2) + '\n')

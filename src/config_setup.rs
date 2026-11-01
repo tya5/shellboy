@@ -116,7 +116,7 @@ impl SetupReport {
             .unwrap_or_else(|| "--config で指定した設定ファイル".into());
         let mut text = format!(
             "設定が必要です: {}\n設定ファイル: {path}\n",
-            facts.join(" · ")
+            facts.join(" | ")
         );
         if !self.config_file_present {
             text.push_str("設定ファイルは読み込まれていません。\n");
@@ -125,7 +125,7 @@ impl SetupReport {
             text.push_str(MINIMAL);
             text.push('\n');
         }
-        text.push_str("同じ --config を指定して config init → 設定を編集・環境変数を設定 → config check → owner を再起動してください。\n");
+        text.push_str("同じ --config を指定して config init > 設定を編集・環境変数を設定 > config check > owner を再起動してください。\n");
         text.push_str("shellboy config init / shellboy config check\nガイド: shellboy docs get --id shellboy/configuration\n優先: --config > OS既定 / --data-dir > SHELLBOY_DATA_DIR > TOML > OS既定");
         text
     }

@@ -1348,7 +1348,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
         .unwrap();
         assert_eq!(
             reports,
-            ["作業 · 状態一覧"],
+            ["作業 | 状態一覧"],
             "the stale report body is never emitted"
         );
         assert_eq!(notices.len(), 1);
@@ -1371,7 +1371,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
             notices[0],
             "new read reports must not consume the outcome notice"
         );
-        assert_eq!(ui.management.as_ref().unwrap().title, "作業 · 状態一覧");
+        assert_eq!(ui.management.as_ref().unwrap().title, "作業 | 状態一覧");
         sender.try_send(UiAction::Quit).unwrap();
         finish_bridge(bridge, &incoming).await;
     }

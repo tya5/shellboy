@@ -468,7 +468,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     terminal
         .write_all(format!("/switch {paused_thread}\r").as_bytes())
         .unwrap();
-    read_until_text(&mut terminal, &mut output, "/index → T").await;
+    read_until_text(&mut terminal, &mut output, "/index > T").await;
     read_until_text(&mut terminal, &mut output, &paused_at).await;
     terminal.write_all(b"/index\r").unwrap();
     read_until_text(&mut terminal, &mut output, "P 費用preview").await;
@@ -567,9 +567,9 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     // commits a distinct persisted assistant node. Exact row identity is
     // asserted by TestBackend; emitted PTY bytes are not a screen emulator.
     terminal.write_all(b"\x1b[<64;10;5M").unwrap();
-    read_repaint_text(&mut terminal, &mut output, &["↓"]).await;
+    read_repaint_text(&mut terminal, &mut output, &["v"]).await;
     allow_completion.send(()).unwrap();
-    read_repaint_text(&mut terminal, &mut output, &["✓", "↓"]).await;
+    read_repaint_text(&mut terminal, &mut output, &["✓", "v"]).await;
     // Static-idle redraw is tested with the deterministic draw budget, not a
     // finite window with no PTY bytes (which cannot prove future absence).
     assert!(emitted_text(&output).contains("✓"));
@@ -609,7 +609,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         |bytes| {
             bytes.windows(4).any(|b| b == b"\x1b[2J")
                 && emitted_text(bytes).contains("EDITABLE_WHILE_WAITING")
-                && emitted_text(bytes).contains("↓")
+                && emitted_text(bytes).contains("v")
         },
     )
     .await;
@@ -623,7 +623,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         "draft must survive repaint: {text}"
     );
     assert!(
-        text.contains("↓"),
+        text.contains("v"),
         "scroll anchor/follow must survive repaint: {text}"
     );
     assert!(!text.contains("FOREIGN_SCREEN_MARKER"));

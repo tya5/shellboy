@@ -42,7 +42,7 @@ pub(super) async fn read(
             fields.push(crate::presentation::PresentationField {
                 key: format!("/received/source/{id}"),
                 label: format!(
-                    "{} · {} · Turn {}",
+                    "{} | {} | Turn {}",
                     crate::presentation::fields::local_time(&at)
                         .unwrap_or_else(|| "時刻不明".into()),
                     classification(&kind, &state),
@@ -62,7 +62,7 @@ pub(super) async fn read(
             });
         }
         (
-            format!("受信記録 · {total}件 · {page}ページ · Enter 原文 / Esc 閉じる"),
+            format!("受信記録 | {total}件 | {page}ページ | Enter 原文 / Esc 閉じる"),
             fields,
         )
     })
@@ -149,7 +149,7 @@ fn display(request: &Option<String>, excerpt: Option<&str>) -> String {
     excerpt
         .map_or_else(
             || request.clone(),
-            |text| format!("{request} · 受信: {text}"),
+            |text| format!("{request} | 受信: {text}"),
         )
         .chars()
         .take(80)
@@ -317,7 +317,7 @@ mod tests {
     fn row_text_strips_terminal_controls_and_collapses_lines() {
         let request = Some("\u{1b}[31m依頼\u{1b}[0m\n\t次行\u{7}".into());
         let shown = display(&request, Some("\u{1b}[2J回答\r\n続き"));
-        assert_eq!(shown, "依頼 次行 · 受信: 回答 続き");
+        assert_eq!(shown, "依頼 次行 | 受信: 回答 続き");
         assert!(!shown.chars().any(char::is_control));
         assert_eq!(display(&Some(" \n\t".into()), Some("")), "依頼本文なし");
     }

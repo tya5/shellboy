@@ -61,9 +61,9 @@ impl ActivityPhase {
             Self::Background | Self::Continuing | Self::Stopping => "◌",
             Self::Completed => "✓",
             Self::Recovery | Self::Failed => "!",
-            Self::Stopped => "■",
-            Self::Idle => "·",
-            _ => "●",
+            Self::Stopped => "#",
+            Self::Idle => "|",
+            _ => "*",
         }
     }
 }
@@ -89,12 +89,12 @@ impl RecoverySnapshot {
             crate::model::usage_limit::LimitKind::RateLimitRetryAfter => FooterText::RateLimit,
         };
         Some(format!(
-            "{} · {} UTC{}",
+            "{} | {} UTC{}",
             kind.text(),
             at.format("%m-%d %H:%M"),
             limit
                 .limit_window_minutes
-                .map_or(String::new(), |n| format!(" · {n}分枠"))
+                .map_or(String::new(), |n| format!(" | {n}分枠"))
         ))
     }
 }
@@ -109,7 +109,7 @@ pub struct AutomaticRetrySnapshot {
 impl AutomaticRetrySnapshot {
     pub(super) fn label(&self) -> String {
         format!(
-            "（{}/{}） · {}待機{} · 再送は重複課金の可能性",
+            "（{}/{}） | {}待機{} | 再送は重複課金の可能性",
             self.number,
             self.limit,
             crate::presentation::elapsed_text(
@@ -117,7 +117,7 @@ impl AutomaticRetrySnapshot {
                 false
             ),
             if self.partial_response_discarded {
-                " · 途中応答を保存して作り直し"
+                " | 途中応答を保存して作り直し"
             } else {
                 ""
             }
@@ -356,7 +356,7 @@ impl ActivityView {
     pub fn secondary_note(&self, at: Instant) -> Option<String> {
         let phase = self.secondary_phase()?;
         Some(format!(
-            "{} · {}",
+            "{} | {}",
             phase.label(),
             self.request_clock.as_ref().map_or_else(
                 || FooterText::UnknownAge.text().to_owned(),

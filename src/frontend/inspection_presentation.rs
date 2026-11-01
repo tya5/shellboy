@@ -79,7 +79,7 @@ pub(super) fn prepare(ticket: &Presentation, budget: usize) -> Result<Prepared, 
             if field.key.is_empty() {
                 field.key = "/current_source".into();
             }
-            field.label = format!("現在 · {}", field.label);
+            field.label = format!("現在 | {}", field.label);
         }
     }
     // report.detail may be omitted by a tiny budget. Anchors still derive from

@@ -66,7 +66,7 @@ impl Action {
             Self::Back => ("Esc", "戻る"),
             Self::SelectionBack => ("F2/Esc", "戻る"),
             Self::LongCopy => ("会話の履歴で c", "長い回答のコピー"),
-            Self::Move => ("↑↓", "選択"),
+            Self::Move => ("^v", "選択"),
             Self::NextPage => ("n", "次page"),
             Self::FirstPage => ("p", "先頭再取得"),
             Self::Fields => ("v", "要点/内部項目"),
@@ -92,7 +92,7 @@ impl Action {
             Self::Newline => "入力中に改行する",
             Self::Interrupt => "現在のTurnを中断する（Runと背景の停止はCtrl+C）",
             Self::Stop => "Runと所有する背景の作業を停止する",
-            Self::Commands => "コマンド候補を表示。↑↓で選び、Tabで補完",
+            Self::Commands => "コマンド候補を表示。^vで選び、Tabで補完",
             Self::Code => "保存された原文のコードの塊を番号で選んでコピーする",
             _ => self.spec().1,
         }
@@ -184,12 +184,12 @@ pub(super) fn detail_footer(context: Context) -> &'static str {
         ]
         .map(|actions| {
             format!(
-                "Esc 戻る · ↑↓/PgUp/PgDn 移動\n{}",
+                "Esc 戻る | ^v/PgUp/PgDn 移動\n{}",
                 actions
                     .iter()
                     .map(|a| a.label(&config))
                     .collect::<Vec<_>>()
-                    .join(" · ")
+                    .join(" | ")
             )
         })
     });
@@ -234,7 +234,7 @@ impl Cache {
                         .map(String::as_str)
                         .chain(["F1"])
                         .collect::<Vec<_>>()
-                        .join(" · ");
+                        .join(" | ");
                     if text.width() <= usize::from(width) {
                         break text;
                     }
@@ -309,7 +309,7 @@ mod tests {
                 if width >= 2 {
                     assert!(text.ends_with("F1"), "{text}");
                 }
-                assert!(!text.contains('…'));
+                assert!(!text.contains('.'));
             }
         }
     }

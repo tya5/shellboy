@@ -1137,7 +1137,7 @@ impl ThreadView {
             return None;
         }
         self.start_rebase_navigation();
-        self.status = "履歴の表示位置を再取得中…".into();
+        self.status = "履歴の表示位置を再取得中.".into();
         let action = UiAction::RebaseHistory {
             thread_id,
             generation,
@@ -1249,7 +1249,7 @@ impl ThreadView {
             "{}{}",
             if matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled) {
                 format!(
-                    "{} · /restore {revision} で元の入力を復元",
+                    "{} | /restore {revision} で元の入力を復元",
                     receipt_label(&status)
                 )
             } else {
@@ -1263,7 +1263,7 @@ impl ThreadView {
             && (!self.draft.text.is_empty() || !self.draft.attachments.is_empty())
         {
             self.status
-                .push_str(" · 編集中の入力を保持（次は全文送信）");
+                .push_str(" | 編集中の入力を保持（次は全文送信）");
         }
         if matches!(status, ReceiptStatus::Completed | ReceiptStatus::Applied)
             && (pending.send.is_none() || pending.source_node_id.is_some())
@@ -2289,9 +2289,9 @@ impl ThreadView {
             node.presentation.kind = crate::presentation::PresentationKind::Event;
             node.presentation.event_class = crate::presentation::EventClass::Change;
             node.presentation.title = if kind == "model_stream_observation" {
-                "ストリーム差分 · 最終応答は確定済み"
+                "ストリーム差分 | 最終応答は確定済み"
             } else {
-                "途中で切れた応答（保存済み・会話には含めない） · /received 一覧"
+                "途中で切れた応答（保存済み・会話には含めない） | /received 一覧"
             }
             .into();
             node.presentation.provisional_stream = false;
@@ -2374,7 +2374,7 @@ mod received_tests {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
-        let title = "途中で切れた応答（保存済み・会話には含めない） · /received 一覧";
+        let title = "途中で切れた応答（保存済み・会話には含めない） | /received 一覧";
         let mut paid = UiNode {
             node_id: "paid".into(),
             role: "received_response".into(),

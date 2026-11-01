@@ -343,3 +343,33 @@ selection; incomplete or different targets return typed preview_stale before
 mutation. Legacy unmarked behavior and existing Run-state checks remain. The UI
 uses a fresh preview and new confirmation after stale rejection, never an
 automatic deletion retry. No schema/queue/worker is added.
+
+## Display language and terminal width foundation (#139 / #35 stage A)
+
+`[ui] language` accepts `"en"` (default) or `"ja"`. Other values fail
+configuration validation; the OS locale is not a selector. The typed UI message
+boundary resolves complete messages, including typed arguments and language-
+appropriate plural forms. Stage A migrates the force-quit confirmation and the
+terminal-width diagnostic as examples; other screens remain for stage B. It does
+not translate or rewrite model/user content, saved data, protocol values or CLI
+output.
+
+On TUI startup, the alternate screen issues two cursor-position queries around
+an ambiguous-width character on row 11. The existing terminal event reader
+consumes only matching replies without blocking the UI thread or reordering
+keyboard/paste events. Two agreeing replies identify width one or two; a 250 ms
+timeout, unsupported input path, impossible response or disagreement is unknown.
+A small terminal that cannot host the probe is also unknown. The Windows input
+backend currently falls back to unknown because its cursor reports are not
+exposed through the Unix parser. F1 help and the optional diagnostic event record
+the observation; no user width override or terminal-name/locale guess is used.
+
+The same process-wide effective policy is applied before presentation workers
+start and is used by both application layout and ratatui. Unknown reserves two
+cells for ambiguous characters. Multi-code-point emoji sequences reserve the
+sum of their component widths (at least two for an emoji-presentation selector),
+which may leave whitespace but avoids assuming a terminal's ligature behavior.
+Generated application symbols use width-invariant forms; generated Markdown
+borders are marked separately before conversion, so user/model text is not
+rewritten. Source positions, copying and persisted values retain their original
+contents. See [the stage A design and stage B slices](ui-language-stage-a-draft.md).

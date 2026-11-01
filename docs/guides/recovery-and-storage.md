@@ -80,7 +80,7 @@ shellboy run get --run RUN_ID
 
 When `answer_node_id` is returned, retrieve it with `shellboy history get --node NODE_ID`. Follow `next_cursor` for long bodies. Terminal `failed` / `stopped` states are not successful answers.
 
-In the TUI, start via F8 `待機 · 条件を観測` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
+In the TUI, start via F8 `待機 | 条件を観測` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
 
 Use `shellboy wait` to wait for execution. `timeout` does not mean the target stopped or failed. `satisfied` need not mean target success: inspect the returned snapshot and state. [Delegation](delegation.md) and [CLI reference](cli-reference.md) show JSON and state-dependent branches.
 
@@ -124,7 +124,7 @@ Get-result `context.recovery_reason` is structured. Restart interruption with `r
 
 ## Inspecting the previous shutdown record
 
-After restart, opening a conversation that had background work shows `前回の終了時の記録` (previous shutdown record), with counts of work, response processing, commands, children, and interrupted wait observations. In F6 select that record and Enter for IDs/reasons or O for saved source. Entries labeled `前回の保存記録 · コマンド` (previous saved commands), `子の作業` (child work), and `前回の待機観測は中断済み` (previous wait observation interrupted) lead to individual targets. Use get commands or F8 for their current saved Run/Turn/shell state.
+After restart, opening a conversation that had background work shows `前回の終了時の記録` (previous shutdown record), with counts of work, response processing, commands, children, and interrupted wait observations. In F6 select that record and Enter for IDs/reasons or O for saved source. Entries labeled `前回の保存記録 | コマンド` (previous saved commands), `子の作業` (child work), and `前回の待機観測は中断済み` (previous wait observation interrupted) lead to individual targets. Use get commands or F8 for their current saved Run/Turn/shell state.
 
 The shutdown record is a snapshot before stopping begins. Distinguish `予定した状態` (intended state) from actual cleanup outcome; uncertain external side effects remain uncertain. Normal Ctrl+Q shutdown alone does not prove every external outcome. Restart does not automatically rerun previous work: inspect saved targets, answers, and unapplied requests before choosing an action.
 

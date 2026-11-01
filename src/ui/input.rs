@@ -33,7 +33,7 @@ pub(super) fn display(draft: &DraftSnapshot) -> Display {
                 fold.start,
                 fold.end,
                 format!(
-                    "[貼付け{} · {}行/{}字]",
+                    "[貼付け{} | {}行/{}字]",
                     fold.id,
                     content.lines().count(),
                     content.chars().count()
@@ -220,7 +220,7 @@ pub(super) fn hints(
     if action == "送信"
         && let Some(newline) = config.newline_keys.first()
     {
-        primary.push_str(&format!(" · {newline} 改行"));
+        primary.push_str(&format!(" | {newline} 改行"));
     }
     let mut secondary = Vec::new();
     if phase.is_some_and(|phase| phase.is_active()) {
@@ -240,7 +240,7 @@ pub(super) fn hints(
     if folded {
         secondary.push("/paste 番号 show|edit|remove");
     }
-    (primary, secondary.join(" · "))
+    (primary, secondary.join(" | "))
 }
 
 #[cfg(test)]
@@ -258,6 +258,31 @@ mod tests {
     fn key(code: KeyCode, modifiers: KeyModifiers) -> Event {
         Event::Key(KeyEvent::new(code, modifiers))
     }
+    #[test]
+    fn measured_width_preserves_user_content_and_drives_cursor() {
+        let text = "A\u{00b7}\u{2192}👩\u{200d}💻";
+        for measured in [Some(1), Some(2), None] {
+            unicode_width::set_terminal_width(measured);
+            let draft = DraftSnapshot {
+                text: text.into(),
+                cursor: text.len(),
+                ..Default::default()
+            };
+            let display = display(&draft);
+            assert_eq!(display.text, text);
+            assert_eq!(visible(&display, 120, 0, 1)[0].to_string(), text);
+            assert_eq!(measure(text, text.len(), 120).cursor, (text.width(), 0));
+            for line in visible(&display, 4, 0, 20) {
+                assert!(
+                    line.width() <= 4,
+                    "wrapped input overflows under {measured:?}"
+                );
+            }
+            assert_eq!(draft.text, text);
+        }
+        unicode_width::clear_terminal_width();
+    }
+
     #[test]
     fn character_wrap_matches_visible_words_unicode_caret_and_large_scroll_without_a_full_buffer() {
         let display = Display {

@@ -270,7 +270,7 @@ fn list_discloses_saved_changes_and_runtime_control_before_opening_forms() {
         let rendered = screen(&operations);
         let row = rendered
             .lines()
-            .find(|line| line.contains(operations.rows()[0].label()))
+            .find(|line| line.contains(operations.rows()[0].label().as_str()))
             .unwrap();
         assert!(row.contains(expected), "{filter}: {row}");
         assert!(!row.contains(absent), "{filter}: {row}");

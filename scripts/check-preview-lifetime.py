@@ -42,7 +42,7 @@ for cols in [80,140]:
                 second=scene('reopened-during-delay',lambda s:'出力を取得中' in s)
                 assert '時間内' not in second and '出力取得に失敗' not in second
                 release();released=True
-                observed=scene('released-output',lambda s:'│ GATED_OUTPUT_END' in s and '取得 ' in s and '出力を取得中' not in s)
+                observed=scene('released-output',lambda s:'| GATED_OUTPUT_END' in s and '取得 ' in s and '出力を取得中' not in s)
                 notice=next(line.strip() for line in observed.splitlines() if '取得 ' in line)
                 counter=root/'preview-read-requests'
                 requests=counter.read_text()
@@ -50,11 +50,11 @@ for cols in [80,140]:
                 for n in range(3):
                     title=f'gate-title-{n}'
                     subprocess.run([str(BINARY),'--config',str(root/'config.toml'),'--data-dir',str(root/'data'),'thread','set','--thread','preview-thread','--title',title],check=True,capture_output=True,timeout=WATCHDOG_SECONDS)
-                    text=scene(f'changed-{n}',lambda s:title in s and '│ GATED_OUTPUT_END' in s)
+                    text=scene(f'changed-{n}',lambda s:title in s and '| GATED_OUTPUT_END' in s)
                     assert next(line.strip() for line in text.splitlines() if '取得 ' in line)==notice
                     assert counter.read_text()==requests
                 t.send(' ')
-                scene('closed-after-result',lambda s:'│ GATED_OUTPUT_END' not in s and '取得 ' not in s and '出力取得に失敗' not in s)
+                scene('closed-after-result',lambda s:'| GATED_OUTPUT_END' not in s and '取得 ' not in s and '出力取得に失敗' not in s)
                 (case/'raw.vt').write_bytes(t.raw)
                 results.append({'cols':cols,'mode':mode,'requests':int(requests),'observation_notice':notice,'changed_events_with_fixed_notice':3})
                 print(json.dumps(results[-1],ensure_ascii=False),flush=True)

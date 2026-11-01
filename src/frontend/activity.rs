@@ -330,14 +330,14 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                 let facts = &details["recovery"];
                 if facts.is_object() {
                     stage.push_str(&format!(
-                        " · retry {}/{} · request {}B · tool {}B",
+                        " | retry {}/{} | request {}B | tool {}B",
                         details["automatic_retries"],
                         details["retry_limit"],
                         facts["protected_request"]["bytes"],
                         facts["protected_latest_tool"]["bytes"]
                     ));
                     if let Some(actions) = facts["actions"].as_array() {
-                        message.push_str(" · ");
+                        message.push_str(" | ");
                         message.push_str(
                             &actions
                                 .iter()
@@ -477,7 +477,7 @@ mod tests {
         assert_eq!(projection.snapshot.revisit.as_deref(), Some("Revisit 3"));
         assert_eq!(
             projection.snapshot.context_reduction.as_deref(),
-            Some("自動縮小済み · spill 3組 · 省略 7件 · 90000→40000 chars")
+            Some("自動縮小済み | spill 3組 | 省略 7件 | 90000>40000 chars")
         );
         let recovery = projection.snapshot.recovery.unwrap();
         assert_eq!(recovery.message, "saved reason");

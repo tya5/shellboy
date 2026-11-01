@@ -68,7 +68,7 @@ Starting without a subcommand requires an interactive terminal. You cannot run t
 
 During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
 
-A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “会話 · 詳細” (conversation details).
+A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “会話 | 詳細” (conversation details).
 
 ### Choosing a conversation format
 
@@ -172,8 +172,16 @@ Choose `dark` (default) or `light` in the configuration file and restart the TUI
 
 ```toml
 [ui]
+language = "en" # "en" (default) or "ja"
 palette = "dark"
 ```
+
+Restart the TUI after changing `language`. Stage A translates the force-quit
+confirmation and terminal-width diagnostic; other screens will migrate in later
+slices. User and model content, CLI output, and saved data are not translated.
+The TUI measures ambiguous character width at startup; F1 help shows the result.
+If the terminal does not provide consistent replies, the result is unknown and
+layout reserves two columns. There is no width setting or locale-based guess.
 
 `NO_COLOR` selects plain marks and spacing; terminals without
 advertised 256-color/truecolor support use reverse/separator fallback. No color
@@ -203,7 +211,7 @@ conversation browser; it is separate from F8 operation forms.
 
 ### Inspect saved usage
 
-- Open F8 `使用量 · 合計` (usage totals), enabling children if needed, or use
+- Open F8 `使用量 | 合計` (usage totals), enabling children if needed, or use
   `shellboy usage get --thread THREAD_ID --include-children` (omit the last flag
   for this conversation alone).
 - These are saved-record totals, not a bill or effective work time. The time
@@ -252,7 +260,7 @@ Exit with Ctrl+Q or `/quit`. Shellboy waits for persistence and for owned work t
 
 Next, explore [Attachments](attachments.md), [History and search](history-and-search.md), and the [CLI reference](cli-reference.md).
 
-Before deleting, use F8's “会話 · 削除影響” (deletion impact) to inspect live Runs, descendants, sharing, provenance, and attachment references. Preview does not delete anything; reclaimable-capacity estimates are unsupported. If you lose an acceptance or compaction result, query its operation using F8's “操作 · 受付結果” (operation receipt), then check downstream state. See [Recovery and storage](recovery-and-storage.md).
+Before deleting, use F8's “会話 | 削除影響” (deletion impact) to inspect live Runs, descendants, sharing, provenance, and attachment references. Preview does not delete anything; reclaimable-capacity estimates are unsupported. If you lose an acceptance or compaction result, query its operation using F8's “操作 | 受付結果” (operation receipt), then check downstream state. See [Recovery and storage](recovery-and-storage.md).
 
 ### Recovery without token guesses
 

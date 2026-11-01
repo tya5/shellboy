@@ -128,40 +128,40 @@ impl State {
         };
         if let InspectionTarget::RetainedSources(scope) = &self.target {
             text.push_str(&format!(
-                " · 取得済み結果 {} を保持 · 再実行は a から明示操作",
+                " | 取得済み結果 {} を保持 | 再実行は a から明示操作",
                 scope.captured_at
             ));
         }
         if let InspectionTarget::HistorySources(scope) = &self.target {
             text.push_str(&format!(
-                " · 取得時の結果 {} を保持 · 再取得:aから同じ履歴照会",
+                " | 取得時の結果 {} を保持 | 再取得:aから同じ履歴照会",
                 scope.captured_at
             ));
         }
         if let InspectionTarget::Lists(scope) = &self.target {
             text.push_str(&format!(
-                " · 取得時の一覧 {} を保持 · 新しい行はaから再取得",
+                " | 取得時の一覧 {} を保持 | 新しい行はaから再取得",
                 scope.captured_at
             ));
         }
         if let Some(at) = &self.usage_observed_at {
-            text.push_str(&format!(" · 使用量取得 {at}"));
+            text.push_str(&format!(" | 使用量取得 {at}"));
         }
         for (kind, error) in [
             ("状態", &self.metadata_error),
             ("使用量", &self.usage_error),
         ] {
             if let Some((_, error)) = error {
-                text.push_str(&format!(" · {kind}未更新: {error}"));
+                text.push_str(&format!(" | {kind}未更新: {error}"));
             }
         }
         if self.selection_unavailable {
             if matches!(self.target, InspectionTarget::Attachments { .. }) {
                 text.push_str(
-                    " · 選択した添付は今回の取得範囲で未確認・上下キーで選び直してください",
+                    " | 選択した添付は今回の取得範囲で未確認・上下キーで選び直してください",
                 );
             } else {
-                text.push_str(" · 選択元は利用不可・上下キーで選び直してください");
+                text.push_str(" | 選択元は利用不可・上下キーで選び直してください");
             }
         }
         text
@@ -1455,7 +1455,7 @@ mod tests {
                 usage_observed_at: None,
                 fields: vec![PresentationField {
                     key: "/current_source/nodes/0/body_available".into(),
-                    label: "現在 · 原文".into(),
+                    label: "現在 | 原文".into(),
                     value: available.into(),
                     ..Default::default()
                 }],

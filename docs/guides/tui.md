@@ -39,7 +39,7 @@ when the terminal is too narrow; the full-width banner includes the UTC date.
 
 ## Saved usage details
 
-F8's `使用量 · 合計` reads the selected conversation's saved model usage and
+F8's `使用量 | 合計` reads the selected conversation's saved model usage and
 separate Run/model/shell time; enable children to include its bounded descendants.
 Conversation, Run and Turn detail results also include these saved totals. Missing
 usage is marked unknown and unrecorded summary/embedding coverage is explicit.
@@ -84,7 +84,7 @@ means the header cannot safely derive the first request. It does not mean there
 are no messages; inspect history or set an explicit title. This header read does
 not rewrite the title or alter the CLI's title lookup.
 
-The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `会話 · 詳細`.
+The header orders state, conversation name, model, and working directory. Long names use at most half the width; when space runs out, trailing items are omitted first. Working directories favor their final components; inspect/copy the full value in F8 `会話 | 詳細`.
 
 Display follows stored state and received events. Receiving response means actual text has arrived from the current model attempt. Unobservable details, such as the model's internal thought, are not guessed. The `抱えている作業` section shows saved wait targets when available and labels the timeout estimate as approximate. A Turn that has answered while owned shells or child Runs remain active shows answered/background-active. Use `/status thread` or F8 for details.
 
@@ -236,7 +236,7 @@ Restore failed/cancelled send snapshots with `/restore REVISION`. Unaccepted or 
 
 `/status` lists stored work across all Threads. `/status thread` limits it to the current Thread; `/status all` includes terminal work. Runs, Turns, background shells, unapplied requests, and model attempts each occupy one row. Up/Down select, Enter opens ownership/model/timestamp details, O queries the target, S reads shell source output, R refreshes, and N fetches the next list page. Within a detail page, N continues that detail. Esc returns to the conversation, retaining the draft and reading position.
 
-This observes saved state, not OS process liveness, in-flight searches, or standalone RAG stores. A completed Turn can still own background shells or child Runs; inspect Turn and Run states separately. Use F8 `作業 · 状態一覧` for filters such as failures, `/index status` for indexing, and CLI `shellboy rag status` for RAG.
+This observes saved state, not OS process liveness, in-flight searches, or standalone RAG stores. A completed Turn can still own background shells or child Runs; inspect Turn and Run states separately. Use F8 `作業 | 状態一覧` for filters such as failures, `/index status` for indexing, and CLI `shellboy rag status` for RAG.
 
 Replace `ID` and connection names below with real values. `/attach` and `/cwd`, which use their argument as a path, allow quoted paths with spaces.
 
@@ -330,7 +330,7 @@ the original source/copy target. Fetching a later page remains explicit.
 
 The conversation list uses one row per conversation with name, working directory, state, and update time columns. Filter text appears immediately; fetching follows 150ms without typing. Ctrl+R refreshes immediately. An empty saved title displays a short name from the first user request, searchable by that name, without rewriting explicit titles or history. Branch lines show ancestry; `▾` / `▸` mean expanded/collapsed, `●` marks the open conversation, and `›` with background marks the selected item. Left collapses children or moves to the parent when already collapsed/a leaf. Right expands or enters the first child when already expanded. Up/Down traverse visible rows and keep selection in view.
 
-In F8 `会話 · 設定` (conversation settings), set `タイトル操作` (title action) to `set` and enter a title to rename. `auto` clears the manual name and returns to conversation-derived display; `keep` preserves it. CLI: `shellboy thread set --thread THREAD --title 'Name'`; clear with `--title ''`.
+In F8 `会話 | 設定` (conversation settings), set `タイトル操作` (title action) to `set` and enter a title to rename. `auto` clears the manual name and returns to conversation-derived display; `keep` preserves it. CLI: `shellboy thread set --thread THREAD --title 'Name'`; clear with `--title ''`.
 
 Fixed bottom details show the selection's cwd, ID, parent, state, and a one-line excerpt of roughly at most 80 characters with Markdown/newlines normalized. Narrow screens omit columns; details or F1 show complete values. Enter opens the conversation; F6 reads source.
 
@@ -409,8 +409,8 @@ Screen hints such as S/P/B use lowercase keys. See [history and search](history-
 F6 `会話の詳細` (conversation details) selects by item number, kind, and excerpt. Model answers, shell calls/results, and state changes are distinct; the selected content remains above the fields after Enter. O and C act on the Up/Down-selected target; returning to the list with F6 preserves selection. Enter `送信` (submit) in an action form sends a query/change request; required mutation confirmation appears separately.
 
 1. In F6 (`/details`), select a history item and Enter its fields: node ID, tool arguments, state, before/after values, and more. Full IDs remain here rather than repeating in ordinary conversation rows.
-2. Select fields with Up/Down and C to copy. A shortened value marked `[詳細は原文参照]` is not copied; proceed to source. Enter on Run/Turn/execution references opens the corresponding query form; node references open source. Use F8 `履歴 · 原文` for neighboring/source node IDs.
-3. O refreshes the selected source; N requests the next source page and P the first. C copies **only the current source page**. This never loads all history or raw output at once. Pages are at most 64KiB, with continuation, neighboring, and source references. For full shell raw output, use F8 `shell · 保存出力` with execution, cursor, and encoding.
+2. Select fields with Up/Down and C to copy. A shortened value marked `[詳細は原文参照]` is not copied; proceed to source. Enter on Run/Turn/execution references opens the corresponding query form; node references open source. Use F8 `履歴 | 原文` for neighboring/source node IDs.
+3. O refreshes the selected source; N requests the next source page and P the first. C copies **only the current source page**. This never loads all history or raw output at once. Pages are at most 64KiB, with continuation, neighboring, and source references. For full shell raw output, use F8 `shell | 保存出力` with execution, cursor, and encoding.
 4. F7 (`/links`) or lowercase l in details selects HTTP(S) links for the current item. C copies the complete URL regardless of wrapping/short labels. Display does not connect or launch a browser. An empty link set for the current body window is stated explicitly.
 
 Ordinary shell results separate stdout/stderr blocks only when verified from retained raw output; words such as “error” do not determine the stream. This is a bounded tail display preview; `出力の表示範囲` (output display range) in details reports remaining/uncollected portions. When streams cannot be identified because raw was reclaimed, execution reference is unknown, or display preparation exceeded its deadline, saved combined excerpts and the reason remain. This visual distinction never rewrites saved source from O or body copies.
@@ -467,7 +467,7 @@ F8 actions, searches, attachment/index/storage management results use structured
 
 C on a shortened `[詳細は原文参照]` value fetches details instead of copying; omission marks never become a purported complete clipboard value.
 
-Inside details, N gets the next page, P the first, and Up/Down/PgUp/PgDn scroll the current page. C copies that page; Esc returns to fields, then Esc to the conversation. Fetch detail pages when a complete value is required rather than treating a preview as the full text. `この操作の受付ID` (`request_operation_id`) identifies that query/action itself and can be inspected with F8 `操作 · 受付結果`; it differs from message and Run IDs.
+Inside details, N gets the next page, P the first, and Up/Down/PgUp/PgDn scroll the current page. C copies that page; Esc returns to fields, then Esc to the conversation. Fetch detail pages when a complete value is required rather than treating a preview as the full text. `この操作の受付ID` (`request_operation_id`) identifies that query/action itself and can be inspected with F8 `操作 | 受付結果`; it differs from message and Run IDs.
 
 Only the most recent result's details are retained. A new result replaces old details; late requests for old results are discarded. If body-cache limits prevent retention, the UI reports it and explains refetching. Read source pages using the node/execution or narrow the query. This is not a route to credentials or opaque reasoning that was never returned.
 
@@ -477,9 +477,9 @@ Esc closes management display without cancelling an accepted operation. `/stop` 
 
 F8 (`/actions`, `/operations`) lists all 36 actions under `この会話で` (in this conversation), `よく使う` (common), and `すべての操作` (all actions). Type/paste up to 128 characters to filter human names, CLI names, and related slash actions. Choose with Up/Down and Enter, then enter target IDs/arguments per field. Conversation-state updates affect suggestions in the next form, not the target currently being edited; IDs opened from references also remain fixed. Suggestions do not guarantee acceptance: verify the target before submission. Shown slash actions are related shortcuts; `/attach` adds to the draft whereas F8 attachment-add is a saved operation.
 
-`履歴 · 検索` accepts Thread, kind/excluded kind (space-separated), and creation from/to (offset-bearing RFC3339) filters. An empty Thread means global, never automatically current Thread. `/search QUERY` remains global. `履歴 · 関係` takes node, previous/next/sources/replacements, count, and cursor. Structured fields expose provenance, source revision, and indexed spans. See [history and search](history-and-search.md) for scope and relation semantics.
+`履歴 | 検索` accepts Thread, kind/excluded kind (space-separated), and creation from/to (offset-bearing RFC3339) filters. An empty Thread means global, never automatically current Thread. `/search QUERY` remains global. `履歴 | 関係` takes node, previous/next/sources/replacements, count, and cursor. Structured fields expose provenance, source revision, and indexed spans. See [history and search](history-and-search.md) for scope and relation semantics.
 
-F8 `会話 · 削除影響` queries blocking Runs, reference counts, sharing, and update time for a Thread/descendant choice. It does not open actual deletion confirmation, and execution still requires a new deletion check. Reclaimable size is unestimated. Structured fields expose get-result context and operation targets/downstream. Distinguish acceptance from downstream completion.
+F8 `会話 | 削除影響` queries blocking Runs, reference counts, sharing, and update time for a Thread/descendant choice. It does not open actual deletion confirmation, and execution still requires a new deletion check. Reclaimable size is unestimated. Structured fields expose get-result context and operation targets/downstream. Distinguish acceptance from downstream completion.
 
 Typing/paste appends to a field. Ctrl+U clears a suggested ID before replacement; Backspace removes its last character. Multiline request/stdin fields use Ctrl+J for newline. **Enter submits the action request, not a newline**: inspect pasted content before pressing it. Total form input is limited to 1MiB; overflow preserves existing values.
 
@@ -487,7 +487,7 @@ Use Left/Right/Space for booleans/choices. Empty-field semantics and required ar
 
 ### Cancelling observation versus interrupting its target
 
-In F8 `待機 · 条件を観測`, choose a condition kind and target ID. F9 adds it and clears the target field; F10 removes the last added condition. Submission includes any condition still in the target field and waits for any condition. Inspect result status and snapshot, including timeout and `recovery_wait`.
+In F8 `待機 | 条件を観測`, choose a condition kind and target ID. F9 adds it and clears the target field; F10 removes the last added condition. Submission includes any condition still in the target field and waits for any condition. Inspect result status and snapshot, including timeout and `recovery_wait`.
 
 **Lowercase w** in management or `/cancel-wait` in conversation input cancels only observation of an explicit wait started by the TUI. Its Run/shell continues. Esc merely closes display. **Ctrl+C interrupts the current Thread**; do not use it merely to stop waiting.
 
@@ -511,7 +511,7 @@ During sent-text recall with Up/Down, current unsent attachments move to the rec
 
 `/received` lists receive records for the current conversation newest first, 32 per page. Specify a page with `/received 2`; previous/next list-page entries also open with Enter. The list shows count/page; select an item and Enter to read its saved JSON in the existing source viewer. N continues source pages, P returns to the first, C copies the current page. No memorized ID is required.
 
-Failed requests display readable received reasoning/answers as `途中で切れた応答（保存済み・会話には含めない）` (interrupted response, saved but excluded from conversation). Differences between streaming and final content on successful requests are marked `ストリーム差分 · 最終応答は確定済み` (stream difference, final adopted). Ordinary conversation retains display windows for the latest two records; older records and omitted portions remain accessible in the list. Attention color applies only while the original Turn is in recovery wait, becoming a normal notification after recovery/stop. Local time and the same Turn's request excerpt identify records. Reselecting a conversation or restarting reconstructs display from saved records.
+Failed requests display readable received reasoning/answers as `途中で切れた応答（保存済み・会話には含めない）` (interrupted response, saved but excluded from conversation). Differences between streaming and final content on successful requests are marked `ストリーム差分 | 最終応答は確定済み` (stream difference, final adopted). Ordinary conversation retains display windows for the latest two records; older records and omitted portions remain accessible in the list. Attention color applies only while the original Turn is in recovery wait, becoming a normal notification after recovery/stop. Local time and the same Turn's request excerpt identify records. Reselecting a conversation or restarting reconstructs display from saved records.
 
 These are receive-audit records, excluded from adopted history resent to the model. Display windows extract text/reasoning excerpts rather than showing source JSON itself. Source retains partial text, completed items, final response, and failure/difference information. Encrypted reasoning is never expanded as screen text.
 

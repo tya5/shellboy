@@ -4,7 +4,7 @@ use std::mem::size_of;
 const MAX_ROWS: usize = 65_536;
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SOURCE_BYTES: usize = 256 * 1024;
-const LIMIT_NOTICE: &str = "表示キャッシュ上限 · 原文のコピー・取得元から全文を確認";
+const LIMIT_NOTICE: &str = "表示キャッシュ上限 | 原文のコピー・取得元から全文を確認";
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::ui) struct ReaderBounds {
     pub total: usize,

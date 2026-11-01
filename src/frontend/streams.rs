@@ -367,7 +367,7 @@ fn apply_preview(
                     key: marker,
                     label: "出力の表示範囲".into(),
                     value: format!(
-                        "取得 {} UTC · 閉じて開くと再取得 · 保持中rawの末尾抜粋。{}{}{}",
+                        "取得 {} UTC | 閉じて開くと再取得 | 保持中rawの末尾抜粋。{}{}{}",
                         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"),
                         if page.skipped {
                             "前方省略あり。"
@@ -550,7 +550,7 @@ mod tests {
             .filter(|field| field.key.starts_with("/ui_raw_stream_preview/"))
         {
             assert!(
-                note.value.starts_with("取得 ") && note.value.contains(" UTC · 閉じて開くと再取得")
+                note.value.starts_with("取得 ") && note.value.contains(" UTC | 閉じて開くと再取得")
             );
         }
 
