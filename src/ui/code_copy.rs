@@ -15,6 +15,16 @@ pub(crate) fn caption_in(index: usize, syntax: &str, language: UiLanguage) -> St
         (UiLanguage::En, false) => format!("[{number}] Copy | {key} Choose number | {syntax}"),
     }
 }
+fn block_label(language: UiLanguage, block: &CopyBlock) -> String {
+    let number = block.index + 1;
+    let chars = block.chars;
+    let preview = &block.preview;
+    match language {
+        UiLanguage::Ja => format!("[{number}] コピー | {chars}文字 | {preview}"),
+        UiLanguage::En if chars == 1 => format!("[{number}] Copy | 1 character | {preview}"),
+        UiLanguage::En => format!("[{number}] Copy | {chars} characters | {preview}"),
+    }
+}
 #[derive(Clone, Debug)]
 pub struct CopyBlock {
     pub index: usize,
@@ -176,12 +186,24 @@ impl Choices {
         let body = popup::panel_recorded(
             frame,
             area,
-            "コードの塊をコピー",
-            "保存された原文から取得 | 表示の折返しはコピーしません",
+            i18n::local!(language, "コードの塊をコピー", "Copy code block"),
+            i18n::local!(
+                language,
+                "保存された原文から取得 | 表示の折返しはコピーしません",
+                "From saved source | Display wrapping is not copied"
+            ),
             match self.hint_context() {
-                key_hints::Context::CodePending => "Esc 戻る",
-                key_hints::Context::CodeBody => "0 本文全体 | Esc 戻る",
-                _ => "^v 選択 | Enter/c コピー | 1-9 番号でコピー\n0 本文全体 | Esc 戻る",
+                key_hints::Context::CodePending => i18n::local!(language, "Esc 戻る", "Esc Back"),
+                key_hints::Context::CodeBody => i18n::local!(
+                    language,
+                    "0 本文全体 | Esc 戻る",
+                    "0 Entire body | Esc Back"
+                ),
+                _ => i18n::local!(
+                    language,
+                    "^v 選択 | Enter/c コピー | 1-9 番号でコピー\n0 本文全体 | Esc 戻る",
+                    "^v Select | Enter/c Copy | 1-9 Copy by number\n0 Entire body | Esc Back"
+                ),
             },
             paint,
         );
@@ -197,9 +219,11 @@ impl Choices {
                 popup::reader(
                     frame,
                     body,
-                    &[Line::raw(
+                    &[Line::raw(i18n::local!(
+                        language,
                         "コードの塊はありません。0で本文全体をコピーできます",
-                    )],
+                        "No code blocks. Press 0 to copy the entire body."
+                    ))],
                     0,
                 );
             } else {
@@ -208,20 +232,22 @@ impl Choices {
                     body,
                     blocks
                         .iter()
-                        .map(|b| {
-                            popup::Item::new(format!(
-                                "[{}] コピー | {}文字 | {}",
-                                b.index + 1,
-                                b.chars,
-                                b.preview
-                            ))
-                        })
+                        .map(|b| popup::Item::new(block_label(language, b)))
                         .collect(),
                     self.selected,
                 );
             }
         } else {
-            popup::reader(frame, body, &[Line::raw("原文を取得中")], 0);
+            popup::reader(
+                frame,
+                body,
+                &[Line::raw(i18n::local!(
+                    language,
+                    "原文を取得中",
+                    "Loading source"
+                ))],
+                0,
+            );
         }
     }
 }
@@ -248,7 +274,11 @@ impl UiState {
     }
     pub(super) fn choose_code(&mut self, prefer: bool) -> Vec<UiAction> {
         let Some(node_id) = self.copy_target() else {
-            return self.command_error("コピー対象の回答がありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "コピー対象の回答がありません",
+                "No answer available to copy"
+            ));
         };
         self.next_detail_request = self.next_detail_request.wrapping_add(1);
         let request_id = self.next_detail_request;
@@ -414,6 +444,149 @@ mod tests {
                 matches!(*action,UiAction::CopySelected {code_block:Some(1),ref source_hash,..} if source_hash==&"a".repeat(64))
             ),
             _ => panic!("missing block action"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    fn configure(ui: &mut UiState, result: Option<Result<CopyOffer, String>>) {
+        let mut details = details::Details::for_node(ui.view(), "source-node".into(), false);
+        let mut choices = Choices::new(ui.view(), "source-node".into(), 73, false);
+        if let Some(result) = result {
+            assert!(
+                choices
+                    .accept(ui.view(), 73, "source-node", result)
+                    .is_none()
+            );
+        }
+        details.copy_choices = Some(choices);
+        ui.details = Some(details);
+    }
+    fn empty(ui: &mut UiState) {
+        configure(
+            ui,
+            Some(Ok(CopyOffer {
+                source_hash: "hash".into(),
+                blocks: vec![],
+            })),
+        );
+    }
+    fn listed(ui: &mut UiState) {
+        configure(
+            ui,
+            Some(Ok(CopyOffer {
+                source_hash: "hash".into(),
+                blocks: vec![CopyBlock {
+                    index: 2,
+                    chars: 1,
+                    preview: "x".into(),
+                }],
+            })),
+        );
+    }
+    #[test]
+    fn copy_screens_are_registered_in_both_languages() {
+        i18n::verify_screen(
+            |ui| configure(ui, None),
+            |language| match language {
+                UiLanguage::En => &["Copy code block", "Loading source", "Esc Back"],
+                UiLanguage::Ja => &["コードの塊をコピー", "原文を取得中", "Esc 戻る"],
+            },
+        );
+        i18n::verify_screen(empty, |language| match language {
+            UiLanguage::En => &["No code blocks.", "0 Entire body", "Esc Back"],
+            UiLanguage::Ja => &["コードの塊はありません。", "0 本文全体", "Esc 戻る"],
+        });
+        i18n::verify_screen(listed, |language| match language {
+            UiLanguage::En => &[
+                "[3] Copy | 1 character | x",
+                "Enter/c Copy",
+                "1-9 Copy by number",
+                "0 Entire body",
+            ],
+            UiLanguage::Ja => &[
+                "[3] コピー | 1文字 | x",
+                "Enter/c コピー",
+                "1-9 番号でコピー",
+                "0 本文全体",
+            ],
+        });
+        i18n::verify_screen(
+            |ui| configure(ui, Some(Err("raw-provider-error".into()))),
+            |language| match language {
+                UiLanguage::En => &["Copy code block", "raw-provider-error", "Esc Back"],
+                UiLanguage::Ja => &["コードの塊をコピー", "raw-provider-error", "Esc 戻る"],
+            },
+        );
+    }
+    #[test]
+    fn complete_copy_labels_preserve_syntax_and_preview_and_pluralize_counts() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            for count in [0, 1, 2, 123] {
+                let block = CopyBlock {
+                    index: 8,
+                    chars: count,
+                    preview: "原文·👩‍💻".into(),
+                };
+                let label = block_label(language, &block);
+                assert!(label.ends_with("原文·👩‍💻"));
+                assert!(label.starts_with("[9] "));
+                match language {
+                    UiLanguage::En if count == 1 => {
+                        assert_eq!(label, "[9] Copy | 1 character | 原文·👩‍💻")
+                    }
+                    UiLanguage::En => {
+                        assert_eq!(label, format!("[9] Copy | {count} characters | 原文·👩‍💻"))
+                    }
+                    UiLanguage::Ja => {
+                        assert_eq!(label, format!("[9] コピー | {count}文字 | 原文·👩‍💻"))
+                    }
+                }
+            }
+            let label = caption_in(0, "syntax-原文", language);
+            assert!(label.ends_with(" | syntax-原文"));
+            assert!(!caption_in(0, "", language).ends_with(" | "));
+        }
+        assert_eq!(caption(0, "rust"), caption_in(0, "rust", UiLanguage::En));
+    }
+    #[test]
+    fn language_projection_keeps_exact_copy_actions_and_owner_fences() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut ui = UiState::new(&config, PathBuf::new());
+            listed(&mut ui);
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 30)).unwrap();
+            terminal
+                .draw(|frame| super::super::draw(frame, &mut ui))
+                .unwrap();
+            let choices = ui.details.as_mut().unwrap().copy_choices.as_mut().unwrap();
+            assert!(
+                matches!(choices.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)), details::Outcome::Action(action) if matches!(*action, UiAction::CopySelected { ref node_id, code_block: Some(2), ref source_hash } if node_id == "source-node" && source_hash == "hash"))
+            );
+            assert!(
+                matches!(choices.key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE)), details::Outcome::Action(action) if matches!(*action, UiAction::CopySelected { code_block: None, ref source_hash, .. } if source_hash == "hash"))
+            );
+            let mut stale = Choices::new(ui.view(), "source-node".into(), 74, true);
+            ui.view_mut().generation += 1;
+            assert!(
+                stale
+                    .accept(
+                        ui.view(),
+                        74,
+                        "source-node",
+                        Ok(CopyOffer {
+                            source_hash: "stale".into(),
+                            blocks: vec![]
+                        })
+                    )
+                    .is_none()
+            );
+            assert!(stale.blocks.is_none());
+            assert!(stale.source_hash.is_none());
         }
     }
 }

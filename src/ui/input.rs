@@ -1,5 +1,5 @@
 //! Pure composer display and cursor projection; canonical input stays unchanged.
-use super::{DraftSnapshot, draft, i18n, theme};
+use super::{DraftSnapshot, draft, theme};
 use crate::config::UiLanguage;
 use crate::ui::text_width::UnicodeWidthStr;
 use ratatui::{
@@ -52,7 +52,12 @@ pub(super) fn display(draft: &DraftSnapshot, language: UiLanguage) -> Display {
             (
                 fold.start,
                 fold.end,
-                paste_chip(language, fold.id, content.lines().count(), content.chars().count()),
+                paste_chip(
+                    language,
+                    fold.id,
+                    content.lines().count(),
+                    content.chars().count(),
+                ),
             )
         })
         .collect();
@@ -275,7 +280,7 @@ mod tests {
                 cursor: text.len(),
                 ..Default::default()
             };
-            let display = display(&draft);
+            let display = display(&draft, UiLanguage::En);
             assert_eq!(display.text, text);
             assert_eq!(visible(&display, 120, 0, 1)[0].to_string(), text);
             assert_eq!(
@@ -342,7 +347,9 @@ mod tests {
     }
     #[test]
     fn folded_paste_uses_projected_height_and_typed_chip_style_without_changing_send_text() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         // This assertion exercises the rich palette deliberately. The host may
         // set NO_COLOR/TERM=dumb; never mutate process-wide environment in tests.
         let palette = super::super::theme::Palette::from_capabilities(
@@ -465,5 +472,106 @@ mod tests {
                 .0
                 .contains("保留送信")
         );
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    use crate::{
+        config::Config,
+        ui::{PasteFold, UiAction, UiAttachment, UiState},
+    };
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    fn composer(ui: &mut UiState) {
+        ui.insert(&"pasted\n".repeat(40), true);
+        let draft = &mut ui.view_mut().draft;
+        let position = draft.text.len();
+        draft.text.push_str(draft::MARKER);
+        draft.cursor = draft.text.len();
+        draft.attachments.push(UiAttachment {
+            id: "attachment-id".into(),
+            path: "picture.png".into(),
+            kind: "image".into(),
+            state: "ready".into(),
+            position: Some(position),
+        });
+    }
+    #[test]
+    fn composer_screen_is_registered_in_both_languages() {
+        crate::ui::i18n::verify_screen(composer, |language| match language {
+            UiLanguage::En => &["Paste 1", "40 lines/280 chars", "Image: picture.png"],
+            UiLanguage::Ja => &["貼付け1", "40行/280字", "画像: picture.png"],
+        });
+    }
+    #[test]
+    fn paste_counts_are_complete_zero_one_and_many_messages() {
+        for (lines, chars, en) in [
+            (0, 0, "[Paste 7 | 0 lines/0 chars]"),
+            (1, 1, "[Paste 7 | 1 line/1 char]"),
+            (1, 2, "[Paste 7 | 1 line/2 chars]"),
+            (2, 1, "[Paste 7 | 2 lines/1 char]"),
+            (2, 42, "[Paste 7 | 2 lines/42 chars]"),
+        ] {
+            assert_eq!(paste_chip(UiLanguage::En, 7, lines, chars), en);
+            assert_eq!(
+                paste_chip(UiLanguage::Ja, 7, lines, chars),
+                format!("[貼付け7 | {lines}行/{chars}字]")
+            );
+        }
+    }
+    #[test]
+    fn localized_chips_project_the_same_source_caret_without_mutating_draft_or_send() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            for observed in [Some(1), Some(2), None] {
+                crate::ui::text_width::set_terminal_width(observed);
+                let raw = "日本語·👩‍💻\n".repeat(40);
+                let text = format!("A{raw}Z{}", draft::MARKER);
+                let mut draft = DraftSnapshot {
+                    text,
+                    cursor: 1 + raw.len(),
+                    folds: vec![PasteFold {
+                        id: 1,
+                        start: 1,
+                        end: 1 + raw.len(),
+                        expanded: false,
+                    }],
+                    attachments: vec![UiAttachment {
+                        id: "raw-id".into(),
+                        path: "原文·👩‍💻.png".into(),
+                        kind: "image".into(),
+                        state: "raw-state".into(),
+                        position: Some(2 + raw.len()),
+                    }],
+                    ..Default::default()
+                };
+                let before = serde_json::to_value(&draft).unwrap();
+                let projection = display(&draft, language);
+                assert!(projection.text[projection.cursor..].starts_with('Z'));
+                assert!(projection.text.contains("原文·👩‍💻.png"));
+                assert!(!projection.text.contains(&raw));
+                for width in [80, 120] {
+                    let metrics = measure(&projection.text, projection.cursor, width);
+                    let visible = visible(&projection, width, 0, metrics.rows as u16);
+                    let (x, y) = metrics.cursor;
+                    let line = visible[y].to_string();
+                    let before_z = line.split('Z').next().unwrap();
+                    assert_eq!(before_z.width(), x);
+                }
+                assert_eq!(serde_json::to_value(&draft).unwrap(), before);
+                let mut config = Config::default();
+                config.ui.language = language;
+                let mut ui = UiState::new(&config, std::path::PathBuf::new());
+                draft.cursor = draft.text.len();
+                ui.view_mut().draft = draft.clone();
+                let actions = ui.event(Event::Key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                )));
+                assert!(actions.iter().any(|action| matches!(action, UiAction::Send { text, attachments, .. } if text == &draft.text && attachments == &draft.attachments)));
+            }
+        }
+        crate::ui::text_width::set_terminal_width(None);
     }
 }

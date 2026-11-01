@@ -456,7 +456,7 @@ mod tests {
         ui.insert("頭", true);
         assert_eq!(ui.view().draft.attachments[0].position, Some(6));
         let (display, _) = crate::ui::draft_display(&ui.view().draft);
-        assert!(display.contains("頭前[画像: a.png]中後"));
+        assert!(display.contains("頭前[Image: a.png]中後"));
         ui.view_mut().draft.cursor = 9;
         ui.event(Event::Key(KeyEvent::new(
             KeyCode::Backspace,
