@@ -90,6 +90,7 @@ impl Api {
                 "reasoning",
                 "previous_response_id",
                 "prompt_cache_key",
+                "prompt_cache_options",
             ],
             Self::ChatCompletions => &[
                 "model",
@@ -171,6 +172,7 @@ pub struct Connection {
     /// Header names that each carry the Thread UUID when `session_header` is on.
     pub session_header_names: Vec<String>,
     pub prompt_cache_key: bool,
+    pub prompt_cache_diagnostics: bool,
     /// Send the dialect's cache markers for the common cache hint (#127).
     /// Default on; `false` sends nothing cache-related.
     pub prompt_caching: bool,
@@ -204,6 +206,7 @@ impl Default for Connection {
                 .map(|name| (*name).to_owned())
                 .collect(),
             prompt_cache_key: false,
+            prompt_cache_diagnostics: false,
             prompt_caching: true,
             response_header_timeout_ms: 120_000,
             stream_idle_timeout_ms: 600_000,
@@ -233,6 +236,7 @@ impl fmt::Debug for Connection {
             .field("session_header", &self.session_header)
             .field("session_header_names", &self.session_header_names)
             .field("prompt_cache_key", &self.prompt_cache_key)
+            .field("prompt_cache_diagnostics", &self.prompt_cache_diagnostics)
             .field("prompt_caching", &self.prompt_caching)
             .field(
                 "response_header_timeout_ms",

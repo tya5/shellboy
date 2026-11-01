@@ -917,6 +917,12 @@ impl Form {
             OpKind::UsageGet => (
                 vec![
                     thread(),
+                    f(
+                        "attempt",
+                        "モデル試行ID（他の指定は空に）",
+                        String::new(),
+                        Text,
+                    ),
                     f("since", "開始日時", String::new(), Text),
                     f("until", "終了日時（未満）", String::new(), Text),
                     f("run", "作業ID（指定時は会話を空に）", String::new(), Text),
@@ -939,6 +945,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::UsageGet(UsageGetArgs {
+                        attempt_id: form.optional("attempt")?.map(String::into_boxed_str),
                         since: form.optional("since")?,
                         until: form.optional("until")?,
                         thread_id: form.thread_target()?.thread_id,

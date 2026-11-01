@@ -803,3 +803,24 @@ payload/cache entry and 8MiB copied input text. At most 28 indexed/batched SQL
 statements are used. An oversized scope stays unknown rather than becoming an
 empty successful forecast. Large context-marker provenance uses the canonical
 short outbound notice; genuinely oversized visible groups remain refusals.
+
+### Inspect One Attempt's Usage And Cache Diagnostics
+
+```bash
+shellboy usage get --attempt ATTEMPT_ID
+shellboy thread request --thread THREAD_ID --attempt ATTEMPT_ID --body
+```
+
+The first command selects one saved model attempt instead of an aggregate
+scope. Do not combine `--attempt` with Thread/Run/Turn, children, time-window,
+grouping or pagination options. It returns IDs/state, standard usage scalars and
+`prompt_cache_diagnostics` (bounded reported object, or JSON null). Aggregate
+usage queries do not add a growing list of diagnostic bodies.
+
+Cache diagnosis is opt-in in the Responses connection; see
+[configuration](configuration.md#optional-responses-cache-diagnostics). The
+second command is read-only/offline, shows the saved diagnostic observation and
+reconstructs the admitted comparison identity, not a newer response's ID. An
+unknown historical request witness or changed diagnosis setting is reported as
+unknown rather than silently guessed. Neither command verifies provider cache
+effectiveness.

@@ -17,6 +17,8 @@ api_key_env = "SHELLBOY_API_KEY"
 # session_header = true
 # Optional Responses body key; enable only when supported by your provider.
 # prompt_cache_key = false
+# Opt-in Responses comparison with the Thread's last adopted response ID.
+# prompt_cache_diagnostics = false
 # Role for Shellboy-inserted context; use "user" behind gateways that reject a
 # conversation not ending with a user message (e.g. LiteLLM in front of Claude).
 # context_role = "developer"

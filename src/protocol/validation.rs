@@ -377,6 +377,25 @@ impl Command {
             Self::CompactList(a) => a.validate(),
             Self::ShellList(a) => a.validate(),
             Self::UsageGet(a) => {
+                if let Some(attempt) = &a.attempt_id {
+                    optional_nonempty(Some(attempt), "attempt_id")?;
+                    if a.thread_id.is_some()
+                        || a.run_id.is_some()
+                        || a.turn_id.is_some()
+                        || a.include_children
+                        || a.since.is_some()
+                        || a.until.is_some()
+                        || a.group_by.is_some()
+                        || a.timezone.is_some()
+                        || a.limit.is_some()
+                        || a.cursor.is_some()
+                    {
+                        return Err(invalid(
+                            "usage.get attempt selector conflicts with aggregate options",
+                        ));
+                    }
+                    return Ok(());
+                }
                 crate::usage_totals::breakdown::validate(a)?;
                 crate::readback::Window::new(a.since.as_deref(), a.until.as_deref())?;
                 if [

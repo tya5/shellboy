@@ -136,6 +136,7 @@ impl HttpModelClient {
             }
             if let Some(raw) = &mut failure.raw_response {
                 crate::usage::normalize_response(raw);
+                crate::model::cache_diagnostics::normalize_response(raw);
             }
             if let Some(observation) = facts
                 .http_observation
@@ -200,6 +201,10 @@ impl HttpModelClient {
             Ok(None)
         }
     }
+    pub(crate) fn cache_diagnostics_enabled(&self) -> bool {
+        self.connection.api == crate::config::Api::Responses
+            && self.connection.prompt_cache_diagnostics
+    }
     /// The exact conversation request body this client sends for a canonical
     /// request, and the session header value. Pure: no I/O, no credentials.
     /// `shellboy thread request` uses the same function, so an inspected body
@@ -218,6 +223,9 @@ impl HttpModelClient {
         };
         object.insert("stream".into(), Value::Bool(true));
         object.insert("store".into(), Value::Bool(false));
+        if !self.cache_diagnostics_enabled() {
+            object.remove("prompt_cache_options");
+        }
         // The hint reads Shellboy's own roles, before context_role maps them.
         let cache = self
             .connection

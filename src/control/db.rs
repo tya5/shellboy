@@ -1098,6 +1098,9 @@ impl Store {
                 MutationResult::value(crate::readback::shells(tx, args, &self.instance_id)?)
             }
             Command::UsageGet(args) => {
+                if let Some(attempt) = &args.attempt_id {
+                    return MutationResult::value(crate::usage_totals::read_attempt(tx, attempt)?);
+                }
                 if args.group_by.is_some() {
                     return MutationResult::value(crate::usage_totals::breakdown::read(
                         tx,

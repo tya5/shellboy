@@ -175,6 +175,7 @@ pub(crate) enum Discovery {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum FieldId {
+    Attempt,
     Thread,
     Run,
     Turn,
@@ -415,6 +416,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         help: "対象Runを指定します。人のCLIは明示IDが必要です。Revisitだけはモデルの自分のRunを省略できます。",
         kind: FieldType::Id(IdKind::Run),
         discovery: Discovery::RunFromThread,
+    },
+    FieldSpec {
+        id: FieldId::Attempt,
+        default_origin: DefaultOrigin::None,
+        label: "モデル試行ID（単独指定）",
+        help: "保存attemptの使用量とキャッシュ診断を取得します。他の集計指定は空にします。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
     },
     FieldSpec {
         id: FieldId::Turn,
@@ -1046,6 +1055,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Timezone,
             FieldId::GroupLimit,
             FieldId::Cursor,
+            FieldId::Attempt,
         ],
     },
     OperationSpec {

@@ -3609,3 +3609,37 @@ combined91 / scroll237 / stored15, versus the approved structural boundary
 coverage and decision/evidence records. Local focused checks and strict Clippy
 pass; exact-SHA branch CI evidence accompanies the handoff. This is not a claim
 that #118 is merged or entirely closed.
+## 2026-11-01 - #142 Part 1: Optional Responses Cache Diagnostic Facts
+
+- Implements only the reviewer-requested cache diagnosis half of #142; the issue
+  comment defers sticky headers. No sticky routing/capture, provider-specific
+  behavior, real-provider request, dependency or new background service is added.
+- Responses connections default `prompt_cache_diagnostics` to false. When
+  enabled with `prompt_caching`, requests use the same Thread's immediately
+  preceding adopted response ID, without invented provider/model filters.
+  Missing IDs omit the options; failed/incomplete/stale/cancelled attempts do
+  not advance the identity. Forks do not inherit an adoption of their own.
+- Conversation schema 20 adds a nullable FK to the latest adopted attempt plus
+  its deletion index. Startup migration backfills completed attempts only;
+  runtime reads are bounded PK probes, with no lookup when the feature is off.
+  Existing attempt manifest ownership/byte accounting retain bounded request
+  witnesses and reported diagnostics; aggregate usage readers are unchanged.
+- `usage get --attempt` and the existing F8 usage surface use one read-only
+  scalar-projection reader. `thread request --attempt` exposes saved facts and
+  reconstructs the admitted comparison rather than a newer identity; changed
+  settings/missing witnesses are unknown, never inferred absence or a cache hit.
+- Local validation: all-target `cargo check` and warning-clean all-target
+  Clippy; focused cache/adoption/frontend/witness tests (40 pass, one existing
+  ignored fixture), operation/form tests (50 pass), JSON/SSE loopback suites
+  (2 pass), strict config, wire selector and original #137 inspection test.
+  Previous focused migration tests (25 integration + 4 library), state tests
+  (11), bounded attempt reader and CLI selector also pass. Python helpers:
+  122 pass; test-layout and diff checks pass. All Cargo runs use `rust-slot`.
+- Scope-linked maintenance: box only the rare management-confirmation payload
+  to preserve enum-size bounds; advance synthetic upgrade helper/default and
+  current-only error catalogue guard to schema 20. Python fixtures do not claim
+  an actual published-binary/PTY 17-to-20 upgrade.
+- Remaining at this record: post-rebase light checks, task-branch push approval,
+  Linux/macOS branch CI and formal integrator handoff. Windows/3-OS batch,
+  independent review, main inclusion and physical terminal/provider behavior
+  remain unverified. Delivery acceptance is not review or integration approval.

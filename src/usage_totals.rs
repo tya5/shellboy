@@ -616,3 +616,34 @@ pub(crate) fn read_period_logged(
     value["requested_period"] = window.json();
     Ok(value)
 }
+
+/// Explicit single-attempt inspection; aggregate/UI refresh reads stay unchanged.
+pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiError> {
+    let sql = format!(
+        "SELECT a.id,u.thread_id,u.run_id,a.turn_id,a.state,{},
+         CASE WHEN json_valid(a.input_manifest_json) THEN
+             CASE WHEN json_type(a.input_manifest_json,'$.prompt_cache_diagnostics')='object'
+                  AND octet_length(json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics'))<=2048
+             THEN json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics') END END
+         FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1",
+        usage::sql_projection("a.usage_json")
+    );
+    db.query_row(&sql, [attempt], |row| {
+        let saved: Option<String> = row.get(10)?;
+        let diagnostic = saved
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .and_then(|value| crate::model::cache_diagnostics::bounded(&value));
+        Ok(json!({
+            "attempt_id":row.get::<_,String>(0)?,
+            "thread_id":row.get::<_,String>(1)?,
+            "run_id":row.get::<_,String>(2)?,
+            "turn_id":row.get::<_,String>(3)?,
+            "state":row.get::<_,String>(4)?,
+            "usage":usage::StandardUsage::read(row,5)?.to_value(),
+            "prompt_cache_diagnostics":diagnostic
+        }))
+    })
+    .optional()
+    .map_err(error)?
+    .ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable, "Model attempt not found"))
+}

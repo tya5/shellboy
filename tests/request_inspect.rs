@@ -17,11 +17,20 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 
-struct Incoming {
-    raw: Vec<u8>,
-    reply: oneshot::Sender<Value>,
+pub(super) struct Incoming {
+    pub(super) raw: Vec<u8>,
+    pub(super) reply: oneshot::Sender<Value>,
 }
 async fn proxy() -> (
+    String,
+    mpsc::Receiver<Incoming>,
+    tokio::task::JoinHandle<()>,
+) {
+    proxy_mode(false).await
+}
+pub(super) async fn proxy_mode(
+    sse: bool,
+) -> (
     String,
     mpsc::Receiver<Incoming>,
     tokio::task::JoinHandle<()>,
@@ -62,14 +71,29 @@ async fn proxy() -> (
                     return;
                 }
                 let Ok(body) = result.await else { return };
-                let body = body.to_string();
-                let _ = stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+                let (kind, body) = if sse {
+                    let event = if body["status"] == "incomplete" {
+                        "response.incomplete"
+                    } else {
+                        "response.completed"
+                    };
+                    (
+                        "text/event-stream",
+                        format!(
+                            "event: {event}\ndata: {}\n\n",
+                            json!({"type":event,"response":body})
+                        ),
+                    )
+                } else {
+                    ("application/json", body.to_string())
+                };
+                let _ = stream.write_all(format!("HTTP/1.1 200 Fixture\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
             });
         }
     });
     (format!("http://{address}/v1"), receive, task)
 }
-async fn request(control: &Arc<Control>, command: Command) -> Value {
+pub(super) async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
@@ -79,13 +103,13 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
     assert!(response.ok, "{:?}", response.error);
     response.result.unwrap()
 }
-async fn incoming(receive: &mut mpsc::Receiver<Incoming>) -> Incoming {
+pub(super) async fn incoming(receive: &mut mpsc::Receiver<Incoming>) -> Incoming {
     crate::test_watchdog::watchdog("tests/request_inspect.rs: incoming", receive.recv())
         .await
         .expect("loopback request watchdog")
         .expect("proxy open")
 }
-async fn settled(control: &Control, thread: &str) {
+pub(super) async fn settled(control: &Control, thread: &str) {
     let mut events = control.subscribe();
     crate::test_watchdog::watchdog("tests/request_inspect.rs: settled", async {
         loop {
@@ -105,16 +129,16 @@ async fn settled(control: &Control, thread: &str) {
     .await
     .expect("Thread settles");
 }
-fn tool(call: &str, command: &str) -> Value {
+pub(super) fn tool(call: &str, command: &str) -> Value {
     json!({"id":uuid::Uuid::new_v4().to_string(),"status":"completed","output":[{"type":"function_call","call_id":call,"name":"shell","arguments":json!({"command":command}).to_string()}]})
 }
-fn sha256(bytes: &[u8]) -> String {
+pub(super) fn sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
 }
-fn options(
+pub(super) fn options(
     thread: &str,
     attempt: Option<&str>,
     compare: Option<&str>,
@@ -175,6 +199,13 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
         json!({"id":"done","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"done"}]}]}),
     ] {
         let next = incoming(&mut receive).await;
+        assert!(
+            serde_json::from_slice::<Value>(&next.raw)
+                .unwrap()
+                .get("prompt_cache_options")
+                .is_none(),
+            "diagnostics default off"
+        );
         sent.push(next.raw);
         next.reply.send(reply).unwrap();
     }

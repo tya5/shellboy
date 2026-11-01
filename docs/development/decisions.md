@@ -2871,13 +2871,13 @@ adopted scrolling design. No I/O, worker, protocol, budget or deadline change.
 ## D-142: Opt-in cache diagnostic facts, not routing or inferred usage
 
 2026-11-01, adopted for issue #142 part 1 per reviewer task and issue comment
-6558350298. Use one derived Thread-to-adopted-attempt pointer (schema 19) for
+6558350298. Use one derived Thread-to-adopted-attempt pointer (schema 20) for
 bounded latest-ID lookup; store small diagnostic observations/request witnesses
 in existing attempt manifest metadata, not a new counter ledger/table/worker.
 A single-attempt `usage get --attempt` selector avoids adding lifetime-growing
 body lists or new work to aggregate/UI usage reads. Bound/whitelist provider
 fields independently of usage; missing is null. The comparison is same-Thread,
-same-connection but may span model/Turn/restart changes. Reserve the dynamic
+without invented provider/model identity filters; it spans Turn/restart changes. Reserve the dynamic
 options object rather than silently override a static extra_body value. Sticky
 headers, provider/cache efficacy tests and real API calls remain outside scope.
 Revisit only with an explicitly approved routing or options-extension request.

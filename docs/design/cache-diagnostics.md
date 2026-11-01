@@ -18,15 +18,16 @@ the options object rather than inventing an identity.
 ## Identity And Adoption
 
 When enabled, send the immediately preceding adopted response's opaque ID in
-`prompt_cache_options.comparison_response_id`, on the same Thread and connection.
-Model changes within that connection do not discard the comparison. Turns and
+`prompt_cache_options.comparison_response_id`, on the same Thread.
+Connection or model changes do not discard a reported opaque identity: only the
+provider can determine whether that comparison is meaningful. Turns and
 owner restarts do not reset it. Forked Threads start without an adopted response
 of their own. Failed, incomplete, cancelled and stale attempts cannot replace
 this identity. An adopted response without a usable ID clears it; never fall
 back to an older response. IDs must be nonempty and at most 1024 UTF-8 bytes;
 never truncate or hash an opaque identity into a request.
 
-Conversation schema 19 adds one nullable Thread pointer,
+Conversation schema 20 adds one nullable Thread pointer,
 `last_adopted_attempt_id REFERENCES model_attempt(id) ON DELETE SET NULL`.
 The pointer is set in the existing response-adoption transaction, after its
 live-generation/attempt CAS. It is derived lookup state, not a second response
@@ -86,3 +87,16 @@ Config tests cover defaults, strict boolean, dialect/master-opt-out conflicts
 and reserved extension fields. Migration validates fresh/upgrade equivalence,
 known last-completed backfill and FK deletion. No provider/cache effectiveness,
 LiteLLM behavior, sticky routing, real network model or physical terminal claim.
+
+## Supporting Surface Maintenance
+
+The rare F8 confirmation result boxes its `Command` payload so the additive
+usage selector does not enlarge every management result past the enum size
+bound; confirmation behavior is unchanged. The synthetic release-upgrade helper
+now defaults to schema 20 (public v0.5.0/schema 17 remains the source), retaining
+explicit historical targets. Python migration tests do not claim a native
+published-binary/PTY 17-to-20 upgrade run.
+
+The final rebase preserves main's independent schema 19 context-attempt-scope
+index (#141); this feature therefore uses migration 20, not the draft's 19.
+Both startup upgrade steps and both sides' historical test fixtures are kept.

@@ -69,6 +69,7 @@ pub(super) async fn prepare_attempt(
             return fail_turn(control, snapshot, error).await;
         }
     };
+    snapshot.cache_diagnostics_enabled = client.cache_diagnostics_enabled();
     let request = match prepare_request(snapshot, instruction_body, &mut prepared) {
         Ok(request) => request,
         Err(error) => return fail_turn(control, snapshot, error).await,
@@ -222,12 +223,14 @@ pub(super) fn prepare_request(
         effort: snapshot.effort.as_deref(),
         agents: &snapshot.agents,
     }));
-    Ok(model::response_request(
-        &snapshot.model,
-        input,
-        snapshot.effort.as_deref(),
-        true,
-    ))
+    let mut request =
+        model::response_request(&snapshot.model, input, snapshot.effort.as_deref(), true);
+    model::cache_diagnostics::apply_request(
+        &mut request,
+        snapshot.cache_diagnostics_enabled,
+        snapshot.cache_comparison_response_id.as_deref(),
+    );
+    Ok(request)
 }
 // Preserve the client's existing bounded partial-text/items/raw recovery type.
 #[allow(clippy::result_large_err)]
@@ -296,6 +299,11 @@ impl Snapshot {
             manifest["replay"] = json!(replay.witness());
         }
         manifest["cwd"] = json!(self.cwd.to_string_lossy());
+        manifest["prompt_cache"] = json!({
+            "diagnostics_enabled":self.cache_diagnostics_enabled,
+            "comparison_response_id":self.cache_comparison_response_id.as_deref().filter(|_|self.cache_diagnostics_enabled)
+        });
+        manifest["prompt_cache_diagnostics"] = Value::Null;
         // Only a hash: the contents stay in the user's configuration file.
         if let Some(digest) = extra_digest {
             manifest["extra_digest"] = json!(digest);

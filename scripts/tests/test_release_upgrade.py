@@ -152,12 +152,12 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             checks.check_migration(db, before, 17, 18)
 
-    def test_arguments_default_to_public_v050_schema17_and_target19(self):
+    def test_arguments_default_to_public_v050_schema17_and_target20(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
-        self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema), ('0.5.0', 17, 19))
-        explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
-        self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
+        self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema), ('0.5.0', 17, 20))
+        explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '20'])
+        self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 20))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         staged = checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '16'])
@@ -166,3 +166,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
             checks.parse_args(required + ['--start-schema', '14'])
         with self.assertRaises(SystemExit):
             checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '17', '--expected-new-schema', '15'])
+
+    def test_public_schema17_to20_adds_nullable_adoption_pointer_without_source_changes(self):
+        db = self.fixture(17)
+        before, records = self.upgrade(db, 17, 20)
+        self.assertEqual(checks.ledger(db)[17:], [(n, checks.DERIVED[n].stem) for n in (18, 19, 20)])
+        self.assertEqual(checks.snapshot(db), records)
+        self.assertEqual(db.execute('SELECT last_adopted_attempt_id FROM thread').fetchall(), [(None,), (None,)])
+        self.assertEqual([row[2] for row in db.execute('PRAGMA index_info(thread_last_adopted_attempt)')], ['last_adopted_attempt_id'])

@@ -127,6 +127,9 @@ pub enum UsageCommand {
 }
 #[derive(Debug, Clone, Args)]
 pub struct UsageOptions {
+    /// Inspect one saved attempt's usage and cache diagnostic facts.
+    #[arg(long="attempt", conflicts_with_all=["thread_id","run_id","turn_id","include_children","since","until","group_by","timezone","limit","cursor"])]
+    pub attempt_id: Option<String>,
     /// Return bounded saved-attempt groups instead of ungrouped totals.
     #[arg(long, value_parser = ["hour", "day", "thread"])]
     pub group_by: Option<String>,
@@ -776,6 +779,7 @@ impl Cli {
             CliCommand::Usage {
                 command: UsageCommand::Get(a),
             } => C::UsageGet(wire::UsageGetArgs {
+                attempt_id: a.attempt_id.map(String::into_boxed_str),
                 group_by: a.group_by.map(String::into_boxed_str),
                 timezone: a.timezone.map(String::into_boxed_str),
                 limit: a.limit,

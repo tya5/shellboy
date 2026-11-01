@@ -177,6 +177,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # session_header = true
 # session_header_names = ["X-Shellboy-Session-Id", "x-litellm-session-id"]
 # prompt_cache_key = false
+# prompt_cache_diagnostics = false
 # prompt_caching = true
 # response_header_timeout_ms = 120000
 # stream_idle_timeout_ms = 600000
@@ -700,3 +701,28 @@ characters; saved/replayed model arguments remain verbatim.
 Descriptions are model-authored, not command verification. False
 omits the argument from generation tool definitions and displays commands instead.
 Saved history and command provenance are not deleted by opting out.
+
+### Optional Responses Cache Diagnostics
+
+Set `connections.<name>.prompt_cache_diagnostics = true` only on a Responses
+connection with `prompt_caching = true`. The default is false. When enabled and
+a usable previous adopted response ID exists on the same Thread, Shellboy sends
+it as `prompt_cache_options.comparison_response_id`. The first request or a
+missing ID omits this field. The identity follows accepted responses across
+Turns/restarts; failures and cancelled/stale results do not replace it. A fork
+starts without an adoption of its own. Model/connection changes do not invent a
+replacement ID or a provider-specific comparison rule.
+
+`prompt_cache_options` is now a Shellboy-owned dynamic Responses body field;
+it cannot be set in `extra_body` (including for a static TTL). No sticky headers
+are captured or forwarded. This feature does not guarantee that a provider or
+proxy accepts the options, preserves IDs, or returns diagnostics.
+
+Inspect a saved attempt with `shellboy usage get --attempt ATTEMPT_ID`.
+`prompt_cache_diagnostics` contains only reported `type`, `reason`, and
+`cache_missed_tokens`, or JSON null when unavailable. Strings/numbers are
+whitelisted and bounded; invalid/oversized members are discarded, not guessed
+or truncated into new provider facts. This does not calculate cache misses from
+usage counters. `shellboy thread request --thread THREAD_ID --attempt ATTEMPT_ID`
+also shows the observation under `saved.prompt_cache_diagnostics`, and rebuilds
+the saved comparison ID instead of borrowing the Thread's current last ID.

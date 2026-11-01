@@ -79,6 +79,8 @@ async fn marker_case(rollback: bool) {
             profile_revision: 0,
             profile: "p".into(),
             model: "m".into(),
+            cache_comparison_response_id: None,
+            cache_diagnostics_enabled: false,
             effort: None,
             epoch: 0,
             cwd: root.path().into(),

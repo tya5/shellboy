@@ -1226,3 +1226,36 @@ async fn grouped_usage_cli_preserves_scope_timezone_limit_and_cursor() {
         );
     }
 }
+
+#[tokio::test]
+async fn usage_attempt_selector_is_typed_and_exclusive() {
+    use clap::Parser;
+    let cli = shellboy::cli::Cli::try_parse_from([
+        "shellboy",
+        "usage",
+        "get",
+        "--attempt",
+        "attempt-fixture",
+    ])
+    .unwrap();
+    let Some(shellboy::protocol::Command::UsageGet(args)) = cli
+        .into_command_with_stdin(cwd(), &mut &b""[..])
+        .await
+        .unwrap()
+    else {
+        panic!("usage command")
+    };
+    assert_eq!(args.attempt_id.as_deref(), Some("attempt-fixture"));
+    for extra in [
+        vec!["--thread", "t"],
+        vec!["--run", "r"],
+        vec!["--turn", "u"],
+        vec!["--include-children"],
+        vec!["--since", "2026-11-01T00:00:00Z"],
+        vec!["--group-by", "thread"],
+    ] {
+        let mut args = vec!["shellboy", "usage", "get", "--attempt", "a"];
+        args.extend(extra);
+        assert!(shellboy::cli::Cli::try_parse_from(args).is_err());
+    }
+}

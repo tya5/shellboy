@@ -124,7 +124,13 @@ pub fn inspect(loaded: &LoadedConfig, options: &RequestOptions) -> Result<Value>
 }
 
 /// What saved state says about one request.
+enum CacheInput {
+    Current(Option<String>),
+    Saved { enabled: bool, id: Option<String> },
+    Unknown,
+}
 struct Plan {
+    cache: CacheInput,
     source: &'static str,
     attempt: Option<String>,
     thread: String,
@@ -218,6 +224,7 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
             })
         });
     Ok(Plan {
+        cache: cache_input(&manifest),
         source: "attempt",
         attempt: Some(attempt.to_owned()),
         thread: thread.to_owned(),
@@ -237,6 +244,7 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
         saved: Some(json!({
             "input_characters": manifest["input_characters"],
             "request_body_bytes": manifest["http_observation"]["request_body_bytes"],
+            "prompt_cache_diagnostics": crate::model::cache_diagnostics::bounded(&manifest["prompt_cache_diagnostics"]),
             "usage": usage,
         })),
     })
@@ -275,6 +283,9 @@ fn next_plan(tx: &Connection, thread: &str) -> Result<Plan> {
         |r| r.get(0),
     )?;
     Ok(Plan {
+        cache: CacheInput::Current(crate::model::cache_diagnostics::last_response_id(
+            tx, thread,
+        )?),
         source: "next",
         attempt: None,
         thread: thread.to_owned(),
@@ -380,6 +391,30 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             "context line: this attempt's manifest does not record its cwd".into(),
         ),
     }
+    let configured = config
+        .connections
+        .get(&plan.profile)
+        .is_some_and(|c| c.prompt_cache_diagnostics);
+    let cache = match &plan.cache {
+        CacheInput::Current(id) => Some((configured, id.as_deref())),
+        CacheInput::Saved { enabled, id } if *enabled == configured => {
+            Some((*enabled, id.as_deref()))
+        }
+        CacheInput::Saved { .. } => {
+            note(
+                &mut parts,
+                "cache diagnostics: connection setting changed since this attempt".into(),
+            );
+            None
+        }
+        CacheInput::Unknown => {
+            note(
+                &mut parts,
+                "cache diagnostics: this attempt has no valid saved request witness".into(),
+            );
+            None
+        }
+    };
     let wire = if unknown.is_empty() {
         let input = parts
             .iter()
@@ -390,6 +425,9 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             .collect();
         let mut request =
             crate::model::response_request(&plan.model, input, plan.effort.as_deref(), true);
+        if let Some((enabled, id)) = cache {
+            crate::model::cache_diagnostics::apply_request(&mut request, enabled, id);
+        }
         crate::model::configure_shell_description(&mut request, config.shell.describe_calls);
         match config.connections.get(&plan.profile) {
             Some(connection) => {
@@ -564,4 +602,52 @@ fn compare(primary: &Assembled, other: &Assembled) -> Value {
         }),
         "unknown": other.unknown,
     })
+}
+
+fn cache_input(manifest: &Value) -> CacheInput {
+    let saved = &manifest["prompt_cache"];
+    let Some(enabled) = saved["diagnostics_enabled"].as_bool() else {
+        return CacheInput::Unknown;
+    };
+    let Some(id) = saved.get("comparison_response_id") else {
+        return CacheInput::Unknown;
+    };
+    if id.is_null() {
+        CacheInput::Saved { enabled, id: None }
+    } else if enabled && let Some(id) = crate::model::cache_diagnostics::response_id(id.as_str()) {
+        CacheInput::Saved {
+            enabled,
+            id: Some(id.to_owned()),
+        }
+    } else {
+        CacheInput::Unknown
+    }
+}
+
+#[cfg(test)]
+mod cache_witness_tests {
+    use super::*;
+    #[test]
+    fn missing_malformed_and_changed_witnesses_are_not_inferred_absence() {
+        for manifest in [
+            json!({}),
+            json!({"prompt_cache":{"diagnostics_enabled":true}}),
+            json!({"prompt_cache":{"diagnostics_enabled":false,"comparison_response_id":"opaque"}}),
+            json!({"prompt_cache":{"diagnostics_enabled":true,"comparison_response_id":"x".repeat(1025)}}),
+        ] {
+            assert!(matches!(cache_input(&manifest), CacheInput::Unknown));
+        }
+        assert!(matches!(
+            cache_input(
+                &json!({"prompt_cache":{"diagnostics_enabled":true,"comparison_response_id":null}})
+            ),
+            CacheInput::Saved {
+                enabled: true,
+                id: None
+            }
+        ));
+        assert!(
+            matches!(cache_input(&json!({"prompt_cache":{"diagnostics_enabled":true,"comparison_response_id":"opaque"}})),CacheInput::Saved {enabled:true,id:Some(id)} if id=="opaque")
+        );
+    }
 }

@@ -201,7 +201,7 @@ against independent work. This primitive alone does not expose descendant UI.
 
 ## Last adopted attempt lookup (#142 part 1)
 
-Conversation schema 19 adds the nullable derived Thread pointer described in
+Conversation schema 20 adds the nullable derived Thread pointer described in
 [cache diagnostics](cache-diagnostics.md). Existing attempts own the identities;
 the pointer changes only with guarded response adoption and clears on referenced
 attempt deletion. A startup-only migration backfills completed attempts; runtime

@@ -453,3 +453,12 @@ when identities differ or cannot be enumerated completely. Re-preview and obtain
 new human confirmation; never automatically retry the mutation. See
 [deletion-impact](deletion-impact.md) for canonical hash encoding and bounds.
 The marker is not a permission token, Run-state snapshot or GC byte estimate.
+
+## Single-attempt usage facts (#142 part 1)
+
+Protocol remains v2. `usage.get` adds optional `attempt_id`; this selector is
+exclusive with Thread/Run/Turn, children, time window, grouping, timezone,
+limit and cursor. It returns one attempt's IDs/state, bounded standard `usage`
+scalars and `prompt_cache_diagnostics` (provider object or JSON null). Missing
+attempts return `target_unavailable`; aggregate requests/output stay unchanged.
+See [cache diagnostics](cache-diagnostics.md) for bounds and ownership.

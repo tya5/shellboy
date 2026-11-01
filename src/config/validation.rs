@@ -89,6 +89,12 @@ impl Config {
 impl Connection {
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         nonempty(&format!("connections.{name}"), name)?;
+        if self.prompt_cache_diagnostics && (self.api != Api::Responses || !self.prompt_caching) {
+            return Err(invalid(
+                format!("connections.{name}.prompt_cache_diagnostics"),
+                "requires api = responses and prompt_caching = true",
+            ));
+        }
         if self.api != Api::Responses && self.prompt_cache_key {
             return Err(invalid(
                 format!("connections.{name}.prompt_cache_key"),

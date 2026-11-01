@@ -940,3 +940,44 @@ fn index_status_additive_policy_defaults_do_not_change_config_defaults() {
     missing_pending.as_object_mut().unwrap().remove("pending");
     assert!(serde_json::from_value::<IndexStatus>(missing_pending).is_err());
 }
+
+#[test]
+fn attempt_usage_wire_validation_rejects_aggregate_options_and_blank_ids() {
+    use shellboy::protocol::{Command, UsageGetArgs};
+    assert!(
+        Command::UsageGet(UsageGetArgs {
+            attempt_id: Some("a".into()),
+            ..Default::default()
+        })
+        .validate()
+        .is_ok()
+    );
+    for args in [
+        UsageGetArgs {
+            attempt_id: Some("".into()),
+            ..Default::default()
+        },
+        UsageGetArgs {
+            attempt_id: Some("a".into()),
+            thread_id: Some("t".into()),
+            ..Default::default()
+        },
+        UsageGetArgs {
+            attempt_id: Some("a".into()),
+            group_by: Some("thread".into()),
+            ..Default::default()
+        },
+        UsageGetArgs {
+            attempt_id: Some("a".into()),
+            include_children: true,
+            ..Default::default()
+        },
+        UsageGetArgs {
+            attempt_id: Some("a".into()),
+            since: Some("2026-11-01T00:00:00Z".into()),
+            ..Default::default()
+        },
+    ] {
+        assert!(Command::UsageGet(args).validate().is_err());
+    }
+}

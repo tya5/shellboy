@@ -97,7 +97,7 @@ pub(super) enum Outcome {
     Close,
     Operations,
     Confirm {
-        command: Command,
+        command: Box<Command>,
         detail: String,
         attempt: u64,
     },
@@ -1016,7 +1016,7 @@ impl ManagementPopup {
                 _ => Command::IndexRebuild(args.clone()),
             };
             Outcome::Confirm {
-                command,
+                command: Box::new(command),
                 attempt,
                 detail: format!(
                     "費用対象: {}\n{preview}\n外部embedding APIへ送信し費用が発生します。見積りは取得時点の対象数で、金額未見積です。",

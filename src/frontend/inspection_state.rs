@@ -908,6 +908,16 @@ pub(super) fn read_usage_tx(
 ) -> Result<RawUsage, crate::storage::StorageError> {
     use crate::usage_totals::Scope;
     if let InspectionTarget::Usage(args) = &ticket.identity.target
+        && let Some(attempt) = &args.attempt_id
+    {
+        crate::protocol::Command::UsageGet(args.clone()).validate()?;
+        return Ok(RawUsage {
+            value: crate::usage_totals::read_attempt(db, attempt)?,
+            context_usage: None,
+            observed_at: chrono::Utc::now().to_rfc3339(),
+        });
+    }
+    if let InspectionTarget::Usage(args) = &ticket.identity.target
         && args.group_by.is_some()
     {
         crate::protocol::Command::UsageGet(args.clone()).validate()?;
@@ -2185,5 +2195,66 @@ mod retained_list_fence_tests {
                     .is_none()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod cache_attempt_reader_tests {
+    use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn attempt_usage_uses_read_only_shared_reader_and_source_thread_notifications() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), crate::config::Logging::default());
+        let target = InspectionTarget::Usage(crate::protocol::UsageGetArgs {
+            attempt_id: Some("a".into()),
+            ..Default::default()
+        });
+        let context = ManagementContext {
+            epoch: 1,
+            owner_draft: "draft".into(),
+            owner_thread: Some("viewer".into()),
+        };
+        let mut observation = Observation::default();
+        observation.install(1, context.clone(), target.clone(), None);
+        observation.observe(&context, &target, true);
+        let ticket = observation
+            .take_usage(Instant::now(), diagnostics.clone())
+            .unwrap();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(r#"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('source','/','','p','m','now');
+          INSERT INTO run(id,thread_id,state,created_at)VALUES('r','source','completed','now');
+          INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','source','r','completed','now');
+          INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{"prompt_cache_diagnostics":{"type":"cache_miss","cache_missed_tokens":0}}','now');"#).unwrap();
+        db.pragma_update(None, "query_only", true).unwrap();
+        let before = db.total_changes();
+        let raw = read_usage_tx(&db, &ticket, None).unwrap();
+        assert_eq!(
+            raw.value["prompt_cache_diagnostics"]["cache_missed_tokens"],
+            0
+        );
+        assert_eq!(db.total_changes(), before);
+        assert!(matches!(
+            observation.complete_usage(&ticket, 1, Ok(prepare_usage(raw))),
+            Completion::Updated
+        ));
+        tokio::time::advance(std::time::Duration::from_secs(60)).await;
+        assert!(
+            observation
+                .take_usage(Instant::now(), diagnostics.clone())
+                .is_none()
+        );
+        observation.changed("viewer");
+        assert!(
+            observation
+                .take_usage(Instant::now(), diagnostics.clone())
+                .is_none()
+        );
+        observation.changed("source");
+        assert!(
+            observation
+                .take_usage(Instant::now(), diagnostics)
+                .is_some()
+        );
     }
 }

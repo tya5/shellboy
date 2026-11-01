@@ -69,6 +69,8 @@ async fn performance_ten_shells_ten_lifecycle_waits() {
             profile_revision: 0,
             profile: "fixture".into(),
             model: "synthetic".into(),
+            cache_comparison_response_id: None,
+            cache_diagnostics_enabled: false,
             effort: None,
             epoch: 0,
             cwd: root.path().into(),

@@ -63,6 +63,7 @@ const MEANINGS: &[Meaning] = &[
             ("run_id", FieldId::Run),
             ("turn_id", FieldId::Turn),
             ("include_children", FieldId::IncludeChildren),
+            ("attempt_id", FieldId::Attempt),
         ],
         None,
     ),

@@ -7861,3 +7861,36 @@ context regression:1 passed. The first strict lint run found clone_on_copy in
 the new synthetic fixture; the fixture now assigns Copy usage directly and
 strict lint/fmt are rerun before push. CI receipts and the exact candidate SHA
 are supplied in the handoff rather than changing the validated SHA afterward.
+
+## 2026-11-01 - #142 Part 1: Cache Diagnosis, Not Sticky Routing
+
+Adopted contract: [cache diagnostics](../design/cache-diagnostics.md). Scope is
+fake replies over loopback HTTP only, in disposable temporary data directories.
+No installed binary or user data is changed; no provider/cache-effectiveness,
+LiteLLM or sticky-routing result is claimed.
+
+| Surface | Local evidence | Result / Limit |
+| --- | --- | --- |
+| Default-off / strict config | `config::cache_diagnostics_are_strict_opt_in_responses_only_and_reserve_dynamic_options`; original #137 fixture asserts options absent | false default, typed bool, Responses/master-opt-out and owned-body-field validation pass |
+| Comparison and adoption | `cache_diagnostics::{json,sse}_cache_diagnostics_follow_adoption_and_are_inspectable` | Both JSON/SSE pass first request, tool loop, cross-Turn, missing adopted ID, nonadopted incomplete response, Thread/fork isolation and owner restart |
+| Reported observations | `model::cache_diagnostics::tests` | Unknown bounded type/reason strings preserved, zero distinguished from missing, negative/fractional/oversized values discarded, no inferred cache hit; encoded object <=2048 bytes |
+| Terminal CAS | `control::state::cache_diagnostic_tests` | Completion/failure/incomplete use guarded metadata updates; disabled or stale attempts cannot fill/overwrite the saved observation |
+| Usage inspection | `usage_totals::tests::attempt_diagnostics_read_is_bounded_exact_read_only_and_not_an_aggregate` | PK/scalar reader does not copy unrelated large manifest bodies; unavailable diagnostics are null; read-only and missing-target cases pass |
+| Existing standalone F8 path | `frontend::inspection_state::cache_attempt_reader_tests` | Same query-only reader; source-Thread notifications, not periodic timers or viewer-Thread changes, refresh the result |
+| Request reconstruction | Existing #137 fixture plus JSON/SSE diagnostic fixtures and `request_inspect::cache_witness_tests` | Admitted wire digest preserved even after newer responses; changed/missing/malformed witness is unknown rather than guessed |
+| Public selector | CLI `usage_attempt_selector_is_typed_and_exclusive`; wire `attempt_usage_wire_validation_rejects_aggregate_options_and_blank_ids` | CLI and typed operation/wire metadata reject aggregate-option combinations; current selector remains part of usage.get, not a new operation |
+| Native migration | `storage::schema_twenty_backfills_only_adopted_attempts_and_clears_deleted_identity` plus existing storage suites | Completed-only backfill, missing-ID clearing, FK deletion-index EXPLAIN, reopen without fallback and FK integrity pass; fresh/upgrade equivalence retained |
+| Supporting scripts | `python3 -m unittest discover -s scripts/tests` | 122 pass, including synthetic public schema17-to20 preservation; current-only error catalogue now requires schema20 |
+
+All-target check/Clippy, 40 focused cache-related library cases (one pre-existing
+ignored), 50 operation/form cases, JSON/SSE suites and the named config/wire/#137
+cases pass locally. Prior focused storage (25 integration, 4 library), state
+(11), scalar-reader and CLI cases pass. Test layout and `git diff --check` pass.
+Initial implementation check failures (fixture/CLI compile mismatch, enum size
+lint, schema-pinned Python guard) were corrected; they are not CI or provider
+results. Full standard check is reserved for branch CI after push approval.
+
+Not yet confirmed here: post-rebase rerun, exact-SHA Linux/macOS branch CI,
+independent review, Windows/3-OS integration batch, main inclusion, native public
+binary/PTY schema17-to20 upgrade or any physical terminal/provider behavior.
+Sticky headers are deferred and receive no implementation or verification claim.

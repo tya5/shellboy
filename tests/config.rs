@@ -1050,3 +1050,28 @@ fn environment_credential_headers_cannot_collide_or_bypass_extra_header_checks()
     );
     assert!(connection.credentials(|_| Some(" ".into())).is_err());
 }
+
+#[test]
+fn cache_diagnostics_are_strict_opt_in_responses_only_and_reserve_dynamic_options() {
+    assert!(!Connection::default().prompt_cache_diagnostics);
+    let defaults: Connection = toml::from_str("base_url='http://127.0.0.1:1/v1'").unwrap();
+    assert!(!defaults.prompt_cache_diagnostics);
+    for value in ["false", "true"] {
+        let config=Config::parse(&format!("[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\nprompt_cache_diagnostics={value}\n")).unwrap();
+        assert_eq!(
+            config.connections["fixture"].prompt_cache_diagnostics,
+            value == "true"
+        );
+    }
+    for value in ["1", "'true'", "[]"] {
+        assert!(Config::parse(&format!("[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\nprompt_cache_diagnostics={value}\n")).is_err());
+    }
+    for extra in [
+        "api='chat_completions'",
+        "api='anthropic_messages'",
+        "prompt_caching=false",
+    ] {
+        assert!(Config::parse(&format!("[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\nprompt_cache_diagnostics=true\n{extra}\n")).is_err());
+    }
+    assert!(Config::parse("[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n[connections.fixture.extra_body]\nprompt_cache_options={comparison_response_id='not-adopted'}\n").is_err());
+}

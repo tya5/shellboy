@@ -691,3 +691,34 @@ fn requested_periods_use_saved_start_boundaries_and_keep_whole_lifetimes() {
         assert_eq!(z["model_attempts"], json!({}));
     });
 }
+
+#[test]
+fn attempt_diagnostics_read_is_bounded_exact_read_only_and_not_an_aggregate() {
+    let mut db = db();
+    seed(&mut db, 1, false);
+    let diagnostic = json!({"type":"cache_miss","reason":"fixture","cache_missed_tokens":0});
+    let manifest =
+        json!({"prompt_cache_diagnostics":diagnostic,"unrelated":"x".repeat(100_000)}).to_string();
+    db.execute(
+        "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='a0-0'",
+        [manifest],
+    )
+    .unwrap();
+    let before = db.total_changes();
+    let result = read_attempt(&db, "a0-0").unwrap();
+    assert_eq!(result["prompt_cache_diagnostics"], diagnostic);
+    assert_eq!(result["usage"]["input_tokens"], 100);
+    assert!(result.to_string().len() < 2048);
+    assert_eq!(db.total_changes(), before);
+    assert!(read_attempt(&db, "missing").is_err());
+    assert!(read_attempt(&db, "a0-1").unwrap()["prompt_cache_diagnostics"].is_null());
+    let huge =
+        json!({"prompt_cache_diagnostics":{"type":"cache_miss","reason":"x".repeat(100_000)}})
+            .to_string();
+    db.execute(
+        "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='a0-0'",
+        [huge],
+    )
+    .unwrap();
+    assert!(read_attempt(&db, "a0-0").unwrap()["prompt_cache_diagnostics"].is_null());
+}

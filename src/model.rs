@@ -1,5 +1,6 @@
 //! Bounded Responses SSE parsing and completed-response validation.
 
+pub(crate) mod cache_diagnostics;
 pub mod dialect;
 pub mod http;
 pub mod opaque;
@@ -224,6 +225,7 @@ pub struct StreamObservation {
 impl ModelResponse {
     pub fn completed(mut raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
         crate::usage::normalize_response(&mut raw);
+        cache_diagnostics::normalize_response(&mut raw);
         if raw.get("status").and_then(Value::as_str) != Some("completed") {
             return Err(ModelError::new("incomplete", "Response was not completed"));
         }

@@ -45,6 +45,7 @@ impl Form {
             "thread" => FieldId::Thread,
             "run" => FieldId::Run,
             "turn" => FieldId::Turn,
+            "attempt" => FieldId::Attempt,
             "node" => FieldId::Node,
             "parent" => FieldId::Parent,
             "message" => FieldId::Message,

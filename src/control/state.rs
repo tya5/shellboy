@@ -78,12 +78,13 @@ pub(super) fn fail_attempt(
 ) -> Result<AttemptTransition, StorageError> {
     let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='failed',error_json=?2,ended_at=?3,usage_json=COALESCE(?4,usage_json)
+        "UPDATE model_attempt SET state='failed',error_json=?2,ended_at=?3,usage_json=COALESCE(?4,usage_json),
+         input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?5 ELSE 'null' END))
          WHERE id=?1 AND state IN ('preparing','inflight')
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state IN ('preparing','running','waiting') AND r.state='live')",
-        params![attempt, error.to_string(), at, usage.map(|u| u.to_value().to_string())],
+        params![attempt, error.to_string(), at, usage.map(|u| u.to_value().to_string()), diagnostic_json(&error["raw_response"])],
     )?;
     attempt_outcome(db, attempt, AttemptState::Failed, changed)
 }
@@ -94,7 +95,8 @@ pub(super) fn complete_attempt(
     at: &str,
 ) -> Result<AttemptTransition, StorageError> {
     let changed = db.execute(
-        "UPDATE model_attempt SET state='completed',response_id=?2,usage_json=?3,ended_at=?4
+        "UPDATE model_attempt SET state='completed',response_id=?2,usage_json=?3,ended_at=?4,
+         input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?5 ELSE 'null' END))
          WHERE id=?1 AND state='inflight'
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
@@ -106,10 +108,16 @@ pub(super) fn complete_attempt(
                 .get("usage")
                 .map(crate::usage::StandardUsage::from_value)
                 .map(|u| u.to_value().to_string()),
-            at
+            at,
+            diagnostic_json(response)
         ],
     )?;
     attempt_outcome(db, attempt, AttemptState::Completed, changed)
+}
+fn diagnostic_json(response: &Value) -> String {
+    crate::model::cache_diagnostics::bounded(&response["prompt_cache_diagnostics"])
+        .unwrap_or(Value::Null)
+        .to_string()
 }
 fn normalized_failure(error: &Value) -> (Value, Option<crate::usage::StandardUsage>) {
     let mut error = error.clone();
@@ -118,6 +126,7 @@ fn normalized_failure(error: &Value) -> (Value, Option<crate::usage::StandardUsa
         .map(crate::usage::StandardUsage::from_value);
     if let Some(raw) = error.get_mut("raw_response") {
         crate::usage::normalize_response(raw);
+        crate::model::cache_diagnostics::normalize_response(raw);
     }
     (error, usage)
 }
@@ -151,12 +160,13 @@ pub(super) fn incomplete_attempt(
         .filter(|body| failed_context_limit(Some(body)));
     let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3,usage_json=COALESCE(?5,usage_json)
+        "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3,usage_json=COALESCE(?5,usage_json),
+         input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?6 ELSE 'null' END))
          WHERE id=?1 AND (state IN ('preparing','inflight') OR (state='failed' AND error_json=?4))
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
                     WHERE u.id=model_attempt.turn_id AND u.generation=model_attempt.generation
                     AND u.state IN ('preparing','running','waiting','recovery_wait') AND r.state='live')",
-        params![attempt, error.to_string(), at, permitted_failure, usage.map(|u| u.to_value().to_string())],
+        params![attempt, error.to_string(), at, permitted_failure, usage.map(|u| u.to_value().to_string()), diagnostic_json(&error["raw_response"])],
     )?;
     attempt_outcome(db, attempt, AttemptState::Incomplete, changed)
 }
@@ -572,8 +582,8 @@ mod tests {
 
     fn fixture(state: &str) -> Connection {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE run(id TEXT PRIMARY KEY,state TEXT); CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,state TEXT,generation INTEGER); CREATE TABLE model_attempt(id TEXT PRIMARY KEY,turn_id TEXT,state TEXT,generation INTEGER,error_json TEXT,response_id TEXT,usage_json TEXT,ended_at TEXT); INSERT INTO run VALUES('run','live'); INSERT INTO turn VALUES('turn','run','running',1);").unwrap();
-        db.execute("INSERT INTO model_attempt VALUES('attempt','turn',?1,1,'{\"original\":true}','original','{}','original')", [state]).unwrap();
+        db.execute_batch("CREATE TABLE run(id TEXT PRIMARY KEY,state TEXT); CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,state TEXT,generation INTEGER); CREATE TABLE model_attempt(id TEXT PRIMARY KEY,turn_id TEXT,state TEXT,generation INTEGER,error_json TEXT,response_id TEXT,usage_json TEXT,ended_at TEXT,input_manifest_json TEXT NOT NULL DEFAULT '{}'); INSERT INTO run VALUES('run','live'); INSERT INTO turn VALUES('turn','run','running',1);").unwrap();
+        db.execute("INSERT INTO model_attempt VALUES('attempt','turn',?1,1,'{\"original\":true}','original','{}','original','{}')", [state]).unwrap();
         db
     }
     fn saved(db: &Connection) -> (String, String, String) {
@@ -1003,6 +1013,57 @@ mod exit_reason_tests {
                 "{boundary}"
             );
             tx.commit().unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod cache_diagnostic_tests {
+    use super::*;
+    #[test]
+    fn diagnostics_share_terminal_cas_and_disabled_or_stale_never_overwrites() {
+        for operation in [complete_attempt, fail_attempt, incomplete_attempt] {
+            for enabled in [false, true] {
+                let db = Connection::open_in_memory().unwrap();
+                db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+                db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','now');").unwrap();
+                let manifest=json!({"prompt_cache":{"diagnostics_enabled":enabled,"comparison_response_id":null},"prompt_cache_diagnostics":null}).to_string();
+                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'inflight',?1,'now')",[&manifest]).unwrap();
+                let diagnostic = json!({"type":"cache_miss","reason":"reported","cache_missed_tokens":0,"unknown":"x".repeat(8192)});
+                let raw = json!({"id":"native-id","prompt_cache_diagnostics":diagnostic});
+                let body = json!({"id":"native-id","prompt_cache_diagnostics":diagnostic,"raw_response":raw});
+                db.execute("UPDATE turn SET generation=1", []).unwrap();
+                assert_eq!(
+                    operation(&db, "a", &body, "stale").unwrap(),
+                    AttemptTransition::Obsolete
+                );
+                assert_eq!(
+                    db.query_row("SELECT input_manifest_json FROM model_attempt", [], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .unwrap(),
+                    manifest
+                );
+                db.execute("UPDATE turn SET generation=0", []).unwrap();
+                assert_eq!(
+                    operation(&db, "a", &body, "done").unwrap(),
+                    AttemptTransition::Applied
+                );
+                let saved: String = db
+                    .query_row("SELECT input_manifest_json FROM model_attempt", [], |r| {
+                        r.get(0)
+                    })
+                    .unwrap();
+                let saved: Value = serde_json::from_str(&saved).unwrap();
+                assert_eq!(
+                    saved["prompt_cache_diagnostics"],
+                    if enabled {
+                        json!({"type":"cache_miss","reason":"reported","cache_missed_tokens":0})
+                    } else {
+                        Value::Null
+                    }
+                );
+            }
         }
     }
 }

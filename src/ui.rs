@@ -5258,7 +5258,7 @@ impl UiState {
                 attempt,
             } => {
                 self.set_confirmation(Confirmation::Index {
-                    command,
+                    command: *command,
                     detail,
                     attempt,
                 });
