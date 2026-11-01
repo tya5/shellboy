@@ -1,25 +1,70 @@
 #!/usr/bin/env python3
-"""Synthetic public-0.3.0 -> candidate upgrade on an owned Unix PTY.
+"""Synthetic public-release -> candidate upgrade on an owned Unix PTY.
 
 Only supplied binaries, an empty fixture directory and loopback endpoints are
 used. This never locates or modifies a user's owner/store/installed executable.
 """
 import argparse
-import fcntl
 import hashlib
 import http.server
 import json
 import os
 from pathlib import Path
-import pty
 import shlex
 import signal
 import sqlite3
 import struct
 import subprocess
-import termios
 import threading
 import time
+
+
+MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
+DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
+           for version in (15, 16, 17)}
+
+
+def ledger(db):
+    return db.execute('SELECT version,name FROM schema_migration ORDER BY version').fetchall()
+
+
+def snapshot(db):
+    # Saved originals and relationships must survive; startup may append records.
+    rows = {table: db.execute(f'SELECT * FROM "{table}"').fetchall()
+            for table in ('node', 'edge', 'thread_path', 'output_item', 'tool_call',
+                          'tool_result', 'output_chunk', 'attachment_ref', 'managed_file')}
+    rows['thread_lineage'] = db.execute('SELECT id,parent_thread_id,cwd FROM thread').fetchall()
+    return rows
+
+
+def preserved(db, before):
+    for table, rows in before.items():
+        query = ('SELECT id,parent_thread_id,cwd FROM thread' if table == 'thread_lineage'
+                 else f'SELECT * FROM "{table}"')
+        after = set(db.execute(query).fetchall())
+        assert all(row in after for row in rows), f'saved data changed: {table}'
+
+
+def check_migration(db, before, start, target):
+    assert db.execute('PRAGMA user_version').fetchone() == (target,)
+    expected = before + [(version, DERIVED[version].stem)
+                         for version in range(start + 1, target + 1)]
+    assert ledger(db) == expected, 'migration ledger prefix or suffix changed'
+    assert db.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
+    assert db.execute('PRAGMA foreign_key_check').fetchall() == []
+    if target == 17:
+        assert [row[2] for row in db.execute('PRAGMA index_info(thread_parent)')] == [
+            'parent_thread_id', 'id']
+
+
+def prepare_schema(db, target):
+    start = db.execute('PRAGMA user_version').fetchone()[0]
+    assert start == 14 and target in (14, 16), 'unexpected synthetic fixture schema'
+    before, records = ledger(db), snapshot(db)
+    for version in range(start + 1, target + 1):
+        db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
+    check_migration(db, before, start, target)
+    preserved(db, records)
 
 
 def main():
@@ -27,12 +72,17 @@ def main():
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--expected-version', default='0.4.0')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15), default=15,
-                        help='Use 14 only when rechecking the historical public v0.4.0 source')
+    parser.add_argument('--old-version', choices=('0.3.0', '0.4.0'), default='0.4.0')
+    parser.add_argument('--start-schema', type=int, choices=(14, 16), default=14,
+                        help='16 stages derived indexes on a stopped synthetic copy; public v0.4.0 is 14')
+    parser.add_argument('--expected-version', default='0.5.0')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17), default=17,
+                        help='17 for v0.5.0; 14/15 retain historical release checks')
     args = parser.parse_args()
+    if args.expected_new_schema < args.start_schema:
+        parser.error('target schema must not precede fixture schema')
     old, new = args.old.resolve(), args.new.resolve()
-    assert subprocess.check_output([str(old), '--version'], text=True).strip() == 'shellboy 0.3.0'
+    assert subprocess.check_output([str(old), '--version'], text=True).strip() == 'shellboy ' + args.old_version
     assert subprocess.check_output([str(new), '--version'], text=True).strip() == 'shellboy ' + args.expected_version
     root = args.root.resolve()
     root.mkdir()  # Existing fixture/user paths are never overwritten.
@@ -77,7 +127,7 @@ def main():
             if 'SYNTHETIC_SENDER' in text:
                 if any(item.get('type') == 'function_call_output' for item in body.get('input', [])):
                     return self.send(200, response('synthetic sender completed'))
-                command = ' '.join(shlex.quote(str(item)) for item in [old, '--config', config, '--data-dir', data, 'message', 'send', '--thread', state['recovery_thread'], '--text', 'SYNTHETIC_PENDING_FROM_030'])
+                command = ' '.join(shlex.quote(str(item)) for item in [old, '--config', config, '--data-dir', data, 'message', 'send', '--thread', state['recovery_thread'], '--text', 'SYNTHETIC_PENDING_FROM_OLD'])
                 return self.send(200, {'id': 'synthetic-tool', 'status': 'completed', 'output': [{'type': 'function_call', 'call_id': 'queue-pending', 'name': 'shell', 'arguments': json.dumps({'command': command})}]})
             return self.send(200, response('SYNTHETIC_ANSWER retained conversation text'))
 
@@ -87,6 +137,9 @@ def main():
 
     class Owner:
         def __init__(self, binary, store):
+            import fcntl
+            import pty
+            import termios
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 40, 120, 0, 0))
             def setup():
@@ -179,7 +232,7 @@ def main():
         sender = thread(old, data)
         cli(old, data, 'message', 'send', '--thread', sender, '--text', 'SYNTHETIC_SENDER')
         settled(data, sender, 'completed')
-        pending = sql(data, "SELECT r.message_node_id,r.state FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=? AND n.payload_json LIKE '%SYNTHETIC_PENDING_FROM_030%'", (recovery,))
+        pending = sql(data, "SELECT r.message_node_id,r.state FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=? AND n.payload_json LIKE '%SYNTHETIC_PENDING_FROM_OLD%'", (recovery,))
         assert len(pending) == 1 and pending[0][1] in ('held', 'accepted'), pending
         materials = root / 'materials'
         materials.mkdir()
@@ -187,7 +240,8 @@ def main():
         cli(old, data, 'rag', 'init')
         cli(old, data, 'rag', 'source', 'add', materials, '--name', 'synthetic-documents')
         cli(old, data, 'rag', 'index', '--source', 'synthetic-documents', '--mode', 'keyword')
-        before_ledger = sql(data, 'SELECT * FROM schema_migration ORDER BY version')
+        original_sender = cli(old, data, 'message', 'get', '--message', first)['result']['sender']
+        original_usage = cli(old, data, 'usage', 'get', '--thread', seed)['result']['model_attempts']['completed']
         before_nodes = sql(data, 'SELECT count(*) FROM node')[0][0]
         previous.close(hard=True)
         owners.remove(previous)
@@ -205,23 +259,24 @@ def main():
             finally:
                 destination.close()
                 source.close()
+        with sqlite3.connect(upgraded / 'shellboy.db') as fixture:
+            prepare_schema(fixture, args.start_schema)
+            before_ledger, before_records = ledger(fixture), snapshot(fixture)
         current = Owner(new, upgraded)
         owners.append(current)
         ready(new, upgraded)
-        assert sql(upgraded, 'PRAGMA user_version') == [(args.expected_new_schema,)]
-        after_ledger = sql(upgraded, 'SELECT * FROM schema_migration ORDER BY version')
-        expected_ledger = before_ledger + ([(15, '0015_readback_indexes')]
-                                           if args.expected_new_schema == 15 else [])
-        assert after_ledger == expected_ledger
-        assert sql(upgraded, 'PRAGMA integrity_check') == [('ok',)]
-        assert sql(upgraded, 'PRAGMA foreign_key_check') == []
+        with sqlite3.connect((upgraded / 'shellboy.db').as_uri() + '?mode=ro', uri=True) as fixture:
+            check_migration(fixture, before_ledger, args.start_schema, args.expected_new_schema)
+            preserved(fixture, before_records)
+            after_ledger = ledger(fixture)
         assert 'SYNTHETIC_ANSWER' in json.dumps(cli(new, upgraded, 'history', 'search', '--thread', seed, '--query', 'SYNTHETIC_ANSWER'))
         old_sender = cli(new, upgraded, 'message', 'get', '--message', first)['result']['sender']
-        assert old_sender['kind'] == 'unknown', old_sender
+        assert old_sender == original_sender, (original_sender, old_sender)
         saved_pending = cli(new, upgraded, 'message', 'get', '--message', pending[0][0])['result']
         assert saved_pending['delivery_status'] in ('held', 'accepted')
         assert saved_pending['sender']['kind'] == 'model' and saved_pending['sender']['thread_id'] == sender
         usage = cli(new, upgraded, 'usage', 'get', '--thread', seed)['result']
+        assert usage['model_attempts']['completed'] == original_usage
         assert usage['model_attempts']['completed']['input_tokens']['known_sum'] == 11
         assert 'SYNTHETIC_RAG_CONTENT' in json.dumps(cli(new, upgraded, 'rag', 'search', '--scope', 'source:synthetic-documents', '--query', 'SYNTHETIC_RAG_CONTENT'))
         schema = root / 'result.schema.json'
@@ -243,13 +298,17 @@ def main():
             rag_schema = rag.execute('PRAGMA user_version').fetchone()[0]
         finally:
             rag.close()
-        result = dict(old_public_version='0.3.0', new_version=args.expected_version,
+        assert rag_schema == 3, rag_schema
+        result = dict(old_public_version=args.old_version, new_version=args.expected_version,
                       old_binary_sha256=hashlib.sha256(old.read_bytes()).hexdigest(),
                       new_binary_sha256=hashlib.sha256(new.read_bytes()).hexdigest(),
-                      schema_before=14, schema_after=args.expected_new_schema,
+                      public_schema=14, schema_before=args.start_schema, schema_after=args.expected_new_schema,
+                      synthetic_schema_staging=(args.start_schema != 14),
+                      migration_ledger_before=before_ledger, migration_ledger_after=after_ledger,
+                      preserved_rows={table: len(rows) for table, rows in before_records.items()},
                       migration_ledger_unchanged=(after_ledger == before_ledger),
                       rag_schema=rag_schema, original_nodes_before=before_nodes,
-                      old_external_sender='unknown', old_model_sender='model',
+                      old_external_sender=old_sender, old_model_sender='model',
                       pending_preserved=saved_pending['delivery_status'], new_exec_sender=added,
                       old_and_new_usage='pass', conversation_search='pass', standalone_rag='pass',
                       mock_exec='pass', owner_shutdown_exit=exit_code,

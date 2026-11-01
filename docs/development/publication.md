@@ -370,11 +370,25 @@ execute with command fallback and verbatim replay.
    17 `0017_thread_parent`, and standalone RAG 3. Check integrity/foreign keys,
    saved originals/senders/pending work/usage, search, mock exec and clean stop.
    Use loopback mocks and temporary stores only, never user data or paid APIs.
-   **Tooling gap:** `check-release-upgrade.py` currently fixes the old binary at
-   v0.3.0 and accepts only schema 14/15 with a matching historical ledger check.
-   It cannot qualify this upgrade unchanged; adapting and running it is still
-   required before recording an upgrade pass. No schema-17 result is inferred
-   from earlier release checks or a changed expected-version string.
+   `check-release-upgrade.py` now defaults to public v0.4.0 and schema17. The
+   public v0.4.0 tag (`dae2ba1f`) is schema14, not16. In addition to that actual
+   release path, run `--start-schema 16` to apply only production derived-index
+   migrations15/16 to a stopped synthetic copy before candidate startup. This
+   distinguishes public14 -> 17 from synthetic16 -> 17; never relabel the staged
+   fixture as an unmodified public schema16 store. Both runs must pass:
+
+   ```sh
+   python3 scripts/check-release-upgrade.py --old VERIFIED_PUBLIC_040_BINARY \
+     --new EXACT_CANDIDATE_BINARY --root NEW_EMPTY_PATH_14
+   python3 scripts/check-release-upgrade.py --old VERIFIED_PUBLIC_040_BINARY \
+     --new EXACT_CANDIDATE_BINARY --root NEW_EMPTY_PATH_16 --start-schema 16
+   ```
+
+   The helper checks the exact unchanged ledger prefix plus required suffix,
+   `thread_parent(parent_thread_id,id)`, SQLite integrity/foreign keys, saved
+   original rows/relationships/lineage, sender identity and completed usage.
+   Synthetic recovery/pending sender work, standalone RAG3/search and new mock
+   exec/clean stop remain required. SQL unit tests are not a binary-upgrade pass.
 5. Record exact SHA, CI/candidate run URLs, six hashes, installer and upgrade
    results outside the qualified tree so evidence updates do not recursively
    invalidate it. Retain failed attempts/reruns separately. Publication/tagging,

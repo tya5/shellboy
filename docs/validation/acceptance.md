@@ -18,10 +18,15 @@ synthetic fixtures; they do not establish a real candidate installation pass.
 Exact-source Rust checks and three-OS CI remain pending. No candidate release
 build, extracted-binary smoke, installer, synthetic upgrade, public download,
 provider request or user-data/installed-binary change has been performed.
-`check-release-upgrade.py --help` confirms schema14/15 only; its fixed public0.3.0
-input and ledger assertions cannot qualify the required public0.4.0/schema17
-upgrade. The [candidate plan](../development/publication.md#candidate-validation-plan-not-results)
-records expectations, not successful observations.
+The upgrade helper now accepts public0.4.0, schema17 and `--start-schema 16`.
+The authoritative v0.4.0 tag `dae2ba1f` contains migrations1-14; schema16 is a
+separately labeled synthetic fixture prepared with existing derived SQL15/16,
+not an unmodified published0.4.0 store. Seven Python SQL unit tests pass:
+public14 -> 17, staged16 -> 17, staging preservation, and rejection of rewritten
+originals, changed lineage/ledger prefix and a wrong parent index. These tests
+use production SQL but do not launch the startup migration runner; actual binary
+PTY runs are pending. The [candidate plan](../development/publication.md#candidate-validation-plan-not-results)
+records those remaining gates, not successful observations.
 
 ## G latest-main fixture correction and final gate records
 

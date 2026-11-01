@@ -8,8 +8,10 @@ headless owners, bounded usage and landed fixes. #117 must land before finalizin
 The broader #41 and unmerged followups are not claimed complete. Candidate
 validation is planned in [publication](publication.md#candidate-validation-plan-not-results);
 reviewer dispatch and actual publication are separate. Candidate/build/install/
-upgrade checks have not run. The historical upgrade helper cannot yet validate
-schema17; that gap is explicit, not a passing result.
+upgrade checks have not run. The upgrade helper now supports public14 -> 17 and
+staged synthetic16 -> 17 with row/ledger/index preservation checks. Seven SQL
+unit tests pass; actual candidate-binary PTY qualification is pending. Public
+v0.4.0 is schema14 at its release tag, not schema16.
 
 ## G latest-main admission batch
 
