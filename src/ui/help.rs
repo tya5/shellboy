@@ -2,24 +2,7 @@
 use super::theme;
 use crate::config::{Config, UiLanguage};
 
-// Each pair is one complete UI message, selected without ambient locale.
-struct HelpMessage {
-    ja: &'static str,
-    en: &'static str,
-}
-impl HelpMessage {
-    fn render(self, language: UiLanguage) -> &'static str {
-        match language {
-            UiLanguage::Ja => self.ja,
-            UiLanguage::En => self.en,
-        }
-    }
-}
-macro_rules! local {
-    ($language:expr, $ja:literal, $en:literal) => {
-        HelpMessage { ja: $ja, en: $en }.render($language)
-    };
-}
+use super::i18n::local;
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},

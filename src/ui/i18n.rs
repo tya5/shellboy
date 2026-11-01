@@ -1,6 +1,16 @@
 //! Complete UI messages; dynamic values belong to the message, not fragments.
 use crate::config::UiLanguage;
 
+macro_rules! local {
+    ($language:expr, $ja:literal, $en:literal) => {
+        match $language {
+            $crate::config::UiLanguage::Ja => $ja,
+            $crate::config::UiLanguage::En => $en,
+        }
+    };
+}
+pub(super) use local;
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Message {
     ForceQuitTitle,
@@ -54,6 +64,12 @@ mod tests {
         assert!(crate::ui::text_width::is_emoji_variation_base('\u{231a}'));
         assert!(!crate::ui::text_width::is_emoji_variation_base('1'));
         assert!(!crate::ui::text_width::is_emoji_variation_base('▸'));
+    }
+
+    #[test]
+    fn fixed_messages_select_the_explicit_language() {
+        assert_eq!(local!(UiLanguage::Ja, "日本語", "English"), "日本語");
+        assert_eq!(local!(UiLanguage::En, "日本語", "English"), "English");
     }
 
     #[test]
