@@ -647,4 +647,104 @@ mod tests {
             Arc::new(json!({"items":[{"thread_id":"one","title":"x".repeat(status::TEXT_BYTES)}]}));
         assert!(capture_list_scope(&command, value, &[]).is_err());
     }
+    #[tokio::test(start_paused = true)]
+    async fn all_routes_reject_late_read_and_paint_across_eight_race_conditions() {
+        use super::super::{inspection_read::{Dependencies, PreparedInspection}, inspection_state::{Completion, Observation}};
+        use crate::ui::{InspectionTarget, ManagementContext};
+        use tokio::time::Instant;
+        let context = ManagementContext { epoch:1,owner_draft:"viewer".into(),owner_thread:None };
+        let targets = [
+            (Command::Status(serde_json::from_value(json!({"thread_id":"scope","all":true})).unwrap()),json!({"kind":"run","id":"r","thread_id":"scope"})),
+            (Command::ThreadList(Default::default()),json!({"thread_id":"scope"})),
+            (Command::ShellList(serde_json::from_value(json!({"thread_id":"scope"})).unwrap()),json!({"execution_id":"s","thread_id":"scope"})),
+            (Command::CompactList(serde_json::from_value(json!({"thread_id":"scope"})).unwrap()),json!({"event_id":"operation:op","operation_ids":["op"],"thread_id":"scope"})),
+        ];
+        for (command,row) in targets {
+            let original = Arc::new(json!({"items":[row],"next_cursor":"captured-next"}));
+            let target = capture_target(&command,original.clone()).unwrap();
+            for condition in 0..8 {
+                let mut observation = Observation::default();
+                observation.install(1,context.clone(),target.clone(),None);
+                let now = Instant::now();
+                assert!(observation.take_metadata(now).is_none(),"hidden admission");
+                observation.observe_at(&context,&target,true,10);
+                let first = observation.take_metadata(now).unwrap();
+                assert!(observation.take_metadata(now).is_none(),"one inflight");
+                let prepared = |value| PreparedInspection {
+                    target:target.clone(),dependencies:Dependencies {thread:"scope".into(),parent_thread:None},
+                    value:json!({"current":value}),observed_at:"fixture".into(),limited_fields:vec![],
+                };
+                let later = now+std::time::Duration::from_secs(1);
+                match condition {
+                    0 => {
+                        assert!(matches!(observation.complete_metadata(&first,1,Ok(prepared(1))),Completion::Updated));
+                        let paint = observation.take_presentation().unwrap();
+                        assert!(observation.presentation_finished(&paint));
+                        assert!(observation.take_metadata(later).is_none(),"quiet has zero read admissions");
+                        assert!(observation.take_presentation().is_none(),"quiet has zero paints");
+                    }
+                    1 => {
+                        for _ in 0..32 {observation.changed("scope");}
+                        assert!(observation.take_metadata(later).is_none());
+                        assert!(matches!(observation.complete_metadata(&first,1,Ok(prepared(1))),Completion::Updated));
+                        let one_followup = observation.take_metadata(later).unwrap();
+                        assert!(observation.take_metadata(later).is_none(),"burst coalesces to one followup");
+                        assert!(matches!(observation.complete_metadata(&one_followup,2,Ok(prepared(2))),Completion::Updated));
+                        assert!(observation.take_metadata(later+std::time::Duration::from_secs(1)).is_none());
+                    }
+                    2 => {
+                        observation.hide_at(20);
+                        assert!(first.stop.is_cancelled());
+                        observation.observe_at(&context,&target,true,19);
+                        assert!(observation.take_metadata(later).is_none(),"reordered older show cannot undo hide");
+                        assert!(matches!(observation.complete_metadata(&first,1,Ok(prepared(1))),Completion::Retired));
+                        assert!(observation.take_presentation().is_none(),"hidden completion has no paint");
+                    }
+                    3 => {
+                        observation.install(2,context.clone(),target.clone(),None);
+                        assert!(first.stop.is_cancelled());
+                        assert!(matches!(observation.complete_metadata(&first,1,Ok(prepared(1))),Completion::Retired));
+                        assert!(observation.take_presentation().is_none());
+                    }
+                    4 => {
+                        let mut replacement = context.clone();replacement.epoch+=1;
+                        observation.install(1,replacement,target.clone(),None);
+                        assert!(matches!(observation.complete_metadata(&first,1,Ok(prepared(1))),Completion::Retired));
+                        assert!(observation.take_presentation().is_none());
+                    }
+                    5 => {
+                        let mut replacement = target.clone();
+                        let InspectionTarget::Lists(ref mut list) = replacement else {unreachable!()};
+                        list.original=Arc::new(json!({"items":[],"next_cursor":"different-page"}));
+                        observation.install(1,context.clone(),replacement,None);
+                        assert!(matches!(observation.complete_metadata(&first,1,Ok(prepared(1))),Completion::Retired));
+                        assert!(observation.take_presentation().is_none(),"replaced page rejects old completion");
+                    }
+                    6 => {
+                        assert!(matches!(observation.complete_metadata(&first,1,Ok(prepared(1))),Completion::Updated));
+                        let stale_paint = observation.take_presentation().unwrap();
+                        observation.changed("scope");
+                        let next = observation.take_metadata(later).unwrap();
+                        assert!(matches!(observation.complete_metadata(&next,2,Ok(prepared(2))),Completion::Updated));
+                        assert!(!observation.presentation_finished(&stale_paint),"late prepared paint cannot overwrite new metadata");
+                        let current = observation.take_presentation().unwrap();
+                        assert_eq!(current.metadata.sequence,2);
+                        assert!(observation.presentation_finished(&current));
+                    }
+                    7 => {
+                        first.stop.cancel();
+                        assert!(matches!(observation.complete_metadata(&first,1,Err(ApiError::new(ErrorCode::InvalidState,"cancelled read"))),Completion::Retired));
+                        assert!(observation.take_presentation().is_none(),"cancelled failure has no paint");
+                        observation.close();
+                        assert!(observation.take_metadata(later).is_none());
+                    }
+                    _ => unreachable!(),
+                }
+                let InspectionTarget::Lists(list)=&target else {unreachable!()};
+                assert_eq!(list.command,command);
+                assert!(Arc::ptr_eq(&list.original,&original));
+                assert_eq!(list.original["next_cursor"],"captured-next");
+            }
+        }
+    }
 }

@@ -1,5 +1,6 @@
 //! Registered frontend/real local IPC list observations, synthetic saved facts.
 use serde_json::json;
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use shellboy::{
     app::DataOwner,
     attachments::clipboard::{ClipboardPixels, CopyOutcome},
@@ -33,13 +34,84 @@ impl frontend::ClipboardBackend for NoClipboard {
         Box::pin(async { panic!("list inspection must not copy") })
     }
 }
-fn snapshot(update: UiUpdate) -> Option<InspectionSnapshot> {
-    match update {
-        UiUpdate::ScopedManagement { update, .. } => snapshot(*update),
-        UiUpdate::InspectionSnapshot { snapshot, .. } => Some(snapshot),
+fn draw(ui: &mut shellboy::ui::UiState) -> String {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 40)).unwrap();
+    terminal.draw(|frame| shellboy::ui::draw(frame, ui)).unwrap();
+    let mut text = String::new();
+    for y in 0..40 {
+        let mut x = 0;
+        while x < 140 {
+            let symbol = terminal.backend().buffer()[(x, y)].symbol();
+            text.push_str(symbol);
+            x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+        }
+        text.push('\n');
+    }
+    text
+}
+fn context(action: &UiAction) -> Option<ManagementContext> {
+    match action {
+        UiAction::SubmittedCommand { action, .. } => context(action),
+        UiAction::ManagementIntent { context, .. } => Some(context.clone()),
         _ => None,
     }
 }
+fn gesture(ui: &mut shellboy::ui::UiState, code: KeyCode, modifiers: KeyModifiers) {
+    assert!(ui.event(Event::Key(KeyEvent::new(code, modifiers))).is_empty());
+}
+fn paste(ui: &mut shellboy::ui::UiState, text: &str) {
+    assert!(ui.event(Event::Paste(text.into())).is_empty());
+}
+fn submit_list(ui: &mut shellboy::ui::UiState, route: &str) -> (Vec<UiAction>, ManagementContext) {
+    gesture(ui, KeyCode::F(8), KeyModifiers::NONE);
+    paste(ui, match route {"status"=>"/status","thread"=>"thread list","shell"=>"shell list",_=>"compact list"});
+    gesture(ui, KeyCode::Enter, KeyModifiers::NONE);
+    if route == "thread" {
+        gesture(ui, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        paste(ui, "1");
+    } else if route == "status" {
+        gesture(ui, KeyCode::Tab, KeyModifiers::NONE);
+        paste(ui, "scope");
+        for _ in 0..4 { gesture(ui, KeyCode::Tab, KeyModifiers::NONE); }
+        gesture(ui, KeyCode::Right, KeyModifiers::NONE);
+        gesture(ui, KeyCode::Tab, KeyModifiers::NONE);
+        gesture(ui, KeyCode::Char('u'), KeyModifiers::CONTROL);
+        paste(ui, "20");
+    } else {
+        paste(ui, "scope");
+    }
+    let pending = ui.event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+    let owner = pending.iter().find_map(context).expect("real F8 form must scope the submitted command");
+    (pending, owner)
+}
+async fn dispatch(actions: &mpsc::Sender<UiAction>, pending: Vec<UiAction>) {
+    for action in pending { actions.send(action).await.unwrap(); }
+}
+async fn paint_changed(ui: &mut shellboy::ui::UiState, actions: &mpsc::Sender<UiAction>, expected: &str) {
+    // Current fields follow the retained page; inspect a bounded traversal, not
+    // just the first viewport. No source/detail command is invoked by Down.
+    gesture(ui, KeyCode::Home, KeyModifiers::NONE);
+    for _ in 0..384 {
+        let screen = draw(ui);
+        dispatch(actions, ui.take_deferred_actions()).await;
+        if screen.contains(expected) { return; }
+        gesture(ui, KeyCode::Down, KeyModifiers::NONE);
+    }
+    panic!("changed metadata not painted: {expected}\n{}", draw(ui));
+}
+fn apply(ui: &mut shellboy::ui::UiState, update: UiUpdate) -> Option<InspectionSnapshot> {
+    fn saved(update: &UiUpdate) -> Option<InspectionSnapshot> {
+        match update {
+            UiUpdate::ScopedManagement { update, .. } => saved(update),
+            UiUpdate::InspectionSnapshot { snapshot, .. } => Some(snapshot.clone()),
+            _ => None,
+        }
+    }
+    let proof = saved(&update);
+    ui.apply(update);
+    proof
+}
+
 fn started(update: &UiUpdate) -> Option<InspectionTarget> {
     match update {
         UiUpdate::ScopedManagement { update, .. } => started(update),
@@ -80,23 +152,21 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                     if forward.blocking_send(update).is_err() { break; }
                 }
             });
+            let mut ui = shellboy::ui::UiState::new(&owner.loaded.config,root.path().into());
             let bridge = tokio::spawn(frontend::run_with_clipboard(control.clone(),receive,updates,root.path().into(),owner,server,Arc::new(NoClipboard)));
-            let command = match route {
-                "status" => Command::Status(serde_json::from_value(json!({"thread_id":"scope","all":true,"limit":20})).unwrap()),
-                "thread" => Command::ThreadList(serde_json::from_value(json!({"limit":1})).unwrap()),
-                "shell" => Command::ShellList(serde_json::from_value(json!({"thread_id":"scope","limit":20})).unwrap()),
-                _ => Command::CompactList(serde_json::from_value(json!({"thread_id":"scope","limit":20})).unwrap()),
-            };
-            let context = ManagementContext { epoch:1, owner_draft:"viewer-draft".into(), owner_thread:None };
-            actions.send(UiAction::ManagementIntent { context:context.clone(), action:Box::new(UiAction::Command(command)) }).await.unwrap();
+            let (pending, context) = submit_list(&mut ui,route);
+            dispatch(&actions,pending).await;
             let target = loop {
                 let update = incoming.recv().await.expect("frontend closed before retained target");
-                if let Some(target) = started(&update) { break target; }
+                let target = started(&update);
+                ui.apply(update);
+                if let Some(target) = target { break target; }
             };
             assert!(matches!(target,InspectionTarget::Lists(_)));
-            actions.send(UiAction::ObserveInspection { context:context.clone(),target:target.clone(),visible:true,revision:1 }).await.unwrap();
+            let _ = draw(&mut ui);
+            dispatch(&actions,ui.take_deferred_actions()).await;
             let mut last_sequence = loop {
-                if let Some(s) = snapshot(incoming.recv().await.unwrap()) {
+                if let Some(s) = apply(&mut ui,incoming.recv().await.unwrap()) {
                     assert_eq!(s.target,target); break s.metadata_sequence;
                 }
             };
@@ -117,12 +187,13 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                 assert!(response.ok,"{response:?}");
                 let expected = if route=="thread" {title.as_str()} else {state};
                 let s = loop {
-                    if let Some(s) = snapshot(incoming.recv().await.unwrap()) {
+                    if let Some(s) = apply(&mut ui,incoming.recv().await.unwrap()) {
                         assert_eq!(s.target,target,"retained scope changed");
                         if s.metadata_sequence>last_sequence && s.fields.iter().any(|f|f.value.contains(expected)) { break s; }
                     }
                 };
                 last_sequence=s.metadata_sequence;
+                paint_changed(&mut ui,&actions,expected).await;
                 let before = control.store.database.call(|db| Ok(db.query_row("SELECT revision,title FROM thread WHERE id='scope'",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?)))?)).await.unwrap();
                 let replay = shellboy::ipc::call(&data,mutation,Some(response.operation_id.clone()),None).await.unwrap();
                 assert!(replay.ok);
@@ -145,7 +216,10 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                 writeln!(std::fs::OpenOptions::new().append(true).open(&witness).unwrap(),"{}",json!({"route":route,"round":round,"sequence":last_sequence,"fact":expected})).unwrap();
             }
             assert_eq!(std::fs::read_to_string(&witness).unwrap().lines().count(),2);
-            actions.send(UiAction::HideInspection {revision:2}).await.unwrap();
+            gesture(&mut ui,KeyCode::Esc,KeyModifiers::NONE);
+            let _ = draw(&mut ui);
+            dispatch(&actions,ui.take_deferred_actions()).await;
+            assert!(ui.management.is_none(),"Esc must hide the inspected list");
             actions.send(UiAction::Quit).await.unwrap();
             bridge.await.unwrap().unwrap();
             drop(incoming);
