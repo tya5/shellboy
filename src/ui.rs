@@ -4558,7 +4558,12 @@ impl UiState {
                 };
                 self.invalidate_management();
                 self.management.open_text(ManagementView {
-                    title: "受信記録 | 読込み中".into(),
+                    title: i18n::local!(
+                        self.config.ui.language,
+                        "受信記録 | 読込み中",
+                        "Received records | Loading"
+                    )
+                    .into(),
                     text: String::new(),
                     scroll: 0,
                 });
@@ -4809,30 +4814,40 @@ impl UiState {
                 vec![]
             }
             "/attachments" => {
+                let language = self.config.ui.language;
                 let mut text = self
                     .view()
                     .draft
                     .attachments
                     .iter()
-                    .map(|a| {
-                        format!(
+                    .map(|a| match language {
+                        crate::config::UiLanguage::Ja => format!(
                             "下書き: {} | {} | {}\n{}",
                             a.id,
                             a.kind,
                             a.state,
                             a.path.display()
-                        )
+                        ),
+                        crate::config::UiLanguage::En => format!(
+                            "Draft: {} | {} | {}\n{}",
+                            a.id,
+                            a.kind,
+                            a.state,
+                            a.path.display()
+                        ),
                     })
                     .collect::<Vec<_>>()
                     .join("\n\n");
                 if text.is_empty() {
-                    text = "下書きの添付はありません".into();
+                    text =
+                        i18n::local!(language, "下書きの添付はありません", "No draft attachments")
+                            .into();
                 }
-                text.push_str("\n\n保存済みselectionはselected/managed/unavailable_reasonで表示します。/detach IDは送信選択だけを解除し、外部ファイルを削除しません。");
+                text.push_str(i18n::local!(language, "\n\n保存済みselectionはselected/managed/unavailable_reasonで表示します。/detach IDは送信選択だけを解除し、外部ファイルを削除しません。", "\n\nSaved selections show selected/managed/unavailable_reason. /detach ID only removes the send selection; it does not delete external files."));
                 self.management.mode = management::ManagementMode::Attachments;
                 self.management.scope = None;
                 self.management.open_text(ManagementView {
-                    title: "添付管理".into(),
+                    title: i18n::local!(language, "添付管理", "Attachment management").into(),
                     text,
                     scroll: 0,
                 });
@@ -5138,7 +5153,14 @@ impl UiState {
         self.management.mode = management::ManagementMode::Index;
         self.management.scope = selection.clone();
         self.management.reset_preview();
-        self.management.open_text(ManagementView{title:"Index管理".into(),text:"現在の索引状態を取得中。停止理由は過去の記録で、待機中の要求を示しません。\nTで失敗分を再試行（previewと確認）。B/Rは明示対象が必要です。\n/search QUERYで検索。会話は続けられます。外部APIの利用で費用が発生する場合があります。".into(),scroll:0});
+        self.management.open_text(ManagementView {
+            title: i18n::local!(self.config.ui.language, "Index管理", "Index management").into(),
+            text: i18n::local!(self.config.ui.language,
+                "現在の索引状態を取得中。停止理由は過去の記録で、待機中の要求を示しません。\nTで失敗分を再試行（previewと確認）。B/Rは明示対象が必要です。\n/search QUERYで検索。会話は続けられます。外部APIの利用で費用が発生する場合があります。",
+                "Loading the current index status. A stop reason is a past record, not a waiting request.\nT retries failures after preview and confirmation. B/R require explicit targets.\nUse /search QUERY to search. You can continue the conversation. External API use may incur charges."
+            ).into(),
+            scroll: 0,
+        });
         let args = selection.clone().unwrap_or_default();
         let mut actions = vec![UiAction::Manage(Command::IndexStatus(args))];
         if let Some(selection) = selection.filter(management::explicit_index_targets) {
@@ -5271,15 +5293,21 @@ impl UiState {
         &mut self,
         operation: crate::client_operation::ClientOperation,
     ) -> Vec<UiAction> {
-        let spec = operation.catalogue().spec();
+        let id = operation.catalogue();
+        let language = self.config.ui.language;
+        let meaning = operations::catalogue_meaning(id, language);
         self.details = None;
         self.management.mode = management::ManagementMode::General;
         self.management.open_text(ManagementView {
-            title: spec.label.into(),
-            text: format!(
-                "{}\n処理しています。閉じても受付済みの処理は続行します。",
-                spec.meaning
-            ),
+            title: operations::catalogue_label(id, language),
+            text: match language {
+                crate::config::UiLanguage::Ja => {
+                    format!("{meaning}\n処理しています。閉じても受付済みの処理は続行します。")
+                }
+                crate::config::UiLanguage::En => format!(
+                    "{meaning}\nProcessing. Accepted work continues even if this screen is closed."
+                ),
+            },
             scroll: 0,
         });
         vec![UiAction::ClientOperation(Box::new(operation))]
@@ -5352,8 +5380,18 @@ impl UiState {
             management::ManagementMode::General
         };
         self.management.open_text(ManagementView {
-            title: "操作 | 受付待ち".into(),
-            text: "処理しています。Wは明示waitの観測だけを取消します".into(),
+            title: i18n::local!(
+                self.config.ui.language,
+                "操作 | 受付待ち",
+                "Operation | Awaiting acceptance"
+            )
+            .into(),
+            text: i18n::local!(
+                self.config.ui.language,
+                "処理しています。Wは明示waitの観測だけを取消します",
+                "Processing. W cancels only observation of an explicit wait."
+            )
+            .into(),
             scroll: 0,
         });
         vec![UiAction::Manage(command)]
@@ -8887,6 +8925,93 @@ mod band_extent_tests {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod initial_management_language_tests {
+    use super::*;
+    use crate::config::UiLanguage;
+
+    #[test]
+    fn initial_pages_preserve_raw_attachment_fields_and_localize_copy() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut ui = UiState::new(&config, std::env::temp_dir());
+            ui.active_view_mut().draft.insert_attachment(
+                UiAttachment {
+                    id: "RAW-ID".into(),
+                    path: PathBuf::from("RAW-PATH"),
+                    kind: "RAW-KIND".into(),
+                    state: "RAW-STATE".into(),
+                    position: None,
+                },
+                0,
+            );
+            ui.insert("/attachments", false);
+            ui.submit();
+            let page = ui.management.as_ref().unwrap();
+            for raw in [
+                "RAW-ID",
+                "RAW-PATH",
+                "RAW-KIND",
+                "RAW-STATE",
+                "selected/managed/unavailable_reason",
+                "/detach ID",
+            ] {
+                assert!(page.text.contains(raw), "{raw}: {}", page.text);
+            }
+            assert_eq!(
+                page.title,
+                if language == UiLanguage::En {
+                    "Attachment management"
+                } else {
+                    "添付管理"
+                }
+            );
+            assert!(page.text.contains(if language == UiLanguage::En {
+                "does not delete external files"
+            } else {
+                "外部ファイルを削除しません"
+            }));
+
+            ui.index_command("");
+            let page = ui.management.as_ref().unwrap();
+            assert_eq!(
+                page.title,
+                if language == UiLanguage::En {
+                    "Index management"
+                } else {
+                    "Index管理"
+                }
+            );
+            for raw in ["T", "B/R", "/search QUERY"] {
+                assert!(page.text.contains(raw));
+            }
+            assert!(page.text.contains(if language == UiLanguage::En {
+                "External API use may incur charges"
+            } else {
+                "外部APIの利用で費用"
+            }));
+
+            let operation = crate::client_operation::ClientOperation::Config(
+                crate::config_setup::ConfigCommand::Init,
+            );
+            let id = operation.catalogue();
+            ui.execute_client_operation(operation);
+            let page = ui.management.as_ref().unwrap();
+            assert_eq!(page.title, operations::catalogue_label(id, language));
+            assert!(
+                page.text
+                    .starts_with(operations::catalogue_meaning(id, language))
+            );
+            assert!(page.text.contains(if language == UiLanguage::En {
+                "continues even if this screen is closed"
+            } else {
+                "閉じても受付済みの処理は続行"
+            }));
         }
     }
 }
