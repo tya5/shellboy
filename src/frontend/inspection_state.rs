@@ -1963,14 +1963,21 @@ mod completion_size_tests {
         assert!(std::mem::size_of::<Completion>() <= 2 * std::mem::size_of::<usize>());
         for part in [InspectionPart::Metadata, InspectionPart::Usage] {
             let target = InspectionTarget::Usage(crate::protocol::UsageGetArgs {
-                group_by: Some("thread".into()), timezone: Some("UTC".into()),
-                cursor: Some("original cursor".into()), ..Default::default()
+                group_by: Some("thread".into()),
+                timezone: Some("UTC".into()),
+                cursor: Some("original cursor".into()),
+                ..Default::default()
             });
             let completion = Completion::Failed(Box::new(Failure {
-                target: target.clone(), part, read_sequence: 42,
-                observed_at: "captured failure time".into(), error: "original failure".into(),
+                target: target.clone(),
+                part,
+                read_sequence: 42,
+                observed_at: "captured failure time".into(),
+                error: "original failure".into(),
             }));
-            let Completion::Failed(failure) = completion else { panic!("failure variant"); };
+            let Completion::Failed(failure) = completion else {
+                panic!("failure variant");
+            };
             let failure = *failure;
             assert_eq!(failure.target, target);
             assert_eq!(failure.part, part);
