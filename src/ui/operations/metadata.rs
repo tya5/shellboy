@@ -1718,17 +1718,7 @@ fn global_argument_text(
         _ => None,
     };
     match rendered {
-        Some(message) => {
-            debug_assert!(
-                language != crate::config::UiLanguage::Ja
-                    || message
-                        == format!(
-                            "{} | {}: {}",
-                            argument.spelling, argument.label, argument.meaning
-                        )
-            );
-            message.to_owned()
-        }
+        Some(message) => message.to_owned(),
         None => match language {
             crate::config::UiLanguage::Ja => format!(
                 "{} | {}: {}",

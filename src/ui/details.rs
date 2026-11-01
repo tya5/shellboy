@@ -1698,6 +1698,47 @@ mod tests {
             .join("\n")
     }
     #[test]
+    fn numbered_answer_fields_are_bilingual_and_copy_original_values() {
+        fn configure(ui: &mut UiState) {
+            ui.select_thread("thread-fixture".into());
+            let payload = serde_json::json!({"output":[
+                {"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"RAW-ANSWER-ONE"}]},
+                {"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"RAW-ANSWER-TWO"}]}
+            ]});
+            let raw = crate::history::text_of_payload(&payload);
+            let presentation =
+                crate::presentation::project("assistant_response", &payload, &raw, 0);
+            *ui.view_mut().nodes_mut_for_test() = vec![UiNode {
+                node_id: "node-fixture".into(),
+                role: "assistant".into(),
+                total_chars: raw.chars().count(),
+                text: raw,
+                presentation,
+                ..Default::default()
+            }];
+            let mut details = Details::new(ui.view(), false);
+            details.mode = Mode::Fields;
+            details.selected = details
+                .fields(ui.view())
+                .iter()
+                .position(|field| field.key == "/output/0/content/0/text")
+                .expect("answer field");
+            let mut next = 0;
+            assert!(
+                matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { ref text, .. } if text == "RAW-ANSWER-ONE"))
+            );
+            ui.details = Some(details);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Answer 1 > Text", "RAW-ANSWER-ONE"],
+                UiLanguage::Ja => &["回答 1 › 本文", "RAW-ANSWER-ONE"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn single_detail_count_is_bilingual_at_standard_widths() {
         fn configure(ui: &mut UiState) {
             ui.select_thread("thread-fixture".into());
