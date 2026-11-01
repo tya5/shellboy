@@ -1896,4 +1896,79 @@ mod tests {
         let label = count.label().unwrap();
         assert!(label.contains("稼働>=2") && label.contains("復旧>=1") && label.contains("循環"));
     }
+    #[test]
+    fn generated_cache_relocalizes_without_resanitizing_source_or_releasing_fences() {
+        let mut state = WatchState::default();
+        state.open(7, vec![summary("t", ActivityPhase::Completed)]);
+        let mut raw = detail("t", "r", Some("a"), ActivityPhase::Completed);
+        raw.answer_preview = Some("**原文の回答** / model-code".into());
+        raw.pending_messages = 2;
+        let prepared = raw.prepare_in(UiLanguage::En);
+        let source = prepared.facts().answer_preview.clone();
+        assert!(state.apply_detail(7, 11, prepared));
+        let before = state.action_target("t", WatchActionKind::Output);
+        assert!(
+            state
+                .row("t")
+                .unwrap()
+                .secondary
+                .contains("2 pending messages")
+        );
+        state.set_language(UiLanguage::Ja);
+        assert!(state.row("t").unwrap().secondary.contains("待ち 2"));
+        assert_eq!(
+            state.entries["t"]
+                .detail
+                .as_ref()
+                .unwrap()
+                .facts()
+                .answer_preview,
+            source
+        );
+        assert_eq!(state.action_target("t", WatchActionKind::Output), before);
+        assert!(!state.apply_detail(
+            7,
+            10,
+            detail("t", "stale", None, ActivityPhase::Recovery).prepare()
+        ));
+        state.set_language(UiLanguage::En);
+        let row = state.row("t").unwrap();
+        assert!(
+            row.secondary.contains("原文の回答 / model-code"),
+            "{}",
+            row.secondary
+        );
+        assert!(row.secondary.contains("2 pending messages"));
+    }
+    #[test]
+    fn translated_clocks_preserve_age_origins_and_raw_recovery_reason() {
+        let now = Instant::now();
+        let age = WatchAge {
+            elapsed_base: Duration::from_secs(65),
+            observed_at: now,
+            origin: WatchAgeOrigin::Observed,
+            saved_at: None,
+        };
+        assert_eq!(
+            state_label_in(ActivityPhase::Running, Some(&age), now, UiLanguage::En),
+            "Observed 65s"
+        );
+        assert!(
+            state_label_in(ActivityPhase::Running, Some(&age), now, UiLanguage::Ja)
+                .starts_with("観測 ")
+        );
+        assert_eq!(
+            state_label_in(ActivityPhase::Stopped, None, now, UiLanguage::En),
+            "Time unknown"
+        );
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let mut raw = detail("t", "r", None, ActivityPhase::Recovery);
+            raw.recovery_reason = Some("raw provider 日本語 / restart_required".into());
+            assert!(
+                raw.prepare_in(language)
+                    .secondary
+                    .contains("raw provider 日本語 / restart_required")
+            );
+        }
+    }
 }

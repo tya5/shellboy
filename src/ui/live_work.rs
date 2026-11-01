@@ -1265,7 +1265,7 @@ mod tests {
             for x in 0..80 {
                 assert_eq!(bright[(x, y)].symbol(), dim[(x, y)].symbol());
                 if bright[(x, y)] != dim[(x, y)] {
-                    assert_eq!((x, y, bright[(x, y)].symbol()), (0, 1, "◉"));
+                    assert_eq!((x, y, bright[(x, y)].symbol()), (0, 1, "*"));
                 }
             }
         }
@@ -1835,8 +1835,8 @@ mod tests {
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[0].starts_with("+-[1]") && lines[0].contains("$ "));
-        assert!(lines[1].starts_with("+-[2]") && lines[1].contains("↳ child task"));
-        assert!(lines[2].starts_with("\\-[3]") && lines[2].contains("⋯ saved wait"));
+        assert!(lines[1].starts_with("+-[2]") && lines[1].contains("> child task"));
+        assert!(lines[2].starts_with("\\-[3]") && lines[2].contains(": saved wait"));
         // Padding rows carry no connector: same count with fewer items.
         let mut two = snapshot(at);
         two.rows.truncate(2);
@@ -1853,5 +1853,115 @@ mod tests {
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[0].starts_with("+-[1]") && lines[1].starts_with("+-[2]"));
         assert!(lines[2].starts_with("\\- 他5件"), "{lines:?}");
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::*;
+    fn populate(ui: &mut UiState) {
+        let view = &mut ui.active_view_mut().live_work;
+        let targets = [
+            LiveWorkTarget::Shell {
+                execution_id: "shell-id".into(),
+                turn_id: None,
+            },
+            LiveWorkTarget::ChildRun {
+                run_id: "child-run".into(),
+                thread_id: "child-thread".into(),
+            },
+            LiveWorkTarget::Wait {
+                operation_id: "wait-id".into(),
+                execution_id: "shell-id".into(),
+            },
+        ];
+        let rows = targets
+            .into_iter()
+            .enumerate()
+            .map(|(index, target)| LiveWorkRow {
+                target,
+                label: format!("Synthetic work {index}"),
+                description: None,
+                state: if index == 2 { "waiting" } else { "running" }.into(),
+                started_at: None,
+                elapsed_base: None,
+                last_output_at: None,
+                wait_info: None,
+                output_age_base: None,
+            })
+            .collect();
+        assert!(view.accept(
+            Some(LiveWorkSnapshot {
+                run_id: "owner".into(),
+                observed_at: Instant::now(),
+                shells: 1,
+                children: 1,
+                waits: Some(1),
+                overflow: 0,
+                rows
+            }),
+            Instant::now()
+        ));
+    }
+    #[test]
+    fn owned_work_is_registered_in_both_languages_and_widths() {
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Owned work",
+                    "Shells: 1",
+                    "Child runs: 1",
+                    "Running",
+                    "Waiting",
+                ],
+                UiLanguage::Ja => &["抱えている作業", "shell 1", "子 1", "実行中", "待機中"],
+            }
+        }
+        super::super::i18n::verify_screen(populate, expected);
+    }
+    #[test]
+    fn folded_and_empty_work_are_registered() {
+        fn folded(ui: &mut UiState) {
+            populate(ui);
+            ui.toggle_live_work_section();
+        }
+        fn folded_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Owned work | Folded", "Shells: 1"],
+                UiLanguage::Ja => &["抱えている作業 | 折りたたみ", "shell 1"],
+            }
+        }
+        fn empty(_: &mut UiState) {}
+        fn empty_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Owned work | None"],
+                UiLanguage::Ja => &["抱えている作業 | なし"],
+            }
+        }
+        super::super::i18n::verify_screen(folded, folded_expected);
+        super::super::i18n::verify_screen(empty, empty_expected);
+    }
+    #[test]
+    fn count_grammar_and_unknown_values_are_explicit() {
+        for (count, english) in [(0, "0 more items"), (1, "1 more item"), (2, "2 more items")] {
+            assert_eq!(WorkMessage::More(count).render(UiLanguage::En), english);
+            assert_eq!(
+                WorkMessage::More(count).render(UiLanguage::Ja),
+                format!("他{count}件")
+            );
+        }
+        assert_eq!(
+            WorkMessage::Deadline(None).render(UiLanguage::En),
+            "Deadline unknown"
+        );
+        assert!(
+            WorkMessage::Counts {
+                shells: 0,
+                children: 0,
+                waits: None
+            }
+            .render(UiLanguage::En)
+            .ends_with("Waits: unknown")
+        );
     }
 }

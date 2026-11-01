@@ -2760,6 +2760,13 @@ fn japanese_browser() -> ThreadBrowser {
 }
 
 #[cfg(test)]
+fn japanese_config() -> crate::config::Config {
+    let mut config = crate::config::Config::default();
+    config.ui.language = UiLanguage::Ja;
+    config
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2771,7 +2778,7 @@ mod tests {
                 thread("first", Some("parent")),
                 thread("last", Some("parent")),
             ],
-            ..Default::default()
+            ..japanese_browser()
         };
         let rows = browser.rows();
         let first = rows
@@ -2840,7 +2847,7 @@ mod tests {
             items: vec![thread("first", None), thread("chosen", None)],
             selected: 1,
             filter: "query".into(),
-            ..Default::default()
+            ..japanese_browser()
         };
         let generation = browser.generation();
         for key in [
@@ -2891,7 +2898,7 @@ mod tests {
             selected: 2,
             filter: "fixture".into(),
             next_cursor: Some("page-two".into()),
-            ..Default::default()
+            ..japanese_browser()
         };
         browser.collapsed.insert("parent".into());
         let old_generation = browser.generation();
@@ -2929,7 +2936,7 @@ mod tests {
             items: vec![thread("first", None), thread("chosen", None)],
             selected: 1,
             filter: "latest".into(),
-            ..Default::default()
+            ..japanese_browser()
         };
         browser.remove_deleted(&["first".into()]);
         assert_eq!(browser.items[browser.selected].thread_id, "chosen");
@@ -2968,7 +2975,7 @@ mod tests {
         let mut browser = ThreadBrowser {
             visible: true,
             items: vec![thread("chosen", None)],
-            ..Default::default()
+            ..japanese_browser()
         };
         browser.notice("削除できません: 作業開始後に状態が変わりました".into());
         let mut terminal =
@@ -3001,7 +3008,7 @@ mod tests {
         let mut row = thread("t", None);
         let mut tree = ThreadBrowser {
             items: vec![row.clone()],
-            ..Default::default()
+            ..japanese_browser()
         };
         tree.update_times(vec![ThreadDisplayTime {
             thread_id: row.thread_id.clone(),
@@ -3092,11 +3099,11 @@ mod tests {
                                 text(&buffer)
                             )
                         });
-                    // Read only eight cells in the first data row below the
-                    // header, never the selected detail/footer text.
+                    // Measure the localized label in the actual first data row,
+                    // never selected details or a historical fixed column width.
                     let mut shown = String::new();
                     let mut col = x;
-                    while col < x + 8 {
+                    while col < x + phase.column_label().width() as u16 {
                         let symbol = buffer[(col, y + 1)].symbol();
                         shown.push_str(symbol);
                         col += symbol.width().max(1) as u16;
@@ -3173,7 +3180,7 @@ mod tests {
                     "{reason:?}, width={width}"
                 );
                 if width == 120 {
-                    assert_eq!(shown.contains("Interrupted by app exit"), marked);
+                    assert_eq!(shown.contains("アプリ終了による中断"), marked);
                     assert!(
                         shown.contains(activity_label(&item, UiLanguage::Ja)),
                         "ordinary state must remain visible: {shown}"
@@ -3212,7 +3219,7 @@ mod tests {
         });
         let browser = ThreadBrowser {
             items: vec![item.clone()],
-            ..Default::default()
+            ..japanese_browser()
         };
         let row = &browser.rows()[0];
         assert!(
@@ -3354,7 +3361,7 @@ mod tests {
         ];
         let mut tree = ThreadBrowser {
             items: threads.clone(),
-            ..Default::default()
+            ..japanese_browser()
         };
         assert_eq!(tree.visible_indices(), [1, 2, 0, 4, 3]);
         assert_eq!(tree.parent_index(4), Some(0));
@@ -3377,7 +3384,7 @@ mod tests {
                 thread("child", Some("parent")),
                 thread("other", None),
             ],
-            ..Default::default()
+            ..japanese_browser()
         };
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20)).unwrap();
@@ -3443,7 +3450,7 @@ mod tests {
             .collect::<Vec<_>>();
         let mut tree = ThreadBrowser {
             items: items.clone(),
-            ..Default::default()
+            ..japanese_browser()
         };
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20)).unwrap();
@@ -3501,7 +3508,7 @@ mod tests {
             items: (0..12)
                 .map(|index| thread(&format!("t{index:02}"), None))
                 .collect(),
-            ..Default::default()
+            ..japanese_browser()
         };
         tree.key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
         let mut small =
@@ -3538,7 +3545,7 @@ mod tests {
             items: (0..40)
                 .map(|index| thread(&format!("t{index:02}"), None))
                 .collect(),
-            ..Default::default()
+            ..japanese_browser()
         };
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20)).unwrap();
@@ -3575,7 +3582,7 @@ mod tests {
         ];
         let mut tree = ThreadBrowser {
             items: threads.clone(),
-            ..Default::default()
+            ..japanese_browser()
         };
         let rows = tree.rows();
         assert_eq!(rows.len(), 4);
@@ -3624,7 +3631,7 @@ mod tests {
                     selected,
                     filter: "検索語".into(),
                     error: error.map(str::to_owned),
-                    ..Default::default()
+                    ..japanese_browser()
                 }
                 .draw(frame, frame.area(), Some("t03"), true);
             })
@@ -3678,7 +3685,7 @@ mod tests {
         assert_eq!(rendered.matches("ID t03").count(), 1);
         let selected = rendered
             .lines()
-            .position(|line| line.contains("›*"))
+            .position(|line| line.contains(">*"))
             .unwrap() as u16;
         assert_eq!(
             buffer[(60, selected)].bg,
@@ -3701,7 +3708,7 @@ mod tests {
             );
             assert!(!rendered.contains('\u{1b}'));
             if width >= 24 {
-                assert!(rendered.contains('›'));
+                assert!(rendered.contains('>'));
                 assert!(rendered.contains("Ctrl+R"));
             }
         }
@@ -3877,7 +3884,7 @@ mod filter_tests {
     fn full_action_queue_retries_one_latest_filter_and_discards_superseded_requests() {
         use super::super::{UiState, actions};
         let now = Instant::now();
-        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        let mut ui = UiState::new(&japanese_config(), std::path::PathBuf::new());
         let initial = ui.thread_browser.open(String::new(), vec![], None);
         let (sender, _receiver) = actions::channel(1);
         sender.try_send(initial).unwrap();
@@ -4418,7 +4425,7 @@ mod patch_tests {
     fn actual_ui_filter_covered_before_deadline_resumes_one_latest_page_request() {
         use super::super::UiState;
         use crossterm::event::Event;
-        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        let mut ui = UiState::new(&japanese_config(), std::path::PathBuf::new());
         ui.thread_browser = initial(vec![row("chosen", "answer", "now")]);
         ui.take_deferred_actions();
         ui.event(Event::Key(KeyEvent::new(
@@ -4856,7 +4863,7 @@ mod watch_integration_tests {
     #[test]
     fn stop_and_retry_confirmations_capture_run_and_recovery_generation_without_late_retarget() {
         use crate::activity::ActivityPhase::Recovery;
-        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        let mut ui = UiState::new(&japanese_config(), std::path::PathBuf::new());
         ui.thread_browser = browser();
         ui.thread_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
         assert!(
@@ -4894,7 +4901,7 @@ mod watch_integration_tests {
     }
     #[test]
     fn descendant_hotkey_respects_custom_send_binding_and_scope_clears_for_f2() {
-        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        let mut ui = UiState::new(&japanese_config(), std::path::PathBuf::new());
         ui.select_thread("root".into());
         ui.viewport = Rect::new(0, 0, 100, 30);
         let actions = ui.event(Event::Key(KeyEvent::new(
@@ -4915,7 +4922,7 @@ mod watch_integration_tests {
             .unwrap();
         ui.event(Event::Key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
         assert!(ui.take_deferred_actions().iter().any(|action|matches!(action,UiAction::ObserveDescendants {generation:g,roots} if *g>generation && roots.is_empty())));
-        let mut config = crate::config::Config::default();
+        let mut config = japanese_config();
         config.ui.send_key = "Alt+D".into();
         let mut configured = UiState::new(&config, std::path::PathBuf::new());
         configured.select_thread("root".into());
@@ -4975,7 +4982,7 @@ mod watch_integration_tests {
     #[test]
     fn queued_watch_details_are_rejected_after_cover_resize_and_scope_change() {
         use crate::activity::ActivityPhase::Tools;
-        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        let mut ui = UiState::new(&japanese_config(), std::path::PathBuf::new());
         ui.thread_browser = browser();
         paint(&ui.thread_browser, 120, 28);
         let generation = ui.thread_browser.generation;
@@ -5111,7 +5118,7 @@ mod watch_integration_tests {
     #[test]
     fn coherent_metadata_then_detail_reply_preserves_actual_painted_scope_until_next_frame() {
         use crate::activity::ActivityPhase::Recovery;
-        let mut ui = UiState::new(&crate::config::Config::default(), std::path::PathBuf::new());
+        let mut ui = UiState::new(&japanese_config(), std::path::PathBuf::new());
         ui.thread_browser = browser();
         paint(&ui.thread_browser, 120, 28);
         let generation = ui.thread_browser.generation;
@@ -5369,5 +5376,285 @@ mod watch_integration_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod language_tests {
+    use super::super::watch::WatchDetail;
+    use super::*;
+    use crate::activity::ActivityPhase;
+    use crate::ui::UiState;
+
+    fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
+        ThreadSummary {
+            last_answer: None,
+            last_input: None,
+            revisit: None,
+            thread_id: id.into(),
+            title: format!("Task {id}"),
+            cwd: "/synthetic".into(),
+            parent_id: None,
+            state: "saved_native_state".into(),
+            activity: phase,
+            latest_run_stop_reason: None,
+            updated_at: "saved".into(),
+            excerpt: String::new(),
+        }
+    }
+    fn populate(ui: &mut UiState, watch: bool) {
+        use ActivityPhase::*;
+        // All content is synthetic ASCII so the common checker can examine every cell.
+        let browser = &mut ui.thread_browser;
+        if watch {
+            browser.open_watch(String::new(), None, None);
+        } else {
+            browser.open(String::new(), vec![], None);
+        }
+        let rows = [
+            Recovery,
+            Preparing,
+            AwaitingModel,
+            Background,
+            Completed,
+            Stopped,
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, phase)| record(&index.to_string(), phase))
+        .collect::<Vec<_>>();
+        let summaries = rows.iter().map(WatchSummary::prepare).collect();
+        let generation = browser.generation;
+        assert!(browser.apply(
+            generation,
+            1,
+            None,
+            rows.clone(),
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        if watch {
+            browser.apply_watch_summaries(generation, 1, summaries);
+            let details = rows
+                .iter()
+                .map(|row| {
+                    WatchDetail {
+                        thread_id: row.thread_id.clone(),
+                        latest_run_id: Some(format!("run-{}", row.thread_id)),
+                        answer_id: (row.activity == Completed)
+                            .then(|| format!("answer-{}", row.thread_id)),
+                        turn_id: None,
+                        turn_generation: None,
+                        phase: row.activity,
+                        parent_title: None,
+                        state_age: None,
+                        model_request_age: None,
+                        work: None,
+                        recovery_reason: None,
+                        answer_preview: None,
+                        pending_messages: 0,
+                        revisit: None,
+                    }
+                    .prepare()
+                })
+                .collect();
+            assert!(
+                browser
+                    .watch
+                    .get_mut()
+                    .apply_details(generation, 1, details)
+            );
+        }
+    }
+    #[test]
+    fn list_is_registered_with_both_languages_and_terminal_width_policies() {
+        fn configure(ui: &mut UiState) {
+            populate(ui, false);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Conversations",
+                    "Recovery needed",
+                    "Awaiting model",
+                    "Esc Back",
+                    "Enter Open",
+                    "Ctrl+D Delete",
+                ],
+                UiLanguage::Ja => &[
+                    "会話一覧",
+                    "復旧待ち",
+                    "応答待ち",
+                    "Esc戻る",
+                    "Enter切替",
+                    "Ctrl+D削除",
+                ],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+    #[test]
+    fn watch_is_registered_with_both_languages_and_terminal_width_policies() {
+        fn configure(ui: &mut UiState) {
+            populate(ui, true);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Work Watch",
+                    "Recovery needed",
+                    "Awaiting model",
+                    "Owned-work details unavailable",
+                    "Confirm stop",
+                    "Confirm retry",
+                    "Alt+O Output",
+                ],
+                UiLanguage::Ja => &[
+                    "作業の監視",
+                    "復旧待ち",
+                    "応答待ち",
+                    "所有する作業の詳細は未取得",
+                    "停止確認",
+                    "再試行確認",
+                    "Alt+O 出力詳細",
+                ],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+    #[test]
+    fn descendant_watch_and_empty_states_are_registered() {
+        fn descendant_count(ui: &mut UiState) -> u64 {
+            populate(ui, true);
+            ui.thread_browser.descendant_root = Some("root".into());
+            let Some(UiAction::ObserveDescendants { generation, .. }) = ui.descendants.observe(vec!["root".into()]) else { panic!("new root must be observed"); };
+            ui.apply(crate::ui::UiUpdate::Descendants { generation, read_sequence: 1, counts: vec![super::super::watch::DescendantCount { root: "root".into(), available: true, active: 2, recovery: 1, truncated: false, cycle: false }], error: None });
+            generation
+        }
+        fn descendant(ui: &mut UiState) { descendant_count(ui); }
+        fn stale(ui: &mut UiState) {
+            let generation = descendant_count(ui);
+            ui.apply(crate::ui::UiUpdate::Descendants { generation, read_sequence: 2, counts: vec![], error: Some("fixture refresh failure".into()) });
+        }
+        fn stale_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Refresh failed", "Active 2"],
+                UiLanguage::Ja => &["稼働2", "前回の値", "更新失敗"],
+            }
+        }
+        fn descendant_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Descendant Watch", "Confirm stop", "Active 2", "Recovery 1"],
+                UiLanguage::Ja => &["子孫の監視", "停止確認", "稼働2", "復旧1"],
+            }
+        }
+        fn empty(ui: &mut UiState) {
+            let browser = &mut ui.thread_browser;
+            browser.open(String::new(), vec![], None);
+            assert!(browser.apply(
+                browser.generation,
+                1,
+                None,
+                vec![],
+                vec![],
+                None,
+                vec![],
+                None
+            ));
+        }
+        fn empty_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["No conversations", "Filter >"],
+                UiLanguage::Ja => &["会話がありません", "検索 >"],
+            }
+        }
+        super::super::i18n::verify_screen(descendant, descendant_expected);
+        super::super::i18n::verify_screen(stale, stale_expected);
+        super::super::i18n::verify_screen(empty, empty_expected);
+    }
+    #[test]
+    fn localized_details_preserve_native_values_and_source_text() {
+        let mut row = record("日本語-ID", ActivityPhase::Stopped);
+        row.title = "利用者の題名 ◉".into();
+        row.state = "raw_native_日本語".into();
+        row.cwd = "/原文/workspace".into();
+        row.latest_run_stop_reason = Some("app_exit".into());
+        let before = format!("{row:?}");
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let info = BrowserMessage::Info {
+                thread: &row,
+                title: &row.title,
+                phase: activity_label(&row, language),
+                excerpt: "raw excerpt 日本語",
+                page: "",
+                controls: "",
+            }
+            .render(language);
+            for raw in [&row.thread_id, &row.title, &row.cwd, &row.state] {
+                assert!(info.contains(raw), "{info}");
+            }
+            assert!(info.contains("Native state: raw_native_日本語"));
+            assert!(info.contains("Latest Run stop reason: app_exit"));
+            assert!(info.contains("raw excerpt 日本語"));
+        }
+        assert_eq!(before, format!("{row:?}"));
+    }
+    #[test]
+    fn failed_and_empty_watch_screens_preserve_recovery_controls() {
+        fn failed(ui: &mut UiState) {
+            let browser = &mut ui.thread_browser;
+            browser.open(String::new(), vec![], None);
+            browser.failed(browser.generation, "provider_unavailable".into());
+        }
+        fn failed_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Fetch failed",
+                    "Esc Back",
+                    "Ctrl+R Refresh",
+                    "provider_unavailable",
+                ],
+                UiLanguage::Ja => &[
+                    "取得失敗",
+                    "Esc戻る",
+                    "Ctrl+R再取得",
+                    "provider_unavailable",
+                ],
+            }
+        }
+        fn empty_watch(ui: &mut UiState) {
+            let browser = &mut ui.thread_browser;
+            browser.open_watch(String::new(), None, None);
+            assert!(browser.apply(
+                browser.generation,
+                1,
+                None,
+                vec![],
+                vec![],
+                None,
+                vec![],
+                None
+            ));
+        }
+        fn empty_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Work Watch",
+                    "No work to display",
+                    "Confirm stop",
+                    "Confirm retry",
+                ],
+                UiLanguage::Ja => &[
+                    "作業の監視",
+                    "現在表示する作業はありません",
+                    "停止確認",
+                    "再試行確認",
+                ],
+            }
+        }
+        super::super::i18n::verify_screen(failed, failed_expected);
+        super::super::i18n::verify_screen(empty_watch, empty_expected);
     }
 }
