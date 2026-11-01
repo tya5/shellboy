@@ -382,7 +382,9 @@ async fn wall_clock_changes_do_not_change_ui_observation_time_or_saved_shell_mea
         db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES('saved-tool','tool_result','now',?1)",[payload.to_string()])?;
         Ok(())
     }).await.unwrap();
-    let mut state = UiState::new(&Config::default(), root.path().into());
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut state = UiState::new(&config, root.path().into());
     state.select_thread("t".into());
     let generation = state.view().generation;
     let at = Instant::now();
@@ -601,8 +603,9 @@ async fn human_model_failure_message_keeps_saved_error_and_does_not_guess_prefix
     let recovery = projection(&db).await.snapshot.recovery.unwrap();
     assert_eq!(recovery.stage, "モデル要求");
     assert_eq!(recovery.message, model.message);
-    let mut ui =
-        shellboy::ui::UiState::new(&shellboy::config::Config::default(), root.path().into());
+    let mut config = shellboy::config::Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = shellboy::ui::UiState::new(&config, root.path().into());
     ui.select_thread("t".into());
     let snapshot = projection(&db).await.snapshot;
     ui.apply(shellboy::ui::UiUpdate::Activity {

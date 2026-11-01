@@ -329,7 +329,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     let data = root.path().join("data");
     let (embedding_url, embedding_proxy) = embedding_fixture().await;
     let config_source = format!(
-        "default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://{}/v1'\n[connections.embedding]\nbase_url='{embedding_url}'\n[embedding]\nconnection='embedding'\nmodel='embedding-fixture'\n",
+        "default_connection='fixture'\ndefault_model='fixture-model'\n[ui]\nlanguage='ja'\n[connections.fixture]\nbase_url='http://{}/v1'\n[connections.embedding]\nbase_url='{embedding_url}'\n[embedding]\nconnection='embedding'\nmodel='embedding-fixture'\n",
         listener.local_addr().unwrap()
     );
     std::fs::write(&config, &config_source).unwrap();

@@ -2,7 +2,12 @@ use super::*;
 use ratatui::{Terminal, backend::TestBackend};
 
 fn ui() -> UiState {
-    let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+    ui_in(crate::config::UiLanguage::En)
+}
+fn ui_in(language: crate::config::UiLanguage) -> UiState {
+    let mut config = Config::default();
+    config.ui.language = language;
+    let mut ui = UiState::new(&config, std::env::temp_dir());
     ui.apply(UiUpdate::Initialize {
         cwd: std::env::temp_dir(),
     });
@@ -154,7 +159,7 @@ fn preparing(ui: &mut UiState) {
 
 #[test]
 fn enter_draws_and_animates_before_frontend_then_hands_off_only_after_matching_history() {
-    let mut ui = ui();
+    let mut ui = ui_in(crate::config::UiLanguage::Ja);
     let (id, rev, _) = send(&mut ui, "first request");
     assert!(ui.dirty);
     assert!(footer(&ui).contains("送信受付中"));
@@ -290,7 +295,7 @@ fn completed_send_with_a_bound_source_outside_the_history_window_is_no_longer_bu
 
 #[test]
 fn recovery_stays_static_when_a_new_send_is_pending() {
-    let mut ui = ui();
+    let mut ui = ui_in(crate::config::UiLanguage::Ja);
     let _ = send(&mut ui, "resume request");
     ui.active_view_mut().activity.snapshot = Some(activity::ActivitySnapshot {
         phase: activity::ActivityPhase::Recovery,
@@ -327,7 +332,7 @@ fn terminal_admission_is_not_answered_or_cancelled_and_keeps_late_source_binding
 
 #[test]
 fn send_progress_does_not_become_a_stale_operation_notice() {
-    let mut ui = ui();
+    let mut ui = ui_in(crate::config::UiLanguage::Ja);
     ui.insert("synthetic request", false);
     let id = ui.view().draft.draft_id.clone();
     let revision = ui.view().draft.revision;
@@ -388,7 +393,7 @@ fn history_failure_remains_visible_in_quiet_footer() {
 }
 #[test]
 fn unknown_activity_is_not_displayed_as_known_idle() {
-    let mut ui = ui();
+    let mut ui = ui_in(crate::config::UiLanguage::Ja);
     ui.select_thread("t".into());
     assert!(footer(&ui).contains("状態を確認中"));
     assert!(!footer(&ui).contains("入力できます"));

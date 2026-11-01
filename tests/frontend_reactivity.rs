@@ -54,6 +54,14 @@ impl Fixture {
         Self::build(url, hold, false).await
     }
     async fn build(url: &str, hold: bool, long_usage: bool) -> Self {
+        Self::build_in(url, hold, long_usage, shellboy::config::UiLanguage::En).await
+    }
+    async fn build_in(
+        url: &str,
+        hold: bool,
+        long_usage: bool,
+        language: shellboy::config::UiLanguage,
+    ) -> Self {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
         let data = root.path().join("data");
@@ -103,7 +111,9 @@ impl Fixture {
             owner,
             server,
         ));
-        let mut ui = UiState::new(&Config::default(), root.path().into());
+        let mut config_ui = Config::default();
+        config_ui.ui.language = language;
+        let mut ui = UiState::new(&config_ui, root.path().into());
         for action in ui.select_thread("reactive".into()) {
             actions.send(action).await.unwrap();
         }
@@ -560,7 +570,7 @@ async fn failing_proxy() -> (
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() {
     let (url, mut requests, proxy) = failing_proxy().await;
-    let mut fixture = Fixture::new(&url).await;
+    let mut fixture = Fixture::build_in(&url, false, false, shellboy::config::UiLanguage::Ja).await;
     let (_, started) = fixture
         .cli(&[
             "message",

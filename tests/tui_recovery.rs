@@ -187,7 +187,9 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
         .await
         .unwrap();
         let control = Control::new(&owner, root.path().into());
-        let mut ui = UiState::new(&control.store.config, root.path().into());
+        let mut ui_config = control.store.config.as_ref().clone();
+        ui_config.ui.language = shellboy::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&ui_config, root.path().into());
         let (rpc, receive) = mpsc::channel(16);
         let server = LocalServer::bind(&owner, rpc).await.unwrap();
         tokio::spawn(control.clone().serve(receive));
@@ -378,7 +380,9 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     .await
     .unwrap();
     let control = Control::new(&owner, root.path().into());
-    let mut ui = UiState::new(&control.store.config, root.path().into());
+    let mut ui_config = control.store.config.as_ref().clone();
+    ui_config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&ui_config, root.path().into());
     let (rpc, receive) = mpsc::channel(16);
     let server = LocalServer::bind(&owner, rpc).await.unwrap();
     tokio::spawn(control.clone().serve(receive));
