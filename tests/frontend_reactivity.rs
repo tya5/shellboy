@@ -31,6 +31,8 @@ struct Fixture {
     terminal: Terminal<TestBackend>,
     source_snapshots: Vec<shellboy::ui::DetailSourceSnapshot>,
     view_sequences: Vec<u64>,
+    current_view_trace: std::collections::VecDeque<Value>,
+    last_screen: String,
     held_initial_views: Option<Vec<UiUpdate>>,
     browser_sequences: Vec<u64>,
     browser_pages: usize,
@@ -118,6 +120,8 @@ impl Fixture {
             terminal: Terminal::new(TestBackend::new(180, 40)).unwrap(),
             source_snapshots: Vec::new(),
             view_sequences: Vec::new(),
+            current_view_trace: std::collections::VecDeque::new(),
+            last_screen: String::new(),
             held_initial_views: hold.then(Vec::new),
             browser_sequences: Vec::new(),
             browser_pages: 0,
@@ -161,9 +165,13 @@ impl Fixture {
             _ => {}
         }
         match &update {
-            UiUpdate::CurrentView { history, .. } => {
-                if let UiUpdate::History { read_revision, .. } = history.as_ref() {
+            UiUpdate::CurrentView { generation, details, context_usage, history, .. } => {
+                if let UiUpdate::History { read_revision, selection_revision, .. } = history.as_ref() {
                     self.view_sequences.push(*read_revision);
+                    self.current_view_trace.push_back(json!({"thread":details.thread_id,"generation":generation,"read_revision":read_revision,"selection_revision":selection_revision,"input_tokens":context_usage.input_tokens,"cached_tokens":context_usage.cached_tokens,"output_tokens":context_usage.output_tokens}));
+                    while self.current_view_trace.len() > 8 {
+                        self.current_view_trace.pop_front();
+                    }
                 }
             }
             UiUpdate::BrowserPatch { patch } => {
@@ -248,6 +256,7 @@ impl Fixture {
             }
             screen.push('\n');
         }
+        self.last_screen = screen.clone();
         screen
     }
     async fn wait_update_or_action(&mut self) {
@@ -292,11 +301,13 @@ impl Fixture {
                     .map(|row| (&row.thread_id, &row.state))
                     .collect::<Vec<_>>();
                 panic!(
-                    "{label}: frontend watchdog; bridge_finished={}; ui_rows={rows:?}; saved={saved:?}; browser_generation={}; pages={}; browser_trace={:?}",
+                    "{label}: frontend watchdog; bridge_finished={}; ui_rows={rows:?}; saved={saved:?}; browser_generation={}; pages={}; browser_trace={:?}; current_view_snapshots={:?}\nLAST DRAWN SCREEN:\n{}",
                     self.bridge.is_finished(),
                     self.ui.list_generation(),
                     self.browser_pages,
-                    self.browser_trace
+                    self.browser_trace,
+                    self.current_view_trace,
+                    self.last_screen
                 )
             }
         }

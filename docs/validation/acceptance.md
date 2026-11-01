@@ -7804,3 +7804,13 @@ LoadHistoryWindow(ordinal7, from_end=false) in deferred reply actions, without a
 second key. Focused macOS execution of that exact integration test passes. This is
 a test-contract correction for the reverse-input fix, not a production/budget or
 guard change. Combined91 / scroll237 / fields15 stay unchanged; new-SHA CI follows.
+
+## #138 saved-context status diagnostic boundary
+
+Ubuntu run41316050841 attempt1 timed out in the #141 long-thread status test.
+Its previous failure showed a completed saved attempt but neither the terminal
+frame nor CurrentView context-usage snapshot. Before changing readiness, the
+fixture now retains the last drawn synthetic frame and the last eight paired
+snapshot identities/usage scalars and includes both in its watchdog failure.
+No user data, raw conversation logs, provider request or watchdog budget change.
+Root cause and state-driven correction are investigated next; no pass claimed.
