@@ -353,7 +353,7 @@ priority view: recovery, failed, unread completion, active work and background
 work first, then stopped conversations, read completions and idle ones, with
 saved details below each title. A stopped row reads `13:42 停止` (the saved
 stop time; `時刻不明` when none was saved). When the saved stop reason records
-an app exit or an owner restart, the row says `停止 · 終了で中断`; a stop with
+an app exit or an owner restart, the row says `停止（終了で中断）`; a stop with
 any other or no saved reason is never labelled that way. After an owner restart
 the interrupted conversations therefore stay visible and can be reopened. Enter opens a
 conversation. Ctrl+S confirms a full Run stop; Alt+R confirms retry of a recovery

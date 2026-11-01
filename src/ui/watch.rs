@@ -674,7 +674,7 @@ impl WatchState {
                 "確認履歴の保持範囲外"
             }
             WatchCategory::Confirming => "確認中",
-            WatchCategory::Stopped if entry.summary.interrupted => "停止 · 終了で中断",
+            WatchCategory::Stopped if entry.summary.interrupted => "停止（終了で中断）",
             WatchCategory::Stopped => "停止",
             _ => entry.summary.phase.column_label(),
         };
@@ -1150,7 +1150,7 @@ mod tests {
                 "no-answer"
             ]
         );
-        assert_eq!(state.row("restarted").unwrap().status, "停止 · 終了で中断");
+        assert_eq!(state.row("restarted").unwrap().status, "停止（終了で中断）");
         assert_eq!(state.row("stopped").unwrap().status, "停止");
         let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T13:42:00Z")
             .unwrap()
