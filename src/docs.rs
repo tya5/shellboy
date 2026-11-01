@@ -156,6 +156,29 @@ pub fn documents() -> Vec<Document> {
         ),
     ]
 }
+/// The bundled catalogue is immutable: build it, its version and the per-guide
+/// parse results once per process instead of once per page request.
+struct Bundled {
+    docs: Vec<Document>,
+    version: String,
+    sections: Vec<std::sync::OnceLock<Vec<Section>>>,
+    links: Vec<std::sync::OnceLock<Vec<Value>>>,
+    hashes: Vec<std::sync::OnceLock<String>>,
+}
+static BUNDLED: std::sync::LazyLock<Bundled> = std::sync::LazyLock::new(|| {
+    let docs = catalogue();
+    let version = version(&docs);
+    let sections = docs.iter().map(|_| Default::default()).collect();
+    let links = docs.iter().map(|_| Default::default()).collect();
+    let hashes = docs.iter().map(|_| Default::default()).collect();
+    Bundled {
+        docs,
+        version,
+        sections,
+        links,
+        hashes,
+    }
+});
 fn catalogue() -> Vec<Document> {
     let mut docs = documents();
     for (id, title, summary) in [
@@ -398,8 +421,10 @@ fn paginated(mut page: Value, cursor: Option<String>) -> Value {
 
 /// Execute locally. Errors have a stable code prefix for the standalone envelope.
 pub fn execute(command: DocsCommand) -> Result<Value, String> {
-    let docs = catalogue();
-    let version = version(&docs);
+    // The bundled catalogue is immutable; build and hash it once per process.
+    let bundled = &*BUNDLED;
+    let docs: &[Document] = &bundled.docs;
+    let version = bundled.version.as_str();
     match command {
         DocsCommand::List {
             parent,
@@ -437,7 +462,12 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
         } => {
             limit(limit_bytes, 65536)?;
             let d = find(&docs, &id)?;
-            let sections = sections(&d.text);
+            let index = docs
+                .iter()
+                .position(|candidate| candidate.id == d.id)
+                .expect("found document is in the catalogue");
+            let content_hash = bundled.hashes[index].get_or_init(|| hash(&d.text));
+            let sections = bundled.sections[index].get_or_init(|| sections(&d.text));
             let (start, end) = if let Some(s) = &section {
                 let sec = sections
                     .iter()
@@ -448,7 +478,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
                 (0, d.text.len())
             };
             let scope =
-                serde_json::to_string(&json!(["get", id, section, hash(&d.text)])).expect("scope");
+                serde_json::to_string(&json!(["get", id, section, content_hash])).expect("scope");
             let offset = if cursor.is_some() {
                 read_cursor(cursor.as_deref(), &version, &scope)?
             } else {
@@ -466,7 +496,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
                 );
             }
             Ok(paginated(
-                json!({"id":d.id,"title":d.title,"version":version,"content_hash":hash(&d.text),"text":&d.text[offset..page_end],"start":offset,"end":page_end,"total_bytes":d.text.len(),"section":section,"sections":sections,"links":links(d,&docs)}),
+                json!({"id":d.id,"title":d.title,"version":version,"content_hash":content_hash,"text":&d.text[offset..page_end],"start":offset,"end":page_end,"total_bytes":d.text.len(),"section":section,"sections":sections,"links":bundled.links[index].get_or_init(|| links(d, docs))}),
                 (page_end < end).then(|| next_cursor(&version, &scope, page_end)),
             ))
         }
@@ -487,7 +517,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
             let offset = read_cursor(cursor.as_deref(), &version, &scope)?;
             let needle = query.to_lowercase();
             let mut hits = Vec::new();
-            for d in &docs {
+            for d in docs {
                 if category(&d.id)
                     || parent
                         .as_ref()
