@@ -49,7 +49,11 @@ pub(crate) trait UnicodeWidthStr {
 }
 impl UnicodeWidthStr for str {
     fn width(&self) -> usize {
-        let wide = policy() >= 2;
+        let policy = policy();
+        if policy == 0 {
+            return UpstreamWidth::width(self);
+        }
+        let wide = policy >= 2;
         let ordinary = if wide {
             UpstreamWidth::width_cjk(self)
         } else {
