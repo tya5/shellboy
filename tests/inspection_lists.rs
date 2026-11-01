@@ -62,6 +62,7 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
             let cwd = root.path().to_string_lossy().into_owned();
             control.store.database.call(move |db| {
                 db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('scope','initial',?1,'','fixture','fixture','2026-11-01T00:00:00Z')",[&cwd])?;
+                db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('other','older',?1,'','fixture','fixture','2026-10-31T00:00:00Z')",[&cwd])?;
                 db.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','scope','completed','2026-11-01T00:00:00Z','2026-11-01T00:00:01Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('t','scope','r','completed','2026-11-01T00:00:00Z','2026-11-01T00:00:01Z');")?;
                 db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('s','r','t','shell-op','exited',?1,'{\"command\":\"printf synthetic\"}','utf-8','utf-8','closed','2026-11-01T00:00:00Z')",[cwd])?;
                 db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('compact-op','fixture','{}','hash','completed',?1,'2026-11-01T00:00:00Z')",[json!({"result":{"thread_id":"scope","status":"queued","context_edit":{"action":"restore"}}}).to_string()])?;
@@ -82,7 +83,7 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
             let bridge = tokio::spawn(frontend::run_with_clipboard(control.clone(),receive,updates,root.path().into(),owner,server,Arc::new(NoClipboard)));
             let command = match route {
                 "status" => Command::Status(serde_json::from_value(json!({"thread_id":"scope","all":true,"limit":20})).unwrap()),
-                "thread" => Command::ThreadList(serde_json::from_value(json!({"limit":20})).unwrap()),
+                "thread" => Command::ThreadList(serde_json::from_value(json!({"limit":1})).unwrap()),
                 "shell" => Command::ShellList(serde_json::from_value(json!({"thread_id":"scope","limit":20})).unwrap()),
                 _ => Command::CompactList(serde_json::from_value(json!({"thread_id":"scope","limit":20})).unwrap()),
             };
@@ -111,7 +112,8 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                     Ok(())
                 }).await.unwrap();
                 let title = format!("round-{round}");
-                let response = shellboy::ipc::call(&data,Command::ThreadSet(serde_json::from_value(json!({"thread_id":"scope","title":title})).unwrap()),None,None).await.unwrap();
+                let mutation = Command::ThreadSet(serde_json::from_value(json!({"thread_id":"scope","title":title})).unwrap());
+                let response = shellboy::ipc::call(&data,mutation.clone(),None,None).await.unwrap();
                 assert!(response.ok,"{response:?}");
                 let expected = if route=="thread" {title.as_str()} else {state};
                 let s = loop {
@@ -121,6 +123,24 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                     }
                 };
                 last_sequence=s.metadata_sequence;
+                let before = control.store.database.call(|db| Ok(db.query_row("SELECT revision,title FROM thread WHERE id='scope'",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?)))?)).await.unwrap();
+                let replay = shellboy::ipc::call(&data,mutation,Some(response.operation_id.clone()),None).await.unwrap();
+                assert!(replay.ok);
+                assert_eq!(replay.result,response.result,"saved same-ID result must replay");
+                let read = shellboy::ipc::call(&data,Command::ThreadGet(serde_json::from_value(json!({"thread_id":"scope"})).unwrap()),None,None).await.unwrap();
+                assert!(read.ok);
+                let rollback = shellboy::ipc::call(&data,Command::ThreadSet(serde_json::from_value(json!({"thread_id":"scope","title":"SHOULD_NOT_COMMIT","connection":"missing-profile"})).unwrap()),None,None).await.unwrap();
+                assert!(!rollback.ok);
+                let after = control.store.database.call(|db| Ok(db.query_row("SELECT revision,title FROM thread WHERE id='scope'",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?)))?)).await.unwrap();
+                assert_eq!(before,after,"replay/read/rejected mutation changed saved row");
+                if route == "thread" {
+                    let reordered = shellboy::ipc::call(&data,Command::ThreadSet(serde_json::from_value(json!({"thread_id":"other","title":format!("newer-{round}")})).unwrap()),None,None).await.unwrap();
+                    assert!(reordered.ok);
+                    let current_page = shellboy::ipc::call(&data,Command::ThreadList(serde_json::from_value(json!({"limit":1})).unwrap()),None,None).await.unwrap();
+                    assert_eq!(current_page.result.unwrap()["items"][0]["thread_id"],"other");
+                    // The open target/page must remain the original identity/cursor.
+                    actions.send(UiAction::ObserveInspection {context:context.clone(),target:target.clone(),visible:true,revision:1}).await.unwrap();
+                }
                 use std::io::Write;
                 writeln!(std::fs::OpenOptions::new().append(true).open(&witness).unwrap(),"{}",json!({"route":route,"round":round,"sequence":last_sequence,"fact":expected})).unwrap();
             }
