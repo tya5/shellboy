@@ -1380,15 +1380,21 @@ pub(super) fn confirmation_title(
     confirmation: &Confirmation,
     language: crate::config::UiLanguage,
 ) -> Option<&'static str> {
-    (!matches!(confirmation, Confirmation::ForceQuit))
-        .then_some(local!(language, "実行の確認", "Confirm action"))
+    (!matches!(confirmation, Confirmation::ForceQuit)).then_some(local!(
+        language,
+        "実行の確認",
+        "Confirm action"
+    ))
 }
 pub(super) fn confirmation_context(
     confirmation: &Confirmation,
     language: crate::config::UiLanguage,
 ) -> Option<&'static str> {
-    (!matches!(confirmation, Confirmation::ForceQuit))
-        .then_some(local!(language, "内容を確認してください", "Review the details"))
+    (!matches!(confirmation, Confirmation::ForceQuit)).then_some(local!(
+        language,
+        "内容を確認してください",
+        "Review the details"
+    ))
 }
 pub(super) fn confirmation_footer(
     confirmation: &Confirmation,
