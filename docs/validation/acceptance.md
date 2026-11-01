@@ -7691,6 +7691,10 @@ Native macOS qualification: `cargo check --locked --all-targets` passed;
 integration docs_cli::` passed 7/7 including the new page regression.
 `docs_proxy::` was intentionally ignored (0 passed, 1 ignored): that opt-in test
 would call an actual model API and is not evidence here. Python script tests
-passed 94/94; `scripts/check-test-layout.py` passed 100 suites and watchdog
+passed 118/118; `scripts/check-test-layout.py` passed 100 suites and watchdog
 policy. Formatting and final post-fetch focused verification are repeated
 before push. No new test suite or target is introduced.
+
+Downloaded `result.json` byte digests (SHA-256, not archive hashes):
+- Comparison: `4e9a9aab8460c834e10ad2a0a48819ec7bcb3f891c02c76f101c01a984fd99e7`.
+- Footprint: `f537b7963ac3a686c1ee126de5e077f20ed0f8aa5c2d0a886e11591147f44f05`.
