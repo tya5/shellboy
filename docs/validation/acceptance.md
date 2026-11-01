@@ -7737,3 +7737,10 @@ Read failure and admission rejection now discard their deferred displacement;
 the explicit retry assertion requires exactly the original single-input delta,
 not twice that amount. Reducer test expectation changes to zero. Same helper:
 combined91 / scroll237 / fields15. Focused Rust validation pending shared slot.
+
+### #118 Tab review: retain intentional pause
+
+Doubtful marker removed: focus is explicit history navigation, unlike a no-op
+wheel. Regression now checks selected-item identity, source anchor and rows stay
+fixed across streamed growth, with unseen set. No production code added.
+Same helper: combined91 / scroll237 / fields15. Rust validation pending slot.

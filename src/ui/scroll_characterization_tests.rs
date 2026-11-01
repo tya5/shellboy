@@ -603,10 +603,8 @@ fn tab_into_history_focus_pauses_on_the_visible_top_row_without_a_read() {
     assert!(ui.view().navigation.follow());
     let actions = key(&mut ui, KeyCode::Tab);
     assert!(actions.is_empty(), "{actions:?}");
-    // characterization: current behaviour, see #118
-    // Entering item focus leaves following and pins the screen: `select_history_item`
-    // writes follow/anchor/within/row/revision/origin/initialized directly,
-    // bypassing `scroll()`, and rebases (not cancels) navigation.
+    // Item focus intentionally pauses: growth must not displace the selected item.
+    assert!(ui.view().items.active && ui.view().items.focus.is_some());
     assert!(!ui.view().navigation.follow(), "{}", snap(&ui));
     assert_eq!(rows(&mut ui, &mut t), screen, "same rows, now paused");
     let v = ui.view();
@@ -616,6 +614,25 @@ fn tab_into_history_focus_pauses_on_the_visible_top_row_without_a_read() {
             && v.navigation.pending() == 0
     );
     assert!(v.navigation.scroll.initialized() && !v.navigation.unseen());
+    let focus = v.items.focus.clone();
+    let anchor = v.navigation.anchor.clone();
+    let grown = numbered("N9-", 130);
+    ui.apply(UiUpdate::Stream {
+        thread_id: THREAD.into(),
+        generation: ui.view().generation,
+        node_id: "n-9".into(),
+        role: "assistant".into(),
+        total_chars: grown.chars().count(),
+        text: grown,
+        base_char_offset: 0,
+        reasoning_ranges: vec![],
+        presentation: Default::default(),
+        ack: None,
+    });
+    assert_eq!(rows(&mut ui, &mut t), screen);
+    assert_eq!(ui.view().items.focus, focus);
+    assert_eq!(ui.view().navigation.anchor, anchor);
+    assert!(!ui.view().navigation.follow() && ui.view().navigation.unseen());
 }
 
 // ---- resize ----
