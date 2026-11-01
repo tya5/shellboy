@@ -1584,7 +1584,7 @@ mod tests {
     }
     #[tokio::test]
     async fn explicit_middle_summary_retains_prefix_suffix_and_exact_provenance() {
-        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"middle summary"}]}]});
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"## Goal\nTask\n## Constraints\nNone\n## Current state\nActive\n## Open issues and next steps\nContinue\n## Key references\nSource"}]}]});
         let (url, server) = summary_proxy(vec![raw]).await;
         let (_root, db) = database().await;
         db.call(|db| {
@@ -1616,6 +1616,12 @@ mod tests {
         let selected=db.call(move|db| {
             let path=db.prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?.query_map([],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
             assert_eq!(path,vec!["before".to_owned(),summary.clone(),"after".to_owned()]);
+            let body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&summary], |row| row.get(0))?;
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            let text = history::text_of_payload(&payload);
+            for heading in ["Goal", "Constraints", "Current state", "Open issues and next steps", "Key references"] {
+                assert!(text.contains(&format!("## {heading}\n")));
+            }
             let sources=db.prepare("SELECT s.source_node_id FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id WHERE r.output_node_id=?1 ORDER BY s.ordinal")?.query_map([summary],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
             Ok(sources)
         }).await.unwrap();
@@ -2101,7 +2107,7 @@ mod tests {
     async fn successful_summary_cached_and_adopted_atomically_without_losing_originals() {
         let(url,server)=summary_proxy(vec![json!({"id":"summary","status":"completed","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"extra":"x".repeat(128*1024)},"output_tokens":10,"attribution":"x".repeat(128*1024)},"output":[
             {"type":"reasoning","summary":[{"type":"summary_text","text":"PRIVATE-REASONING"},{"type":"reasoning_text","text":"PRIVATE-DETAIL"}],"encrypted_content":"OPAQUE-AUDIT"},
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"## Goal\n"},{"type":"output_text","text":"Remember the task"}]}
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"## 目的\n"},{"type":"output_text","text":"Remember the task"}]}
         ]})]).await;
         let (_root, db) = database().await;
         db.call(|db| {
@@ -2171,7 +2177,7 @@ mod tests {
             )?;
             let payload: Value = serde_json::from_str(&body).unwrap();
             let text = history::text_of_payload(&payload);
-            assert!(text.contains("## Goal\nRemember the task"));
+            assert!(text.contains("## 目的\nRemember the task"));
             assert!(
                 !text.contains("REASONING")
                     && !text.contains("PRIVATE-DETAIL")
@@ -2183,7 +2189,7 @@ mod tests {
                     r.get(0)
                 })?;
             let part: Value = serde_json::from_str(&part).unwrap();
-            assert_eq!(part["text"], "## Goal\nRemember the task");
+            assert_eq!(part["text"], "## 目的\nRemember the task");
             assert_eq!(part["raw_response"]["usage"],json!({"input_tokens":100,"input_tokens_details":{"cached_tokens":80},"output_tokens":10}));
             assert!(part["raw_response"]["usage"].to_string().len()<256);
             assert_eq!(part["sources"], json!(["one", "two"]));

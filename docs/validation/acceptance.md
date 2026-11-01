@@ -8031,18 +8031,19 @@ Scope: Core title fallbacks, startup data-directory/IPC errors and hints, and
 model-facing summary headings; no UI source changes or data migration.
 `create_thread` omits the title column (empty schema default). The Core callers
 of `thread_display_title` derive read-time details/list values; the frontend
-program-status caller also only reads the value. `set_thread`
-writes only explicit title input. A nonblank stored title returns unchanged,
+program-status caller also only reads the value. `set_thread` writes only
+explicit title input. A nonblank stored title returns unchanged,
 including the old Japanese fallback text if explicitly persisted elsewhere.
 
 Source inspection with recursive grep found no summary-heading parser. The
 remaining Japanese summary headings in runtime/attachment fixtures are model
 output data, intentionally retained. New summary instructions request Goal,
 Constraints, Current state, Open issues and next steps, and Key references.
-The loopback summary proxy checks the outgoing prompt; the successful-summary
-fixture checks English-heading adoption and caching. Separate regressions cover
-saved Japanese summary replay without a payload rewrite and Japanese stored
-titles. Unicode stress fixtures (including `"あ".repeat(...)`) are unchanged.
+The loopback summary proxy checks the outgoing prompt; an English-heading
+fixture checks summary adoption, and the existing fixture checks caching.
+Separate regressions cover saved Japanese summary replay without a payload
+rewrite and Japanese stored titles. Unicode stress fixtures (including
+`"あ".repeat(...)`) are unchanged.
 
 Local native macOS focused checks and branch Linux/macOS CI are pending at this
 entry's creation; the task handoff records exact commands, results and run ID.
