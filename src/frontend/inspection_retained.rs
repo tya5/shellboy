@@ -415,7 +415,7 @@ pub(super) fn capture_response(command:&crate::protocol::Command,value:&serde_js
         Command::HistoryRelations(a)=>{
             targets.push(CaptureTarget{kind:TargetKind::Node,id:&a.node_id,selecting_thread:None,source_revision:None,source_hash:None,raw:None});
             for row in value.get("items")?.as_array()?.iter().take(201) {
-                if let Some(id)=row["node_id"].as_str(){targets.push(CaptureTarget{kind:TargetKind::Node,id,selecting_thread:None,source_revision:row["source_revision"].as_u64(),source_hash:row["source_hash"].as_str(),raw:None});}
+                if let Some(id)=row["node_id"].as_str(){targets.push(CaptureTarget{kind:TargetKind::Node,id,selecting_thread:None,source_revision:row["source_revision"].as_u64().or_else(||row.pointer("/provenance/source_revision").and_then(serde_json::Value::as_u64)),source_hash:row["source_hash"].as_str(),raw:None});}
             }RetainedRoute::Relations
         }
         Command::HistorySearch(a)=>{
@@ -479,6 +479,7 @@ pub(crate) fn prepare_inspection(raw:OwnedRetainedRaw)->Result<serde_json::Value
             TargetKind::Node=>{
                 row["selected"]=json!(match f.selection{Selection::Selected=>Some(true),Selection::NotSelected=>Some(false),Selection::Unknown=>None});
                 row["source_changed"]=json!(f.source_changed);row["body_available"]=json!(f.body_retained);
+                row["body_scope"]=json!("saved node payload; raw search-span byte retention is not inferred");
                 row["source_revision"]=json!(f.current_revision);row["body_hash"]=json!(f.current_hash.as_deref());
             }
             TargetKind::Execution=>{
