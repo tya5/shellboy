@@ -1,19 +1,20 @@
 //! Request-scoped deletion review on the existing confirmation overlay.
 use super::*;
+use crate::config::UiLanguage;
 use serde_json::Value;
-fn failure_text(error: &crate::protocol::ApiError) -> String {
-    let prefix = if error
+fn failure_text(error: &crate::protocol::ApiError, language: UiLanguage) -> String {
+    let uncertain = error
         .details
         .as_ref()
         .and_then(|details| details.get("deletion_outcome_uncertain"))
         .and_then(Value::as_bool)
-        == Some(true)
-    {
-        "削除結果は未確認です"
-    } else {
-        "削除できません"
-    };
-    format!("{prefix}: {}", error.message)
+        == Some(true);
+    match (language, uncertain) {
+        (UiLanguage::En, true) => format!("Deletion outcome is unknown: {}", error.message),
+        (UiLanguage::En, false) => format!("Could not delete: {}", error.message),
+        (UiLanguage::Ja, true) => format!("削除結果は未確認です: {}", error.message),
+        (UiLanguage::Ja, false) => format!("削除できません: {}", error.message),
+    }
 }
 const FOOTER_READY: &str =
     "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧";
@@ -26,9 +27,11 @@ enum Phase {
     Stale(Option<Value>),
     Executing,
     Failed(crate::protocol::ApiError),
+    InvalidPreview,
 }
 #[derive(Clone, Debug)]
 pub(super) struct DeletionDialog {
+    language: UiLanguage,
     request_id: u64,
     args: ThreadDeleteArgs,
     title: String,
@@ -37,10 +40,15 @@ pub(super) struct DeletionDialog {
 }
 impl DeletionDialog {
     pub(super) fn footer(&self) -> &'static str {
-        if self.can_execute() {
-            FOOTER_READY
-        } else {
-            FOOTER_DISABLED
+        match (self.language, self.can_execute()) {
+            (UiLanguage::Ja, true) => FOOTER_READY,
+            (UiLanguage::Ja, false) => FOOTER_DISABLED,
+            (UiLanguage::En, true) => {
+                "D / Space Toggle descendants | N / Esc Back\nY Delete | ^v/PgUp/PgDn Scroll"
+            }
+            (UiLanguage::En, false) => {
+                "D / Space Toggle descendants | N / Esc Back\nY disabled | ^v/PgUp/PgDn Scroll"
+            }
         }
     }
     fn matches(&self, request_id: u64, args: &ThreadDeleteArgs) -> bool {
@@ -60,6 +68,9 @@ impl DeletionDialog {
             && matches!(&self.phase,Phase::Ready(value) if value.get("deletable_now").and_then(Value::as_bool)==Some(true))
     }
     pub(super) fn text(&self) -> String {
+        if self.language == UiLanguage::En {
+            return self.text_en();
+        }
         let mut text = format!(
             "会話の削除確認\n対象: {}\n会話ID: {}\n子の会話も削除: {}\n",
             self.title,
@@ -83,8 +94,9 @@ impl DeletionDialog {
             }
             Phase::Failed(error) => text.push_str(&format!(
                 "\n{}\n閉じてから再度選んでください。",
-                failure_text(error)
+                failure_text(error, self.language)
             )),
+            Phase::InvalidPreview => text.push_str("\n削除できません: 削除影響の対象が一致しません。もう一度開いてください\n閉じてから再度選んでください。"),
             Phase::Stale(None) => {
                 text.push_str("\n確認が古くなりました。閉じて再確認してください。Y は使えません。")
             }
@@ -124,6 +136,64 @@ impl DeletionDialog {
         }
         text
     }
+    fn text_en(&self) -> String {
+        let mut text = if self.args.descendants {
+            format!(
+                "Confirm conversation deletion\nTarget: {}\nConversation ID: {}\nDelete descendants: yes\n",
+                self.title, self.args.thread_id
+            )
+        } else {
+            format!(
+                "Confirm conversation deletion\nTarget: {}\nConversation ID: {}\nDelete descendants: no\n",
+                self.title, self.args.thread_id
+            )
+        };
+        if let Some(captured_at) = self.captured_at {
+            let timestamp = captured_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            text.push_str(&format!("Reviewed at: {timestamp}\n"));
+        }
+        match &self.phase {
+            Phase::Loading => text.push_str("\nChecking deletion impact. Y is not available yet."),
+            Phase::Executing => text.push_str("\nDeleting. Closing this screen does not cancel accepted work."),
+            Phase::Failed(error) => {
+                let failure = failure_text(error, UiLanguage::En);
+                text.push_str(&format!("\n{failure}\nClose this screen and select the target again."));
+            }
+            Phase::InvalidPreview => text.push_str("\nCould not delete: The deletion preview target does not match. Open it again.\nClose this screen and select the target again."),
+            Phase::Stale(None) => text.push_str("\nThe preview is stale. Close and review again. Y is disabled."),
+            Phase::Ready(value) | Phase::Stale(Some(value)) => {
+                let number = |pointer: &str| value.pointer(pointer).and_then(Value::as_u64)
+                    .map_or_else(|| "unknown".to_owned(), |value| value.to_string());
+                text.push_str(if matches!(self.phase, Phase::Stale(_)) {
+                    "\nThe preview is stale. Close and review again. Y is disabled."
+                } else if self.args.preview_marker.is_none() {
+                    "\nNo preview marker is available. Narrow the scope and review again. Y is disabled."
+                } else if self.can_execute() {
+                    "\nDeletion is available. Press Y to execute."
+                } else {
+                    "\nDeletion is not available. Stop active work and review again."
+                });
+                let selected = number("/selection/thread_count");
+                let descendants = number("/selection/descendant_thread_count");
+                let running = number("/blockers/live_run_count");
+                let stopping = number("/blockers/stopping_run_count");
+                let shared = number("/references/shared_path_nodes");
+                let sources = number("/references/completed_replacement_source_nodes");
+                let attachments = number("/references/attachment_reference_count");
+                text.push_str(&format!("\nSelected conversations: {selected} | Descendants: {descendants}\nRunning: {running} | Stopping: {stopping}\nShared history: {shared}\nReplacement sources: {sources} | Attachment references: {attachments}"));
+                if let Some(runs) = value.pointer("/blockers/runs").and_then(Value::as_array) {
+                    for run in runs.iter().take(50) {
+                        if let Some(id) = run.get("id").and_then(Value::as_str) {
+                            let state = run.get("state").and_then(Value::as_str).unwrap_or("unknown");
+                            text.push_str(&format!("\n  Run {id} | {state}"));
+                        }
+                    }
+                }
+                text.push_str("\n\nState is checked again immediately before deletion. Shared source history is not immediately discarded.");
+            }
+        }
+        text
+    }
 }
 impl UiState {
     fn deletion_action(&self, dialog: &DeletionDialog, execute: bool) -> UiAction {
@@ -156,12 +226,21 @@ impl UiState {
         descendants: bool,
     ) -> Vec<UiAction> {
         if thread.starts_with("draft:") {
-            self.thread_browser
-                .notice("未保存の下書きは会話の削除対象ではありません".into());
+            let message = match self.config.ui.language {
+                UiLanguage::En => "An unsaved draft is not a conversation to delete",
+                UiLanguage::Ja => "未保存の下書きは会話の削除対象ではありません",
+            };
+            self.thread_browser.notice(message.into());
             return vec![];
         }
         if !self.thread_deletions_inflight.is_empty() {
-            let message = "削除を実行中です。結果を待ってから再操作してください".to_owned();
+            let message = match self.config.ui.language {
+                UiLanguage::En => {
+                    "Deletion is in progress. Wait for its result before trying again"
+                }
+                UiLanguage::Ja => "削除を実行中です。結果を待ってから再操作してください",
+            }
+            .to_owned();
             self.thread_browser.notice(message.clone());
             self.active_view_mut().status = message;
             return vec![];
@@ -174,8 +253,12 @@ impl UiState {
             .find(|item| item.thread_id == thread)
             .map(|item| crate::presentation::sanitize_plain(&item.title, 0).0)
             .filter(|title| !title.trim().is_empty())
-            .unwrap_or_else(|| "タイトルなし".into());
+            .unwrap_or_else(|| match self.config.ui.language {
+                UiLanguage::En => "Untitled".into(),
+                UiLanguage::Ja => "タイトルなし".into(),
+            });
         let dialog = DeletionDialog {
+            language: self.config.ui.language,
             title,
             captured_at: None,
             request_id: self.next_thread_deletion_request,
@@ -265,7 +348,10 @@ impl UiState {
         let result = match result {
             Ok(ThreadDeletionReply::DeletedWithWarning { ids, warning }) if execute => {
                 self.remove_deleted_threads(&ids);
-                let message = format!("削除しました。後片付けに失敗しました: {warning}");
+                let message = match self.config.ui.language {
+                    UiLanguage::En => format!("Deleted, but cleanup failed: {warning}"),
+                    UiLanguage::Ja => format!("削除しました。後片付けに失敗しました: {warning}"),
+                };
                 self.thread_browser.notice(message.clone());
                 self.active_view_mut().status = message;
                 self.dirty = true;
@@ -283,8 +369,12 @@ impl UiState {
                     self.confirmation = None;
                     self.confirmation_scroll = 0;
                 }
-                self.thread_browser
-                    .notice(format!("{} 件の会話を削除しました", ids.len()));
+                let count = ids.len();
+                let message = match self.config.ui.language {
+                    UiLanguage::En => format!("Deleted {count} conversations"),
+                    UiLanguage::Ja => format!("{count} 件の会話を削除しました"),
+                };
+                self.thread_browser.notice(message);
             }
             Ok(ThreadDeletionReply::Preview(value, captured_at)) if !execute && matches => {
                 if let Some(Confirmation::ThreadDeletion(dialog)) = &mut self.confirmation
@@ -302,10 +392,7 @@ impl UiState {
                     {
                         Phase::Ready(value)
                     } else {
-                        Phase::Failed(crate::protocol::ApiError::new(
-                            crate::protocol::ErrorCode::InvalidState,
-                            "削除影響の対象が一致しません。もう一度開いてください",
-                        ))
+                        Phase::InvalidPreview
                     };
                 }
             }
@@ -325,13 +412,16 @@ impl UiState {
                         self.deferred_actions.push(action);
                         self.set_confirmation(Confirmation::ThreadDeletion(dialog));
                     }
-                    self.thread_browser
-                        .notice("削除対象が変わりました。再確認してください".into());
+                    let message = match self.config.ui.language {
+                        UiLanguage::En => "The deletion target changed. Review it again",
+                        UiLanguage::Ja => "削除対象が変わりました。再確認してください",
+                    };
+                    self.thread_browser.notice(message.into());
                     self.dirty = true;
                     return;
                 }
                 if execute {
-                    let message = failure_text(&error);
+                    let message = failure_text(&error, self.config.ui.language);
                     self.thread_browser.notice(message.clone());
                     self.active_view_mut().status = message;
                 }
@@ -539,7 +629,7 @@ mod observation_tests {
             )),
         );
         assert!(matches!(&ui.confirmation,
-            Some(Confirmation::ThreadDeletion(dialog)) if matches!(dialog.phase, Phase::Failed(_))));
+            Some(Confirmation::ThreadDeletion(dialog)) if matches!(dialog.phase, Phase::InvalidPreview)));
     }
 }
 
@@ -550,7 +640,9 @@ mod invalidation_tests {
 
     #[test]
     fn changed_deletion_preserves_evidence_disables_y_and_rejects_late_preview() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         let action = ui.begin_thread_deletion("thread".into()).pop().unwrap();
         let UiAction::ThreadDeletion {
             request_id, args, ..
@@ -616,5 +708,103 @@ mod marker_entry_tests {
         assert!(
             matches!(&ui.confirmation,Some(Confirmation::ThreadDeletion(dialog)) if !dialog.can_execute())
         );
+    }
+}
+
+#[cfg(test)]
+mod language_rendering_tests {
+    use super::*;
+    use crate::config::UiLanguage;
+
+    fn show_ready(ui: &mut UiState) {
+        let action = ui
+            .begin_thread_deletion("thread-fixture".into())
+            .pop()
+            .unwrap();
+        let UiAction::ThreadDeletion {
+            request_id, args, ..
+        } = action
+        else {
+            panic!("preview request")
+        };
+        let body = serde_json::json!({
+            "thread_id": "thread-fixture", "descendants": false,
+            "deletable_now": true, "selection": {"thread_count": 1},
+            "preview_marker": {"thread_count": 1, "ids_hash": "0".repeat(64)}
+        });
+        ui.apply_thread_deletion(
+            request_id,
+            args,
+            false,
+            Ok(ThreadDeletionReply::Preview(body, chrono::Utc::now())),
+        );
+    }
+
+    #[test]
+    fn ready_deletion_review_keeps_destructive_action_explicit() {
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["thread-fixture", "Y Delete"],
+                UiLanguage::Ja => &["thread-fixture", "Y 削除"],
+            }
+        }
+        super::super::i18n::verify_screen(show_ready, expected);
+    }
+
+    #[test]
+    fn stale_deletion_review_disables_destructive_action() {
+        fn configure(ui: &mut UiState) {
+            show_ready(ui);
+            ui.apply(UiUpdate::ConfirmationSourcesChanged);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["thread-fixture", "Y disabled"],
+                UiLanguage::Ja => &["thread-fixture", "Y 使用不可"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn deletion_failure_preserves_provider_message_and_blocks_execution() {
+        fn configure(ui: &mut UiState) {
+            let action = ui
+                .begin_thread_deletion("thread-fixture".into())
+                .pop()
+                .unwrap();
+            let UiAction::ThreadDeletion {
+                request_id, args, ..
+            } = action
+            else {
+                panic!("preview request")
+            };
+            let error = crate::protocol::ApiError::new(
+                crate::protocol::ErrorCode::InvalidState,
+                "PROVIDER-ERROR: opaque detail",
+            );
+            ui.apply_thread_deletion(request_id, args, false, Err(error));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["PROVIDER-ERROR: opaque detail", "Y disabled"],
+                UiLanguage::Ja => &["PROVIDER-ERROR: opaque detail", "Y 使用不可"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn loading_deletion_review_shows_scope_and_disabled_action_in_both_languages() {
+        fn configure(ui: &mut UiState) {
+            let _ = ui.begin_thread_deletion("thread-fixture".into());
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["thread-fixture", "Checking deletion impact", "Y disabled"],
+                UiLanguage::Ja => &["thread-fixture", "削除影響を確認中", "Y 使用不可"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
     }
 }

@@ -1,9 +1,11 @@
 //! A live model picker; no built-in model/capability catalog.
 use super::*;
+use crate::config::UiLanguage;
 use crate::protocol::ThreadSetArgs;
 
 const FOOTER: &str = "Esc 戻る | Enter 変更\n^v 選択 | Ctrl+R 再取得 | Ctrl+Y コピー";
 pub(super) struct ModelPicker {
+    language: UiLanguage,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     filtered_indices: Vec<usize>,
     request: u64,
@@ -30,8 +32,50 @@ fn notice_height(body_height: u16) -> u16 {
     body_height.saturating_sub(2).min(3)
 }
 impl ModelPicker {
+    fn footer(&self) -> &'static str {
+        match self.language {
+            UiLanguage::En => "Esc Back | Enter Change\n^v Select | Ctrl+R Refresh | Ctrl+Y Copy",
+            UiLanguage::Ja => FOOTER,
+        }
+    }
+    fn notice_text(&self, notice: &super::observation_notice::ObservationNotice) -> String {
+        use super::observation_notice::{Freshness, NextAction};
+        if self.language == UiLanguage::Ja {
+            return notice.text();
+        }
+        let state = match notice.freshness {
+            Freshness::Captured => "The saved model list reflects its capture time.",
+            Freshness::Stale => "The model list may be stale while refresh is running.",
+            Freshness::FailedRefresh => "Refresh failed; the previous model list is shown.",
+            Freshness::Unavailable => "The model list has not been captured.",
+        };
+        let time = |value: chrono::DateTime<chrono::Utc>| {
+            value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        };
+        let timing = match (notice.captured_at, notice.last_attempt_at) {
+            (Some(captured), Some(attempted)) => {
+                let captured = time(captured);
+                let attempted = time(attempted);
+                format!("Captured at {captured}; last requested at {attempted}.")
+            }
+            (Some(captured), None) => format!("Captured at {}.", time(captured)),
+            (None, Some(attempted)) => format!(
+                "Capture time unavailable; last requested at {}.",
+                time(attempted)
+            ),
+            (None, None) => "Capture and request times are unavailable.".into(),
+        };
+        match notice.next_action {
+            NextAction::RefreshModels => format!("{state}\n{timing}\nCtrl+R Refresh"),
+            _ => format!("{state}\n{timing}"),
+        }
+    }
     fn key(&mut self, key: KeyEvent, area: Rect) -> Outcome {
-        let body_height = popup::body_area(area, "モデル一覧", FOOTER, None).height;
+        let title = match self.language {
+            UiLanguage::En => "Models",
+            UiLanguage::Ja => "モデル一覧",
+        };
+        let body_height = popup::body_area(area, title, self.footer(), None).height;
         let page = usize::from(body_height.saturating_sub(notice_height(body_height)))
             .saturating_sub(1)
             .max(1);
@@ -195,34 +239,56 @@ impl ModelPicker {
             },
             confirmation_enabled: false,
         };
-        let context = format!(
-            "{} | 絞込み: {} | {} / {}件",
-            self.connection,
-            self.query,
-            if filtered.is_empty() {
-                0
-            } else {
-                self.selected + 1
-            },
-            filtered.len()
-        );
-        let body = popup::panel_recorded(frame, area, "Ctrl+T 情報", &context, FOOTER, &self.paint);
+        let position = if filtered.is_empty() {
+            0
+        } else {
+            self.selected + 1
+        };
+        let count = filtered.len();
+        let context = match self.language {
+            UiLanguage::En => format!(
+                "{} | Filter: {} | {position} / {count} models",
+                self.connection, self.query
+            ),
+            UiLanguage::Ja => format!(
+                "{} | 絞込み: {} | {position} / {count}件",
+                self.connection, self.query
+            ),
+        };
+        let title = match self.language {
+            UiLanguage::En => "Ctrl+T Details",
+            UiLanguage::Ja => "Ctrl+T 情報",
+        };
+        let body = popup::panel_recorded(frame, area, title, &context, self.footer(), &self.paint);
+        let notice_text = self.notice_text(&notice);
         if let Some(scroll) = self.notice_scroll {
             let captured = self.captured_at.map_or_else(
-                || "取得時刻なし".to_owned(),
+                || match self.language {
+                    UiLanguage::En => "Capture time unavailable".to_owned(),
+                    UiLanguage::Ja => "取得時刻なし".to_owned(),
+                },
                 |time| {
                     if body.width < 24 {
-                        format!("取得 UTC\n{}", time.format("%Y-%m-%d\n%H:%M:%S\n%.3f UTC"))
+                        match self.language {
+                            UiLanguage::En => format!(
+                                "Captured UTC\n{}",
+                                time.format("%Y-%m-%d\n%H:%M:%S\n%.3f UTC")
+                            ),
+                            UiLanguage::Ja => {
+                                format!("取得 UTC\n{}", time.format("%Y-%m-%d\n%H:%M:%S\n%.3f UTC"))
+                            }
+                        }
                     } else {
-                        format!(
-                            "取得 UTC {}",
-                            time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-                        )
+                        let timestamp = time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+                        match self.language {
+                            UiLanguage::En => format!("Captured UTC {timestamp}"),
+                            UiLanguage::Ja => format!("取得 UTC {timestamp}"),
+                        }
                     }
                 },
             );
             frame.render_widget(
-                Paragraph::new(format!("{captured}\n{}", notice.text()))
+                Paragraph::new(format!("{captured}\n{notice_text}"))
                     .wrap(Wrap { trim: false })
                     .scroll((scroll, 0)),
                 body,
@@ -231,7 +297,7 @@ impl ModelPicker {
         }
         let notice_height = notice_height(body.height);
         frame.render_widget(
-            Paragraph::new(notice.text()).wrap(Wrap { trim: false }),
+            Paragraph::new(notice_text).wrap(Wrap { trim: false }),
             Rect::new(body.x, body.y, body.width, notice_height),
         );
         let body = Rect::new(
@@ -242,24 +308,32 @@ impl ModelPicker {
         );
         if self.loading && self.captured_at.is_none() {
             frame.render_widget(
-                Paragraph::new("モデル一覧を取得中.").style(Style::default().fg(theme::ACCENT)),
+                Paragraph::new(match self.language {
+                    UiLanguage::En => "Loading models.",
+                    UiLanguage::Ja => "モデル一覧を取得中.",
+                })
+                .style(Style::default().fg(theme::ACCENT)),
                 body,
             );
         } else if self.captured_at.is_none()
             && let Some(error) = &self.error
         {
             frame.render_widget(
-                Paragraph::new(format!("取得できません: {error}\nCtrl+Rで再取得"))
-                    .wrap(Wrap { trim: false })
-                    .style(Style::default().fg(theme::ATTENTION)),
+                Paragraph::new(match self.language {
+                    UiLanguage::En => format!("Could not retrieve models: {error}\nCtrl+R Refresh"),
+                    UiLanguage::Ja => format!("取得できません: {error}\nCtrl+Rで再取得"),
+                })
+                .wrap(Wrap { trim: false })
+                .style(Style::default().fg(theme::ATTENTION)),
                 body,
             );
         } else if filtered.is_empty() {
             frame.render_widget(
-                Paragraph::new(if self.models.is_empty() {
-                    "接続先のモデル一覧は空です"
-                } else {
-                    "一致するモデルがありません"
+                Paragraph::new(match (self.language, self.models.is_empty()) {
+                    (UiLanguage::En, true) => "The connection has no models",
+                    (UiLanguage::En, false) => "No models match",
+                    (UiLanguage::Ja, true) => "接続先のモデル一覧は空です",
+                    (UiLanguage::Ja, false) => "一致するモデルがありません",
                 }),
                 body,
             );
@@ -267,15 +341,11 @@ impl ModelPicker {
             let items = filtered
                 .iter()
                 .map(|model| {
-                    let label = format!(
-                        "{}{}",
-                        model,
-                        if self.current.as_ref() == Some(*model) {
-                            "  * 現在"
-                        } else {
-                            ""
-                        }
-                    );
+                    let label = match (self.language, self.current.as_ref() == Some(*model)) {
+                        (UiLanguage::En, true) => format!("{model}  * Current"),
+                        (UiLanguage::Ja, true) => format!("{model}  * 現在"),
+                        (_, false) => (*model).clone(),
+                    };
                     popup::item(&label, body.width)
                 })
                 .collect();
@@ -295,10 +365,15 @@ impl UiState {
         };
         let Some(connection) = connection.filter(|name| self.config.connections.contains_key(name))
         else {
-            return self.command_error("/models [connection] に設定済みの接続名を指定してください");
+            let message = match self.config.ui.language {
+                UiLanguage::En => "Specify a configured connection name with /models [connection]",
+                UiLanguage::Ja => "/models [connection] に設定済みの接続名を指定してください",
+            };
+            return self.command_error(message);
         };
         self.next_model_request = self.next_model_request.wrapping_add(1);
         self.models = Some(ModelPicker {
+            language: self.config.ui.language,
             paint: Default::default(),
             filtered_indices: Vec::new(),
             request: self.next_model_request,
@@ -374,6 +449,7 @@ mod wheel_tests {
     #[test]
     fn failed_refresh_retains_facts_and_ignores_late_or_duplicate_results() {
         let mut picker = ModelPicker {
+            language: UiLanguage::Ja,
             paint: Default::default(),
             filtered_indices: vec![],
             request: 1,
@@ -435,6 +511,7 @@ mod wheel_tests {
     #[test]
     fn prepared_model_filter_and_wheel_never_select_or_reload_a_model() {
         let mut picker = ModelPicker {
+            language: UiLanguage::Ja,
             paint: Default::default(),
             filtered_indices: vec![],
             request: 1,
@@ -475,5 +552,69 @@ mod wheel_tests {
         assert!(picker.filtered_indices.is_empty());
         assert!(picker.paint_bounds().is_none());
         assert!(!picker.wheel(3));
+    }
+}
+
+#[cfg(test)]
+mod language_rendering_tests {
+    use super::*;
+    use crate::config::UiLanguage;
+
+    #[test]
+    fn model_error_is_bilingual_without_rewriting_provider_text() {
+        fn configure(ui: &mut UiState) {
+            ui.models = Some(ModelPicker {
+                language: ui.config.ui.language,
+                paint: Default::default(),
+                filtered_indices: vec![],
+                request: 1,
+                connection: "mock".into(),
+                current: None,
+                models: vec![],
+                query: String::new(),
+                selected: 0,
+                loading: false,
+                error: Some("PROVIDER-ERROR: opaque detail".into()),
+                captured_at: None,
+                last_attempt_at: None,
+                notice_scroll: None,
+            });
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Could not retrieve", "PROVIDER-ERROR: opaque detail"],
+                UiLanguage::Ja => &["取得できません", "PROVIDER-ERROR: opaque detail"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn loading_model_picker_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.models = Some(ModelPicker {
+                language: ui.config.ui.language,
+                paint: Default::default(),
+                filtered_indices: vec![],
+                request: 1,
+                connection: "mock".into(),
+                current: None,
+                models: vec![],
+                query: String::new(),
+                selected: 0,
+                loading: true,
+                error: None,
+                captured_at: None,
+                last_attempt_at: None,
+                notice_scroll: None,
+            });
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Loading models", "Ctrl+R"],
+                UiLanguage::Ja => &["モデル一覧を取得中", "Ctrl+R"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
     }
 }
