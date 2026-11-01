@@ -1636,7 +1636,6 @@ pub enum ManagementFollow {
     Next,
     Refresh,
 }
-const HELP_FOOTER: &str = "Esc / Enter / F1 戻る | ^v / PgUp / PgDn 閲覧";
 const MANAGEMENT_DETAIL_FOOTER: &str =
     "Esc 戻る | ^v/PgUp/PgDn 閲覧\nN 次page | P 先頭 | C このpageをコピー";
 const CONFIRMATION_FOOTER: &str = "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧";
@@ -5448,7 +5447,7 @@ impl UiState {
             area,
             self.help_page.title,
             self.help_page.context,
-            HELP_FOOTER,
+            help::footer(self.config.ui.language),
             &self.aux_popup_paint,
         );
         self.help_scroll = self
@@ -5473,7 +5472,7 @@ impl UiState {
         self.management
             .draw(frame, area, status, self.config.ui.language);
         if let Some(details) = &self.details {
-            link_regions = details.draw(frame, area, self.view());
+            link_regions = details.draw(frame, area, self.view(), self.config.ui.language);
         }
         if let Some(operations) = &self.operations {
             operations.draw(frame, area);

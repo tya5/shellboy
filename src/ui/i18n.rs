@@ -186,8 +186,8 @@ mod rendering_tests {
         }
         fn help_expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Common actions", "Esc"],
-                UiLanguage::Ja => &["よく使う操作", "Esc"],
+                UiLanguage::En => &["Common actions", "F1 Back"],
+                UiLanguage::Ja => &["よく使う操作", "F1 戻る"],
             }
         }
         fn operations_expected(_: UiLanguage) -> &'static [&'static str] {

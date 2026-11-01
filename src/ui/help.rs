@@ -1080,7 +1080,6 @@ impl Page {
         }
     }
 }
-#[allow(dead_code)]
 pub(super) fn footer(language: UiLanguage) -> &'static str {
     local!(
         language,

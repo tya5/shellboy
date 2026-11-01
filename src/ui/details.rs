@@ -1177,6 +1177,7 @@ impl Details {
         frame: &mut Frame<'_>,
         area: Rect,
         view: &ThreadView,
+        language: crate::config::UiLanguage,
     ) -> Vec<crate::terminal_links::LinkRegion> {
         if let Some(choices) = &self.copy_choices {
             choices.draw(frame, area, &self.paint);
@@ -1233,7 +1234,7 @@ impl Details {
                 safe(&self.node_id)
             )
         };
-        let footer = super::key_hints::detail_footer(self.hint_context());
+        let footer = super::key_hints::detail_footer_for(self.hint_context(), language);
         let mut body = popup::panel_recorded(frame, area, mode, &context, footer, &self.paint);
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
             frame.render_widget(
@@ -1480,6 +1481,24 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn detail_footer_uses_configured_language_in_the_actual_ui() {
+        for (language, expected) in [
+            (crate::config::UiLanguage::En, "Esc Back"),
+            (crate::config::UiLanguage::Ja, "Esc 戻る"),
+        ] {
+            let mut ui = state();
+            ui.config.ui.language = language;
+            ui.details = Some(Details::new(ui.view(), false));
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+            terminal
+                .draw(|frame| super::super::draw(frame, &mut ui))
+                .unwrap();
+            let shown = screen(&terminal);
+            assert!(shown.contains(expected), "{shown}");
+        }
+    }
+
     #[test]
     fn rejected_link_action_exits_loading_with_an_actionable_error() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
@@ -2030,7 +2049,12 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         terminal
             .draw(|frame| {
-                details.draw(frame, frame.area(), ui.view());
+                details.draw(
+                    frame,
+                    frame.area(),
+                    ui.view(),
+                    crate::config::UiLanguage::Ja,
+                );
             })
             .unwrap();
         let shown = screen(&terminal);
@@ -2133,7 +2157,12 @@ mod tests {
             details.mode = Mode::Fields;
             terminal
                 .draw(|frame| {
-                    details.draw(frame, frame.area(), ui.view());
+                    details.draw(
+                        frame,
+                        frame.area(),
+                        ui.view(),
+                        crate::config::UiLanguage::Ja,
+                    );
                 })
                 .unwrap();
             let text = screen(&terminal);
@@ -2165,7 +2194,12 @@ mod tests {
             details.mode = Mode::Fields;
             terminal
                 .draw(|frame| {
-                    details.draw(frame, frame.area(), ui.view());
+                    details.draw(
+                        frame,
+                        frame.area(),
+                        ui.view(),
+                        crate::config::UiLanguage::Ja,
+                    );
                 })
                 .unwrap();
             let text = screen(&terminal);
@@ -2180,7 +2214,12 @@ mod tests {
             details.mode = Mode::Nodes;
             terminal
                 .draw(|frame| {
-                    details.draw(frame, frame.area(), ui.view());
+                    details.draw(
+                        frame,
+                        frame.area(),
+                        ui.view(),
+                        crate::config::UiLanguage::Ja,
+                    );
                 })
                 .unwrap();
             assert!(!screen(&terminal).contains(&expected));
@@ -2236,7 +2275,12 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
             .draw(|frame| {
-                details.draw(frame, frame.area(), ui.view());
+                details.draw(
+                    frame,
+                    frame.area(),
+                    ui.view(),
+                    crate::config::UiLanguage::Ja,
+                );
             })
             .unwrap();
         let text = screen(&terminal);
@@ -2279,7 +2323,12 @@ mod tests {
         );
         terminal
             .draw(|frame| {
-                details.draw(frame, frame.area(), ui.view());
+                details.draw(
+                    frame,
+                    frame.area(),
+                    ui.view(),
+                    crate::config::UiLanguage::Ja,
+                );
             })
             .unwrap();
         assert!(screen(&terminal).contains("接続先を確認しました"));
@@ -2329,7 +2378,12 @@ mod tests {
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(90, 24)).unwrap();
         terminal
             .draw(|frame| {
-                details.draw(frame, frame.area(), ui.view());
+                details.draw(
+                    frame,
+                    frame.area(),
+                    ui.view(),
+                    crate::config::UiLanguage::Ja,
+                );
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
@@ -2399,7 +2453,14 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let mut regions = Vec::new();
             terminal
-                .draw(|frame| regions = details.draw(frame, frame.area(), ui.view()))
+                .draw(|frame| {
+                    regions = details.draw(
+                        frame,
+                        frame.area(),
+                        ui.view(),
+                        crate::config::UiLanguage::Ja,
+                    )
+                })
                 .unwrap();
             let text = screen(&terminal);
             assert!(text.contains("Esc"), "{width}x{height}: {text}");
@@ -2450,7 +2511,12 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
         terminal
             .draw(|frame| {
-                details.draw(frame, frame.area(), ui.view());
+                details.draw(
+                    frame,
+                    frame.area(),
+                    ui.view(),
+                    crate::config::UiLanguage::Ja,
+                );
             })
             .unwrap();
         details.key(
@@ -2500,7 +2566,12 @@ mod tests {
         }
         terminal
             .draw(|frame| {
-                details.draw(frame, frame.area(), ui.view());
+                details.draw(
+                    frame,
+                    frame.area(),
+                    ui.view(),
+                    crate::config::UiLanguage::Ja,
+                );
             })
             .unwrap();
         let at = details.scroll.get();
@@ -2562,7 +2633,12 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
             terminal
                 .draw(|frame| {
-                    details.draw(frame, frame.area(), ui.view());
+                    details.draw(
+                        frame,
+                        frame.area(),
+                        ui.view(),
+                        crate::config::UiLanguage::Ja,
+                    );
                 })
                 .unwrap();
             let visible = screen(&terminal);
@@ -2715,7 +2791,12 @@ mod tests {
             for _ in 0..5 {
                 terminal
                     .draw(|frame| {
-                        details.draw(frame, frame.area(), ui.view());
+                        details.draw(
+                            frame,
+                            frame.area(),
+                            ui.view(),
+                            crate::config::UiLanguage::Ja,
+                        );
                     })
                     .unwrap();
             }
@@ -2818,7 +2899,12 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 35)).unwrap();
         terminal
             .draw(|frame| {
-                details.draw(frame, frame.area(), ui.view());
+                details.draw(
+                    frame,
+                    frame.area(),
+                    ui.view(),
+                    crate::config::UiLanguage::Ja,
+                );
             })
             .unwrap();
         let shown = terminal

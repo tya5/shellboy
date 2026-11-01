@@ -564,7 +564,7 @@ impl UiState {
                 let page = popup::body_area(
                     popup::viewport(self.viewport),
                     self.help_page.context,
-                    HELP_FOOTER,
+                    help::footer(self.config.ui.language),
                     None,
                 )
                 .height

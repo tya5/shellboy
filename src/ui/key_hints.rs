@@ -252,7 +252,6 @@ pub(super) fn detail_footer(context: Context) -> &'static str {
     }]
 }
 
-#[allow(dead_code)]
 pub(super) fn detail_footer_for(
     context: Context,
     language: crate::config::UiLanguage,
