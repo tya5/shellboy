@@ -8,8 +8,8 @@ is weakened, and no test is ignored or serialized to obtain a pass.
 | --- | --- | --- |
 | edit_adapter | Original/fork/management observations; then frontend exits while its bounded consumer stays live | shared update60s; shutdown5s |
 | structured_history | Exact page/detail/wait-cancellation facts; then consumer drains until task termination | shared update60s; shutdown8s |
-| persisted_output_identity | Consumer observes exact stream/current-view identity before releasing each proxy phase | shared update60s; shutdown10s |
-| unsaved_agents_round_trip | Initialize, exact origin draft AgentsSelected, then same-Thread SavedMessage plus durable receipt | each original phase5s |
+| persisted_output_identity | Consumer observes the selected Thread's current view before the proxy sends the first delta (the frontend ignores deltas for an unselected Thread), then exact stream/current-view identity before releasing each proxy phase | shared update60s; shutdown10s |
+| unsaved_agents_round_trip | Initialize, exact origin draft AgentsSelected, then the durable same-Thread receipt in the database (the UI may hold or coalesce its receipt update), rechecked after each delivered update | Initialize/AgentsSelected 5s; receipt 60s watchdog |
 | full_reserve_cancel_quit_force | Committed stopped Run; draft revision99 and40 exact held receipts; force-ready level; one explicit force result | original5/10/15/2s |
 
 The three integration shutdown checks used to await the producer while no longer

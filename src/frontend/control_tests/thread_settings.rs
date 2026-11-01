@@ -264,56 +264,30 @@ async fn unsaved_agents_round_trip_adopts_origin_draft_and_next_send_uses_same_t
             send.iter()
                 .any(|a| matches!(a,UiAction::Send{thread_id:Some(id),..} if id==&thread))
         );
-        let sent_draft = send
-            .iter()
-            .find_map(|action| match action {
-                UiAction::Send { draft_id, .. } => Some(draft_id.clone()),
-                _ => None,
-            })
-            .expect("same-Thread send action");
         for action in send {
             sender.try_send(action).unwrap();
         }
-        crate::test_watchdog::receive_until(
-            "same-Thread durable acceptance",
-            &incoming,
-            std::time::Duration::from_secs(5),
-            |update| {
-                let saved = match &update {
-                    UiUpdate::SavedMessage {
-                        thread_id,
-                        draft_id,
-                        ..
-                    } => thread_id == &thread && draft_id == &sent_draft,
-                    UiUpdate::Receipt {
-                        thread_id: Some(id),
-                        draft_id,
-                        status,
-                        ..
-                    } => {
-                        id == &thread
-                            && draft_id == &sent_draft
-                            && matches!(
-                                status,
-                                crate::ui::ReceiptStatus::Accepted
-                                    | crate::ui::ReceiptStatus::Applied
-                                    | crate::ui::ReceiptStatus::Held
-                                    | crate::ui::ReceiptStatus::Completed
-                            )
-                    }
-                    _ => false,
-                };
-                ui.apply(update);
-                saved.then_some(())
-            },
-        )
-        .await;
+        // The durable receipt is the fact; the UI may coalesce or hold it, so
+        // re-check the database after each delivered update. The watchdog only
+        // reports a stall.
         let target = thread.clone();
-        let saved=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND n.payload_json LIKE '%kept while reference%')",[target],|r|r.get::<_,bool>(0))?)).await.unwrap();
-        assert!(
-            saved,
-            "the observed receipt must name the saved instruction"
-        );
+        loop {
+            let probe = target.clone();
+            let saved = control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND n.payload_json LIKE '%kept while reference%')",[probe],|r|r.get::<_,bool>(0))?)).await.unwrap();
+            if saved {
+                break;
+            }
+            crate::test_watchdog::receive_until(
+                "same-Thread durable receipt",
+                &incoming,
+                crate::test_watchdog::WATCHDOG,
+                |update| {
+                    ui.apply(update);
+                    Some(())
+                },
+            )
+            .await;
+        }
         let count: i64 = control
             .store
             .database

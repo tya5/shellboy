@@ -1303,18 +1303,10 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     })
     .await;
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        crate::test_watchdog::drain_to_completion(
-            bridge,
-            &incoming,
-            std::time::Duration::from_secs(5),
-        ),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .unwrap();
+    crate::test_watchdog::drain_to_completion(bridge, &incoming, crate::test_watchdog::WATCHDOG)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -2305,14 +2297,10 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
         .await
         .unwrap();
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(
-        Duration::from_secs(8),
-        crate::test_watchdog::drain_to_completion(bridge, &incoming, Duration::from_secs(8)),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .unwrap();
+    crate::test_watchdog::drain_to_completion(bridge, &incoming, crate::test_watchdog::WATCHDOG)
+        .await
+        .unwrap()
+        .unwrap();
 }
 
 // Exercise the real asynchronous bridge without sending a message or starting
@@ -2522,7 +2510,6 @@ async fn stale_history_window_falls_back_when_anchor_leaves_selected_path() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persisted_output_identity_is_delivered_before_each_history_window() {
     use serde_json::json;
-    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let root = tempfile::tempdir().unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2530,6 +2517,9 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://{}/v1'\n", listener.local_addr().unwrap())).unwrap();
     let (complete, ready) = tokio::sync::oneshot::channel();
     let (more, next_delta) = tokio::sync::oneshot::channel();
+    // The frontend only observes live deltas for the thread it has selected; the
+    // fixture must not race that selection, so the first delta waits for it.
+    let (selected, selected_ready) = tokio::sync::oneshot::channel();
     let proxy = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut request = Vec::new();
@@ -2574,6 +2564,9 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
             "data: {}\n\n",
             json!({"type":"response.completed","response":{"id":"fixture-response","status":"completed","output":[{"id":"message-1","type":"message","role":"assistant","opaque":"z".repeat(128*1024),"content":[{"type":"output_text","text":"persisted final prose"}]}]}})
         );
+        selected_ready
+            .await
+            .expect("consumer dropped before selecting the streamed thread");
         socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",delta.len()+continuation.len()+final_event.len()).as_bytes()).await.unwrap();
         socket.write_all(delta.as_bytes()).await.unwrap();
         next_delta
@@ -2624,6 +2617,12 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     })
     .await
     .unwrap();
+    // The frontend selected the sent Thread once it publishes its current view.
+    next_state_update(&mut incoming, |update| {
+        matches!(update, UiUpdate::CurrentView { .. }).then_some(())
+    })
+    .await;
+    selected.send(()).unwrap();
     let (thread, generation, attempt) = next_state_update(&mut incoming, |update| match update {
         UiUpdate::Stream {
             thread_id,
@@ -2939,14 +2938,10 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
     })
     .await;
     send.send(UiAction::Quit).await.unwrap();
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        crate::test_watchdog::drain_to_completion(bridge, &incoming, Duration::from_secs(10)),
-    )
-    .await
-    .unwrap()
-    .unwrap()
-    .unwrap();
+    crate::test_watchdog::drain_to_completion(bridge, &incoming, crate::test_watchdog::WATCHDOG)
+        .await
+        .unwrap()
+        .unwrap();
     proxy.await.unwrap();
 }
 

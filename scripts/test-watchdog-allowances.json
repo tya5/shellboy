@@ -1034,31 +1034,7 @@
   {
     "file": "tests/frontend.rs",
     "rule": "raw-timeout",
-    "fingerprint": "201a6f72f045b86715110fca8e25a44851dbf653f38850504a82b2a26d613076",
-    "function": "edit_adapter_loads_full_original_then_forks_before_first_request_and_displays_management_results",
-    "count": 1,
-    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
     "fingerprint": "235650b64cd872388939b7b8239027c41f5405c845f186cb3d64514e4e8cac88",
-    "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
-    "count": 1,
-    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "5a9351f075688b338f56a4d9046865c4f240755fdcc17fe03b81de817cccf359",
-    "function": "persisted_output_identity_is_delivered_before_each_history_window",
-    "count": 1,
-    "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
-  },
-  {
-    "file": "tests/frontend.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "c8681dd9e87b12439600ff5f096bc669bd3849b0b751bb850090e38b819b351c",
     "function": "structured_history_pages_details_url_copy_and_wait_cancel_keep_originals",
     "count": 1,
     "reason": "Issue124: unchanged existing phase/shutdown diagnostic bound around concrete state/delivery completion; receive_until keeps one original caller deadline, not a renewed per-update timeout. No latency success criterion or increased duration."
