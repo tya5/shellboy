@@ -299,6 +299,8 @@ impl ThreadView {
         self.navigation.on_event(NavEvent::TailRequested);
     }
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
+        let mut live_work = super::live_work::LiveWorkView::default();
+        live_work.set_language(config.ui.language);
         Self {
             palette: theme::Palette::from_capabilities(config.ui.palette, false, true),
             describe_calls: config.shell.describe_calls,
@@ -308,7 +310,7 @@ impl ThreadView {
             agents_path: cwd.join("AGENTS.md").to_string_lossy().into_owned(),
             selecting_agents: None,
             activity: Default::default(),
-            live_work: Default::default(),
+            live_work,
             thread_id: None,
             cwd,
             connection: config.default_connection.clone(),

@@ -1865,6 +1865,8 @@ impl UiState {
         view.palette = palette;
         let active = view.draft.draft_id.clone();
         let initialized = cwd.is_absolute();
+        let mut thread_browser = threads::ThreadBrowser::default();
+        thread_browser.set_language(config.ui.language);
         Self {
             inspection_observation: None,
             inspection_revision: 0,
@@ -1880,7 +1882,7 @@ impl UiState {
             key_hints: key_hints::Cache::default(),
             views: BTreeMap::from([(active.clone(), view)]),
             active,
-            thread_browser: threads::ThreadBrowser::default(),
+            thread_browser,
             descendants: Default::default(),
             selection_mode: false,
             live_work_collapsed: false,
