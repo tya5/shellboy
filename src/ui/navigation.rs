@@ -113,6 +113,12 @@ impl Navigation {
             (false, true) => FollowMode::ReadingUnseen,
         };
     }
+    pub(super) fn begin_read(&mut self, ticket: ReadTicket, pending: Option<isize>) {
+        self.read = ReadState::Awaiting(ticket);
+        if let Some(pending) = pending {
+            self.scroll.pending = pending;
+        }
+    }
     pub fn is_loading(&self) -> bool {
         matches!(self.read, ReadState::Hydrating | ReadState::Awaiting(_))
     }
@@ -263,13 +269,11 @@ impl ThreadView {
                     && !view.closed_tool_source(node)
                     && let Some(thread_id) = view.thread_id.clone()
                 {
-                    view.navigation.set_loading(true);
-                    view.navigation.scroll.pending = amount;
                     view.navigation.view_revision = view.navigation.view_revision.wrapping_add(1);
-                    view.navigation.set_request(Some((
-                        view.navigation.view_revision,
-                        Some(node.node_id.clone()),
-                    )));
+                    view.navigation.begin_read(
+                        (view.navigation.view_revision, Some(node.node_id.clone())),
+                        Some(amount),
+                    );
                     return Some(vec![UiAction::LoadNodeWindow {
                         thread_id,
                         generation: view.generation,
@@ -491,13 +495,11 @@ impl ThreadView {
                     }
                     view.navigation.scroll.row = checkpoint;
                     view.navigation.scroll.anchor = view.navigation.anchor.clone();
-                    view.navigation.set_loading(true);
-                    view.navigation.scroll.pending = target.saturating_sub(checkpoint as isize);
                     let node = &view.nodes[index];
-                    view.navigation.set_request(Some((
-                        view.navigation.view_revision,
-                        Some(node.node_id.clone()),
-                    )));
+                    view.navigation.begin_read(
+                        (view.navigation.view_revision, Some(node.node_id.clone())),
+                        Some(target.saturating_sub(checkpoint as isize)),
+                    );
                     let offset = if amount < 0 {
                         if entry || empty {
                             node.total_chars.saturating_sub(8192 - 512)
@@ -569,12 +571,10 @@ impl ThreadView {
                         && ((!forward && node.base_char_offset > 0)
                             || (forward && cached_end < node.total_chars))
                     {
-                        view.navigation.set_loading(true);
-                        view.navigation.scroll.pending = amount;
-                        view.navigation.set_request(Some((
-                            view.navigation.view_revision,
-                            Some(node.node_id.clone()),
-                        )));
+                        view.navigation.begin_read(
+                            (view.navigation.view_revision, Some(node.node_id.clone())),
+                            Some(amount),
+                        );
                         view.navigation.anchor = origin.clone();
                         view.navigation.scroll.anchor = origin.clone();
                         view.navigation.scroll.within = within;
@@ -627,10 +627,8 @@ impl ThreadView {
                     view.navigation.anchor = origin;
                     view.navigation.scroll.within = within;
                     view.navigation.scroll.row = top;
-                    view.navigation.set_loading(true);
-                    view.navigation.scroll.pending = amount;
                     view.navigation
-                        .set_request(Some((view.navigation.view_revision, None)));
+                        .begin_read((view.navigation.view_revision, None), Some(amount));
                     view.navigation.scroll.anchor = view.navigation.anchor.clone();
                     return vec![UiAction::LoadHistoryWindow {
                         thread_id,
@@ -651,12 +649,10 @@ impl ThreadView {
                     && !view.closed_tool_source(node)
                     && let Some(thread_id) = view.thread_id.clone()
                 {
-                    view.navigation.set_loading(true);
-                    view.navigation.scroll.pending = amount;
-                    view.navigation.set_request(Some((
-                        view.navigation.view_revision,
-                        Some(node.node_id.clone()),
-                    )));
+                    view.navigation.begin_read(
+                        (view.navigation.view_revision, Some(node.node_id.clone())),
+                        Some(amount),
+                    );
                     return vec![UiAction::LoadNodeWindow {
                         thread_id,
                         generation: view.generation,

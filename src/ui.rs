@@ -3580,9 +3580,8 @@ impl UiState {
                 // arrive; never apply it against the rejected snapshot.
                 view.navigation.scroll.pending = amount;
                 view.navigation.history_rebase_pending = true;
-                view.navigation.set_loading(true);
                 view.navigation
-                    .set_request(Some((view.navigation.view_revision, None)));
+                    .begin_read((view.navigation.view_revision, None), None);
                 self.deferred_actions.push(UiAction::RebaseHistory {
                     thread_id: view
                         .thread_id

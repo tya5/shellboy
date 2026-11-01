@@ -874,9 +874,8 @@ impl ThreadView {
         };
         self.rebase_navigation();
         self.navigation.history_rebase_pending = true;
-        self.navigation.set_loading(true);
         self.navigation
-            .set_request(Some((self.navigation.view_revision, None)));
+            .begin_read((self.navigation.view_revision, None), None);
         Some(UiAction::RebaseStream(Box::new(StreamRebase {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,
@@ -904,9 +903,8 @@ impl ThreadView {
             // offsets. No provisional ID is sent to history.get.
             self.rebase_navigation();
             self.navigation.history_rebase_pending = true;
-            self.navigation.set_loading(true);
             self.navigation
-                .set_request(Some((self.navigation.view_revision, None)));
+                .begin_read((self.navigation.view_revision, None), None);
             let action = UiAction::RebaseHistory {
                 thread_id,
                 generation,
@@ -1141,9 +1139,8 @@ impl ThreadView {
         }
         self.rebase_navigation();
         self.navigation.history_rebase_pending = true;
-        self.navigation.set_loading(true);
         self.navigation
-            .set_request(Some((self.navigation.view_revision, None)));
+            .begin_read((self.navigation.view_revision, None), None);
         self.status = "履歴の表示位置を再取得中…".into();
         let action = UiAction::RebaseHistory {
             thread_id,
@@ -1619,9 +1616,8 @@ impl ThreadView {
         }
         self.rebase_navigation();
         self.navigation.history_rebase_pending = true;
-        self.navigation.set_loading(true);
         self.navigation
-            .set_request(Some((self.navigation.view_revision, None)));
+            .begin_read((self.navigation.view_revision, None), None);
         Some(UiAction::RebaseHistory {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,
@@ -1831,9 +1827,8 @@ mod completion_notice_tests {
     #[test]
     fn read_failure_keeps_queued_navigation_for_explicit_retry() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation.set_loading(true);
         view.navigation
-            .set_request(Some((view.navigation.view_revision, None)));
+            .begin_read((view.navigation.view_revision, None), None);
         view.navigation.scroll.pending = -3;
         view.on_load_failed("read permit unavailable".into());
         assert!(!view.navigation.is_loading());
@@ -1864,9 +1859,8 @@ mod completion_notice_tests {
     #[test]
     fn navigation_read_has_an_explicit_footer_indicator() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation.set_loading(true);
         view.navigation
-            .set_request(Some((view.navigation.view_revision, None)));
+            .begin_read((view.navigation.view_revision, None), None);
         let palette = crate::ui::theme::Palette::from_capabilities(
             crate::config::PaletteMode::Dark,
             false,
@@ -1907,9 +1901,8 @@ mod completion_notice_tests {
         };
         view.navigation.scroll.width = 80;
         view.navigation.scroll.height = 10;
-        view.navigation.set_loading(true);
         view.navigation
-            .set_request(Some((view.navigation.view_revision, None)));
+            .begin_read((view.navigation.view_revision, None), None);
         let mut cache = HistoryLayoutCache::default();
         let actions = view.scroll(-1, "thread", &mut cache, 1024 * 1024);
         assert!(actions.is_empty());
@@ -1946,9 +1939,8 @@ mod completion_notice_tests {
         };
         view.navigation.scroll.width = 80;
         view.navigation.scroll.height = 10;
-        view.navigation.set_loading(true);
         view.navigation
-            .set_request(Some((view.navigation.view_revision, None)));
+            .begin_read((view.navigation.view_revision, None), None);
         let mut cache = HistoryLayoutCache::default();
         view.scroll(-2, "thread", &mut cache, 1024 * 1024);
         assert_ne!(view.navigation.anchor.node_id.as_deref(), Some("node-15"));
@@ -2062,9 +2054,8 @@ mod completion_notice_tests {
             node_id: Some("saved".into()),
             char_offset: 0,
         };
-        view.navigation.set_loading(true);
         view.navigation
-            .set_request(Some((view.navigation.view_revision, None)));
+            .begin_read((view.navigation.view_revision, None), None);
         view.navigation.scroll.pending = -4;
         let action = view.rebase_committed_stream("thread".into(), view.generation);
         assert!(matches!(action, Some(UiAction::RebaseHistory { .. })));

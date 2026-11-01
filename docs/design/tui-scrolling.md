@@ -209,3 +209,13 @@ all 19 characterizations and 41 view regressions still pass. The conservative
 combined write/transition count is temporarily 154 versus baseline147, because
 it counts both setter calls and enum writes. Next coalesce complete read-start
 transitions rather than claim improvement by excluding setter internals.
+
+Atomic read starts now set the ticket and optional deferred delta together.
+`None` preserves the old pending amount during rebasing, while `Some(delta)`
+replaces it for a newly requested scroll window. This is structural: no new
+request, replay, cancellation or frame-adoption rule. After this boundary the
+conservative source metric is 141 (85 direct mutation sites + 56 transition
+invocations), versus baseline147 (137 + 10); fields18 vs20; scroll307 vs395.
+All three measures decrease, including setter internals and relocated code.
+Remaining work is source/checkpoint transition encapsulation and then the six
+individually committed behaviour fixes; no marked expectation has changed yet.

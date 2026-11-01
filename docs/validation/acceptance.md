@@ -7534,3 +7534,16 @@ used loopback mocks. The `scripts/tests` cases also cover historical schema
 14/16 paths, an existing synthetic summary-usage row, incorrect indexes and
 invalid schema arguments. This is not a real-data, paid-provider, native
 Linux/Windows binary-upgrade, installer, or future-release qualification.
+
+## #118 Navigation structural boundaries (partial)
+
+Own-worktree macOS rust-slot validation, synthetic TestBackend fixtures only:
+baseline characterization19/0 (9f3496b3); ownership check --tests +19/0 +view41/0
+(517d24d2); enum check +19/0 +navigation2/0 +view41/0 (9c822221); extracted-step
+check +19/0 +view41/0 (42d3c823); atomic-read check +19/0 +navigation2/0 +view41/0
+(03a5b0fd). Repeated characterizations are repeated qualification, not 95 distinct
+cases. The six marked behaviours remain unchanged. Metrics include new setters
+and enum writes: 147 ->141 mutation/transition sites, 395 ->307 scroll lines,
+20 ->18 stored fields. No timing threshold, cache budget, protocol, Core, worker,
+queue or dependency change. No real terminal/clipboard, user data or paid provider
+validation. Native branch CI still required before handing this checkpoint off.
