@@ -1,6 +1,9 @@
 //! Bounded current metadata for saved notifications; never reads raw output.
 use crate::{
-    presentation::{PresentationField, PresentationKind},
+    presentation::{
+        PresentationField, PresentationKind,
+        messages::{Message, Text},
+    },
     protocol::{ApiError, ErrorCode},
     storage::StorageError,
     ui::UiNode,
@@ -141,6 +144,8 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
         node.presentation
             .fields
             .retain(|f| !f.key.starts_with(PREFIX));
+        node.presentation.ui_messages.notice = None;
+        node.presentation.ui_messages.source_error = None;
         let Some(fact) = facts.iter().find(|f| f.node_id == node.node_id) else {
             continue;
         };
@@ -212,6 +217,30 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
             node.presentation.metadata_limited = true;
         }
         node.presentation.fields.extend(fields);
+        let source_error = (fact.kind == "shell_ended"
+            && (fact.source.is_none() || fact.source_deleted.is_some()))
+        .then_some(Text::NoticeSourceUnavailable);
+        let notice = if fact.kind == "shell_ended" {
+            if fact.available_execution.is_none() || fact.group.is_none() {
+                Message::Text(Text::NoticeCallUnavailable)
+            } else {
+                Message::CommandNotice {
+                    command: fact.command.as_deref().map(clean).filter(|s| !s.is_empty()),
+                    background: fact.background,
+                }
+            }
+        } else if fact.deleted.is_some() {
+            Message::Text(Text::NoticeDeletedThread)
+        } else if fact.available_thread.is_none() {
+            Message::Text(Text::NoticeThreadUnavailable)
+        } else {
+            Message::ThreadNotice {
+                title: fact.title.as_deref().map(clean).filter(|s| !s.is_empty()),
+            }
+        };
+        node.presentation
+            .ui_messages
+            .set_notice(notice, source_error);
         node.presentation.bound_metadata();
     }
 }
@@ -269,6 +298,73 @@ mod tests {
             .find(|f| f.key == format!("{PREFIX}{key}"))
             .map(|f| f.value.as_str())
     }
+    #[test]
+    fn typed_current_notices_preserve_serialized_fields_and_clear_stale_facts() {
+        let db = fixture();
+        let ids = vec![
+            "node-shell".into(),
+            "node-child-notice".into(),
+            "node-missing".into(),
+        ];
+        let mut facts = read_tx(&db, &ids).unwrap();
+        let mut nodes = vec![node("shell"), node("child-notice"), node("missing")];
+        apply(&mut nodes, &facts);
+        assert_eq!(
+            nodes[0].presentation.ui_messages.notice,
+            Some(Message::CommandNotice {
+                command: Some("printf CORRECT".into()),
+                background: Some(true),
+            })
+        );
+        assert_eq!(
+            nodes[1].presentation.ui_messages.notice,
+            Some(Message::ThreadNotice {
+                title: Some("same".into()),
+            })
+        );
+        assert_eq!(
+            nodes[2].presentation.ui_messages.notice,
+            Some(Message::Text(Text::NoticeThreadUnavailable))
+        );
+        let serialized = serde_json::to_value(&nodes[0].presentation).unwrap();
+        let mut without_typed = nodes[0].presentation.clone();
+        without_typed.ui_messages.notice = None;
+        without_typed.ui_messages.source_error = None;
+        assert_eq!(serialized, serde_json::to_value(&without_typed).unwrap());
+
+        let shell = facts
+            .iter_mut()
+            .find(|fact| fact.node_id == "node-shell")
+            .unwrap();
+        shell.source = None;
+        shell.group = None;
+        let child = facts
+            .iter_mut()
+            .find(|fact| fact.node_id == "node-child-notice")
+            .unwrap();
+        child.deleted = Some("now".into());
+        apply(&mut nodes, &facts);
+        assert_eq!(
+            nodes[0].presentation.ui_messages.notice,
+            Some(Message::Text(Text::NoticeCallUnavailable))
+        );
+        assert_eq!(
+            nodes[0].presentation.ui_messages.source_error,
+            Some(Text::NoticeSourceUnavailable)
+        );
+        assert!(value(&nodes[0], "source_error").is_some());
+        assert_eq!(
+            nodes[1].presentation.ui_messages.notice,
+            Some(Message::Text(Text::NoticeDeletedThread))
+        );
+        apply(&mut nodes, &[]);
+        for node in &nodes {
+            assert_eq!(node.presentation.ui_messages.notice, None);
+            assert_eq!(node.presentation.ui_messages.source_error, None);
+            assert_eq!(value(node, "title"), None);
+        }
+    }
+
     #[test]
     fn exact_execution_and_run_sources_use_one_bounded_metadata_statement() {
         let db = fixture();
