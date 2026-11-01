@@ -5524,7 +5524,8 @@ impl UiState {
     }
     /// Publish derived frame geometry without changing the durable source anchor.
     fn project_viewport(&mut self, layout: &HistoryLayout, width: u16, height: u16) -> usize {
-        self.active_view_mut().project_viewport(layout, width, height)
+        self.active_view_mut()
+            .project_viewport(layout, width, height)
     }
     fn scroll(&mut self, amount: isize) -> Vec<UiAction> {
         let budget = usize::try_from(self.config.cache.layout_bytes).unwrap_or(usize::MAX);

@@ -5,8 +5,8 @@
 //! `moved_during_read`, `initialized`) do today, before any refactor. They drive
 //! the real `UiState` input/update path, never set the flags directly except to
 //! build a starting position, and compare the flag tuple plus visible rows.
-//! Expected values record current behaviour, not a reviewed ideal. Cases that
-//! look doubtful carry `// characterization: current behaviour, see #118`.
+//! The six initially doubtful cases now encode reviewed behaviour; the adopted
+//! reasons and per-case measurements are recorded in docs/design/tui-scrolling.md.
 use super::*;
 use crossterm::event::{Event, KeyEvent, MouseEvent, MouseEventKind};
 use ratatui::{Terminal, backend::TestBackend};
@@ -705,22 +705,50 @@ fn render_publishes_only_derived_viewport_cache_and_then_settles() {
     rows(&mut ui, &mut t);
     assert_eq!(ui.view().navigation.scroll.width, 38);
     assert_eq!(ui.view().navigation.scroll.height, 26);
-    assert_eq!((ui.view().navigation.anchor.clone(), snap(&ui)), authoritative);
+    assert_eq!(
+        (ui.view().navigation.anchor.clone(), snap(&ui)),
+        authoritative
+    );
 }
 
 #[test]
 fn paused_anchor_beyond_a_true_end_is_clamped_to_a_full_last_page_on_render() {
-    // characterization: current behaviour, see #118
-    // A paused anchor near the end of a fully cached thread leaves a blank
-    // tail; render pulls the row back to `lines - height` (the "true end" clamp
-    // duplicated in project_viewport and scroll), but leaves `follow` false.
+    // Full-page EOF projection must not replace the paused source anchor.
     let (mut ui, mut t) = single(200);
     let tail = rows(&mut ui, &mut t);
     set_anchor(&mut ui, "long", numbered("R", 199).chars().count());
+    let anchor = ui.view().navigation.anchor.clone();
+    let revision = ui.view().navigation.view_revision;
     let screen = rows(&mut ui, &mut t);
+    assert_eq!(ui.view().navigation.anchor, anchor);
+    assert_eq!(ui.view().navigation.view_revision, revision);
     assert_eq!(screen, tail);
     assert!(
         !ui.view().navigation.follow(),
         "clamp does not restore follow"
     );
+    let grown = numbered("R", 230);
+    ui.apply(UiUpdate::Stream {
+        thread_id: THREAD.into(),
+        generation: ui.view().generation,
+        node_id: "long".into(),
+        role: "assistant".into(),
+        total_chars: grown.chars().count(),
+        text: grown,
+        base_char_offset: 0,
+        reasoning_ranges: vec![],
+        presentation: Default::default(),
+        ack: None,
+    });
+    let grown_screen = rows(&mut ui, &mut t);
+    assert_eq!(first_text(&grown_screen), "R199");
+    assert_ne!(last_text(&grown_screen), "R229");
+    assert_eq!(ui.view().navigation.anchor, anchor);
+    assert!(!ui.view().navigation.follow() && ui.view().navigation.unseen());
+
+    let mut partial = node("long", numbered("R", 100));
+    partial.total_chars = numbered("R", 200).chars().count();
+    let (mut ui, mut t) = fixture(vec![partial], 1, 0, 60, 33);
+    set_anchor(&mut ui, "long", numbered("R", 99).chars().count());
+    assert_eq!(first_text(&rows(&mut ui, &mut t)), "R099", "not true EOF");
 }
