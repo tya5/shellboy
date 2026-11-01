@@ -163,7 +163,7 @@ impl UiState {
         };
         let source = layout.sources.get(top);
         let view = self.active_view_mut();
-        view.cancel_navigation();
+        view.rebase_navigation();
         view.items.active = true;
         view.items.focus = Some(item.key.clone());
         view.history_focus_item = Some(item);

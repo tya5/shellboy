@@ -3200,7 +3200,13 @@ impl UiState {
                     .view_for(&thread_id, generation)
                     .filter(|v| view_revision.is_none_or(|revision| revision == v.view_revision))
                 {
-                    view.on_load_failed(message.clone());
+                    if view_revision.is_none() && view.scroll.request.is_some() {
+                        // A background refresh failure does not own the in-flight window read.
+                        view.status = message.clone();
+                        view.promote_status_notice(history_interaction::NoticeKind::Failure);
+                    } else {
+                        view.on_load_failed(message.clone());
+                    }
                     if selected && let Some(details) = &mut self.details {
                         details.mark_stale(&format!("更新失敗 · 前回の観測値: {message}"));
                     }
@@ -3557,6 +3563,49 @@ impl UiState {
     }
 
     pub fn action_rejected(&mut self, action: &UiAction) {
+        let navigation = match action {
+            UiAction::LoadNodeWindow {
+                thread_id,
+                generation,
+                view_revision,
+                node_id,
+                ..
+            } => Some((
+                thread_id.as_str(),
+                *generation,
+                *view_revision,
+                Some(node_id.as_str()),
+            )),
+            UiAction::LoadHistoryWindow {
+                thread_id,
+                generation,
+                view_revision,
+                ..
+            } => Some((thread_id.as_str(), *generation, *view_revision, None)),
+            _ => None,
+        };
+        if let Some((thread, generation, revision, node)) = navigation {
+            if let Some(view) = self
+                .views
+                .values_mut()
+                .find(|view| view.matches_navigation_reply(thread, generation, revision, node))
+            {
+                view.loading = false;
+                view.scroll.request = None;
+                view.scroll.moved_during_read = false;
+                view.status = "履歴の取得は未受付です。スクロールで再試行できます".into();
+                self.dirty = true;
+                return;
+            }
+            // A stale rejection must not disturb a newer navigation read.
+            if self
+                .views
+                .values()
+                .any(|view| view.matches(thread, generation) && view.scroll.request.is_some())
+            {
+                return;
+            }
+        }
         if let UiAction::ObserveInspection {
             context,
             target,
@@ -3943,6 +3992,7 @@ impl UiState {
         view.live_work.accept(None, Instant::now());
         view.scroll.request = None;
         view.scroll.pending = 0;
+        view.scroll.moved_during_read = false;
         view.loading = true;
         actions.push(UiAction::SelectThread {
             thread_id: thread_id.clone(),

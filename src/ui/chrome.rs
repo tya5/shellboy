@@ -244,7 +244,7 @@ pub(super) fn footer_lines(
     if let Some(gap) = view.activity.receive_gap_note(std::time::Instant::now()) {
         facts.push(gap);
     }
-    if view.loading {
+    if view.loading && view.scroll.request.is_none() {
         facts.push("…".into());
     }
     let facts = fit(
@@ -265,6 +265,9 @@ pub(super) fn footer_lines(
         activity_spans.push(Span::styled(facts, Style::default().fg(palette.muted())));
     }
     let (hint, error) = notice.unwrap_or((hints, false));
+    let navigation_hint = (view.loading && view.scroll.request.is_some() && !error)
+        .then(|| format!("履歴読込中 · {hint}"));
+    let hint = navigation_hint.as_deref().unwrap_or(hint);
     let notice_style = if error && !palette.plain() {
         Style::default().fg(super::theme::ATTENTION)
     } else {

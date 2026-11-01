@@ -71,6 +71,7 @@ pub(super) struct VisualScroll {
     pub(super) revision: u64,
     pub(super) pending: isize,
     pub(super) request: Option<(u64, Option<String>)>,
+    pub(super) moved_during_read: bool,
     pub(super) focus: Option<String>,
     pub(super) initialized: bool,
     pub(super) origin: usize,
@@ -87,6 +88,7 @@ impl Default for VisualScroll {
             revision: 0,
             pending: 0,
             request: None,
+            moved_during_read: false,
             focus: None,
             initialized: false,
             origin: 0,
@@ -221,7 +223,13 @@ impl ThreadView {
             self.loading = false;
         }
         self.scroll.pending = 0;
+        self.scroll.moved_during_read = false;
         self.view_revision = self.view_revision.wrapping_add(1);
+    }
+    pub(super) fn rebase_navigation(&mut self) {
+        let pending = self.scroll.pending;
+        self.cancel_navigation();
+        self.scroll.pending = pending;
     }
     pub(super) fn clear_tool_observation(&mut self) -> Option<UiAction> {
         let existed = self.tool_observation_scope.take().is_some();
@@ -523,11 +531,19 @@ impl ThreadView {
         cache: &mut HistoryLayoutCache,
         budget: usize,
     ) -> Vec<UiAction> {
+        let amount = if self.scroll.request.is_none() {
+            amount.saturating_add(std::mem::take(&mut self.scroll.pending))
+        } else {
+            amount
+        };
         let following = self.follow;
         if self.committed_preview.is_some()
             && !self.history_rebase_pending
             && let Some(action) = self.rebase_preview()
         {
+            // Replay the initiating movement after the committed stream has a
+            // durable anchor, just like movement arriving while the read runs.
+            self.scroll.pending = self.scroll.pending.saturating_add(amount);
             return vec![action];
         }
         // Projection changes must advance through cached nodes without nesting
@@ -538,6 +554,52 @@ impl ThreadView {
             }
             if self.loading {
                 if self.scroll.request.is_some() {
+                    if self.scroll.pending != 0 {
+                        if self.scroll.pending.signum() == amount.signum() {
+                            self.scroll.pending = self.scroll.pending.saturating_add(amount);
+                            return vec![];
+                        }
+                        // Reversing direction cancels navigation that could not
+                        // yet be applied, rather than replaying it after the read.
+                        self.scroll.pending = 0;
+                    }
+                    let (width, height) = (self.scroll.width, self.scroll.height);
+                    let layout = self.history_layout(view_key, cache, budget, width, height);
+                    let top = self.viewport_row(&layout, width, height);
+                    let max = layout.lines.saturating_sub(usize::from(height));
+                    let target = top.saturating_add_signed(amount).min(max.max(top));
+                    if target != top
+                        && let (Some(from), Some(to)) =
+                            (layout.sources.get(top), layout.sources.get(target))
+                        && let Some(node) = self.nodes.get(to.node)
+                        && ((from.node == to.node
+                            && !node.text.is_empty()
+                            && to.offset >= node.base_char_offset
+                            && to.offset < node.base_char_offset + node.text.chars().count())
+                            || (from.node.min(to.node)..=from.node.max(to.node)).all(|index| {
+                                let node = &self.nodes[index];
+                                self.closed_tool_source(node)
+                                    || (!node.presentation.body_evicted
+                                        && node.base_char_offset == 0
+                                        && node.text.chars().count() >= node.total_chars)
+                            }))
+                    {
+                        self.anchor = ViewAnchor {
+                            node_id: Some(node.node_id.clone()),
+                            char_offset: to.offset,
+                        };
+                        let first = layout
+                            .sources
+                            .iter()
+                            .position(|row| row.node == to.node && row.offset == to.offset)
+                            .unwrap_or(target);
+                        self.scroll.within = target.saturating_sub(first);
+                        self.scroll.row = target;
+                        self.scroll.anchor = self.anchor.clone();
+                        self.scroll.moved_during_read = true;
+                        self.follow = false;
+                        return vec![];
+                    }
                     self.scroll.pending = self.scroll.pending.saturating_add(amount);
                     return vec![];
                 }
@@ -1302,7 +1364,7 @@ impl ThreadView {
             reasoning_ranges: node.reasoning_ranges.clone(),
             presentation: Default::default(),
         };
-        self.cancel_navigation();
+        self.rebase_navigation();
         self.history_rebase_pending = true;
         self.loading = true;
         self.scroll.request = Some((self.view_revision, None));
@@ -1330,7 +1392,7 @@ impl ThreadView {
         {
             // Keep this frame while resolving real ordinals and source
             // offsets. No provisional ID is sent to history.get.
-            self.cancel_navigation();
+            self.rebase_navigation();
             self.history_rebase_pending = true;
             self.loading = true;
             self.scroll.request = Some((self.view_revision, None));
@@ -1352,8 +1414,11 @@ impl ThreadView {
     pub(super) fn on_load_failed(&mut self, message: String) {
         self.history_rebase_pending = false;
         self.loading = false;
-        self.scroll.pending = 0;
+        if self.scroll.request.is_none() {
+            self.scroll.pending = 0;
+        }
         self.scroll.request = None;
+        self.scroll.moved_during_read = false;
         self.status = message;
         self.promote_status_notice(history_interaction::NoticeKind::Failure);
     }
@@ -1521,7 +1586,7 @@ impl ThreadView {
         self.selection_revision = selection_revision;
         self.total_nodes = total_nodes;
         if !window_reply
-            || (self.history_rebase_pending && self.anchor != anchor)
+            || (self.history_rebase_pending && !self.scroll.moved_during_read)
             || !self
                 .nodes
                 .iter()
@@ -1532,6 +1597,7 @@ impl ThreadView {
         }
         self.before_cursor = None;
         self.loading = false;
+        self.scroll.moved_during_read = false;
         if self.history_rebase_pending {
             self.history_rebase_pending = false;
             self.status = if relocated {
@@ -1557,7 +1623,7 @@ impl ThreadView {
         {
             return None;
         }
-        self.cancel_navigation();
+        self.rebase_navigation();
         self.history_rebase_pending = true;
         self.loading = true;
         self.scroll.request = Some((self.view_revision, None));
@@ -1934,6 +2000,7 @@ impl ThreadView {
     pub(super) fn finish_navigation_reply(&mut self) -> isize {
         self.scroll.initialized = false;
         self.scroll.request = None;
+        self.scroll.moved_during_read = false;
         std::mem::take(&mut self.scroll.pending)
     }
 }
@@ -2029,7 +2096,7 @@ impl ThreadView {
             self.scroll.initialized = false;
             return None;
         }
-        self.cancel_navigation();
+        self.rebase_navigation();
         self.history_rebase_pending = true;
         self.loading = true;
         self.scroll.request = Some((self.view_revision, None));
@@ -2240,6 +2307,361 @@ mod completion_notice_tests {
         assert_eq!(ui.view().status, "verified source");
     }
     #[test]
+    fn read_failure_keeps_queued_navigation_for_explicit_retry() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.loading = true;
+        view.scroll.request = Some((view.view_revision, None));
+        view.scroll.pending = -3;
+        view.on_load_failed("read permit unavailable".into());
+        assert!(!view.loading);
+        assert!(view.scroll.request.is_none());
+        assert_eq!(view.scroll.pending, -3);
+        assert_eq!(view.status, "read permit unavailable");
+    }
+    #[test]
+    fn unrelated_refresh_failure_does_not_cancel_navigation_read() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("thread".into());
+        let generation = ui.view().generation;
+        let revision = ui.view().view_revision;
+        ui.view_mut().loading = true;
+        ui.view_mut().scroll.request = Some((revision, None));
+        ui.view_mut().scroll.pending = -3;
+        ui.apply(UiUpdate::LoadFailed {
+            thread_id: "thread".into(),
+            generation,
+            view_revision: None,
+            message: "background refresh failed".into(),
+        });
+        assert!(ui.view().loading);
+        assert_eq!(ui.view().scroll.request, Some((revision, None)));
+        assert_eq!(ui.view().scroll.pending, -3);
+        assert_eq!(ui.view().status, "background refresh failed");
+    }
+    #[test]
+    fn navigation_read_has_an_explicit_footer_indicator() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.loading = true;
+        view.scroll.request = Some((view.view_revision, None));
+        let palette = crate::ui::theme::Palette::from_capabilities(
+            crate::config::PaletteMode::Dark,
+            false,
+            true,
+        );
+        let text = crate::ui::chrome::footer_lines(&view, 100, "", palette, vec![], None)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("履歴読込中"), "{text}");
+    }
+    #[test]
+    fn cached_rows_remain_navigable_during_a_pending_read() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let text = (0..100)
+            .map(|i| format!("cached line {i:03}\n"))
+            .collect::<String>();
+        let offset = "cached line 000\n".len() * 50;
+        view.nodes = vec![UiNode {
+            node_id: "saved".into(),
+            role: "assistant".into(),
+            text: text.clone(),
+            total_chars: text.chars().count(),
+            ..Default::default()
+        }];
+        view.thread_id = Some("thread".into());
+        view.total_nodes = 2;
+        view.follow = false;
+        view.anchor = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: offset,
+        };
+        view.scroll.width = 80;
+        view.scroll.height = 10;
+        view.loading = true;
+        view.scroll.request = Some((view.view_revision, None));
+        let mut cache = HistoryLayoutCache::default();
+        let actions = view.scroll(-1, "thread", &mut cache, 1024 * 1024);
+        assert!(actions.is_empty());
+        assert!(
+            view.anchor.char_offset < offset,
+            "cached rows should move during the read"
+        );
+        assert!(
+            view.scroll.request.is_some(),
+            "the original read stays owned"
+        );
+    }
+    #[test]
+    fn pending_read_allows_cached_movement_across_nodes() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.nodes = (0..30)
+            .map(|i| {
+                let text = format!("cached item {i:02}");
+                UiNode {
+                    node_id: format!("node-{i:02}"),
+                    role: "assistant".into(),
+                    total_chars: text.chars().count(),
+                    text,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        view.thread_id = Some("thread".into());
+        view.total_nodes = 31;
+        view.follow = false;
+        view.anchor = ViewAnchor {
+            node_id: Some("node-15".into()),
+            char_offset: 0,
+        };
+        view.scroll.width = 80;
+        view.scroll.height = 10;
+        view.loading = true;
+        view.scroll.request = Some((view.view_revision, None));
+        let mut cache = HistoryLayoutCache::default();
+        view.scroll(-2, "thread", &mut cache, 1024 * 1024);
+        assert_ne!(view.anchor.node_id.as_deref(), Some("node-15"));
+        assert!(view.scroll.request.is_some());
+    }
+    #[test]
+    fn stopped_growth_near_tail_keeps_up_navigation_available() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let text = (0..100)
+            .map(|i| format!("cached line {i:03}\n"))
+            .collect::<String>();
+        view.nodes = vec![UiNode {
+            node_id: "saved".into(),
+            role: "assistant".into(),
+            text: text.clone(),
+            total_chars: text.chars().count(),
+            ..Default::default()
+        }];
+        view.thread_id = Some("thread".into());
+        view.total_nodes = 1;
+        view.follow = false;
+        view.anchor = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: "cached line 000\n".len() * 80,
+        };
+        view.scroll.width = 80;
+        view.scroll.height = 10;
+        view.total_nodes = 2; // Another committed node arrives while paused.
+        let mut cache = HistoryLayoutCache::default();
+        let actions = view.scroll(30, "thread", &mut cache, 1024 * 1024);
+        assert!(matches!(
+            actions.as_slice(),
+            [UiAction::LoadHistoryWindow { .. }]
+        ));
+        let before = view.anchor.char_offset;
+        view.scroll(-1, "thread", &mut cache, 1024 * 1024);
+        assert!(
+            view.anchor.char_offset < before,
+            "up remains usable before the read returns"
+        );
+        assert_eq!(
+            view.scroll.pending, 0,
+            "opposite input cancels queued forward movement"
+        );
+        assert_eq!(
+            view.finish_navigation_reply(),
+            0,
+            "a late reply cannot replay the cancelled movement"
+        );
+    }
+    #[test]
+    fn rebase_reply_keeps_newer_cached_movement_on_the_same_source() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let text = "source line\n".repeat(100);
+        let node = UiNode {
+            node_id: "saved".into(),
+            role: "assistant".into(),
+            text: text.clone(),
+            total_chars: text.chars().count(),
+            ..Default::default()
+        };
+        view.nodes = vec![node.clone()];
+        view.follow = false;
+        view.anchor = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: 100,
+        };
+        view.history_rebase_pending = true;
+        view.scroll.moved_during_read = true;
+        let old = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: 200,
+        };
+        view.on_history_window(vec![node], 0, 0, 1, old, true);
+        assert_eq!(
+            view.anchor.char_offset, 100,
+            "late reply must not undo cached movement"
+        );
+    }
+    #[test]
+    fn rebase_reply_uses_authoritative_offset_without_newer_movement() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        let text = "source line\n".repeat(100);
+        let node = UiNode {
+            node_id: "saved".into(),
+            role: "assistant".into(),
+            text: text.clone(),
+            total_chars: text.chars().count(),
+            ..Default::default()
+        };
+        view.nodes = vec![node.clone()];
+        view.follow = false;
+        view.anchor = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: 100,
+        };
+        view.history_rebase_pending = true;
+        let mapped = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: 200,
+        };
+        view.on_history_window(vec![node], 0, 0, 1, mapped, true);
+        assert_eq!(view.anchor.char_offset, 200);
+    }
+    #[test]
+    fn stream_commit_rebase_does_not_discard_queued_navigation() {
+        let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
+        view.thread_id = Some("thread".into());
+        view.follow = false;
+        view.anchor = ViewAnchor {
+            node_id: Some("saved".into()),
+            char_offset: 0,
+        };
+        view.loading = true;
+        view.scroll.request = Some((view.view_revision, None));
+        view.scroll.pending = -4;
+        let action = view.rebase_committed_stream("thread".into(), view.generation);
+        assert!(matches!(action, Some(UiAction::RebaseHistory { .. })));
+        assert_eq!(
+            view.scroll.pending, -4,
+            "rebase must preserve queued movement"
+        );
+    }
+    #[test]
+    fn rejected_navigation_releases_only_the_matching_read_and_keeps_movement() {
+        for node_window in [false, true] {
+            let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+            ui.select_thread("thread".into());
+            let generation = ui.view().generation;
+            let revision = ui.view().view_revision;
+            let node = node_window.then(|| "node".to_owned());
+            ui.view_mut().loading = true;
+            ui.view_mut().scroll.request = Some((revision, node.clone()));
+            ui.view_mut().scroll.pending = -3;
+            let action = if node_window {
+                UiAction::LoadNodeWindow {
+                    thread_id: "thread".into(),
+                    generation,
+                    view_revision: revision,
+                    node_id: "node".into(),
+                    char_offset: 0,
+                }
+            } else {
+                UiAction::LoadHistoryWindow {
+                    thread_id: "thread".into(),
+                    generation,
+                    view_revision: revision,
+                    ordinal: 0,
+                    char_offset: 0,
+                    from_end: false,
+                    selection_revision: 0,
+                }
+            };
+            ui.action_rejected(&action);
+            assert!(
+                !ui.view().loading,
+                "rejected read must not leave loading set"
+            );
+            assert!(ui.view().scroll.request.is_none());
+            assert!(
+                ui.view().scroll.pending != 0 || !ui.take_deferred_actions().is_empty(),
+                "unconsumed movement must be retained or retried"
+            );
+        }
+    }
+    #[test]
+    fn initiating_scroll_is_replayed_after_stream_rebase() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("thread".into());
+        let generation = ui.view().generation;
+        let text = (0..100)
+            .map(|i| format!("source line {i:03}\n"))
+            .collect::<String>();
+        ui.apply(UiUpdate::Stream {
+            thread_id: "thread".into(),
+            generation,
+            node_id: "attempt".into(),
+            role: "assistant".into(),
+            text: text.clone(),
+            base_char_offset: 0,
+            total_chars: text.chars().count(),
+            reasoning_ranges: vec![],
+            presentation: Default::default(),
+            ack: None,
+        });
+        let offset = "source line 000\n".len() * 50;
+        ui.view_mut().follow = false;
+        ui.view_mut().scroll.width = 80;
+        ui.view_mut().scroll.height = 10;
+        ui.view_mut().anchor = ViewAnchor {
+            node_id: Some("attempt".into()),
+            char_offset: offset,
+        };
+        ui.apply(UiUpdate::StreamCommitted {
+            thread_id: "thread".into(),
+            generation,
+            attempt_id: "attempt".into(),
+            node_id: "saved".into(),
+        });
+        let original = ui.take_deferred_actions().pop().unwrap();
+        ui.action_rejected(&original);
+        let key = ui.active.clone();
+        let actions =
+            ui.views
+                .get_mut(&key)
+                .unwrap()
+                .scroll(-1, &key, &mut ui.layout_cache, 1024 * 1024);
+        assert!(matches!(actions.as_slice(), [UiAction::RebaseStream(_)]));
+        let revision = ui.view().view_revision;
+        let saved = UiNode {
+            node_id: "saved".into(),
+            role: "assistant".into(),
+            text: text.clone(),
+            total_chars: text.chars().count(),
+            ..Default::default()
+        };
+        ui.apply(UiUpdate::HistoryWindow {
+            thread_id: "thread".into(),
+            generation,
+            view_revision: revision,
+            nodes: vec![saved],
+            pending: Default::default(),
+            read_revision: 0,
+            first_ordinal: 0,
+            selection_revision: 0,
+            total_nodes: 1,
+            anchor: ViewAnchor {
+                node_id: Some("saved".into()),
+                char_offset: offset,
+            },
+        });
+        assert!(!ui.view().follow);
+        assert!(
+            ui.view().anchor.char_offset < offset,
+            "movement must survive the read"
+        );
+        assert_eq!(ui.view().scroll.pending, 0);
+    }
+    #[test]
     fn rejected_stream_rebase_can_retry_and_follow_completion_releases_its_correspondence() {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
@@ -2282,6 +2704,7 @@ mod completion_notice_tests {
         assert!(
             matches!(retry.as_slice(),[UiAction::RebaseStream(request)]if request.source.text=="bounded source"&&request.anchor.char_offset==7)
         );
+        assert_eq!(ui.view().scroll.pending, 1);
         let old_revision = ui.view().view_revision;
         ui.event(Event::Key(KeyEvent::new(
             KeyCode::End,
