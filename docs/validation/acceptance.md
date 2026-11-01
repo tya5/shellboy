@@ -7707,3 +7707,13 @@ byte-identical to `4d6f128a`. Post-rebase Python 118/118 and layout 101 suites /
 watchdog pass. This supersedes the 100-suite count on the original staging base;
 only the focused native checks and CI on the final rebased source qualify the
 handoff. The reproduction example explicitly requires Linux x86_64 and Bash.
+
+The first guide-branch CI, run 41312172387 at `41483fda`, failed on both Linux
+and macOS in `all_guide_navigation_captions_match_actual_display_labels`: its
+full-catalogue count still expected 13, while the adopted guide count is now 14.
+Integration harnesses (including the new page test) passed. This was a missing
+fixture update in this change, not a timing flake. The exact count is updated
+to 14 and explicitly requires `shellboy/resource-usage` in the scanned set;
+the full caption scan, wrong-caption negative control and coverage gate remain
+unchanged. The focused caption test is added to local qualification before the
+next push; a new exact-SHA CI is required. No UI product behavior changes.
