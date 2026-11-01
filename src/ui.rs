@@ -1661,6 +1661,9 @@ impl Confirmation {
         }
     }
     fn footer(&self, language: crate::config::UiLanguage) -> String {
+        if let Some(footer) = overlay::confirmation_footer(self, language) {
+            return footer.into();
+        }
         if matches!(self, Self::ForceQuit) {
             i18n::Message::ForceQuitFooter.render(language)
         } else if let Self::ThreadDeletion(dialog) = self {
@@ -1672,6 +1675,9 @@ impl Confirmation {
         }
     }
     fn context(&self, language: crate::config::UiLanguage) -> String {
+        if let Some(context) = overlay::confirmation_context(self, language) {
+            return context.into();
+        }
         if matches!(self, Self::ForceQuit) {
             i18n::Message::ForceQuitContext.render(language)
         } else {
@@ -1679,6 +1685,9 @@ impl Confirmation {
         }
     }
     fn title(&self, language: crate::config::UiLanguage) -> String {
+        if let Some(title) = overlay::confirmation_title(self, language) {
+            return title.into();
+        }
         if matches!(self, Self::ForceQuit) {
             i18n::Message::ForceQuitTitle.render(language)
         } else {
@@ -1692,6 +1701,9 @@ impl Confirmation {
             .collect()
     }
     fn text(&self, language: crate::config::UiLanguage) -> String {
+        if let Some(text) = overlay::confirmation_text(self, language) {
+            return text;
+        }
         match self {
             Confirmation::Watch(target) => format!(
                 "表示中の保存済み対象を{}しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
@@ -6740,9 +6752,34 @@ mod layout_cache_tests {
         assert_eq!(ui.management.structured().unwrap().selected, 1);
     }
     #[test]
+    fn confirmation_helpers_are_used_by_the_real_bilingual_screen() {
+        fn configure(ui: &mut UiState) {
+            ui.confirmation = Some(Confirmation::StaleIndex {
+                detail: "INDEX-ID".into(),
+            });
+        }
+        fn expected(language: crate::config::UiLanguage) -> &'static [&'static str] {
+            match language {
+                crate::config::UiLanguage::En => &[
+                    "Confirm action",
+                    "cannot execute",
+                    "INDEX-ID",
+                    "Review again",
+                ],
+                crate::config::UiLanguage::Ja => {
+                    &["実行の確認", "実行できません", "INDEX-ID", "再確認が必要"]
+                }
+            }
+        }
+        i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn long_confirmation_can_be_read_without_accepting_it() {
         use ratatui::{Terminal, backend::TestBackend};
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.confirmation = Some(Confirmation::Operation {
             command: Command::ThreadGet(ThreadTarget {
                 thread_id: Some("fixture".into()),
