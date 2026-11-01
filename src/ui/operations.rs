@@ -827,21 +827,18 @@ impl Operations {
                 .iter()
                 .position(|kind| *kind == OpKind::ALL[self.selected])
                 .unwrap_or(0);
-            let source = match (
-                self.language,
-                self.context.thread.is_empty(),
-                self.context.phase,
-            ) {
-                (UiLanguage::En, true, _) => "New conversation",
-                (UiLanguage::En, false, ActivityPhase::Recovery) => {
+            let source = if self.context.thread.is_empty() {
+                local!(self.language, "新しい会話", "New conversation")
+            } else if self.context.phase == ActivityPhase::Recovery {
+                local!(
+                    self.language,
+                    "復旧待ちの会話",
                     "Conversation awaiting recovery"
-                }
-                (UiLanguage::En, false, phase) if phase.is_active() => "Running conversation",
-                (UiLanguage::En, false, _) => "Current conversation",
-                (UiLanguage::Ja, true, _) => "新しい会話",
-                (UiLanguage::Ja, false, ActivityPhase::Recovery) => "復旧待ちの会話",
-                (UiLanguage::Ja, false, phase) if phase.is_active() => "実行中の会話",
-                (UiLanguage::Ja, false, _) => "この会話",
+                )
+            } else if self.context.phase.is_active() {
+                local!(self.language, "実行中の会話", "Running conversation")
+            } else {
+                local!(self.language, "この会話", "Current conversation")
             };
             let cli = rows
                 .get(selected)
@@ -890,13 +887,10 @@ impl Operations {
                 for (action, kind) in rows.iter().enumerate() {
                     let section = self.section(*kind);
                     if self.filter.is_empty() && previous != Some(section) {
-                        let header = match (self.language, section) {
-                            (UiLanguage::En, 0) => "For this conversation",
-                            (UiLanguage::En, 1) => "Common actions",
-                            (UiLanguage::En, _) => "Other actions",
-                            (UiLanguage::Ja, 0) => "この会話で",
-                            (UiLanguage::Ja, 1) => "よく使う",
-                            (UiLanguage::Ja, _) => "その他の操作",
+                        let header = match section {
+                            0 => local!(self.language, "この会話で", "For this conversation"),
+                            1 => local!(self.language, "よく使う", "Common actions"),
+                            _ => local!(self.language, "その他の操作", "Other actions"),
                         };
                         items.push(ListItem::new(
                             Line::from(header).style(Style::default().fg(theme::MUTED)),
