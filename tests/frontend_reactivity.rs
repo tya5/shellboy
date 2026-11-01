@@ -664,7 +664,13 @@ async fn foreign_cli_queue_cancel_recovery_and_run_stop_repaint_without_input() 
 async fn real_cli_raw_gc_updates_open_f6_without_input_or_source_rewrite() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use sha2::{Digest, Sha256};
-    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    let mut fixture = Fixture::build_in(
+        "http://127.0.0.1:9/v1",
+        false,
+        false,
+        shellboy::config::UiLanguage::Ja,
+    )
+    .await;
     let stamp = chrono::Utc::now().to_rfc3339();
     let original=json!({"group_id":"gc-group","item":{"type":"function_call_output","call_id":"gc-call","output":json!({"execution_id":"gc-shell","status":"exited","exit_code":0,"output":"GC_PAID_SOURCE must remain unchanged"}).to_string()}}).to_string();
     let saved = original.clone();
@@ -828,7 +834,13 @@ async fn real_cli_raw_gc_updates_open_f6_without_input_or_source_rewrite() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn real_history_gc_preserves_live_fork_sources_then_invalidates_deleted_child_f7() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    let mut fixture = Fixture::build_in(
+        "http://127.0.0.1:9/v1",
+        false,
+        false,
+        shellboy::config::UiLanguage::Ja,
+    )
+    .await;
     const CALL: &str = "f7-shared-call";
     const RESULT: &str = "f7-parent-result";
     const CALL_URL: &str = "https://example.test/CALL_F7_GC";
@@ -1784,8 +1796,9 @@ async fn model_observation_retains_success_after_one_failed_explicit_refresh() {
             stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
         }
     });
-    let mut fixture = Fixture::new(&url).await;
-    let config = Config::parse(&std::fs::read_to_string(&fixture.config).unwrap()).unwrap();
+    let mut fixture = Fixture::build_in(&url, false, false, shellboy::config::UiLanguage::Ja).await;
+    let mut config = Config::parse(&std::fs::read_to_string(&fixture.config).unwrap()).unwrap();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
     fixture.ui = UiState::new(&config, fixture.root.path().into());
     for action in fixture.ui.select_thread("reactive".into()) {
         fixture.actions.send(action).await.unwrap();
@@ -1830,7 +1843,13 @@ async fn model_observation_retains_success_after_one_failed_explicit_refresh() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn index_observation_retains_success_after_one_failed_explicit_refresh() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    let mut fixture = Fixture::build_in(
+        "http://127.0.0.1:9/v1",
+        false,
+        false,
+        shellboy::config::UiLanguage::Ja,
+    )
+    .await;
     fixture.command("/index thread").await;
     let first = fixture
         .until("first index preview", |_, screen| {
@@ -1959,7 +1978,13 @@ async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unrelated_owner_changed_invalidates_deletion_preview_without_a_new_probe() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    let mut fixture = Fixture::build_in(
+        "http://127.0.0.1:9/v1",
+        false,
+        false,
+        shellboy::config::UiLanguage::Ja,
+    )
+    .await;
     for action in fixture.ui.event(Event::Key(KeyEvent::new(
         KeyCode::Char('t'),
         KeyModifiers::CONTROL,
