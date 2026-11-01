@@ -69,6 +69,8 @@ mod index_batch;
 mod index_dimensions;
 #[path = "../input_history_backend.rs"]
 mod input_history_backend;
+#[path = "../inspection_lists.rs"]
+mod inspection_lists;
 #[path = "../instructions.rs"]
 mod instructions;
 #[path = "../message_recovery.rs"]
