@@ -3767,11 +3767,21 @@ async fn run_with_delivery(
             .and(control_result)
             .and(owner_result)
     };
-    wait_for_shutdown_delivery(&mut actions, &updates, grace, shutdown, language).await
+    wait_for_shutdown_delivery_localized(&mut actions, &updates, grace, shutdown, language).await
+}
+
+#[cfg(test)]
+async fn wait_for_shutdown_delivery<F: Future<Output = Result<(), ApiError>>>(
+    actions: &mut crate::ui::actions::ActionReceiver,
+    updates: &BufferedUpdates,
+    grace: Duration,
+    shutdown: F,
+) -> Result<(), ApiError> {
+    wait_for_shutdown_delivery_localized(actions, updates, grace, shutdown, UiLanguage::En).await
 }
 
 // Drive delivery while the shutdown future is pending, not just the active loop.
-async fn wait_for_shutdown_delivery<F: Future<Output = Result<(), ApiError>>>(
+async fn wait_for_shutdown_delivery_localized<F: Future<Output = Result<(), ApiError>>>(
     actions: &mut crate::ui::actions::ActionReceiver,
     updates: &BufferedUpdates,
     grace: Duration,

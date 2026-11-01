@@ -681,13 +681,9 @@ mod tests {
             // grace or consume this explicit force without acting on it.
             let error = tokio::time::timeout(
                 Duration::from_millis(250),
-                wait_for_shutdown_delivery(
-                    &mut actions,
-                    &out,
-                    Duration::from_secs(60),
-                    async { result },
-                    UiLanguage::En,
-                ),
+                wait_for_shutdown_delivery(&mut actions, &out, Duration::from_secs(60), async {
+                    result
+                }),
             )
             .await
             .unwrap()
@@ -710,13 +706,9 @@ mod tests {
         let (_sender, mut actions) = crate::ui::actions::channel(1);
         let producer = out.clone();
         let task = tokio::spawn(async move {
-            wait_for_shutdown_delivery(
-                &mut actions,
-                &producer,
-                Duration::from_secs(60),
-                async { Ok(()) },
-                UiLanguage::En,
-            )
+            wait_for_shutdown_delivery(&mut actions, &producer, Duration::from_secs(60), async {
+                Ok(())
+            })
             .await
         });
         tokio::task::yield_now().await;
@@ -1128,7 +1120,6 @@ mod tests {
                 &worker,
                 Duration::from_millis(20),
                 std::future::pending(),
-                UiLanguage::En,
             )
             .await
         });
