@@ -5486,7 +5486,12 @@ impl UiState {
                     vec![UiAction::WatchAction(target)]
                 } else {
                     self.thread_browser.notice(
-                        "対象が変わったため確認を取り消しました。選び直してください".into(),
+                        i18n::local!(
+                            self.config.ui.language,
+                            "対象が変わったため確認を取り消しました。選び直してください",
+                            "The target changed, so confirmation was cancelled. Select it again"
+                        )
+                        .into(),
                     );
                     vec![]
                 }
@@ -5502,8 +5507,13 @@ impl UiState {
             }) => {
                 if self.view().draft.draft_id != draft_id || self.view().draft.revision != revision
                 {
-                    self.active_view_mut().status =
-                        "下書きが変更されたため確認を取り消しました。再送してください".into();
+                    let language = self.config.ui.language;
+                    self.active_view_mut().status = i18n::local!(
+                        language,
+                        "下書きが変更されたため確認を取り消しました。再送してください",
+                        "The draft changed, so confirmation was cancelled. Send again"
+                    )
+                    .into();
                     return vec![];
                 }
                 self.send_current(Some(run_id))
