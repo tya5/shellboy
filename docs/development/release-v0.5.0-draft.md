@@ -78,6 +78,28 @@ owners, and a clearer breakdown of saved model usage.
   Automatic history embedding can be disabled with `indexing.auto_history=false`;
   existing vectors and standalone RAG are not removed or disabled.
 
+## Connection-specific request settings
+
+- Connections can set `extra_body` and `extra_headers` for provider-specific
+  options. Shellboy forwards them without interpreting their meaning. Extra
+  body fields never overwrite Shellboy-owned fields; reserved-key collisions,
+  invalid values and size limits fail configuration checks. Extra headers cannot
+  carry credential-like or transport-owned names; keep keys in `api_key_env` or
+  the existing credential settings. Extras apply to conversation/summary requests,
+  not embedding or model-list requests. Attempts retain an extras hash, not a
+  copy of their contents (#119).
+- Set `context_role = "user"` on a connection when using **Claude through
+  LiteLLM**. This is recommended for gateways that fold developer messages into
+  the system prompt and then reject an assistant-ending conversation. The default
+  remains `"developer"`. The setting maps post-system developer context to user
+  role at send time, without changing its text or saved history. Restart the
+  owner after changing connection settings (#121).
+- The dialect-module reorganization is internal and keeps existing Responses and
+  Chat Completions behavior. Only #120 stage 1 is included: native Anthropic
+  Messages and the later opaque provider-block work are **not added** by this
+  release. Connection settings are not a real-provider/cache-effectiveness
+  guarantee; provider-specific options remain the user's responsibility.
+
 ## Other improvements
 
 - `wait` can watch several Threads settling and resume from a saved cursor, so
@@ -97,6 +119,9 @@ owners, and a clearer breakdown of saved model usage.
 
 - List/Watch viewports no longer hide promoted running rows until reopening
   (#100). Committed stop requests settle after driver ownership retires (#106).
+- Scrolling back up near the live tail no longer gets stuck after reversing
+  direction. Pending history loads preserve navigation anchors and show loading
+  feedback instead of losing the requested position (#117).
 - Context-trim markers use the outbound notice's actual size and summary (#112).
   Shell previews follow visible disclosure and output revisions, avoiding stale
   preview state after equivalent metadata changes (#99).
@@ -114,9 +139,8 @@ Windows x64, macOS Apple Silicon and Linux x64 archives include the executable,
 LICENSE, configuration example and offline documentation. Verify all three
 archives and both installer scripts against `SHA256SUMS`.
 
-Preparation only: #101 is on main; #117 scrolling reversal is pending main
-integration and is not yet claimed in these notes. Finalization requires both.
-Exact-source native CI, candidate archives/installers/checksums and final-candidate
-upgrade checks remain pending; see the v0.5.0 section in `publication.md`.
+These notes include #101 and #117 from main `1f519332`. Release-preparation CI,
+candidate archives/installers/checksums and final-candidate upgrade checks are
+separate gates; see the v0.5.0 section in `publication.md` for their status.
 No tag, GitHub Release or installed-binary replacement is performed by this
 preparation. Candidate builds and actual publication remain reviewer-owned.

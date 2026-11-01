@@ -7065,3 +7065,34 @@ No index/schema/migration, separate binary/PTY, provider or user-data work ran.
 The earlier Clippy failure and invalid zero-match chain remain in issue101 and
 /tmp logs; neither qualifies corrected code. Native3OS/latest-main integration
 is still separate. This record-only follow-up does not change the checked code.
+
+## v0.5.0 post-#117 preparation finalization
+
+The three preparation commits rebase without conflicts onto exact main
+`1f519332d9e8a09bf5d50f4eb2416e94625a4826`, including #101 and #117.
+Main's ordinary native3OS CI41265533220 is confirmed success at that exact SHA;
+it is not evidence for the new version/guide/helper preparation commits.
+Notes now include near-tail scroll reversal, retained navigation anchors and
+loading feedback from #117. Package/lock remain0.5.0; schema17/RAG3/protocol2
+are unchanged. Unmerged #107-#109/#115 work is not included or claimed complete.
+
+Finalization does not run a new binary build, release workflow, tag, installer
+or user-data operation. Prior private macOS14/16 -> 17 qualification remains
+source-qualified above, not relabeled as final-candidate-byte evidence. The
+existing candidate_ref release mode and both upgrade commands are ready for
+reviewer-authorized final-candidate checks. Preparation-branch native3OS CI is
+required before review handoff; build/release/tag/install permission is separate.
+
+### Extended release cut: #120 stage1 / #119 / #121
+
+The reviewer adds those three deliveries before final preparation qualification.
+Notes are drafted against author branches' configuration guides: extras are
+bounded/non-overriding and not semantically interpreted; credential/transport
+header exclusions remain; context_role defaults developer and user is recommended
+for Claude via LiteLLM. Mapping occurs at send time without rewriting saved
+history. Only internal dialect refactoring is included from #120, not native
+Messages or later opaque-block replay. Actual source/API verification and final
+branch CI must follow integration/rebase; author-branch docs are not a main pass.
+The #117-only preliminary tree passes Python95, layout95/watchdog, package/lock
+0.5.0 parsing and diff checks (executiondbe00421 exit0/cleanup); these results do
+not qualify the not-yet-integrated extended cut. No new build/tag/install ran.

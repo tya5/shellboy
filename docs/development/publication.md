@@ -329,16 +329,24 @@ not a new release build or an executed public-binary upgrade qualification.
 ## v0.5.0 preparation (2026-11-01, not published)
 
 The reviewer requested release preparation with push approval, using the
-[v0.5.0 notes](release-v0.5.0-draft.md) and package version 0.5.0. Finalize only
-after #101 and #117 are on main. #101 is included at base `cdcb70da`; #117 is
-still pending. The broader #41 and unmerged #107-#109/#115 work are not declared
-complete. Guide version labels and the description-generation requirement are
+[v0.5.0 notes](release-v0.5.0-draft.md) and package version 0.5.0. Both required
+fixes #101/#117 are on main `1f519332d9e8a09bf5d50f4eb2416e94625a4826`;
+preparation rebases onto it without conflicts. The reviewer additionally requires
+#120 stage1, #119 and #121 before the final cut. Their notes are drafted, but
+finalization/push/CI wait for integration and a rebase onto that exact main.
+Stage1 is internal refactoring, not native Messages/opaque-block support.
+Its ordinary native3OS
+[CI41265533220](https://github.com/tya5/shellboy/actions/runs/41265533220) is green;
+this does not qualify the preparation branch. The broader #41 and unmerged
+#107-#109/#115 work are not declared complete. Guide version labels and the
+description-generation requirement are
 aligned with the adopted model-HTTP contract; received missing labels still
 execute with command fallback and verbatim replay.
 
 ### Candidate validation plan (not results)
 
-1. Fetch/rebase the preparation branch onto main after both required fixes land.
+1. Fetch/rebase the preparation branch onto main after #101/#117 and the extended
+   cut (#120 stage1/#119/#121) land.
    Run light local checks; push the branch and dispatch ordinary `ci.yml` for
    that exact SHA. The full standard check runs in CI, not locally. Require green
    native Linux/macOS/Windows checks before review/handoff and main integration.
@@ -399,6 +407,7 @@ No final release-artifact build, installer or public v0.5.0 download check has
 run. Private macOS binary source0c9535fe passes both public14 -> 17 and synthetic
 16 -> 17 PTY upgrades; exact hashes, preservation counts and failure history are
 in [acceptance](../validation/acceptance.md#private-macos-synthetic-upgrade-qualification).
-Rerun against the exact final candidate after #117/main integration; the private
-build does not qualify final release bytes. The unmodified release workflow
+Rerun against the exact final candidate after preparation/main integration; the
+private pre-#117 build does not qualify final release bytes. Build, release, tag
+and install still require separate explicit permission. The unmodified workflow
 supplies candidate mode; no publication permission/workflow change is needed.
