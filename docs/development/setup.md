@@ -361,3 +361,13 @@ there are no performance thresholds and no cross-agent/provider comparisons.
 Stage 2 (`scripts/bench/compare.py`, same README) adds Claude Code, Codex CLI,
 opencode and jcode on the same fake model; the same `footprint` input runs its
 `compare` job, which installs pinned agents with `install_agents.py`.
+
+### Stage C language inventory
+
+`python3 scripts/dev/language-audit.py --repo . --summary` reads Japanese Rust
+string literals without changing files or contacting providers. Use the full
+JSON output for literal IDs/lines and the `--classifications` reviewed JSON map
+for explicit decisions (`category` a/b/c plus `reason`). `--check` fails while
+(c) remains, and stale reviewed IDs are errors. Conservative (c) candidates
+still require source-boundary review; never bulk-translate provider/user/saved
+content. See [the Stage C table](../validation/language-audit-stage-c.md).

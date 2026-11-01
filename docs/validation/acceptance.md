@@ -8049,3 +8049,14 @@ Local native macOS focused checks and branch Linux/macOS CI are pending at this
 entry's creation; the task handoff records exact commands, results and run ID.
 No paid model, user data, installed binary, Windows-specific behavior, or full
 bilingual UI acceptance is claimed by these synthetic tests.
+## #152 Stage C Initial Language Inventory
+
+On main13d5ac86, the read-only scanner enumerates Japanese-containing Rust
+string literals and conservatively classifies proven Japanese local!/language
+arms and test-only scopes, leaving other candidates for explicit review. Eight
+synthetic Python tests pass (raw/multiline/escaped strings, comments, lifetimes,
+bounded branches, external test modules, stable/stale IDs and no-write failures).
+The [initial per-file table](language-audit-stage-c.md) is an inventory, not a
+zero-mixing result. Core/startup/model-instruction changes, final zero-(c), En/Ja
+0/1/2/many rendering and 3-OS CI are still unverified. B-5/B-6 owner source files
+have not been edited by this preparation.

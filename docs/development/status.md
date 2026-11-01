@@ -3723,3 +3723,13 @@ and existing summary bodies remain verbatim. Summary prompt v2 separates new
 cache entries without migrating old data. UI modules and intentional Japanese
 fixtures are outside this task. Focused validation is recorded in acceptance;
 full language-mixing audit and bilingual acceptance belong to later #152 work.
+## Stage C Language Inventory (#152)
+
+The read-only Rust string inventory and synthetic lexer/classification tests
+are prepared on `issue-152/language-audit`, based on #146 main13d5ac86. Initial
+classification is recorded in the [Stage C table](../validation/language-audit-stage-c.md).
+Conservative category (c) is not zero and is not a confirmed-defect count.
+B-5/B-6 files remain read-only until #149/#150 land. W6 owns the four
+Core/startup/compaction English-only files; W1 owns this inventory and final
+mixing/rendering/plural/3-OS acceptance, which is not yet claimed. #138's three
+same-SHA Windows observations take priority.
