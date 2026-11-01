@@ -95,6 +95,9 @@ pub(super) struct LiveWorkView {
     clock_step: Option<u64>,
     pub area: Option<Rect>,
     visible_rows: usize,
+    /// Section fold and fixed body size, synced from the UI each layout (#131).
+    collapsed: bool,
+    capacity: usize,
     revision: u64,
     published: Option<(Vec<String>, Option<String>)>,
 }
@@ -227,11 +230,37 @@ impl LiveWorkView {
     fn rows(&self) -> &[LiveWorkRow] {
         self.snapshot.as_ref().map_or(&[], |s| s.rows.as_slice())
     }
+    /// Fixed body rows; an unconfigured view (no layout yet) is uncapped.
+    fn cap(&self) -> usize {
+        if self.capacity == 0 {
+            10
+        } else {
+            self.capacity
+        }
+    }
+    pub fn configure(&mut self, collapsed: bool, capacity: usize) {
+        self.collapsed = collapsed;
+        self.capacity = capacity.clamp(1, 10);
+        if collapsed {
+            self.active = false;
+            self.close();
+        }
+    }
+    fn has_work(&self) -> bool {
+        self.snapshot
+            .as_ref()
+            .is_some_and(|s| !s.rows.is_empty() || s.overflow > 0)
+    }
+    /// Heading always; a body of exactly `capacity` rows when open. The height
+    /// never depends on how much work exists (#131).
     pub fn height(&self, available: u16) -> u16 {
-        if self.snapshot.is_none() || available <= 3 {
+        if available <= 3 {
             return 0;
         }
-        let rows = self.rows().len().clamp(1, 10) as u16;
+        if self.collapsed {
+            return 2.min(available.saturating_sub(3));
+        }
+        let rows = self.cap() as u16;
         let preview = if self
             .open
             .as_ref()
@@ -245,10 +274,19 @@ impl LiveWorkView {
     }
     pub fn set_area(&mut self, area: Rect) {
         self.area = (area.height > 0).then_some(area);
-        self.visible_rows = self
-            .rows()
-            .len()
-            .min(usize::from(area.height.saturating_sub(2)));
+        self.visible_rows = if self.collapsed {
+            0
+        } else {
+            let body = usize::from(area.height.saturating_sub(2)).min(self.cap());
+            let overflow = self.snapshot.as_ref().is_some_and(|s| s.overflow > 0);
+            // A separate "他N件" line is the last body row.
+            let items = if overflow && body >= 2 {
+                body - 1
+            } else {
+                body
+            };
+            self.rows().len().min(items)
+        };
         if area.height == 0 {
             self.active = false;
         }
@@ -278,7 +316,10 @@ impl LiveWorkView {
     /// The heading's blink origin (#90): the section's existing seconds
     /// clock, only while the section is drawn.
     pub fn blink_origin(&self) -> Option<Instant> {
-        self.area.and(self.snapshot.as_ref()).and(self.clock_origin)
+        self.area
+            .filter(|_| self.has_work())
+            .and(self.snapshot.as_ref())
+            .and(self.clock_origin)
     }
     pub fn advance(&mut self, now: Instant) -> bool {
         let step = self
@@ -516,6 +557,7 @@ pub(super) fn draw(
     let counts = view
         .snapshot
         .as_ref()
+        .filter(|_| view.has_work())
         .map(|s| {
             format!(
                 " · shell {} · 子 {} · 待機 {}",
@@ -528,10 +570,15 @@ pub(super) fn draw(
         })
         .unwrap_or_default();
     let (mark, name, _) = crate::presentation::rows::RowKind::LiveWork.spec();
+    let empty_label = if view.has_work() { "" } else { " · なし" };
+    let fold = if view.collapsed { " ▸" } else { "" };
     let heading = fit(
-        &format!("{mark} {name}{hidden_label}{counts}"),
+        &format!("{mark} {name}{empty_label}{hidden_label}{counts}{fold}"),
         usize::from(area.width),
     );
+    let separate_overflow = hidden > 0
+        && view.visible_rows > 0
+        && usize::from(area.height.saturating_sub(2)) > view.visible_rows;
     let mut lines = Vec::new();
     if area.height > 1 {
         lines.push(Line::from(""));
@@ -552,12 +599,19 @@ pub(super) fn draw(
         let marker = if view.active && view.selected.as_ref() == Some(&row.target) {
             "›"
         } else {
-            "·"
+            " "
         };
+        // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
         let kind = match row.target {
-            LiveWorkTarget::Shell { .. } => "shell",
-            LiveWorkTarget::ChildRun { .. } => "子",
-            LiveWorkTarget::Wait { .. } => "待機",
+            LiveWorkTarget::Shell { .. } => "$",
+            LiveWorkTarget::ChildRun { .. } => "↳",
+            LiveWorkTarget::Wait { .. } => "⋯",
+        };
+        let last_item = index + 1 == view.visible_rows;
+        let connector = if last_item && !separate_overflow {
+            "└─"
+        } else {
+            "├─"
         };
         let elapsed = view
             .seconds
@@ -615,7 +669,7 @@ pub(super) fn draw(
                     })
             });
 
-        let extra = if index + 1 == view.visible_rows {
+        let extra = if index + 1 == view.visible_rows && !separate_overflow {
             view.snapshot.as_ref().map_or(0, |s| {
                 s.overflow
                     .saturating_add((s.rows.len() - view.visible_rows) as u64)
@@ -630,7 +684,7 @@ pub(super) fn draw(
         };
         use unicode_width::UnicodeWidthStr;
         let prefix = format!(
-            "  │ {marker} [{}] {kind} {}",
+            "{connector}[{}]{marker}{kind} {}",
             index + 1,
             linked
                 .map(|i| format!("→ [{}] ", i + 1))
@@ -668,6 +722,18 @@ pub(super) fn draw(
                 },
             ),
         ]));
+    }
+    if separate_overflow {
+        lines.push(Line::styled(
+            format!("└─ 他{hidden}件"),
+            palette.live_work(),
+        ));
+    }
+    if !view.collapsed {
+        let body = 1 + usize::from(area.height > 1) + view.cap();
+        while lines.len() < body.min(usize::from(area.height)) {
+            lines.push(Line::from(""));
+        }
     }
     if view
         .open
@@ -708,7 +774,24 @@ pub(super) fn draw(
     }
     frame.render_widget(Paragraph::new(lines), area);
 }
+/// Alt+W folds the section unless the user bound it to send or newline.
+pub(super) fn section_key_available(config: &crate::config::Config) -> bool {
+    let key = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT);
+    !super::key_matches(&config.ui.send_key, key)
+        && !config
+            .ui
+            .newline_keys
+            .iter()
+            .any(|binding| super::key_matches(binding, key))
+}
 impl UiState {
+    /// Fold or unfold the owned-work body. Remembered for this UI process.
+    pub(super) fn toggle_live_work_section(&mut self) {
+        self.live_work_collapsed = !self.live_work_collapsed;
+        let (collapsed, rows) = (self.live_work_collapsed, self.config.ui.live_work_rows);
+        self.live_work_mut().configure(collapsed, rows);
+        self.dirty = true;
+    }
     pub(super) fn live_work_key(&mut self, key: KeyEvent) -> Option<Vec<UiAction>> {
         if !self.composer_active() {
             return None;
@@ -784,6 +867,11 @@ impl UiState {
         };
         if !area.contains(ratatui::layout::Position::new(column, row)) {
             return false;
+        }
+        let heading_row = area.y + u16::from(area.height > 1);
+        if row == heading_row {
+            self.toggle_live_work_section();
+            return true;
         }
         let Some(offset) = row.saturating_sub(area.y).checked_sub(2) else {
             return true;
@@ -1112,7 +1200,8 @@ mod tests {
         let at = Instant::now();
         let mut ui = ui(at);
         ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
-        let all = snapshot(at);
+        let mut all = snapshot(at);
+        all.overflow = 0;
         let mut original = all.clone();
         original.rows.remove(2);
         let shell = original.rows[0].target.clone();
@@ -1220,14 +1309,16 @@ mod tests {
         }
         assert_eq!(view.height(4), 1);
         view.accept(None, at);
-        assert_eq!(view.height(30), 0);
+        view.configure(false, 3);
+        assert_eq!(view.height(30), 5);
+        assert_eq!(view.height(3), 0);
         assert!(view.preview.is_none());
     }
     #[test]
     fn actual_draw_and_focus_keep_live_work_separate_from_history_and_composer() {
         let at = Instant::now();
         let mut ui = ui(at);
-        let backend = ratatui::backend::TestBackend::new(80, 20);
+        let backend = ratatui::backend::TestBackend::new(80, 30);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
             .draw(|frame| super::super::draw(frame, &mut ui))
@@ -1250,7 +1341,7 @@ mod tests {
         }
         assert!(text.contains("printf synthetic-output"), "{text}");
         assert!(
-            text.contains("他1件"),
+            text.contains("他2件"),
             "exact overflow count must remain visible: {text}"
         );
         assert!(!text.contains("answered-turn"));
@@ -1272,6 +1363,7 @@ mod tests {
         let at = Instant::now();
         let mut view = LiveWorkView::default();
         let mut data = snapshot(at);
+        data.overflow = 0;
         data.rows[2].wait_info = Some(WaitInfo {
             target: Some(WaitTarget::Shell("execution".into())),
             timeout: Some(Duration::from_secs(300)),
@@ -1310,10 +1402,7 @@ mod tests {
             text.push('\n');
         }
         assert!(text.contains("◉ 抱えている作業"), "{text}");
-        assert!(
-            text.contains("[1] shell") && text.contains("→ [1]"),
-            "{text}"
-        );
+        assert!(text.contains("[1] $") && text.contains("→ [1]"), "{text}");
         assert!(
             text.contains("期限目安") && text.contains("待機中"),
             "{text}"
@@ -1420,6 +1509,7 @@ mod tests {
         let mut ui = ui(at);
         let mut source = snapshot(at);
         source.rows.swap(0, 1);
+        source.overflow = 0;
         ui.view_mut().live_work.accept(Some(source), at);
         ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
         ui.view_mut().live_work.selected = Some(LiveWorkTarget::Shell {
@@ -1496,5 +1586,146 @@ mod tests {
             view.output_age_label(0).as_deref(),
             Some(" · 最後の出力 1秒前")
         );
+    }
+
+    fn screen(ui: &mut UiState) -> (String, u16) {
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| super::super::draw(frame, ui))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let mut text = String::new();
+        for y in buffer.area.y..buffer.area.bottom() {
+            let mut x = buffer.area.x;
+            while x < buffer.area.right() {
+                let symbol = buffer[(x, y)].symbol();
+                text.push_str(symbol);
+                x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+            }
+            text.push('\n');
+        }
+        (text, ui.view().live_work.area.map_or(0, |a| a.height))
+    }
+    fn set_work(ui: &mut UiState, work: Option<LiveWorkSnapshot>, epoch: u64, at: Instant) {
+        ui.apply(UiUpdate::Activity {
+            thread_id: "thread".into(),
+            generation: ui.view().generation,
+            epoch,
+            snapshot: activity::ActivitySnapshot {
+                run_id: Some("owner".into()),
+                phase: activity::ActivityPhase::Background,
+                live_work: work,
+                ..Default::default()
+            },
+            observed_at: at,
+        });
+    }
+    #[test]
+    fn height_is_constant_across_zero_two_zero_works_and_empty_heading_does_not_blink() {
+        let at = Instant::now();
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        ui.select_thread("thread".into());
+        let (text, empty) = screen(&mut ui);
+        assert!(text.contains("◉ 抱えている作業 · なし"), "{text}");
+        assert_eq!(empty, 5);
+        assert!(ui.view().live_work.blink_origin().is_none());
+        let mut two = snapshot(at);
+        two.rows.truncate(2);
+        set_work(&mut ui, Some(two), 1, at);
+        let (text, busy) = screen(&mut ui);
+        assert!(text.contains("printf synthetic-output"), "{text}");
+        assert_eq!(busy, empty);
+        set_work(&mut ui, None, 2, at);
+        let (_, after) = screen(&mut ui);
+        assert_eq!(after, empty);
+        let mut empty_snapshot = snapshot(at);
+        empty_snapshot.rows.clear();
+        empty_snapshot.overflow = 0;
+        set_work(&mut ui, Some(empty_snapshot), 3, at);
+        screen(&mut ui);
+        assert!(ui.view().live_work.blink_origin().is_none());
+    }
+    #[test]
+    fn key_and_heading_click_toggle_between_heading_only_and_fixed_rows() {
+        for rows in [1, 5] {
+            let at = Instant::now();
+            let mut config = Config::default();
+            config.ui.live_work_rows = rows;
+            let mut ui = UiState::new(&config, PathBuf::from("/"));
+            ui.select_thread("thread".into());
+            set_work(&mut ui, Some(snapshot(at)), 1, at);
+            let (_, open) = screen(&mut ui);
+            assert_eq!(open, 2 + rows as u16);
+            let alt_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::ALT);
+            ui.key(alt_w);
+            let (text, closed) = screen(&mut ui);
+            assert_eq!(closed, 2);
+            assert!(!text.contains("printf synthetic-output"), "{text}");
+            ui.key(alt_w);
+            assert_eq!(screen(&mut ui).1, open);
+            let area = ui.view().live_work.area.unwrap();
+            assert!(ui.live_work_click(area.x + 2, area.y + 1));
+            assert_eq!(screen(&mut ui).1, 2);
+            let area = ui.view().live_work.area.unwrap();
+            assert!(ui.live_work_click(area.x + 2, area.y + 1));
+            assert_eq!(screen(&mut ui).1, open);
+        }
+    }
+
+    #[test]
+    fn kind_glyphs_are_one_column_even_under_cjk_ambiguous_width() {
+        use unicode_width::UnicodeWidthStr;
+        for glyph in ["$", "↳", "⋯", "›"] {
+            assert_eq!(glyph.width(), 1, "{glyph}");
+            assert_eq!(glyph.width_cjk(), 1, "{glyph} ambiguous under CJK");
+        }
+    }
+    fn body_lines(ui: &mut UiState) -> Vec<String> {
+        let (text, _) = screen(ui);
+        text.lines()
+            .filter(|l| l.contains("├─") || l.contains("└─"))
+            .map(str::to_owned)
+            .collect()
+    }
+    #[test]
+    fn tree_connectors_cover_single_multiple_and_overflow_rows_and_all_kinds() {
+        let at = Instant::now();
+        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        ui.select_thread("thread".into());
+        let mut one = snapshot(at);
+        one.rows.truncate(1);
+        one.overflow = 0;
+        set_work(&mut ui, Some(one), 1, at);
+        let lines = body_lines(&mut ui);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with("└─[1]") && lines[0].contains("$ printf"),
+            "{lines:?}"
+        );
+        assert!(!lines[0].contains("shell "), "{lines:?}");
+        let mut three = snapshot(at);
+        three.overflow = 0;
+        set_work(&mut ui, Some(three), 2, at);
+        let lines = body_lines(&mut ui);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines[0].starts_with("├─[1]") && lines[0].contains("$ "));
+        assert!(lines[1].starts_with("├─[2]") && lines[1].contains("↳ child task"));
+        assert!(lines[2].starts_with("└─[3]") && lines[2].contains("⋯ saved wait"));
+        // Padding rows carry no connector: same count with fewer items.
+        let mut two = snapshot(at);
+        two.rows.truncate(2);
+        two.overflow = 0;
+        set_work(&mut ui, Some(two), 3, at);
+        let lines = body_lines(&mut ui);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[1].starts_with("└─[2]"));
+        // Overflow is its own last line.
+        let mut many = snapshot(at);
+        many.overflow = 4;
+        set_work(&mut ui, Some(many), 4, at);
+        let lines = body_lines(&mut ui);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(lines[0].starts_with("├─[1]") && lines[1].starts_with("├─[2]"));
+        assert!(lines[2].starts_with("└─ 他5件"), "{lines:?}");
     }
 }

@@ -99,6 +99,19 @@ smaller terminals show a hidden count. Matching row numbers connect a wait to
 its visible target. Shift+Tab focuses a row, Space opens a shell preview, F6
 inspects it, and `o` opens a selected child. Unknown evidence remains unknown.
 
+The heading is always shown, as `◉ 抱えている作業` plus `なし` (none) when there is no work
+(no blink then). Alt+W or a click on the heading folds and unfolds the body; the
+state is kept while the UI runs and starts open. An open body is always exactly
+`ui.live_work_rows` rows, padded with blank rows, so the section height changes
+only when you toggle it or resize the terminal. Alt+W is skipped if it is bound
+as the send or newline key.
+
+Each work row is drawn as a tree entry: `├─[1] $ label` with the state and elapsed time at the right edge, with
+`└─` on the last item row. The one-column kind glyph is `$` for a shell, `↳`
+for a child Run and `⋯` for a saved wait; the same characters are used under
+`NO_COLOR` and `TERM=vt100`. A `他N件` (N more) overflow line, when shown, is the
+last row (`└─`). Blank padding rows have no connector.
+
 The composer follows displayed line count, normally limited to one quarter of screen height and at most eight lines; small screens prioritize a three-line control area. Folded pastes become short numbered chips; expand/edit/remove with `/paste NUMBER show|edit|remove`.
 
 ## Recovery-wait notification bell
@@ -161,6 +174,7 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 | Left/Right / Backspace / Delete | Move/delete by character, accounting for combining characters and emoji |
 | Up/Down | Select completion, recall sent text, or move between draft lines; see below |
 | Tab | Complete the selected slash candidate |
+| Alt+W | Fold or unfold the owned-work body (heading click does the same) |
 | Shift+Tab | Focus visible owned work above the composer; Up/Down selects, Space toggles shell output, F6 inspects, `o` opens a child, Esc returns |
 | Home / End | Start/end of the current draft line |
 | Mouse wheel | Move history three display rows, measured after wrapping |

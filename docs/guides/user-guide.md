@@ -132,6 +132,7 @@ opening the display does not run, retry or stop the command.
 | History focus | Esc / Tab | Return to the composer |
 | Conversation | F6 / F7 | Details / links for the selected item |
 | Composer | Shift+Tab | Focus visible live work above the composer |
+| Composer | Alt+W | Fold or unfold the live-work section (or click its heading) |
 | Live work | Up / Down; Space | Choose work; open/close the selected shell output |
 | Live work | F6; `o`; Esc | Inspect the selected work; open a child conversation; return to input |
 
@@ -351,6 +352,11 @@ limit is three; `ui.live_work_rows` accepts 1 through 10. Overflow
 shows a count; missing saved timing or wait evidence is not reported as zero.
 Elapsed time comes from saved start facts. Last-output age uses saved or newly
 observed output; local clocks do not poll the database.
+
+The section heading is always shown (`◉ 抱えている作業` followed by `なし` when idle). Alt+W
+or a click on the heading folds and unfolds the body; it starts open and shows
+exactly `ui.live_work_rows` rows (blank-padded), so its height changes only when
+you toggle it or resize the terminal.
 
 Use Shift+Tab or click a work row to focus it. Space toggles a shell's bounded
 output preview, F6 opens the matching inspection form, and `o` opens a selected

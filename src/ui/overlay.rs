@@ -276,7 +276,7 @@ impl UiState {
         self.send_now = false;
         actions
     }
-    fn key(&mut self, key: KeyEvent) -> Vec<UiAction> {
+    pub(super) fn key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         if let Some(actions) = self.global_key(key) {
             return actions;
         }
@@ -307,6 +307,14 @@ impl UiState {
                 .any(|binding| key_matches(binding, key))
         {
             return self.open_descendant_watch();
+        }
+        if self.composer_active()
+            && key.code == KeyCode::Char('w')
+            && key.modifiers == KeyModifiers::ALT
+            && super::live_work::section_key_available(&self.config)
+        {
+            self.toggle_live_work_section();
+            return vec![];
         }
         if let Some(actions) = self.live_work_key(key) {
             return actions;

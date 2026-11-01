@@ -194,6 +194,10 @@ impl Page {
             "入力欄の上にある作業を選ぶ。↑↓で移動",
         );
         page.entry(
+            "Alt+W / 見出しクリック",
+            "作業の中身を開閉。開いた高さは ui.live_work_rows 行で固定",
+        );
+        page.entry(
             "作業内 Space / F6 / o",
             "shell出力の開閉／詳細フォーム／子の会話へ",
         );

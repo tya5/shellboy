@@ -1710,6 +1710,7 @@ pub struct UiState {
     thread_browser: threads::ThreadBrowser,
     descendants: watch::DescendantView,
     pub selection_mode: bool,
+    pub live_work_collapsed: bool,
     selection_frozen_at: Option<String>,
     pub help_visible: bool,
     // F1 can temporarily cover a popup without discarding its selection/source.
@@ -1815,6 +1816,7 @@ impl UiState {
             thread_browser: threads::ThreadBrowser::default(),
             descendants: Default::default(),
             selection_mode: false,
+            live_work_collapsed: false,
             selection_frozen_at: None,
             help_visible: false,
             help_above_popups: false,
@@ -6187,6 +6189,10 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         state.view(),
         layout[1].height.saturating_sub(recovery_height),
     );
+    {
+        let (collapsed, rows) = (state.live_work_collapsed, state.config.ui.live_work_rows);
+        state.live_work_mut().configure(collapsed, rows);
+    }
     let live_height = state.view().live_work.height(
         layout[1]
             .height
