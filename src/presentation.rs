@@ -25,6 +25,7 @@ pub use time_text::{TIME_TEXT, elapsed_text, ended_text};
 mod events;
 pub(crate) mod fields;
 mod markdown_links;
+pub mod messages;
 mod projection;
 pub mod rows;
 pub use projection::project;
@@ -816,6 +817,9 @@ pub enum InputSource {
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodePresentation {
+    /// Display-only sentence provenance; canonical projections remain unchanged.
+    #[serde(skip)]
+    pub ui_messages: messages::PresentationMessages,
     #[serde(skip)]
     pub created_at: Option<String>,
     #[serde(skip)]
@@ -911,6 +915,7 @@ impl NodePresentation {
     }
     pub fn retained_bytes(&self) -> usize {
         size_of::<Self>()
+            + self.ui_messages.retained_bytes()
             + self.created_at.as_ref().map_or(0, String::capacity)
             + self.input_sender_label.as_ref().map_or(0, String::capacity)
             + self.title.capacity()
@@ -1357,6 +1362,24 @@ pub(crate) fn project_stream_window(
 #[cfg(test)]
 mod stream_projection_tests {
     use super::*;
+
+    #[test]
+    fn display_message_provenance_is_unserialized_and_charged_to_metadata() {
+        let mut projection = NodePresentation::default();
+        let baseline_json = serde_json::to_value(&projection).unwrap();
+        let baseline_bytes = projection.retained_bytes();
+        let kind = String::from("diagnostic-only-kind");
+        let kind_capacity = kind.capacity();
+        projection.ui_messages.title = Some(messages::Message::UnknownTitle { kind });
+        assert_eq!(serde_json::to_value(&projection).unwrap(), baseline_json);
+        assert_eq!(projection.retained_bytes(), baseline_bytes + kind_capacity);
+        let restored: NodePresentation = serde_json::from_value(baseline_json).unwrap();
+        assert_eq!(
+            restored.ui_messages,
+            messages::PresentationMessages::default()
+        );
+    }
+
     #[test]
     fn provisional_unicode_ranges_are_projected_without_mutating_the_raw_window() {
         let raw = "考え\n```rust\nlet\tx = 1;\n```\n答え";
