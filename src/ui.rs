@@ -3650,16 +3650,22 @@ impl UiState {
                 {
                     let label = if matches!(&command, Command::IndexRetry(args) if !management::explicit_index_targets(args))
                     {
-                        "失敗した許可済み索引作業（全体）".into()
+                        i18n::local!(
+                            self.config.ui.language,
+                            "失敗した許可済み索引作業（全体）",
+                            "Failed authorized index jobs (all)"
+                        )
+                        .into()
                     } else {
                         self.management.index_label()
                     };
                     self.set_confirmation(Confirmation::Index {
                         command,
                         attempt,
-                        detail: format!(
-                            "{label}\n{text}\n外部embedding APIの費用が発生します。Yで実行 / Nで取消"
-                        ),
+                        detail: match self.config.ui.language {
+                            crate::config::UiLanguage::En => format!("{label}\n{text}\nExternal embedding API charges apply. Y to execute / N to cancel"),
+                            crate::config::UiLanguage::Ja => format!("{label}\n{text}\n外部embedding APIの費用が発生します。Yで実行 / Nで取消"),
+                        },
                     });
                 }
             }
@@ -5303,8 +5309,18 @@ impl UiState {
                 self.management.mode = management::ManagementMode::Index;
                 let attempt = self.management.begin_preview(args.clone());
                 self.management.open_text(ManagementView {
-                    title: "索引 | 費用preview".into(),
-                    text: "対象件数を確認しています。まだ実行していません".into(),
+                    title: i18n::local!(
+                        self.config.ui.language,
+                        "索引 | 費用preview",
+                        "Index | Cost preview"
+                    )
+                    .into(),
+                    text: i18n::local!(
+                        self.config.ui.language,
+                        "対象件数を確認しています。まだ実行していません",
+                        "Checking the number of targets. Nothing has been executed yet."
+                    )
+                    .into(),
                     scroll: 0,
                 });
                 return vec![
@@ -5321,10 +5337,10 @@ impl UiState {
             Command::StorageCollect(args) => {
                 self.set_confirmation(Confirmation::Operation {
                     command: command.clone(),
-                    detail: format!(
-                        "保存データの回収を要求します。category={:?}。保護されたデータを含む回収結果を確認してください",
-                        args.category
-                    ),
+                    detail: match self.config.ui.language {
+                        crate::config::UiLanguage::En => format!("Requesting collection of stored data. category={:?}. Review the collection results, including protected data.", args.category),
+                        crate::config::UiLanguage::Ja => format!("保存データの回収を要求します。category={:?}。保護されたデータを含む回収結果を確認してください", args.category),
+                    },
                 });
                 return vec![];
             }
