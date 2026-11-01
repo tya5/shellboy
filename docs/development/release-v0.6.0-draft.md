@@ -37,8 +37,9 @@ Messages support, and new request and resource inspection tools.
 
 - When a completed response reports at least 200,000 input tokens, Shellboy
   attempts a bounded compaction at the next safe boundary, before the following
-  request. It reacts to provider-reported usage, not a guessed token count; it
-  does not pre-block a large request. Set `auto_at_tokens = 0` under
+  request. It reacts to provider-reported usage, not a guessed token count; if
+  the provider reports no input count, it does not trigger. It does not
+  pre-block a large request. Set `auto_at_tokens = 0` under
   `[compaction]` to disable it, or override the threshold per connection (#125).
 - Summary requests may cost tokens and affect prompt-cache reuse. `compact list`
   and ungrouped `usage get` expose separately recorded summary-request usage;
@@ -63,8 +64,9 @@ Messages support, and new request and resource inspection tools.
 - `shellboy thread request --thread ID` reconstructs a next request from saved
   state without starting an owner, calling a model or writing the database.
   `--attempt` inspects a saved attempt, `--compare-attempt` compares prefixes,
-  and `--body` includes the body. Headers and credentials are never shown, but
-  the body may contain conversation text: handle the output as sensitive (#137).
+  and `--body` includes the body. Request headers and configured credentials
+  are omitted, but the body can contain conversation text or secrets present in
+  that text: handle the output as sensitive (#137).
 
 ## Other improvements
 
