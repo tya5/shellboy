@@ -3640,7 +3640,9 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
 fn recovery_reason_survives_transient_results_and_retry_targets_the_current_run() {
     use shellboy::presentation::PresentationField;
     use shellboy::ui::activity::{ActivityPhase, ActivitySnapshot, RecoverySnapshot};
-    let mut ui = state();
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     ui.select_thread("current-thread".into());
     ui.view_mut().run_id = Some("stale-view-run".into());
     let generation = ui.view().generation;
@@ -3704,7 +3706,9 @@ fn recovery_reason_survives_transient_results_and_retry_targets_the_current_run(
 #[test]
 fn stopped_recovery_keeps_the_original_reason_and_requires_a_new_explicit_choice() {
     use shellboy::ui::activity::{ActivityPhase, ActivitySnapshot, RecoverySnapshot};
-    let mut ui = state();
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     ui.select_thread("thread".into());
     ui.apply(UiUpdate::Activity {
         thread_id: "thread".into(),
