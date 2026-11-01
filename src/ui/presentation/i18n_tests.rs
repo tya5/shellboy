@@ -556,3 +556,48 @@ fn simultaneous_quota_and_retry_keep_both_critical_facts_visible_bilingually() {
         UiLanguage::Ja => &["再送は重複課金の可能性", "UTC", "明示的に再試行"],
     });
 }
+
+fn index_pause_with_saved_time(ui: &mut UiState) {
+    let value = json!({"kind":"index_state","change":{"before":{"paused":false},"after":{"paused":true,"paused_at":"2027-01-15T08:00:00.123456789+00:00","pause_kind":"fixture_pause"}}});
+    history(
+        ui,
+        vec![node("event", "pause", json!({"text":value.to_string()}))],
+    );
+}
+#[test]
+fn index_pause_keeps_saved_timestamp_reason_and_retry_binding_bilingually() {
+    crate::ui::i18n::verify_screen(index_pause_with_saved_time, |_| {
+        &[
+            "/index > T",
+            "2027-01-15T08:00:00.123456789+00:00",
+            "fixture_pause",
+        ]
+    });
+}
+fn resumed_saved_failures(ui: &mut UiState) {
+    let mut value = node(
+        "event",
+        "resume",
+        json!({"text":json!({"kind":"recovery_resumed"}).to_string()}),
+    );
+    value.presentation.title = "復旧再開 | 再開前にこの応答処理で記録したモデル失敗2件".into();
+    value.presentation.blocks[0].text = "直近の保存理由: Raw saved failure".into();
+    for (key, text) in [("count", "2"), ("error/message", "Raw saved failure")] {
+        value
+            .presentation
+            .fields
+            .push(crate::presentation::PresentationField {
+                key: format!("/saved_model_failures/{key}"),
+                value: text.into(),
+                ..Default::default()
+            });
+    }
+    history(ui, vec![value]);
+}
+#[test]
+fn resumed_saved_failure_count_and_raw_reason_survive_provenance_in_both_languages() {
+    crate::ui::i18n::verify_screen(resumed_saved_failures, |language| match language {
+        UiLanguage::En => &["2 model failures recorded", "Raw saved failure"],
+        UiLanguage::Ja => &["記録したモデル失敗2件", "Raw saved failure"],
+    });
+}

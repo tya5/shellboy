@@ -68,6 +68,10 @@ sentences! {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
+    IndexPause {
+        at: Option<String>,
+        reason: Option<String>,
+    },
     CommandNotice {
         command: Option<String>,
         background: Option<bool>,
@@ -162,6 +166,23 @@ impl Message {
     pub fn render(&self, language: UiLanguage) -> String {
         let en = language == UiLanguage::En;
         match self {
+            Self::IndexPause { at, reason } => {
+                let at = at.as_deref().unwrap_or(if en {
+                    "Time unavailable"
+                } else {
+                    "時刻不明"
+                });
+                let reason = reason.as_deref().unwrap_or(if en {
+                    "Reason unavailable"
+                } else {
+                    "理由不明"
+                });
+                if en {
+                    format!("/index > T | Pause recorded at {at} | {reason}")
+                } else {
+                    format!("/index > T | 索引更新の停止記録 | {at} | {reason}")
+                }
+            }
             Self::CommandNotice {
                 command,
                 background,
@@ -387,6 +408,10 @@ impl Message {
     }
     fn retained_bytes(&self) -> usize {
         match self {
+            Self::IndexPause { at, reason } => {
+                at.as_ref().map_or(0, String::capacity)
+                    + reason.as_ref().map_or(0, String::capacity)
+            }
             Self::CommandNotice { command, .. } => command.as_ref().map_or(0, String::capacity),
             Self::ThreadNotice { title } => title.as_ref().map_or(0, String::capacity),
             Self::Raw { text } | Self::Hint { text } => text.capacity(),
@@ -640,7 +665,22 @@ pub(super) fn event_messages(
     .iter()
     .find_map(|key| payload.get(*key).and_then(Value::as_str))
     .map(clipped);
-    let title = if let Some(identity) = identity {
+    let title = if kind == "index_state"
+        && event.pointer("/change/after/paused") == Some(&Value::Bool(true))
+    {
+        let title = Message::IndexPause {
+            at: event
+                .pointer("/change/after/paused_at")
+                .and_then(Value::as_str)
+                .map(clipped),
+            reason: event
+                .pointer("/change/after/pause_kind")
+                .and_then(Value::as_str)
+                .map(clipped),
+        };
+        body.push(title.clone());
+        title
+    } else if let Some(identity) = identity {
         Message::EventIdentity {
             kind: clipped(kind),
             identity,
@@ -761,7 +801,7 @@ pub(super) fn event_messages(
                 Message::Change { .. }
                     | Message::SavedState { .. }
                     | Message::Exit { .. }
-                    | Message::Text(Text::OutputIncomplete | Text::IndexPaused)
+                    | Message::Text(Text::OutputIncomplete)
             )
         })
         .cloned()

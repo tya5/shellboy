@@ -163,11 +163,11 @@ impl AutomaticRetrySnapshot {
                 self.number, self.limit
             ),
             (UiLanguage::Ja, true) => format!(
-                "再送は重複課金の可能性 | 再試行 {}/{} | {wait}待機 | 途中応答を保存して作り直し",
+                "再送は重複課金の可能性 | 再試行（{}/{}） | {wait}待機 | 途中応答を保存して作り直し",
                 self.number, self.limit
             ),
             (UiLanguage::Ja, false) => format!(
-                "再送は重複課金の可能性 | 再試行 {}/{} | {wait}待機",
+                "再送は重複課金の可能性 | 再試行（{}/{}） | {wait}待機",
                 self.number, self.limit
             ),
         }

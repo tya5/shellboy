@@ -27,7 +27,44 @@ fn source_candidate(text: &str) -> &str {
     text.trim_start_matches([' ', '›', '▸', '│', '┃']).trim()
 }
 
+fn saved_failure_text(node: &UiNode, language: UiLanguage) -> Option<(String, String)> {
+    if node.presentation.kind != PresentationKind::Event {
+        return None;
+    }
+    let field = |key: &str| {
+        node.presentation
+            .fields
+            .iter()
+            .find(|f| f.key == key && !f.value_omitted)
+    };
+    let count = field("/saved_model_failures/count")?
+        .value
+        .parse::<u64>()
+        .ok()?;
+    let title = match (language, count) {
+        (UiLanguage::En, 1) => "Recovery resumed | 1 model failure recorded before resuming".into(),
+        (UiLanguage::En, _) => {
+            format!("Recovery resumed | {count} model failures recorded before resuming")
+        }
+        (UiLanguage::Ja, _) => {
+            format!("復旧再開 | 再開前にこの応答処理で記録したモデル失敗{count}件")
+        }
+    };
+    let body = match (language, field("/saved_model_failures/error/message")) {
+        (UiLanguage::En, Some(reason)) => format!("Last saved reason: {}", reason.value),
+        (UiLanguage::Ja, Some(reason)) => format!("直近の保存理由: {}", reason.value),
+        (UiLanguage::En, None) => "Read the saved record for the latest reason | F6 Details".into(),
+        (UiLanguage::Ja, None) => "直近の理由は保存記録で確認してください | F6 詳細".into(),
+    };
+    Some((title, body))
+}
+
 fn label(language: UiLanguage, node: &UiNode) -> String {
+    if language == UiLanguage::En
+        && let Some((title, _)) = saved_failure_text(node, language)
+    {
+        return title;
+    }
     if language == UiLanguage::En
         && let Some(message) = &node.presentation.ui_messages.title
         && (node.presentation.ui_messages.notice.is_some()
@@ -312,24 +349,31 @@ fn node_lines_inner(
                     .skip(start - block.source_start)
                     .collect::<String>()
             } else {
-                node.presentation
-                    .ui_messages
-                    .bodies
-                    .iter()
-                    .find(|(index, _)| {
-                        language == UiLanguage::En
-                            && block.kind == BlockKind::Event
-                            && !block.source_exact
-                            && *index == block_index
-                    })
-                    .map(|(_, messages)| {
-                        messages
-                            .iter()
-                            .map(|m| m.render(language))
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
-                    .unwrap_or_else(|| block.text.clone())
+                if language == UiLanguage::En
+                    && block.kind == BlockKind::Event
+                    && let Some((_, body)) = saved_failure_text(node, language)
+                {
+                    body
+                } else {
+                    node.presentation
+                        .ui_messages
+                        .bodies
+                        .iter()
+                        .find(|(index, _)| {
+                            language == UiLanguage::En
+                                && block.kind == BlockKind::Event
+                                && !block.source_exact
+                                && *index == block_index
+                        })
+                        .map(|(_, messages)| {
+                            messages
+                                .iter()
+                                .map(|m| m.render(language))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .unwrap_or_else(|| block.text.clone())
+                }
             };
             if block.kind == BlockKind::ToolCall {
                 let mut command = text
