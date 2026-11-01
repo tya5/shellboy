@@ -7814,3 +7814,22 @@ fixture now retains the last drawn synthetic frame and the last eight paired
 snapshot identities/usage scalars and includes both in its watchdog failure.
 No user data, raw conversation logs, provider request or watchdog budget change.
 Root cause and state-driven correction are investigated next; no pass claimed.
+
+The diagnostics-only original test passed locally once (macOS); that is not a
+reproduction or proof of the Ubuntu cause. Source tracing identifies a concrete
+startup race: SelectThread publishes separate Thread/History/progress; the saved
+context is only attached to CurrentView. Selection starts with progress_running,
+but completed activity turns it off. A periodic tick admitted before that result
+can issue CurrentView; a later tick correctly issues no idle read. Fixture rows
+were committed before subscription, so no Changed event guaranteed that snapshot.
+
+The correction holds initial paired views until completed activity is observed,
+asserts the footer is still unknown, releases them, commits a real title change
+through the separate CLI/owner, and waits for that title's actual CurrentView
+input159534/cache103424 plus rendered input/cache. A pure readiness regression
+rejects absent, old-title and unknown snapshots and a missing footer. It also
+finishes/drains the real bridge. Local focused readiness and owner tests plus
+strict Clippy passed before the additional unknown-before-release assertion;
+final rerun and Linux same-SHA triple are pending. The later #118 batch failure
+41317992047 is being compared in a separate task-owned reproduction worktree,
+not dismissed as unrelated, and the final fix will be validated on that batch.

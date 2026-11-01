@@ -138,3 +138,21 @@ releases only the matching draft/generation/request selection. Submitted slash
 text retains its normal restoration behavior. A local UUID identifies each
 pending selection (one bounded value per view) so a stale rejection or result
 cannot release a later selection in the same draft generation.
+
+## Saved-context frontend fixture readiness (#138)
+
+The long-thread owner fixture seeds completed attempts before the frontend
+subscribes. SelectThread delivers Thread + History and saved activity; context
+usage arrives only in a paired CurrentView observation. An initial periodic
+progress tick may race completed activity, but an idle/completed thread does
+not continue polling. Header/history readiness therefore does not imply a
+context snapshot is pending. A watchdog cannot turn a missing Changed event
+into a snapshot.
+
+The status-usage test must wait for completed initial activity, then use a real
+owner commit/Changed and await the matching selected CurrentView usage scalars
+and rendered footer together. Initial CurrentViews can be held to force header
+and completed activity ahead of paired-snapshot delivery. No elapsed-success
+condition, repeated refresh key, synthetic usage injection, provider request or
+production periodic-poll change is needed. Watchdog failures retain the last
+frame and eight bounded CurrentView identity/usage snapshots.

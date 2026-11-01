@@ -165,10 +165,21 @@ impl Fixture {
             _ => {}
         }
         match &update {
-            UiUpdate::CurrentView { generation, details, context_usage, history, .. } => {
-                if let UiUpdate::History { read_revision, selection_revision, .. } = history.as_ref() {
+            UiUpdate::CurrentView {
+                generation,
+                details,
+                context_usage,
+                history,
+                ..
+            } => {
+                if let UiUpdate::History {
+                    read_revision,
+                    selection_revision,
+                    ..
+                } = history.as_ref()
+                {
                     self.view_sequences.push(*read_revision);
-                    self.current_view_trace.push_back(json!({"thread":details.thread_id,"generation":generation,"read_revision":read_revision,"selection_revision":selection_revision,"input_tokens":context_usage.input_tokens,"cached_tokens":context_usage.cached_tokens,"output_tokens":context_usage.output_tokens}));
+                    self.current_view_trace.push_back(json!({"thread":details.thread_id,"title":details.title,"generation":generation,"read_revision":read_revision,"selection_revision":selection_revision,"input_tokens":context_usage.input_tokens,"cached_tokens":context_usage.cached_tokens,"output_tokens":context_usage.output_tokens}));
                     while self.current_view_trace.len() > 8 {
                         self.current_view_trace.pop_front();
                     }
@@ -329,8 +340,8 @@ impl Fixture {
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "{label}: observation watchdog; bridge_finished={}",
-                self.bridge.is_finished()
+                "{label}: observation watchdog; bridge_finished={}; current_view_snapshots={:?}\nLAST DRAWN SCREEN:\n{}",
+                self.bridge.is_finished(), self.current_view_trace, self.last_screen
             )
         })
     }
@@ -1991,12 +2002,67 @@ async fn unrelated_owner_changed_invalidates_deletion_preview_without_a_new_prob
 /// bounded display window (more than 33 turns), through the real owner path.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn status_bar_shows_saved_context_usage_for_a_long_thread_through_the_real_owner() {
-    let mut fixture = Fixture::build("http://127.0.0.1:9/v1", false, true).await;
-    let screen = fixture
-        .until("saved context usage on the status bar", |_ui, screen| {
-            screen.contains("↑159K")
+    let mut fixture = Fixture::build("http://127.0.0.1:9/v1", true, true).await;
+    // Header/history can precede CurrentView. Completed activity stops polling,
+    // so force that order and use a real Changed event, not a lucky startup tick.
+    let initial = fixture
+        .until("initial completed activity", |ui, _| {
+            ui.view().state == shellboy::activity::ActivityPhase::Completed.label()
         })
+        .await;
+    assert!(initial.contains("↑—"), "no context is adopted before CurrentView: {initial}");
+    assert!(
+        fixture.current_view_trace.is_empty(),
+        "initial snapshots are held"
+    );
+    for update in fixture.held_initial_views.take().unwrap() {
+        fixture.accept_update(update);
+    }
+    fixture
+        .cli(&[
+            "thread",
+            "set",
+            "--thread",
+            "reactive",
+            "--title",
+            "CONTEXT_USAGE_READY",
+        ])
+        .await;
+    let screen = fixture
+        .observed_until(
+            "saved context usage on the status bar",
+            |fixture, screen| {
+                fixture.ui.view().title == "CONTEXT_USAGE_READY"
+                    && saved_context_status_ready(fixture.current_view_trace.back(), screen)
+            },
+        )
         .await;
     assert!(!screen.contains("↑—"), "{screen}");
     assert!(screen.contains("キャッシュ65%"), "{screen}");
+    fixture.finish().await;
+}
+
+fn saved_context_status_ready(snapshot: Option<&Value>, screen: &str) -> bool {
+    snapshot.is_some_and(|snapshot| {
+        snapshot["thread"] == "reactive"
+            && snapshot["title"] == "CONTEXT_USAGE_READY"
+            && snapshot["input_tokens"] == 159534
+            && snapshot["cached_tokens"] == 103424
+    }) && screen.contains("↑159K")
+        && screen.contains("キャッシュ65%")
+}
+
+#[test]
+fn saved_context_wait_requires_matching_snapshot_and_footer() {
+    let screen = "↑159K/200K ↓— キャッシュ65%";
+    let snapshot = json!({"thread":"reactive","title":"CONTEXT_USAGE_READY","input_tokens":159534,"cached_tokens":103424});
+    assert!(!saved_context_status_ready(None, screen));
+    assert!(!saved_context_status_ready(Some(&snapshot), "↑—"));
+    let mut old = snapshot.clone();
+    old["title"] = json!("BASE_TITLE");
+    assert!(!saved_context_status_ready(Some(&old), screen));
+    old = snapshot.clone();
+    old["input_tokens"] = Value::Null;
+    assert!(!saved_context_status_ready(Some(&old), screen));
+    assert!(saved_context_status_ready(Some(&snapshot), screen));
 }
