@@ -7639,3 +7639,13 @@ no new guard/fingerprint change. Read reducer and projection publish every state
 change via events, measured161 ->90 combined sites and fields20 ->15. Full local
 suite not run; native branch CI and latest-main/#131 qualification still required.
 All six suspect behaviours remain intentionally unchanged.
+
+#118 event boundary, latest-main requalification: base275eb122 (#131 included),
+check --tests, unchanged characterization19, view45, scrolling6 and stream/refresh
+11 pass (88de4364). Only the two characterization conflicts were resolved,
+retaining #131 heights33/13 and resize60x33 plus the new getter API. Bounded
+boundary-planner extraction then passes strict Clippy --tests and the same19/
+45/6/11 gates (224f4573; /tmp/issue118-boundary-plan.log). Conservative metrics
+are161 ->91 overall (approved checkpoint155 ->91), fields20 ->15 (approved18
+->15), scroll395 ->237 (approved307 ->237). Native branch CI still pending;
+no local full-suite claim. No marked behaviour fix is included.

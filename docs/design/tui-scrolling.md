@@ -314,3 +314,26 @@ are excluded only once. Both whole-state mem::take and replacement assignments,
 all event/entry calls and reducer internals are included. A mutable child borrow
 is not also charged to its parent aggregate. New helper regression tests cover
 that rule and whole-intent replacement accounting (7 tests total).
+
+### Final next-boundary measurements on #131 main
+
+The remaining bounded body/metadata boundary planner returns Clear / Advance /
+Actions to the existing bounded scroll loop; it cannot recursively call UI input.
+The helper invocation is included in the transition count. This reduces scroll
+orchestration as well, without omitting relocated planner code from write counts.
+
+| Measure (same final helper) | Original 5cb06aaa | Approved #118/#131 main | Next boundary |
+| --- | ---: | ---: | ---: |
+| Direct state mutation sites | 151 | 99 | 32 |
+| Transition/entry calls, including internals | 10 | 56 | 59 |
+| Conservative combined sites | 161 | 155 | 91 |
+| Stored fields including nested intent payload | 20 | 18 | 15 |
+| ThreadView scroll orchestration lines | 395 | 307 | 237 |
+
+The UiState forwarding wrapper remains 7 lines. Metadata budgets, node/character
+windows, generation/selection/request fences and the canonical path are unchanged.
+Rebase onto #131 preserves its fixed live-work section and its 33-row fixture /
+13-row reserved height; conflicts combine those dimensions with read-only row /
+initialized getters, not the older 28/8 dimensions. All six doubtful behaviours
+still have their original expectations. Their separate fixes follow this gate,
+not this structural commit.

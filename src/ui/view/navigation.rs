@@ -127,7 +127,118 @@ impl Navigation {
     }
 }
 
+enum BoundaryProgress {
+    Clear,
+    Advance,
+    Actions(Vec<UiAction>),
+}
+
 impl ThreadView {
+    fn traverse_boundary(
+        &mut self,
+        boundary: Option<bool>,
+        layout: &HistoryLayout,
+        amount: isize,
+        origin: ViewAnchor,
+        within: usize,
+        top: usize,
+    ) -> BoundaryProgress {
+        let view = self;
+        if let Some(forward) = boundary
+            && let Some(thread_id) = view.thread_id.clone()
+        {
+            let source = if forward {
+                layout.sources.last()
+            } else {
+                layout.sources.first()
+            };
+            if let Some(source) = source {
+                let node = &view.nodes[source.node];
+                let cached_end = node.base_char_offset + node.text.chars().count();
+                if !view.closed_tool_source(node)
+                    && ((!forward && node.base_char_offset > 0)
+                        || (forward && cached_end < node.total_chars))
+                {
+                    view.navigation.on_event(NavEvent::ReadRequested {
+                        ticket: (view.navigation.view_revision, Some(node.node_id.clone())),
+                        pending: Some(amount),
+                        new_epoch: false,
+                    });
+                    view.navigation.anchor = origin.clone();
+                    view.navigation.scroll.anchor = origin.clone();
+                    view.navigation.scroll.within = within;
+                    return BoundaryProgress::Actions(vec![UiAction::LoadNodeWindow {
+                        thread_id,
+                        generation: view.generation,
+                        view_revision: view.navigation.view_revision,
+                        node_id: node.node_id.clone(),
+                        char_offset: if forward {
+                            origin.char_offset
+                        } else {
+                            // frontend::window starts 512 Unicode characters
+                            // before its requested offset. Ask for 8192 total
+                            // lookbehind (at most 32KiB), not one 513-char step.
+                            node.base_char_offset.saturating_sub(8192 - 512)
+                        },
+                    }]);
+                }
+            }
+            if let Some(source) = source {
+                let adjacent = if forward {
+                    (source.covered_end < view.nodes.len()).then_some(source.covered_end)
+                } else {
+                    // Quiet observations may be painted after later prose.
+                    // Their canonical prefix still belongs to this bounded
+                    // projection; navigation uses its range, not row order.
+                    presentation::projection_bounds(view).0.checked_sub(1)
+                };
+                if let Some(index) = adjacent {
+                    let focus = projection_node_index(view);
+                    if (forward && index <= focus) || (!forward && index >= focus) {
+                        return BoundaryProgress::Actions(vec![]);
+                    }
+                    view.navigation.scroll.focus = Some(view.nodes[index].node_id.clone());
+                    view.navigation.anchor = origin.clone();
+                    view.navigation.scroll.anchor = origin;
+                    view.navigation.scroll.within = within;
+                    view.navigation.on_event(NavEvent::SourceInvalidated);
+                    return BoundaryProgress::Advance;
+                }
+            }
+            let ordinal = if forward {
+                view.first_ordinal + view.selected_node_count() as u64
+            } else {
+                view.first_ordinal.saturating_sub(1)
+            };
+            if (forward && ordinal < view.total_nodes) || (!forward && view.first_ordinal > 0) {
+                // Keep the last visible frame while metadata is in flight.
+                // Its source range is retained when the overlapping page arrives.
+                view.navigation.on_event(NavEvent::PositionResolved {
+                    position: Some((origin, within)),
+                    row: top,
+                    follow_tail: false,
+                    local_read: false,
+                });
+                view.navigation.on_event(NavEvent::ReadRequested {
+                    ticket: (view.navigation.view_revision, None),
+                    pending: Some(amount),
+                    new_epoch: false,
+                });
+                view.navigation.scroll.anchor = view.navigation.anchor.clone();
+                return BoundaryProgress::Actions(vec![UiAction::LoadHistoryWindow {
+                    thread_id,
+                    generation: view.generation,
+                    view_revision: view.navigation.view_revision,
+                    ordinal,
+                    char_offset: 0,
+                    from_end: !forward,
+                    selection_revision: view.selection_revision,
+                }]);
+            }
+        }
+        BoundaryProgress::Clear
+    }
+
     fn scroll_during_read(
         &mut self,
         amount: isize,
@@ -511,97 +622,10 @@ impl ThreadView {
             } else {
                 None
             };
-            if let Some(forward) = boundary
-                && let Some(thread_id) = view.thread_id.clone()
-            {
-                let source = if forward {
-                    layout.sources.last()
-                } else {
-                    layout.sources.first()
-                };
-                if let Some(source) = source {
-                    let node = &view.nodes[source.node];
-                    let cached_end = node.base_char_offset + node.text.chars().count();
-                    if !view.closed_tool_source(node)
-                        && ((!forward && node.base_char_offset > 0)
-                            || (forward && cached_end < node.total_chars))
-                    {
-                        view.navigation.on_event(NavEvent::ReadRequested {
-                            ticket: (view.navigation.view_revision, Some(node.node_id.clone())),
-                            pending: Some(amount),
-                            new_epoch: false,
-                        });
-                        view.navigation.anchor = origin.clone();
-                        view.navigation.scroll.anchor = origin.clone();
-                        view.navigation.scroll.within = within;
-                        return vec![UiAction::LoadNodeWindow {
-                            thread_id,
-                            generation: view.generation,
-                            view_revision: view.navigation.view_revision,
-                            node_id: node.node_id.clone(),
-                            char_offset: if forward {
-                                origin.char_offset
-                            } else {
-                                // frontend::window starts 512 Unicode characters
-                                // before its requested offset. Ask for 8192 total
-                                // lookbehind (at most 32KiB), not one 513-char step.
-                                node.base_char_offset.saturating_sub(8192 - 512)
-                            },
-                        }];
-                    }
-                }
-                if let Some(source) = source {
-                    let adjacent = if forward {
-                        (source.covered_end < view.nodes.len()).then_some(source.covered_end)
-                    } else {
-                        // Quiet observations may be painted after later prose.
-                        // Their canonical prefix still belongs to this bounded
-                        // projection; navigation uses its range, not row order.
-                        presentation::projection_bounds(view).0.checked_sub(1)
-                    };
-                    if let Some(index) = adjacent {
-                        let focus = projection_node_index(view);
-                        if (forward && index <= focus) || (!forward && index >= focus) {
-                            return vec![];
-                        }
-                        view.navigation.scroll.focus = Some(view.nodes[index].node_id.clone());
-                        view.navigation.anchor = origin.clone();
-                        view.navigation.scroll.anchor = origin;
-                        view.navigation.scroll.within = within;
-                        view.navigation.on_event(NavEvent::SourceInvalidated);
-                        continue;
-                    }
-                }
-                let ordinal = if forward {
-                    view.first_ordinal + view.selected_node_count() as u64
-                } else {
-                    view.first_ordinal.saturating_sub(1)
-                };
-                if (forward && ordinal < view.total_nodes) || (!forward && view.first_ordinal > 0) {
-                    // Keep the last visible frame while metadata is in flight.
-                    // Its source range is retained when the overlapping page arrives.
-                    view.navigation.on_event(NavEvent::PositionResolved {
-                        position: Some((origin, within)),
-                        row: top,
-                        follow_tail: false,
-                        local_read: false,
-                    });
-                    view.navigation.on_event(NavEvent::ReadRequested {
-                        ticket: (view.navigation.view_revision, None),
-                        pending: Some(amount),
-                        new_epoch: false,
-                    });
-                    view.navigation.scroll.anchor = view.navigation.anchor.clone();
-                    return vec![UiAction::LoadHistoryWindow {
-                        thread_id,
-                        generation: view.generation,
-                        view_revision: view.navigation.view_revision,
-                        ordinal,
-                        char_offset: 0,
-                        from_end: !forward,
-                        selection_revision: view.selection_revision,
-                    }];
-                }
+            match view.traverse_boundary(boundary, &layout, amount, origin, within, top) {
+                BoundaryProgress::Actions(actions) => return actions,
+                BoundaryProgress::Advance => continue,
+                BoundaryProgress::Clear => {}
             }
             // A metadata-only row needs its original source window before moving
             // inside that node; no character delta is substituted for row distance.

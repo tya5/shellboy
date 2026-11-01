@@ -3571,3 +3571,12 @@ the `compare` job and uploads `agent-comparison-linux-<SHA>/result.json`; there
 are no thresholds. All five agents completed the workload in CI (see
 acceptance). Resume point: stage 3 (publication) needs a separate decision;
 real-model use stays out of scope.
+## #118 event-driven next boundary (CI pending)
+
+NavigationEvent selects epoch, mode and projection settlement; ReadEvent reduces
+owned read intent atomically. Persistent moved/rebase bools and independently
+writable initialized/row state are replaced by phase discriminants. Full-field
+metrics161 ->91 (approved155 ->91), fields20 ->15, scroll395 ->237. Helper
+counts all entry/event calls, payload fields and whole-state take/replacements.
+#131 fixed section height and viewport fixtures are retained on main275eb122.
+Strict/local19+45+6+11 pass; six doubtful behaviours remain for separate commits.

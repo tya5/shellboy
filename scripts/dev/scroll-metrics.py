@@ -79,7 +79,7 @@ def measure(root):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
             for m in re.finditer(rf'&mut\s+{path_pattern}{name}\b(?!\s*\.)', code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
-        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation|set_follow|set_unseen|set_mode|set_loading|set_request|take_request|begin_read|resume_follow|begin_rebase|restore|cancel|rebase|fail_read|finish_reply|read_event|on_event|start_rebase_navigation|follow_tail)\(', code):
+        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation|set_follow|set_unseen|set_mode|set_loading|set_request|take_request|begin_read|resume_follow|begin_rebase|restore|cancel|rebase|fail_read|finish_reply|read_event|on_event|start_rebase_navigation|follow_tail|traverse_boundary)\(', code):
             transitions.append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
         for m in re.finditer(r'\bfn (scroll|scroll_step)\s*\(', code):
             begin = code.index('{', m.end())
