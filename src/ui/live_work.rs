@@ -17,6 +17,7 @@ enum WorkMessage<'a> {
     },
     More(u64),
     OutputAge(u64),
+    Elapsed(u64),
     Oldest(u64),
     Deadline(Option<u64>),
     PreviewLimit,
@@ -84,6 +85,10 @@ impl WorkMessage<'_> {
             (En, Self::More(1)) => "1 more item".into(),
             (En, Self::More(count)) => format!("{count} more items"),
             (Ja, Self::More(count)) => format!("他{count}件"),
+            (En, Self::Elapsed(seconds)) => format!("{seconds}s"),
+            (Ja, Self::Elapsed(seconds)) => {
+                crate::presentation::elapsed_text(seconds.saturating_mul(1000), false)
+            }
             (En, Self::OutputAge(seconds)) => format!("Last output: {seconds}s ago"),
             (Ja, Self::OutputAge(seconds)) => format!(
                 "最後の出力 {}前",
@@ -725,15 +730,7 @@ pub(super) fn draw(
             .seconds
             .get(index)
             .and_then(|(e, _)| *e)
-            .map(|s| {
-                format!(
-                    " | {}",
-                    match view.language {
-                        UiLanguage::En => format!("{s}s"),
-                        UiLanguage::Ja => format!("{s}秒"),
-                    }
-                )
-            })
+            .map(|s| format!(" | {}", WorkMessage::Elapsed(s).render(view.language)))
             .unwrap_or_default();
         let age = view.output_age_label(index).unwrap_or_default();
         let deadline = row

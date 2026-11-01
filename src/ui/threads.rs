@@ -194,6 +194,7 @@ enum BrowserMessage<'a> {
         notice: Option<&'a str>,
     },
     FetchFailure(&'a str),
+    ExcerptFailure(&'a str),
     FailedFooter(&'a str),
     LimitedFooter(&'a str),
     PreviousExcerpt(&'a str),
@@ -338,6 +339,8 @@ impl BrowserMessage<'_> {
             ) => format!("{notice} | 検索 > {query}"),
             (En, Self::Filter { query, .. }) => format!("Filter > {query}"),
             (Ja, Self::Filter { query, .. }) => format!("検索 > {query}"),
+            (En, Self::ExcerptFailure(error)) => format!("Fetch failed: {error}"),
+            (Ja, Self::ExcerptFailure(error)) => format!("取得失敗: {error}"),
             (En, Self::FetchFailure(error)) => format!("List refresh failed: {error}"),
             (Ja, Self::FetchFailure(error)) => format!("一覧の更新に失敗: {error}"),
             (En, Self::FailedFooter(error)) => {
@@ -425,10 +428,20 @@ impl BrowserMessage<'_> {
                     interrupted,
                 },
             ) => format!(
-                "ID {} | Parent {} | {}{}",
-                thread.thread_id,
-                thread.parent_id.as_deref().unwrap_or("none"),
-                thread.updated_at,
+                "{}ID {} | Parent {} | {}{}",
+                thread
+                    .revisit
+                    .as_ref()
+                    .and_then(crate::presentation::revisit_label)
+                    .map(|label| format!("{label} | "))
+                    .unwrap_or_default(),
+                one_line(&thread.thread_id),
+                thread
+                    .parent_id
+                    .as_deref()
+                    .map(one_line)
+                    .unwrap_or_else(|| "none".into()),
+                one_line(activity_label(thread, language)),
                 if interrupted {
                     " | Interrupted by app exit"
                 } else {
@@ -442,10 +455,20 @@ impl BrowserMessage<'_> {
                     interrupted,
                 },
             ) => format!(
-                "ID {} | 親 {} | {}{}",
-                thread.thread_id,
-                thread.parent_id.as_deref().unwrap_or("なし"),
-                thread.updated_at,
+                "{}ID {} | 親 {} | {}{}",
+                thread
+                    .revisit
+                    .as_ref()
+                    .and_then(crate::presentation::revisit_label)
+                    .map(|label| format!("{label} | "))
+                    .unwrap_or_default(),
+                one_line(&thread.thread_id),
+                thread
+                    .parent_id
+                    .as_deref()
+                    .map(one_line)
+                    .unwrap_or_else(|| "なし".into()),
+                one_line(activity_label(thread, language)),
                 if interrupted {
                     " | アプリ終了による中断"
                 } else {
@@ -1337,7 +1360,7 @@ impl ThreadBrowser {
                 .excerpt_error
                 .as_ref()
                 .filter(|(id, _)| id == &thread.thread_id)
-                .map(|(_, error)| BrowserMessage::FetchFailure(error).render(self.language))
+                .map(|(_, error)| BrowserMessage::ExcerptFailure(error).render(self.language))
                 .unwrap_or_else(|| BrowserText::LoadingExcerpt.render(self.language).into());
             if thread.excerpt.is_empty() {
                 return BrowserMessage::Excerpt {
@@ -2164,7 +2187,7 @@ impl ThreadBrowser {
                 .max()
                 .unwrap_or(0)
                 .max(BrowserText::State.render(self.language).width())
-                .min(width / 3);
+                .min(width.saturating_sub(12));
         }
         let gaps =
             usize::from(cwd_width > 0) + usize::from(state_width > 0) + usize::from(time_width > 0);

@@ -48,6 +48,31 @@ pub(super) fn phase_label(phase: ActivityPhase, language: UiLanguage, full: bool
     }
 }
 #[derive(Clone, Copy)]
+enum WatchText {
+    Unread,
+    HistoryUnavailable,
+    Confirming,
+    AppExit,
+    LoadingDetails,
+}
+impl WatchText {
+    fn render(self, language: UiLanguage) -> &'static str {
+        use UiLanguage::{En, Ja};
+        match (language, self) {
+            (En, Self::Unread) => "Completed *",
+            (Ja, Self::Unread) => "完了 *",
+            (En, Self::HistoryUnavailable) => "Outside seen history",
+            (Ja, Self::HistoryUnavailable) => "確認履歴の保持範囲外",
+            (En, Self::Confirming) => "Confirming",
+            (Ja, Self::Confirming) => "確認中",
+            (En, Self::AppExit) => "Stopped (app exit)",
+            (Ja, Self::AppExit) => "中断済み（アプリ終了）",
+            (En, Self::LoadingDetails) => "Checking details",
+            (Ja, Self::LoadingDetails) => "詳細を確認中",
+        }
+    }
+}
+#[derive(Clone, Copy)]
 enum WatchMessage<'a> {
     Recovery(&'a str),
     FailureUnknown,
@@ -233,7 +258,7 @@ impl WatchMessage<'_> {
             (Ja, Self::DescendantsUnknown) => "子孫数は未取得".into(),
             (En, Self::DescendantsUncertain) => "Descendant counts uncertain".into(),
             (Ja, Self::DescendantsUncertain) => "子孫数は未確定".into(),
-            (En, Self::StaleCount(label)) => format!("{label} (previous counts; refresh failed)"),
+            (En, Self::StaleCount(label)) => format!("Refresh failed | {label} (previous)"),
             (Ja, Self::StaleCount(label)) => format!("{label}（前回の値・更新失敗）"),
             (En, Self::FailedCount) => "Descendant refresh failed; counts unconfirmed".into(),
             (Ja, Self::FailedCount) => "子孫数は更新失敗・未確認".into(),
@@ -926,24 +951,14 @@ impl WatchState {
         let entry = self.entries.get(id)?;
         let detail = entry.detail.as_ref();
         let status = match entry.category {
-            WatchCategory::Unread => match self.language {
-                UiLanguage::En => "Completed *",
-                UiLanguage::Ja => "完了 *",
-            },
+            WatchCategory::Unread => WatchText::Unread.render(self.language),
             WatchCategory::Confirming if entry.identity().is_some() && self.seen_overflow => {
-                match self.language {
-                    UiLanguage::En => "Outside confirmation history",
-                    UiLanguage::Ja => "確認履歴の保持範囲外",
-                }
+                WatchText::HistoryUnavailable.render(self.language)
             }
-            WatchCategory::Confirming => match self.language {
-                UiLanguage::En => "Confirming",
-                UiLanguage::Ja => "確認中",
-            },
-            WatchCategory::Stopped if entry.summary.interrupted => match self.language {
-                UiLanguage::En => "Stopped (app exit)",
-                UiLanguage::Ja => "中断済み（アプリ終了）",
-            },
+            WatchCategory::Confirming => WatchText::Confirming.render(self.language),
+            WatchCategory::Stopped if entry.summary.interrupted => {
+                WatchText::AppExit.render(self.language)
+            }
             _ => phase_label(entry.summary.phase, self.language, false),
         };
         Some(WatchRow {
@@ -953,13 +968,9 @@ impl WatchState {
             category: entry.category,
             status,
             state_age: &entry.state_clock,
-            secondary: detail.map_or(
-                match self.language {
-                    UiLanguage::En => "Checking details",
-                    UiLanguage::Ja => "詳細を確認中",
-                },
-                |d| d.secondary.as_str(),
-            ),
+            secondary: detail.map_or(WatchText::LoadingDetails.render(self.language), |d| {
+                d.secondary.as_str()
+            }),
             secondary_age: &entry.secondary_clock,
         })
     }
@@ -1302,7 +1313,8 @@ impl DescendantView {
         self.error = error;
         changed
     }
-    pub fn label(&self, root: &str) -> Option<String> {
+    #[cfg(test)]
+    fn label(&self, root: &str) -> Option<String> {
         self.label_in(root, UiLanguage::Ja)
     }
     pub(super) fn label_in(&self, root: &str, language: UiLanguage) -> Option<String> {
