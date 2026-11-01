@@ -2014,7 +2014,7 @@ async fn status_bar_shows_saved_context_usage_for_a_long_thread_through_the_real
         })
         .await;
     assert!(
-        initial.contains("↑—"),
+        initial.contains("^-"),
         "no context is adopted before CurrentView: {initial}"
     );
     assert!(
@@ -2043,7 +2043,7 @@ async fn status_bar_shows_saved_context_usage_for_a_long_thread_through_the_real
             },
         )
         .await;
-    assert!(!screen.contains("↑—"), "{screen}");
+    assert!(!screen.contains("^-"), "{screen}");
     assert!(screen.contains("キャッシュ65%"), "{screen}");
     fixture.finish().await;
 }
@@ -2054,16 +2054,16 @@ fn saved_context_status_ready(snapshot: Option<&Value>, screen: &str) -> bool {
             && snapshot["title"] == "CONTEXT_USAGE_READY"
             && snapshot["input_tokens"] == 159534
             && snapshot["cached_tokens"] == 103424
-    }) && screen.contains("↑159K")
+    }) && screen.contains("^159K")
         && screen.contains("キャッシュ65%")
 }
 
 #[test]
 fn saved_context_wait_requires_matching_snapshot_and_footer() {
-    let screen = "↑159K/200K ↓— キャッシュ65%";
+    let screen = "^159K/200K v- キャッシュ65%";
     let snapshot = json!({"thread":"reactive","title":"CONTEXT_USAGE_READY","input_tokens":159534,"cached_tokens":103424});
     assert!(!saved_context_status_ready(None, screen));
-    assert!(!saved_context_status_ready(Some(&snapshot), "↑—"));
+    assert!(!saved_context_status_ready(Some(&snapshot), "^-"));
     let mut old = snapshot.clone();
     old["title"] = json!("BASE_TITLE");
     assert!(!saved_context_status_ready(Some(&old), screen));
