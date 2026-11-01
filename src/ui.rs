@@ -1330,6 +1330,20 @@ impl UiUpdate {
             display,
         }
     }
+
+    /// Prepare localized display on a presentation worker without changing the raw page.
+    pub fn original_page_localized(
+        request_id: u64,
+        body: crate::protocol::HistoryBody,
+        language: crate::config::UiLanguage,
+    ) -> Self {
+        let display = details::original_page_lines_for(&body, language);
+        Self::OriginalPage {
+            request_id,
+            body,
+            display,
+        }
+    }
 }
 
 // Cache keys contain revisions rather than copies or hashes of retained source

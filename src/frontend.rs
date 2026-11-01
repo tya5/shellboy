@@ -2794,6 +2794,7 @@ async fn run_with_delivery(
                         cursor,
                         request_id,
                     } => {
+                        let language = control.store.config.ui.language;
                         let control = control.clone();
                         let sender = updates.worker();
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
@@ -2813,7 +2814,7 @@ async fn run_with_delivery(
                                 })
                             }) {
                                 Ok(body) => match presentation_work(move || {
-                                    UiUpdate::original_page(request_id, body)
+                                    UiUpdate::original_page_localized(request_id, body, language)
                                 })
                                 .await
                                 {

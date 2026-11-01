@@ -1549,6 +1549,33 @@ fn typed_conversation_has_inline_markers_and_details_copy_full_urls_without_chan
         next_cursor: Some("next".into()),
         tombstone_reason: None,
     };
+    for (language, heading) in [
+        (shellboy::config::UiLanguage::En, "Original reclaimed"),
+        (shellboy::config::UiLanguage::Ja, "原文回収済み"),
+    ] {
+        let mut raw = body.clone();
+        raw.tombstone_reason = Some("opaque reason".into());
+        match UiUpdate::original_page_localized(request_id, raw, language) {
+            UiUpdate::OriginalPage {
+                request_id: id,
+                body: actual,
+                display,
+            } => {
+                assert_eq!(id, request_id);
+                assert_eq!(actual.text, "current-page");
+                assert_eq!(actual.node_id, node_id);
+                let rendered = display
+                    .iter()
+                    .map(|line| line.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(rendered.contains(heading));
+                assert!(rendered.contains("opaque reason"));
+                assert!(rendered.contains("current-page"));
+            }
+            _ => panic!("expected original page"),
+        }
+    }
     ui.apply(UiUpdate::original_page(request_id + 1, body.clone()));
     assert!(ui.event(key(KeyCode::Char('c'))).is_empty());
     ui.apply(UiUpdate::original_page(request_id, body.clone()));
