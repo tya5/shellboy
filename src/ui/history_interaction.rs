@@ -312,8 +312,21 @@ impl UiState {
                     field("/ui_notice/source_node"),
                     field("/ui_notice/group_id"),
                     field("/ui_notice/call_id"),
-                    field("/ui_notice/unavailable"),
-                    field("/ui_notice/source_error"),
+                    field("/ui_notice/unavailable").map(|legacy| {
+                        node.presentation
+                            .ui_messages
+                            .notice
+                            .as_ref()
+                            .map(|message| message.render(self.config.ui.language))
+                            .unwrap_or(legacy)
+                    }),
+                    field("/ui_notice/source_error").map(|legacy| {
+                        node.presentation
+                            .ui_messages
+                            .source_error
+                            .map(|message| message.render(self.config.ui.language).to_owned())
+                            .unwrap_or(legacy)
+                    }),
                 )
             });
         if let Some((execution, thread, source, group, call, unavailable, source_error)) = notice {

@@ -260,3 +260,97 @@ fn actual_recovery_banner_screen_bilingual() {
         ],
     });
 }
+
+#[test]
+fn post_enrichment_bounder_drops_translation_before_changing_canonical_projection() {
+    use crate::presentation::messages::Message;
+    use crate::presentation::{NodePresentation, PresentationField};
+    let mut value = NodePresentation::default();
+    for index in 0..80 {
+        let mut key = format!("/extra/{index}");
+        key.shrink_to_fit();
+        value.fields.push(PresentationField {
+            key,
+            value: "x".repeat(600),
+            ..Default::default()
+        });
+    }
+    value.fields.shrink_to_fit();
+    assert!(value.metadata_bytes() < MAX_METADATA_BYTES);
+    let mut canonical = value.clone();
+    // Enrichment already happened; this is a direct call to the shared bounder,
+    // not the earlier projection::limits::finish path.
+    value.ui_messages.title = Some(Message::Raw {
+        text: "t".repeat(8 * 1024),
+    });
+    assert!(value.metadata_bytes() > MAX_METADATA_BYTES);
+    value.bound_metadata();
+    canonical.bound_metadata();
+    assert!(value.ui_messages.limited);
+    assert!(value.ui_messages.title.is_none());
+    assert!(value.metadata_bytes() <= MAX_METADATA_BYTES);
+    assert!(!value.metadata_limited && !value.details_omitted);
+    assert_eq!(
+        serde_json::to_value(&value).unwrap(),
+        serde_json::to_value(&canonical).unwrap()
+    );
+}
+
+#[test]
+fn canonical_only_post_enrichment_pressure_still_runs_the_existing_bounder() {
+    use crate::presentation::{NodePresentation, PresentationField};
+    let mut value = NodePresentation::default();
+    for index in 0..128 {
+        value.fields.push(PresentationField {
+            key: format!("/extra/{index}"),
+            value: "x".repeat(600),
+            ..Default::default()
+        });
+    }
+    assert!(value.metadata_bytes() > MAX_METADATA_BYTES);
+    value.bound_metadata();
+    assert!(value.metadata_bytes() <= MAX_METADATA_BYTES);
+    assert!(value.metadata_limited && value.details_omitted);
+}
+
+#[test]
+fn typed_current_notice_caption_preserves_raw_command_and_title_in_both_languages() {
+    use crate::presentation::messages::{Message, Text};
+    let saved = json!({"kind":"child_report","payload":{"thread_id":"child"}});
+    let mut value = node("event", "n", json!({"text":saved.to_string()}));
+    value
+        .presentation
+        .fields
+        .push(crate::presentation::PresentationField {
+            key: "/ui_notice/title".into(),
+            value: "保存された表示 | 現在の名前: 利用者の題名".into(),
+            ..Default::default()
+        });
+    let before = serde_json::to_value(&value.presentation).unwrap();
+    assert!(value.presentation.ui_messages.set_notice(
+        Message::ThreadNotice {
+            title: Some("利用者の題名 🙂".into())
+        },
+        None
+    ));
+    assert!(label(UiLanguage::En, &value).contains("Current name: 利用者の題名 🙂"));
+    assert!(label(UiLanguage::Ja, &value).contains("現在の名前: 利用者の題名"));
+    assert_eq!(serde_json::to_value(&value.presentation).unwrap(), before);
+    let command = Message::CommandNotice {
+        command: Some("printf '背景指定あり 🙂'".into()),
+        background: Some(false),
+    };
+    assert_eq!(
+        command.render(UiLanguage::En),
+        "printf '背景指定あり 🙂' | Background not requested"
+    );
+    assert_eq!(
+        command.render(UiLanguage::Ja),
+        "printf '背景指定あり 🙂' | 背景指定なし"
+    );
+    value
+        .presentation
+        .ui_messages
+        .set_notice(Message::Text(Text::NoticeDeletedThread), None);
+    assert!(label(UiLanguage::En, &value).contains("Referenced conversation was deleted"));
+}

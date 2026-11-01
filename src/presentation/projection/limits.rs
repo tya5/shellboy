@@ -89,6 +89,11 @@ mod localized_metadata_tests {
                 value_omitted: false,
             })
             .collect();
+        // Retained-byte limits intentionally count allocation capacity. Normalize
+        // the canonical fixture before cloning so both inputs have equal charges.
+        for field in &mut p.fields {
+            field.key.shrink_to_fit();
+        }
         let mut without_translation = p.clone();
         without_translation.ui_messages = Default::default();
         finish(&mut without_translation, &serde_json::json!({}));

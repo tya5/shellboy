@@ -30,8 +30,18 @@ fn source_candidate(text: &str) -> &str {
 fn label(language: UiLanguage, node: &UiNode) -> String {
     if language == UiLanguage::En
         && let Some(message) = &node.presentation.ui_messages.title
+        && (node.presentation.ui_messages.notice.is_some()
+            || !node
+                .presentation
+                .fields
+                .iter()
+                .any(|f| f.key == "/ui_notice/title"))
     {
-        return message.render(language);
+        let title = message.render(language);
+        return match &node.presentation.ui_messages.notice {
+            Some(notice) => format!("{title} | {}", notice.render(language)),
+            None => title,
+        };
     }
     if let Some(title) = node
         .presentation

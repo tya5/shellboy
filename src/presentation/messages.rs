@@ -21,6 +21,12 @@ sentences! {
     ReasoningExpanded => ("▸ Reasoning (expanded)", "▸ 推論（展開中）"),
     ContextTrim => ("Input scope reduced (original retained)", "入力範囲を縮小（原文は保持）"),
     MetadataLimited => ("Display details limited | F6 Original for complete facts", "表示情報を制限 | 完全な情報はF6 原文"),
+    NoticeSourceUnavailable => ("Source result is unavailable", "元の結果を参照できません"),
+    NoticeCallUnavailable => ("Call information is unavailable", "呼出し情報を参照できません"),
+    NoticeCommandUnrecorded => ("Command not recorded", "コマンド未記録"),
+    NoticeDeletedThread => ("Referenced conversation was deleted", "参照先の会話は削除済み"),
+    NoticeThreadUnavailable => ("Referenced conversation is unavailable", "参照先の会話を取得できません"),
+    NoticeUntitled => ("Untitled", "無題"),
     User => ("You", "あなた"), Reasoning => ("Reasoning", "推論"),
     ToolResult => ("Execution result", "実行結果"), Event => ("State change", "状態変更"),
     ReviewChange => ("Review the change", "変更内容を確認"), History => ("History", "履歴"),
@@ -62,6 +68,13 @@ sentences! {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
+    CommandNotice {
+        command: Option<String>,
+        background: Option<bool>,
+    },
+    ThreadNotice {
+        title: Option<String>,
+    },
     Text(Text),
     UnknownTitle {
         kind: String,
@@ -149,6 +162,36 @@ impl Message {
     pub fn render(&self, language: UiLanguage) -> String {
         let en = language == UiLanguage::En;
         match self {
+            Self::CommandNotice {
+                command,
+                background,
+            } => {
+                let command = command
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| display_value(s, 120))
+                    .unwrap_or_else(|| Text::NoticeCommandUnrecorded.render(language).into());
+                match (en, background) {
+                    (true, Some(true)) => format!("{command} | Background requested"),
+                    (true, Some(false)) => format!("{command} | Background not requested"),
+                    (true, None) => format!("{command} | Background request not recorded"),
+                    (false, Some(true)) => format!("{command} | 背景指定あり"),
+                    (false, Some(false)) => format!("{command} | 背景指定なし"),
+                    (false, None) => format!("{command} | 背景指定未記録"),
+                }
+            }
+            Self::ThreadNotice { title } => {
+                let title = title
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| display_value(s, 80))
+                    .unwrap_or_else(|| Text::NoticeUntitled.render(language).into());
+                if en {
+                    format!("Current name: {title}")
+                } else {
+                    format!("現在の名前: {title}")
+                }
+            }
             Self::Text(text) => text.render(language).into(),
             Self::UnknownTitle { kind } => {
                 if en {
@@ -324,6 +367,8 @@ impl Message {
     }
     fn retained_bytes(&self) -> usize {
         match self {
+            Self::CommandNotice { command, .. } => command.as_ref().map_or(0, String::capacity),
+            Self::ThreadNotice { title } => title.as_ref().map_or(0, String::capacity),
             Self::Raw { text } | Self::Hint { text } => text.capacity(),
             Self::SavedState { state } => state.capacity(),
             Self::EventSummary { title, facts } => {
@@ -359,12 +404,15 @@ impl Message {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PresentationMessages {
     pub title: Option<Message>,
+    pub notice: Option<Message>,
+    pub source_error: Option<Text>,
     pub bodies: Vec<(usize, Vec<Message>)>,
     pub limited: bool,
 }
 impl PresentationMessages {
     pub fn retained_bytes(&self) -> usize {
         self.title.as_ref().map_or(0, Message::retained_bytes)
+            + self.notice.as_ref().map_or(0, Message::retained_bytes)
             + self.bodies.capacity() * std::mem::size_of::<(usize, Vec<Message>)>()
             + self
                 .bodies
@@ -751,11 +799,11 @@ pub fn tool_heading(tool: &super::ToolPresentation, request: bool, language: UiL
     let identity = tool
         .ordinal
         .map(|n| format!("#{}", n + 1))
-        .unwrap_or_else(|| format!("Ref {}", super::short(&tool.call_id, 16)));
+        .unwrap_or_else(|| format!("Ref {}", display_value(&tool.call_id, 16)));
     let command = if tool.command.is_empty() {
         "Original command in details".into()
     } else {
-        super::short(
+        display_value(
             &tool
                 .command
                 .split_whitespace()
@@ -786,7 +834,7 @@ pub fn tool_heading(tool: &super::ToolPresentation, request: bool, language: UiL
             facts.push(Message::Elapsed { ms, decimal: true }.render(language));
         }
         if let Some(id) = &tool.execution_id {
-            facts.push(format!("Execution {} | F6", super::short(id, 8)));
+            facts.push(format!("Execution {} | F6", display_value(id, 8)));
         }
     }
     facts.join(" | ")
@@ -901,6 +949,19 @@ impl PresentationMessages {
         // Fall back to the complete canonical display title, not an earlier
         // generic translated label that would conceal its saved facts.
         self.title = None;
+        self.limited = true;
+        false
+    }
+}
+
+impl PresentationMessages {
+    pub fn set_notice(&mut self, notice: Message, source_error: Option<Text>) -> bool {
+        self.notice = Some(notice);
+        self.source_error = source_error;
+        if self.retained_bytes() <= 8 * 1024 {
+            return true;
+        }
+        self.notice = None;
         self.limited = true;
         false
     }
