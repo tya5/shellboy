@@ -217,6 +217,9 @@ pub(super) fn footer_lines(
     };
     let phase = view.footer_phase();
     let mut facts = Vec::new();
+    if let Some(retry) = view.activity.snapshot.as_ref().and_then(|s| s.automatic_retry.as_ref()) {
+        facts.push(retry.label_localized(view.language));
+    }
     if let Some(limit) = view
         .activity
         .snapshot
@@ -226,9 +229,6 @@ pub(super) fn footer_lines(
         .and_then(|r| r.limit_summary_localized(view.language))
     {
         facts.push(limit);
-    }
-    if let Some(retry) = view.activity.snapshot.as_ref().and_then(|s| s.automatic_retry.as_ref()) {
-        facts.push(retry.label_localized(view.language));
     }
 
     if let Some(reason) = view
