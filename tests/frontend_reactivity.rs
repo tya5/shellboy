@@ -1986,9 +1986,9 @@ async fn status_bar_shows_saved_context_usage_for_a_long_thread_through_the_real
     let mut fixture = Fixture::build("http://127.0.0.1:9/v1", false, true).await;
     let screen = fixture
         .until("saved context usage on the status bar", |_ui, screen| {
-            screen.contains("↑159K")
+            screen.contains("^159K")
         })
         .await;
-    assert!(!screen.contains("↑—"), "{screen}");
+    assert!(!screen.contains("^-"), "{screen}");
     assert!(screen.contains("キャッシュ65%"), "{screen}");
 }
