@@ -1640,8 +1640,6 @@ pub enum ManagementFollow {
     Next,
     Refresh,
 }
-const MANAGEMENT_DETAIL_FOOTER: &str =
-    "Esc 戻る | ^v/PgUp/PgDn 閲覧\nN 次page | P 先頭 | C このpageをコピー";
 const CONFIRMATION_FOOTER: &str = "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧";
 const CONFIRMATION_CONTEXT: &str = "内容を確認してください";
 impl Confirmation {
@@ -1883,6 +1881,8 @@ impl UiState {
         let initialized = cwd.is_absolute();
         let mut thread_browser = threads::ThreadBrowser::default();
         thread_browser.set_language(config.ui.language);
+        let mut management = management::ManagementPopup::default();
+        management.set_language(config.ui.language);
         Self {
             inspection_observation: None,
             inspection_revision: 0,
@@ -1913,7 +1913,7 @@ impl UiState {
             full_redraw_requested: false,
             lifecycle: Default::default(),
             input_notice: None,
-            management: management::ManagementPopup::default(),
+            management,
             confirmation: None,
             config: config.clone(),
             startup_cwd: cwd,
