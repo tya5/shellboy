@@ -7554,3 +7554,8 @@ The earlier147/141 comparison is the narrower legacy inventory, not a different
 outcome. Fields20 ->18 and scroll395 ->307 use the same archived source and
 helper. check/fmt + scrolling6/0 + ui_scroll_stream/refresh11/0 (57f169e8) pass;
 metrics-helper4/0 and test watchdog policy pass. Native branch CI is pending.
+
+First branch CI 41300987588 (3d5dc0fb) failed strict Clippy on the new test module
+preceding impl ThreadView; no behavioural test failure is claimed. Move that
+module to EOF, without suppressing the lint. Local strict clippy --tests and
+characterization19/navigation2 pass (2aa2b2d6). Replacement exact-SHA CI required.

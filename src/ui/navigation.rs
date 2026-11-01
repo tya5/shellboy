@@ -144,47 +144,6 @@ impl Navigation {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn follow_mode_preserves_all_characterized_flag_combinations() {
-        for follow in [false, true] {
-            for unseen in [false, true] {
-                let mut nav = Navigation::default();
-                nav.set_follow(follow);
-                nav.set_unseen(unseen);
-                assert_eq!((nav.follow(), nav.unseen()), (follow, unseen));
-                nav.set_follow(!follow);
-                assert_eq!((nav.follow(), nav.unseen()), (!follow, unseen));
-                nav.set_unseen(!unseen);
-                assert_eq!((nav.follow(), nav.unseen()), (!follow, !unseen));
-            }
-        }
-    }
-
-    #[test]
-    fn read_state_distinguishes_hydration_awaiting_and_delivered_tickets() {
-        for loading in [false, true] {
-            for owned in [false, true] {
-                let mut nav = Navigation::default();
-                let ticket = owned.then(|| (17, Some("node".into())));
-                nav.set_loading(loading);
-                nav.set_request(ticket.clone());
-                assert_eq!(nav.is_loading(), loading);
-                assert_eq!(nav.request(), ticket.as_ref());
-                nav.set_loading(!loading);
-                assert_eq!(nav.is_loading(), !loading);
-                assert_eq!(nav.request(), ticket.as_ref());
-                assert_eq!(nav.take_request(), ticket);
-                assert_eq!(nav.is_loading(), !loading);
-                assert!(nav.request().is_none());
-            }
-        }
-    }
-}
-
 impl ThreadView {
     fn scroll_during_read(
         &mut self,
@@ -665,5 +624,46 @@ impl ThreadView {
             return vec![];
         }
         vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn follow_mode_preserves_all_characterized_flag_combinations() {
+        for follow in [false, true] {
+            for unseen in [false, true] {
+                let mut nav = Navigation::default();
+                nav.set_follow(follow);
+                nav.set_unseen(unseen);
+                assert_eq!((nav.follow(), nav.unseen()), (follow, unseen));
+                nav.set_follow(!follow);
+                assert_eq!((nav.follow(), nav.unseen()), (!follow, unseen));
+                nav.set_unseen(!unseen);
+                assert_eq!((nav.follow(), nav.unseen()), (!follow, !unseen));
+            }
+        }
+    }
+
+    #[test]
+    fn read_state_distinguishes_hydration_awaiting_and_delivered_tickets() {
+        for loading in [false, true] {
+            for owned in [false, true] {
+                let mut nav = Navigation::default();
+                let ticket = owned.then(|| (17, Some("node".into())));
+                nav.set_loading(loading);
+                nav.set_request(ticket.clone());
+                assert_eq!(nav.is_loading(), loading);
+                assert_eq!(nav.request(), ticket.as_ref());
+                nav.set_loading(!loading);
+                assert_eq!(nav.is_loading(), !loading);
+                assert_eq!(nav.request(), ticket.as_ref());
+                assert_eq!(nav.take_request(), ticket);
+                assert_eq!(nav.is_loading(), !loading);
+                assert!(nav.request().is_none());
+            }
+        }
     }
 }
