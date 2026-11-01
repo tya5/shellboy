@@ -2,7 +2,7 @@
 use crate::config::UiLanguage;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Message {
+pub(crate) enum Message {
     ForceQuitTitle,
     ForceQuitContext,
     ForceQuitBody,
@@ -18,7 +18,7 @@ pub(super) enum Message {
 }
 
 impl Message {
-    pub(super) fn render(self, language: UiLanguage) -> String {
+    pub(crate) fn render(self, language: UiLanguage) -> String {
         match (language, self) {
             (UiLanguage::En, Self::ForceQuitTitle) => "Confirm force quit".into(),
             (UiLanguage::Ja, Self::ForceQuitTitle) => "強制終了の確認".into(),
@@ -84,73 +84,99 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
     unicode_width::set_terminal_width(policy);
 }
 
+/// Register a synthetic UI-only screen and its essential translated phrases.
+/// Stage B screens reuse the same sizes, terminal policies and border checks.
+#[cfg(test)]
+pub(super) fn verify_screen(
+    configure: fn(&mut super::UiState),
+    expected: fn(UiLanguage) -> &'static [&'static str],
+) {
+    use ratatui::{Terminal, backend::TestBackend};
+    use unicode_width::UnicodeWidthStr;
+    for observed in [Some(1), Some(2), None] {
+        unicode_width::set_terminal_width(observed);
+        for width in [80, 120] {
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let mut config = crate::config::Config::default();
+                config.ui.language = language;
+                let mut ui = super::UiState::new(&config, std::path::PathBuf::new());
+                configure(&mut ui);
+                let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
+                terminal.draw(|frame| super::draw(frame, &mut ui)).unwrap();
+                let buffer = terminal.backend().buffer();
+                assert_invariant_ui_symbols(buffer, observed);
+                if let Some(bounds) = ui.aux_popup_paint.get() {
+                    let bounds = bounds.outer;
+                    for y in bounds.y + 1..bounds.bottom() - 1 {
+                        assert_eq!(buffer[(bounds.x, y)].symbol(), "|", "left border at {y}");
+                        assert_eq!(
+                            buffer[(bounds.right() - 1, y)].symbol(),
+                            "|",
+                            "right border at {y}"
+                        );
+                    }
+                }
+                let mut screen = String::new();
+                for y in 0..30 {
+                    let mut x = 0;
+                    while x < width {
+                        let value = buffer[(x, y)].symbol();
+                        screen.push_str(value);
+                        x += value.width().max(1) as u16;
+                    }
+                    screen.push('\n');
+                }
+                for phrase in expected(language) {
+                    assert!(
+                        screen.contains(phrase),
+                        "terminal={observed:?} width={width} missing {phrase:?}: {screen}"
+                    );
+                }
+            }
+        }
+    }
+    unicode_width::clear_terminal_width();
+}
+
 #[cfg(test)]
 mod rendering_tests {
     use super::*;
     use crate::{
         config::Config,
-        ui::{self, Confirmation, UiState},
+        ui::{Confirmation, UiState},
     };
-    use ratatui::{Terminal, backend::TestBackend};
-    use unicode_width::UnicodeWidthStr;
-
-    fn render_fixture(language: UiLanguage, width: u16) -> String {
-        let mut config = Config::default();
-        config.ui.language = language;
-        let mut ui = UiState::new(&config, std::path::PathBuf::new());
-        ui.confirmation = Some(Confirmation::ForceQuit);
-        let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
-        terminal.draw(|frame| ui::draw(frame, &mut ui)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let observed = unicode_width::terminal_width_observation();
-        super::assert_invariant_ui_symbols(buffer, observed);
-        let bounds = ui.aux_popup_paint.get().expect("confirmation bounds").outer;
-        for y in bounds.y + 1..bounds.bottom() - 1 {
-            assert_eq!(buffer[(bounds.x, y)].symbol(), "|", "left border at {y}");
-            assert_eq!(
-                buffer[(bounds.right() - 1, y)].symbol(),
-                "|",
-                "right border at {y}"
-            );
-        }
-        let mut result = String::new();
-        for y in 0..30 {
-            let mut x = 0;
-            while x < width {
-                let value = buffer[(x, y)].symbol();
-                result.push_str(value);
-                x += value.width().max(1) as u16;
-            }
-            result.push('\n');
-        }
-        result
-    }
 
     #[test]
     fn force_quit_is_complete_in_both_languages_and_widths() {
-        for observed in [Some(1), Some(2), None] {
-            unicode_width::set_terminal_width(observed);
-            for width in [80, 120] {
-                for (language, title, warning, action) in [
-                    (
-                        UiLanguage::En,
-                        "Confirm force quit",
-                        "Saving and cleanup",
-                        "Y Force quit",
-                    ),
-                    (UiLanguage::Ja, "強制終了の確認", "保存や回収", "Y 強制終了"),
-                ] {
-                    let screen = render_fixture(language, width);
-                    for expected in [title, warning, action] {
-                        assert!(
-                            screen.contains(expected),
-                            "terminal={observed:?} width={width} missing {expected:?}: {screen}"
-                        );
-                    }
-                }
+        fn configure(ui: &mut UiState) {
+            ui.confirmation = Some(Confirmation::ForceQuit);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Confirm force quit", "Saving and cleanup", "Y Force quit"],
+                UiLanguage::Ja => &["強制終了の確認", "保存や回収", "Y 強制終了"],
             }
         }
-        unicode_width::clear_terminal_width();
+        super::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn representative_help_and_operations_screens_share_the_width_checks() {
+        fn show_help(ui: &mut UiState) {
+            let config = ui.config.clone();
+            ui.show_help(super::super::help::Page::guide(&config));
+        }
+        fn show_operations(ui: &mut UiState) {
+            ui.open_operations(None);
+        }
+        fn help_expected(_: UiLanguage) -> &'static [&'static str] {
+            &["よく使う操作", "Esc"]
+        }
+        fn operations_expected(_: UiLanguage) -> &'static [&'static str] {
+            &["CLIと同じ操作", "Esc"]
+        }
+        super::verify_screen(show_help, help_expected);
+        super::verify_screen(show_operations, operations_expected);
     }
 
     #[test]

@@ -30,7 +30,7 @@ pub(crate) mod draft;
 mod help;
 mod history_interaction;
 mod history_items;
-mod i18n;
+pub(crate) mod i18n;
 #[cfg(test)]
 pub(crate) use history_items::ItemState as PreviewItemState;
 pub use history_items::{ItemKey, Preview as ToolPreview};
@@ -1638,6 +1638,21 @@ const MANAGEMENT_DETAIL_FOOTER: &str =
 const CONFIRMATION_FOOTER: &str = "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧";
 const CONFIRMATION_CONTEXT: &str = "内容を確認してください";
 impl Confirmation {
+    fn sized_area(&self, area: Rect, language: crate::config::UiLanguage) -> Rect {
+        if matches!(self, Self::ForceQuit) {
+            popup::text_viewport(
+                area,
+                &[
+                    &self.title(language),
+                    &self.context(language),
+                    &self.footer(language),
+                    &self.text(language),
+                ],
+            )
+        } else {
+            area
+        }
+    }
     fn footer(&self, language: crate::config::UiLanguage) -> String {
         if matches!(self, Self::ForceQuit) {
             i18n::Message::ForceQuitFooter.render(language)
@@ -1705,6 +1720,7 @@ impl Confirmation {
         }
     }
     fn layout(&self, area: Rect, language: crate::config::UiLanguage) -> (String, u16) {
+        let area = self.sized_area(area, language);
         let text = self.text(language);
         let width = popup::reader_width(popup::body_area(
             area,
@@ -1723,6 +1739,7 @@ impl Confirmation {
     }
     fn page(&self, area: Rect, language: crate::config::UiLanguage) -> u16 {
         let (_, height) = self.layout(area, language);
+        let area = self.sized_area(area, language);
         popup::body_area(
             area,
             &self.context(language),
@@ -5497,6 +5514,7 @@ impl UiState {
         }
         if let Some(confirmation) = &self.confirmation {
             let language = self.config.ui.language;
+            let area = confirmation.sized_area(area, language);
             let context = confirmation.context(language);
             let footer = confirmation.footer(language);
             let title = confirmation.title(language);
