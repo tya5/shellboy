@@ -554,6 +554,7 @@ impl ThreadView {
             }
             if self.loading {
                 if self.scroll.request.is_some() {
+                    let mut reversed = false;
                     if self.scroll.pending != 0 {
                         if self.scroll.pending.signum() == amount.signum() {
                             self.scroll.pending = self.scroll.pending.saturating_add(amount);
@@ -562,6 +563,7 @@ impl ThreadView {
                         // Reversing direction cancels navigation that could not
                         // yet be applied, rather than replaying it after the read.
                         self.scroll.pending = 0;
+                        reversed = true;
                     }
                     let (width, height) = (self.scroll.width, self.scroll.height);
                     let layout = self.history_layout(view_key, cache, budget, width, height);
@@ -600,7 +602,9 @@ impl ThreadView {
                         self.follow = false;
                         return vec![];
                     }
-                    self.scroll.pending = self.scroll.pending.saturating_add(amount);
+                    if !reversed {
+                        self.scroll.pending = self.scroll.pending.saturating_add(amount);
+                    }
                     return vec![];
                 }
                 // Explicit navigation supersedes presentation-only hydration.
@@ -1586,7 +1590,9 @@ impl ThreadView {
         self.selection_revision = selection_revision;
         self.total_nodes = total_nodes;
         if !window_reply
-            || (self.history_rebase_pending && !self.scroll.moved_during_read)
+            || (self.history_rebase_pending
+                && !self.scroll.moved_during_read
+                && self.anchor != anchor)
             || !self
                 .nodes
                 .iter()

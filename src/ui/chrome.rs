@@ -244,7 +244,7 @@ pub(super) fn footer_lines(
     if let Some(gap) = view.activity.receive_gap_note(std::time::Instant::now()) {
         facts.push(gap);
     }
-    if view.loading && view.scroll.request.is_none() {
+    if view.loading {
         facts.push("…".into());
     }
     let facts = fit(
