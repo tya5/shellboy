@@ -131,6 +131,9 @@ class ReleaseUpgradeTests(unittest.TestCase):
         self.assertEqual(records['summary_usage'], [('summary.usage.synthetic', '{"tokens":7}')])
         self.assertIn("key LIKE 'summary.usage.%'", db.execute(
             "SELECT sql FROM sqlite_master WHERE name='gc_bytes_app_meta_history'").fetchone()[0])
+        db.execute("UPDATE app_meta SET value='changed' WHERE key='summary.usage.synthetic'")
+        with self.assertRaisesRegex(AssertionError, 'summary_usage'):
+            checks.preserved(db, records)
 
     def test_historical_schema14_to18_keeps_complete_prefix(self):
         db = self.fixture(14)
@@ -153,6 +156,8 @@ class ReleaseUpgradeTests(unittest.TestCase):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema), ('0.5.0', 17, 18))
+        explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '18'])
+        self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 18))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         staged = checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '16'])
