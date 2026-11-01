@@ -5907,59 +5907,19 @@ fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize)
     }
     out
 }
-fn draw_recovery(frame: &mut Frame<'_>, area: Rect, snapshot: &activity::ActivitySnapshot) {
-    let Some(recovery) = &snapshot.recovery else {
+fn draw_recovery(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    snapshot: &activity::ActivitySnapshot,
+    language: crate::config::UiLanguage,
+) {
+    if snapshot.recovery.is_none() {
         return;
-    };
+    }
     if area.height == 0 {
         return;
     }
-    let current = snapshot.phase == activity::ActivityPhase::Recovery;
-    let title = if current {
-        "! 復旧待ち | 操作を待っています".to_owned()
-    } else {
-        format!("! 前回の復旧待ち | {}", snapshot.phase.label())
-    };
-    let reason = crate::presentation::sanitize_plain(&recovery.message, 0)
-        .0
-        .replace('\n', " ");
-    let next = if current {
-        "/retry 同じ内容で再試行 | 入力で新指示 | Ctrl+C 停止 | F8 詳細"
-    } else {
-        "入力で新しい作業 | F8 作業/応答処理の詳細"
-    };
-    let mut lines = vec![
-        Line::from(title),
-        Line::from(format!("{} | {reason}", recovery.stage)),
-    ];
-    let reduction_row = u16::from(snapshot.context_reduction.is_some() && area.height >= 4);
-    if reduction_row > 0
-        && let Some(summary) = &snapshot.context_reduction
-    {
-        lines.push(Line::from(summary.clone()));
-    }
-    if !current && let Some(reason) = &recovery.stop_reason {
-        let label = match reason.as_str() {
-            "explicit_stop" => "人による停止",
-            "shutdown" | "app_shutdown" => "アプリ終了",
-            _ => "停止理由はF8の詳細で確認",
-        };
-        if area.height >= 4 + reduction_row {
-            lines.push(Line::from(label));
-        }
-    } else if area.height >= 4 + reduction_row {
-        lines.push(Line::from(format!(
-            "依頼は保存済み | 未反映指示 {}件 | 保存済みツール結果 {}件",
-            recovery.pending_messages, recovery.saved_tool_results
-        )));
-    }
-    if area.height >= 5 + reduction_row {
-        lines.push(Line::from(format!(
-            "動作中shell {}件 | 回収未完了 {}件 | 副作用は詳細で確認",
-            recovery.live_shells, recovery.uncollected_shells
-        )));
-    }
-    lines.push(Line::from(next));
+    let lines = presentation::recovery_lines(snapshot, language, area.width.saturating_sub(1), area.height);
     frame.render_widget(
         Paragraph::new(lines)
             .style(Style::default().fg(theme::WARNING))
@@ -6376,7 +6336,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         );
     }
     if let Some(snapshot) = &view.activity.snapshot {
-        draw_recovery(frame, recovery_area, snapshot);
+        draw_recovery(frame, recovery_area, snapshot, state.config.ui.language);
     }
     message_queue::draw_compact(frame, queue_area, view);
     live_work::draw(
