@@ -25,6 +25,8 @@ pub(crate) struct CaptureTarget<'a> {
     // Only the original request's explicit selection, never a viewer/provenance.
     pub(crate) selecting_thread: Option<&'a str>,
     pub(crate) source_revision: Option<u64>,
+    // Comparable node-body hash only. Replacement/span hashes stay in the
+    // original result; they must not be compared with node.body_hash.
     pub(crate) source_hash: Option<&'a str>,
     pub(crate) raw: Option<&'a CapturedRawFacts>,
 }
@@ -415,7 +417,7 @@ pub(super) fn capture_response(command:&crate::protocol::Command,value:&serde_js
         Command::HistoryRelations(a)=>{
             targets.push(CaptureTarget{kind:TargetKind::Node,id:&a.node_id,selecting_thread:None,source_revision:None,source_hash:None,raw:None});
             for row in value.get("items")?.as_array()?.iter().take(201) {
-                if let Some(id)=row["node_id"].as_str(){targets.push(CaptureTarget{kind:TargetKind::Node,id,selecting_thread:None,source_revision:row["source_revision"].as_u64().or_else(||row.pointer("/provenance/source_revision").and_then(serde_json::Value::as_u64)),source_hash:row["source_hash"].as_str(),raw:None});}
+                if let Some(id)=row["node_id"].as_str(){targets.push(CaptureTarget{kind:TargetKind::Node,id,selecting_thread:None,source_revision:row["source_revision"].as_u64().or_else(||row.pointer("/provenance/source_revision").and_then(serde_json::Value::as_u64)),source_hash:row["body_hash"].as_str(),raw:None});}
             }RetainedRoute::Relations
         }
         Command::HistorySearch(a)=>{
@@ -494,8 +496,11 @@ pub(crate) fn prepare_inspection(raw:OwnedRetainedRaw)->Result<serde_json::Value
         row[match target.kind{TargetKind::Node=>"node_id",TargetKind::Execution=>"execution_id",TargetKind::Run=>"run_id",TargetKind::Turn=>"turn_id",TargetKind::Thread=>"thread_id"}]=json!(target.id.as_ref());row
     }).collect::<Vec<_>>();
     let value=json!({"result_identity":prepared.scope.result_identity.as_ref(),"captured_result_at":prepared.scope.captured_at.as_ref(),"route":format!("{:?}",prepared.scope.route),
-        "sources":rows,"unobserved_targets":prepared.scope.unobserved_targets,"limited_fields":prepared.limited_fields,"sql_statements":prepared.leaf_sql_count,
-        "cursor_authorization":"not performed; original cursor preserved, output growth alone does not expire it","notice":"Current metadata only. Original bytes, outcome, request filters and cursor remain retained; missing/unknown does not prove deletion."});
+        "sources":rows,"unobserved_targets":prepared.scope.unobserved_targets,"captured_scope_complete":prepared.scope.unobserved_targets==0,
+        "request_metadata_available":prepared.scope.original_request.is_some(),"limited_fields":prepared.limited_fields,"sql_statements":prepared.leaf_sql_count,
+        "query_membership":"not rerun; repeat explicitly for new relation/search matches",
+        "cursor_authorization":"not performed; original cursor preserved, output growth alone does not expire it",
+        "notice":if prepared.scope.original_request.is_some(){"Current metadata only. Original bytes, outcome, request filters and cursor remain retained; missing/unknown does not prove deletion."}else{"Original result remains retained. Request metadata exceeded capture limits or was unavailable; re-enter those filters explicitly. Missing/unknown does not prove deletion."}});
     if serde_json::to_vec(&value).map_err(|_|crate::protocol::ApiError::new(crate::protocol::ErrorCode::InvalidState,"cannot prepare retained facts"))?.len()>MAX_METADATA_BYTES {
         return Err(crate::protocol::ApiError::new(crate::protocol::ErrorCode::InputLimit,"retained prepared metadata exceeds channel"));
     }Ok(value)
