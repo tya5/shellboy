@@ -1,5 +1,28 @@
 # Validation record
 
+## v0.5.0 preparation boundary
+
+Preparation base is main `cdcb70da`, including #101, before #117 main integration.
+Package/lock version, release-note draft and guide version/description wording
+are changed; conversation schema remains17, RAG3 and local protocol2.
+The Agent Guide's obsolete optional-generation/normalization wording is corrected
+to the adopted model-HTTP requirement and existing verbatim replay behavior.
+No runtime implementation or migration is added by this preparation.
+
+Build-free checks on the preparation tree pass: integration layout95/watchdog,
+Python document-role1 and candidate-installer unit2 (3 tests total), `git diff
+--check`, and TOML parsing confirming package/lock both identify shellboy0.5.0.
+Execution315e7d61 exits0 with group cleanup confirmed. Installer unit tests use
+synthetic fixtures; they do not establish a real candidate installation pass.
+
+Exact-source Rust checks and three-OS CI remain pending. No candidate release
+build, extracted-binary smoke, installer, synthetic upgrade, public download,
+provider request or user-data/installed-binary change has been performed.
+`check-release-upgrade.py --help` confirms schema14/15 only; its fixed public0.3.0
+input and ledger assertions cannot qualify the required public0.4.0/schema17
+upgrade. The [candidate plan](../development/publication.md#candidate-validation-plan-not-results)
+records expectations, not successful observations.
+
 ## G latest-main fixture correction and final gate records
 
 At main4035457 integration351e5f4, standard v32 passes Python86/layout95/

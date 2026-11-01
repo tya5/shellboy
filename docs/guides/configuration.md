@@ -543,8 +543,10 @@ increase the selected context even when it is much shorter than its originals.
 
 ### Shell call descriptions
 
-`[shell] describe_calls = true` is the default. Execution/display descriptions are
-limited to 80 Unicode characters; saved/replayed model arguments remain verbatim.
+`[shell] describe_calls = true` is the default and requires `description` in
+generated shell tool definitions. Received missing/blank descriptions still use
+command fallback. Execution/display descriptions are limited to 80 Unicode
+characters; saved/replayed model arguments remain verbatim.
 Descriptions are model-authored, not command verification. False
 omits the argument from generation tool definitions and displays commands instead.
 Saved history and command provenance are not deleted by opting out.

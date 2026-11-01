@@ -1,5 +1,16 @@
 # Development status
 
+## v0.5.0 release preparation
+
+Dedicated preparation branch starts at main `cdcb70da` with #101 included.
+Package/lock version is 0.5.0; user-facing notes summarize E/F/G, shell labels,
+headless owners, bounded usage and landed fixes. #117 must land before finalizing.
+The broader #41 and unmerged followups are not claimed complete. Candidate
+validation is planned in [publication](publication.md#candidate-validation-plan-not-results);
+reviewer dispatch and actual publication are separate. Candidate/build/install/
+upgrade checks have not run. The historical upgrade helper cannot yet validate
+schema17; that gap is explicit, not a passing result.
+
 ## G latest-main admission batch
 
 G54e377b is published; native3OS CI41251630243 succeeds: Linux2329/0/34,

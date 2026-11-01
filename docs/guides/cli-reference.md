@@ -539,8 +539,8 @@ held entries. No saved job state is changed by this status projection.
 
 ## Saved compaction and shell observations
 
-These unreleased-main commands require the matching owner and CLI; public v0.4.0
-alone does not provide them. They do not start/stop work, read shell output, call a
+These commands require matching v0.5.0 owner and CLI; v0.4.0 alone does not
+provide them. They do not start/stop work, read shell output, call a
 provider or allocate operation receipts.
 
 ```sh
@@ -658,7 +658,7 @@ are not cancelled. Input preparation is not skipped. Embeddings and model-list
 requests are outside this first version. Short bottom-line TUI rendering is
 tracked separately in #85; use run get/the existing recovery reason for now.
 
-## Terminal-free owner startup (#5, unreleased)
+## Terminal-free owner startup (#5, v0.5.0)
 
 `shellboy serve --data-dir DIR [--config FILE]` starts an owner without a terminal.
 The data directory must be explicit and is protected by the normal owner lock;

@@ -325,3 +325,62 @@ new-main synthetic upgrade checks, `scripts/check-release-upgrade.py` defaults t
 15, rather than claiming no migration. Use `--expected-new-schema 14` only to
 repeat the historical v0.4.0/schema14 qualification. This script change itself is
 not a new release build or an executed public-binary upgrade qualification.
+
+## v0.5.0 preparation (2026-11-01, not published)
+
+The reviewer requested release preparation with push approval, using the
+[v0.5.0 notes](release-v0.5.0-draft.md) and package version 0.5.0. Finalize only
+after #101 and #117 are on main. #101 is included at base `cdcb70da`; #117 is
+still pending. The broader #41 and unmerged #107-#109/#115 work are not declared
+complete. Guide version labels and the description-generation requirement are
+aligned with the adopted model-HTTP contract; received missing labels still
+execute with command fallback and verbatim replay.
+
+### Candidate validation plan (not results)
+
+1. Fetch/rebase the preparation branch onto main after both required fixes land.
+   Run light local checks; push the branch and dispatch ordinary `ci.yml` for
+   that exact SHA. The full standard check runs in CI, not locally. Require green
+   native Linux/macOS/Windows checks before review/handoff and main integration.
+   Historical local-check wording above describes previous releases, not this
+   sandbox's current shared-build policy.
+2. After integration, identify the exact main SHA with successful ordinary
+   three-OS checks. The reviewer, not this preparation worker, dispatches:
+
+   ```sh
+   gh workflow run release.yml --repo tya5/shellboy --ref main \
+     -f release_tag=v0.5.0 -f candidate_ref=EXACT_GREEN_MAIN_SHA
+   ```
+
+   Do not omit `candidate_ref`: empty selects publication mode. Candidate mode
+   creates no tag or GitHub Release and keeps read-only contents permissions.
+   Keep Rust CI and release-build run URLs distinct; release builds are not a
+   substitute for ordinary exact-SHA Rust checks.
+3. Require all three native builds, extracted-archive `--version` (`shellboy
+   0.5.0`), `--help` and offline `docs list` smoke checks, assembled candidate
+   assets and native installer checks. Check three archives, two version-stamped
+   installers and the five-entry `SHA256SUMS`. Retain the checksum file's own
+   SHA-256 too. Use disposable paths with spaces; test replacement/backup bytes
+   and corrupt-archive rejection without changing existing or fresh destinations.
+   Candidate URLs are local mirrors, not claims of public v0.5.0 availability.
+4. Qualify a synthetic public-v0.4.0 to candidate upgrade with independently
+   verified old bytes, a stopped owner and consistent SQLite backups preserving
+   committed WAL. Expect conversation schema 14 -> 17, the unchanged ledger
+   prefix followed by 15 `0015_readback_indexes`, 16 `0016_thread_observation`,
+   17 `0017_thread_parent`, and standalone RAG 3. Check integrity/foreign keys,
+   saved originals/senders/pending work/usage, search, mock exec and clean stop.
+   Use loopback mocks and temporary stores only, never user data or paid APIs.
+   **Tooling gap:** `check-release-upgrade.py` currently fixes the old binary at
+   v0.3.0 and accepts only schema 14/15 with a matching historical ledger check.
+   It cannot qualify this upgrade unchanged; adapting and running it is still
+   required before recording an upgrade pass. No schema-17 result is inferred
+   from earlier release checks or a changed expected-version string.
+5. Record exact SHA, CI/candidate run URLs, six hashes, installer and upgrade
+   results outside the qualified tree so evidence updates do not recursively
+   invalidate it. Retain failed attempts/reruns separately. Publication/tagging,
+   public-byte verification and installed-binary replacement remain separate
+   reviewer/user-controlled steps; this worker does not perform them.
+
+Preparation has not run candidate builds, installers, synthetic upgrades or
+public download checks. The unmodified release workflow supplies candidate mode;
+no publication permission or workflow change is needed for this preparation.

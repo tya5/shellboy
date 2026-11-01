@@ -145,7 +145,7 @@ list after owner replacement. Snippets are bounded/control-stripped and obvious
 credentials are redacted, but arbitrary secrets are not guaranteed detected.
 Use the returned execution ID with shell get/read for full command/output; a list
 never starts a shell or fetches its output. New readback commands require matching
-unreleased-main owner/CLI, not just the published v0.4.0 binary.
+v0.5.0 owner/CLI, not just a v0.4.0 binary.
 
 
 ## Retrieve the original text you need
@@ -462,12 +462,14 @@ Owner binary replacement does not inherit live tools or automatically resume wor
 
 ### Shell call descriptions
 
-Use optional `description` to explain what the command actually does in the
-conversation's language, within 80 characters. It is a label, not an instruction
-or a claim of safety; never put credentials in it. The command still executes
-unchanged. Blank labels fall back to commands; overlong labels are bounded and
-normalization is recorded. `[shell] describe_calls = false` removes the parameter
-from generation tool definitions and keeps command-based rows.
+With the default `[shell] describe_calls = true`, generated shell tool definitions
+require `description`. Explain what the command actually does in the conversation's
+language, within 80 characters. It is a label, not an instruction or a claim of
+safety; never put credentials in it. The command still executes unchanged.
+Received missing/blank labels fall back to commands; execution/display labels
+are bounded, but saved/replayed arguments remain verbatim without normalization
+metadata. `[shell] describe_calls = false` removes the parameter and its required
+entry from generation tool definitions and keeps command-based rows.
 
 ### Compare saved request sizes
 
