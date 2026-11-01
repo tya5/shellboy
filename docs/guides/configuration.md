@@ -192,15 +192,15 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 
 Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash or `$env:SHELLBOY_PROXY_API_KEY = '…'` in PowerShell. Choose a method appropriate to your environment that avoids leaving secrets in history or shared configuration. The binary does not automatically read `credentials.env`.
 
-`base_url` is the HTTP(S) API root; Shellboy appends the selected conversation path (`/responses` or `/chat/completions`), `/models`, or `/embeddings`. URLs containing username/password, query, fragment, or an already appended endpoint suffix are rejected. `api_key_env` is the **name** of an environment variable; its value is read immediately before sending a request and used as `Authorization: Bearer ...`. Unset, empty, or newline-containing values are errors.
+`base_url` is the HTTP(S) API root; Shellboy appends the selected conversation path (`/responses`, `/chat/completions`, or `/messages`), `/models`, or `/embeddings`. URLs containing username/password, query, fragment, or an already appended endpoint suffix are rejected. `api_key_env` is the **name** of an environment variable; its value is read immediately before sending a request. By default it is sent as `Authorization: Bearer ...`. Optional `api_key_header` sends that value **unchanged**, without a Bearer prefix, in the named header instead (for example `x-api-key`, Azure's `api-key`, or a gateway-specific name). This setting works for every dialect and requires `api_key_env`. Unset, empty, or newline-containing credential values are errors. Header names must be valid HTTP tokens, at most 256 bytes, and cannot be transport-owned names.
 
-`connections.<name>.headers` is an optional HTTP header dictionary. Names must be unique ignoring case, and invalid control characters in values are rejected. `api_key_env` cannot be combined with an Authorization header. Prefer environment-variable references to writing secrets directly in headers. `default_effort` is an optional nonempty string accepted by the endpoint. There is no built-in catalog of model capacity or effort support.
+`connections.<name>.headers` is an optional HTTP header dictionary. Names must be unique ignoring case, and invalid control characters in values are rejected. The header selected by `api_key_env`/`api_key_header` cannot also appear in `headers` or `extra_headers`, even under different capitalization. Prefer environment-variable references to writing secrets directly in headers. `default_effort` is an optional nonempty string accepted by the endpoint. There is no built-in catalog of model capacity or effort support.
 
 ### Anthropic Messages: `api = "anthropic_messages"`
 
 Use this to talk to Anthropic's own Messages API (`POST {base_url}/messages`),
 for example with an Anthropic Console API key (the way a Claude plan's API credit
-is used), where prompt caching and reasoning continuity work. Through a LiteLLM
+is used), which exposes native prompt caching and signed thinking. Through a LiteLLM
 or similar gateway, the gateway's own dialect (`responses`/`chat_completions`) is
 what Shellboy sees; this setting is for the native API.
 
@@ -211,12 +211,20 @@ default_model = "YOUR_CLAUDE_MODEL_ID"
 [connections.claude]
 api = "anthropic_messages"
 base_url = "https://api.anthropic.com/v1"
-headers = { "x-api-key" = "PASTE_NOT_RECOMMENDED" }   # or api_key_env (Bearer)
+api_key_env = "ANTHROPIC_API_KEY" # Set this environment variable before starting Shellboy.
+api_key_header = "x-api-key"     # Raw key value, not Authorization: Bearer.
 # max_tokens = 32768
-# extra_body = { cache_control = { type = "ephemeral" } }     # automatic prompt caching
-# extra_body = { thinking = { type = "adaptive" } }           # provider-specific; see its docs
+extra_body = { cache_control = { type = "ephemeral" } } # Recommended: automatic prompt caching.
+# To also enable thinking, add thinking = { type = "adaptive" } inside extra_body.
 # extra_headers = { "anthropic-beta" = "..." }
 ```
+
+**Recommended: enable prompt caching.** Without `cache_control`, every request's
+full input is billed at the full rate. For long-running agent conversations,
+this can cost several times more. The active `extra_body` example above is the
+recommended user setting; Shellboy still sends no optional provider fields unless
+you configure them. Cache-read behavior still needs the approved live verification
+described below; synthetic fixtures are not evidence of a real provider cache hit.
 
 - Shellboy sends the minimum a conversation needs: `model`, `max_tokens`
   (required by the API), `stream`, `messages`, a top-level `system` and `tools`,
@@ -228,8 +236,10 @@ headers = { "x-api-key" = "PASTE_NOT_RECOMMENDED" }   # or api_key_env (Bearer)
 - `max_tokens` (positive integer, only valid with this dialect) defaults to 32768,
   below the 128K output cap documented for current models. Raise it for very long
   answers; a turn that reaches it is reported as incomplete, not as a success.
-- Authentication: `api_key_env` sends `Authorization: Bearer`; to use the
-  `x-api-key` header instead, put it in `headers`.
+- Authentication: prefer `api_key_env = "ANTHROPIC_API_KEY"` with
+  `api_key_header = "x-api-key"`, as in the example. No key is pasted into TOML.
+  Omitting `api_key_header` retains the default Bearer path; whether that path
+  authenticates a real Anthropic key has not been verified here.
 - Context Shellboy inserts mid-conversation (event notices) is sent as a user
   message (the API has no mid-conversation system role), so `context_role` has no
   effect here. A request must end with a user message; Shellboy refuses to send an
@@ -254,6 +264,18 @@ headers = { "x-api-key" = "PASTE_NOT_RECOMMENDED" }   # or api_key_env (Bearer)
 - Fixture tests check Shellboy's side of the documented wire format. Real-provider
   behavior (cache reads, thinking round trips, rate limits) is verified separately
   and only with your approval.
+
+### Native Messages Verification Still Pending
+
+No real provider call is part of the synthetic fixture qualification. After API
+credit returns, explicit user approval is required before verifying: a second
+request has positive `cache_read_input_tokens`; cache-creation facts can be
+recorded for that observation; authentication works with the chosen Bearer or
+`x-api-key` path; and thinking/signature blocks survive a provider round trip.
+Shellboy currently maps cache reads into its standard cached counter but has no
+separate saved `cache_creation` counter. Whether to persist one is a separate
+issue; this change adds no storage column and does not claim that check passed.
+
 
 ### Context role: `context_role`
 

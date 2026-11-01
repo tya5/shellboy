@@ -255,8 +255,14 @@ models) read on 2026-11-01; no real provider call has been made.
 - Headers: `anthropic-version` is a constant in the dialect (`2023-06-01`, the
   version whose streaming format is documented in detail), never inferred.
   Raising it is a deliberate code change. `content-type` and the credential path
-  stay as for the other dialects: `api_key_env` sends `Authorization: Bearer`,
-  which the API accepts; `x-api-key` is available through `headers`.
+  stay shared with the other dialects: `api_key_env` defaults to
+  `Authorization: Bearer`; `api_key_header` selects a valid non-transport-owned
+  header and sends the environment value unchanged. The recommended Anthropic
+  configuration is `api_key_header = "x-api-key"`; Azure's `api-key` and arbitrary
+  gateway credential headers use the same generic path. A custom credential
+  header cannot collide case-insensitively with `headers` or `extra_headers`.
+  All resolved values use the existing sensitive-header/redaction path. Real
+  Anthropic Bearer authentication remains unverified, not assumed compatible.
 - Request: `model`, `max_tokens` (required by the API), `stream: true`,
   `messages`, a top-level `system` string, and `tools`. Nothing optional is sent:
   no `thinking`, effort, temperature, `tool_choice`, `cache_control` or beta

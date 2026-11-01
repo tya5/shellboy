@@ -139,6 +139,29 @@ impl Connection {
         if let Some(effort) = &self.default_effort {
             nonempty(&format!("connections.{name}.default_effort"), effort)?;
         }
+        if let Some(header) = &self.api_key_header {
+            if self.api_key_env.is_none()
+                || header.is_empty()
+                || header.len() > 256
+                || !header.bytes().all(header_name_byte)
+                || matches!(
+                    header.to_ascii_lowercase().as_str(),
+                    "host"
+                        | "content-type"
+                        | "content-length"
+                        | "accept"
+                        | "transfer-encoding"
+                        | "connection"
+                        | "x-shellboy-session-id"
+                        | "anthropic-version"
+                )
+            {
+                return Err(invalid(
+                    format!("connections.{name}.api_key_header"),
+                    "requires api_key_env and a valid non-transport-owned HTTP header name of at most 256 bytes",
+                ));
+            }
+        }
         if let Some(env) = &self.api_key_env {
             if !valid_env_name(env) {
                 return Err(invalid(
@@ -146,14 +169,12 @@ impl Connection {
                     "must be an environment variable name",
                 ));
             }
-            if self
-                .headers
-                .keys()
-                .any(|key| key.eq_ignore_ascii_case("authorization"))
-            {
+            if self.headers.keys().any(|key| {
+                key.eq_ignore_ascii_case(self.api_key_header.as_deref().unwrap_or("authorization"))
+            }) {
                 return Err(invalid(
                     format!("connections.{name}.headers"),
-                    "Authorization and api_key_env cannot both be defined",
+                    "the api_key_env credential header cannot also be defined in headers",
                 ));
             }
         }
@@ -219,6 +240,14 @@ impl Connection {
             .keys()
             .map(|key| key.to_ascii_lowercase())
             .collect();
+        if self.api_key_env.is_some() {
+            seen.insert(
+                self.api_key_header
+                    .as_deref()
+                    .unwrap_or("authorization")
+                    .to_ascii_lowercase(),
+            );
+        }
         for (key, value) in &self.extra_headers {
             if key.is_empty()
                 || !key.bytes().all(header_name_byte)
@@ -246,7 +275,7 @@ impl Connection {
             if !seen.insert(lower) {
                 return Err(invalid(
                     headers_key,
-                    "names must be unique case-insensitively and must not repeat a `headers` entry",
+                    "names must be unique case-insensitively and must not repeat a headers or environment-credential entry",
                 ));
             }
         }

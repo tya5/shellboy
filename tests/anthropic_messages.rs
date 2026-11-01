@@ -507,3 +507,56 @@ fn configuration_validates_max_tokens_and_the_messages_api() {
         "/v1/messages"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn environment_key_custom_headers_are_sent_raw_and_redacted() {
+    const CHILD: &str = "SHELLBOY_TEST_API_KEY_HEADER_CHILD";
+    const KEY: &str = "SHELLBOY_TEST_API_KEY_HEADER_KEY";
+    const SECRET: &str = "fixture-env-key-120";
+    // A child-only environment avoids mutating process-global state while other
+    // integration tests run concurrently. It never reads a user's API key.
+    if std::env::var(CHILD).as_deref() != Ok("1") {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "anthropic_messages::environment_key_custom_headers_are_sent_raw_and_redacted",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env(KEY, SECRET)
+            .status()
+            .unwrap();
+        assert!(status.success(), "isolated credential fixture failed");
+        return;
+    }
+    crate::test_watchdog::watchdog("tests/anthropic_messages.rs: environment header", async {
+        const RESPONSES: &str = "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}]}}\n\n";
+        const ERROR: &str = r#"{"type":"error","error":{"type":"invalid_request_error","message":"echo fixture-env-key-120"}}"#;
+        for (api, header, status, kind, body) in [
+            (Api::AnthropicMessages, "x-api-key", 200, "text/event-stream", TEXT),
+            (Api::Responses, "api-key", 200, "text/event-stream", RESPONSES),
+            (Api::AnthropicMessages, "X-Owner", 400, "application/json", ERROR),
+        ] {
+            let (url, server) = serve_once(status, kind, body).await;
+            let mut config = connection(url);
+            config.api = api;
+            config.api_key_env = Some(KEY.into());
+            config.api_key_header = Some(header.into());
+            config.response_max_retries = 0;
+            let client = HttpModelClient::for_connection("fixture", config).unwrap();
+            let result = client.response_for_thread("fixture-thread", request(vec![]), CancellationToken::new(), None).await;
+            let (head, _) = server.await.unwrap();
+            let head = head.to_ascii_lowercase();
+            assert!(head.contains(&format!("{}: {SECRET}", header.to_ascii_lowercase())));
+            assert!(!head.contains("authorization:"));
+            assert!(!head.contains(&format!("bearer {SECRET}")));
+            if status == 200 {
+                assert!(result.is_ok());
+            } else {
+                let failure = result.unwrap_err();
+                assert!(!failure.error.message.contains(SECRET));
+                assert!(failure.error.message.contains("[redacted]"));
+            }
+        }
+    }).await.unwrap();
+}

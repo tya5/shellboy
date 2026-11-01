@@ -880,3 +880,88 @@ fn context_role_defaults_to_developer_and_accepts_only_known_values() {
         );
     }
 }
+
+#[test]
+fn environment_credentials_can_use_any_dialect_with_an_explicit_raw_header() {
+    for (api, header) in [
+        ("responses", "api-key"),
+        ("chat_completions", "X-Owner"),
+        ("anthropic_messages", "x-api-key"),
+        ("responses", "Authorization"),
+    ] {
+        let config = Config::parse(&format!("[connections.test]\napi='{api}'\nbase_url='https://example.test/v1'\napi_key_env='TEST_HEADER_KEY'\napi_key_header='{header}'\n")).unwrap();
+        let credentials = config.connections["test"]
+            .credentials(|name| {
+                assert_eq!(name, "TEST_HEADER_KEY");
+                Some("fixture-raw-key".into())
+            })
+            .unwrap();
+        assert_eq!(credentials.headers().len(), 1);
+        assert_eq!(credentials.headers()[header], "fixture-raw-key");
+        assert!(!format!("{config:?} {credentials:?}").contains("fixture-raw-key"));
+    }
+}
+
+#[test]
+fn environment_credential_headers_validate_names_and_require_a_variable() {
+    for header in [
+        "",
+        "not a header",
+        "name:bad",
+        "x\r\nheader",
+        "Host",
+        "Content-Length",
+        "Content-Type",
+        "Accept",
+        "Connection",
+        "Transfer-Encoding",
+        "X-Shellboy-Session-Id",
+        "anthropic-version",
+        &"x".repeat(257),
+    ] {
+        let mut config = Config::default();
+        config.connections.insert(
+            "test".into(),
+            shellboy::config::Connection {
+                base_url: "https://example.test/v1".into(),
+                api_key_env: Some("KEY".into()),
+                api_key_header: Some(header.into()),
+                ..Default::default()
+            },
+        );
+        assert!(config.validate().is_err(), "accepted header {header:?}");
+    }
+    assert!(
+        Config::parse(
+            "[connections.test]\nbase_url='https://example.test/v1'\napi_key_header='x-api-key'\n"
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn environment_credential_headers_cannot_collide_or_bypass_extra_header_checks() {
+    for entry in [
+        "headers={'x-owner'='literal'}",
+        "extra_headers={'X-OWNER'='literal'}",
+        "extra_headers={'Authorization'='literal'}",
+        "extra_headers={'api-key'='literal'}",
+    ] {
+        let source = format!(
+            "[connections.test]\nbase_url='https://example.test/v1'\napi_key_env='KEY'\napi_key_header='X-Owner'\n{entry}\n"
+        );
+        assert!(
+            Config::parse(&source).is_err(),
+            "accepted collision {entry}"
+        );
+    }
+    let config = Config::parse("[connections.test]\nbase_url='https://example.test/v1'\napi_key_env='KEY'\napi_key_header='X-Owner'\nextra_headers={'X-Beta'='safe'}\n").unwrap();
+    let connection = &config.connections["test"];
+    assert!(connection.credentials(|_| None).is_err());
+    assert!(
+        connection
+            .credentials(|_| Some("\r\nPRIVATE-KEY".into()))
+            .is_err()
+    );
+    assert!(connection.credentials(|_| Some(" ".into())).is_err());
+}

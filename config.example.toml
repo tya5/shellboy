@@ -9,6 +9,8 @@ default_model = "REPLACE_WITH_MODEL_ID"
 # max_tokens = 32768 # anthropic_messages only.
 base_url = "https://proxy.example/v1"
 api_key_env = "SHELLBOY_API_KEY"
+# Optional: send the raw environment value in this header instead of Bearer auth.
+# api_key_header = "x-api-key" # Or Azure's "api-key"; valid for every api dialect.
 # Set false only to disable certificate verification for this connection.
 # ssl_verify = true
 # Conversation/summary Responses headers identify each Thread automatically.

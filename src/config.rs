@@ -147,6 +147,8 @@ pub struct Connection {
     pub api: Api,
     pub base_url: String,
     pub api_key_env: Option<String>,
+    /// Raw environment key in this header; None keeps Authorization: Bearer.
+    pub api_key_header: Option<String>,
     pub default_effort: Option<String>,
     pub context_role: ContextRole,
     /// Required by `anthropic_messages` only; `None` selects the default.
@@ -174,6 +176,7 @@ impl Default for Connection {
             api: Api::default(),
             base_url: String::new(),
             api_key_env: None,
+            api_key_header: None,
             default_effort: None,
             context_role: ContextRole::default(),
             max_tokens: None,
@@ -199,6 +202,7 @@ impl fmt::Debug for Connection {
             .field("api", &self.api)
             .field("base_url", &"[redacted]")
             .field("api_key_env", &self.api_key_env)
+            .field("api_key_header", &self.api_key_header)
             .field("default_effort", &self.default_effort)
             .field("context_role", &self.context_role)
             .field("max_tokens", &self.max_tokens)
@@ -275,7 +279,11 @@ impl Connection {
                     "credential must not contain a newline",
                 ));
             }
-            headers.insert("Authorization".into(), format!("Bearer {key}"));
+            let (header, value) = match &self.api_key_header {
+                Some(header) => (header.clone(), key),
+                None => ("Authorization".into(), format!("Bearer {key}")),
+            };
+            headers.insert(header, value);
         }
         Ok(ConnectionCredentials { headers })
     }
