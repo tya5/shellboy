@@ -110,7 +110,9 @@ impl ManagementPopup {
     pub(super) fn set_language(&mut self, language: UiLanguage) {
         if self.language != language {
             self.language = language;
-            self.reader_cache.borrow_mut().clear();
+            let mut reader = self.reader_cache.borrow_mut();
+            reader.set_language(language);
+            reader.clear();
         }
     }
     fn detail_footer(&self) -> &'static str {

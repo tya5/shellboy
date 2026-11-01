@@ -355,7 +355,9 @@ impl Operations {
         self.cached_rows.take();
         if let Some(form) = &mut self.form {
             form.language = language;
-            form.reader.borrow_mut().clear();
+            let mut reader = form.reader.borrow_mut();
+            reader.set_language(language);
+            reader.clear();
             form.help_revision = form.help_revision.wrapping_add(1);
         }
         self.ensure_selection();
@@ -474,6 +476,7 @@ impl Operations {
             .expect("every operation is listed");
         let mut form = Form::new(operation, &self.context);
         form.language = self.language;
+        form.reader.get_mut().set_language(self.language);
         self.form = Some(form);
     }
     pub fn paste(&mut self, text: &str) {
@@ -574,6 +577,7 @@ impl Operations {
                 if let Some(kind) = self.rows().get(selected).copied() {
                     let mut form = Form::new(kind, &self.context);
                     form.language = self.language;
+                    form.reader.get_mut().set_language(self.language);
                     self.form = Some(form);
                 }
                 return Outcome::None;

@@ -32,7 +32,6 @@ pub(in crate::ui) struct ReaderCache {
     builds: usize,
 }
 impl ReaderCache {
-    #[allow(dead_code)]
     pub fn set_language(&mut self, language: UiLanguage) {
         if self.language.unwrap_or(UiLanguage::Ja) == language {
             self.language = Some(language);
@@ -375,6 +374,23 @@ mod tests {
             }
         }
         crate::ui::text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn limited_help_screen_uses_configured_language_at_standard_widths() {
+        fn configure(ui: &mut crate::ui::UiState) {
+            ui.show_help(crate::ui::help::Page::info(
+                "Synthetic reader", "Fixture", "x".repeat(300_000),
+            ));
+            ui.help_scroll = u16::MAX;
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Limit: Copy the original"],
+                UiLanguage::Ja => &["上限: 表示キャッシュ上限"],
+            }
+        }
+        crate::ui::i18n::verify_screen(configure, expected);
     }
 
     #[test]
