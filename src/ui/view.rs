@@ -871,9 +871,7 @@ impl ThreadView {
             presentation: Default::default(),
         };
         self.rebase_navigation();
-        self.navigation.history_rebase_pending = true;
-        self.navigation
-            .begin_read((self.navigation.view_revision, None), None);
+        self.navigation.begin_rebase();
         Some(UiAction::RebaseStream(Box::new(StreamRebase {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,
@@ -900,9 +898,7 @@ impl ThreadView {
             // Keep this frame while resolving real ordinals and source
             // offsets. No provisional ID is sent to history.get.
             self.rebase_navigation();
-            self.navigation.history_rebase_pending = true;
-            self.navigation
-                .begin_read((self.navigation.view_revision, None), None);
+            self.navigation.begin_rebase();
             let action = UiAction::RebaseHistory {
                 thread_id,
                 generation,
@@ -914,9 +910,7 @@ impl ThreadView {
         None
     }
     pub(super) fn on_view_state(&mut self, anchor: ViewAnchor, follow: bool) {
-        self.navigation.anchor = anchor;
-        self.navigation.set_follow(follow);
-        self.navigation.set_unseen(false);
+        self.navigation.restore(anchor, follow);
     }
     pub(super) fn on_load_failed(&mut self, message: String) {
         self.navigation.fail_read();
@@ -1130,9 +1124,7 @@ impl ThreadView {
             return None;
         }
         self.rebase_navigation();
-        self.navigation.history_rebase_pending = true;
-        self.navigation
-            .begin_read((self.navigation.view_revision, None), None);
+        self.navigation.begin_rebase();
         self.status = "履歴の表示位置を再取得中…".into();
         let action = UiAction::RebaseHistory {
             thread_id,
@@ -1604,9 +1596,7 @@ impl ThreadView {
             return None;
         }
         self.rebase_navigation();
-        self.navigation.history_rebase_pending = true;
-        self.navigation
-            .begin_read((self.navigation.view_revision, None), None);
+        self.navigation.begin_rebase();
         Some(UiAction::RebaseHistory {
             thread_id: self.thread_id.clone()?,
             generation: self.generation,

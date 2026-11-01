@@ -142,6 +142,17 @@ impl Navigation {
             (false, true) => FollowMode::ReadingUnseen,
         };
     }
+    pub(in crate::ui) fn resume_follow(&mut self) {
+        self.mode = FollowMode::Following;
+    }
+    pub(in crate::ui) fn begin_rebase(&mut self) {
+        self.history_rebase_pending = true;
+        self.begin_read((self.view_revision, None), None);
+    }
+    pub(in crate::ui) fn restore(&mut self, anchor: ViewAnchor, follow: bool) {
+        self.anchor = anchor;
+        self.set_mode(follow, false);
+    }
     pub(in crate::ui) fn begin_read(&mut self, ticket: ReadTicket, pending: Option<isize>) {
         self.read = ReadState::Awaiting(ticket);
         if let Some(pending) = pending {
@@ -534,8 +545,7 @@ impl ThreadView {
                 && end
                 && (following || row > top || (max == 0 && view.first_ordinal == 0))
             {
-                view.navigation.set_follow(true);
-                view.navigation.set_unseen(false);
+                view.navigation.resume_follow();
             }
             let boundary = if target < 0 {
                 Some(false)

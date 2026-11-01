@@ -3579,9 +3579,7 @@ impl UiState {
                 // Keep the user's unconsumed movement until fresh ordinals
                 // arrive; never apply it against the rejected snapshot.
                 view.navigation.scroll.pending = amount;
-                view.navigation.history_rebase_pending = true;
-                view.navigation
-                    .begin_read((view.navigation.view_revision, None), None);
+                view.navigation.begin_rebase();
                 self.deferred_actions.push(UiAction::RebaseHistory {
                     thread_id: view
                         .thread_id
@@ -4366,8 +4364,7 @@ impl UiState {
         );
         view.status = "送信要求を受け付け中".into();
         view.cancel_navigation();
-        view.navigation.set_follow(true);
-        view.navigation.set_unseen(false);
+        view.navigation.resume_follow();
         let snapshot = Some(Box::new(draft.clone()));
         if let Some(edit) = draft.edit {
             return vec![UiAction::SendEdited {

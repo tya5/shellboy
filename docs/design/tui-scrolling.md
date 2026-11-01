@@ -250,3 +250,19 @@ reply settlement is delegated to the owner; the failed-read pending-delta quirk
 remains deliberately intact. Conservative full-field counts now159 vs baseline
 161 (including the new lifecycle invocations), fields18 vs20 and scroll307 vs395.
 Characterization19 and view43 (including the two Navigation state tests) pass.
+
+### Reviewer gate after the approved checkpoint
+
+Issue #118's confirmed review requires an event-driven transition model, a
+visible field reduction and a conservative combined count below 100 before
+fixing the six doubtful cases. The incremental setter/event wrappers (currently
+154 combined sites, 18 fields) do not meet that gate and will not be handed off
+as the next completed boundary. Revised direction: NavigationEvent chooses the
+new read/motion state; read-kind and moved flags become discriminated lifecycle
+states, and common cancellation/delivery/failure settlement shares one state
+replacement rather than independent setters. Keep deferred movement attached to
+its read lifecycle, including explicit legacy failed/deferred states until the
+separate behaviour-fix commits. Collapse only demonstrably redundant projection
+identity, not authoritative position or a relocated copy of it. Count new event
+invocations, reducer assignments and all still-stored payloads; do not hide
+writes under a new receiver/tuple or exclude helper internals to pass the gate.
