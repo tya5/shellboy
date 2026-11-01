@@ -5,11 +5,36 @@ const SOURCE_BYTES: usize = 1024 * 1024;
 const SOURCE_PAGES: usize = 64;
 const BLOCKS: usize = 128;
 
+#[derive(Debug)]
+enum CopyError {
+    Limit,
+    ReferenceChanged,
+    Unavailable(String),
+    Stalled,
+    SourceChanged,
+    MissingBlock,
+}
+impl CopyError {
+    fn error(self) -> ApiError {
+        let (code, message) = match self {
+            Self::Limit => (ErrorCode::InputLimit,
+                "Copy retrieval limit exceeded. Press o to open the source and n to continue（also available through history get）".into()),
+            Self::ReferenceChanged => (ErrorCode::TargetUnavailable,
+                "The source reference has changed".into()),
+            Self::Unavailable(reason) => (ErrorCode::OutputExpired,
+                format!("Cannot retrieve the source: {reason}")),
+            Self::Stalled => (ErrorCode::IoFailed,
+                "Source pagination is not advancing".into()),
+            Self::SourceChanged => (ErrorCode::TargetUnavailable,
+                "The source has changed. Press b to select the code block again".into()),
+            Self::MissingBlock => (ErrorCode::InvalidArgument,
+                "The selected code block does not exist".into()),
+        };
+        ApiError::new(code, message)
+    }
+}
 fn limit() -> ApiError {
-    ApiError::new(
-        ErrorCode::InputLimit,
-        "コピーの取得上限を超えました。oで原文を開き、nで続きを確認してください（history getでも取得できます）",
-    )
+    CopyError::Limit.error()
 }
 async fn source(control: &Control, node_id: String, budget: usize) -> Result<String, ApiError> {
     let history = crate::history::History::new(control.store.database.clone());
@@ -27,16 +52,10 @@ async fn source(control: &Control, node_id: String, budget: usize) -> Result<Str
             })
             .await?;
         if body.node_id != node_id {
-            return Err(ApiError::new(
-                ErrorCode::TargetUnavailable,
-                "原文の参照先が変わりました",
-            ));
+            return Err(CopyError::ReferenceChanged.error());
         }
         if let Some(reason) = body.tombstone_reason {
-            return Err(ApiError::new(
-                ErrorCode::OutputExpired,
-                format!("原文を取得できません: {reason}"),
-            ));
+            return Err(CopyError::Unavailable(reason).error());
         }
         if text.len().saturating_add(body.text.len()) > budget {
             return Err(limit());
@@ -46,7 +65,7 @@ async fn source(control: &Control, node_id: String, budget: usize) -> Result<Str
             return Ok(text);
         };
         if !seen.insert(next.clone()) {
-            return Err(ApiError::new(ErrorCode::IoFailed, "原文の続きが進みません"));
+            return Err(CopyError::Stalled.error());
         }
         cursor = Some(next);
     }
@@ -114,18 +133,13 @@ pub(super) async fn text(
             .as_ref()
             .is_some_and(|expected| expected != &source_hash(&text))
         {
-            return Err(ApiError::new(
-                ErrorCode::TargetUnavailable,
-                "原文が更新されました。bでコードの塊を選び直してください",
-            ));
+            return Err(CopyError::SourceChanged.error());
         }
         let result = if let Some(index) = block {
             crate::presentation::markdown_code_blocks(&text)
                 .nth(index)
                 .map(|b| b.text)
-                .ok_or_else(|| {
-                    ApiError::new(ErrorCode::InvalidArgument, "指定したコードの塊がありません")
-                })?
+                .ok_or_else(|| CopyError::MissingBlock.error())?
         } else {
             text
         };
@@ -140,6 +154,31 @@ pub(super) async fn text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_copy_failures_are_english_without_changing_codes_or_source_reason() {
+        let reason = "fixture reason: \u{4fdd}\u{5b58}\u{6e08}\u{307f} \u{25c9}";
+        for (failure, code, expected) in [
+            (CopyError::Limit, ErrorCode::InputLimit,
+             "Copy retrieval limit exceeded. Press o to open the source and n to continue（also available through history get）".to_owned()),
+            (CopyError::ReferenceChanged, ErrorCode::TargetUnavailable,
+             "The source reference has changed".into()),
+            (CopyError::Unavailable(reason.into()), ErrorCode::OutputExpired,
+             format!("Cannot retrieve the source: {reason}")),
+            (CopyError::Stalled, ErrorCode::IoFailed,
+             "Source pagination is not advancing".into()),
+            (CopyError::SourceChanged, ErrorCode::TargetUnavailable,
+             "The source has changed. Press b to select the code block again".into()),
+            (CopyError::MissingBlock, ErrorCode::InvalidArgument,
+             "The selected code block does not exist".into()),
+        ] {
+            let error = failure.error();
+            assert_eq!(error.code, code);
+            assert_eq!(error.message, expected);
+            assert!(error.hint.is_none());
+            assert!(error.details.is_none());
+        }
+    }
+
     #[test]
     fn summaries_count_unicode_and_retain_parser_order_without_rendered_labels() {
         let items = summaries("text\n```rust\n界e\u{301}\n```\n\n    indented\n").unwrap();

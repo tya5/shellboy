@@ -166,3 +166,13 @@ holds the matching owner-produced CurrentView until the browser adopts the
 committed title, verifies the selected view is still unchanged, then releases
 and awaits adoption. Arbitrary startup snapshots cannot satisfy this boundary.
 The 16 measured shared-snapshot/count/no-reload checks remain unchanged.
+
+## Copy Worker Diagnostic Language (#152, Next Release)
+
+Copy acquisition errors are application-generated diagnostics and default to
+complete English sentences. This is separate from locale-owned picker labels:
+the copy picker retains an error's supplied text rather than translating raw
+source/provider details. Preserve each error code, source reason, key action,
+limit, pagination/hash guard and copied bytes. An untranslated generated prefix
+must not be used as a comparison token or bundled with source bytes. Stage C
+product changes are excluded from0.6.0; this applies to the next release only.

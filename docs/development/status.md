@@ -3774,3 +3774,13 @@ classifiers, source bytes, glyph policy and filesystem behavior remain unchanged
 Local focused checks and exact-tip CI qualify this candidate separately; the
 resume point is their evidence and review. #149/#150 dependent ranges and final
 Stage C mixed-language/three-OS acceptance remain pending.
+### Stage C Product Copy Review, Batch 1 (#152, Next Release Only)
+
+The user excluded Stage C product changes from0.6.0 while approving the inventory
+tooling. On its approved checkpoint, first production review confirms6 raw copy
+worker diagnostic literals in `src/frontend/copying.rs` reach the copy picker or
+failure notices without English projection. Batch1 uses complete English errors
+and keeps codes, guards, limits, key hints, source reasons/copy bytes and symbols.
+B5/B6 files remain deferred until landing; W8's separator work is untouched.
+Focused tests and exact branch CI evidence are recorded in acceptance; the rest
+of c1888 is not a confirmed-defect count or a StageC completion claim.
