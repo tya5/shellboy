@@ -878,6 +878,9 @@ impl NodePresentation {
             .saturating_sub(self.blocks.iter().map(|b| b.text.capacity()).sum::<usize>())
     }
     pub(crate) fn bound_metadata(&mut self) {
+        if self.metadata_bytes() > MAX_METADATA_BYTES {
+            self.ui_messages.clear();
+        }
         if self.metadata_bytes() <= MAX_METADATA_BYTES {
             return;
         }
