@@ -7204,3 +7204,21 @@ parts/invalid cache, virtual UUID rendered size, forged hidden bounds, and zero
 removed messages for preflight budget refusal are covered. Registered real IPC1/0
 is qualified on the unchanged routing/fixture above. Full standard/native3OS CI
 is deliberately left to the exact pushed branch; no full local suite is claimed.
+
+## #113 initial native CI catalogue correction
+
+Exact7747290f CI41272580406 fails the same executable-catalogue assertion on all
+three OSes: clap exposes --dry-run but compact's shared CLI binding omits it.
+All other library tests, integration suites and termination/crash suites pass;
+this is a task-related registration omission, not a Windows intermittent failure.
+No same-SHA rerun is used. The existing DryRun logical field and false-default
+flag binding are added to compact's catalogue. Its help is generalized so it is
+truthful for both RAG and compaction. Manual owner forms remain a strict subset:
+no new unimplemented checkbox or mutation builder is exposed. The exact clap
+coverage test remains unchanged and must pass rather than weakening assertions.
+
+The unchanged full executable-catalogue filter passes9/0 and the dry-run CLI
+contract case passes1/0 locally through rust-slot after the binding correction
+(execution39e4198e exit0/cleanup). Rebase onto latest main1120c8bb is required;
+that main delta is publication/status/acceptance documentation only. Original
+CI7747290f remains failed; latest exact-SHA3OS CI must pass before handoff.

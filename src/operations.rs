@@ -916,7 +916,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::DryRun,
         default_origin: DefaultOrigin::Literal,
         label: "実行対象だけを確認",
-        help: "索引の対象を表示する読み取りだけに切り替えます。",
+        help: "操作を適用せず、対象や変更の見込みを確認します。",
         kind: FieldType::Boolean,
         discovery: Discovery::None,
     },
@@ -1413,6 +1413,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::ToNode,
             FieldId::SummaryMaxChars,
             FieldId::SummaryMaxPercent,
+            FieldId::DryRun,
         ],
     },
     OperationSpec {
@@ -2863,6 +2864,14 @@ pub(crate) const CLI_BINDINGS: &[CliBinding] = &[
         operation: OperationId::Compact,
         path: &["compact"],
         arguments: &[
+            CliArgument {
+                spelling: "--dry-run",
+                field: FieldId::DryRun,
+                takes_value: false,
+                repeat: false,
+                default: Some("false"),
+                choices: &[],
+            },
             CliArgument {
                 spelling: "--thread",
                 field: FieldId::Thread,
