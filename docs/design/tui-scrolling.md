@@ -201,3 +201,11 @@ not 20 (7 Navigation members + 12 VisualScroll members minus the aggregate
 scroll member). Independent source/presentation identities are not collapsed.
 Characterization19, navigation-state2 and view-unit41 pass without changing any
 of the six marked expectations. This remains structural, not a bug-fix commit.
+
+The next structural boundary moves viewport/scroll orchestration into the
+Navigation module, extracts the owned-read and missing-anchor-body steps and
+shares the true-tail predicate. `scroll()` is 315 lines versus baseline395;
+all 19 characterizations and 41 view regressions still pass. The conservative
+combined write/transition count is temporarily 154 versus baseline147, because
+it counts both setter calls and enum writes. Next coalesce complete read-start
+transitions rather than claim improvement by excluding setter internals.

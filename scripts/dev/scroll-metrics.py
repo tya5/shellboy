@@ -8,7 +8,7 @@ from pathlib import Path
 TOKENS = re.compile(r'r(?P<hash>\#*)".*?"(?P=hash)|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])\'|//[^\n]*|/\*.*?\*/', re.S)
 FIELDS = ('follow', 'loading', 'request', 'pending', 'history_rebase_pending',
           'committed_preview', 'initialized', 'unseen', 'moved_during_read',
-          'anchor', 'row', 'within')
+          'anchor', 'row', 'within', 'mode', 'read')
 FILES = ('src/ui.rs', 'src/ui/view.rs', 'src/ui/history_interaction.rs',
          'src/ui/overlay.rs', 'src/ui/navigation.rs')
 
@@ -59,19 +59,24 @@ def measure(root):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
             for m in re.finditer(rf'&mut\s+{path_pattern}{name}\b', code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
-        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation)\(', code):
+        for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation|set_follow|set_unseen|set_mode|set_loading|set_request|take_request|begin_read|resume_follow)\(', code):
             transitions.append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
         for m in re.finditer(r'\bfn (scroll|scroll_step)\s*\(', code):
             begin = code.index('{', m.end())
             end = closing(code, begin)
             functions[f'{path}:{m[1]}'] = code.count('\n', m.start(), end) + 1
-        for m in re.finditer(r'\bstruct (VisualScroll|Navigation)\s*\{', code):
+        for m in re.finditer(r'\bstruct (ThreadView|VisualScroll|Navigation)\s*\{', code):
             end = closing(code, code.index('{', m.start()))
             body = code[m.end():end - 1]
-            fields[m[1]] = len(re.findall(r'^\s*(?:pub(?:\([^)]*\))?\s+)?\w+\s*:', body, re.M))
+            names = re.findall(r'^\s*(?:pub(?:\([^)]*\))?\s+)?(\w+)\s*:', body, re.M)
+            if m[1] == 'ThreadView':
+                names = [name for name in names if name in ('anchor', 'follow', 'unseen', 'loading', 'history_rebase_pending', 'committed_preview', 'view_revision')]
+            fields[m[1]] = len(names)
     return dict(counts={k: len(set(v)) for k, v in sites.items()},
                 total_state_write_sites=sum(len(set(v)) for v in sites.values()),
-                cancel_rebase_calls=len(transitions), functions=functions,
+                transition_calls=len(transitions),
+                writes_and_transitions=sum(len(set(v)) for v in sites.values()) + len(transitions),
+                stored_fields=sum(fields.values()) - int('Navigation' in fields), functions=functions,
                 struct_fields=fields, sites=sites, transitions=transitions)
 
 
