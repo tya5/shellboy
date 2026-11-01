@@ -5610,7 +5610,9 @@ mod language_tests {
                         let mut ui = UiState::new(&config, std::path::PathBuf::new());
                         populate(&mut ui, watch);
                         let mut terminal = Terminal::new(TestBackend::new(width, 30)).unwrap();
-                        terminal.draw(|frame| super::super::draw(frame, &mut ui)).unwrap();
+                        terminal
+                            .draw(|frame| super::super::draw(frame, &mut ui))
+                            .unwrap();
                         let bounds = ui.thread_browser.paint_bounds().unwrap().outer;
                         let buffer = terminal.backend().buffer();
                         for x in [bounds.x, bounds.right() - 1] {
@@ -5618,7 +5620,11 @@ mod language_tests {
                                 assert_eq!(buffer[(x, y)].symbol(), "+");
                             }
                             for y in bounds.y + 1..bounds.bottom() - 1 {
-                                assert_eq!(buffer[(x, y)].symbol(), "|", "{policy:?} {width} {language:?}");
+                                assert_eq!(
+                                    buffer[(x, y)].symbol(),
+                                    "|",
+                                    "{policy:?} {width} {language:?}"
+                                );
                             }
                         }
                     }
