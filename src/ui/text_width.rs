@@ -200,6 +200,13 @@ pub(crate) mod glyphs {
             (false, false) => "+-",
         }
     }
+    pub(crate) fn ellipsis() -> &'static str {
+        if terminal_width_observation() == Some(1) {
+            "…"
+        } else {
+            "."
+        }
+    }
     pub(crate) fn vertical() -> &'static str {
         if terminal_width_observation() == Some(1) {
             "│"

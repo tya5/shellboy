@@ -108,9 +108,12 @@ as the send or newline key.
 
 Each work row is drawn as a tree entry, with state and elapsed time at the
 right edge. When the startup measurement confirms that ambiguous characters
-are one column wide, branches use `├─` and `└─`, and metadata uses ` · `.
-If the measurement reports two columns or is unavailable, the branches use
-`+-` and `\-`, and metadata uses ` | `. No terminal width is guessed.
+are one column wide, branches use `├─` and `└─`, and metadata uses a spaced
+middle dot (`·`). If the measurement reports two columns or is unavailable,
+the branches use `+-` and `\-`, and metadata uses a spaced vertical bar (`|`).
+Truncated work and tool rows use
+`…` only when the measurement is one column; otherwise they use `.`. No
+terminal width is guessed.
 The one-column kind glyph is `$` for a shell, `↳` for a child Run, and `⋯`
 for a saved wait; `›` marks selection. These fixed-width glyphs do not depend
 on color. An overflow line uses the last branch; blank padding has no connector.

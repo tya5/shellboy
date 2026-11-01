@@ -128,7 +128,7 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
             crate::ui::text_width::set_terminal_width(Some(2));
             let wide = value.width_cjk();
             assert!(
-                narrow == wide || (policy == Some(1) && "·├└─│→".contains(value)),
+                narrow == wide || (policy == Some(1) && "·├└─│→…".contains(value)),
                 "ambiguous UI symbol {value:?} under {policy:?}"
             );
         }

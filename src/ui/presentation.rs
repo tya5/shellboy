@@ -1550,7 +1550,7 @@ fn tool_text_fit(text: &str, width: usize) -> String {
         result.push_str(glyph);
         used += glyph.width();
     }
-    result.push('.');
+    result.push_str(crate::ui::text_width::glyphs::ellipsis());
     result
 }
 fn tool_row(
@@ -4574,6 +4574,22 @@ mod conversation_item_tests {
         let line = compact_tool_line(UiLanguage::Ja, &released, 80, palette);
         assert!(line.spans.last().unwrap().content.contains("背景"));
     }
+    #[test]
+    fn clipped_tool_text_uses_only_measured_ellipsis() {
+        use crate::ui::text_width::UnicodeWidthStr;
+        for (observed, ellipsis) in [(Some(1), "…"), (Some(2), "."), (None, ".")] {
+            crate::ui::text_width::set_terminal_width(observed);
+            assert_eq!(tool_text_fit("abcdef", 4), format!("abc{ellipsis}"));
+            assert_eq!(tool_text_fit("abcdef", 0), "");
+            assert_eq!(tool_text_fit("ok", 4), "ok");
+            for width in 0..10 {
+                let value = tool_text_fit("日e\u{301}本語abcdefgh", width);
+                assert!(value.width() <= width, "{observed:?} {width}: {value}");
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn compact_tool_metadata_uses_only_measured_ambiguous_width() {
         let mut value = tool("parts", "completed");

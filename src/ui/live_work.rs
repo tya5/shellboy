@@ -119,7 +119,20 @@ impl WorkMessage<'_> {
             Self::PreviewNotice | Self::PreviewLoading => {
                 let prefix = format!("  {}   {} ", glyphs::vertical(), glyphs::vertical());
                 let body = rendered.strip_prefix("  |   | ").unwrap_or(&rendered);
-                format!("{prefix}{}", glyphs::decorate(body))
+                let body = match self {
+                    Self::PreviewNotice => format!(
+                        "{}{}",
+                        glyphs::ellipsis(),
+                        body.strip_prefix('.').unwrap_or(body)
+                    ),
+                    Self::PreviewLoading => format!(
+                        "{}{}",
+                        body.strip_suffix('.').unwrap_or(body),
+                        glyphs::ellipsis()
+                    ),
+                    _ => unreachable!(),
+                };
+                format!("{prefix}{}", glyphs::decorate(&body))
             }
             _ => glyphs::decorate(&rendered),
         }
@@ -259,7 +272,7 @@ fn fit(text: &str, width: usize) -> String {
         used += part.width();
         result.push_str(part);
     }
-    result.push('.');
+    result.push_str(glyphs::ellipsis());
     result
 }
 
@@ -2059,18 +2072,39 @@ mod language_tests {
         super::super::i18n::verify_screen(empty, empty_expected);
     }
     #[test]
+    fn clipped_live_work_uses_measured_ellipsis_without_exceeding_width() {
+        use crate::ui::text_width::UnicodeWidthStr;
+        for (observed, ellipsis) in [(Some(1), "…"), (Some(2), "."), (None, ".")] {
+            crate::ui::text_width::set_terminal_width(observed);
+            assert_eq!(fit("abcdef", 4), format!("abc{ellipsis}"));
+            assert_eq!(fit("abcdef", 0), "");
+            assert_eq!(fit("ok", 4), "ok");
+            for width in 0..10 {
+                let value = fit("日e\u{301}本語abcdefgh", width);
+                assert!(value.width() <= width, "{observed:?} {width}: {value}");
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn preview_decoration_does_not_rewrite_unknown_state() {
         for observed in [Some(1), Some(2), None] {
             crate::ui::text_width::set_terminal_width(observed);
             for language in [UiLanguage::En, UiLanguage::Ja] {
                 let preview = WorkMessage::PreviewNotice.render(language);
                 let expected_prefix = if observed == Some(1) {
-                    "  │   │ . "
+                    "  │   │ … "
                 } else {
                     "  |   | . "
                 };
                 assert!(preview.starts_with(expected_prefix), "{preview}");
                 assert!(preview.contains(glyphs::separator()), "{preview}");
+                assert!(
+                    WorkMessage::PreviewLoading
+                        .render(language)
+                        .ends_with(glyphs::ellipsis())
+                );
                 assert_eq!(
                     WorkMessage::State("external | value").render(language),
                     "external | value"
