@@ -658,7 +658,7 @@ async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_foot
     f.db.call(|db| {
         db.execute("INSERT INTO app_meta(key,value) VALUES('revisit.root',?1)",[json!({"pending":{"text":"PRIVATE_INSTRUCTION","set_by":{"kind":"human"},"operation_id":"fixture:reserve","set_at":"2026-10-25T08:00:00Z"},"consumed_count":5,"last_fired_at":"2026-10-25T07:59:00Z"}).to_string()])?;
         let activity = shellboy::frontend::activity::project(db,"a")?;
-        assert_eq!(activity.snapshot.revisit.as_deref(),Some("Revisit 5 · next reserved"));
+        assert_eq!(activity.snapshot.revisit.as_deref(),Some("Revisit 5 | next reserved"));
         Ok(())
     }).await.unwrap();
     let after = f.status(StatusArgs::default()).await.unwrap();
