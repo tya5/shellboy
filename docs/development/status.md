@@ -3726,7 +3726,7 @@ full language-mixing audit and bilingual acceptance belong to later #152 work.
 ## Stage C Language Inventory (#152)
 
 The read-only Rust string inventory and synthetic lexer/classification tests
-are prepared on the #152 audit branch, rebased onto #148 main84dc782e. Initial
+are prepared on the #152 audit branch, rebased onto W6 mainb12a8291. Initial
 classification is recorded in the [Stage C table](../validation/language-audit-stage-c.md).
 Conservative category (c) is not zero and is not a confirmed-defect count.
 B-5/B-6 files remain read-only until #149/#150 land. W6 owns the four

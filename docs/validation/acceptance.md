@@ -8051,18 +8051,19 @@ No paid model, user data, installed binary, Windows-specific behavior, or full
 bilingual UI acceptance is claimed by these synthetic tests.
 ## #152 Stage C Initial Language Inventory
 
-On current main84dc782e, the read-only scanner enumerates Japanese-containing Rust
+On current mainb12a8291, the read-only scanner enumerates Japanese-containing Rust
 string literals and conservatively classifies proven Japanese local!/language
 arms and test-only scopes, leaving other candidates for explicit review. Thirteen
 synthetic Python tests pass (134 total Python tests; raw/multiline/escaped strings,
 comments, lifetimes,
 bounded branches, external test modules, stable/stale IDs and no-write failures).
 The [initial per-file table](language-audit-stage-c.md) is an inventory, not a
-zero-mixing result. Core/startup/model-instruction changes, final zero-(c), En/Ja
-0/1/2/many rendering and 3-OS CI are still unverified. B-5/B-6 owner source files
+zero-mixing result. W6 Core/startup/model-instruction changes landed with their
+own three-OS CI41359768326; combined final zero-(c), En/Ja 0/1/2/many rendering
+and Stage C three-OS CI remain unverified. B-5/B-6 owner source files
 have not been edited by this preparation. The approved independent protected
 canonical-token category requires individual saved/comparison/classifier and
 UI-projection references, not blanket exemptions. Its current count is zero;
-remaining conservative (c)=1902 is not a confirmed-defect count or completion.
+remaining conservative (c)=1888 is not a confirmed-defect count or completion.
 W6's four files and W8's live_work separator area remain unedited here. No
 user-selected mark, branch or separator was changed by this audit.

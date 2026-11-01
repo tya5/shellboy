@@ -1,8 +1,8 @@
 # Stage C Language Audit (#152)
 
 Status: initial inventory, not completion or permission to translate source data.
-Baseline: main `84dc782ef4c2ef9d42b704220a0db5565f863b5a` (#148 landed).
-B-5/B-6 and W6 are not yet included. No third-party production source was edited.
+Baseline: main `b12a8291b1950a5f7db58de4dccbb12101a2a074` (W6 task 1 landed).
+B-5/B-6 are not yet included. No third-party production source was edited.
 
 ## Reproduce
 
@@ -40,14 +40,17 @@ mandatory and retained in the JSON report. There are currently zero protected
 entries: approval of the category does not by itself classify any unknown token.
 Ownership labels never exempt a literal from review or the zero-(c) gate.
 
-Current raw scan: 353 Rust files; 3398 literals; a=279, b=1192, c=1927.
+Current raw scan: 353 Rust files; 3384 literals; a=279, b=1192, c=1913.
 Individual review of 25 `Message::render` Ja branches is recorded in
 `scripts/dev/language-classifications.json`; the table applies those decisions:
-a=304, b=1192, protected=0, c=1902. `Message::render` was reread against the
+a=304, b=1192, protected=0, c=1888. `Message::render` was reread against the
 actual current source after rebase; its source-token fingerprint is unchanged,
 so no fingerprint was blindly refreshed. No production source was modified to
 reduce the count. The earlier main13d5ac86/f5c9b31a checkpoint had3339 literals;
-#148 accounts for the current source changes and extra fixture strings.
+#148 increased that to3398. W6's landed non-UI English change removes14 remaining
+production literals, without changing the reviewed Message fingerprints. W6's
+three-OS integration evidence is run41359768326, exact mainb12a8291; final Stage C
+acceptance is still separate from that task-1 result.
 The zero-(c) gate intentionally fails at this stage. Final classification,
 fresh En/Ja rendering/plural checks and three-OS CI remain outstanding.
 
@@ -56,15 +59,13 @@ fresh En/Ja rendering/plural checks and three-OS CI remain outstanding.
 | Source | (a) | (b) | Protected Canonical | (c), Review Pending | Editing Boundary |
 | --- | ---: | ---: | ---: | ---: | --- |
 | `src/activity.rs` | 0 | 0 | 0 | 34 | review in C |
-| `src/app.rs` | 0 | 0 | 0 | 3 | W6, task 1 |
 | `src/attachments/draft.rs` | 0 | 10 | 0 | 0 | review in C |
-| `src/compaction.rs` | 0 | 7 | 0 | 1 | W6, task 1 |
+| `src/compaction.rs` | 0 | 8 | 0 | 0 | W6 task 1 landed; read-only here |
 | `src/compaction/context_usage.rs` | 0 | 1 | 0 | 0 | review in C |
 | `src/compaction/edit/bounded_tests.rs` | 0 | 2 | 0 | 0 | review in C |
 | `src/compaction/edit/tests.rs` | 0 | 2 | 0 | 0 | review in C |
 | `src/compaction/keys.rs` | 0 | 1 | 0 | 0 | review in C |
 | `src/config_setup.rs` | 0 | 0 | 0 | 10 | review in C |
-| `src/control/db.rs` | 0 | 0 | 0 | 2 | W6, task 1 |
 | `src/control/driver/request.rs` | 0 | 1 | 0 | 0 | review in C |
 | `src/control/output/preview/live.rs` | 0 | 2 | 0 | 0 | review in C |
 | `src/control/receipt.rs` | 0 | 1 | 0 | 0 | review in C |
@@ -115,9 +116,7 @@ fresh En/Ja rendering/plural checks and three-OS CI remain outstanding.
 | `src/index/keys.rs` | 0 | 13 | 0 | 0 | review in C |
 | `src/index/store.rs` | 0 | 2 | 0 | 0 | review in C |
 | `src/instructions.rs` | 0 | 2 | 0 | 0 | review in C |
-| `src/ipc/server.rs` | 0 | 0 | 0 | 8 | W6, task 1 |
 | `src/ipc/server/endpoint/namespace.rs` | 0 | 1 | 0 | 2 | review in C |
-| `src/ipc/server/endpoint/tests.rs` | 0 | 1 | 0 | 0 | review in C |
 | `src/ipc/server/tests.rs` | 0 | 3 | 0 | 0 | review in C |
 | `src/json_pointer.rs` | 0 | 1 | 0 | 0 | review in C |
 | `src/lib.rs` | 0 | 4 | 0 | 0 | review in C |
@@ -193,7 +192,7 @@ instruction changes in `src/control/db.rs`, `src/app.rs`, `src/ipc/server.rs`
 and `src/compaction.rs`. W1 must not edit those four files. W1 owns inventory,
 classification/remaining mixing cleanup and final acceptance after #138.
 Preserve stored titles and all saved summary bodies. Use W6's compaction test
-evidence after integration; do not infer it from this scanner. Do not edit
+evidence from task-1 integration; do not infer it from this scanner. Do not edit
 B-5/B-6 owner files until those tasks land, preserving #149 then #150 priority.
 `src/ui/live_work.rs` is also coordinated with W8/#156 before any edit; its
 separator-symbol restoration is W8's work. User-selected marks, branches and
