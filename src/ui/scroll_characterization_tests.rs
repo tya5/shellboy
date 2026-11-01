@@ -49,7 +49,7 @@ fn fixture(
     (ui, Terminal::new(TestBackend::new(width, height)).unwrap())
 }
 fn single(rows: usize) -> (UiState, Terminal<TestBackend>) {
-    fixture(vec![node("long", numbered("R", rows))], 1, 0, 60, 28)
+    fixture(vec![node("long", numbered("R", rows))], 1, 0, 60, 33)
 }
 /// Ten 100-row nodes. `evicted` clears that node's cached text (length kept).
 fn ten(evicted: Option<usize>) -> (UiState, Terminal<TestBackend>, Vec<UiNode>) {
@@ -60,14 +60,14 @@ fn ten(evicted: Option<usize>) -> (UiState, Terminal<TestBackend>, Vec<UiNode>) 
     if let Some(i) = evicted {
         nodes[i].text.clear();
     }
-    let (ui, terminal) = fixture(nodes, 10, 0, 60, 28);
+    let (ui, terminal) = fixture(nodes, 10, 0, 60, 33);
     (ui, terminal, complete)
 }
 fn rows(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     use unicode_width::UnicodeWidthStr;
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
-    (2..buffer.area.height - 6)
+    (2..buffer.area.height - 11)
         .map(|y| {
             let mut row = String::new();
             let mut x = 1;
@@ -180,7 +180,7 @@ fn following_tail_is_the_initial_state_and_render_does_not_change_it() {
     // The first render is the one that initializes the visual scroll cache.
     assert!(before.contains("initialized=false"), "{before}");
     assert!(after_first.contains("initialized=true"), "{after_first}");
-    assert!(ui.view().navigation.scroll.row > 0 && ui.view().navigation.scroll.height == 28 - 8);
+    assert!(ui.view().navigation.scroll.row > 0 && ui.view().navigation.scroll.height == 33 - 13);
 }
 
 #[test]
@@ -511,7 +511,7 @@ fn history_page_before_the_oldest_cached_node_is_requested_and_keeps_the_anchor(
     let nodes: Vec<UiNode> = (5..10)
         .map(|i| node(&format!("n-{i}"), numbered(&format!("N{i}-"), 100)))
         .collect();
-    let (mut ui, mut t) = fixture(nodes, 10, 5, 60, 28);
+    let (mut ui, mut t) = fixture(nodes, 10, 5, 60, 33);
     set_anchor(&mut ui, "n-5", 0);
     let screen = rows(&mut ui, &mut t);
     let actions = up(&mut ui);
@@ -610,11 +610,11 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
     let (mut ui, mut t) = single(200);
     let tail = rows(&mut ui, &mut t);
     // Following: a narrower and a taller terminal keep the tail.
-    t.backend_mut().resize(40, 28);
+    t.backend_mut().resize(40, 33);
     let narrow = rows(&mut ui, &mut t);
     assert!(last_text(&narrow) == "R199", "{narrow:?}");
     assert!(ui.view().navigation.follow());
-    t.backend_mut().resize(60, 28);
+    t.backend_mut().resize(60, 33);
     assert_eq!(rows(&mut ui, &mut t), tail);
     // Paused: the source anchor is unchanged by width and height changes.
     for _ in 0..5 {
@@ -622,12 +622,12 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
     }
     let paused = rows(&mut ui, &mut t);
     let anchor = ui.view().navigation.anchor.clone();
-    t.backend_mut().resize(40, 34);
+    t.backend_mut().resize(40, 39);
     rows(&mut ui, &mut t);
     assert_eq!(ui.view().navigation.anchor, anchor);
     assert!(!ui.view().navigation.follow() && ui.view().navigation.request().is_none());
     assert!(ui.view().navigation.scroll.initialized);
-    t.backend_mut().resize(60, 28);
+    t.backend_mut().resize(60, 33);
     assert_eq!(
         rows(&mut ui, &mut t),
         paused,
