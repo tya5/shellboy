@@ -581,7 +581,9 @@ pub(crate) fn read_retained_source_facts_tx(
             .map_err(|e| crate::storage::StorageError::InvalidInput(e.to_string()))?;
         db.prepare(LIFECYCLE_SQL)?
             .query_map([parameter], |r| {
-                let ordinal = r.get::<_, usize>(0)?;
+                let value = r.get::<_, i64>(0)?;
+                let ordinal = usize::try_from(value)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, value))?;
                 let mut limited = r.get::<_, bool>(3)?;
                 let state = if let rusqlite::types::ValueRef::Text(bytes) = r.get_ref(2)? {
                     let charge = bytes
@@ -761,7 +763,7 @@ mod adapter_contract_tests {
             .unwrap()
             .query_map([&requests], |r| {
                 Ok((
-                    r.get::<_, usize>(0)?,
+                    r.get::<_, u32>(0)?,
                     r.get::<_, bool>(1)?,
                     r.get::<_, Option<String>>(2)?,
                 ))
@@ -1204,7 +1206,7 @@ pub(super) fn limited_scope(route: RetainedRoute) -> crate::ui::InspectionTarget
 mod registered_reader_tests {
     use super::*;
     use crate::protocol::*;
-    use serde_json::{Value, json};
+    use serde_json::json;
     fn relation() -> Command {
         Command::HistoryRelations(HistoryRelationsArgs {
             node_id: "n".into(),

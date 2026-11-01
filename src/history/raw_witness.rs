@@ -132,6 +132,15 @@ pub(crate) struct RetainedExecutionFacts {
     pub(crate) oldest_sequence: Option<u64>,
     pub(crate) metadata_limited: bool,
 }
+fn retained_unsigned(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<Option<u64>> {
+    row.get::<_, Option<i64>>(column)?
+        .map(|value| {
+            u64::try_from(value)
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(column, value))
+        })
+        .transpose()
+}
+
 impl RawWitness {
     /// One batch statement, at most 200 exact requests. No raw-output bytes cross into Rust;
     /// cursor authorization stays with control::output's authoritative rules.
@@ -182,7 +191,9 @@ impl RawWitness {
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         db.prepare(RETAINED_EXECUTION_FACTS_SQL)?
             .query_map([parameter], |row| {
-                let ordinal = row.get::<_, usize>(0)?;
+                let value = row.get::<_, i64>(0)?;
+                let ordinal = usize::try_from(value)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, value))?;
                 let _request = requests.get(ordinal).ok_or(rusqlite::Error::InvalidQuery)?;
                 let mut limited = row.get::<_, bool>(9)?;
                 let mut bounded_text = |column| -> rusqlite::Result<Option<String>> {
@@ -213,8 +224,8 @@ impl RawWitness {
                     encoding,
                     state,
                     tombstone: row.get(6)?,
-                    cursor_chunk_length: row.get(7)?,
-                    oldest_sequence: row.get(8)?,
+                    cursor_chunk_length: retained_unsigned(row, 7)?,
+                    oldest_sequence: retained_unsigned(row, 8)?,
                     metadata_limited: limited,
                 })
             })?
@@ -285,6 +296,23 @@ mod retained_execution_tests {
         assert_eq!(facts.len(), 2);
         assert!(!facts[1].exists);
         assert_eq!(db.total_changes(), before);
+        for (literal, expected) in [
+            ("0", Some(0)),
+            ("9223372036854775807", Some(i64::MAX as u64)),
+            ("NULL", None),
+        ] {
+            assert_eq!(
+                db.query_row(&format!("SELECT {literal}"), [], |row| retained_unsigned(
+                    row, 0
+                ))
+                .unwrap(),
+                expected
+            );
+        }
+        assert!(
+            db.query_row("SELECT -1", [], |row| retained_unsigned(row, 0))
+                .is_err()
+        );
         let plan = db
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {RETAINED_EXECUTION_FACTS_SQL}"

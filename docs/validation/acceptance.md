@@ -7275,3 +7275,15 @@ per 2 s; 0 frames in 3 s after completion. Motion off showed only `⏵`/`▸` an
 PTY (the decoder records text). The quiet background-only scene, Windows/Linux
 terminals and real fonts are unverified in PTY; spinner shape awaits the user's
 choice. No real provider, installed executable or user data is used.
+## #108 first lightweight qualification failure
+
+At source88edcf2c/basecdcb70da, allocated execution1bf25314 passes formatting
+then `cargo check --locked --tests` fails on five unsupported rusqlite FromSql
+uses: usize ordinals in retained/lifecycle readers and a test, plus optionalu64
+raw length/oldest sequence. One unused test import is reported. Own-path compile
+is visible in verbose output; execution exits1/cleanup confirmed, slot released.
+No targeted tests ran and this chain is not a pass. Correction reads SQLitei64
+and checked-converts ordinals/nonnegative metadata, preserves NULL and rejects
+negative values. Existing raw test adds0/i64::MAX/NULL/negative assertions; test
+count remains14+3+2. Corrected source is formatted but Rust-unverified until a
+new explicit slot; no automatic retry or full local standard check is performed.
