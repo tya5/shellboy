@@ -1898,7 +1898,7 @@ mod initial_management_screen_tests {
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Config | Create template", "Accepted work continues"],
+                UiLanguage::En => &["Config · Create template", "Accepted work continues"],
                 UiLanguage::Ja => &["設定 | テンプレート作成", "閉じても受付済みの処理は続行"],
             }
         }

@@ -20,7 +20,7 @@ use ratatui::{
 use std::path::{Path, PathBuf};
 
 pub(super) fn catalogue_label(id: OperationId, language: UiLanguage) -> String {
-    metadata::text_for(id.label_text(), language).replace('·', "|")
+    metadata::text_for(id.label_text(), language).to_owned()
 }
 pub(super) fn catalogue_meaning(id: OperationId, language: UiLanguage) -> &'static str {
     metadata::text_for(id.meaning_text(), language)

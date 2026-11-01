@@ -548,116 +548,116 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::CompactList => local!(
             language,
             "圧縮 · 保存済み一覧",
-            "Compaction | Saved history"
+            "Compaction · Saved history"
         ),
-        OperationId::ShellList => local!(language, "shell · 一覧", "Shell | List"),
-        OperationId::Status => local!(language, "作業 · 状態一覧", "Work | Status"),
-        OperationId::UsageGet => local!(language, "使用量 · 合計", "Usage | Total"),
-        OperationId::ModelList => local!(language, "モデル · 一覧", "Models | List"),
-        OperationId::ThreadList => local!(language, "会話 · 一覧", "Conversations | List"),
-        OperationId::ThreadGet => local!(language, "会話 · 詳細", "Conversation | Details"),
-        OperationId::ThreadCreate => local!(language, "会話 · 作成", "Conversation | Create"),
-        OperationId::ThreadFork => local!(language, "会話 · 分岐", "Conversation | Fork"),
-        OperationId::ThreadDelete => local!(language, "会話 · 削除", "Conversation | Delete"),
+        OperationId::ShellList => local!(language, "shell · 一覧", "Shell · List"),
+        OperationId::Status => local!(language, "作業 · 状態一覧", "Work · Status"),
+        OperationId::UsageGet => local!(language, "使用量 · 合計", "Usage · Total"),
+        OperationId::ModelList => local!(language, "モデル · 一覧", "Models · List"),
+        OperationId::ThreadList => local!(language, "会話 · 一覧", "Conversations · List"),
+        OperationId::ThreadGet => local!(language, "会話 · 詳細", "Conversation · Details"),
+        OperationId::ThreadCreate => local!(language, "会話 · 作成", "Conversation · Create"),
+        OperationId::ThreadFork => local!(language, "会話 · 分岐", "Conversation · Fork"),
+        OperationId::ThreadDelete => local!(language, "会話 · 削除", "Conversation · Delete"),
         OperationId::ThreadDeletePreview => local!(
             language,
             "会話 · 削除影響",
-            "Conversation | Deletion impact"
+            "Conversation · Deletion impact"
         ),
-        OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation | Settings"),
-        OperationId::MessageSend => local!(language, "依頼 · 送信", "Message | Send"),
+        OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
+        OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
         OperationId::MessageGet => local!(
             language,
             "依頼 · 割当と回答",
-            "Message | Assignment and response"
+            "Message · Assignment and response"
         ),
         OperationId::MessageCancel => local!(
             language,
             "依頼 · 未採用入力の取消",
-            "Message | Cancel unadopted input"
+            "Message · Cancel unadopted input"
         ),
-        OperationId::OperationGet => local!(language, "操作 · 受付結果", "Operation | Receipt"),
-        OperationId::RunGet => local!(language, "作業 · 詳細", "Run | Details"),
-        OperationId::RunRetry => local!(language, "作業 · 復旧を再試行", "Run | Retry recovery"),
-        OperationId::RunStop => local!(language, "作業 · 停止", "Run | Stop"),
-        OperationId::RevisitSet => local!(language, "次の指示 · 設定", "Next instruction | Set"),
+        OperationId::OperationGet => local!(language, "操作 · 受付結果", "Operation · Receipt"),
+        OperationId::RunGet => local!(language, "作業 · 詳細", "Run · Details"),
+        OperationId::RunRetry => local!(language, "作業 · 復旧を再試行", "Run · Retry recovery"),
+        OperationId::RunStop => local!(language, "作業 · 停止", "Run · Stop"),
+        OperationId::RevisitSet => local!(language, "次の指示 · 設定", "Next instruction · Set"),
         OperationId::RevisitGet => {
-            local!(language, "次の指示 · 確認", "Next instruction | Inspect")
+            local!(language, "次の指示 · 確認", "Next instruction · Inspect")
         }
         OperationId::RevisitCancel => {
-            local!(language, "次の指示 · 取消", "Next instruction | Cancel")
+            local!(language, "次の指示 · 取消", "Next instruction · Cancel")
         }
-        OperationId::TurnGet => local!(language, "応答処理 · 詳細", "Turn | Details"),
-        OperationId::Wait => local!(language, "待機 · 条件を観測", "Wait | Observe conditions"),
-        OperationId::HistoryList => local!(language, "履歴 · 一覧", "History | List"),
-        OperationId::HistoryGet => local!(language, "履歴 · 原文", "History | Original"),
-        OperationId::HistorySearch => local!(language, "履歴 · 検索", "History | Search"),
-        OperationId::HistoryRelations => local!(language, "履歴 · 関係", "History | Relationships"),
-        OperationId::ShellGet => local!(language, "shell · 詳細", "Shell | Details"),
-        OperationId::ShellRead => local!(language, "shell · 保存出力", "Shell | Saved output"),
-        OperationId::ShellWrite => local!(language, "shell · 入力", "Shell | Input"),
-        OperationId::ShellEof => local!(language, "shell · 入力を閉じる", "Shell | Close input"),
-        OperationId::ShellStop => local!(language, "shell · 停止", "Shell | Stop"),
-        OperationId::AttachmentAdd => local!(language, "添付 · 追加", "Attachment | Add"),
-        OperationId::AttachmentList => local!(language, "添付 · 一覧", "Attachment | List"),
-        OperationId::AttachmentRemove => local!(language, "添付 · 除外", "Attachment | Remove"),
-        OperationId::Compact => local!(language, "履歴 · 圧縮と編集", "History | Compact and edit"),
-        OperationId::IndexStatus => local!(language, "索引 · 状態", "Index | Status"),
-        OperationId::IndexPreview => local!(language, "索引 · 費用確認", "Index | Cost preview"),
+        OperationId::TurnGet => local!(language, "応答処理 · 詳細", "Turn · Details"),
+        OperationId::Wait => local!(language, "待機 · 条件を観測", "Wait · Observe conditions"),
+        OperationId::HistoryList => local!(language, "履歴 · 一覧", "History · List"),
+        OperationId::HistoryGet => local!(language, "履歴 · 原文", "History · Original"),
+        OperationId::HistorySearch => local!(language, "履歴 · 検索", "History · Search"),
+        OperationId::HistoryRelations => local!(language, "履歴 · 関係", "History · Relationships"),
+        OperationId::ShellGet => local!(language, "shell · 詳細", "Shell · Details"),
+        OperationId::ShellRead => local!(language, "shell · 保存出力", "Shell · Saved output"),
+        OperationId::ShellWrite => local!(language, "shell · 入力", "Shell · Input"),
+        OperationId::ShellEof => local!(language, "shell · 入力を閉じる", "Shell · Close input"),
+        OperationId::ShellStop => local!(language, "shell · 停止", "Shell · Stop"),
+        OperationId::AttachmentAdd => local!(language, "添付 · 追加", "Attachment · Add"),
+        OperationId::AttachmentList => local!(language, "添付 · 一覧", "Attachment · List"),
+        OperationId::AttachmentRemove => local!(language, "添付 · 除外", "Attachment · Remove"),
+        OperationId::Compact => local!(language, "履歴 · 圧縮と編集", "History · Compact and edit"),
+        OperationId::IndexStatus => local!(language, "索引 · 状態", "Index · Status"),
+        OperationId::IndexPreview => local!(language, "索引 · 費用確認", "Index · Cost preview"),
         OperationId::IndexBackfill => local!(
             language,
             "索引 · 過去履歴を追加",
-            "Index | Backfill history"
+            "Index · Backfill history"
         ),
         OperationId::IndexRetry => {
-            local!(language, "索引 · 失敗分を再試行", "Index | Retry failures")
+            local!(language, "索引 · 失敗分を再試行", "Index · Retry failures")
         }
-        OperationId::IndexRebuild => local!(language, "索引 · 作り直す", "Index | Rebuild"),
+        OperationId::IndexRebuild => local!(language, "索引 · 作り直す", "Index · Rebuild"),
         OperationId::IndexProbe => local!(
             language,
             "索引 · 接続と次元を試す",
-            "Index | Probe connection and dimensions"
+            "Index · Probe connection and dimensions"
         ),
-        OperationId::StorageStatus => local!(language, "保存 · 状態", "Storage | Status"),
-        OperationId::StorageCollect => local!(language, "保存 · 回収", "Storage | Collect"),
+        OperationId::StorageStatus => local!(language, "保存 · 状態", "Storage · Status"),
+        OperationId::StorageCollect => local!(language, "保存 · 回収", "Storage · Collect"),
         OperationId::Exec => local!(
             language,
             "作業 · JSON契約で実行",
-            "Work | Execute with JSON contract"
+            "Work · Execute with JSON contract"
         ),
         OperationId::ConfigInit => local!(
             language,
             "設定 · テンプレート作成",
-            "Config | Create template"
+            "Config · Create template"
         ),
         OperationId::ConfigCheck => {
-            local!(language, "設定 · 接続確認", "Config | Check connection")
+            local!(language, "設定 · 接続確認", "Config · Check connection")
         }
-        OperationId::DocsList => local!(language, "ガイド · 一覧", "Guides | List"),
-        OperationId::DocsGet => local!(language, "ガイド · 本文", "Guides | Text"),
-        OperationId::DocsSearch => local!(language, "ガイド · 検索", "Guides | Search"),
-        OperationId::RagInit => local!(language, "資料検索 · DB作成", "RAG | Initialize database"),
+        OperationId::DocsList => local!(language, "ガイド · 一覧", "Guides · List"),
+        OperationId::DocsGet => local!(language, "ガイド · 本文", "Guides · Text"),
+        OperationId::DocsSearch => local!(language, "ガイド · 検索", "Guides · Search"),
+        OperationId::RagInit => local!(language, "資料検索 · DB作成", "RAG · Initialize database"),
         OperationId::RagSourceAdd => {
-            local!(language, "資料検索 · ソース登録", "RAG | Register source")
+            local!(language, "資料検索 · ソース登録", "RAG · Register source")
         }
         OperationId::RagSourceList => {
-            local!(language, "資料検索 · ソース一覧", "RAG | List sources")
+            local!(language, "資料検索 · ソース一覧", "RAG · List sources")
         }
         OperationId::RagSourceRemove => {
-            local!(language, "資料検索 · ソース解除", "RAG | Remove source")
+            local!(language, "資料検索 · ソース解除", "RAG · Remove source")
         }
-        OperationId::RagIndex => local!(language, "資料検索 · 索引", "RAG | Index sources"),
+        OperationId::RagIndex => local!(language, "資料検索 · 索引", "RAG · Index sources"),
         OperationId::RagIngest => local!(
             language,
             "資料検索 · 抽出済み本文を登録",
-            "RAG | Ingest extracted text"
+            "RAG · Ingest extracted text"
         ),
-        OperationId::RagStatus => local!(language, "資料検索 · 状態", "RAG | Status"),
+        OperationId::RagStatus => local!(language, "資料検索 · 状態", "RAG · Status"),
         OperationId::RagInspect => {
-            local!(language, "資料検索 · 文書詳細", "RAG | Document details")
+            local!(language, "資料検索 · 文書詳細", "RAG · Document details")
         }
-        OperationId::RagSearch => local!(language, "資料検索 · 検索", "RAG | Search"),
-        OperationId::RagGet => local!(language, "資料検索 · 原文", "RAG | Original"),
+        OperationId::RagSearch => local!(language, "資料検索 · 検索", "RAG · Search"),
+        OperationId::RagGet => local!(language, "資料検索 · 原文", "RAG · Original"),
     }
 }
 
@@ -1767,7 +1767,10 @@ mod paired_message_tests {
                 text.key
             );
             let en = text_for(text, UiLanguage::En);
-            assert!(en.is_ascii(), "{:?}: {en}", text.key);
+            assert!(
+                en.chars().all(|ch| ch.is_ascii() || (matches!(text.key, crate::operations::TextKey::Label(_)) && ch == '·')),
+                "{:?}: {en}", text.key
+            );
         }
         for &id in OperationId::ALL {
             verify(id.label_text());
