@@ -19,6 +19,7 @@
 ## Thread単位のセッション識別
 
 `connections.<名前>.session_header` はboolで既定true。会話と要約のResponses要求に、対象Thread UUIDだけを値とする `x-shellboy-session-id` を自動設定する。同じThreadの追加要求・再試行・モデル切替でも同じ値を使い、子Threadとforkは各自のThread UUIDを使う。会話本文・タイトル・cwd・ユーザー名は識別子へ含めない。embeddingとモデル一覧には自動付与しない。
+`connections.<名前>.session_header_names` は文字列の配列で既定 `["X-Shellboy-Session-Id", "x-litellm-session-id"]`（最大8個）。`session_header=true` のとき、各名前で同じThread UUIDを送る（付与範囲は同じ）。後者はLiteLLMが読むsession headerで、未知のheaderは他providerが無視する。コードにgateway固有の分岐は置かず、既定値だけに含める。利用者は配列を上書きして外す。空配列は何も送らない。各名前は `extra_headers` と同じ規則（header名の文字・256バイト以内、資格情報風とtransport所有の名前を拒否、配列内の大文字小文字を無視した重複を拒否）で検査し、`session_header=true` の間は `headers`・`extra_headers`・資格情報headerとの重複も拒否する。旧既定名 `X-Shellboy-Session-Id` は `headers` との同名を従来どおり許可し、Thread UUIDが上書きする。
 
 自動設定がtrueの場合、Responses要求では大文字小文字を問わず同名の固定 `headers` 値をThread UUIDで置き換える。ほかの固定headerを変更せず、固定headerの検証規則も変えない。falseは自動付与だけを停止するため、利用者が `headers` へ明示した同名headerは残る。embedding・モデル一覧でも固定headersは従来どおり適用する。
 

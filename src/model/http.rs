@@ -288,7 +288,12 @@ impl HttpModelClient {
         if matches!(endpoint, ApiEndpoint::Responses)
             && let Some(value) = session_header
         {
-            headers.insert("x-shellboy-session-id", value.clone());
+            for name in &self.connection.session_header_names {
+                let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
+                    ModelError::new("config_invalid", "Invalid configured session header name")
+                })?;
+                headers.insert(name, value.clone());
+            }
             if let Ok(value) = value.to_str() {
                 secrets.push(value.to_owned());
             }

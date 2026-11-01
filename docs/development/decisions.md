@@ -2824,3 +2824,23 @@ its npm Node launcher. Uncertain: whether disabled features or the launcher
 choice materially change PSS. Revisit if stage 3 publishes these numbers, if a
 pinned version changes its headless protocol, or if the user wants
 default-install variants (e.g. jcode memory on) recorded alongside.
+
+## #143: Thread Session Header Names (2026-11-01)
+
+Add per-connection `session_header_names` (list, max 8, default
+`["X-Shellboy-Session-Id", "x-litellm-session-id"]`); with `session_header=true`
+the Thread UUID is sent under every name. Reason: LiteLLM reads only
+`x-litellm-session-id`; otherwise it makes a new session per request and the
+ChatGPT backend does not route a Thread consistently (measured 97-98% cached
+with it vs 0 with a new session per request). The LiteLLM name lives only in
+the default value; no product branching in code. Unknown headers are ignored by
+other providers. Empty list sends nothing (chosen over rejecting it, so users
+can opt out without touching `session_header`). Validation reuses the
+`extra_headers` rules (credential-like words, transport-owned names plus
+`anthropic-version`, case-insensitive duplicates in the list); collisions with
+`headers`/`extra_headers`/the credential header are rejected only while
+`session_header=true`. `X-Shellboy-Session-Id` keeps its old exemption so a
+static header of that name is still overridden. Consequence: an existing
+static `x-litellm-session-id` in `headers` now fails `config check` until the
+list is overridden (accepted pre-1.0; the message says how). No new table,
+worker, queue or dependency. Revisit if a gateway needs a per-request name.

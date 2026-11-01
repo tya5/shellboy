@@ -624,6 +624,66 @@ fn thread_session_settings_have_independent_defaults_and_boolean_overrides() {
 }
 
 #[test]
+fn session_header_names_default_and_validate_like_extra_headers() {
+    assert_eq!(
+        Connection::default().session_header_names,
+        ["X-Shellboy-Session-Id", "x-litellm-session-id"]
+    );
+    let config = connection_with("session_header_names = ['x-other-session']").unwrap();
+    assert_eq!(
+        config.connections["proxy"].session_header_names,
+        ["x-other-session"]
+    );
+    // An empty list sends nothing and is valid.
+    assert!(connection_with("session_header_names = []").is_ok());
+    // The legacy default name may sit next to a static header of that name.
+    assert!(connection_with("headers = { 'x-shellboy-session-id' = 'v' }").is_ok());
+    for name in [
+        "",
+        "name:bad",
+        "Authorization",
+        "proxy-authorization",
+        "Cookie",
+        "Host",
+        "Content-Type",
+        "Content-Length",
+        "Accept",
+        "Connection",
+        "Transfer-Encoding",
+        "anthropic-version",
+        "X-Api-Key",
+        "x-secret-thing",
+        "My-Token",
+        &"x".repeat(257),
+    ] {
+        let source = format!("session_header_names = ['x-ok', \"{name}\"]");
+        let error = connection_with(&source).unwrap_err().to_string();
+        assert!(error.contains("session_header_names"), "{name}: {error}");
+    }
+    for extra in [
+        "session_header_names = ['a-id', 'A-ID']",
+        "headers = { 'X-Litellm-Session-Id' = 'v' }",
+        "extra_headers = { 'X-LITELLM-SESSION-ID' = 'v' }",
+        "api_key_env = 'K'\napi_key_header = 'x-litellm-session-id'",
+    ] {
+        let error = connection_with(extra).unwrap_err().to_string();
+        assert!(error.contains("session_header_names"), "{extra}: {error}");
+    }
+    // Overriding the list or disabling the header resolves a collision.
+    assert!(
+        connection_with(
+            "session_header_names = ['X-Shellboy-Session-Id']\nheaders = { 'x-litellm-session-id' = 'v' }"
+        )
+        .is_ok()
+    );
+    assert!(
+        connection_with("session_header = false\nheaders = { 'x-litellm-session-id' = 'v' }")
+            .is_ok()
+    );
+    assert!(connection_with("session_header_names = 'x'").is_err());
+}
+
+#[test]
 fn thread_session_settings_reject_non_boolean_values() {
     for key in ["session_header", "prompt_cache_key"] {
         for value in ["'true'", "'false'", "0", "1", "1.5", "[]", "{}"] {

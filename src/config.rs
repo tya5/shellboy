@@ -143,6 +143,11 @@ pub enum ContextRole {
     User,
 }
 
+/// Default names of the headers that carry the Thread UUID. The second is the
+/// session header some gateways read; other providers ignore unknown headers.
+pub const DEFAULT_SESSION_HEADER_NAMES: [&str; 2] =
+    ["X-Shellboy-Session-Id", "x-litellm-session-id"];
+
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {
@@ -163,6 +168,8 @@ pub struct Connection {
     pub extra_headers: BTreeMap<String, String>,
     pub ssl_verify: bool,
     pub session_header: bool,
+    /// Header names that each carry the Thread UUID when `session_header` is on.
+    pub session_header_names: Vec<String>,
     pub prompt_cache_key: bool,
     /// Send the dialect's cache markers for the common cache hint (#127).
     /// Default on; `false` sends nothing cache-related.
@@ -192,6 +199,10 @@ impl Default for Connection {
             extra_headers: BTreeMap::new(),
             ssl_verify: true,
             session_header: true,
+            session_header_names: DEFAULT_SESSION_HEADER_NAMES
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect(),
             prompt_cache_key: false,
             prompt_caching: true,
             response_header_timeout_ms: 120_000,
@@ -220,6 +231,7 @@ impl fmt::Debug for Connection {
             .field("extra_headers", &"[redacted]")
             .field("ssl_verify", &self.ssl_verify)
             .field("session_header", &self.session_header)
+            .field("session_header_names", &self.session_header_names)
             .field("prompt_cache_key", &self.prompt_cache_key)
             .field("prompt_caching", &self.prompt_caching)
             .field(

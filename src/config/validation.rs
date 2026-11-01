@@ -203,7 +203,65 @@ impl Connection {
                 ));
             }
         }
+        self.validate_session_header_names(name)?;
         self.validate_extra(name)
+    }
+    /// Thread UUID header names follow the `extra_headers` rules: no
+    /// credential-like or transport-owned name, no repeat inside the list.
+    /// While the header is enabled they also must not repeat another
+    /// configured header. The legacy default name is exempt from the reserved
+    /// and `headers` checks so a static header of that name is still overridden.
+    /// An empty list sends nothing.
+    fn validate_session_header_names(&self, name: &str) -> Result<(), ConfigError> {
+        let key = format!("connections.{name}.session_header_names");
+        if self.session_header_names.len() > 8 {
+            return Err(invalid(key, "at most 8 names are allowed"));
+        }
+        let credential = self.api_key_env.is_some().then(|| {
+            self.api_key_header
+                .as_deref()
+                .unwrap_or("authorization")
+                .to_ascii_lowercase()
+        });
+        let mut seen = std::collections::BTreeSet::new();
+        for value in &self.session_header_names {
+            if value.is_empty() || value.len() > 256 || !value.bytes().all(header_name_byte) {
+                return Err(invalid(
+                    key,
+                    "names must be valid HTTP header names of at most 256 bytes",
+                ));
+            }
+            let lower = value.to_ascii_lowercase();
+            if !seen.insert(lower.clone()) {
+                return Err(invalid(key, "names must be unique case-insensitively"));
+            }
+            if lower == super::DEFAULT_SESSION_HEADER_NAMES[0].to_ascii_lowercase() {
+                continue;
+            }
+            if RESERVED_EXTRA_HEADERS.contains(&lower.as_str())
+                || lower == "anthropic-version"
+                || CREDENTIAL_WORDS.iter().any(|word| lower.contains(word))
+            {
+                return Err(invalid(
+                    key,
+                    "credential-like and transport-owned header names are not accepted",
+                ));
+            }
+            if self.session_header
+                && (credential.as_deref() == Some(lower.as_str())
+                    || self
+                        .headers
+                        .keys()
+                        .chain(self.extra_headers.keys())
+                        .any(|other| other.eq_ignore_ascii_case(value)))
+            {
+                return Err(invalid(
+                    key,
+                    "must not repeat a headers, extra_headers or credential header; override session_header_names to drop the name",
+                ));
+            }
+        }
+        Ok(())
     }
     /// `extra_body` and `extra_headers` are never interpreted. Only shape,
     /// size and collisions with fields Shellboy itself owns are checked.
@@ -268,9 +326,7 @@ impl Connection {
             }
             let lower = key.to_ascii_lowercase();
             if RESERVED_EXTRA_HEADERS.contains(&lower.as_str())
-                || ["api-key", "apikey", "secret", "token", "credential"]
-                    .iter()
-                    .any(|word| lower.contains(word))
+                || CREDENTIAL_WORDS.iter().any(|word| lower.contains(word))
             {
                 return Err(invalid(
                     headers_key,
@@ -287,6 +343,7 @@ impl Connection {
         Ok(())
     }
 }
+const CREDENTIAL_WORDS: [&str; 5] = ["api-key", "apikey", "secret", "token", "credential"];
 const MAX_EXTRA_BODY_BYTES: usize = 64 * 1024;
 const MAX_EXTRA_HEADERS: usize = 32;
 const MAX_EXTRA_HEADER_VALUE_BYTES: usize = 8 * 1024;

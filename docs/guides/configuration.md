@@ -175,6 +175,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # default_effort = "low"
 # ssl_verify = true
 # session_header = true
+# session_header_names = ["X-Shellboy-Session-Id", "x-litellm-session-id"]
 # prompt_cache_key = false
 # prompt_caching = true
 # response_header_timeout_ms = 120000
@@ -424,13 +425,13 @@ and [Anthropic compatibility limits](https://platform.claude.com/docs/en/api/ope
 
 With default `connections.<name>.session_header = true`, conversation and summary requests in either dialect send the Thread UUID in `x-shellboy-session-id`. It remains stable across retries and model changes in the same conversation; child conversations and forks have different Thread UUIDs. The value contains no conversation body, title, or working directory. It is not automatically attached to embedding or model-list requests.
 
-When automatic attachment is enabled, the Thread UUID takes precedence on conversation requests even if `headers` contains the same header with different casing. `session_header = false` disables only automatic attachment: explicitly configured fixed headers are still sent. Other fixed headers and their application to embedding/model-list requests are unchanged.
+`connections.<name>.session_header_names` is a list of header names; the default is `["X-Shellboy-Session-Id", "x-litellm-session-id"]`. With `session_header = true`, the same Thread UUID is sent under every listed name on the same requests (conversation and summary). Providers ignore headers they do not know, so the extra name is harmless elsewhere. Override the list to change or drop names; an empty list (`[]`) sends nothing, like `session_header = false`.
 
-Setting `prompt_cache_key = true` in the same connection section additionally sends the Thread UUID as `prompt_cache_key` in Responses conversation and summary request bodies (not Chat). It defaults to `false` and adds nothing to the body. It is a cache routing hint, so it cannot be combined with `prompt_caching = false`. Responses providers cache request prefixes on their own; `prompt_caching` sends nothing new for `responses` or `chat_completions`. Keep it disabled for providers that do not accept the field. Restart the owner after changing either setting.
+The default includes `x-litellm-session-id` because LiteLLM reads only that header (or `x-litellm-trace-id`) as a session. Without it, LiteLLM creates a new session for every request, and a ChatGPT backend behind it then routes each request separately so prompt caching does not apply. With the default list, LiteLLM-proxied ChatGPT caching works with no configuration. Shellboy has no LiteLLM-specific code; the name is only a default value.
 
-These settings provide identifiers the endpoint can use; they do not guarantee cache hits, routing to one backend, or recovery from communication failures. With LiteLLM or similar proxies, check endpoint session-routing settings. A fixed `x-litellm-session-id` or trace ID may take priority over Shellboy's Thread identity in some configurations. Do not combine a shared fixed identity header with Thread identity when conversation isolation is the goal.
+Measured on 2026-11-01 through an unmodified LiteLLM to a ChatGPT backend (tool loop, six requests of 7,000 to 7,900 tokens): with a fixed session, every request after the first hit the cache almost entirely (6,912 to 7,680 tokens cached); with a new session per request, all six had 0 cached tokens. Sending `x-litellm-session-id` with the Thread UUID gave 97 to 98% cached from the first request, against 35 to 59% worker cache rates when only the unread Shellboy name was sent. Without caching, token consumption rises substantially. `prompt_cache_key` and `x-codex-turn-state` made no difference.
 
-F6 details for a completed answer show saved `usage.input_tokens_details.cached_tokens` as `入力キャッシュ` (input cache). Zero and unreported values are distinct. The UI does not infer cache hits from old records or invalid values and also displays the corresponding model request ID.
+Each name follows the `extra_headers` rules: valid header name (at most 256 bytes, at most 8 names), no credential-like or transport-owned name, no case-insensitive duplicate inside the list. While `session_header = true`, a name also must not repeat a `headers`, `extra_headers` or credential header (for example, a static `x-litellm-session-id` in `headers` is rejected: override the list or set `session_header = false`). `X-Shellboy-Session-Id` in `headers` stays allowed and is overridden by the Thread UUID. `config check` reports violations as `config_invalid`.
 
 ## Owned work rows
 

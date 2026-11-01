@@ -1143,13 +1143,15 @@ async fn session_fixture(mut connection: Connection) -> SessionFixture {
     }
 }
 fn session_values(request: &Request) -> Vec<&str> {
+    named_session_values(request, "x-shellboy-session-id")
+}
+fn named_session_values<'a>(request: &'a Request, wanted: &str) -> Vec<&'a str> {
     request
         .head
         .lines()
         .filter_map(|line| {
             let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case("x-shellboy-session-id")
-                .then_some(value.trim())
+            name.eq_ignore_ascii_case(wanted).then_some(value.trim())
         })
         .collect()
 }
@@ -1276,6 +1278,80 @@ async fn session_header_and_prompt_cache_key_can_be_selected_independently() {
         let plain = fixture.requests.recv().await.unwrap();
         assert!(session_values(&plain).is_empty());
         assert!(plain.body.get("prompt_cache_key").is_none());
+    }
+}
+
+#[tokio::test]
+async fn session_header_names_each_carry_thread_uuid_on_conversation_requests() {
+    // Default list: both names, same value.
+    let mut fixture = session_fixture(Connection::default()).await;
+    for thread in ["thread-a", "thread-b"] {
+        fixture
+            .client
+            .response_for_thread(thread, session_request(), CancellationToken::new(), None)
+            .await
+            .unwrap();
+        let request = fixture.requests.recv().await.unwrap();
+        assert_eq!(session_values(&request), [thread]);
+        assert_eq!(
+            named_session_values(&request, "x-litellm-session-id"),
+            [thread]
+        );
+    }
+    fixture
+        .client
+        .response(session_request(), CancellationToken::new(), None)
+        .await
+        .unwrap();
+    let plain = fixture.requests.recv().await.unwrap();
+    assert!(named_session_values(&plain, "x-litellm-session-id").is_empty());
+    // Overridden list: only the configured name.
+    let mut custom = session_fixture(Connection {
+        session_header_names: vec!["x-other-session".into()],
+        ..Default::default()
+    })
+    .await;
+    custom
+        .client
+        .response_for_thread(
+            "thread-a",
+            session_request(),
+            CancellationToken::new(),
+            None,
+        )
+        .await
+        .unwrap();
+    let request = custom.requests.recv().await.unwrap();
+    assert_eq!(
+        named_session_values(&request, "x-other-session"),
+        ["thread-a"]
+    );
+    assert!(session_values(&request).is_empty());
+    assert!(named_session_values(&request, "x-litellm-session-id").is_empty());
+    // Empty list, or session_header=false: nothing is sent.
+    for connection in [
+        Connection {
+            session_header_names: vec![],
+            ..Default::default()
+        },
+        Connection {
+            session_header: false,
+            ..Default::default()
+        },
+    ] {
+        let mut off = session_fixture(connection).await;
+        off.client
+            .response_for_thread(
+                "thread-a",
+                session_request(),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        let request = off.requests.recv().await.unwrap();
+        assert!(session_values(&request).is_empty());
+        assert!(named_session_values(&request, "x-litellm-session-id").is_empty());
     }
 }
 
