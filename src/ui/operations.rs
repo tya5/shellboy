@@ -19,11 +19,9 @@ use ratatui::{
 };
 use std::path::{Path, PathBuf};
 
-#[allow(dead_code)]
 pub(super) fn catalogue_label(id: OperationId, language: UiLanguage) -> String {
     metadata::text_for(id.label_text(), language).replace('·', "|")
 }
-#[allow(dead_code)]
 pub(super) fn catalogue_meaning(id: OperationId, language: UiLanguage) -> &'static str {
     metadata::text_for(id.meaning_text(), language)
 }
@@ -166,8 +164,8 @@ impl OpKind {
         metadata::text_for(self.catalogue().label_text(), language).replace('·', "|")
     }
     fn shortcut_for(self, language: UiLanguage) -> Option<&'static str> {
-        if language == UiLanguage::En && self == Self::AttachmentAdd {
-            Some("To draft: /attach")
+        if self == Self::AttachmentAdd {
+            Some(local!(language, "下書きへ: /attach", "To draft: /attach"))
         } else {
             self.shortcut()
         }
@@ -185,7 +183,6 @@ impl OpKind {
             Self::RunStop => Some("/stop | Ctrl+C"),
             Self::HistorySearch => Some("/search"),
             Self::Compact => Some("/compact"),
-            Self::AttachmentAdd => Some("下書きへ: /attach"),
             Self::AttachmentList => Some("/attachments"),
             Self::AttachmentRemove => Some("/detach"),
             Self::IndexStatus => Some("/index"),
@@ -350,7 +347,6 @@ impl Operations {
         }
         result
     }
-    #[allow(dead_code)]
     pub(super) fn set_language(&mut self, language: UiLanguage) {
         if self.language == language {
             return;
@@ -715,11 +711,13 @@ impl Operations {
             }
             let selected = form.selected + 1;
             let count = form.fields.len();
-            let field_context = match (form.language, form.fields.is_empty()) {
-                (UiLanguage::En, true) => "No input fields".into(),
-                (UiLanguage::Ja, true) => "入力項目なし".into(),
-                (UiLanguage::En, false) => format!("Field {selected}/{count}"),
-                (UiLanguage::Ja, false) => format!("{selected}/{count}項目"),
+            let field_context = if form.fields.is_empty() {
+                local!(form.language, "入力項目なし", "No input fields").into()
+            } else {
+                match form.language {
+                    UiLanguage::En => format!("Field {selected}/{count}"),
+                    UiLanguage::Ja => format!("{selected}/{count}項目"),
+                }
             };
             let effect = metadata::text_for(form.effect().text(), form.language);
             let conditions = form.conditions.len();

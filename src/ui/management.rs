@@ -1771,3 +1771,135 @@ mod preview_notice_tests {
         assert_eq!(full[0].to_string(), "time");
     }
 }
+
+#[cfg(test)]
+mod initial_management_screen_tests {
+    use super::*;
+    use crate::config::UiLanguage;
+    use std::path::PathBuf;
+
+    #[test]
+    fn initial_index_screen_is_bilingual_and_discloses_api_cost() {
+        fn configure(ui: &mut UiState) {
+            ui.initialized = true;
+            ui.insert("/index", false);
+            let actions = ui.submit();
+            fn command(action: &UiAction) -> Option<&Command> {
+                match action {
+                    UiAction::SubmittedCommand { action, .. }
+                    | UiAction::ManagementIntent { action, .. } => command(action),
+                    UiAction::Manage(command) => Some(command),
+                    _ => None,
+                }
+            }
+            assert!(
+                actions
+                    .iter()
+                    .filter_map(command)
+                    .any(|command| matches!(command, Command::IndexStatus(_)))
+            );
+            assert!(!actions.iter().filter_map(command).any(|command| matches!(
+                command,
+                Command::IndexBackfill(_) | Command::IndexRebuild(_)
+            )));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Index management",
+                    "past record",
+                    "External API use may incur charges",
+                ],
+                UiLanguage::Ja => &["Index管理", "停止理由は過去の記録", "外部APIの利用で費用"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn initial_attachment_screen_preserves_raw_fields_in_both_languages() {
+        fn configure(ui: &mut UiState) {
+            ui.initialized = true;
+            ui.active_view_mut().draft.insert_attachment(
+                UiAttachment {
+                    id: "RAW-ID".into(),
+                    path: PathBuf::from("RAW-PATH"),
+                    kind: "RAW-KIND".into(),
+                    state: "RAW-STATE".into(),
+                    position: None,
+                },
+                0,
+            );
+            ui.insert("/attachments", false);
+            ui.submit();
+            let page = ui.management.as_ref().unwrap();
+            for value in [
+                "RAW-ID",
+                "RAW-PATH",
+                "RAW-KIND",
+                "RAW-STATE",
+                "selected/managed/unavailable_reason",
+                "/detach ID",
+            ] {
+                assert!(page.text.contains(value), "{value}: {}", page.text);
+            }
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Attachment management",
+                    "RAW-ID",
+                    "RAW-KIND",
+                    "RAW-STATE",
+                    "RAW-PATH",
+                ],
+                UiLanguage::Ja => &["添付管理", "RAW-ID", "RAW-KIND", "RAW-STATE", "RAW-PATH"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn initial_received_screen_is_bilingual() {
+        fn configure(ui: &mut UiState) {
+            ui.initialized = true;
+            ui.select_thread("thread-fixture".into());
+            ui.insert("/received", false);
+            let actions = ui.submit();
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::LoadReceived { page: 1, .. }))
+            );
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Received records", "Loading", "Esc"],
+                UiLanguage::Ja => &["受信記録", "読込み中", "Esc"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn initial_client_operation_screen_keeps_accepted_work_warning() {
+        fn configure(ui: &mut UiState) {
+            let operation = crate::client_operation::ClientOperation::Config(
+                crate::config_setup::ConfigCommand::Init,
+            );
+            let actions = ui.execute_client_operation(operation);
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::ClientOperation(_)))
+            );
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Config - Create template", "Accepted work continues"],
+                UiLanguage::Ja => &["設定 | テンプレート作成", "閉じても受付済みの処理は続行"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+}

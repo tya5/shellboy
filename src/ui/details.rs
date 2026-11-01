@@ -124,7 +124,6 @@ thread_local! { static ORIGINAL_PREPARATIONS: Cell<usize> = const { Cell::new(0)
 pub(super) fn original_page_lines(body: &HistoryBody) -> Vec<Line<'static>> {
     original_page_lines_for(body, UiLanguage::Ja)
 }
-#[allow(dead_code)]
 pub(super) fn original_page_lines_for(
     body: &HistoryBody,
     language: UiLanguage,
@@ -505,9 +504,8 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                 if suffix == "status" {
                     field.label = match (language, numbered) {
                         (UiLanguage::Ja, true) => format!("回答 {ordinal} › 回答の状態"),
-                        (UiLanguage::Ja, false) => "回答の状態".into(),
                         (UiLanguage::En, true) => format!("Answer {ordinal} > Answer status"),
-                        (UiLanguage::En, false) => "Answer status".into(),
+                        (_, false) => local!(language, "回答の状態", "Answer status").into(),
                     };
                 }
                 if suffix == "content"
@@ -523,9 +521,8 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                 if suffix == "content" {
                     field.label = match (language, numbered) {
                         (UiLanguage::Ja, true) => format!("回答 {ordinal} › 内容の数"),
-                        (UiLanguage::Ja, false) => "内容の数".into(),
                         (UiLanguage::En, true) => format!("Answer {ordinal} > Content count"),
-                        (UiLanguage::En, false) => "Content count".into(),
+                        (_, false) => local!(language, "内容の数", "Content count").into(),
                     };
                 }
                 let parts = suffix.split('/').collect::<Vec<_>>();
@@ -550,14 +547,13 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                                 (UiLanguage::Ja, true, false) => {
                                     format!("回答 {ordinal} › 本文 {part}")
                                 }
-                                (UiLanguage::Ja, false, true) => "本文".into(),
                                 (UiLanguage::Ja, false, false) => format!("本文 {part}"),
                                 (UiLanguage::En, true, true) => format!("Answer {ordinal} > Text"),
                                 (UiLanguage::En, true, false) => {
                                     format!("Answer {ordinal} > Text {part}")
                                 }
-                                (UiLanguage::En, false, true) => "Text".into(),
                                 (UiLanguage::En, false, false) => format!("Text {part}"),
+                                (_, false, true) => local!(language, "本文", "Text").into(),
                             };
                         }
                     }
