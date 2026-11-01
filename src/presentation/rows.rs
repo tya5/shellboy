@@ -7,6 +7,19 @@ pub const NOTICE_SOURCE_OUTSIDE_WINDOW: &str =
 
 pub const EXTERNAL_MARK_CANDIDATES: [&str; 3] = ["⤷", "⇥", "⤳"];
 
+/// Conversation spinner shapes (#90). Every frame is one column wide even
+/// under CJK width rules, so a frame swap never changes wrap, selection or
+/// scroll geometry. The user picks the shape from real PTY samples; until
+/// then the braille candidate is the default. With motion off, or for rows
+/// that do not win the conversation's single motion slot, the static
+/// `RowKind` mark (`⏵`, `▸`) is drawn instead.
+pub const SPINNER_CANDIDATES: [&[&str]; 3] = [
+    &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+    &["◴", "◷", "◶", "◵"],
+    &["|", "/", "-", "\\"],
+];
+pub const SPINNER_FRAMES: &[&str] = SPINNER_CANDIDATES[0];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RowKind {
     Human,
@@ -130,6 +143,14 @@ mod tests {
         assert_eq!(RowKind::External.spec().1, "外から");
         assert_eq!(RowKind::External.mark().width_cjk(), 1);
         assert_ne!(RowKind::Running.mark(), RowKind::Unknown.mark());
+        for frames in SPINNER_CANDIDATES {
+            assert!(frames.len() >= 4);
+            for frame in frames {
+                assert_eq!(frame.chars().count(), 1, "{frame}");
+                assert_eq!(frame.width(), 1, "{frame}");
+                assert_eq!(frame.width_cjk(), 1, "{frame}");
+            }
+        }
         assert_ne!(RowKind::Notice.mark(), RowKind::Parent.mark());
     }
     #[test]

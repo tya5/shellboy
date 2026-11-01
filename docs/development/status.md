@@ -3389,3 +3389,11 @@ branch CI; the separate #90 animation work is not included.
 
 The current macOS arm64 synthetic checks, observations and outstanding gates are
 recorded in [acceptance](../validation/acceptance.md#86-owned-work-section).
+
+## #90 one motion per region
+
+Branch `issue-90/motion` on main `63952ab2`: `ui.motion` (on/off), one
+`Animation` clock for status shimmer/pulse, the single conversation spinner
+(`ui/motion.rs::select`) and the owned-work heading blink. Spinner shape uses the
+braille candidate until the user picks from real PTY samples. Checks and gaps are
+recorded in [acceptance](../validation/acceptance.md#90-one-motion-per-region).

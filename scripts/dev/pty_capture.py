@@ -52,7 +52,7 @@ def check_config(root):
         raise ValueError('Only minimal synthetic fixture config is allowed')
     if config.get('ui', {}).get('copy_backend') != 'osc52':
         raise ValueError('Fixture requires explicit [ui] copy_backend="osc52"')
-    if set(config.get('ui', {})) - {'copy_backend', 'palette', 'bell', 'send_key', 'newline_keys'}:
+    if set(config.get('ui', {})) - {'copy_backend', 'palette', 'bell', 'send_key', 'newline_keys', 'motion'}:
         raise ValueError('Unexpected fixture UI setting')
     shell = config.get('shell', {})
     if (not isinstance(shell, dict) or set(shell) - {'describe_calls'}

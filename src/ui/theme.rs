@@ -99,6 +99,21 @@ impl Palette {
             crate::config::PaletteMode::Light => Color::Indexed(24),
         })
     }
+    /// The dim half of the owned-work heading blink (#90). `NO_COLOR` has no
+    /// brightness to change, so the heading stays static there.
+    pub(crate) fn live_work_dim(self) -> Option<ratatui::style::Style> {
+        use ratatui::style::{Modifier, Style};
+        if self.no_color {
+            return None;
+        }
+        if !self.rich {
+            return Some(Style::default().add_modifier(Modifier::DIM));
+        }
+        Some(Style::default().fg(match self.choice {
+            crate::config::PaletteMode::Dark => Color::Indexed(30),
+            crate::config::PaletteMode::Light => Color::Indexed(110),
+        }))
+    }
     pub(crate) fn live_work_content(self) -> ratatui::style::Style {
         use ratatui::style::Style;
         if self.no_color || !self.rich {

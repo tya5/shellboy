@@ -7234,3 +7234,30 @@ No forecast policy/queue/runtime behavior changes during rebase. The earlier
 native greenbe644276 remains old-base evidence; latest exact-SHA native3OS CI
 must qualify this rebase before the coordinator integrates it. Old published
 refs are retained rather than force-rewritten, with owner cleanup after landing.
+
+## #90 one motion per region
+
+Local macOS arm64 (Darwin 25.3), branch `issue-90/motion` on `63952ab2`:
+`cargo check --tests`, strict Clippy (`--all-targets -D warnings`) and the focused
+lib tests (`ui::motion ui::live_work ui::activity ui::redraw presentation::rows
+layout_cache_tests`, 57 passed) pass. Virtual-clock tests count: foreground shell
+with spinner and the same scene without a spinner give the same frame count
+(101 per 10 s at the <=10fps cap; no history revision, layout rebuild or
+deferred action); spinner alone with a still footer uses the same step; only
+the owned-work heading blinking gives exactly 60 frames and 60 brightness
+changes in 60 s, on the section's seconds boundaries, and the existing
+600-second owned-work test still counts 600 redraws (blink coalesced with
+elapsed seconds); motion off and `NO_COLOR` give 0 blink frames; completed idle
+schedules nothing (`completed_idle_has_no_animation_and_no_unsolicited_frame`).
+Spinner frames are width 1 (ordinary and CJK); painting changes only the mark
+cell of one row; the heading blink changes only the `◉` cell's color.
+
+Synthetic loopback PTY (temporary root, one bounded tool call, 2 model
+requests, `ulimit -u 1000`): 80/140 columns, dark/light, `NO_COLOR`, `TERM=vt100`
+and motion off. With motion on the foreground `sleep` row cycled the braille
+frames and, after it finished, the streaming answer row did; about 20–22 frames
+per 2 s; 0 frames in 3 s after completion. Motion off showed only `⏵`/`▸` and
+4–5 frames per 2 s (seconds updates). Heading blink color was not inspected in
+PTY (the decoder records text). The quiet background-only scene, Windows/Linux
+terminals and real fonts are unverified in PTY; spinner shape awaits the user's
+choice. No real provider, installed executable or user data is used.

@@ -1220,6 +1220,19 @@ reserved for the #86 work-region heading. The old ambiguous-width `●`, `◇` a
 `◐` are not chosen. Distinct shapes plus labels work without color. Existing
 palette roles are reused; no new theme configuration or translation framework.
 Issue #91 extends this table for external/unknown input with ⇥, labeled 外から.
+Issue #90 registers the conversation spinner frames beside this table
+(`SPINNER_CANDIDATES`, default braille `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`; also `◴◷◶◵` and ASCII
+`|/-\`), every frame checked at width 1 under ordinary and CJK rules. At most one
+row spins and only its mark cell changes: the newest validated
+`running_current` foreground shell while the selected Thread's Turn is in
+progress, else the current attempt's provisional streaming answer while the
+model is awaited/received, else none (`ui/motion.rs::select`, the single rule).
+Other running rows keep `⏵`; background shells never spin; an off-screen winner
+does not pass the slot to an older visible row. Before the first streamed text
+there is no answer row, so only the status bar moves; no placeholder row or
+persisted node is created for decoration. The `◉` heading only changes
+brightness (never glyph); `NO_COLOR` keeps it static. Final spinner shape is a
+pending user choice from real PTY samples.
 The user selected candidate B on 2026-10-31 after the real-PTY comparison; this
 supersedes provisional A (⤷) and the other candidate (⤳). Main integration still
 requires the delegated qualification, not another visual selection.

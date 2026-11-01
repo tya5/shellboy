@@ -455,11 +455,45 @@ impl ObservedClock {
     }
 }
 
-/// At most one footer animation. Time changes styles, never text or layout keys.
+/// What may move in the next frame: at most one decoration per region (#90).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct MotionDemand {
+    /// Status bar: the existing shimmer/pulse of the current phase.
+    pub footer: ActivityPhase,
+    /// Conversation: `motion::select` found a winner.
+    pub spinner: bool,
+    /// Owned-work heading: the section's existing seconds origin while its
+    /// heading is drawn with a palette that can change brightness. Blink
+    /// flips land on the same boundaries as the section's elapsed seconds.
+    pub blink: Option<Instant>,
+}
+impl MotionDemand {
+    #[cfg(test)]
+    pub fn still(footer: ActivityPhase) -> Self {
+        Self {
+            footer,
+            spinner: false,
+            blink: None,
+        }
+    }
+    fn fast(self) -> bool {
+        self.footer.is_active() || self.spinner
+    }
+}
+
+/// The single display clock for every decoration: footer shimmer/pulse,
+/// conversation spinner and owned-work heading blink. Fast decorations share
+/// one `max_fps`-bounded (<=10fps) deadline; blink alone wakes once per
+/// second on the section's seconds boundary. Time changes styles or the
+/// one-column spinner glyph, never text width or layout keys.
 pub(super) struct Animation {
     origin: Instant,
     next: Option<Instant>,
     phase: ActivityPhase,
+    fast: bool,
+    /// The demand last scheduled while visible with motion on; drawing reads
+    /// frames only from it, so motion off and hidden frames stay static.
+    demand: Option<MotionDemand>,
 }
 impl Animation {
     pub fn new(now: Instant) -> Self {
@@ -467,8 +501,11 @@ impl Animation {
             origin: now,
             next: None,
             phase: ActivityPhase::Idle,
+            fast: false,
+            demand: None,
         }
     }
+    #[cfg(test)]
     pub fn tick(
         &mut self,
         now: Instant,
@@ -476,28 +513,90 @@ impl Animation {
         visible: bool,
         max_fps: u32,
     ) -> bool {
-        if !visible || !phase.is_active() {
+        self.tick_demand(now, MotionDemand::still(phase), visible, max_fps, true)
+    }
+    /// Returns whether a frame is due. Never invalidates when nothing moves.
+    pub fn tick_demand(
+        &mut self,
+        now: Instant,
+        demand: MotionDemand,
+        visible: bool,
+        max_fps: u32,
+        motion: bool,
+    ) -> bool {
+        if !visible || !motion || (!demand.fast() && demand.blink.is_none()) {
             self.next = None;
-            self.phase = phase;
+            self.phase = demand.footer;
+            self.fast = false;
+            self.demand = None;
             return false;
         }
-        let step = Duration::from_secs_f64(1.0 / f64::from(max_fps.clamp(1, 10)));
-        if self.phase != phase || self.next.is_none() {
-            self.phase = phase;
-            self.origin = now;
-            self.next = Some(now + step);
-            return true;
+        let previous = self.demand.replace(demand);
+        if demand.fast() {
+            let step = Duration::from_secs_f64(1.0 / f64::from(max_fps.clamp(1, 10)));
+            if self.phase != demand.footer || self.next.is_none() || !self.fast {
+                self.phase = demand.footer;
+                self.fast = true;
+                self.origin = now;
+                self.next = Some(now + step);
+                return true;
+            }
+            if self.next.is_some_and(|deadline| now >= deadline) {
+                self.next = Some(now + step);
+                return true;
+            }
+            return false;
+        }
+        // Quiet: only the heading blinks. Wake on the section's own second
+        // boundary so blink and elapsed seconds share one frame per second.
+        let origin = demand.blink.expect("quiet demand has a blink origin");
+        let boundary = origin
+            + Duration::from_secs(
+                now.saturating_duration_since(origin)
+                    .as_secs()
+                    .saturating_add(1),
+            );
+        let restarted = self.fast
+            || self.next.is_none()
+            || previous.and_then(|previous| previous.blink) != Some(origin);
+        self.phase = demand.footer;
+        self.fast = false;
+        if restarted {
+            self.next = Some(boundary);
+            return false;
         }
         if self.next.is_some_and(|deadline| now >= deadline) {
-            self.next = Some(now + step);
+            self.next = Some(boundary);
             return true;
         }
         false
     }
+    /// The conversation spinner glyph for this frame, if it may move.
+    pub fn spinner(&self, now: Instant) -> Option<&'static str> {
+        self.demand.filter(|demand| demand.spinner)?;
+        let tenths = now.saturating_duration_since(self.origin).as_millis() / 100;
+        Some(super::motion::spinner_frame(tenths as usize))
+    }
+    /// Whether the owned-work heading mark is in its dim half-period.
+    /// At most one transition per second, on the section's seconds boundary.
+    pub fn blink_dim(&self, now: Instant) -> bool {
+        self.demand
+            .and_then(|demand| demand.blink)
+            .is_some_and(|origin| now.saturating_duration_since(origin).as_secs() % 2 == 1)
+    }
+    /// Footer decorations freeze with the other regions when motion is off.
+    pub fn footer_moves(&self) -> bool {
+        self.demand.is_some()
+    }
     pub fn spans(&self, phase: ActivityPhase, base: Style, now: Instant) -> Vec<Span<'static>> {
         let text = format!("{} {}", phase.marker(), phase.label());
         let elapsed = now.saturating_duration_since(self.origin).as_secs_f64();
-        match phase.motion() {
+        let motion = if self.footer_moves() {
+            phase.motion()
+        } else {
+            Motion::Still
+        };
+        match motion {
             Motion::Still => vec![Span::styled(text, base)],
             Motion::Pulse => {
                 let level = (1.0 + (elapsed * std::f64::consts::PI).sin()) / 2.0;
@@ -723,6 +822,65 @@ mod tests {
             true,
             30
         ));
+    }
+    #[test]
+    fn one_clock_serves_spinner_and_blink_and_switches_to_quiet_seconds() {
+        let now = Instant::now();
+        let origin = now - Duration::from_millis(300);
+        let mut animation = Animation::new(now);
+        let spinner = MotionDemand {
+            footer: ActivityPhase::Background,
+            spinner: true,
+            blink: Some(origin),
+        };
+        let mut frames = Vec::new();
+        for tick in 0..=40u64 {
+            let at = now + Duration::from_millis(tick * 25);
+            if animation.tick_demand(at, spinner, true, 60, true) {
+                frames.push(at);
+            }
+        }
+        // Spinner alone (still footer) uses the same <=10fps step.
+        assert_eq!(frames.len(), 11);
+        assert!(
+            frames
+                .windows(2)
+                .all(|w| w[1] - w[0] >= Duration::from_millis(100))
+        );
+        let glyphs = frames
+            .iter()
+            .filter_map(|at| animation.spinner(*at))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(glyphs.len() > 1);
+        // Turn ends: only the heading remains, on the origin's second boundary.
+        let quiet = MotionDemand {
+            spinner: false,
+            ..spinner
+        };
+        let start = now + Duration::from_millis(1_050);
+        assert!(!animation.tick_demand(start, quiet, true, 60, true));
+        assert_eq!(animation.spinner(start), None);
+        let mut due = Vec::new();
+        for tick in 1..=200u64 {
+            let at = start + Duration::from_millis(tick * 25);
+            if animation.tick_demand(at, quiet, true, 60, true) {
+                due.push(at.saturating_duration_since(origin).as_millis() % 1000);
+            }
+        }
+        assert_eq!(due.len(), 5, "{due:?}");
+        assert!(due.iter().all(|offset| *offset < 25), "{due:?}");
+        // Nothing moving: no deadline at all.
+        let idle = MotionDemand::still(ActivityPhase::Completed);
+        for tick in 0..100u64 {
+            assert!(!animation.tick_demand(
+                start + Duration::from_secs(10 + tick),
+                idle,
+                true,
+                60,
+                true
+            ));
+        }
+        assert!(!animation.blink_dim(start + Duration::from_secs(11)));
     }
     #[test]
     fn first_chunk_before_a_new_attempt_projection_is_not_lost() {

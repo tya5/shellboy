@@ -120,3 +120,12 @@ The historical one-row initial scope above is not the current layout: current
 chrome::footer_lines returns two quiet rows. #85 owns first-row activity facts and
 recovery content; #87 owns second-row key-hint selection/fit. These additions do
 not reintroduce an earlier row layout or overwrite #87's caller-supplied hint API.
+
+## 区画ごとに1つの動き（#90）
+
+画面の区画ごとに、動くものは最大1つ。会話は1行だけのスピナー、「抱えている作業」は見出しの`◉`の明るさ、ステータスバーは上表の既存shimmer/pulseのまま。
+
+- 時計は1つ：`ui/activity.rs::Animation`が全区画のコマを計算し、`UiState::animation_tick`の同じ`now`で1回だけdirtyを判断する。ステータスバーかスピナーが動く間は既存の`min(max_fps,10)`の期限を共有し、スピナーを足しても描画回数は増えない。明滅だけのとき（Turn完了・Run liveの背景作業）は、区画の既存の秒時計と同じ原点の秒境界でだけ起き、経過秒の更新と同じ1フレームにまとめる（1秒に最大1回の変化）。何も動かないときは期限を持たず、描画しない。
+- スピナーの行の選び方は`ui/motion.rs::select`の1関数：Turn進行中に、最新の`running_current`かつ背景でないshell、なければ現attemptの生成中（provisional）回答行、なければなし。描画時に見えている行の印1セルだけを置き換え、layout cache・source・選択・F6/F7・scrollの計算には触れない。
+- `ui.motion = "off"`で3区画とも静止した印に戻す。`NO_COLOR`では明滅しない（スピナーは動く）。overlay・選択固定中は既存の規則どおり期限を止める。
+- DB/出力の読取り・worker・queue・timerは追加しない。

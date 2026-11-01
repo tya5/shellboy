@@ -275,6 +275,11 @@ impl LiveWorkView {
             crate::presentation::elapsed_text(age.saturating_mul(1000), false)
         ))
     }
+    /// The heading's blink origin (#90): the section's existing seconds
+    /// clock, only while the section is drawn.
+    pub fn blink_origin(&self) -> Option<Instant> {
+        self.area.and(self.snapshot.as_ref()).and(self.clock_origin)
+    }
     pub fn advance(&mut self, now: Instant) -> bool {
         let step = self
             .clock_origin
@@ -494,6 +499,7 @@ pub(super) fn draw(
     view: &LiveWorkView,
     palette: theme::Palette,
     describe_calls: bool,
+    heading_dim: bool,
 ) {
     if area.height == 0 {
         return;
@@ -522,15 +528,26 @@ pub(super) fn draw(
         })
         .unwrap_or_default();
     let (mark, name, _) = crate::presentation::rows::RowKind::LiveWork.spec();
-    let heading = format!("{mark} {name}{hidden_label}{counts}");
+    let heading = fit(
+        &format!("{mark} {name}{hidden_label}{counts}"),
+        usize::from(area.width),
+    );
     let mut lines = Vec::new();
     if area.height > 1 {
         lines.push(Line::from(""));
     }
-    lines.push(Line::styled(
-        fit(&heading, usize::from(area.width)),
-        palette.live_work(),
-    ));
+    // Blink changes only the `◉` brightness, never its glyph or the width.
+    let dim = heading_dim
+        .then(|| palette.live_work_dim())
+        .flatten()
+        .filter(|_| heading.starts_with(mark));
+    lines.push(match dim {
+        Some(dim) => Line::from(vec![
+            Span::styled(mark.to_owned(), dim),
+            Span::styled(heading[mark.len()..].to_owned(), palette.live_work()),
+        ]),
+        None => Line::styled(heading, palette.live_work()),
+    });
     for (index, row) in view.rows().iter().take(view.visible_rows).enumerate() {
         let marker = if view.active && view.selected.as_ref() == Some(&row.target) {
             "›"
@@ -909,6 +926,7 @@ mod tests {
                         false,
                     ),
                     false,
+                    false,
                 )
             })
             .unwrap();
@@ -961,6 +979,86 @@ mod tests {
             revision,
             "display clock does not reparse history"
         );
+    }
+    #[test]
+    fn quiet_heading_blink_is_one_frame_per_second_and_static_when_motion_or_color_is_off() {
+        use crate::config::{MotionMode, PaletteMode};
+        let at = Instant::now();
+        for (motion, no_color, expected) in [
+            (MotionMode::On, false, 60),
+            (MotionMode::Off, false, 0),
+            (MotionMode::On, true, 0),
+        ] {
+            let mut config = Config::default();
+            config.ui.motion = motion;
+            let mut ui = UiState::new(&config, PathBuf::from("/"));
+            ui.palette = theme::Palette::from_capabilities(PaletteMode::Dark, no_color, true);
+            ui.select_thread("thread".into());
+            // A child row alone has no ticking seconds: only the blink can move.
+            let mut work = snapshot(at);
+            work.rows
+                .retain(|row| matches!(row.target, LiveWorkTarget::ChildRun { .. }));
+            ui.apply(UiUpdate::Activity {
+                thread_id: "thread".into(),
+                generation: ui.view().generation,
+                epoch: 1,
+                snapshot: activity::ActivitySnapshot {
+                    run_id: Some("owner".into()),
+                    phase: activity::ActivityPhase::Background,
+                    live_work: Some(work),
+                    ..Default::default()
+                },
+                observed_at: at,
+            });
+            ui.view_mut().live_work.set_area(Rect::new(0, 20, 80, 5));
+            ui.take_deferred_actions();
+            let mut redraws = 0;
+            let mut transitions = 0;
+            let mut dim = ui.animation.blink_dim(at);
+            for tick in 1..=2400u64 {
+                ui.dirty = false;
+                let now = at + Duration::from_millis(tick * 25);
+                ui.animation_tick(now);
+                redraws += usize::from(ui.dirty);
+                assert!(ui.take_deferred_actions().is_empty(), "no DB/output reads");
+                let next = ui.animation.blink_dim(now);
+                if next != dim {
+                    transitions += 1;
+                    assert!(ui.dirty, "every visible blink change has its frame");
+                    dim = next;
+                }
+                assert_eq!(ui.animation.spinner(now), None, "no conversation spinner");
+            }
+            assert_eq!(redraws, expected, "{motion:?} no_color={no_color}");
+            assert_eq!(transitions, expected);
+        }
+    }
+    #[test]
+    fn heading_blink_changes_only_the_mark_brightness() {
+        let at = Instant::now();
+        let ui = ui(at);
+        let palette =
+            theme::Palette::from_capabilities(crate::config::PaletteMode::Dark, false, true);
+        let render = |dim: bool| {
+            let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 5)).unwrap();
+            let mut view = LiveWorkView::default();
+            view.accept(ui.view().live_work.snapshot.clone(), at);
+            view.set_area(Rect::new(0, 0, 80, 5));
+            terminal
+                .draw(|frame| draw(frame, Rect::new(0, 0, 80, 5), &view, palette, false, dim))
+                .unwrap();
+            terminal.backend().buffer().clone()
+        };
+        let (bright, dim) = (render(false), render(true));
+        for y in 0..5 {
+            for x in 0..80 {
+                assert_eq!(bright[(x, y)].symbol(), dim[(x, y)].symbol());
+                if bright[(x, y)] != dim[(x, y)] {
+                    assert_eq!((x, y, bright[(x, y)].symbol()), (0, 1, "◉"));
+                }
+            }
+        }
+        assert_ne!(bright[(0, 1)].fg, dim[(0, 1)].fg);
     }
     #[test]
     fn maximum_rows_share_one_quiet_clock_without_reads() {
@@ -1195,6 +1293,7 @@ mod tests {
                         false,
                         true,
                     ),
+                    false,
                     false,
                 )
             })

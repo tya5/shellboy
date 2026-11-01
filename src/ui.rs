@@ -50,6 +50,7 @@ pub use message_queue::{PendingMessage, PendingMessages, SubmittedMessage};
 #[cfg(test)]
 mod send_tests;
 pub use management::ManagementPopup;
+mod motion;
 mod operations;
 mod overlay;
 mod popup;
@@ -4164,11 +4165,22 @@ impl UiState {
         if self.thread_browser.watch_tick(browser_visible, now) {
             self.dirty = true;
         }
-        let phase = self.view().footer_phase();
-        if self
-            .animation
-            .tick(now, phase, visible, self.config.ui.max_fps)
-        {
+        let view = self.view();
+        let demand = activity::MotionDemand {
+            footer: view.footer_phase(),
+            spinner: motion::select(view).is_some(),
+            blink: view
+                .live_work
+                .blink_origin()
+                .filter(|_| self.palette.live_work_dim().is_some()),
+        };
+        if self.animation.tick_demand(
+            now,
+            demand,
+            visible,
+            self.config.ui.max_fps,
+            self.config.ui.motion == crate::config::MotionMode::On,
+        ) {
             self.dirty = true;
         }
     }
@@ -5885,6 +5897,7 @@ fn draw_conversation(
     history: &HistoryLayout,
     scroll: usize,
     view: &ThreadView,
+    spinner: Option<&'static str>,
 ) {
     let content = theme::conversation_content(area);
     frame
@@ -5904,6 +5917,17 @@ fn draw_conversation(
         content.width,
         Instant::now(),
     );
+    if let Some(spinner) = spinner
+        && let Some(target) = motion::select(view)
+    {
+        motion::paint_spinner(
+            &mut visible,
+            &history.sources[start..end],
+            view,
+            &target,
+            spinner,
+        );
+    }
     frame.render_widget(Paragraph::new(visible).wrap(Wrap { trim: false }), content);
     paint_conversation_edges(
         frame,
@@ -6208,7 +6232,14 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             body_area,
         );
     } else {
-        draw_conversation(frame, body_area, &history, scroll, view);
+        draw_conversation(
+            frame,
+            body_area,
+            &history,
+            scroll,
+            view,
+            state.animation.spinner(Instant::now()),
+        );
         history_interaction::highlight(
             frame,
             body_area,
@@ -6228,6 +6259,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         &view.live_work,
         state.palette,
         view.describe_calls,
+        state.animation.blink_dim(Instant::now()),
     );
     let input_area = layout[2];
     let input_body_height = input_area.height.saturating_sub(2);
@@ -8521,7 +8553,14 @@ mod band_extent_tests {
                 let mut terminal = Terminal::new(TestBackend::new(width, 6)).unwrap();
                 terminal
                     .draw(|frame| {
-                        draw_conversation(frame, Rect::new(0, 0, width, 6), &history, 0, &view)
+                        draw_conversation(
+                            frame,
+                            Rect::new(0, 0, width, 6),
+                            &history,
+                            0,
+                            &view,
+                            None,
+                        )
                     })
                     .unwrap();
                 let bg = view
@@ -8546,7 +8585,14 @@ mod band_extent_tests {
                 history.lines = 1;
                 terminal
                     .draw(|frame| {
-                        draw_conversation(frame, Rect::new(0, 0, width, 6), &history, 0, &view)
+                        draw_conversation(
+                            frame,
+                            Rect::new(0, 0, width, 6),
+                            &history,
+                            0,
+                            &view,
+                            None,
+                        )
                     })
                     .unwrap();
                 for y in 1..5 {

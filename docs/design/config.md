@@ -148,6 +148,12 @@ file-system error or file creation. Reject unsupported config paths before I/O;
 diagnostic data-directory paths use display-safe UTF-8, without changing their
 filesystem resolution. This adds no credential value to diagnostic output.
 
+## Motion (#90)
+
+`ui.motion` is `"on"` (default) or `"off"`. It is display-only: off removes every
+animation deadline (status shimmer/pulse, conversation spinner, owned-work
+heading blink) and draws the static marks; meaningful seconds still update.
+
 ## Terminal program status (#54)
 
 `ui.program_status` is `"on"` (default) or `"off"`. OSC7501 rev0.4 is emitted
