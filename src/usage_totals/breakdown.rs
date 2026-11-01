@@ -391,7 +391,7 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         None
     };
     Ok(
-        json!({"group_by":group_by,"timezone":a.timezone.as_deref().unwrap_or("local"),"requested_period":w.json(),
+        json!({"thread_id":selection.as_ref().and_then(|s|s.threads.first()).filter(|id|id.len()<=512),"group_by":group_by,"timezone":a.timezone.as_deref().unwrap_or("local"),"requested_period":w.json(),
         "items":items,"more":more,"next_cursor":next_cursor,"scanned_candidates":scanned,"matched_attempts":matched,
         "excluded_time_count":excluded_times,"outside_period_count":outside_period,"row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || continued,
         "scope_complete":selection.as_ref().is_none_or(|s|s.complete),"statistics_scope":"current_candidate_window",

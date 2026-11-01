@@ -927,6 +927,10 @@ impl Form {
                         Text,
                     ),
                     f("children", "子会話を含む", "false".into(), Boolean),
+                    f("group_by", "内訳（空=合計）", String::new(), Choice(&["", "hour", "day", "thread"])),
+                    f("timezone", "時間帯（内訳指定時）", String::new(), Text),
+                    f("limit", "区切り上限（内訳指定時）", String::new(), Number),
+                    f("cursor", "続きcursor（同じ内訳）", String::new(), Text),
                 ],
                 |form, _cwd| {
                     Ok(Command::UsageGet(UsageGetArgs {
@@ -936,7 +940,10 @@ impl Form {
                         run_id: form.optional("run")?,
                         turn_id: form.optional("turn")?,
                         include_children: form.boolean("children")?,
-                        ..Default::default()
+                        group_by: form.optional("group_by")?.map(String::into_boxed_str),
+                        timezone: form.optional("timezone")?.map(String::into_boxed_str),
+                        limit: form.optional_number("limit")?,
+                        cursor: form.optional("cursor")?.map(String::into_boxed_str),
                     }))
                 },
             ),

@@ -186,7 +186,7 @@ pub(super) fn read_shared_tx(
             .inspection_usage
             .as_ref()
             .filter(|ticket| !ticket.identity.stop.is_cancelled())
-            .map(|ticket| observed(inspection_state::read_usage_tx(db, ticket)))
+            .map(|ticket| observed(inspection_state::read_usage_tx(db, ticket, tickets.inspection_services.as_ref().map(|s|s.instance_id.as_str()))))
             .transpose()?,
     })
 }

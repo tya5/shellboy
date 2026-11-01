@@ -52,6 +52,9 @@ impl Form {
             "operation" => FieldId::Operation,
             "execution" => FieldId::Execution,
             "query" => FieldId::Query,
+            "group_by" => FieldId::GroupBy,
+            "timezone" => FieldId::Timezone,
+            "limit" if self.operation == OpKind::UsageGet => FieldId::GroupLimit,
             "cursor" => FieldId::Cursor,
             "limit"
                 if matches!(
