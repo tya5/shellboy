@@ -1410,6 +1410,100 @@ mod confirmation_language_tests {
     use crate::config::UiLanguage;
 
     #[test]
+    fn index_confirmation_screen_preserves_external_preview_in_both_languages() {
+        fn configure(ui: &mut UiState) {
+            let args = IndexArgs {
+                scope: Some(IndexScope::All),
+                ..Default::default()
+            };
+            let actions = ui.execute_operation(Command::IndexBackfill(args.clone()));
+            let attempt = actions
+                .iter()
+                .find_map(|action| match action {
+                    UiAction::IndexPreview { attempt, .. } => Some(*attempt),
+                    _ => None,
+                })
+                .expect("a preview must be requested before execution");
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::Manage(Command::IndexBackfill(_))))
+            );
+            ui.apply(UiUpdate::IndexPreviewReady {
+                args: args.clone(),
+                attempt,
+                text: "OPAQUE-PREVIEW: ABC / 123".into(),
+            });
+            let Some(Confirmation::Index {
+                command, detail, ..
+            }) = &ui.confirmation
+            else {
+                panic!("expected confirmation")
+            };
+            assert!(matches!(command, Command::IndexBackfill(actual) if actual == &args));
+            assert!(
+                detail
+                    .lines()
+                    .any(|line| line == "OPAQUE-PREVIEW: ABC / 123")
+            );
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Confirm index operation",
+                    "OPAQUE-PREVIEW: ABC / 123",
+                    "embedding API charges",
+                    "Y Execute",
+                ],
+                UiLanguage::Ja => &[
+                    "索引処理の実行確認",
+                    "OPAQUE-PREVIEW: ABC / 123",
+                    "embedding APIの費用",
+                    "Y 実行",
+                ],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn storage_confirmation_screen_keeps_category_and_requires_explicit_y() {
+        fn configure(ui: &mut UiState) {
+            let args = crate::protocol::StorageArgs {
+                category: Some(crate::protocol::StorageCategory::Raw),
+            };
+            assert!(
+                ui.execute_operation(Command::StorageCollect(args))
+                    .is_empty()
+            );
+            let Some(Confirmation::Operation { command, detail }) = &ui.confirmation else {
+                panic!("expected confirmation")
+            };
+            assert!(
+                matches!(command, Command::StorageCollect(args) if args.category == Some(crate::protocol::StorageCategory::Raw))
+            );
+            assert!(detail.contains("category=Some(Raw)"));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Confirm action",
+                    "collection of stored data",
+                    "category=Some(Raw)",
+                    "Y Execute",
+                ],
+                UiLanguage::Ja => &[
+                    "実行の確認",
+                    "保存データの回収",
+                    "category=Some(Raw)",
+                    "Y 実行",
+                ],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn stale_index_confirmation_preserves_detail_and_never_offers_execution() {
         let confirmation = Confirmation::StaleIndex {
             detail: "opaque fixture".into(),

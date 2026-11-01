@@ -692,7 +692,9 @@ fn changed_confirmation_retains_preview_and_rejects_old_reply_and_execution() {
 #[test]
 fn tiny_index_preview_renders_visible_omission_marker() {
     use ratatui::{Terminal, backend::TestBackend};
-    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    let mut config = Config::default();
+    config.ui.language = crate::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, fixture_cwd());
     ui.event(Event::Resize(20, 10));
     ui.insert("/index all", false);
     let actions = ui.event(key(KeyCode::Enter));
