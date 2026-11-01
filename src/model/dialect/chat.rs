@@ -8,7 +8,8 @@ pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
     let mut messages: Vec<Value> = Vec::new();
     for item in input {
         match item["type"].as_str() {
-            Some("reasoning") => continue,
+            // Responses reasoning and other dialects' opaque blocks are not replayed.
+            Some("reasoning") | Some(crate::model::opaque::TYPE) => continue,
             Some("function_call") => {
                 let call = json!({"id":item["call_id"],"type":"function","function":{"name":item["name"],"arguments":item["arguments"]}});
                 if !messages

@@ -123,6 +123,18 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn provider_opaque_blocks_never_become_searchable_or_displayed_text() {
+        let payload = json!({"output":[
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible"}]},
+            {"type":"provider_opaque","dialect":"anthropic_messages","kind":"thinking",
+             "block":{"type":"thinking","thinking":"SECRET-THOUGHT","text":"SECRET-TEXT","signature":"SIG"}}
+        ]});
+        let mut seen = Vec::new();
+        visit(&payload, |leaf| seen.push(leaf.text.to_owned()));
+        assert_eq!(seen, ["visible"]);
+    }
+
+    #[test]
     fn canonical_order_offsets_and_inherited_context_include_empty_leaves() {
         let payload = json!({"refusal":"拒否", "text":"", "content":[
             {"type":"reasoning", "summary":[{"type":"summary_text", "text":"考🦀"}], "encrypted_content":"opaque"},

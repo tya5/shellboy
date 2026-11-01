@@ -591,3 +591,37 @@ fn stream_output_observation_distinguishes_metadata_from_all_output_families() {
         assert!(stream.has_output(), "{value}");
     }
 }
+
+#[test]
+fn opaque_provider_items_are_kept_verbatim_and_malformed_envelopes_fail() {
+    use shellboy::model::opaque;
+    let block = json!({"type":"thinking","thinking":"日本語\n\"q\"","signature":"EqQB/+=="});
+    let item = opaque::wrap("anthropic_messages", "thinking", block.clone());
+    let response = ModelResponse::completed(
+        completed(vec![
+            item.clone(),
+            json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}),
+        ]),
+        true,
+    )
+    .unwrap();
+    // Kept as received, and not part of the visible answer text.
+    assert_eq!(response.output[0], item);
+    assert_eq!(response.output[0]["block"], block);
+    assert_eq!(response.text, "ok");
+    // Only the envelope is checked; an unknown type still fails explicitly.
+    let mut bad = item;
+    bad["block"] = json!("text");
+    assert_eq!(
+        ModelResponse::completed(completed(vec![bad]), true)
+            .unwrap_err()
+            .kind,
+        "protocol"
+    );
+    assert_eq!(
+        ModelResponse::completed(completed(vec![json!({"type":"new_provider_thing"})]), true)
+            .unwrap_err()
+            .kind,
+        "unsupported_item"
+    );
+}

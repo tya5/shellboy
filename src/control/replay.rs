@@ -341,7 +341,10 @@ pub(crate) fn convert(mut value: Value, epoch: i64) -> Vec<Value> {
         return std::mem::take(output)
             .into_iter()
             .filter(|item| {
-                item.get("type").and_then(Value::as_str) != Some("reasoning")
+                // Providers bind reasoning and signed opaque blocks to the
+                // model; resend them only while the epoch is unchanged.
+                (item.get("type").and_then(Value::as_str) != Some("reasoning")
+                    && !crate::model::opaque::is_opaque(item))
                     || stored_epoch == Some(epoch)
             })
             .map(outbound_item)
@@ -394,6 +397,25 @@ fn heap_bytes(value: &Value) -> usize {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn opaque_items_replay_byte_exact_only_in_their_epoch() {
+        let block = json!({"type":"thinking","thinking":"考え\n\"x\"","signature":"EqQB/+=="});
+        let item = crate::model::opaque::wrap("anthropic_messages", "thinking", block.clone());
+        let saved = json!({"reasoning_epoch":2,"output":[item,
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]});
+        // Through the stored form, as the history reload does.
+        let saved: Value = serde_json::from_str(&saved.to_string()).unwrap();
+        let same = convert(saved.clone(), 2);
+        assert_eq!(same.len(), 2);
+        assert_eq!(same[0]["block"], block);
+        assert_eq!(same[0]["block"]["signature"], "EqQB/+==");
+        // A model or connection change bumps the epoch: the item stays saved
+        // but is not sent again; other items are unaffected.
+        let later = convert(saved, 3);
+        assert_eq!(later.len(), 1);
+        assert_eq!(later[0]["role"], "assistant");
+    }
 
     #[tokio::test]
     async fn old_adapter_cache_is_rebuilt_from_unchanged_database() {

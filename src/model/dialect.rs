@@ -141,3 +141,36 @@ pub fn decode_json(api: Api, raw: Value) -> Result<Value, ModelError> {
         Api::ChatCompletions => chat::decode_json(raw),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::opaque;
+
+    fn conversation() -> Value {
+        json!({"model":"m","input":[
+            {"role":"user","content":[{"type":"input_text","text":"hi"}]},
+            opaque::wrap("anthropic_messages","thinking",json!({"type":"thinking","thinking":"t","signature":"s"})),
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}
+        ]})
+    }
+
+    #[test]
+    fn responses_and_chat_skip_other_dialects_opaque_items_and_keep_the_rest() {
+        let responses = encode(Api::Responses, conversation()).unwrap();
+        let items = responses["input"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|item| !opaque::is_opaque(item)));
+        assert_eq!(items[1]["role"], "assistant");
+        let chat = encode(Api::ChatCompletions, conversation()).unwrap();
+        let messages = chat["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert!(!chat.to_string().contains("signature"));
+    }
+
+    #[test]
+    fn a_conversation_without_opaque_items_is_unchanged_for_responses() {
+        let plain = json!({"model":"m","input":[{"role":"user","content":"x"}]});
+        assert_eq!(encode(Api::Responses, plain.clone()).unwrap(), plain);
+    }
+}

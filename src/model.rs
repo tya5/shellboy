@@ -2,6 +2,7 @@
 
 pub mod dialect;
 pub mod http;
+pub mod opaque;
 mod reconcile;
 pub mod usage_limit;
 
@@ -275,6 +276,11 @@ impl ModelResponse {
                     }
                 }
                 Some("reasoning") => {}
+                // Kept and returned verbatim; only the envelope is checked.
+                Some(opaque::TYPE) => {
+                    opaque::validate(item)
+                        .map_err(|message| ModelError::new("protocol", message))?;
+                }
                 Some("function_call") => {
                     if !tools_enabled {
                         return Err(ModelError::new("protocol", "Disabled or unknown function"));

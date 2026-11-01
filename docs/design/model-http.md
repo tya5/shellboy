@@ -234,7 +234,14 @@ which dialect it belongs to:
   ignore key order, and no current block carries such numbers.
 - Not shown or indexed as body text. History search and compaction summary
   material skip opaque items (like reasoning, never resurrected into summaries).
-  The screen shows the item as `kind` only.
+  The screen and history search read only known text fields of a saved node, so
+  an opaque item contributes no text at all; it is still visible in the node's
+  raw payload (details view). A `kind`-only line in the transcript is deferred
+  until a dialect that produces opaque items ships.
+- Code: `model::opaque` owns the envelope (`wrap`, `validate`, `block_for`); the
+  completed-response check accepts the type and validates only the envelope;
+  `control::replay::convert` and the summary renderer drop opaque items outside
+  their epoch; `dialect::{responses,chat}` encoders skip them.
 - Unknown item types are still `unsupported_item` failures for every dialect.
   A dialect decoder is what turns an unknown provider block into this envelope,
   so the rule "keep the original, never guess" lives with the dialect, not here.

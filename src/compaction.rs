@@ -900,8 +900,10 @@ fn render(source: &Source, epoch: i64) -> String {
             .payload
             .get("reasoning_epoch")
             .and_then(Value::as_i64);
+        // Reasoning and opaque provider blocks never become summary material.
         items.retain(|item| {
-            item.get("type").and_then(Value::as_str) != Some("reasoning")
+            (item.get("type").and_then(Value::as_str) != Some("reasoning")
+                && !crate::model::opaque::is_opaque(item))
                 || source_epoch == Some(epoch)
         });
     }
