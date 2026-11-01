@@ -725,7 +725,9 @@ mod tests {
     fn f1_dispatch_keeps_operation_field_help_and_layered_general_help_distinct() {
         use ratatui::{Terminal, backend::TestBackend};
         for (width, height) in [(80, 24), (140, 40)] {
-            let mut ui = state();
+            let mut config = state().config;
+            config.ui.language = crate::config::UiLanguage::Ja;
+            let mut ui = UiState::new(&config, PathBuf::from("/"));
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             ui.event(key(KeyCode::F(8), KeyModifiers::NONE));
             ui.event(Event::Paste("run get".into()));

@@ -238,6 +238,7 @@ mod tests {
     fn configured_send_and_newline_win_and_help_explains_the_conflict() {
         for send in [true, false] {
             let mut config = Config::default();
+            config.ui.language = crate::config::UiLanguage::Ja;
             if send {
                 config.ui.send_key = "cTrL+l".into();
             } else {

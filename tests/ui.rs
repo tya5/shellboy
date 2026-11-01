@@ -375,7 +375,9 @@ fn clipboard_result_is_bound_to_draft_revision_and_does_not_follow_switch() {
 }
 #[test]
 fn test_backend_renders_status_modes_and_native_unicode_cursor() {
-    let mut ui = state();
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     ui.insert("日本語😀", false);
     let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
