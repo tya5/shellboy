@@ -106,11 +106,14 @@ state is kept while the UI runs and starts open. An open body is always exactly
 only when you toggle it or resize the terminal. Alt+W is skipped if it is bound
 as the send or newline key.
 
-Each work row is drawn as a tree entry: `+-[1] $ label` with the state and elapsed time at the right edge, with
-`\-` on the last item row. The one-column kind glyph is `$` for a shell, `↳`
-for a child Run and `⋯` for a saved wait; the same characters are used under
-`NO_COLOR` and `TERM=vt100`. A `他N件` (N more) overflow line, when shown, is the
-last row (`\-`). Blank padding rows have no connector.
+Each work row is drawn as a tree entry, with state and elapsed time at the
+right edge. When the startup measurement confirms that ambiguous characters
+are one column wide, branches use `├─` and `└─`, and metadata uses ` · `.
+If the measurement reports two columns or is unavailable, the branches use
+`+-` and `\-`, and metadata uses ` | `. No terminal width is guessed.
+The one-column kind glyph is `$` for a shell, `↳` for a child Run, and `⋯`
+for a saved wait; `›` marks selection. These fixed-width glyphs do not depend
+on color. An overflow line uses the last branch; blank padding has no connector.
 
 The composer follows displayed line count, normally limited to one quarter of screen height and at most eight lines; small screens prioritize a three-line control area. Folded pastes become short numbered chips; expand/edit/remove with `/paste NUMBER show|edit|remove`.
 

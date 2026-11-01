@@ -187,7 +187,6 @@ mod tests {
         }
         clear_terminal_width();
     }
-
     #[test]
     fn measured_and_unknown_width_are_conservative() {
         set_terminal_width(Some(1));
@@ -202,13 +201,47 @@ mod tests {
     }
 }
 
-/// App-owned separators selected only from the measured terminal policy.
+/// App-owned decoration selected only from the measured terminal policy.
 pub(crate) mod glyphs {
+    use super::terminal_width_observation;
+
+    pub(crate) const HEADING: &str = "◉";
+    pub(crate) const SELECTED: &str = "›";
+    pub(crate) const SHELL: &str = "$";
+    pub(crate) const CHILD: &str = "↳";
+    pub(crate) const WAIT: &str = "⋯";
+
     pub(crate) fn separator() -> &'static str {
-        if super::terminal_width_observation() == Some(1) {
+        if terminal_width_observation() == Some(1) {
             " · "
         } else {
             " | "
         }
+    }
+    pub(crate) fn branch(last: bool) -> &'static str {
+        match (terminal_width_observation() == Some(1), last) {
+            (true, true) => "└─",
+            (true, false) => "├─",
+            (false, true) => "\\-",
+            (false, false) => "+-",
+        }
+    }
+    pub(crate) fn vertical() -> &'static str {
+        if terminal_width_observation() == Some(1) {
+            "│"
+        } else {
+            "|"
+        }
+    }
+    pub(crate) fn arrow() -> &'static str {
+        if terminal_width_observation() == Some(1) {
+            "→"
+        } else {
+            ">"
+        }
+    }
+    // Only app-generated labels may be passed here, never user or model text.
+    pub(crate) fn decorate(text: &str) -> String {
+        text.replace(" | ", separator())
     }
 }

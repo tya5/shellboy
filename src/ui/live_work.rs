@@ -2,6 +2,7 @@
 //! Saved elapsed bases are independent of the UI-observed Turn clock.
 use super::*;
 use crate::config::UiLanguage;
+use crate::ui::text_width::glyphs;
 
 #[derive(Clone, Copy)]
 enum WorkMessage<'a> {
@@ -27,7 +28,7 @@ enum WorkMessage<'a> {
 impl WorkMessage<'_> {
     fn render(self, language: UiLanguage) -> String {
         use UiLanguage::{En, Ja};
-        match (language, self) {
+        let rendered: String = match (language, self) {
             (En, Self::State(state)) => match state {
                 "starting" => "Starting",
                 "running" | "live" => "Running",
@@ -112,6 +113,15 @@ impl WorkMessage<'_> {
             (Ja, Self::PreviewNotice) => "  |   | . 表示用抜粋 | F6 詳細".into(),
             (En, Self::PreviewLoading) => "  |   | Loading output.".into(),
             (Ja, Self::PreviewLoading) => "  |   | 出力を取得中.".into(),
+        };
+        match self {
+            Self::State(_) => rendered,
+            Self::PreviewNotice | Self::PreviewLoading => {
+                let prefix = format!("  {}   {} ", glyphs::vertical(), glyphs::vertical());
+                let body = rendered.strip_prefix("  |   | ").unwrap_or(&rendered);
+                format!("{prefix}{}", glyphs::decorate(body))
+            }
+            _ => glyphs::decorate(&rendered),
         }
     }
 }
@@ -420,7 +430,7 @@ impl LiveWorkView {
         let age = self.seconds.get(index)?.1?;
         Some(format!(
             "{}{}",
-            crate::ui::text_width::glyphs::separator(),
+            glyphs::separator(),
             WorkMessage::OutputAge(age).render(self.language)
         ))
     }
@@ -625,11 +635,17 @@ impl LiveWorkView {
             .seconds
             .first()
             .and_then(|(elapsed, _)| *elapsed)
-            .map(|s| format!(" | {}", WorkMessage::Oldest(s).render(self.language)))
+            .map(|s| {
+                format!(
+                    "{}{}",
+                    glyphs::separator(),
+                    WorkMessage::Oldest(s).render(self.language)
+                )
+            })
             .unwrap_or_default();
         let output = self.output_age_label(0).unwrap_or_default();
         Some(format!(
-            "{} | {}{timing}{output}",
+            "{}{sep}{}{timing}{output}",
             WorkMessage::Heading {
                 empty: false,
                 folded: self.collapsed
@@ -640,7 +656,8 @@ impl LiveWorkView {
                 children: snapshot.children,
                 waits: snapshot.waits
             }
-            .render(self.language)
+            .render(self.language),
+            sep = glyphs::separator(),
         ))
     }
 }
@@ -660,7 +677,11 @@ pub(super) fn draw(
             .saturating_add((s.rows.len() - view.visible_rows) as u64)
     });
     let hidden_label = if view.visible_rows == 0 && hidden > 0 {
-        format!(" | {}", WorkMessage::More(hidden).render(view.language))
+        format!(
+            "{}{}",
+            glyphs::separator(),
+            WorkMessage::More(hidden).render(view.language)
+        )
     } else {
         String::new()
     };
@@ -670,7 +691,8 @@ pub(super) fn draw(
         .filter(|_| view.has_work())
         .map(|s| {
             format!(
-                " | {}",
+                "{}{}",
+                glyphs::separator(),
                 WorkMessage::Counts {
                     shells: s.shells,
                     children: s.children,
@@ -680,7 +702,7 @@ pub(super) fn draw(
             )
         })
         .unwrap_or_default();
-    let mark = "*";
+    let mark = glyphs::HEADING;
     let name = WorkMessage::Heading {
         empty: !view.has_work(),
         folded: view.collapsed,
@@ -711,27 +733,29 @@ pub(super) fn draw(
     });
     for (index, row) in view.rows().iter().take(view.visible_rows).enumerate() {
         let marker = if view.active && view.selected.as_ref() == Some(&row.target) {
-            ">"
+            glyphs::SELECTED
         } else {
             " "
         };
         // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
         let kind = match row.target {
-            LiveWorkTarget::Shell { .. } => "$",
-            LiveWorkTarget::ChildRun { .. } => ">",
-            LiveWorkTarget::Wait { .. } => ":",
+            LiveWorkTarget::Shell { .. } => glyphs::SHELL,
+            LiveWorkTarget::ChildRun { .. } => glyphs::CHILD,
+            LiveWorkTarget::Wait { .. } => glyphs::WAIT,
         };
         let last_item = index + 1 == view.visible_rows;
-        let connector = if last_item && !separate_overflow {
-            "\\-"
-        } else {
-            "+-"
-        };
+        let connector = glyphs::branch(last_item && !separate_overflow);
         let elapsed = view
             .seconds
             .get(index)
             .and_then(|(e, _)| *e)
-            .map(|s| format!(" | {}", WorkMessage::Elapsed(s).render(view.language)))
+            .map(|s| {
+                format!(
+                    "{}{}",
+                    glyphs::separator(),
+                    WorkMessage::Elapsed(s).render(view.language)
+                )
+            })
             .unwrap_or_default();
         let age = view.output_age_label(index).unwrap_or_default();
         let deadline = row
@@ -743,7 +767,8 @@ pub(super) fn draw(
                     view.seconds.get(index).and_then(|(elapsed, _)| *elapsed),
                 ) {
                     (Some(timeout), Some(elapsed)) => format!(
-                        " | {}",
+                        "{}{}",
+                        glyphs::separator(),
                         WorkMessage::Deadline(Some(
                             timeout
                                 .saturating_sub(Duration::from_secs(elapsed))
@@ -751,7 +776,11 @@ pub(super) fn draw(
                         ))
                         .render(view.language)
                     ),
-                    _ => format!(" | {}", WorkMessage::Deadline(None).render(view.language)),
+                    _ => format!(
+                        "{}{}",
+                        glyphs::separator(),
+                        WorkMessage::Deadline(None).render(view.language)
+                    ),
                 }
             })
             .unwrap_or_default();
@@ -786,7 +815,11 @@ pub(super) fn draw(
             0
         };
         let overflow = if extra > 0 {
-            format!(" | {}", WorkMessage::More(extra).render(view.language))
+            format!(
+                "{}{}",
+                glyphs::separator(),
+                WorkMessage::More(extra).render(view.language)
+            )
         } else {
             String::new()
         };
@@ -795,7 +828,7 @@ pub(super) fn draw(
             "{connector}[{}]{marker}{kind} {}",
             index + 1,
             linked
-                .map(|i| format!("> [{}] ", i + 1))
+                .map(|i| format!("{} [{}] ", glyphs::arrow(), i + 1))
                 .unwrap_or_default()
         );
         let right_budget = usize::from(area.width) / 2;
@@ -836,7 +869,11 @@ pub(super) fn draw(
     }
     if separate_overflow {
         lines.push(Line::styled(
-            format!("\\- {}", WorkMessage::More(hidden).render(view.language)),
+            format!(
+                "{} {}",
+                glyphs::branch(true),
+                WorkMessage::More(hidden).render(view.language)
+            ),
             palette.live_work(),
         ));
     }
@@ -865,7 +902,7 @@ pub(super) fn draw(
                         break;
                     }
                     lines.push(Line::styled(
-                        format!("  |   | {line}"),
+                        format!("  {}   {} {line}", glyphs::vertical(), glyphs::vertical()),
                         if error {
                             Style::default().fg(theme::ATTENTION)
                         } else {
@@ -1149,7 +1186,7 @@ mod tests {
             text.push_str(symbol);
             x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
         }
-        assert!(text.contains("*") && text.contains("他4件"), "{text}");
+        assert!(text.contains("◉") && text.contains("他4件"), "{text}");
         assert!(ui.live_work_click(0, 0));
         assert!(!ui.view().live_work.active);
     }
@@ -1266,7 +1303,7 @@ mod tests {
             for x in 0..80 {
                 assert_eq!(bright[(x, y)].symbol(), dim[(x, y)].symbol());
                 if bright[(x, y)] != dim[(x, y)] {
-                    assert_eq!((x, y, bright[(x, y)].symbol()), (0, 1, "*"));
+                    assert_eq!((x, y, bright[(x, y)].symbol()), (0, 1, "◉"));
                 }
             }
         }
@@ -1525,7 +1562,7 @@ mod tests {
             }
             text.push('\n');
         }
-        assert!(text.contains("* 抱えている作業"), "{text}");
+        assert!(text.contains("◉ 抱えている作業"), "{text}");
         assert!(text.contains("[1] $") && text.contains("> [1]"), "{text}");
         assert!(
             text.contains("期限目安") && text.contains("待機中"),
@@ -1750,7 +1787,7 @@ mod tests {
         let mut ui = UiState::new(&japanese_config(), PathBuf::from("/"));
         ui.select_thread("thread".into());
         let (text, empty) = screen(&mut ui);
-        assert!(text.contains("* 抱えている作業 | なし"), "{text}");
+        assert!(text.contains("◉ 抱えている作業 | なし"), "{text}");
         assert_eq!(empty, 5);
         assert!(ui.view().live_work.blink_origin().is_none());
         let mut two = snapshot(at);
@@ -1799,7 +1836,7 @@ mod tests {
     #[test]
     fn kind_glyphs_are_one_column_even_under_cjk_ambiguous_width() {
         use crate::ui::text_width::UnicodeWidthStr;
-        for glyph in ["$", "↳", "⋯", "›"] {
+        for glyph in ["$", "◉", "↳", "⋯", "›"] {
             assert_eq!(glyph.width(), 1, "{glyph}");
             assert_eq!(glyph.width_cjk(), 1, "{glyph} ambiguous under CJK");
         }
@@ -1809,13 +1846,91 @@ mod tests {
         text.lines()
             .filter(|l| {
                 let row = l.trim_start();
-                row.starts_with("+-[") || row.starts_with("\\-[") || row.starts_with("\\- 他")
+                row.starts_with("├─[") || row.starts_with("└─[") || row.starts_with("└─ 他")
             })
             .map(str::to_owned)
             .collect()
     }
     #[test]
+    fn measured_tree_fits_both_languages_and_terminal_widths() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        for observed in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(observed);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                for width in [80, 120] {
+                    let now = Instant::now();
+                    let mut view = LiveWorkView::default();
+                    view.set_language(language);
+                    let mut data = snapshot(now);
+                    data.overflow = 0;
+                    data.rows[2].wait_info = Some(WaitInfo {
+                        target: Some(WaitTarget::Shell("execution".into())),
+                        timeout: None,
+                    });
+                    view.accept(Some(data), now);
+                    view.set_area(Rect::new(0, 0, width, 5));
+                    view.active = true;
+                    let mut terminal =
+                        Terminal::new(ratatui::backend::TestBackend::new(width, 5)).unwrap();
+                    terminal
+                        .draw(|frame| {
+                            draw(
+                                frame,
+                                Rect::new(0, 0, width, 5),
+                                &view,
+                                theme::Palette::from_capabilities(
+                                    crate::config::PaletteMode::Dark,
+                                    true,
+                                    false,
+                                ),
+                                false,
+                                false,
+                            )
+                        })
+                        .unwrap();
+                    let buffer = terminal.backend().buffer();
+                    let mut rows = Vec::new();
+                    for y in 0..5 {
+                        let mut text = String::new();
+                        let mut x = 0;
+                        while x < width {
+                            let cell = buffer[(x, y)].symbol();
+                            text.push_str(cell);
+                            x += cell.width().max(1) as u16;
+                        }
+                        assert!(
+                            text.width() <= usize::from(width),
+                            "{observed:?} {language:?} {width}: {text}"
+                        );
+                        rows.push(text);
+                    }
+                    assert!(rows[1].starts_with("◉ "), "{rows:?}");
+                    let (first, last, sep) = if observed == Some(1) {
+                        ("├─", "└─", " · ")
+                    } else {
+                        ("+-", "\\-", " | ")
+                    };
+                    assert!(rows[1].contains(sep), "{rows:?}");
+                    assert!(rows[2].starts_with(&format!("{first}[1]")), "{rows:?}");
+                    assert!(rows[3].starts_with(&format!("{first}[2]")), "{rows:?}");
+                    assert!(rows[4].starts_with(&format!("{last}[3]")), "{rows:?}");
+                    assert!(rows[2].contains("[1]›$"), "{rows:?}");
+                    assert!(rows[3].contains("↳") && rows[4].contains("⋯"), "{rows:?}");
+                    let arrow = if observed == Some(1) {
+                        "→ [1]"
+                    } else {
+                        "> [1]"
+                    };
+                    assert!(rows[4].contains(arrow), "{rows:?}");
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn tree_connectors_cover_single_multiple_and_overflow_rows_and_all_kinds() {
+        crate::ui::text_width::set_terminal_width(Some(1));
         let at = Instant::now();
         let mut ui = UiState::new(&japanese_config(), PathBuf::from("/"));
         ui.select_thread("thread".into());
@@ -1826,7 +1941,7 @@ mod tests {
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(
-            lines[0].starts_with("\\-[1]") && lines[0].contains("$ printf"),
+            lines[0].starts_with("└─[1]") && lines[0].contains("$ printf"),
             "{lines:?}"
         );
         assert!(!lines[0].contains("shell "), "{lines:?}");
@@ -1835,9 +1950,9 @@ mod tests {
         set_work(&mut ui, Some(three), 2, at);
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
-        assert!(lines[0].starts_with("+-[1]") && lines[0].contains("$ "));
-        assert!(lines[1].starts_with("+-[2]") && lines[1].contains("> child task"));
-        assert!(lines[2].starts_with("\\-[3]") && lines[2].contains(": saved wait"));
+        assert!(lines[0].starts_with("├─[1]") && lines[0].contains("$ "));
+        assert!(lines[1].starts_with("├─[2]") && lines[1].contains("↳ child task"));
+        assert!(lines[2].starts_with("└─[3]") && lines[2].contains("⋯ saved wait"));
         // Padding rows carry no connector: same count with fewer items.
         let mut two = snapshot(at);
         two.rows.truncate(2);
@@ -1845,15 +1960,16 @@ mod tests {
         set_work(&mut ui, Some(two), 3, at);
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 2, "{lines:?}");
-        assert!(lines[1].starts_with("\\-[2]"));
+        assert!(lines[1].starts_with("└─[2]"));
         // Overflow is its own last line.
         let mut many = snapshot(at);
         many.overflow = 4;
         set_work(&mut ui, Some(many), 4, at);
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
-        assert!(lines[0].starts_with("+-[1]") && lines[1].starts_with("+-[2]"));
-        assert!(lines[2].starts_with("\\- 他5件"), "{lines:?}");
+        assert!(lines[0].starts_with("├─[1]") && lines[1].starts_with("├─[2]"));
+        assert!(lines[2].starts_with("└─ 他5件"), "{lines:?}");
+        crate::ui::text_width::clear_terminal_width();
     }
 }
 
@@ -1928,20 +2044,42 @@ mod language_tests {
         }
         fn folded_expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Owned work | Folded", "Shells: 1"],
-                UiLanguage::Ja => &["抱えている作業 | 折りたたみ", "shell 1"],
+                UiLanguage::En => &["Owned work", "Folded", "Shells: 1"],
+                UiLanguage::Ja => &["抱えている作業", "折りたたみ", "shell 1"],
             }
         }
         fn empty(_: &mut UiState) {}
         fn empty_expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Owned work | None"],
-                UiLanguage::Ja => &["抱えている作業 | なし"],
+                UiLanguage::En => &["Owned work", "None"],
+                UiLanguage::Ja => &["抱えている作業", "なし"],
             }
         }
         super::super::i18n::verify_screen(folded, folded_expected);
         super::super::i18n::verify_screen(empty, empty_expected);
     }
+    #[test]
+    fn preview_decoration_does_not_rewrite_unknown_state() {
+        for observed in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(observed);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let preview = WorkMessage::PreviewNotice.render(language);
+                let expected_prefix = if observed == Some(1) {
+                    "  │   │ . "
+                } else {
+                    "  |   | . "
+                };
+                assert!(preview.starts_with(expected_prefix), "{preview}");
+                assert!(preview.contains(glyphs::separator()), "{preview}");
+                assert_eq!(
+                    WorkMessage::State("external | value").render(language),
+                    "external | value"
+                );
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn count_grammar_and_unknown_values_are_explicit() {
         for (count, english) in [(0, "0 more items"), (1, "1 more item"), (2, "2 more items")] {

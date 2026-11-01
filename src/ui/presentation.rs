@@ -1526,7 +1526,11 @@ fn tool_metadata(
     } else if kind == RowKind::Running && tool.started_at.is_some() {
         parts.push(Text::ElapsedUnavailable.render(language).into());
     }
-    (kind, parts.join(" | "), critical)
+    (
+        kind,
+        parts.join(crate::ui::text_width::glyphs::separator()),
+        critical,
+    )
 }
 fn tool_text_fit(text: &str, width: usize) -> String {
     use crate::ui::text_width::UnicodeWidthStr;
@@ -2549,7 +2553,10 @@ pub(super) fn paint_live_times(
                     && !span.content.trim().is_empty()
             })
             .map(|span| {
-                let mut parts = span.content.split(" | ").collect::<Vec<_>>();
+                let mut parts = span
+                    .content
+                    .split(crate::ui::text_width::glyphs::separator())
+                    .collect::<Vec<_>>();
                 if parts.last().is_some_and(|part| {
                     *part == Text::ElapsedUnavailable.render(language)
                         || (part.ends_with('秒')
@@ -2558,9 +2565,9 @@ pub(super) fn paint_live_times(
                 }) {
                     parts.pop();
                 }
-                let mut value = parts.join(" | ");
+                let mut value = parts.join(crate::ui::text_width::glyphs::separator());
                 if !value.is_empty() {
-                    value.push_str(" | ");
+                    value.push_str(crate::ui::text_width::glyphs::separator());
                 }
                 value.push_str(
                     &Message::Elapsed {
@@ -4567,6 +4574,25 @@ mod conversation_item_tests {
         let line = compact_tool_line(UiLanguage::Ja, &released, 80, palette);
         assert!(line.spans.last().unwrap().content.contains("背景"));
     }
+    #[test]
+    fn compact_tool_metadata_uses_only_measured_ambiguous_width() {
+        let mut value = tool("parts", "completed");
+        value.background = true;
+        value.elapsed_ms = Some(12_400);
+        for (observed, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            crate::ui::text_width::set_terminal_width(observed);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let (_, metadata, _) = tool_metadata(language, &value, None);
+                assert_eq!(
+                    metadata.matches(separator).count(),
+                    2,
+                    "{observed:?}: {metadata}"
+                );
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn compact_tool_metadata_never_enters_body_and_yields_to_body_before_attention() {
         let palette = theme::Palette::detect(crate::config::PaletteMode::Dark);

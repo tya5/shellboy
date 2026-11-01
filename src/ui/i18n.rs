@@ -84,7 +84,6 @@ mod tests {
         );
         crate::ui::text_width::clear_terminal_width();
     }
-
     #[test]
     fn fixed_messages_select_the_explicit_language() {
         assert_eq!(local!(UiLanguage::Ja, "日本語", "English"), "日本語");
@@ -129,7 +128,7 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
             crate::ui::text_width::set_terminal_width(Some(2));
             let wide = value.width_cjk();
             assert!(
-                narrow == wide || (policy == Some(1) && value == '·'),
+                narrow == wide || (policy == Some(1) && "·├└─│→".contains(value)),
                 "ambiguous UI symbol {value:?} under {policy:?}"
             );
         }
