@@ -3105,6 +3105,68 @@ mod tests {
     }
 
     #[test]
+    fn spilled_tool_groups_render_one_row_like_unspilled_calls() {
+        for (description, code) in [(Some("状態を確認"), 0), (None, 7), (Some("失敗確認"), 7)]
+        {
+            let mut args = serde_json::json!({"command":"git status"});
+            if let Some(description) = description {
+                args["description"] = description.into();
+            }
+            let spill = serde_json::json!({"output":[
+                {"type":"function_call","name":"shell","call_id":"c","arguments":args.to_string()},
+                {"type":"function_call_output","call_id":"c","output":serde_json::json!({"omitted":true,"call_id":"c","status":"exited","exit_code":code,"execution_id":"e","original_node_id":"r"}).to_string()}
+            ],"spill_version":1,"source_node_ids":["a","r"]});
+            let text = crate::history::text_of_payload(&spill);
+            let mut node = UiNode {
+                node_id: "spill".into(),
+                role: "spill".into(),
+                text: text.clone(),
+                total_chars: text.chars().count(),
+                presentation: crate::presentation::project("spill", &spill, &text, 0),
+                ..Default::default()
+            };
+            for block in &mut node.presentation.blocks {
+                if let Some(tool) = &mut block.tool {
+                    tool.group_id = Some("g".into());
+                    tool.call_node_id = Some("spill".into());
+                    tool.result_node_id = Some("spill".into());
+                    tool.ordinal = Some(0);
+                    tool.description = description.map(str::to_owned);
+                    tool.command = "git status".into();
+                    tool.elapsed_ms = Some(400);
+                    tool.current_state = Some("exited".into());
+                    tool.current_exit_code = Some(code);
+                    tool.execution_id = Some("e".into());
+                    if block.kind == BlockKind::ToolCall {
+                        tool.status = "completed".into();
+                    }
+                }
+            }
+            let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+            view.describe_calls = true;
+            *view.nodes_mut_for_test() = vec![node];
+            let shown = plain(&history(&view, 120).0);
+            let rows = shown
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .collect::<Vec<_>>();
+            // Failures open by default, exactly as for unspilled calls.
+            if code == 0 {
+                assert_eq!(rows.len(), 1, "{shown}");
+            }
+            assert!(!shown.contains('▹'), "{shown}");
+            assert!(
+                rows[0].contains(description.unwrap_or("git status")),
+                "{shown}"
+            );
+            assert!(
+                rows[0].contains(&format!("終了 {code}")) && rows[0].contains("0.4秒"),
+                "{shown}"
+            );
+        }
+    }
+
+    #[test]
     fn interruption_details_group_only_with_their_explicit_saved_summary() {
         fn node(id: &str, kind: &str, value: serde_json::Value) -> UiNode {
             let payload = serde_json::json!({"text":value.to_string()});

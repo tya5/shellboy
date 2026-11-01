@@ -221,10 +221,19 @@ legacy AS MATERIALIZED (
  SELECT r.node_id,r.call_id,CASE WHEN count(*)=1 THEN min(r.group_id) END AS group_id
  FROM missing JOIN tool_result r ON r.node_id=missing.node_id AND r.call_id=missing.call_id
  GROUP BY r.node_id,r.call_id
+), spilled AS MATERIALIZED (
+ -- A spill carries no group of its own; its saved source results do.
+ SELECT missing.node_id,missing.call_id,
+        CASE WHEN count(DISTINCT r.group_id)=1 THEN min(r.group_id) END AS group_id
+ FROM missing JOIN node sp ON sp.id=missing.node_id AND sp.kind='spill' AND json_valid(sp.payload_json)
+ JOIN json_each(sp.payload_json,'$.source_node_ids') s
+ JOIN tool_result r ON r.node_id=s.value AND r.call_id=missing.call_id
+ GROUP BY missing.node_id,missing.call_id
 )
-SELECT nodes.node_id,CAST(COALESCE(nodes.saved_group,legacy.group_id) AS TEXT),nodes.call_id
+SELECT nodes.node_id,CAST(COALESCE(nodes.saved_group,legacy.group_id,spilled.group_id) AS TEXT),nodes.call_id
 FROM nodes LEFT JOIN legacy ON legacy.node_id=nodes.node_id AND legacy.call_id=nodes.call_id
-WHERE COALESCE(nodes.saved_group,legacy.group_id) IS NOT NULL ORDER BY nodes.position";
+LEFT JOIN spilled ON spilled.node_id=nodes.node_id AND spilled.call_id=nodes.call_id
+WHERE COALESCE(nodes.saved_group,legacy.group_id,spilled.group_id) IS NOT NULL ORDER BY nodes.position";
 
 pub(super) fn read_tx(
     db: &Connection,
@@ -274,7 +283,20 @@ SELECT requested.position,n.id,n.kind,
    EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.output')='array' THEN json_extract(n.payload_json,'$.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
    OR EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.response.output')='array' THEN json_extract(n.payload_json,'$.response.output') ELSE '[]' END) j WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call')
  ELSE 0 END
-FROM requested CROSS JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result','event') ORDER BY requested.position";
+FROM requested CROSS JOIN node n ON n.id=requested.node_id WHERE n.kind IN ('assistant_response','tool_result','event','spill') ORDER BY requested.position";
+
+// Calls whose results a spill replaced; the group comes from the saved source results.
+const SPILL_CALL_BATCH_SQL: &str = r"
+WITH requested AS (SELECT CAST(key AS INTEGER) AS position,value AS node_id FROM json_each(?1))
+SELECT DISTINCT requested.position,n.id,r.group_id,r.call_id
+FROM requested JOIN node n ON n.id=requested.node_id AND n.kind='spill' AND json_valid(n.payload_json)
+JOIN json_each(n.payload_json,'$.source_node_ids') s
+JOIN tool_result r ON r.node_id=s.value
+WHERE EXISTS(SELECT 1 FROM json_each(CASE WHEN json_type(n.payload_json,'$.output')='array' THEN json_extract(n.payload_json,'$.output') ELSE '[]' END) j
+  WHERE CASE WHEN j.type='object' THEN json_extract(j.value,'$.type') END='function_call_output'
+    AND json_extract(j.value,'$.call_id')=r.call_id)
+ORDER BY requested.position,r.call_id
+LIMIT 16384";
 
 // One bounded ordered seek per actual group member. Unlike row_number over a
 // group join, this never reads every call merely to retain its first129 rows.
@@ -343,6 +365,8 @@ LEFT JOIN first_items first ON first.group_id=c.group_id AND first.call_id=c.cal
 LEFT JOIN output_item o ON o.attempt_id=c.attempt_id AND o.ordinal=first.ordinal
 LEFT JOIN priors ON priors.group_id=c.group_id AND priors.call_id=c.call_id
 WHERE c.result_node_id=requested.node_id
+ OR (source.kind='spill' AND json_valid(source.payload_json)
+     AND EXISTS(SELECT 1 FROM json_each(source.payload_json,'$.source_node_ids') s WHERE s.value=c.result_node_id))
  OR (source.kind='assistant_response' AND json_valid(source.payload_json)
      AND json_extract(source.payload_json,'$.group_id')=c.group_id)
 ORDER BY requested.position";
@@ -409,6 +433,35 @@ pub(super) fn read_nodes_tx(db: &Connection, ids: &[String]) -> Result<ToolFacts
     }
     let mut requests = Vec::<(String, String, String)>::new();
     let mut truncated_nodes = Vec::new();
+    let spills = nodes
+        .iter()
+        .filter(|node| node.kind == "spill")
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    if !spills.is_empty() {
+        let encoded = serde_json::to_string(&spills).expect("spill IDs serialize");
+        let mut query = db.prepare(SPILL_CALL_BATCH_SQL)?;
+        let rows = query.query_map([encoded], |row| {
+            Ok((
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut per_node = std::collections::HashMap::<String, usize>::new();
+        for row in rows {
+            let (node, group, call) = row?;
+            let count = per_node.entry(node.clone()).or_default();
+            *count += 1;
+            if *count > MAX_GROUP_CALLS {
+                if !truncated_nodes.contains(&node) {
+                    truncated_nodes.push(node);
+                }
+                continue;
+            }
+            requests.push((node, group, call));
+        }
+    }
     for node in nodes {
         let Some(group) = node.group else {
             continue;
@@ -496,6 +549,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
         let Some(node) = nodes.iter_mut().find(|node| node.node_id == source.node_id) else {
             continue;
         };
+        let spilled = node.presentation.kind == crate::presentation::PresentationKind::Spill;
         for block in &mut node.presentation.blocks {
             let Some(tool) = &mut block.tool else {
                 continue;
@@ -507,6 +561,12 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
             tool.group_id = Some(source.group_id.clone());
             tool.call_node_id = source.call_node_id.clone();
             tool.result_node_id = source.result_node_id.clone();
+            if spilled {
+                // The visible, openable owner is the spill; originals stay
+                // reachable through its source references.
+                tool.call_node_id = Some(source.node_id.clone());
+                tool.result_node_id = Some(source.node_id.clone());
+            }
             if let Some(elapsed) = source.elapsed_ms {
                 tool.elapsed_ms = Some(elapsed);
             }

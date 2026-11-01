@@ -71,7 +71,7 @@ Shellboy · 調査メモ                            接続 / モデル
 | 再起動・中断metadata | 前回処理が中断/結果未確認であること、件数 | 旧Run/子/実行/未処理message/wait条件の全参照。preview外もpageで取得 |
 | tombstone / 未対応node | 回収理由、または「未対応の項目: 種別」 | 取得できる参照・metadata・原文。未知JSONを空の正常回答や巨大な会話本文へ化けさせない |
 
-単一のassistant_response nodeに複数itemがある場合、自然言語・reasoning・function_callを別blockへ投影する。tool groupのcall/result対応は順序を保ち、共通group表示から個別callを開ける。roleだけを見て全体へMarkdownを適用しない。
+単一のassistant_response nodeに複数itemがある場合、自然言語・reasoning・function_callを別blockへ投影する。tool groupのcall/result対応は順序を保ち、共通group表示から個別callを開ける。退避（spill）nodeは自身にgroupを持たないため、保存済みsource_node_idsに含まれるtool_resultからgroup/callを既存の有界読取りで解決し、退避前と同じ1行（説明、印、終了code、時間）で表示する。開く対象と原文参照は退避nodeを主とし、原文は退避nodeの参照から辿る。roleだけを見て全体へMarkdownを適用しない。
 
 Tool抜粋を折りたたむ場合は全文量と省略中の範囲を明示する。途中のerrorが通常抜粋外でも、保存された構造化error/statusを通常表示から確認できる。本文の特定語を見つけただけで成功/失敗を推測しない。
 

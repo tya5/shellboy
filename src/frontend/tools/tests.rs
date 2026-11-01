@@ -333,3 +333,57 @@ fn disjoint_tool_fact_sets_merge_without_repeating_node_call_identity() {
     facts.append(read_nodes_tx(&db, &["direct-0".into()]).unwrap());
     assert_eq!(facts.sources().len(), 2);
 }
+
+#[tokio::test]
+async fn spilled_group_resolves_the_saved_call_through_its_source_results() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = DataOwner::start(None, Some(root.path().join("data")), root.path().into())
+        .await
+        .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let args = json!({"command":"git status","description":"状態を確認"}).to_string();
+    let spill = json!({"output":[
+        {"type":"function_call","name":"shell","call_id":"c","arguments":args},
+        {"type":"function_call_output","call_id":"c","output":json!({"omitted":true,"call_id":"c","status":"exited","exit_code":0,"execution_id":"e","original_node_id":"result"}).to_string()}
+    ],"spill_version":1,"source_node_ids":["call","result"]});
+    let saved = spill.to_string();
+    let call = json!({"group_id":"g","output":[]}).to_string();
+    let result = json!({"group_id":"g","item":{"type":"function_call_output","call_id":"c","output":json!({"status":"exited","exit_code":0}).to_string()}}).to_string();
+    control.store.database.call(move |db| {
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','now'); INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','u','completed','now'); INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state,operation_id)VALUES('g','c',0,'shell','{\"command\":\"git status\",\"description\":\"状態を確認\"}','completed','e'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,exit_code)VALUES('e','r','u','op','exited','/','{\"completion\":{\"elapsed_ms\":400}}','UTF-8','UTF-8','closed','now',0);")?;
+        for (id, kind, body) in [("call","assistant_response",&call),("result","tool_result",&result),("spill","spill",&saved)] {
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES(?1,?2,'now',?3,length(?3))", rusqlite::params![id,kind,body])?;
+        }
+        db.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('g','c','result','exited')",[])?;
+        let facts = read_nodes_tx(db, &["spill".into()])?;
+        assert_eq!(facts.sources().len(), 1);
+        assert_eq!(facts.sources()[0].group_id, "g");
+        Ok(())
+    }).await.unwrap();
+    let text = crate::history::text_of_payload(&spill);
+    let mut nodes = vec![UiNode {
+        node_id: "spill".into(),
+        role: "spill".into(),
+        text: text.clone(),
+        base_char_offset: 0,
+        total_chars: text.chars().count(),
+        reasoning_ranges: vec![],
+        presentation: presentation::project("spill", &spill, &text, 0),
+    }];
+    enrich(&control, &mut nodes).await.unwrap();
+    let tools = nodes[0]
+        .presentation
+        .blocks
+        .iter()
+        .filter_map(|block| block.tool.as_ref())
+        .collect::<Vec<_>>();
+    assert_eq!(tools.len(), 2, "call and result blocks");
+    for tool in tools {
+        assert_eq!(tool.group_id.as_deref(), Some("g"));
+        assert_eq!(tool.description.as_deref(), Some("状態を確認"));
+        assert_eq!(tool.elapsed_ms, Some(400));
+        assert_eq!(tool.result_node_id.as_deref(), Some("spill"));
+    }
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
