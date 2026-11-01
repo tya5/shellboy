@@ -2036,7 +2036,7 @@ mod grouped_usage_reader_tests {
         observation.install(1, context.clone(), target.clone(), None);
         observation.observe(&context, &target, true);
         let ticket = observation
-            .take_initial_usage(Instant::now(), diagnostics.clone())
+            .take_usage(Instant::now(), diagnostics.clone())
             .unwrap();
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
