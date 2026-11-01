@@ -63,6 +63,7 @@ pub struct ManagementPopup {
     pub(super) epoch: u64,
     pub(super) scope: Option<IndexArgs>,
     pub(super) preview: IndexPreviewState,
+    retained_preview: Option<(IndexArgs, String)>,
     preview_attempt: u64,
     active_preview_attempt: Option<u64>,
     pub(super) ready_preview_attempt: Option<u64>,
@@ -82,6 +83,7 @@ impl Default for ManagementPopup {
             epoch: 0,
             scope: None,
             preview: IndexPreviewState::Idle,
+            retained_preview: None,
             preview_attempt: 0,
             active_preview_attempt: None,
             ready_preview_attempt: None,
@@ -644,6 +646,7 @@ impl ManagementPopup {
     }
     pub(super) fn reset_preview(&mut self) {
         self.preview = IndexPreviewState::Idle;
+        self.retained_preview = None;
         self.active_preview_attempt = None;
         self.ready_preview_attempt = None;
     }
@@ -654,7 +657,13 @@ impl ManagementPopup {
         self.preview = match std::mem::take(&mut self.preview) {
             IndexPreviewState::Ready(args, text) => IndexPreviewState::Stale(args, text),
             IndexPreviewState::Loading(args) => {
-                IndexPreviewState::Stale(args, "取得中の確認は無効になりました".into())
+                let text = self
+                    .retained_preview
+                    .as_ref()
+                    .filter(|(previous, _)| previous == &args)
+                    .map(|(_, text)| text.clone())
+                    .unwrap_or_else(|| "取得中の確認は無効になりました".into());
+                IndexPreviewState::Stale(args, text)
             }
             other => other,
         };
@@ -687,6 +696,7 @@ impl ManagementPopup {
         }
         self.active_preview_attempt = None;
         self.ready_preview_attempt = Some(attempt);
+        self.retained_preview = Some((args.clone(), text.clone()));
         self.preview = IndexPreviewState::Ready(args, text);
         true
     }
@@ -748,7 +758,30 @@ impl ManagementPopup {
             .chars()
             .take(4096)
             .collect();
-        lines.extend(safe.lines().map(|line| Line::from(line.to_owned())));
+        if let IndexPreviewState::Failed(args, _) = &self.preview
+            && let Some((_, previous)) = self
+                .retained_preview
+                .as_ref()
+                .filter(|(saved, _)| saved == args)
+        {
+            // Keep a long error from pushing the retained result out of view.
+            let error = safe.replace('\n', " ");
+            let short: String = error.chars().take(160).collect();
+            lines.push(Line::from(if error.chars().count() > 160 {
+                format!("{short}…")
+            } else {
+                short
+            }));
+            lines.push(Line::from("前回の結果 · 古い情報（再確認が必要）"));
+            let safe: String = crate::presentation::sanitize_plain(previous, 0)
+                .0
+                .chars()
+                .take(4096)
+                .collect();
+            lines.extend(safe.lines().map(|line| Line::from(line.to_owned())));
+        } else {
+            lines.extend(safe.lines().map(|line| Line::from(line.to_owned())));
+        }
         presentation::hanging_wrap(lines, width.max(1))
     }
     fn preview_height(&self, area: Rect) -> u16 {

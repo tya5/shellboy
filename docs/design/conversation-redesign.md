@@ -246,6 +246,13 @@ keep their explicitly resolved foreign Thread and selection identity.
 | Native memory, remote model catalog, standalone docs/config/RAG/exec results | These have explicit on-demand/external-source scope and observed/completion time plus refresh/repeat action. Do not start hidden OS/API/file polling or automatically repeat costly/mutating clients. This exception does not apply to saved owner lifecycle fields. |
 | Deletion/index cost confirmations | Retain chosen target/source/time and existing stronger execution guards; changed facts cannot silently authorize a stale destructive/cost preview. |
 
+An index cost preview refresh that fails retains the last successful result for
+the same index scope as explicitly stale evidence, alongside the new failure.
+It is not a valid confirmation: only a new successful preview can authorize a
+costly operation. A changed source invalidates pending and completed previews;
+scope changes and closing the management view discard the retained result. No
+background preview, owner protocol, or Core persistence is added.
+
 #### Remaining saved pages: captured evidence and current facts
 
 History list/get/relations/search, shell output pages and completed waits retain

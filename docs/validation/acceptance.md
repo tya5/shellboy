@@ -7491,3 +7491,10 @@ indexed/physical count gates pass. No user-data edits or provider requests; mock
 loopback responses only. Standard/native3OS CI must qualify the pushed final SHA;
 no local full standard suite is claimed. Project hybrid search found no task
 history; unavailable docs semantics was not rebuilt.
+## #123 external observation retention
+
+The focused owner/frontend integration cases use a bounded loopback
+model-catalog responder and an isolated SQLite owner; the unrelated Thread
+change is submitted through the real CLI and owner. No real provider or user
+data is used. Full standard checks and native Linux/Windows coverage run in
+branch CI.

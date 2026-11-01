@@ -3473,3 +3473,12 @@ fallback) into metrics.reason while preserving top-level reason. Real proactive
 boundary/adoption regression is RED then GREEN; readback10 and proactive3 pass
 locally. No SQL, budget, storage/trigger/schema or worker changes. Exact-source
 native3OS CI is required before handoff.
+## #123 external observation retention
+
+The owner/frontend regression covers a model catalog success followed
+by a failed explicit refresh, an index cost preview success followed by a failed
+explicit refresh, and an unrelated saved change while an index confirmation is
+open. The index view retains the previous same-scope preview as stale evidence;
+the failed or invalidated preview never authorizes a cost-bearing operation.
+Core and protocol are unchanged. Validation is recorded in acceptance; 3-OS
+branch CI and independent review are required before integration.

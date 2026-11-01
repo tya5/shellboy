@@ -38,6 +38,9 @@ struct Fixture {
     required_browser_row: Option<String>,
     watch_details: Vec<(u64, shellboy::ui::watch::PreparedWatchDetail)>,
     descendant_snapshots: Vec<(u64, Vec<shellboy::ui::watch::DescendantCount>)>,
+    index_preview_ready: usize,
+    index_preview_failed: usize,
+    confirmation_changed: usize,
 }
 impl Fixture {
     async fn new(url: &str) -> Self {
@@ -103,6 +106,9 @@ impl Fixture {
             required_browser_row: None,
             watch_details: Vec::new(),
             descendant_snapshots: Vec::new(),
+            index_preview_ready: 0,
+            index_preview_failed: 0,
+            confirmation_changed: 0,
         };
         fixture
             .until("initial selected header", |ui, screen| {
@@ -112,6 +118,16 @@ impl Fixture {
         fixture
     }
     fn accept_update(&mut self, update: UiUpdate) {
+        let index_update = match &update {
+            UiUpdate::ScopedManagement { update, .. } => update.as_ref(),
+            other => other,
+        };
+        match index_update {
+            UiUpdate::IndexPreviewReady { .. } => self.index_preview_ready += 1,
+            UiUpdate::IndexPreviewFailed { .. } => self.index_preview_failed += 1,
+            UiUpdate::ConfirmationSourcesChanged => self.confirmation_changed += 1,
+            _ => {}
+        }
         match &update {
             UiUpdate::CurrentView { history, .. } => {
                 if let UiUpdate::History { read_revision, .. } = history.as_ref() {
@@ -1570,4 +1586,204 @@ async fn open_browser_keeps_reordered_running_rows_visible_without_reopen() {
     assert_eq!(std::fs::read_to_string(witness).unwrap().lines().count(), 8);
     fixture.finish().await;
     proxy.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn model_observation_retains_success_after_one_failed_explicit_refresh() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    // A hard limit ensures an accidental refresh loop cannot proliferate work.
+    let proxy = tokio::spawn(async move {
+        for attempt in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            observed.fetch_add(1, Ordering::SeqCst);
+            let mut bytes = Vec::new();
+            while !bytes.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                assert_eq!(stream.read(&mut byte).await.unwrap(), 1);
+                bytes.push(byte[0]);
+                assert!(bytes.len() < 16384);
+            }
+            assert!(String::from_utf8_lossy(&bytes).starts_with("GET /v1/models "));
+            let (status, body) = if attempt == 0 {
+                ("200 OK", json!({"data":[{"id":"retained-model"}]}))
+            } else {
+                (
+                    "500 Fixture",
+                    json!({"error":{"message":"synthetic failure"}}),
+                )
+            };
+            let body = body.to_string();
+            stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        }
+    });
+    let mut fixture = Fixture::new(&url).await;
+    let config = Config::parse(&std::fs::read_to_string(&fixture.config).unwrap()).unwrap();
+    fixture.ui = UiState::new(&config, fixture.root.path().into());
+    for action in fixture.ui.select_thread("reactive".into()) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture.command("/models fixture").await;
+    let shown = fixture
+        .until("first model list", |_, screen| {
+            screen.contains("retained-model")
+        })
+        .await;
+    assert_eq!(shown.matches("retained-model").count(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    for action in fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('r'),
+        KeyModifiers::CONTROL,
+    ))) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    let shown = fixture
+        .until("failed model refresh", |_, screen| {
+            screen.contains("再取得に失敗")
+        })
+        .await;
+    assert_eq!(shown.matches("retained-model").count(), 1);
+    assert_eq!(shown.matches("再取得に失敗").count(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    )));
+    assert!(
+        actions.is_empty(),
+        "failed refresh must not confirm an old model"
+    );
+    watchdog("bounded model proxy", proxy)
+        .await
+        .unwrap()
+        .unwrap();
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn index_observation_retains_success_after_one_failed_explicit_refresh() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    fixture.command("/index thread").await;
+    let first = fixture
+        .until("first index preview", |_, screen| {
+            screen.contains("費用preview · 取得済み")
+        })
+        .await;
+    assert_eq!(first.matches("費用preview · 取得済み").count(), 1);
+    assert_eq!(first.matches("資料数: 1").count(), 1, "{first}");
+    // This private disposable DB change creates a broken write-space lookup
+    // without emitting Changed, so the next explicit preview fails in Core.
+    fixture.control.store.database.call(|db| {
+        db.execute("INSERT OR REPLACE INTO app_meta(key,value) VALUES('index.active_space','missing-fixture-space')", [])?;
+        Ok(())
+    }).await.unwrap();
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('p'),
+        KeyModifiers::NONE,
+    )));
+    assert_eq!(actions.len(), 1, "one explicit preview request");
+    for action in actions {
+        fixture.actions.send(action).await.unwrap();
+    }
+    let failed = fixture
+        .until("failed index preview", |_, screen| {
+            screen.contains("費用preview · 取得失敗")
+        })
+        .await;
+    assert_eq!(failed.matches("費用preview · 取得失敗").count(), 1);
+    assert_eq!(
+        failed.matches("区間数: 1").count(),
+        1,
+        "previous result must remain visible: {failed}"
+    );
+    assert_eq!(failed.matches("前回の結果 · 古い情報").count(), 1);
+    assert_eq!(fixture.index_preview_ready, 1);
+    assert_eq!(fixture.index_preview_failed, 1);
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::NONE,
+    )));
+    assert!(
+        actions.is_empty(),
+        "failed preview must not allow confirmation"
+    );
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    let cwd = fixture.root.path().to_str().unwrap().to_owned();
+    fixture.control.store.database.call(move |db| {
+        db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('unrelated','before',?1,'','fixture','fixture0','now')", [cwd])?;
+        Ok(())
+    }).await.unwrap();
+    fixture.command("/index thread").await;
+    fixture
+        .until("index captured", |_, screen| {
+            screen.contains("費用preview · 取得済み")
+        })
+        .await;
+    assert_eq!(fixture.index_preview_ready, 1);
+    assert_eq!(fixture.index_preview_failed, 0);
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::NONE,
+    )));
+    assert!(actions.is_empty());
+    let before = fixture.pump().await;
+    assert_eq!(before.matches("索引処理の実行確認").count(), 1, "{before}");
+    assert!(before.contains("資料数: 1"), "{before}");
+    let previous = fixture.confirmation_changed;
+    let (result, _) = fixture
+        .cli_thread(
+            "unrelated",
+            &["thread", "set", "--thread", "unrelated", "--title", "after"],
+        )
+        .await;
+    assert_eq!(result["ok"], true, "{result}");
+    let stale = fixture
+        .observed_until("unrelated change reaches frontend", |f, _| {
+            f.confirmation_changed > previous
+        })
+        .await;
+    assert_eq!(fixture.confirmation_changed, previous + 1);
+    assert_eq!(
+        stale.matches("N / Esc 戻る · 再確認が必要").count(),
+        1,
+        "{stale}"
+    );
+    assert!(stale.contains("資料数: 1"), "{stale}");
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('y'),
+        KeyModifiers::NONE,
+    )));
+    assert!(actions.is_empty(), "stale confirmation must never dispatch");
+    fixture
+        .ui
+        .event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    let stale_preview = fixture.pump().await;
+    assert_eq!(
+        stale_preview.matches("古い費用preview").count(),
+        1,
+        "{stale_preview}"
+    );
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::NONE,
+    )));
+    assert!(actions.is_empty(), "stale preview must not confirm");
+    assert_eq!(
+        fixture.index_preview_ready, 1,
+        "Changed must not re-run preview"
+    );
+    assert_eq!(fixture.index_preview_failed, 0);
+    fixture.finish().await;
 }

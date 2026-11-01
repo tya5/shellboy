@@ -769,3 +769,42 @@ fn external_completion_is_acknowledged_only_by_visible_matching_owner() {
             .any(|a| matches!(a, UiAction::ExternalObserved { .. }))
     );
 }
+
+#[test]
+fn failed_index_preview_retains_only_stale_same_scope_evidence() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.insert("/index all", false);
+    let actions = ui.event(key(KeyCode::Enter));
+    let args = ui.management.scope.clone().unwrap();
+    assert!(ui.management.accept_preview(
+        preview_attempt(&actions),
+        args.clone(),
+        "previous preview".into(),
+    ));
+
+    let failed = ui.management.begin_preview(args.clone());
+    ui.management
+        .fail_preview(failed, args.clone(), "failed".into());
+    assert!(matches!(
+        &ui.management.preview,
+        management::IndexPreviewState::Failed(_, _)
+    ));
+    assert!(ui.event(key(KeyCode::Char('b'))).is_empty());
+
+    let pending = ui.management.begin_preview(args.clone());
+    ui.management.invalidate_index_preview();
+    assert!(
+        matches!(&ui.management.preview, management::IndexPreviewState::Stale(_, text) if text == "previous preview")
+    );
+    assert!(
+        !ui.management
+            .accept_preview(pending, args.clone(), "late".into())
+    );
+
+    ui.management.reset_preview();
+    ui.management.begin_preview(args);
+    ui.management.invalidate_index_preview();
+    assert!(
+        matches!(&ui.management.preview, management::IndexPreviewState::Stale(_, text) if text != "previous preview")
+    );
+}
