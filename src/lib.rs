@@ -62,7 +62,10 @@ mod shared_ui_message_tests {
             local!(UiLanguage::Ja, "\u{65e5}\u{672c}\u{8a9e}", "English"),
             "\u{65e5}\u{672c}\u{8a9e}"
         );
-        assert_eq!(local!(UiLanguage::En, "\u{65e5}\u{672c}\u{8a9e}", "English"), "English");
+        assert_eq!(
+            local!(UiLanguage::En, "\u{65e5}\u{672c}\u{8a9e}", "English"),
+            "English"
+        );
         let mut evaluations = 0;
         let text = local!(
             {
