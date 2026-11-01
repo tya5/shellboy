@@ -33,10 +33,434 @@ pub struct ThreadDisplayTime {
     pub time: String,
 }
 
+use crate::config::UiLanguage;
+#[derive(Clone, Copy)]
+enum BrowserText {
+    ResyncHistory,
+    Limit,
+    ResyncRange,
+    ResyncDisplay,
+    LoadingExcerpt,
+    UnsupportedAction,
+    DraftCannotDelete,
+    WatchControls,
+    ListControls,
+    ListFullKeys,
+    ListKeys,
+    ListCompactKeys,
+    ListSmallKeys,
+    Back,
+    MoreKey,
+    ReconfirmSelection,
+    ReconfirmRows,
+    Conversation,
+    Cwd,
+    State,
+    Updated,
+    MissingParent,
+    Cycle,
+    Reconfirm,
+    UnconfirmedFilter,
+    Untitled,
+    WatchKeys,
+    MoreCandidates,
+    LoadingWatch,
+    NoWork,
+    Empty,
+    PageLimited,
+}
+impl BrowserText {
+    fn render(self, language: UiLanguage) -> &'static str {
+        use UiLanguage::{En, Ja};
+        match (language, self) {
+            (En, Self::ResyncHistory) => {
+                "Resyncing: list update history reached its retention limit"
+            }
+            (Ja, Self::ResyncHistory) => "一覧の更新履歴が保持上限に達したため再同期します",
+            (En, Self::Limit) => "Display limit: 2000 conversations. Type to filter.",
+            (Ja, Self::Limit) => "表示上限2000件。文字入力で絞り込んでください",
+            (En, Self::ResyncRange) => "Resyncing: list update range exceeded its limit",
+            (Ja, Self::ResyncRange) => "一覧の更新範囲が上限を超えたため再同期します",
+            (En, Self::ResyncDisplay) => "Resyncing: conversation display limit reached",
+            (Ja, Self::ResyncDisplay) => "一覧の表示上限に達したため再同期します",
+            (En, Self::LoadingExcerpt) => "Loading update",
+            (Ja, Self::LoadingExcerpt) => "更新を取得中",
+            (En, Self::UnsupportedAction) => {
+                "This action is unavailable for the current target. Review its saved state and details."
+            }
+            (Ja, Self::UnsupportedAction) => {
+                "現在の対象はこの操作を受け付けません。表示中の保存状態と詳細を確認してください"
+            }
+            (En, Self::DraftCannotDelete) => {
+                "Unsent drafts cannot be deleted here. Open the draft to edit its text or attachments."
+            }
+            (Ja, Self::DraftCannotDelete) => {
+                "未送信の下書きはこの一覧から削除できません。切り替えて本文や添付を編集してください"
+            }
+            (En, Self::WatchControls) => {
+                "Tab: List. Ctrl+S: Confirm stopping the target Run. Alt+R: Confirm retrying recovery. Alt+O: Saved output details. Watch does not delete conversations."
+            }
+            (Ja, Self::WatchControls) => {
+                "Tab: 一覧へ。Ctrl+S: 対象Runの停止確認。Alt+R: 復旧対象の再試行確認。Alt+O: 保存出力の詳細。監視画面では削除しません。"
+            }
+            (En, Self::ListControls) => {
+                "Delete / Ctrl+D: Review deletion impact (does not delete yet). On macOS use fn+delete. In confirmation, D/Space toggles descendants, Y executes, N/Esc returns to the list."
+            }
+            (Ja, Self::ListControls) => {
+                "Delete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。"
+            }
+            (En, Self::ListFullKeys) => {
+                "Esc Back | Enter Open | Ctrl+D Delete | Tab Watch\nUp/Down Select | Left/Right Fold | F1 Info | Ctrl+R Refresh"
+            }
+            (Ja, Self::ListFullKeys) => {
+                "Esc戻る ^v選択 <>展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得"
+            }
+            (En, Self::ListKeys) => {
+                "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info | Ctrl+R Refresh"
+            }
+            (Ja, Self::ListKeys) => {
+                "Esc戻る Enter切替 Delete/Ctrl+D削除\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得"
+            }
+            (En, Self::ListCompactKeys) => {
+                "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info"
+            }
+            (Ja, Self::ListCompactKeys) => "Esc戻る Enter切替 Ctrl+D削除\n^v選択 <>開閉 F1情報",
+            (En, Self::ListSmallKeys) => "Esc Back | Enter Open\nCtrl+D Delete | F1 Info",
+            (Ja, Self::ListSmallKeys) => "Esc戻る Enter切替\nCtrl+D削除 F1情報",
+            (En, Self::Back) => "Esc Back",
+            (Ja, Self::Back) => "Esc戻る",
+            (En, Self::MoreKey) => " | PgDn More",
+            (Ja, Self::MoreKey) => " PgDn次頁",
+            (En, Self::ReconfirmSelection) => " | Reconfirming selection",
+            (Ja, Self::ReconfirmSelection) => " | 選択先を再確認中",
+            (En, Self::ReconfirmRows) => " | Reconfirming previous rows",
+            (Ja, Self::ReconfirmRows) => " | 前回の行を再確認中",
+            (En, Self::Conversation) => "Conversation",
+            (Ja, Self::Conversation) => "会話",
+            (En, Self::Cwd) => "Working folder",
+            (Ja, Self::Cwd) => "作業場所",
+            (En, Self::State) => "State",
+            (Ja, Self::State) => "状態",
+            (En, Self::Updated) => "Updated",
+            (Ja, Self::Updated) => "更新",
+            (En, Self::MissingParent) => "[Parent unavailable] ",
+            (Ja, Self::MissingParent) => "[親未取得] ",
+            (En, Self::Cycle) => "[Cycle] ",
+            (Ja, Self::Cycle) => "[循環] ",
+            (En, Self::Reconfirm) => "[Reconfirming] ",
+            (Ja, Self::Reconfirm) => "[再確認中] ",
+            (En, Self::UnconfirmedFilter) => "[Filter unconfirmed] ",
+            (Ja, Self::UnconfirmedFilter) => "[検索未確認] ",
+            (En, Self::Untitled) => "Untitled",
+            (Ja, Self::Untitled) => "名称未設定",
+            (En, Self::WatchKeys) => {
+                "Tab List | Enter Open | Ctrl+S Confirm stop | Alt+R Confirm retry\nAlt+O Output | Ctrl+R Refresh | PgDn More | Details: 128 visible rows"
+            }
+            (Ja, Self::WatchKeys) => {
+                "Tab 一覧 | Enter 開く | Ctrl+S 停止確認 | Alt+R 再試行確認\nAlt+O 出力詳細 | Ctrl+R 更新 | PgDn 続き | 詳細は表示128件まで"
+            }
+            (En, Self::MoreCandidates) => "More candidates available | PgDn to inspect",
+            (Ja, Self::MoreCandidates) => "続きの候補があります | PgDnで確認",
+            (En, Self::LoadingWatch) => "Loading watched work.",
+            (Ja, Self::LoadingWatch) => "監視対象を取得中.",
+            (En, Self::NoWork) => "No work to display",
+            (Ja, Self::NoWork) => "現在表示する作業はありません",
+            (En, Self::Empty) => "No conversations",
+            (Ja, Self::Empty) => "会話がありません",
+            (En, Self::PageLimited) => {
+                "\nCandidate inspection reached its limit. Check the next page."
+            }
+            (Ja, Self::PageLimited) => "\n候補検査は上限まで。続きのページを確認してください。",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BrowserMessage<'a> {
+    ListTitle {
+        count: usize,
+        fetched: usize,
+        loading: bool,
+        failed: bool,
+    },
+    WatchTitle {
+        count: usize,
+        descendants: bool,
+        loading: bool,
+    },
+    Filter {
+        query: &'a str,
+        error: Option<&'a str>,
+        notice: Option<&'a str>,
+    },
+    FetchFailure(&'a str),
+    FailedFooter(&'a str),
+    LimitedFooter(&'a str),
+    PreviousExcerpt(&'a str),
+    Excerpt {
+        text: &'a str,
+        reason: &'a str,
+    },
+    UnconfirmedTitle(&'a str),
+    Parent(&'a str),
+    Page {
+        at: &'a str,
+        limited: bool,
+    },
+    Info {
+        thread: &'a ThreadSummary,
+        title: &'a str,
+        phase: &'a str,
+        excerpt: &'a str,
+        page: &'a str,
+        controls: &'a str,
+    },
+    Detail {
+        thread: &'a ThreadSummary,
+        interrupted: bool,
+    },
+}
+impl BrowserMessage<'_> {
+    fn render(self, language: UiLanguage) -> String {
+        use UiLanguage::{En, Ja};
+        match (language, self) {
+            (
+                En,
+                Self::ListTitle {
+                    count,
+                    fetched,
+                    loading,
+                    failed,
+                },
+            ) => format!(
+                "Conversations | {count} shown / {fetched} fetched{}",
+                if loading {
+                    " | Loading"
+                } else if failed {
+                    " | Fetch failed"
+                } else {
+                    ""
+                }
+            ),
+            (
+                Ja,
+                Self::ListTitle {
+                    count,
+                    fetched,
+                    loading,
+                    failed,
+                },
+            ) => format!(
+                "会話一覧 | {count}件 / 取得{fetched}件{}",
+                if loading {
+                    " | 読込み中"
+                } else if failed {
+                    " | 取得失敗"
+                } else {
+                    ""
+                }
+            ),
+            (
+                En,
+                Self::WatchTitle {
+                    count,
+                    descendants: true,
+                    loading,
+                },
+            ) => format!(
+                "Descendant Watch | {count} conversations{}",
+                if loading { " | Loading" } else { "" }
+            ),
+            (
+                En,
+                Self::WatchTitle {
+                    count,
+                    descendants: false,
+                    loading,
+                },
+            ) => format!(
+                "Work Watch | {count} conversations{}",
+                if loading { " | Loading" } else { "" }
+            ),
+            (
+                Ja,
+                Self::WatchTitle {
+                    count,
+                    descendants: true,
+                    loading,
+                },
+            ) => format!(
+                "子孫の監視 | {count}件{}",
+                if loading { " | 読込み中" } else { "" }
+            ),
+            (
+                Ja,
+                Self::WatchTitle {
+                    count,
+                    descendants: false,
+                    loading,
+                },
+            ) => format!(
+                "作業の監視 | {count}件{}",
+                if loading { " | 読込み中" } else { "" }
+            ),
+            (
+                En,
+                Self::Filter {
+                    query,
+                    error: Some(error),
+                    ..
+                },
+            ) => format!("Fetch failed: {error} | Filter > {query}"),
+            (
+                Ja,
+                Self::Filter {
+                    query,
+                    error: Some(error),
+                    ..
+                },
+            ) => format!("取得失敗 {error} | 検索 > {query}"),
+            (
+                En,
+                Self::Filter {
+                    query,
+                    notice: Some(notice),
+                    ..
+                },
+            ) => format!("{notice} | Filter > {query}"),
+            (
+                Ja,
+                Self::Filter {
+                    query,
+                    notice: Some(notice),
+                    ..
+                },
+            ) => format!("{notice} | 検索 > {query}"),
+            (En, Self::Filter { query, .. }) => format!("Filter > {query}"),
+            (Ja, Self::Filter { query, .. }) => format!("検索 > {query}"),
+            (En, Self::FetchFailure(error)) => format!("List refresh failed: {error}"),
+            (Ja, Self::FetchFailure(error)) => format!("一覧の更新に失敗: {error}"),
+            (En, Self::FailedFooter(error)) => {
+                format!("Fetch failed | Esc Back\nCtrl+R Refresh | {error}")
+            }
+            (Ja, Self::FailedFooter(error)) => {
+                format!("取得失敗 | Esc戻る\nCtrl+R再取得 | {error}")
+            }
+            (En, Self::LimitedFooter(error)) => format!("Esc Back | {error}"),
+            (Ja, Self::LimitedFooter(error)) => format!("Esc戻る | {error}"),
+            (En, Self::PreviousExcerpt(text)) => {
+                format!("Previous display (reconfirming selection)\n{text}")
+            }
+            (Ja, Self::PreviousExcerpt(text)) => format!("前回の表示（選択先を再確認中）\n{text}"),
+            (En, Self::Excerpt { text: "", reason }) => format!("Excerpt unavailable | {reason}"),
+            (Ja, Self::Excerpt { text: "", reason }) => format!("抜粋は未取得 | {reason}"),
+            (En, Self::Excerpt { text, reason }) => {
+                format!("Previous excerpt (not updated) | {reason}\n{text}")
+            }
+            (Ja, Self::Excerpt { text, reason }) => {
+                format!("以前の抜粋（未更新） | {reason}\n{text}")
+            }
+            (En, Self::UnconfirmedTitle(title)) => format!("{title} (filter match unconfirmed)"),
+            (Ja, Self::UnconfirmedTitle(title)) => format!("{title}（検索条件との一致は未確認）"),
+            (En, Self::Parent(title)) => format!("Parent {title}"),
+            (Ja, Self::Parent(title)) => format!("親 {title}"),
+            (En, Self::Page { at, limited }) => format!(
+                "\nCandidate page read: {at} (row state updates through later notifications){}",
+                if limited {
+                    BrowserText::PageLimited.render(En)
+                } else {
+                    ""
+                }
+            ),
+            (Ja, Self::Page { at, limited }) => format!(
+                "\n候補ページ取得: {at}（行の現在状態は後続通知で更新）{}",
+                if limited {
+                    BrowserText::PageLimited.render(Ja)
+                } else {
+                    ""
+                }
+            ),
+            (
+                En,
+                Self::Info {
+                    thread,
+                    title,
+                    phase,
+                    excerpt,
+                    page,
+                    controls,
+                },
+            ) => format!(
+                "Conversation ID: {}\nTitle: {title}\nWorking folder: {}\nParent conversation: {}\nState: {phase}\nNative state: {}\nLatest Run stop reason: {}\nUpdated: {}\n\n{excerpt}{page}\n\n{controls}\nType / Backspace to filter.",
+                thread.thread_id,
+                thread.cwd,
+                thread.parent_id.as_deref().unwrap_or("root"),
+                thread.state,
+                thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
+                thread.updated_at
+            ),
+            (
+                Ja,
+                Self::Info {
+                    thread,
+                    title,
+                    phase,
+                    excerpt,
+                    page,
+                    controls,
+                },
+            ) => format!(
+                "会話ID: {}\nタイトル: {title}\n作業フォルダー: {}\n親の会話: {}\n状態: {phase}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{excerpt}{page}\n\n{controls}文字入力/Backspaceは絞り込みです。",
+                thread.thread_id,
+                thread.cwd,
+                thread.parent_id.as_deref().unwrap_or("root"),
+                thread.state,
+                thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
+                thread.updated_at
+            ),
+            (
+                En,
+                Self::Detail {
+                    thread,
+                    interrupted,
+                },
+            ) => format!(
+                "ID {} | Parent {} | {}{}",
+                thread.thread_id,
+                thread.parent_id.as_deref().unwrap_or("none"),
+                thread.updated_at,
+                if interrupted {
+                    " | Interrupted by app exit"
+                } else {
+                    ""
+                }
+            ),
+            (
+                Ja,
+                Self::Detail {
+                    thread,
+                    interrupted,
+                },
+            ) => format!(
+                "ID {} | 親 {} | {}{}",
+                thread.thread_id,
+                thread.parent_id.as_deref().unwrap_or("なし"),
+                thread.updated_at,
+                if interrupted {
+                    " | アプリ終了による中断"
+                } else {
+                    ""
+                }
+            ),
+        }
+    }
+}
+
 const FILTER_DELAY: Duration = Duration::from_millis(150);
 
 #[derive(Default)]
 pub(super) struct ThreadBrowser {
+    language: UiLanguage,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     collapsed: BTreeSet<String>,
     mode: BrowserMode,
@@ -120,6 +544,11 @@ struct TreeCache {
 }
 
 impl ThreadBrowser {
+    pub fn set_language(&mut self, language: UiLanguage) {
+        self.language = language;
+        self.watch.get_mut().set_language(language);
+    }
+
     fn invalidate_tree(&mut self) {
         // Cached ordering is not painted geometry. A metadata patch and its
         // detail facts may arrive together before the next frame; the existing
@@ -507,7 +936,7 @@ impl ThreadBrowser {
                 {
                     self.resync(
                         generation,
-                        "一覧の更新履歴が保持上限に達したため再同期します".into(),
+                        BrowserText::ResyncHistory.render(self.language).into(),
                     );
                     return false;
                 }
@@ -536,7 +965,7 @@ impl ThreadBrowser {
         self.error = None;
         self.next_cursor = next_cursor;
         if self.items.len() >= 2000 && self.next_cursor.is_some() {
-            self.error = Some("表示上限2000件。文字入力で絞り込んでください".into());
+            self.error = Some(BrowserText::Limit.render(self.language).into());
         }
         self.selected = selected
             .and_then(|id| self.tree().ids.get(&id).copied())
@@ -678,10 +1107,10 @@ impl ThreadBrowser {
         if generation != self.generation {
             return;
         }
-        self.patch_error = Some(format!(
-            "一覧の更新に失敗: {}",
-            one_line(&error.chars().take(512).collect::<String>())
-        ));
+        self.patch_error = Some(
+            BrowserMessage::FetchFailure(&one_line(&error.chars().take(512).collect::<String>()))
+                .render(self.language),
+        );
         self.stale_excerpts.extend(
             self.items
                 .iter()
@@ -710,7 +1139,7 @@ impl ThreadBrowser {
         if rows.len() > 128 || missing_ids.len() > 128 || limited_titles.len() > 128 {
             return self.resync(
                 generation,
-                "一覧の更新範囲が上限を超えたため再同期します".into(),
+                BrowserText::ResyncRange.render(self.language).into(),
             );
         }
         let added = rows
@@ -723,7 +1152,7 @@ impl ThreadBrowser {
         if self.row_versions.len() + added > 2000 {
             return self.resync(
                 generation,
-                "一覧の更新履歴が保持上限に達したため再同期します".into(),
+                BrowserText::ResyncHistory.render(self.language).into(),
             );
         }
         let selected = self.preferred.clone().or_else(|| {
@@ -794,8 +1223,10 @@ impl ThreadBrowser {
                 *existing = row;
             } else {
                 if self.items.len() >= 2000 {
-                    return self
-                        .resync(generation, "一覧の表示上限に達したため再同期します".into());
+                    return self.resync(
+                        generation,
+                        BrowserText::ResyncDisplay.render(self.language).into(),
+                    );
                 }
                 row.excerpt.clear();
                 self.items.push(row);
@@ -899,19 +1330,27 @@ impl ThreadBrowser {
             || self.reconfirming_row.as_deref() == Some(thread.thread_id.as_str()))
             && !thread.thread_id.starts_with("draft:")
         {
-            return format!("前回の表示（選択先を再確認中）\n{}", thread.excerpt);
+            return BrowserMessage::PreviousExcerpt(&thread.excerpt).render(self.language);
         }
         if self.stale_excerpts.contains(&thread.thread_id) {
             let reason = self
                 .excerpt_error
                 .as_ref()
                 .filter(|(id, _)| id == &thread.thread_id)
-                .map(|(_, error)| format!("取得失敗: {error}"))
-                .unwrap_or_else(|| "更新を取得中".into());
+                .map(|(_, error)| BrowserMessage::FetchFailure(error).render(self.language))
+                .unwrap_or_else(|| BrowserText::LoadingExcerpt.render(self.language).into());
             if thread.excerpt.is_empty() {
-                return format!("抜粋は未取得 | {reason}");
+                return BrowserMessage::Excerpt {
+                    text: "",
+                    reason: &reason,
+                }
+                .render(self.language);
             }
-            return format!("以前の抜粋（未更新） | {reason}\n{}", thread.excerpt);
+            return BrowserMessage::Excerpt {
+                text: &thread.excerpt,
+                reason: &reason,
+            }
+            .render(self.language);
         }
         thread.excerpt.clone()
     }
@@ -1187,8 +1626,16 @@ impl ThreadBrowser {
                 _ => None,
             };
             if let Some(kind) = kind {
-                return self.items.get(self.selected).and_then(|row|self.watch.borrow().action_target(&row.thread_id,kind))
-                    .map(ThreadOutcome::WatchAction).unwrap_or_else(||ThreadOutcome::Info("現在の対象はこの操作を受け付けません。表示中の保存状態と詳細を確認してください".into()));
+                return self
+                    .items
+                    .get(self.selected)
+                    .and_then(|row| self.watch.borrow().action_target(&row.thread_id, kind))
+                    .map(ThreadOutcome::WatchAction)
+                    .unwrap_or_else(|| {
+                        ThreadOutcome::Info(
+                            BrowserText::UnsupportedAction.render(self.language).into(),
+                        )
+                    });
             }
         }
         if self.mode == BrowserMode::List
@@ -1197,13 +1644,18 @@ impl ThreadBrowser {
                     && key.modifiers == KeyModifiers::CONTROL))
         {
             self.clear_preferred();
-            return self.items.get(self.selected).map_or(ThreadOutcome::None, |thread| {
-                if thread.thread_id.starts_with("draft:") {
-                    ThreadOutcome::Info("未送信の下書きはこの一覧から削除できません。切り替えて本文や添付を編集してください".into())
-                } else {
-                    ThreadOutcome::Delete(thread.thread_id.clone())
-                }
-            });
+            return self
+                .items
+                .get(self.selected)
+                .map_or(ThreadOutcome::None, |thread| {
+                    if thread.thread_id.starts_with("draft:") {
+                        ThreadOutcome::Info(
+                            BrowserText::DraftCannotDelete.render(self.language).into(),
+                        )
+                    } else {
+                        ThreadOutcome::Delete(thread.thread_id.clone())
+                    }
+                });
         }
         if matches!(
             key.code,
@@ -1227,38 +1679,34 @@ impl ThreadBrowser {
                         .watch_page_info
                         .as_ref()
                         .map(|info| {
-                            format!(
-                                "\n候補ページ取得: {}（行の現在状態は後続通知で更新）{}",
-                                info.read_at,
-                                if info.continuation_limited {
-                                    "\n候補検査は上限まで。続きのページを確認してください。"
-                                } else {
-                                    ""
-                                }
-                            )
+                            BrowserMessage::Page {
+                                at: &info.read_at,
+                                limited: info.continuation_limited,
+                            }
+                            .render(self.language)
                         })
                         .unwrap_or_default();
                     let controls = if self.mode == BrowserMode::Watch {
-                        "Tab: 一覧へ。Ctrl+S: 対象Runの停止確認。Alt+R: 復旧対象の再試行確認。Alt+O: 保存出力の詳細。監視画面では削除しません。"
+                        BrowserText::WatchControls.render(self.language)
                     } else {
-                        "Delete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。"
+                        BrowserText::ListControls.render(self.language)
                     };
-                    return ThreadOutcome::Info(format!(
-                        "会話ID: {}\nタイトル: {}\n作業フォルダー: {}\n親の会話: {}\n状態: {}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{}{page}\n\n{controls}文字入力/Backspaceは絞り込みです。",
-                        thread.thread_id,
-                        if self.limited_titles.contains(&thread.thread_id) {
-                            format!("{}（検索条件との一致は未確認）", thread.title)
-                        } else {
-                            thread.title.clone()
-                        },
-                        thread.cwd,
-                        thread.parent_id.as_deref().unwrap_or("root"),
-                        activity_label(thread),
-                        thread.state,
-                        thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
-                        thread.updated_at,
-                        self.excerpt_text(thread)
-                    ));
+                    let title = if self.limited_titles.contains(&thread.thread_id) {
+                        BrowserMessage::UnconfirmedTitle(&thread.title).render(self.language)
+                    } else {
+                        thread.title.clone()
+                    };
+                    return ThreadOutcome::Info(
+                        BrowserMessage::Info {
+                            thread,
+                            title: &title,
+                            phase: activity_label(thread, self.language),
+                            excerpt: &self.excerpt_text(thread),
+                            page: &page,
+                            controls,
+                        }
+                        .render(self.language),
+                    );
                 }
             }
             KeyCode::Up => {
@@ -1611,65 +2059,56 @@ impl ThreadBrowser {
         let loading = self.loading;
         let error = self.error.as_deref().or(self.patch_error.as_deref());
         let rows = self.rows();
-        let title = format!(
-            "会話一覧 | {}件{}{}",
-            rows.len(),
-            if rows.len() != threads.len() {
-                format!(" / 取得{}件", threads.len())
-            } else {
-                String::new()
-            },
-            if loading {
-                " | 読込み中"
-            } else if error.is_some() {
-                " | 取得失敗"
-            } else {
-                ""
-            }
-        );
+        let title = BrowserMessage::ListTitle {
+            count: rows.len(),
+            fetched: threads.len(),
+            loading,
+            failed: error.is_some(),
+        }
+        .render(self.language);
         let footer_width = usize::from(area.width.saturating_sub(8).min(108));
-        let footer_text = if let Some(error) = error.filter(|error| error.starts_with("表示上限"))
+        let footer_text = if let Some(error) =
+            error.filter(|error| *error == BrowserText::Limit.render(self.language))
         {
-            format!("Esc戻る | {}", one_line(error))
+            BrowserMessage::LimitedFooter(&one_line(error)).render(self.language)
         } else if let Some(error) = error {
-            format!("取得失敗 | Esc戻る\nCtrl+R再取得 | {}", one_line(error))
+            BrowserMessage::FailedFooter(&one_line(error)).render(self.language)
         } else {
             let mut keys = if footer_width >= 90 {
-                "Esc戻る ^v選択 <>展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得"
-                    .to_owned()
+                BrowserText::ListFullKeys.render(self.language).to_owned()
             } else if footer_width >= 45 {
-                "Esc戻る Enter切替 Delete/Ctrl+D削除\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得"
-                    .to_owned()
+                BrowserText::ListKeys.render(self.language).to_owned()
             } else if footer_width >= 30 {
-                "Esc戻る Enter切替 Ctrl+D削除\n^v選択 <>開閉 F1情報".to_owned()
+                BrowserText::ListCompactKeys
+                    .render(self.language)
+                    .to_owned()
             } else if footer_width >= 17 {
-                "Esc戻る Enter切替\nCtrl+D削除 F1情報".to_owned()
+                BrowserText::ListSmallKeys.render(self.language).to_owned()
             } else {
-                "Esc戻る".to_owned()
+                BrowserText::Back.render(self.language).to_owned()
             };
             if next_cursor {
                 let last_width = keys.lines().next_back().unwrap_or_default().width();
-                if last_width + " PgDn次頁".width() <= footer_width {
-                    keys.push_str(" PgDn次頁");
+                if last_width + BrowserText::MoreKey.render(self.language).width() <= footer_width {
+                    keys.push_str(BrowserText::MoreKey.render(self.language));
                 }
             }
             keys
         };
-        let mut context = match error {
-            Some(error) => format!("取得失敗 {} | 検索 › {}", one_line(error), one_line(filter)),
-            None => match &self.notice {
-                Some(notice) => format!("{} | 検索 › {}", one_line(notice), one_line(filter)),
-                None => format!("検索 › {}", one_line(filter)),
-            },
-        };
+        let mut context = BrowserMessage::Filter {
+            query: &one_line(filter),
+            error: error.map(one_line).as_deref(),
+            notice: self.notice.as_deref().map(one_line).as_deref(),
+        }
+        .render(self.language);
         if self
             .preferred
             .as_ref()
             .is_some_and(|id| !id.starts_with("draft:"))
         {
-            context.push_str(" | 選択先を再確認中");
+            context.push_str(BrowserText::ReconfirmSelection.render(self.language));
         } else if self.reconfirming_row.is_some() {
-            context.push_str(" | 前回の行を再確認中");
+            context.push_str(BrowserText::ReconfirmRows.render(self.language));
         }
         let inner = popup::panel_recorded(frame, area, &title, &context, &footer_text, &self.paint);
         // Tiny popups omit their context row. Use the shared geometry rather
@@ -1707,7 +2146,7 @@ impl ThreadBrowser {
             return;
         }
         let width = usize::from(table_area.width);
-        let (cwd_width, state_width, time_width) = if width >= 90 {
+        let (cwd_width, mut state_width, time_width) = if width >= 90 {
             (24, 8, 11)
         } else if width >= 64 {
             (16, 8, 11)
@@ -1718,22 +2157,31 @@ impl ThreadBrowser {
         } else {
             (0, 0, 0)
         };
+        if state_width > 0 {
+            state_width = rows
+                .iter()
+                .map(|row| activity_column_label(&threads[row.index], self.language).width())
+                .max()
+                .unwrap_or(0)
+                .max(BrowserText::State.render(self.language).width())
+                .min(width / 3);
+        }
         let gaps =
             usize::from(cwd_width > 0) + usize::from(state_width > 0) + usize::from(time_width > 0);
         let title_width = width.saturating_sub(cwd_width + state_width + time_width + gaps);
         let mut columns = vec![Constraint::Length(title_width as u16)];
-        let mut headers = vec![Cell::from("会話")];
+        let mut headers = vec![Cell::from(BrowserText::Conversation.render(self.language))];
         if cwd_width > 0 {
             columns.push(Constraint::Length(cwd_width as u16));
-            headers.push(Cell::from("作業場所"));
+            headers.push(Cell::from(BrowserText::Cwd.render(self.language)));
         }
         if state_width > 0 {
             columns.push(Constraint::Length(state_width as u16));
-            headers.push(Cell::from("状態"));
+            headers.push(Cell::from(BrowserText::State.render(self.language)));
         }
         if time_width > 0 {
             columns.push(Constraint::Length(time_width as u16));
-            headers.push(Cell::from("更新"));
+            headers.push(Cell::from(BrowserText::Updated.render(self.language)));
         }
         let selected_visible = self.selected_position();
         let table_rows = rows.iter().map(|row| {
@@ -1748,8 +2196,11 @@ impl ThreadBrowser {
             }
             if state_width > 0 {
                 cells.push(
-                    Cell::from(fit(&one_line(activity_column_label(thread)), state_width))
-                        .style(status_style),
+                    Cell::from(fit(
+                        &one_line(activity_column_label(thread, self.language)),
+                        state_width,
+                    ))
+                    .style(status_style),
                 );
             }
             if time_width > 0 {
@@ -1787,7 +2238,7 @@ impl ThreadBrowser {
     ) -> String {
         let mut label = format!(
             "{}{}",
-            if selected { "›" } else { " " },
+            if selected { ">" } else { " " },
             if current { "*" } else { " " }
         );
         // Reserve enough room for a title at narrow widths. The ellipsis marks
@@ -1805,18 +2256,18 @@ impl ThreadBrowser {
         }
         label.push_str(if row.children {
             if self.collapsed.contains(&thread.thread_id) {
-                "▸ "
+                "> "
             } else {
-                "▾ "
+                "v "
             }
         } else {
             "  "
         });
         if row.missing_parent {
-            label.push_str("[親未取得] ");
+            label.push_str(BrowserText::MissingParent.render(self.language));
         }
         if row.cycle {
-            label.push_str("[循環] ");
+            label.push_str(BrowserText::Cycle.render(self.language));
         }
         if interrupted_by_app_exit(thread) {
             label.push_str("[exit] ");
@@ -1825,14 +2276,14 @@ impl ThreadBrowser {
             || self.reconfirming_row.as_deref() == Some(thread.thread_id.as_str()))
             && !thread.thread_id.starts_with("draft:")
         {
-            label.push_str("[再確認中] ");
+            label.push_str(BrowserText::Reconfirm.render(self.language));
         }
         if self.limited_titles.contains(&thread.thread_id) {
-            label.push_str("[検索未確認] ");
+            label.push_str(BrowserText::UnconfirmedFilter.render(self.language));
         }
         let title = one_line(&thread.title);
         label.push_str(if title.width() == 0 {
-            "名称未設定"
+            BrowserText::Untitled.render(self.language)
         } else {
             &title
         });
@@ -1861,31 +2312,32 @@ impl ThreadBrowser {
 
     fn draw_watch(&self, frame: &mut Frame<'_>, area: Rect, active_thread: Option<&str>) {
         let count = self.rows().len();
-        let title = format!(
-            "{} | {}件{}",
-            if self.descendant_root.is_some() {
-                "子孫の監視"
-            } else {
-                "作業の監視"
-            },
+        let title = BrowserMessage::WatchTitle {
             count,
-            if self.loading { " | 読込み中" } else { "" }
-        );
-        let mut context = format!("検索 › {}", one_line(&self.filter));
-        if let Some(error) = self.error.as_deref().or(self.patch_error.as_deref()) {
-            context = format!("取得失敗 {} | {context}", one_line(error));
-        } else if let Some(notice) = &self.notice {
-            context = format!("{} | {context}", one_line(notice));
+            descendants: self.descendant_root.is_some(),
+            loading: self.loading,
         }
+        .render(self.language);
+        let mut context = BrowserMessage::Filter {
+            query: &one_line(&self.filter),
+            error: self
+                .error
+                .as_deref()
+                .or(self.patch_error.as_deref())
+                .map(one_line)
+                .as_deref(),
+            notice: self.notice.as_deref().map(one_line).as_deref(),
+        }
+        .render(self.language);
         if let Some(label) = self.descendant_status.clone().or_else(|| {
             self.descendant_count
                 .as_ref()
-                .and_then(super::watch::DescendantCount::label)
+                .and_then(|count| count.label_in(self.language))
         }) {
             context.push_str(" | ");
             context.push_str(&label);
         }
-        let footer = "Tab 一覧 | Enter 開く | Ctrl+S 停止確認 | Alt+R 再試行確認\nAlt+O 出力詳細 | Ctrl+R 更新 | PgDn 続き | 詳細は表示128件まで";
+        let footer = BrowserText::WatchKeys.render(self.language);
         let inner = popup::panel_recorded(frame, area, &title, &context, footer, &self.paint);
         if inner.height == 0 || inner.width == 0 {
             self.watch_visible_ids.borrow_mut().clear();
@@ -1936,7 +2388,7 @@ impl ThreadBrowser {
                     let current = active_thread == Some(summary.thread_id.as_str());
                     let chosen = row.index == self.selected;
                     let prefix = if chosen {
-                        "›"
+                        ">"
                     } else if current {
                         "*"
                     } else {
@@ -1945,17 +2397,18 @@ impl ThreadBrowser {
                     let pending = if self.preferred.as_deref() == Some(summary.thread_id.as_str())
                         || self.reconfirming_row.as_deref() == Some(summary.thread_id.as_str())
                     {
-                        "[再確認中] "
+                        BrowserText::Reconfirm.render(self.language)
                     } else {
                         ""
                     };
                     let uncertainty = if self.limited_titles.contains(&summary.thread_id) {
-                        "[検索未確認] "
+                        BrowserText::UnconfirmedFilter.render(self.language)
                     } else {
                         ""
                     };
                     let (first, second) = watch_lines(
                         &detail,
+                        self.language,
                         prefix,
                         pending,
                         uncertainty,
@@ -2005,11 +2458,11 @@ impl ThreadBrowser {
                                 .as_ref()
                                 .is_some_and(|info| info.continuation_limited)
                         {
-                            "続きの候補があります | PgDnで確認"
+                            BrowserText::MoreCandidates.render(self.language)
                         } else if self.loading {
-                            "監視対象を取得中."
+                            BrowserText::LoadingWatch.render(self.language)
                         } else {
-                            "現在表示する作業はありません"
+                            BrowserText::NoWork.render(self.language)
                         },
                     ),
                     inner,
@@ -2033,34 +2486,21 @@ impl ThreadBrowser {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let Some(thread) = thread else {
-            frame.render_widget(Paragraph::new("会話がありません"), inner);
+            frame.render_widget(
+                Paragraph::new(BrowserText::Empty.render(self.language)),
+                inner,
+            );
             return;
         };
         let width = usize::from(inner.width);
         let lines = vec![
             Line::from(fit(&format!("cwd {}", one_line(&thread.cwd)), width)),
             Line::from(fit(
-                &format!(
-                    "{}ID {} | 親 {} | {}{}",
-                    thread
-                        .revisit
-                        .as_ref()
-                        .and_then(crate::presentation::revisit_label)
-                        .map(|label| format!("{label} | "))
-                        .unwrap_or_default(),
-                    one_line(&thread.thread_id),
-                    thread
-                        .parent_id
-                        .as_deref()
-                        .map(one_line)
-                        .unwrap_or_else(|| "なし".into()),
-                    one_line(activity_label(thread)),
-                    if interrupted_by_app_exit(thread) {
-                        " | Interrupted by app exit"
-                    } else {
-                        ""
-                    }
-                ),
+                &BrowserMessage::Detail {
+                    thread,
+                    interrupted: interrupted_by_app_exit(thread),
+                }
+                .render(self.language),
                 width,
             )),
             Line::from(Span::styled(
@@ -2096,6 +2536,7 @@ std::thread_local! {
 /// Uses the same shared frame/table geometry as List; no additional row state.
 fn watch_lines(
     row: &super::watch::WatchRow<'_>,
+    language: UiLanguage,
     marker: &str,
     pending: &str,
     uncertainty: &str,
@@ -2114,7 +2555,7 @@ fn watch_lines(
     let available = width.saturating_sub(marker.width() + status.width() + 3);
     let parent = if width >= 64 && !row.parent_title.is_empty() {
         fit(
-            &format!("親 {}", row.parent_title),
+            &BrowserMessage::Parent(row.parent_title).render(language),
             (width / 3).min(available.saturating_sub(12)),
         )
     } else {
@@ -2204,18 +2645,18 @@ fn tail_path(path: &str, width: usize) -> String {
     format!(".{}", suffix.into_iter().rev().collect::<String>())
 }
 
-fn activity_column_label(thread: &ThreadSummary) -> &str {
+fn activity_column_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
     if thread.thread_id.starts_with("draft:") {
         &thread.state
     } else {
-        thread.activity.column_label()
+        super::watch::phase_label(thread.activity, language, false)
     }
 }
-fn activity_label(thread: &ThreadSummary) -> &str {
+fn activity_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
     if thread.thread_id.starts_with("draft:") {
         &thread.state
     } else {
-        thread.activity.label()
+        super::watch::phase_label(thread.activity, language, true)
     }
 }
 fn activity_style(phase: crate::activity::ActivityPhase) -> Style {
@@ -2289,6 +2730,13 @@ pub(super) fn plain_preview(text: &str, width: usize) -> String {
 }
 
 #[cfg(test)]
+fn japanese_browser() -> ThreadBrowser {
+    let mut browser = ThreadBrowser::default();
+    browser.set_language(UiLanguage::Ja);
+    browser
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -2322,7 +2770,7 @@ mod tests {
         let shown = text(&capture(&[thread("fixture", None)], 0, 60, 18, None));
         assert!(shown.contains("会話一覧 |"), "{shown}");
         assert!(!shown.contains("スレッド"));
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open_watch(String::new(), None, None);
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(60, 18)).unwrap();
@@ -2478,7 +2926,7 @@ mod tests {
 
     #[test]
     fn tiny_browser_does_not_consume_a_notice_whose_header_is_hidden() {
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.notice("unseen deletion warning".into());
         browser.open(String::new(), vec![], None);
         let mut terminal =
@@ -2650,10 +3098,10 @@ mod tests {
         let mut item = thread("background", None);
         item.state = "completed".into();
         item.activity = crate::activity::ActivityPhase::Background;
-        assert_eq!(activity_label(&item), item.activity.label());
+        assert_eq!(activity_label(&item, UiLanguage::Ja), item.activity.label());
         assert_ne!(activity_style(item.activity), state_style(&item.state));
         item.activity = crate::activity::ActivityPhase::Continuing;
-        assert_eq!(activity_label(&item), "実行継続中");
+        assert_eq!(activity_label(&item, UiLanguage::Ja), "実行継続中");
     }
 
     #[test]
@@ -2678,7 +3126,7 @@ mod tests {
                 reason,
                 Some("previous_instance_interrupted" | "app_shutdown")
             );
-            let mut browser = ThreadBrowser::default();
+            let mut browser = japanese_browser();
             browser.open(String::new(), vec![], Some("t".into()));
             assert!(browser.apply(
                 browser.generation(),
@@ -2704,7 +3152,7 @@ mod tests {
                 if width == 120 {
                     assert_eq!(shown.contains("Interrupted by app exit"), marked);
                     assert!(
-                        shown.contains(activity_label(&item)),
+                        shown.contains(activity_label(&item, UiLanguage::Ja)),
                         "ordinary state must remain visible: {shown}"
                     );
                 }
@@ -2795,7 +3243,7 @@ mod tests {
                 item
             })
             .collect::<Vec<_>>();
-        let mut tree = ThreadBrowser::default();
+        let mut tree = japanese_browser();
         tree.open(String::new(), vec![], Some("s7".into()));
         let generation = tree.generation();
         assert!(tree.apply(
@@ -3252,7 +3700,7 @@ mod tests {
             updated_at: String::new(),
             excerpt: String::new(),
         };
-        let mut tree = ThreadBrowser::default();
+        let mut tree = japanese_browser();
         for title in ["", " \n\t", "\u{1b}[31m\u{1b}[0m"] {
             thread.title = title.into();
             tree.items = vec![thread.clone()];
@@ -3318,7 +3766,7 @@ mod filter_tests {
     #[test]
     fn filter_burst_invalidates_old_pages_without_emitting_each_key() {
         let now = Instant::now();
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open(String::new(), vec![], None);
         let original = browser.generation();
         for (index, ch) in "日本語".chars().enumerate() {
@@ -3341,7 +3789,7 @@ mod filter_tests {
     #[test]
     fn trailing_deadline_sends_only_the_latest_filter_once() {
         let now = Instant::now();
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open(String::new(), vec![], None);
         browser.key_at(key(KeyCode::Char('a')), now);
         browser.key_at(key(KeyCode::Char('b')), now + Duration::from_millis(100));
@@ -3365,7 +3813,7 @@ mod filter_tests {
     #[test]
     fn explicit_refresh_close_and_unchanged_filter_do_not_leave_delayed_queries() {
         let now = Instant::now();
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open(String::new(), vec![], None);
         let original = browser.generation();
         browser.key_at(key(KeyCode::Backspace), now);
@@ -3514,7 +3962,7 @@ mod patch_tests {
         }
     }
     fn initial(items: Vec<ThreadSummary>) -> ThreadBrowser {
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open(String::new(), vec![], None);
         assert!(browser.apply(
             browser.generation,
@@ -4063,7 +4511,7 @@ mod patch_tests {
     }
     #[test]
     fn initial_preferred_outside_first_page_is_observed_until_matching_patch_arrives() {
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open(String::new(), vec![], Some("outside".into()));
         assert!(
             matches!(browser.observe(true),Some(UiAction::ObserveBrowser {selected:Some(id),..}) if id=="outside")
@@ -4232,7 +4680,7 @@ mod watch_integration_tests {
     }
     fn browser() -> ThreadBrowser {
         use crate::activity::ActivityPhase::*;
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open_watch(String::new(), None, None);
         let rows = vec![
             row("recover", Recovery),
@@ -4359,7 +4807,7 @@ mod watch_integration_tests {
     }
     #[test]
     fn watch_empty_limited_page_keeps_explicit_next_cursor_and_scope() {
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         let request = browser.open_watch("sparse".into(), Some("root".into()), None);
         assert!(
             matches!(request,UiAction::LoadThreads {mode:BrowserMode::Watch,descendant_root:Some(root),..} if root=="root")
@@ -4735,7 +5183,7 @@ mod watch_integration_tests {
         use crate::activity::ActivityPhase;
         for width in [80, 140] {
             for phase in [ActivityPhase::Recovery, ActivityPhase::Background] {
-                let mut browser = ThreadBrowser::default();
+                let mut browser = japanese_browser();
                 browser.open_watch(String::new(), None, None);
                 let mut item = row("probe", phase);
                 item.title = if phase == ActivityPhase::Recovery {
@@ -4819,7 +5267,7 @@ mod watch_integration_tests {
     #[test]
     fn fitting_watch_viewport_reconciles_anchor_offset_before_formatting_and_scope() {
         use crate::activity::ActivityPhase::Tools;
-        let mut browser = ThreadBrowser::default();
+        let mut browser = japanese_browser();
         browser.open_watch(String::new(), None, None);
         let rows = ["a", "b", "c"]
             .into_iter()
@@ -4851,7 +5299,7 @@ mod watch_integration_tests {
     fn watch_formats_only_viewport_neighborhoods_and_keeps_actual_visible_rows() {
         use crate::activity::ActivityPhase::Tools;
         for width in [80, 140] {
-            let mut browser = ThreadBrowser::default();
+            let mut browser = japanese_browser();
             browser.open_watch(String::new(), None, None);
             let rows = (0..2000)
                 .map(|n| {

@@ -15,6 +15,235 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::config::UiLanguage;
+
+pub(super) fn phase_label(phase: ActivityPhase, language: UiLanguage, full: bool) -> &'static str {
+    if language == UiLanguage::Ja {
+        return if full {
+            phase.label()
+        } else {
+            phase.column_label()
+        };
+    }
+    use ActivityPhase::*;
+    match (phase, full) {
+        (Idle, true) => "Ready for input",
+        (Idle, false) => "Idle",
+        (Sending, _) => "Sending",
+        (Reflecting, _) => "Loading saved input",
+        (Preparing, _) => "Preparing",
+        (AwaitingModel, _) => "Awaiting model",
+        (Retrying, _) => "Retrying",
+        (Receiving, _) => "Receiving",
+        (Tools, _) => "Running tools",
+        (Running, _) => "Running",
+        (Waiting, _) => "Waiting",
+        (Background, _) => "Background work",
+        (Continuing, _) => "Continuing",
+        (Stopping, _) => "Stopping",
+        (Recovery, _) => "Recovery needed",
+        (Failed, _) => "Failed",
+        (Stopped, _) => "Stopped",
+        (Completed, _) => "Completed",
+    }
+}
+#[derive(Clone, Copy)]
+enum WatchMessage<'a> {
+    Recovery(&'a str),
+    FailureUnknown,
+    AnswerUnknown,
+    WorkUnknown,
+    Counts {
+        shells: u64,
+        children: u64,
+        waits: Option<u64>,
+        first: &'a str,
+    },
+    Pending {
+        summary: &'a str,
+        count: u64,
+    },
+    UnknownTime,
+    Age {
+        observed: bool,
+        seconds: u64,
+    },
+    ModelAge {
+        observed: bool,
+        seconds: u64,
+    },
+    Oldest(u64),
+    Output(u64),
+    Descendants {
+        active: u64,
+        recovery: u64,
+        lower: bool,
+        cycle: bool,
+    },
+    DescendantsUnknown,
+    DescendantsUncertain,
+    StaleCount(&'a str),
+    FailedCount,
+}
+impl WatchMessage<'_> {
+    fn render(self, language: UiLanguage) -> String {
+        use UiLanguage::{En, Ja};
+        match (language, self) {
+            (En, Self::Recovery(reason)) => format!("{reason} | Review recovery in details"),
+            (Ja, Self::Recovery(reason)) => format!("{reason} | 詳細で復旧を確認"),
+            (En, Self::FailureUnknown) => "Failure reason unavailable | Open details".into(),
+            (Ja, Self::FailureUnknown) => "失敗理由は未取得 | 詳細で確認".into(),
+            (En, Self::AnswerUnknown) => "Answer excerpt unavailable".into(),
+            (Ja, Self::AnswerUnknown) => "回答の抜粋は未取得".into(),
+            (En, Self::WorkUnknown) => "Owned-work details unavailable".into(),
+            (Ja, Self::WorkUnknown) => "所有する作業の詳細は未取得".into(),
+            (
+                En,
+                Self::Counts {
+                    shells,
+                    children,
+                    waits,
+                    first,
+                },
+            ) => format!(
+                "Shells: {shells} | Child runs: {children} | Waits: {} | {first}",
+                waits.map_or_else(|| "unknown".into(), |n| n.to_string())
+            ),
+            (
+                Ja,
+                Self::Counts {
+                    shells,
+                    children,
+                    waits,
+                    first,
+                },
+            ) => format!(
+                "shell {shells} | 子 {children} | 待機 {} | {first}",
+                waits.map_or_else(|| "未取得".into(), |n| n.to_string())
+            ),
+            (En, Self::Pending { summary, count: 1 }) => format!("{summary} | 1 pending message"),
+            (En, Self::Pending { summary, count }) => {
+                format!("{summary} | {count} pending messages")
+            }
+            (Ja, Self::Pending { summary, count }) => format!("{summary} | 待ち {count}"),
+            (En, Self::UnknownTime) => "Time unknown".into(),
+            (Ja, Self::UnknownTime) => "時刻不明".into(),
+            (
+                En,
+                Self::Age {
+                    observed: true,
+                    seconds,
+                },
+            ) => format!("Observed {seconds}s"),
+            (
+                En,
+                Self::Age {
+                    observed: false,
+                    seconds,
+                },
+            ) => format!("State {seconds}s"),
+            (
+                Ja,
+                Self::Age {
+                    observed: true,
+                    seconds,
+                },
+            ) => format!("観測 {}", japanese_elapsed(seconds)),
+            (
+                Ja,
+                Self::Age {
+                    observed: false,
+                    seconds,
+                },
+            ) => format!("状態 {}", japanese_elapsed(seconds)),
+            (
+                En,
+                Self::ModelAge {
+                    observed: true,
+                    seconds,
+                },
+            ) => format!("Model request observed {seconds}s"),
+            (
+                En,
+                Self::ModelAge {
+                    observed: false,
+                    seconds,
+                },
+            ) => format!("Model request started {seconds}s ago"),
+            (
+                Ja,
+                Self::ModelAge {
+                    observed: true,
+                    seconds,
+                },
+            ) => format!("モデル要求の観測 {}", japanese_elapsed(seconds)),
+            (
+                Ja,
+                Self::ModelAge {
+                    observed: false,
+                    seconds,
+                },
+            ) => format!("モデル要求開始から {}", japanese_elapsed(seconds)),
+            (En, Self::Oldest(seconds)) => format!("Oldest visible work {seconds}s"),
+            (Ja, Self::Oldest(seconds)) => {
+                format!("表示内最古の作業 {}", japanese_elapsed(seconds))
+            }
+            (En, Self::Output(seconds)) => format!("Visible saved output {seconds}s ago"),
+            (Ja, Self::Output(seconds)) => {
+                format!("表示内の保存出力 {}前", japanese_elapsed(seconds))
+            }
+            (
+                En,
+                Self::Descendants {
+                    active,
+                    recovery,
+                    lower,
+                    cycle,
+                },
+            ) => format!(
+                "Descendants | Active {}{active} | Recovery {}{recovery} | Cycle: {}",
+                if lower { ">=" } else { "" },
+                if lower { ">=" } else { "" },
+                if cycle { "yes" } else { "no" }
+            ),
+            (
+                Ja,
+                Self::Descendants {
+                    active,
+                    recovery,
+                    lower,
+                    cycle,
+                },
+            ) => {
+                let lower = if lower { ">=" } else { "" };
+                let mut labels = Vec::new();
+                if active > 0 {
+                    labels.push(format!("稼働{lower}{active}"));
+                }
+                if recovery > 0 {
+                    labels.push(format!("復旧{lower}{recovery}"));
+                }
+                format!(
+                    "子孫 {}{}",
+                    labels.join(" | "),
+                    if cycle { " | 循環あり" } else { "" }
+                )
+            }
+            (En, Self::DescendantsUnknown) => "Descendant counts unavailable".into(),
+            (Ja, Self::DescendantsUnknown) => "子孫数は未取得".into(),
+            (En, Self::DescendantsUncertain) => "Descendant counts uncertain".into(),
+            (Ja, Self::DescendantsUncertain) => "子孫数は未確定".into(),
+            (En, Self::StaleCount(label)) => format!("{label} (previous counts; refresh failed)"),
+            (Ja, Self::StaleCount(label)) => format!("{label}（前回の値・更新失敗）"),
+            (En, Self::FailedCount) => "Descendant refresh failed; counts unconfirmed".into(),
+            (Ja, Self::FailedCount) => "子孫数は更新失敗・未確認".into(),
+        }
+    }
+}
+fn japanese_elapsed(seconds: u64) -> String {
+    crate::presentation::elapsed_text(seconds.saturating_mul(1000), false)
+}
+
 pub const MAX_ROWS: usize = 2000;
 pub const MAX_VISIBLE_DETAILS: usize = 128;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,7 +322,10 @@ fn safe(text: &str, chars: usize) -> String {
         .collect()
 }
 impl WatchDetail {
-    pub fn prepare(mut self) -> PreparedWatchDetail {
+    pub fn prepare(self) -> PreparedWatchDetail {
+        self.prepare_in(UiLanguage::En)
+    }
+    fn prepare_in(mut self, language: UiLanguage) -> PreparedWatchDetail {
         self.parent_title = self.parent_title.map(|text| safe(&text, 160));
         self.recovery_reason = self.recovery_reason.map(|text| safe(&text, 512));
         self.answer_preview = self.answer_preview.map(|text| {
@@ -118,6 +350,9 @@ impl WatchDetail {
                 row.state = safe(&row.state, 64);
             }
         }
+        self.project(language)
+    }
+    fn project(self, language: UiLanguage) -> PreparedWatchDetail {
         let execution_id = self.work.as_ref().and_then(|work| {
             work.rows.iter().find_map(|row| match &row.target {
                 LiveWorkTarget::Shell { execution_id, .. } => Some(execution_id.clone()),
@@ -152,39 +387,35 @@ impl WatchDetail {
             observed_at: work.observed_at,
         });
         let mut secondary = match self.phase {
-            ActivityPhase::Recovery => format!(
-                "{} | 詳細で復旧を確認",
-                self.recovery_reason
-                    .as_deref()
-                    .unwrap_or("復旧理由は未取得")
-            ),
+            ActivityPhase::Recovery => {
+                WatchMessage::Recovery(self.recovery_reason.as_deref().unwrap_or(match language {
+                    UiLanguage::En => "Recovery reason unavailable",
+                    UiLanguage::Ja => "復旧理由は未取得",
+                }))
+                .render(language)
+            }
             ActivityPhase::Failed => self
                 .recovery_reason
                 .clone()
-                .unwrap_or_else(|| "失敗理由は未取得 | 詳細で確認".into()),
+                .unwrap_or_else(|| WatchMessage::FailureUnknown.render(language)),
             ActivityPhase::Completed => self
                 .answer_preview
                 .clone()
                 .filter(|text| !text.is_empty())
-                .unwrap_or_else(|| "回答の抜粋は未取得".into()),
+                .unwrap_or_else(|| WatchMessage::AnswerUnknown.render(language)),
             ActivityPhase::Background | ActivityPhase::Continuing => self
                 .work
                 .as_ref()
                 .map(|work| {
-                    format!(
-                        "shell {} | 子 {} | 待機 {}{}",
-                        work.shells,
-                        work.children,
-                        work.waits
-                            .map(|n| n.to_string())
-                            .unwrap_or_else(|| "未取得".into()),
-                        work.rows
-                            .first()
-                            .map(|row| format!(" | {}", row.label))
-                            .unwrap_or_default()
-                    )
+                    WatchMessage::Counts {
+                        shells: work.shells,
+                        children: work.children,
+                        waits: work.waits,
+                        first: work.rows.first().map_or("", |row| row.label.as_str()),
+                    }
+                    .render(language)
                 })
-                .unwrap_or_else(|| "所有する作業の詳細は未取得".into()),
+                .unwrap_or_else(|| WatchMessage::WorkUnknown.render(language)),
             _ => self
                 .work
                 .as_ref()
@@ -194,10 +425,14 @@ impl WatchDetail {
                         .find(|row| matches!(row.target, LiveWorkTarget::Shell { .. }))
                 })
                 .map(|row| row.label.clone())
-                .unwrap_or_else(|| self.phase.label().into()),
+                .unwrap_or_else(|| phase_label(self.phase, language, true).into()),
         };
         if self.pending_messages > 0 {
-            secondary.push_str(&format!(" | 待ち {}", self.pending_messages));
+            secondary = WatchMessage::Pending {
+                summary: &secondary,
+                count: self.pending_messages,
+            }
+            .render(language);
         }
         if let Some(label) = self
             .revisit
@@ -208,9 +443,14 @@ impl WatchDetail {
             secondary.push_str(&label);
         }
         let now = Instant::now();
-        let initial_state_clock = state_label(self.phase, self.state_age.as_ref(), now);
-        let initial_secondary_clock =
-            secondary_age_label(self.model_request_age.as_ref(), work_clocks.as_ref(), now);
+        let initial_state_clock =
+            state_label_in(self.phase, self.state_age.as_ref(), now, language);
+        let initial_secondary_clock = secondary_age_label_in(
+            self.model_request_age.as_ref(),
+            work_clocks.as_ref(),
+            now,
+            language,
+        );
         PreparedWatchDetail {
             parent_label: self.parent_title.clone().unwrap_or_default(),
             facts: self,
@@ -307,6 +547,7 @@ impl Entry {
 }
 #[derive(Default)]
 pub struct WatchState {
+    language: UiLanguage,
     generation: u64,
     open: bool,
     entries: BTreeMap<String, Entry>,
@@ -346,6 +587,21 @@ fn ordinary_category(phase: ActivityPhase) -> WatchCategory {
     }
 }
 impl WatchState {
+    pub(super) fn set_language(&mut self, language: UiLanguage) {
+        if self.language == language {
+            return;
+        }
+        self.language = language;
+        for entry in self.entries.values_mut() {
+            if let Some(detail) = entry.detail.take() {
+                let detail = detail.facts.project(language);
+                entry.state_clock = detail.initial_state_clock.clone();
+                entry.secondary_clock = detail.initial_secondary_clock.clone();
+                entry.detail = Some(detail);
+            }
+        }
+    }
+
     pub fn open(&mut self, generation: u64, summaries: Vec<WatchSummary>) -> bool {
         if summaries.len() > MAX_ROWS {
             self.limited = true;
@@ -588,6 +844,7 @@ impl WatchState {
             }
             entry.observed_in_session = self.open;
             entry.previous_observed = None;
+            let detail = detail.facts.project(self.language);
             entry.state_clock = detail.initial_state_clock.clone();
             entry.secondary_clock = detail.initial_secondary_clock.clone();
             entry.detail = Some(detail);
@@ -669,13 +926,25 @@ impl WatchState {
         let entry = self.entries.get(id)?;
         let detail = entry.detail.as_ref();
         let status = match entry.category {
-            WatchCategory::Unread => "完了 *",
+            WatchCategory::Unread => match self.language {
+                UiLanguage::En => "Completed *",
+                UiLanguage::Ja => "完了 *",
+            },
             WatchCategory::Confirming if entry.identity().is_some() && self.seen_overflow => {
-                "確認履歴の保持範囲外"
+                match self.language {
+                    UiLanguage::En => "Outside confirmation history",
+                    UiLanguage::Ja => "確認履歴の保持範囲外",
+                }
             }
-            WatchCategory::Confirming => "確認中",
-            WatchCategory::Stopped if entry.summary.interrupted => "中断済み（アプリ終了）",
-            _ => entry.summary.phase.column_label(),
+            WatchCategory::Confirming => match self.language {
+                UiLanguage::En => "Confirming",
+                UiLanguage::Ja => "確認中",
+            },
+            WatchCategory::Stopped if entry.summary.interrupted => match self.language {
+                UiLanguage::En => "Stopped (app exit)",
+                UiLanguage::Ja => "中断済み（アプリ終了）",
+            },
+            _ => phase_label(entry.summary.phase, self.language, false),
         };
         Some(WatchRow {
             thread_id: &entry.summary.thread_id,
@@ -684,7 +953,13 @@ impl WatchState {
             category: entry.category,
             status,
             state_age: &entry.state_clock,
-            secondary: detail.map_or("詳細を確認中", |d| d.secondary.as_str()),
+            secondary: detail.map_or(
+                match self.language {
+                    UiLanguage::En => "Checking details",
+                    UiLanguage::Ja => "詳細を確認中",
+                },
+                |d| d.secondary.as_str(),
+            ),
             secondary_age: &entry.secondary_clock,
         })
     }
@@ -745,12 +1020,18 @@ impl WatchState {
             let label = if is_terminal(detail.facts.phase) {
                 entry.state_clock.clone()
             } else {
-                state_label(detail.facts.phase, detail.facts.state_age.as_ref(), now)
+                state_label_in(
+                    detail.facts.phase,
+                    detail.facts.state_age.as_ref(),
+                    now,
+                    self.language,
+                )
             };
-            let secondary = secondary_age_label(
+            let secondary = secondary_age_label_in(
                 detail.facts.model_request_age.as_ref(),
                 detail.work_clocks.as_ref(),
                 now,
+                self.language,
             );
             changed |= entry.state_clock != label || entry.secondary_clock != secondary;
             entry.state_clock = label;
@@ -823,27 +1104,52 @@ fn is_terminal(phase: ActivityPhase) -> bool {
             | ActivityPhase::Recovery
     )
 }
-fn state_label(phase: ActivityPhase, age: Option<&WatchAge>, now: Instant) -> String {
-    if is_terminal(phase) {
-        transition_label(
-            phase,
-            age,
-            chrono::Utc::now(),
-            *chrono::Local::now().offset(),
-        )
-    } else {
-        age.map(|age| age_label(age, now)).unwrap_or_default()
-    }
-}
-/// "13:42 完了" today, "10/31 22:05 完了" otherwise; never an invented time.
+#[cfg(test)]
 fn transition_label(
     phase: ActivityPhase,
     age: Option<&WatchAge>,
     now: chrono::DateTime<chrono::Utc>,
     offset: chrono::FixedOffset,
 ) -> String {
+    transition_label_in(phase, age, now, offset, UiLanguage::Ja)
+}
+fn state_label_in(
+    phase: ActivityPhase,
+    age: Option<&WatchAge>,
+    now: Instant,
+    language: UiLanguage,
+) -> String {
+    if is_terminal(phase) {
+        transition_label_in(
+            phase,
+            age,
+            chrono::Utc::now(),
+            *chrono::Local::now().offset(),
+            language,
+        )
+    } else {
+        age.map(|age| {
+            WatchMessage::Age {
+                observed: age.origin == WatchAgeOrigin::Observed,
+                seconds: age
+                    .elapsed_base
+                    .saturating_add(now.saturating_duration_since(age.observed_at))
+                    .as_secs(),
+            }
+            .render(language)
+        })
+        .unwrap_or_default()
+    }
+}
+fn transition_label_in(
+    phase: ActivityPhase,
+    age: Option<&WatchAge>,
+    now: chrono::DateTime<chrono::Utc>,
+    offset: chrono::FixedOffset,
+    language: UiLanguage,
+) -> String {
     let Some(at) = age.and_then(|age| age.saved_at) else {
-        return "時刻不明".into();
+        return WatchMessage::UnknownTime.render(language);
     };
     let local = at.with_timezone(&offset);
     let format = if local.date_naive() == now.with_timezone(&offset).date_naive() {
@@ -851,58 +1157,38 @@ fn transition_label(
     } else {
         "%m/%d %H:%M"
     };
-    format!("{} {}", local.format(format), phase.column_label())
-}
-fn elapsed(duration: Duration) -> String {
-    crate::presentation::elapsed_text(duration.as_secs().saturating_mul(1000), false)
-}
-fn age_label(age: &WatchAge, now: Instant) -> String {
-    let elapsed = elapsed(
-        age.elapsed_base
-            .saturating_add(now.saturating_duration_since(age.observed_at)),
-    );
     format!(
-        "{} {elapsed}",
-        match age.origin {
-            WatchAgeOrigin::SavedTransition => "状態",
-            WatchAgeOrigin::Observed => "観測",
-        }
+        "{} {}",
+        local.format(format),
+        phase_label(phase, language, false)
     )
 }
-
-fn secondary_age_label(
+fn secondary_age_label_in(
     model: Option<&WatchAge>,
     work: Option<&WorkClocks>,
     now: Instant,
+    language: UiLanguage,
 ) -> String {
     let mut labels = Vec::with_capacity(3);
     if let Some(age) = model {
-        let elapsed = elapsed(
-            age.elapsed_base
-                .saturating_add(now.saturating_duration_since(age.observed_at)),
-        );
-        labels.push(format!(
-            "モデル要求{} {elapsed}",
-            if age.origin == WatchAgeOrigin::Observed {
-                "の観測"
-            } else {
-                "開始から"
+        labels.push(
+            WatchMessage::ModelAge {
+                observed: age.origin == WatchAgeOrigin::Observed,
+                seconds: age
+                    .elapsed_base
+                    .saturating_add(now.saturating_duration_since(age.observed_at))
+                    .as_secs(),
             }
-        ));
+            .render(language),
+        );
     }
     if let Some(work) = work {
         let since = now.saturating_duration_since(work.observed_at);
         if let Some(age) = work.oldest {
-            labels.push(format!(
-                "表示内最古の作業 {}",
-                elapsed(age.saturating_add(since))
-            ));
+            labels.push(WatchMessage::Oldest(age.saturating_add(since).as_secs()).render(language));
         }
         if let Some(age) = work.latest_output {
-            labels.push(format!(
-                "表示内の保存出力 {}前",
-                elapsed(age.saturating_add(since))
-            ));
+            labels.push(WatchMessage::Output(age.saturating_add(since).as_secs()).render(language));
         }
     }
     labels.join(" | ")
@@ -928,33 +1214,28 @@ pub struct DescendantCount {
 }
 impl DescendantCount {
     pub fn label(&self) -> Option<String> {
+        self.label_in(UiLanguage::Ja)
+    }
+    pub(super) fn label_in(&self, language: UiLanguage) -> Option<String> {
         if !self.available {
-            return Some("子孫数は未取得".into());
+            return Some(WatchMessage::DescendantsUnknown.render(language));
         }
         if self.active == 0 && self.recovery == 0 {
             return if self.truncated || self.cycle {
-                Some("子孫数は未確定".into())
+                Some(WatchMessage::DescendantsUncertain.render(language))
             } else {
                 None
             };
         }
-        let lower = if self.truncated || self.cycle {
-            ">="
-        } else {
-            ""
-        };
-        let mut labels = Vec::with_capacity(2);
-        if self.active > 0 {
-            labels.push(format!("稼働{lower}{}", self.active));
-        }
-        if self.recovery > 0 {
-            labels.push(format!("復旧{lower}{}", self.recovery));
-        }
-        Some(format!(
-            "子孫 {}{}",
-            labels.join(" | "),
-            if self.cycle { " | 循環あり" } else { "" }
-        ))
+        Some(
+            WatchMessage::Descendants {
+                active: self.active,
+                recovery: self.recovery,
+                lower: self.truncated || self.cycle,
+                cycle: self.cycle,
+            }
+            .render(language),
+        )
     }
 }
 #[derive(Default)]
@@ -1022,14 +1303,17 @@ impl DescendantView {
         changed
     }
     pub fn label(&self, root: &str) -> Option<String> {
+        self.label_in(root, UiLanguage::Ja)
+    }
+    pub(super) fn label_in(&self, root: &str, language: UiLanguage) -> Option<String> {
         let count = self.get(root)?;
         if self.error.is_some() {
-            return Some(match count.label() {
-                Some(label) if count.available => format!("{label}（前回の値・更新失敗）"),
-                _ => "子孫数は更新失敗・未確認".into(),
+            return Some(match count.label_in(language) {
+                Some(label) if count.available => WatchMessage::StaleCount(&label).render(language),
+                _ => WatchMessage::FailedCount.render(language),
             });
         }
-        count.label()
+        count.label_in(language)
     }
     pub fn get(&self, root: &str) -> Option<&DescendantCount> {
         self.counts.get(root)
@@ -1038,6 +1322,12 @@ impl DescendantView {
 
 #[cfg(test)]
 mod tests {
+    fn japanese_watch() -> WatchState {
+        let mut watch = WatchState::default();
+        watch.set_language(UiLanguage::Ja);
+        watch
+    }
+
     use super::*;
     fn summary(id: &str, phase: ActivityPhase) -> WatchSummary {
         WatchSummary {
@@ -1092,11 +1382,11 @@ mod tests {
             overflow: 0,
             observed_at: Instant::now(),
         });
-        facts.prepare()
+        facts.prepare_in(UiLanguage::Ja)
     }
     #[test]
     fn stopped_read_and_idle_rows_follow_live_work_and_name_saved_interruption_only() {
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         let mut done = summary("read", ActivityPhase::Completed);
         done.latest_run_id = Some("run-read".into());
         done.answer_id = Some("answer-read".into());
@@ -1168,13 +1458,13 @@ mod tests {
     }
     #[test]
     fn completed_without_identity_is_confirming_and_opened_completion_is_retained_until_reopen() {
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(1, vec![summary("t", ActivityPhase::Completed)]);
         assert_eq!(state.row("t").unwrap().status, "確認中");
         state.apply_detail(
             1,
             10,
-            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare(),
+            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare_in(UiLanguage::Ja),
         );
         assert_eq!(state.row("t").unwrap().category, WatchCategory::Unread);
         let visible = state.visible_scope(0, 10);
@@ -1189,7 +1479,7 @@ mod tests {
         state.apply_detail(
             1,
             12,
-            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare(),
+            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare_in(UiLanguage::Ja),
         );
         assert_eq!(
             state.row("t").unwrap().category,
@@ -1206,7 +1496,7 @@ mod tests {
     }
     #[test]
     fn active_order_is_fixed_at_entry_and_category_transitions_reprioritize_but_clocks_do_not() {
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(
             1,
             vec![
@@ -1224,7 +1514,7 @@ mod tests {
         );
         let mut recovery = detail("a", "a", None, ActivityPhase::Recovery);
         recovery.recovery_reason = Some("saved failure".into());
-        state.apply_detail(1, 3, recovery.prepare());
+        state.apply_detail(1, 3, recovery.prepare_in(UiLanguage::Ja));
         assert_eq!(state.ordered_ids(), ["a", "b"]);
         let ids = state.visible_scope(0, 2).ids;
         let at = Instant::now();
@@ -1246,9 +1536,9 @@ mod tests {
         };
         let mut facts = detail("t", "r", None, ActivityPhase::Background);
         facts.state_age = Some(observed.clone());
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(1, vec![summary("t", ActivityPhase::Background)]);
-        state.apply_detail(1, 1, facts.prepare());
+        state.apply_detail(1, 1, facts.prepare_in(UiLanguage::Ja));
         assert_eq!(state.row("t").unwrap().state_age, "観測 1分30秒");
         let visible = state.visible_scope(0, 129);
         assert!(visible.limited);
@@ -1262,7 +1552,7 @@ mod tests {
         assert_eq!(state.row("t").unwrap().state_age, label);
         state.close();
         assert!(!state.tick(&visible.ids, at + Duration::from_secs(200)));
-        let prepared = detail("t", "r", None, ActivityPhase::Recovery).prepare();
+        let prepared = detail("t", "r", None, ActivityPhase::Recovery).prepare_in(UiLanguage::Ja);
         assert!(
             prepared.facts().state_age.is_none(),
             "missing transition cannot invent recovery age"
@@ -1271,7 +1561,7 @@ mod tests {
         let mut facts = detail("o", "r", None, ActivityPhase::Failed);
         facts.state_age = Some(observed);
         assert_eq!(
-            facts.prepare().initial_state_clock,
+            facts.prepare_in(UiLanguage::Ja).initial_state_clock,
             "時刻不明",
             "an observed age is never shown as a transition time"
         );
@@ -1314,7 +1604,7 @@ mod tests {
         done.state_age = Some(saved(3600));
         let mut running = detail("r", "r", None, ActivityPhase::Background);
         running.state_age = Some(saved(59));
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(
             1,
             vec![
@@ -1322,7 +1612,14 @@ mod tests {
                 summary("r", ActivityPhase::Background),
             ],
         );
-        state.apply_details(1, 1, vec![done.prepare(), running.prepare()]);
+        state.apply_details(
+            1,
+            1,
+            vec![
+                done.prepare_in(UiLanguage::Ja),
+                running.prepare_in(UiLanguage::Ja),
+            ],
+        );
         let label = state.row("d").unwrap().state_age.to_owned();
         assert!(label.ends_with(" 完了") && label.contains(':'), "{label}");
         assert_eq!(state.row("r").unwrap().state_age, "状態 59秒");
@@ -1343,12 +1640,13 @@ mod tests {
     }
     #[test]
     fn seen_lru_overflow_is_uncertain_until_opened_or_a_new_completion_is_observed() {
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(1, vec![summary("t", ActivityPhase::Completed)]);
         state.apply_detail(
             1,
             1,
-            detail("t", "old-run", Some("old-answer"), ActivityPhase::Completed).prepare(),
+            detail("t", "old-run", Some("old-answer"), ActivityPhase::Completed)
+                .prepare_in(UiLanguage::Ja),
         );
         state.visible_scope(0, 1);
         state.mark_opened("t");
@@ -1367,7 +1665,8 @@ mod tests {
         state.apply_detail(
             1,
             2,
-            detail("t", "old-run", Some("old-answer"), ActivityPhase::Completed).prepare(),
+            detail("t", "old-run", Some("old-answer"), ActivityPhase::Completed)
+                .prepare_in(UiLanguage::Ja),
         );
         assert_eq!(
             state.row("t").unwrap().category,
@@ -1377,7 +1676,7 @@ mod tests {
         state.apply_detail(
             1,
             3,
-            detail("t", "new-run", None, ActivityPhase::AwaitingModel).prepare(),
+            detail("t", "new-run", None, ActivityPhase::AwaitingModel).prepare_in(UiLanguage::Ja),
         );
         let mut changed = summary("t", ActivityPhase::Completed);
         changed.updated_at = "new completion".into();
@@ -1385,7 +1684,8 @@ mod tests {
         state.apply_detail(
             1,
             5,
-            detail("t", "new-run", Some("new-answer"), ActivityPhase::Completed).prepare(),
+            detail("t", "new-run", Some("new-answer"), ActivityPhase::Completed)
+                .prepare_in(UiLanguage::Ja),
         );
         assert_eq!(state.row("t").unwrap().category, WatchCategory::Unread);
         state.mark_opened("t");
@@ -1393,39 +1693,39 @@ mod tests {
     }
     #[test]
     fn action_targets_reject_replacement_run_recovery_generation_and_stale_browser_reply() {
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(7, vec![summary("t", ActivityPhase::Recovery)]);
         state.apply_detail(
             7,
             10,
-            detail("t", "r", None, ActivityPhase::Recovery).prepare(),
+            detail("t", "r", None, ActivityPhase::Recovery).prepare_in(UiLanguage::Ja),
         );
         let target = state.action_target("t", WatchActionKind::Retry).unwrap();
         assert!(state.validates(&target));
         let mut later = detail("t", "r", None, ActivityPhase::Recovery);
         later.turn_generation = Some(2);
-        state.apply_detail(7, 11, later.prepare());
+        state.apply_detail(7, 11, later.prepare_in(UiLanguage::Ja));
         assert!(!state.validates(&target));
         let stop = state.action_target("t", WatchActionKind::Stop).unwrap();
         state.apply_detail(
             7,
             12,
-            detail("t", "replacement", None, ActivityPhase::Recovery).prepare(),
+            detail("t", "replacement", None, ActivityPhase::Recovery).prepare_in(UiLanguage::Ja),
         );
         assert!(!state.validates(&stop));
         assert!(!state.apply_detail(
             6,
             100,
-            detail("t", "r", None, ActivityPhase::Recovery).prepare()
+            detail("t", "r", None, ActivityPhase::Recovery).prepare_in(UiLanguage::Ja)
         ));
         assert!(!state.apply_detail(
             7,
             9,
-            detail("t", "r", None, ActivityPhase::Recovery).prepare()
+            detail("t", "r", None, ActivityPhase::Recovery).prepare_in(UiLanguage::Ja)
         ));
         let mut unknown = detail("t", "replacement", None, ActivityPhase::Recovery);
         unknown.turn_generation = None;
-        state.apply_detail(7, 13, unknown.prepare());
+        state.apply_detail(7, 13, unknown.prepare_in(UiLanguage::Ja));
         assert!(state.action_target("t", WatchActionKind::Retry).is_none());
     }
     #[test]
@@ -1435,10 +1735,10 @@ mod tests {
         assert!(!prepared.secondary.contains('\u{1b}'));
         let mut mismatch = detail("t", "r", Some("a"), ActivityPhase::Completed);
         mismatch.work = prepared.facts().work.clone();
-        let mismatch = mismatch.prepare();
+        let mismatch = mismatch.prepare_in(UiLanguage::Ja);
         assert!(mismatch.facts().work.is_none());
         assert_eq!(mismatch.secondary, "first answer");
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         let too_many = (0..=MAX_ROWS)
             .map(|n| summary(&format!("t{n}"), ActivityPhase::Tools))
             .collect();
@@ -1464,7 +1764,7 @@ mod tests {
         another.output_age_base = Some(Duration::from_secs(5));
         work.rows.push(another);
         facts.work = Some(work);
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(
             1,
             vec![
@@ -1472,7 +1772,11 @@ mod tests {
                 summary("b", ActivityPhase::Tools),
             ],
         );
-        state.apply_details(1, 1, vec![facts.prepare(), output_detail("b", 10)]);
+        state.apply_details(
+            1,
+            1,
+            vec![facts.prepare_in(UiLanguage::Ja), output_detail("b", 10)],
+        );
         assert_eq!(
             state.ordered_ids(),
             ["t", "b"],
@@ -1516,7 +1820,7 @@ mod tests {
         work.rows[0].elapsed_base = None;
         work.rows[0].output_age_base = None;
         unknown.work = Some(work);
-        state.apply_detail(1, 2, unknown.prepare());
+        state.apply_detail(1, 2, unknown.prepare_in(UiLanguage::Ja));
         assert!(
             state.row("t").unwrap().secondary_age.is_empty(),
             "unrecorded ages cannot become zero-duration facts"
@@ -1524,12 +1828,12 @@ mod tests {
     }
     #[test]
     fn page_generation_change_preserves_session_seen_and_rejects_late_facts() {
-        let mut state = WatchState::default();
+        let mut state = japanese_watch();
         state.open(1, vec![summary("t", ActivityPhase::Completed)]);
         state.apply_detail(
             1,
             40,
-            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare(),
+            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare_in(UiLanguage::Ja),
         );
         assert_eq!(state.visible_scope(0, 1).ids, ["t"]);
         let seen = state.mark_opened("t").unwrap();
@@ -1538,13 +1842,13 @@ mod tests {
         state.apply_detail(
             2,
             1,
-            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare(),
+            detail("t", "run", Some("answer"), ActivityPhase::Completed).prepare_in(UiLanguage::Ja),
         );
         assert_eq!(state.row("t").unwrap().category, WatchCategory::Read);
         assert!(!state.apply_detail(
             1,
             100,
-            detail("t", "other", Some("new"), ActivityPhase::Completed).prepare()
+            detail("t", "other", Some("new"), ActivityPhase::Completed).prepare_in(UiLanguage::Ja)
         ));
         assert_eq!(state.seen_completions(), [seen]);
         assert!(!state.seen_history_limited());

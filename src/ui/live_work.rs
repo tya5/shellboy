@@ -1,6 +1,115 @@
 //! Bounded fixed-region projection of work owned by the selected Run.
 //! Saved elapsed bases are independent of the UI-observed Turn clock.
 use super::*;
+use crate::config::UiLanguage;
+
+#[derive(Clone, Copy)]
+enum WorkMessage<'a> {
+    State(&'a str),
+    Heading {
+        empty: bool,
+        folded: bool,
+    },
+    Counts {
+        shells: u64,
+        children: u64,
+        waits: Option<u64>,
+    },
+    More(u64),
+    OutputAge(u64),
+    Oldest(u64),
+    Deadline(Option<u64>),
+    PreviewLimit,
+    PreviewNotice,
+    PreviewLoading,
+}
+impl WorkMessage<'_> {
+    fn render(self, language: UiLanguage) -> String {
+        use UiLanguage::{En, Ja};
+        match (language, self) {
+            (En, Self::State(state)) => match state {
+                "starting" => "Starting",
+                "running" | "live" => "Running",
+                "stopping" => "Stopping",
+                "waiting" => "Waiting",
+                other => other,
+            }
+            .into(),
+            (Ja, Self::State(state)) => match state {
+                "starting" => "起動中",
+                "running" | "live" => "実行中",
+                "stopping" => "停止中",
+                "waiting" => "待機中",
+                other => other,
+            }
+            .into(),
+            (En, Self::Heading { empty: true, .. }) => "Owned work | None".into(),
+            (Ja, Self::Heading { empty: true, .. }) => "抱えている作業 | なし".into(),
+            (En, Self::Heading { folded: true, .. }) => "Owned work | Folded".into(),
+            (Ja, Self::Heading { folded: true, .. }) => "抱えている作業 | 折りたたみ".into(),
+            (En, Self::Heading { .. }) => "Owned work".into(),
+            (Ja, Self::Heading { .. }) => "抱えている作業".into(),
+            (
+                En,
+                Self::Counts {
+                    shells,
+                    children,
+                    waits: Some(waits),
+                },
+            ) => format!("Shells: {shells} | Child runs: {children} | Waits: {waits}"),
+            (
+                En,
+                Self::Counts {
+                    shells,
+                    children,
+                    waits: None,
+                },
+            ) => format!("Shells: {shells} | Child runs: {children} | Waits: unknown"),
+            (
+                Ja,
+                Self::Counts {
+                    shells,
+                    children,
+                    waits: Some(waits),
+                },
+            ) => format!("shell {shells} | 子 {children} | 待機 {waits}"),
+            (
+                Ja,
+                Self::Counts {
+                    shells,
+                    children,
+                    waits: None,
+                },
+            ) => format!("shell {shells} | 子 {children} | 待機 未取得"),
+            (En, Self::More(1)) => "1 more item".into(),
+            (En, Self::More(count)) => format!("{count} more items"),
+            (Ja, Self::More(count)) => format!("他{count}件"),
+            (En, Self::OutputAge(seconds)) => format!("Last output: {seconds}s ago"),
+            (Ja, Self::OutputAge(seconds)) => format!(
+                "最後の出力 {}前",
+                crate::presentation::elapsed_text(seconds.saturating_mul(1000), false)
+            ),
+            (En, Self::Oldest(seconds)) => format!("Oldest work: {seconds}s"),
+            (Ja, Self::Oldest(seconds)) => format!(
+                "最古 {}",
+                crate::presentation::elapsed_text(seconds.saturating_mul(1000), false)
+            ),
+            (En, Self::Deadline(Some(seconds))) => format!("Deadline estimate: {seconds}s"),
+            (Ja, Self::Deadline(Some(seconds))) => format!(
+                "期限目安 {}",
+                crate::presentation::elapsed_text(seconds.saturating_mul(1000), false)
+            ),
+            (En, Self::Deadline(None)) => "Deadline unknown".into(),
+            (Ja, Self::Deadline(None)) => "期限不明".into(),
+            (En, Self::PreviewLimit) => "Output exceeds display limit | F6 Details".into(),
+            (Ja, Self::PreviewLimit) => "出力の表示上限を超えました | F6 詳細".into(),
+            (En, Self::PreviewNotice) => "  |   | . Display excerpt | F6 Details".into(),
+            (Ja, Self::PreviewNotice) => "  |   | . 表示用抜粋 | F6 詳細".into(),
+            (En, Self::PreviewLoading) => "  |   | Loading output.".into(),
+            (Ja, Self::PreviewLoading) => "  |   | 出力を取得中.".into(),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum LiveWorkTarget {
@@ -83,6 +192,7 @@ pub struct LiveOutputPreview {
 }
 #[derive(Debug, Default)]
 pub(super) struct LiveWorkView {
+    language: UiLanguage,
     snapshot: Option<LiveWorkSnapshot>,
     pub active: bool,
     selected: Option<LiveWorkTarget>,
@@ -137,16 +247,11 @@ fn fit(text: &str, width: usize) -> String {
     result.push('.');
     result
 }
-fn state_label(state: &str) -> &str {
-    match state {
-        "starting" => "起動中",
-        "running" | "live" => "実行中",
-        "stopping" => "停止中",
-        "waiting" => "待機中",
-        _ => state,
-    }
-}
+
 impl LiveWorkView {
+    pub fn set_language(&mut self, language: UiLanguage) {
+        self.language = language;
+    }
     pub fn accept(&mut self, snapshot: Option<LiveWorkSnapshot>, now: Instant) -> bool {
         let mut snapshot = snapshot;
         if let Some(snapshot) = &mut snapshot {
@@ -309,8 +414,8 @@ impl LiveWorkView {
     fn output_age_label(&self, index: usize) -> Option<String> {
         let age = self.seconds.get(index)?.1?;
         Some(format!(
-            " | 最後の出力 {}前",
-            crate::presentation::elapsed_text(age.saturating_mul(1000), false)
+            " | {}",
+            WorkMessage::OutputAge(age).render(self.language)
         ))
     }
     /// The heading's blink origin (#90): the section's existing seconds
@@ -466,7 +571,7 @@ impl LiveWorkView {
                 self.preview = Some(preview);
                 self.error = None;
             }
-            Ok(_) => self.error = Some("出力の表示上限を超えました | F6 詳細".into()),
+            Ok(_) => self.error = Some(WorkMessage::PreviewLimit.render(self.language)),
             Err(error) => self.error = Some(bounded(&error, 256)),
         }
         true
@@ -514,23 +619,22 @@ impl LiveWorkView {
             .seconds
             .first()
             .and_then(|(elapsed, _)| *elapsed)
-            .map(|s| {
-                format!(
-                    " | 最古 {}",
-                    crate::presentation::elapsed_text(s.saturating_mul(1000), false)
-                )
-            })
+            .map(|s| format!(" | {}", WorkMessage::Oldest(s).render(self.language)))
             .unwrap_or_default();
         let output = self.output_age_label(0).unwrap_or_default();
         Some(format!(
-            "{} | shell {} | 子 {} | 待機 {}{timing}{output}",
-            crate::presentation::rows::RowKind::LiveWork.spec().1,
-            snapshot.shells,
-            snapshot.children,
-            snapshot
-                .waits
-                .map(|n| n.to_string())
-                .unwrap_or_else(|| "未取得".into())
+            "{} | {}{timing}{output}",
+            WorkMessage::Heading {
+                empty: false,
+                folded: self.collapsed
+            }
+            .render(self.language),
+            WorkMessage::Counts {
+                shells: snapshot.shells,
+                children: snapshot.children,
+                waits: snapshot.waits
+            }
+            .render(self.language)
         ))
     }
 }
@@ -550,7 +654,7 @@ pub(super) fn draw(
             .saturating_add((s.rows.len() - view.visible_rows) as u64)
     });
     let hidden_label = if view.visible_rows == 0 && hidden > 0 {
-        format!(" | 他{hidden}件")
+        format!(" | {}", WorkMessage::More(hidden).render(view.language))
     } else {
         String::new()
     };
@@ -560,20 +664,24 @@ pub(super) fn draw(
         .filter(|_| view.has_work())
         .map(|s| {
             format!(
-                " | shell {} | 子 {} | 待機 {}",
-                s.shells,
-                s.children,
-                s.waits
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "未取得".into())
+                " | {}",
+                WorkMessage::Counts {
+                    shells: s.shells,
+                    children: s.children,
+                    waits: s.waits
+                }
+                .render(view.language)
             )
         })
         .unwrap_or_default();
-    let (mark, name, _) = crate::presentation::rows::RowKind::LiveWork.spec();
-    let empty_label = if view.has_work() { "" } else { " | なし" };
-    let fold = if view.collapsed { " ▸" } else { "" };
+    let mark = "*";
+    let name = WorkMessage::Heading {
+        empty: !view.has_work(),
+        folded: view.collapsed,
+    }
+    .render(view.language);
     let heading = fit(
-        &format!("{mark} {name}{empty_label}{hidden_label}{counts}{fold}"),
+        &format!("{mark} {name}{hidden_label}{counts}"),
         usize::from(area.width),
     );
     let separate_overflow = hidden > 0
@@ -597,15 +705,15 @@ pub(super) fn draw(
     });
     for (index, row) in view.rows().iter().take(view.visible_rows).enumerate() {
         let marker = if view.active && view.selected.as_ref() == Some(&row.target) {
-            "›"
+            ">"
         } else {
             " "
         };
         // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
         let kind = match row.target {
             LiveWorkTarget::Shell { .. } => "$",
-            LiveWorkTarget::ChildRun { .. } => "↳",
-            LiveWorkTarget::Wait { .. } => "⋯",
+            LiveWorkTarget::ChildRun { .. } => ">",
+            LiveWorkTarget::Wait { .. } => ":",
         };
         let last_item = index + 1 == view.visible_rows;
         let connector = if last_item && !separate_overflow {
@@ -620,7 +728,10 @@ pub(super) fn draw(
             .map(|s| {
                 format!(
                     " | {}",
-                    crate::presentation::elapsed_text(s.saturating_mul(1000), false)
+                    match view.language {
+                        UiLanguage::En => format!("{s}s"),
+                        UiLanguage::Ja => format!("{s}秒"),
+                    }
                 )
             })
             .unwrap_or_default();
@@ -634,16 +745,15 @@ pub(super) fn draw(
                     view.seconds.get(index).and_then(|(elapsed, _)| *elapsed),
                 ) {
                     (Some(timeout), Some(elapsed)) => format!(
-                        " | 期限目安 {}",
-                        crate::presentation::elapsed_text(
+                        " | {}",
+                        WorkMessage::Deadline(Some(
                             timeout
                                 .saturating_sub(Duration::from_secs(elapsed))
-                                .as_millis()
-                                .min(u128::from(u64::MAX)) as u64,
-                            false
-                        )
+                                .as_secs()
+                        ))
+                        .render(view.language)
                     ),
-                    _ => " | 期限不明".to_owned(),
+                    _ => format!(" | {}", WorkMessage::Deadline(None).render(view.language)),
                 }
             })
             .unwrap_or_default();
@@ -678,7 +788,7 @@ pub(super) fn draw(
             0
         };
         let overflow = if extra > 0 {
-            format!(" | 他{extra}件")
+            format!(" | {}", WorkMessage::More(extra).render(view.language))
         } else {
             String::new()
         };
@@ -695,7 +805,10 @@ pub(super) fn draw(
         let right = format!(
             "{}{overflow}",
             fit(
-                &format!("{}{elapsed}{deadline}{age}", state_label(&row.state)),
+                &format!(
+                    "{}{elapsed}{deadline}{age}",
+                    WorkMessage::State(&row.state).render(view.language)
+                ),
                 right_budget.saturating_sub(overflow.width()),
             )
         );
@@ -725,7 +838,7 @@ pub(super) fn draw(
     }
     if separate_overflow {
         lines.push(Line::styled(
-            format!("\\- 他{hidden}件"),
+            format!("\\- {}", WorkMessage::More(hidden).render(view.language)),
             palette.live_work(),
         ));
     }
@@ -766,10 +879,12 @@ pub(super) fn draw(
             if (preview.skipped || preview.decode_uncertain)
                 && lines.len() < usize::from(area.height)
             {
-                lines.push(Line::from("  |   | . 表示用抜粋 | F6 詳細"));
+                lines.push(Line::from(WorkMessage::PreviewNotice.render(view.language)));
             }
         } else if view.error.is_none() {
-            lines.push(Line::from("  |   | 出力を取得中."));
+            lines.push(Line::from(
+                WorkMessage::PreviewLoading.render(view.language),
+            ));
         }
     }
     frame.render_widget(Paragraph::new(lines), area);
@@ -899,6 +1014,17 @@ impl UiState {
 
 #[cfg(test)]
 mod tests {
+    fn japanese_view() -> LiveWorkView {
+        let mut view = LiveWorkView::default();
+        view.set_language(UiLanguage::Ja);
+        view
+    }
+    fn japanese_config() -> Config {
+        let mut config = Config::default();
+        config.ui.language = UiLanguage::Ja;
+        config
+    }
+
     use super::*;
     fn snapshot(at: Instant) -> LiveWorkSnapshot {
         LiveWorkSnapshot {
@@ -955,7 +1081,7 @@ mod tests {
         }
     }
     fn ui(at: Instant) -> UiState {
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        let mut ui = UiState::new(&japanese_config(), PathBuf::from("/"));
         ui.select_thread("thread".into());
         ui.apply(UiUpdate::Activity {
             thread_id: "thread".into(),
@@ -976,7 +1102,7 @@ mod tests {
     #[test]
     fn configured_cap_applies_to_ui_and_counts_hidden_rows() {
         let at = Instant::now();
-        let mut config = Config::default();
+        let mut config = japanese_config();
         config.ui.live_work_rows = 1;
         let mut ui = UiState::new(&config, PathBuf::from("/"));
         ui.select_thread("thread".into());
@@ -1025,7 +1151,7 @@ mod tests {
             text.push_str(symbol);
             x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
         }
-        assert!(text.contains("◉") && text.contains("他4件"), "{text}");
+        assert!(text.contains("*") && text.contains("他4件"), "{text}");
         assert!(ui.live_work_click(0, 0));
         assert!(!ui.view().live_work.active);
     }
@@ -1077,7 +1203,7 @@ mod tests {
             (MotionMode::Off, false, 0),
             (MotionMode::On, true, 0),
         ] {
-            let mut config = Config::default();
+            let mut config = japanese_config();
             config.ui.motion = motion;
             let mut ui = UiState::new(&config, PathBuf::from("/"));
             ui.palette = theme::Palette::from_capabilities(PaletteMode::Dark, no_color, true);
@@ -1129,7 +1255,7 @@ mod tests {
             theme::Palette::from_capabilities(crate::config::PaletteMode::Dark, false, true);
         let render = |dim: bool| {
             let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 5)).unwrap();
-            let mut view = LiveWorkView::default();
+            let mut view = japanese_view();
             view.accept(ui.view().live_work.snapshot.clone(), at);
             view.set_area(Rect::new(0, 0, 80, 5));
             terminal
@@ -1151,7 +1277,7 @@ mod tests {
     #[test]
     fn maximum_rows_share_one_quiet_clock_without_reads() {
         let at = Instant::now();
-        let mut config = Config::default();
+        let mut config = japanese_config();
         config.ui.live_work_rows = 10;
         let mut ui = UiState::new(&config, PathBuf::from("/"));
         ui.select_thread("thread".into());
@@ -1239,7 +1365,7 @@ mod tests {
     #[test]
     fn scope_revision_and_exact_execution_guard_live_output_and_postcommit_markers() {
         let at = Instant::now();
-        let mut view = LiveWorkView::default();
+        let mut view = japanese_view();
         view.accept(Some(snapshot(at)), at);
         view.set_area(Rect::new(0, 0, 80, 5));
         let Some(UiAction::ObserveLiveWork {
@@ -1297,7 +1423,7 @@ mod tests {
     #[test]
     fn snapshot_time_reobservation_avoids_redraw_feedback_and_small_layout_preserves_history() {
         let at = Instant::now();
-        let mut view = LiveWorkView::default();
+        let mut view = japanese_view();
         assert!(view.accept(Some(snapshot(at)), at));
         let mut newer = snapshot(at + Duration::from_millis(500));
         newer.rows[0].elapsed_base = Some(Duration::from_millis(900_500));
@@ -1361,7 +1487,7 @@ mod tests {
     #[test]
     fn wait_target_number_and_approximate_deadline_are_visible() {
         let at = Instant::now();
-        let mut view = LiveWorkView::default();
+        let mut view = japanese_view();
         let mut data = snapshot(at);
         data.overflow = 0;
         data.rows[2].wait_info = Some(WaitInfo {
@@ -1401,7 +1527,7 @@ mod tests {
             }
             text.push('\n');
         }
-        assert!(text.contains("◉ 抱えている作業"), "{text}");
+        assert!(text.contains("* 抱えている作業"), "{text}");
         assert!(text.contains("[1] $") && text.contains("> [1]"), "{text}");
         assert!(
             text.contains("期限目安") && text.contains("待機中"),
@@ -1548,7 +1674,7 @@ mod tests {
     #[test]
     fn newer_saved_output_replaces_only_older_commit_observations_and_labels_the_source() {
         let at = Instant::now();
-        let mut view = LiveWorkView::default();
+        let mut view = japanese_view();
         view.accept(Some(snapshot(at)), at);
         view.set_area(Rect::new(0, 0, 80, 5));
         let Some(UiAction::ObserveLiveWork { revision, .. }) =
@@ -1623,10 +1749,10 @@ mod tests {
     #[test]
     fn height_is_constant_across_zero_two_zero_works_and_empty_heading_does_not_blink() {
         let at = Instant::now();
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        let mut ui = UiState::new(&japanese_config(), PathBuf::from("/"));
         ui.select_thread("thread".into());
         let (text, empty) = screen(&mut ui);
-        assert!(text.contains("◉ 抱えている作業 | なし"), "{text}");
+        assert!(text.contains("* 抱えている作業 | なし"), "{text}");
         assert_eq!(empty, 5);
         assert!(ui.view().live_work.blink_origin().is_none());
         let mut two = snapshot(at);
@@ -1649,7 +1775,7 @@ mod tests {
     fn key_and_heading_click_toggle_between_heading_only_and_fixed_rows() {
         for rows in [1, 5] {
             let at = Instant::now();
-            let mut config = Config::default();
+            let mut config = japanese_config();
             config.ui.live_work_rows = rows;
             let mut ui = UiState::new(&config, PathBuf::from("/"));
             ui.select_thread("thread".into());
@@ -1693,7 +1819,7 @@ mod tests {
     #[test]
     fn tree_connectors_cover_single_multiple_and_overflow_rows_and_all_kinds() {
         let at = Instant::now();
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
+        let mut ui = UiState::new(&japanese_config(), PathBuf::from("/"));
         ui.select_thread("thread".into());
         let mut one = snapshot(at);
         one.rows.truncate(1);
