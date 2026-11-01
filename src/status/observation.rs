@@ -421,10 +421,10 @@ pub(crate) fn matches_filters(
         return Some(false);
     }
     for (filter, name) in [(&args.thread_id, "thread_id"), (&args.run_id, "run_id")] {
-        if let Some(expected) = filter {
-            if fields.get(name)?.as_str()? != expected {
-                return Some(false);
-            }
+        if let Some(expected) = filter
+            && fields.get(name)?.as_str()? != expected
+        {
+            return Some(false);
         }
     }
     if let Some(since) = args.since.as_deref() {

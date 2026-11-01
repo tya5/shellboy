@@ -233,10 +233,10 @@ pub(crate) fn prepare(raw: Raw) -> Result<Value, ApiError> {
             "body_available",
             "output_complete",
         ] {
-            if let Some(number) = value.get(name).and_then(Value::as_i64) {
-                if number == 0 || number == 1 {
-                    value[name] = Value::Bool(number == 1);
-                }
+            if let Some(number) = value.get(name).and_then(Value::as_i64)
+                && (number == 0 || number == 1)
+            {
+                value[name] = Value::Bool(number == 1);
             }
         }
         if let Some(object) = value.as_object_mut() {
