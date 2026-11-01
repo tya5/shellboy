@@ -23,3 +23,22 @@ class ScrollMetricsTests(unittest.TestCase):
     def test_ignores_test_only_use_and_balances_braces(self):
         self.assertNotIn('use', metrics.production('#[cfg(test)] use super::*;\nfn a() {}'))
         self.assertEqual(metrics.closing('{ { } } rest', 0), 7)
+
+    def test_counts_enum_writes_and_transition_calls_without_other_ui_loading(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src/ui').mkdir(parents=True)
+            (root / 'src/ui/navigation.rs').write_text('''
+struct Navigation { read: ReadState, scroll: VisualScroll, }
+impl Navigation { fn start(&mut self) {
+ self.read = ReadState::Idle;
+ self.set_loading(true);
+ self.model_picker.loading = true;
+} }
+''')
+            result = metrics.measure(root)
+            self.assertEqual(result['counts']['read'], 1)
+            self.assertEqual(result['counts']['loading'], 0)
+            self.assertEqual(result['transition_calls'], 1)
+            self.assertEqual(result['writes_and_transitions'], 2)

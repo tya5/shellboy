@@ -219,3 +219,24 @@ invocations), versus baseline147 (137 + 10); fields18 vs20; scroll307 vs395.
 All three measures decrease, including setter internals and relocated code.
 Remaining work is source/checkpoint transition encapsulation and then the six
 individually committed behaviour fixes; no marked expectation has changed yet.
+
+### Full-field checkpoint measurement
+
+The final helper also includes view_revision and projection width/height/
+revision/focus/origin/area (not only the legacy inventory categories). To avoid
+making the movement look smaller by dropping fields, rerun this exact version
+against `git archive 5cb06aaa` and the checkpoint source with `--root`.
+
+| Measure | Before (5cb06aaa) | Structural checkpoint |
+| --- | ---: | ---: |
+| Direct source mutation sites | 151 | 99 |
+| Transition invocations (including enum setters) | 10 | 56 |
+| Conservative combined sites | 161 | 155 |
+| ThreadView scroll orchestration lines | 395 | 307 |
+| Stored navigation fields, including derived projection fields | 20 | 18 |
+
+The UiState forwarding scroll wrapper remains 7 lines in both versions.
+The earlier 147/141 figures describe the narrower stage-1 inventory categories;
+they are not mixed with this full-field comparison. Four metrics-helper tests
+cover source masking, interleaved test modules and counting both enum writes and
+transition invocations without unrelated loading fields.

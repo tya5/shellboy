@@ -3517,3 +3517,13 @@ scroll401 vs baseline395, fields20 are not improvements. Next replace flags with
 explicit states and split orchestration; do not claim completion from relocation.
 The pre-existing frontend watchdog allowance fingerprint follows only the field
 access change: no deadline, guard count or assertion was weakened.
+
+### #118 structural checkpoint ready for branch CI
+
+Ownership movement, state enums, bounded scroll-step extraction and atomic read
+starts are separate structural commits, with characterizations unchanged at each
+boundary. Full-field metrics161 ->155 combined sites, scroll395 ->307, fields20
+->18 (wrappers not double-counted). Fresh check/fmt and scrolling6/0 plus
+stream/refresh11/0 integration regressions pass (57f169e8). Source/checkpoint
+encapsulation and all six individually committed behaviour fixes remain; this
+is an explicitly partial delivery, not the completed #118 stage 2.

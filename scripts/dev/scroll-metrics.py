@@ -8,7 +8,8 @@ from pathlib import Path
 TOKENS = re.compile(r'r(?P<hash>\#*)".*?"(?P=hash)|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])\'|//[^\n]*|/\*.*?\*/', re.S)
 FIELDS = ('follow', 'loading', 'request', 'pending', 'history_rebase_pending',
           'committed_preview', 'initialized', 'unseen', 'moved_during_read',
-          'anchor', 'row', 'within', 'mode', 'read')
+          'anchor', 'row', 'within', 'mode', 'read', 'view_revision',
+          'width', 'height', 'revision', 'focus', 'origin', 'area')
 FILES = ('src/ui.rs', 'src/ui/view.rs', 'src/ui/history_interaction.rs',
          'src/ui/overlay.rs', 'src/ui/navigation.rs')
 
@@ -52,8 +53,10 @@ def measure(root):
         for name in FIELDS:
             # Ignore request-builder fields and other UI domains. This is the
             # stage-1 inventory, not an instruction/event execution counter.
-            owner = r'(?:self|view)\s*(?:\.\s*(?:active_)?view_mut\(\))?'
-            path_pattern = owner + r'\s*\.\s*(?:navigation\s*\.\s*)?(?:scroll\s*\.\s*)?'
+            owner = r'(?:self|view|state)\s*(?:\.\s*(?:active_)?view_mut\(\))?'
+            projection_only = name in ('width', 'height', 'revision', 'focus', 'origin', 'area')
+            scroll_path = r'scroll\s*\.\s*' if projection_only else r'(?:scroll\s*\.\s*)?'
+            path_pattern = owner + r'\s*\.\s*(?:navigation\s*\.\s*)?' + scroll_path
             pattern = path_pattern + rf'{name}(?:\s*\.\s*(?:node_id|char_offset))?\s*(?:=(?!=)|\+=|-=|\.take\(\))'
             for m in re.finditer(pattern, code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')

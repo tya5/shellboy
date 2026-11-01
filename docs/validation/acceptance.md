@@ -7547,3 +7547,10 @@ and enum writes: 147 ->141 mutation/transition sites, 395 ->307 scroll lines,
 20 ->18 stored fields. No timing threshold, cache budget, protocol, Core, worker,
 queue or dependency change. No real terminal/clipboard, user data or paid provider
 validation. Native branch CI still required before handing this checkpoint off.
+
+The final full-field metrics audit also counts view_revision and all projection
+geometry writes: baseline151 direct +10 transitions=161, checkpoint99 +56=155.
+The earlier147/141 comparison is the narrower legacy inventory, not a different
+outcome. Fields20 ->18 and scroll395 ->307 use the same archived source and
+helper. check/fmt + scrolling6/0 + ui_scroll_stream/refresh11/0 (57f169e8) pass;
+metrics-helper4/0 and test watchdog policy pass. Native branch CI is pending.
