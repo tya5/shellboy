@@ -1766,6 +1766,67 @@ mod tests {
     }
 
     #[test]
+    fn empty_links_screen_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.details = Some(Details::new(ui.view(), true));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Links", "No HTTP(S) links", "Esc Back"],
+                UiLanguage::Ja => &["リンク", "このwindowにHTTP(S)リンク", "Esc 戻る"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn localized_original_worker_output_renders_without_changing_raw_content() {
+        fn configure(ui: &mut UiState) {
+            let body = HistoryBody {
+                node_id: "node-fixture".into(), kind: "assistant_response".into(),
+                text: "RAW-ORIGINAL-CONTENT".into(),
+                context: serde_json::from_value(serde_json::json!({"state":"present","node_id":"node-fixture","created_at":"2026-10-25T00:00:00Z"})).unwrap(),
+                provenance: crate::protocol::NodeProvenance {
+                    sender: None, kind: "assistant_response".into(), created_at: "2026-10-25T00:00:00Z".into(),
+                    source_revision: 0, turn_id: None, run_id: None, origin_thread_id: None,
+                },
+                source_node_ids: vec!["source-id".into()], previous_node_ids: vec!["prev-id".into()],
+                next_node_ids: vec!["next-id".into()], next_cursor: None, tombstone_reason: None,
+            };
+            let mut details = Details::for_node(ui.view(), "node-fixture".into(), false);
+            details.mode = Mode::Original;
+            details.request_id = 42;
+            ui.details = Some(details);
+            ui.apply(crate::ui::UiUpdate::original_page_localized(
+                42,
+                body,
+                ui.config.ui.language,
+            ));
+            assert_eq!(
+                ui.details.as_ref().unwrap().original.as_ref().unwrap().text,
+                "RAW-ORIGINAL-CONTENT"
+            );
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &[
+                    "Original",
+                    "RAW-ORIGINAL-CONTENT",
+                    "Previous prev-id",
+                    "Sources source-id",
+                ],
+                UiLanguage::Ja => &[
+                    "原文",
+                    "RAW-ORIGINAL-CONTENT",
+                    "前 prev-id",
+                    "出典 source-id",
+                ],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
     fn detail_screen_is_bilingual_at_standard_widths() {
         fn configure(ui: &mut UiState) {
             ui.details = Some(Details::new(ui.view(), false));
