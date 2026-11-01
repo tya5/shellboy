@@ -196,6 +196,26 @@ Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash o
 
 `connections.<name>.headers` is an optional HTTP header dictionary. Names must be unique ignoring case, and invalid control characters in values are rejected. `api_key_env` cannot be combined with an Authorization header. Prefer environment-variable references to writing secrets directly in headers. `default_effort` is an optional nonempty string accepted by the endpoint. There is no built-in catalog of model capacity or effort support.
 
+### Provider-specific options: `extra_body` and `extra_headers`
+
+Shellboy sends only what a conversation needs. Everything optional and provider-specific (reasoning settings, sampling, cache hints, beta headers) is yours to add per connection, and **Shellboy does not interpret it**. Providers change what they accept from one model generation to the next, so the list stays in your configuration, not in Shellboy.
+
+```toml
+[connections.proxy]
+extra_body = { temperature = 0.2, thinking = { type = "enabled", budget_tokens = 2048 } }
+extra_headers = { "X-Beta-Feature" = "alpha" }
+```
+
+- `extra_body` is a TOML table. Its keys are added to the top level of each conversation and summary request body. It never replaces a field Shellboy sends.
+- `extra_headers` is a table of strings added to each conversation and summary request. It is not sent to model-list or embedding requests.
+- Both apply to every dialect (`responses`, `chat_completions`, and later ones). With neither set, the request is exactly what it was before.
+- Shellboy checks only three things: the value is representable as JSON (no TOML dates or times), it is small (`extra_body` at most 64 KiB serialized, `extra_headers` at most 32 entries of at most 8 KiB each), and it does not collide with a field Shellboy owns. Anything else is passed through and judged by the provider. A rejected value reports `config_invalid` at `shellboy config check` and at startup.
+- Reserved `extra_body` top-level keys (rejected, not overridden). `responses`: `model`, `input`, `tools`, `stream`, `store`, `include`, `reasoning`, `previous_response_id`, `prompt_cache_key`. `chat_completions`: `model`, `messages`, `tools`, `stream`, `stream_options`, `reasoning_effort`. A name reserved for one dialect is ordinary for the other.
+- `extra_headers` rejects credential-like and transport-owned names (`Authorization`, `Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, `Accept`, `X-Shellboy-Session-Id`, and any name containing `api-key`, `apikey`, `secret`, `token` or `credential`). Use `api_key_env` or `headers` for credentials. A name may not repeat an entry of `headers`.
+- Effort: `default_effort` (and a Thread's effort) is sent as `reasoning` (Responses) or `reasoning_effort` (Chat). Those keys are reserved, so `extra_body` cannot also set them; there is nothing to prioritize. Provider-specific reasoning shapes (for example `thinking`) go in `extra_body`.
+- Each model attempt records only a SHA-256 hash of the extra fields it sent (`extra_digest` in its input manifest), so you can later tell whether two attempts used the same settings. The contents stay in your configuration file; they are not copied into the database. Treat `extra_body` values as non-secret: use `api_key_env` for keys.
+- Restart the owner after changing either setting. The provider's own documentation, not Shellboy, says which values are valid; add and remove entries as the provider changes.
+
 `ssl_verify` controls HTTPS certificate verification per connection and defaults to `true`. Set `ssl_verify = false` in the same `[connections.proxy]` only when disabling verification for that connection, for example for a self-signed certificate. It applies to conversation, summary, embedding, and model-list requests on the connection, skipping issuer, expiry, and hostname verification. Direct HTTP APIs have no certificate to verify. With an HTTPS forwarding proxy, it also applies to that proxy's certificate. Restart after changing owner settings. Standalone RAG follows the connection configuration read at invocation. No environment-only switch disables verification.
 
 Conversations use the selected API dialect; indexing and search queries keep using the Embeddings API. Omit both `embedding.connection` and `embedding.model`, or specify both. The named connection must exist. Changing embedding settings selects another space and does not silently reindex all historical data. See [history and search](history-and-search.md) for explicit backfill/rebuild and costs. Searches can also incur API usage.
@@ -271,7 +291,7 @@ replayed), and vendor-specific opaque tool metadata is not supported. Modes
 requiring such replay are outside this first version. `reasoning_effort` is sent
 when an effort is configured, but provider acceptance/meaning is unverified.
 `prompt_cache_key=true` is Responses-only and is rejected with Chat; omit it.
-No provider-specific `extra_body`/`cached_content` control is added in this version.
+Provider-specific optional request fields are not built in; add them yourself with `extra_body` and `extra_headers` (next section).
 
 Chat requests `stream_options.include_usage`. Reported `prompt_tokens`,
 `completion_tokens`, cached-input and reasoning-token details map to the normal

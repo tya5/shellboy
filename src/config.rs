@@ -70,6 +70,31 @@ impl Api {
             Self::ChatCompletions => "chat_completions",
         }
     }
+    /// Top-level request-body fields Shellboy itself owns for this dialect.
+    /// `extra_body` may not contain them; there is no precedence rule to learn.
+    pub fn reserved_body_fields(self) -> &'static [&'static str] {
+        match self {
+            Self::Responses => &[
+                "model",
+                "input",
+                "tools",
+                "stream",
+                "store",
+                "include",
+                "reasoning",
+                "previous_response_id",
+                "prompt_cache_key",
+            ],
+            Self::ChatCompletions => &[
+                "model",
+                "messages",
+                "tools",
+                "stream",
+                "stream_options",
+                "reasoning_effort",
+            ],
+        }
+    }
     pub fn unavailable_features(self) -> Vec<String> {
         match self {
             Self::Responses => vec![],
@@ -93,6 +118,11 @@ pub struct Connection {
     pub api_key_env: Option<String>,
     pub default_effort: Option<String>,
     pub headers: BTreeMap<String, String>,
+    /// Provider-specific optional request fields, merged into conversation
+    /// request bodies without interpretation. See `validate`.
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
+    /// Provider-specific optional headers for conversation requests only.
+    pub extra_headers: BTreeMap<String, String>,
     pub ssl_verify: bool,
     pub session_header: bool,
     pub prompt_cache_key: bool,
@@ -112,6 +142,8 @@ impl Default for Connection {
             api_key_env: None,
             default_effort: None,
             headers: BTreeMap::new(),
+            extra_body: serde_json::Map::new(),
+            extra_headers: BTreeMap::new(),
             ssl_verify: true,
             session_header: true,
             prompt_cache_key: false,
@@ -133,6 +165,8 @@ impl fmt::Debug for Connection {
             .field("api_key_env", &self.api_key_env)
             .field("default_effort", &self.default_effort)
             .field("headers", &"[redacted]")
+            .field("extra_body", &"[redacted]")
+            .field("extra_headers", &"[redacted]")
             .field("ssl_verify", &self.ssl_verify)
             .field("session_header", &self.session_header)
             .field("prompt_cache_key", &self.prompt_cache_key)
@@ -175,6 +209,18 @@ impl Connection {
     }
     /// Resolve credentials only immediately before beginning this connection.
     /// No environment values are included in errors or Debug output.
+    /// SHA-256 over the canonical JSON of the extra fields actually sent, or
+    /// `None` when neither is configured. Contents stay in the config file.
+    pub fn extra_digest(&self) -> Option<String> {
+        if self.extra_body.is_empty() && self.extra_headers.is_empty() {
+            return None;
+        }
+        let canonical = serde_json::json!({
+            "extra_body": self.extra_body,
+            "extra_headers": self.extra_headers,
+        });
+        Some(crate::digest::sha256_hex(canonical.to_string()))
+    }
     pub fn credentials(
         &self,
         env: impl Fn(&str) -> Option<String>,

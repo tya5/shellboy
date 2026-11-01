@@ -213,7 +213,14 @@ impl HttpModelClient {
             .get("tools")
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
-        let request = dialect::encode(self.connection.api, request)?;
+        let mut request = dialect::encode(self.connection.api, request)?;
+        // Shellboy never interprets these. Config validation rejects any key
+        // Shellboy owns, so a plain insert can neither override nor reorder.
+        if let Some(object) = request.as_object_mut() {
+            for (key, value) in &self.connection.extra_body {
+                object.entry(key.clone()).or_insert_with(|| value.clone());
+            }
+        }
         let (response, secrets, observation) = self
             .send(
                 ApiEndpoint::Responses,

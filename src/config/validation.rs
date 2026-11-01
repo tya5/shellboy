@@ -162,7 +162,107 @@ impl Connection {
                 ));
             }
         }
+        self.validate_extra(name)
+    }
+    /// `extra_body` and `extra_headers` are never interpreted. Only shape,
+    /// size and collisions with fields Shellboy itself owns are checked.
+    fn validate_extra(&self, name: &str) -> Result<(), ConfigError> {
+        let body_key = format!("connections.{name}.extra_body");
+        for key in self.extra_body.keys() {
+            if self.api.reserved_body_fields().contains(&key.as_str()) {
+                return Err(invalid(
+                    body_key,
+                    format!(
+                        "`{key}` is a field Shellboy sends itself for api={}; remove it from extra_body",
+                        self.api.as_str()
+                    ),
+                ));
+            }
+        }
+        let value = serde_json::Value::Object(self.extra_body.clone());
+        if contains_toml_datetime(&value) {
+            return Err(invalid(
+                body_key,
+                "must be representable as JSON; use strings instead of TOML dates/times",
+            ));
+        }
+        if value.to_string().len() > MAX_EXTRA_BODY_BYTES {
+            return Err(invalid(
+                body_key,
+                format!("serialized JSON must be at most {MAX_EXTRA_BODY_BYTES} bytes"),
+            ));
+        }
+        let headers_key = format!("connections.{name}.extra_headers");
+        if self.extra_headers.len() > MAX_EXTRA_HEADERS {
+            return Err(invalid(
+                headers_key,
+                format!("at most {MAX_EXTRA_HEADERS} headers are allowed"),
+            ));
+        }
+        let mut seen: std::collections::BTreeSet<String> = self
+            .headers
+            .keys()
+            .map(|key| key.to_ascii_lowercase())
+            .collect();
+        for (key, value) in &self.extra_headers {
+            if key.is_empty()
+                || !key.bytes().all(header_name_byte)
+                || value.len() > MAX_EXTRA_HEADER_VALUE_BYTES
+                || value
+                    .chars()
+                    .any(|c| c == '\r' || c == '\n' || c == '\0' || (c.is_control() && c != '\t'))
+            {
+                return Err(invalid(
+                    headers_key,
+                    "must contain valid HTTP header names and values",
+                ));
+            }
+            let lower = key.to_ascii_lowercase();
+            if RESERVED_EXTRA_HEADERS.contains(&lower.as_str())
+                || ["api-key", "apikey", "secret", "token", "credential"]
+                    .iter()
+                    .any(|word| lower.contains(word))
+            {
+                return Err(invalid(
+                    headers_key,
+                    "credential-like and transport-owned headers are not accepted; use api_key_env or headers for credentials",
+                ));
+            }
+            if !seen.insert(lower) {
+                return Err(invalid(
+                    headers_key,
+                    "names must be unique case-insensitively and must not repeat a `headers` entry",
+                ));
+            }
+        }
         Ok(())
+    }
+}
+const MAX_EXTRA_BODY_BYTES: usize = 64 * 1024;
+const MAX_EXTRA_HEADERS: usize = 32;
+const MAX_EXTRA_HEADER_VALUE_BYTES: usize = 8 * 1024;
+/// Headers the transport or the credential path owns.
+const RESERVED_EXTRA_HEADERS: &[&str] = &[
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+    "host",
+    "content-type",
+    "content-length",
+    "accept",
+    "transfer-encoding",
+    "connection",
+    "x-shellboy-session-id",
+];
+fn contains_toml_datetime(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.keys().any(|key| key.starts_with("$__toml_private"))
+                || map.values().any(contains_toml_datetime)
+        }
+        serde_json::Value::Array(items) => items.iter().any(contains_toml_datetime),
+        _ => false,
     }
 }
 impl Limits {

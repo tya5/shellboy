@@ -63,6 +63,13 @@ async fn admit_attempt(
     history_characters: u64,
 ) -> Result<bool, ApiError> {
     let current = snapshot.clone();
+    // Hash only; the configured extra fields stay in the user's config file.
+    let extra_digest = control
+        .store
+        .config
+        .connections
+        .get(&snapshot.profile)
+        .and_then(crate::config::Connection::extra_digest);
     let attempt_id = attempt.to_owned();
     let result = control
         .store
@@ -75,6 +82,7 @@ async fn admit_attempt(
                 &attempt_attachments,
                 input_characters,
                 history_characters,
+                extra_digest,
             )?;
             if !admitted {
                 return Ok(false);

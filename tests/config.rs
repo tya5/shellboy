@@ -748,3 +748,104 @@ fn summary_request_budgets_are_independent_configurable_and_positive() {
         }
     }
 }
+
+fn connection_with(extra: &str) -> Result<Config, ConfigError> {
+    Config::parse(&format!(
+        "[connections.proxy]\nbase_url='https://example.com'\n{extra}"
+    ))
+}
+#[test]
+fn extra_body_and_headers_are_stored_without_interpretation() {
+    let config = connection_with(
+        "extra_body = { thinking = { type = 'enabled', budget_tokens = 2048 }, temperature = 0.25, tags = ['a', 1, true] }\nextra_headers = { 'X-Beta-Feature' = 'alpha,beta' }",
+    )
+    .unwrap();
+    let connection = &config.connections["proxy"];
+    assert_eq!(connection.extra_body["thinking"]["budget_tokens"], 2048);
+    assert_eq!(connection.extra_body["tags"][1], 1);
+    assert_eq!(connection.extra_headers["X-Beta-Feature"], "alpha,beta");
+    let digest = connection.extra_digest().unwrap();
+    assert_eq!(digest.len(), 64);
+    // Only a hash is exposed; Debug never prints contents.
+    let debug = format!("{connection:?}");
+    assert!(!debug.contains("budget_tokens") && !debug.contains("alpha"));
+    assert!(
+        connection_with("").unwrap().connections["proxy"]
+            .extra_digest()
+            .is_none()
+    );
+    let other = connection_with("extra_body = { temperature = 0.5 }").unwrap();
+    assert_ne!(other.connections["proxy"].extra_digest().unwrap(), digest);
+}
+#[test]
+fn extra_body_rejects_fields_shellboy_owns_per_dialect() {
+    for (api, field) in [
+        ("responses", "model"),
+        ("responses", "input"),
+        ("responses", "tools"),
+        ("responses", "stream"),
+        ("responses", "store"),
+        ("responses", "include"),
+        ("responses", "reasoning"),
+        ("responses", "previous_response_id"),
+        ("responses", "prompt_cache_key"),
+        ("chat_completions", "model"),
+        ("chat_completions", "messages"),
+        ("chat_completions", "tools"),
+        ("chat_completions", "stream"),
+        ("chat_completions", "stream_options"),
+        ("chat_completions", "reasoning_effort"),
+    ] {
+        let error = connection_with(&format!("api='{api}'\nextra_body = {{ {field} = 1 }}"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("connections.proxy.extra_body"),
+            "{api} {field}: {error}"
+        );
+    }
+    // A name reserved for one dialect is ordinary for the other.
+    connection_with("api='chat_completions'\nextra_body = { reasoning = 1, input = 2 }").unwrap();
+    connection_with("api='responses'\nextra_body = { messages = 1, reasoning_effort = 'x' }")
+        .unwrap();
+}
+#[test]
+fn extra_body_is_bounded_and_must_be_json() {
+    let big = "x".repeat(70 * 1024);
+    assert!(connection_with(&format!("extra_body = {{ blob = '{big}' }}")).is_err());
+    assert!(connection_with("extra_body = { when = 1979-05-27T07:32:00Z }").is_err());
+    assert!(connection_with("extra_body = { nested = { when = 1979-05-27 } }").is_err());
+    assert!(connection_with("extra_body = 'text'").is_err());
+}
+#[test]
+fn extra_headers_reject_credentials_transport_fields_and_duplicates() {
+    for name in [
+        "Authorization",
+        "proxy-authorization",
+        "Cookie",
+        "Host",
+        "Content-Type",
+        "Content-Length",
+        "Accept",
+        "X-Shellboy-Session-Id",
+        "X-Api-Key",
+        "x-secret-thing",
+        "My-Token",
+    ] {
+        let error = connection_with(&format!("extra_headers = {{ '{name}' = 'v' }}"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("connections.proxy.extra_headers"),
+            "{name}: {error}"
+        );
+    }
+    assert!(connection_with("extra_headers = { 'Bad Name' = 'v' }").is_err());
+    assert!(connection_with("extra_headers = { 'X-A' = \"a\\nb\" }").is_err());
+    assert!(
+        connection_with("headers = { X-Same = 'a' }\nextra_headers = { x-same = 'b' }").is_err()
+    );
+    assert!(connection_with("extra_headers = { 'X-A' = 'a', 'x-a' = 'b' }").is_err());
+    let many: Vec<String> = (0..33).map(|i| format!("'X-H{i}' = 'v'")).collect();
+    assert!(connection_with(&format!("extra_headers = {{ {} }}", many.join(", "))).is_err());
+}

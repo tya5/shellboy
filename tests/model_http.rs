@@ -1459,3 +1459,95 @@ async fn fragmented_shell_description_sse_is_bounded_and_opt_out_is_visible_in_h
         assert_eq!(std::fs::read_to_string(&record).unwrap().lines().count(), count);
     }).await.unwrap();
 }
+
+fn header_values<'a>(request: &'a Request, wanted: &str) -> Vec<&'a str> {
+    request
+        .head
+        .lines()
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case(wanted).then_some(value.trim())
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn extra_body_and_headers_reach_the_wire_unchanged_for_both_dialects() {
+    use shellboy::config::Api;
+    for api in [Api::Responses, Api::ChatCompletions] {
+        let mut fixture = session_fixture(Connection {
+            api,
+            extra_body: serde_json::from_value(json!({
+                "thinking": {"type": "enabled", "budget_tokens": 2048},
+                "temperature": 0.25,
+                "metadata": ["日本語", null, 1.5]
+            }))
+            .unwrap(),
+            extra_headers: BTreeMap::from([("X-Beta-Feature".into(), "alpha,beta".into())]),
+            ..Default::default()
+        })
+        .await;
+        // The fixture replies in Responses shape, so Chat cannot parse it;
+        // only the request that reached the wire matters here.
+        let _ = fixture
+            .client
+            .response(session_request(), CancellationToken::new(), None)
+            .await;
+        let request = fixture.requests.recv().await.unwrap();
+        assert_eq!(request.body["thinking"]["budget_tokens"], 2048);
+        assert_eq!(request.body["temperature"], 0.25);
+        assert_eq!(request.body["metadata"], json!(["日本語", null, 1.5]));
+        assert_eq!(request.body["stream"], true);
+        assert_eq!(header_values(&request, "x-beta-feature"), ["alpha,beta"]);
+        // Extra headers apply to conversations only, not to other endpoints.
+        fixture
+            .client
+            .models(CancellationToken::new())
+            .await
+            .unwrap();
+        let models = fixture.requests.recv().await.unwrap();
+        assert!(header_values(&models, "x-beta-feature").is_empty());
+    }
+}
+
+#[tokio::test]
+async fn without_extra_settings_the_request_is_exactly_the_baseline() {
+    use shellboy::config::Api;
+    for api in [Api::Responses, Api::ChatCompletions] {
+        let mut plain = session_fixture(Connection {
+            api,
+            ..Default::default()
+        })
+        .await;
+        let mut empty = session_fixture(Connection {
+            api,
+            extra_body: serde_json::Map::new(),
+            extra_headers: BTreeMap::new(),
+            ..Default::default()
+        })
+        .await;
+        let mut keys = Vec::new();
+        for fixture in [&mut plain, &mut empty] {
+            let _ = fixture
+                .client
+                .response(session_request(), CancellationToken::new(), None)
+                .await;
+            let request = fixture.requests.recv().await.unwrap();
+            let mut names: Vec<String> =
+                request.body.as_object().unwrap().keys().cloned().collect();
+            names.sort();
+            keys.push((names, request.body.to_string()));
+        }
+        assert_eq!(keys[0], keys[1]);
+        // Optional provider fields are never added on the user's behalf.
+        for absent in [
+            "thinking",
+            "temperature",
+            "tool_choice",
+            "max_tokens",
+            "cache_control",
+        ] {
+            assert!(!keys[0].0.iter().any(|key| key == absent), "{absent}");
+        }
+    }
+}

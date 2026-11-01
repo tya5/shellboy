@@ -256,6 +256,17 @@ impl HttpModelClient {
             return Err(cancelled());
         }
         let (mut headers, mut secrets) = self.headers()?;
+        if matches!(endpoint, ApiEndpoint::Responses) {
+            for (name, value) in &self.connection.extra_headers {
+                let name = HeaderName::from_bytes(name.as_bytes()).map_err(|_| {
+                    ModelError::new("config_invalid", "Invalid configured extra header name")
+                })?;
+                let value = HeaderValue::from_str(value).map_err(|_| {
+                    ModelError::new("config_invalid", "Invalid configured extra header value")
+                })?;
+                headers.entry(name).or_insert(value);
+            }
+        }
         if matches!(endpoint, ApiEndpoint::Responses)
             && let Some(value) = session_header
         {

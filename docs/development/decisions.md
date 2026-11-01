@@ -2585,3 +2585,19 @@ strings to whole-second period bounds. The finite pass validates current UTC
 format and exact half-open fractional boundaries. Non-current/missing/malformed
 times are counted as excluded, never inferred. Only measured evidence may justify
 a separate proposal for a plain started_at index; no such index is implemented.
+## #119: Provider extras are opaque, validated by shape only (2026-11-01)
+
+Add `extra_body` and `extra_headers` per connection. Shellboy does not interpret
+them; it checks JSON representability, size (64 KiB body, 32 headers of 8 KiB)
+and collisions with fields it owns, and passes the rest through. Reject a
+colliding key instead of choosing a winner, so `reasoning`/`reasoning_effort`
+stay owned by `default_effort` and no precedence rule has to be learned.
+Reserved lists are per dialect and are the only place that must track Shellboy's
+own request shape. Credential-like and transport-owned header names are
+rejected; credentials keep one path (`api_key_env`/`headers`). The attempt
+manifest stores only a SHA-256 of the canonical extras, never the contents, so
+secrets accidentally placed there are not copied into the database (the config
+file remains their only home). Extras apply to conversation and summary
+requests, not to model-list or embedding requests. Revisit if a provider needs a
+non-top-level merge, per-model extras, or a header that the credential filter
+wrongly rejects.

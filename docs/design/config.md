@@ -26,6 +26,10 @@
 
 両値ともRust DefaultとTOML省略時を揃え、文字列・整数などbool以外を拒否する。owner再起動後の要求へ反映する。LiteLLM側のroutingでは `x-litellm-session-id` やtrace ID等が優先される構成があるため、意図せず全Thread共通の固定識別headerを併用しない。接続先側の設定・優先順位は [設定ガイド](../guides/configuration.md#per-thread-session-identity) と [model HTTP](model-http.md) を参照する。
 
+## 接続ごとの追加指定（extra_body / extra_headers、#119）
+
+提供元ごとの任意の指定（推論の細かい設定、サンプリング、キャッシュ指定、ベータheader等）はShellboyが解釈しない。`connections.<名前>.extra_body`（TOMLの表、JSONとして要求本文の最上位へ追加）と `extra_headers`（文字列の表）を、会話・要約の要求にだけ付ける。未設定の要求は従来と完全に同じ。検証はJSONで表せること（TOMLの日時を拒否）、大きさ（本文64KiB、header 32個・値8KiB）、Shellboyが持つ欄との衝突の3点だけ。予約欄は方言ごとの一覧（`Api::reserved_body_fields`）で、衝突は上書きせず拒否する。そのため `reasoning`／`reasoning_effort` は `default_effort` が持ち、`extra_body` との優先順位は存在しない。`extra_headers` は資格情報らしい名前（authorization、cookie、名前に api-key／secret／token／credential を含むもの）と転送を所有するheader（host、content-*、accept、`x-shellboy-session-id`）を拒否し、`headers` と大文字小文字を無視して重複できない。attemptの入力manifestには追加指定の正準JSONのSHA-256（`extra_digest`）だけを残し、中身は設定ファイルが持つ。再起動で反映する。
+
 ## 接続ごとのTLS検証
 
 `connections.<名前>.ssl_verify` はboolで既定true。明示falseの場合だけ、その接続のHTTPS証明書検証を無効化する。HTTP APIへの直接接続では検証対象がない。HTTPS中継プロキシを経由する場合は、そのプロキシ証明書にも同じ設定を適用する。ConnectionのRust DefaultとTOML省略時をともにtrueへ揃え、文字列や数値は拒否する。ownerは起動時の設定を保持するため変更後は再起動する。独立RAGは実行時に読む同じ接続設定を使う。接続CLIからownerのTLS設定を上書きしない。
