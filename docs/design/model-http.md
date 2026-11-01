@@ -463,3 +463,10 @@ entry costs 14 serialized UTF-8 bytes, not a measured token estimate.
 Existing history/DB formats, lifecycle and workers stay
 unchanged. Incomplete opaque audit input remains subject to existing transport
 limits; it is not accepted as an executable description.
+
+## Optional cache diagnostics (#142 part 1)
+
+The [adopted cache diagnostic contract](cache-diagnostics.md) adds an opt-in
+Responses comparison identity and a separate bounded provider-fact whitelist.
+It preserves terminal validation, usage normalization, cancellation and adoption
+CAS. No sticky response/request headers are captured or forwarded.

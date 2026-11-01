@@ -179,3 +179,11 @@ Unlike sections with independent defaults, an explicitly present section uses
 only its specified limit keys; omission of the whole section selects both
 20,000 characters and 5%. Config parsing and config check enforce the same
 numeric validation and expose resolved limits without a paid conversation call.
+
+## Responses cache diagnostics (#142 part 1)
+
+Adopt [cache diagnostics](cache-diagnostics.md):
+`connections.<name>.prompt_cache_diagnostics = false` by default; true is
+Responses-only and requires `prompt_caching`. The owned dynamic
+`prompt_cache_options` field is reserved against `extra_body`. No sticky headers
+or provider-specific settings are introduced.

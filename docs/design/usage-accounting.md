@@ -66,3 +66,10 @@ indexed SQL totals of saved attempts and saved timing values. Measure the actual
 queries first; no storage or producer change follows merely from this document.
 Unrecorded summary/embedding coverage remains explicit. Non-2xx HTTP behavior
 and existing #49 data remain unchanged; this version adds no observation hooks.
+
+## Attempt cache observations (#142 part 1)
+
+[Cache diagnostics](cache-diagnostics.md) are bounded attempt manifest metadata,
+not usage counters or inferred aggregates. `usage get --attempt` reads one
+attempt and reports the provider object or explicit null. Existing aggregate
+queries, counter whitelist and scalar readers are unchanged.

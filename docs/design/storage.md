@@ -198,3 +198,12 @@ data-directory backup (including any SQLite WAL/SHM files) before opening it
 with the new binary. Older binaries reject schema17. Recheck main's actual
 version and migration names immediately before F admission;17 is not reserved
 against independent work. This primitive alone does not expose descendant UI.
+
+## Last adopted attempt lookup (#142 part 1)
+
+Conversation schema 19 adds the nullable derived Thread pointer described in
+[cache diagnostics](cache-diagnostics.md). Existing attempts own the identities;
+the pointer changes only with guarded response adoption and clears on referenced
+attempt deletion. A startup-only migration backfills completed attempts; runtime
+readers do not carry historical schema branches. Diagnostic bytes remain in the
+existing bounded attempt manifest and existing GC accounting.

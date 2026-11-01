@@ -325,3 +325,12 @@ Owner replacement/reload does not transfer running work in this feature. Keep
 - 出力：項目ごとの index/type/role/文字数/SHA-256先頭12桁と、全体のSHA-256・byte数・文字数。`--body` のときだけbody JSONを含め、`extra_body` の値はSHA-256だけにする。ヘッダーと資格情報は出さない。
 - `--compare-attempt B`：Bの項目hash列と比べ、共通の先頭項目数と最初に異なる項目indexを返す。同じtool loopの連続要求では、前の要求の末尾にある要求ごとのcontext行だけが異なるのが正常。
 
+
+## Single-attempt cache observations (#142 part 1)
+
+`usage get --attempt ID` selects one saved attempt instead of aggregate scopes;
+it conflicts with Thread/Run/Turn, children, time/group/pagination selectors.
+The response includes attempt/state, standard usage scalars and the bounded
+`prompt_cache_diagnostics` object or null. `thread request --attempt` additionally
+exposes that saved observation and rebuilds the saved comparison ID; see
+[cache diagnostics](cache-diagnostics.md). Both paths are read-only.
