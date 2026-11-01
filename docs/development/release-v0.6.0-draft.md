@@ -22,8 +22,9 @@ Messages support, and new request and resource inspection tools.
   Japanese, add the following to the configuration and restart the TUI; use
   `"en"` to select English. Help, conversation and browser surfaces are
   migrating in stages; saved content and model/user text are not translated
-  (#35, #139, #145-#148). Core fallback titles, startup diagnostics and new
-  compaction summary headings use English without rewriting saved data (#152).
+  (#35, #139, #145-#148). Core fallback titles, data-directory and IPC startup
+  diagnostics, and new compaction summary headings use English without rewriting
+  saved data (#152).
 
   ```toml
   [ui]
