@@ -2601,3 +2601,18 @@ file remains their only home). Extras apply to conversation and summary
 requests, not to model-list or embedding requests. Revisit if a provider needs a
 non-top-level merge, per-model extras, or a header that the credential filter
 wrongly rejects.
+
+## #121: context_role maps inserted context at send time (2026-11-01)
+
+Add `connections.<name>.context_role = "developer" | "user"` (default
+`developer`). With `user`, `developer` items after the leading system message are
+sent as `user` with unchanged text, in the request just before dialect encoding,
+so every dialect and the summary path get it and saved nodes are never rewritten.
+A per-connection setting was chosen over a global switch because OpenAI-style
+APIs give developer a real authority meaning and only some gateways need the
+change. The marker text (`Shellboy event v1:`) stays so the model can tell a
+notification from user text. Considered and rejected: appending a synthetic user
+turn only when the tail is not user (hides the real order and still changes
+saved-vs-sent equivalence), and dropping the notices (loses delivered facts).
+Known limits: two adjacent user messages after mapping are left to the provider
+or gateway to merge. Revisit if a provider rejects consecutive user messages.

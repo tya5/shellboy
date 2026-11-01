@@ -110,6 +110,20 @@ impl Api {
     }
 }
 
+/// Role used on the wire for context Shellboy inserts into a conversation
+/// (event notices, context changes, instructions). Saved history is unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextRole {
+    /// Send them as `developer` messages (the meaning OpenAI-style APIs expect).
+    #[default]
+    Developer,
+    /// Send them as `user` messages, for providers behind a gateway that moves
+    /// developer messages to the system prompt and then rejects a conversation
+    /// that does not end with a user message.
+    User,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {
@@ -117,6 +131,7 @@ pub struct Connection {
     pub base_url: String,
     pub api_key_env: Option<String>,
     pub default_effort: Option<String>,
+    pub context_role: ContextRole,
     pub headers: BTreeMap<String, String>,
     /// Provider-specific optional request fields, merged into conversation
     /// request bodies without interpretation. See `validate`.
@@ -141,6 +156,7 @@ impl Default for Connection {
             base_url: String::new(),
             api_key_env: None,
             default_effort: None,
+            context_role: ContextRole::default(),
             headers: BTreeMap::new(),
             extra_body: serde_json::Map::new(),
             extra_headers: BTreeMap::new(),
@@ -164,6 +180,7 @@ impl fmt::Debug for Connection {
             .field("base_url", &"[redacted]")
             .field("api_key_env", &self.api_key_env)
             .field("default_effort", &self.default_effort)
+            .field("context_role", &self.context_role)
             .field("headers", &"[redacted]")
             .field("extra_body", &"[redacted]")
             .field("extra_headers", &"[redacted]")

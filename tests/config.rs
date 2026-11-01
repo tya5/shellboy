@@ -849,3 +849,22 @@ fn extra_headers_reject_credentials_transport_fields_and_duplicates() {
     let many: Vec<String> = (0..33).map(|i| format!("'X-H{i}' = 'v'")).collect();
     assert!(connection_with(&format!("extra_headers = {{ {} }}", many.join(", "))).is_err());
 }
+
+#[test]
+fn context_role_defaults_to_developer_and_accepts_only_known_values() {
+    assert_eq!(Connection::default().context_role, ContextRole::Developer);
+    assert_eq!(
+        connection_with("").unwrap().connections["proxy"].context_role,
+        ContextRole::Developer
+    );
+    assert_eq!(
+        connection_with("context_role='user'").unwrap().connections["proxy"].context_role,
+        ContextRole::User
+    );
+    for bad in ["'system'", "'assistant'", "true", "''"] {
+        assert!(
+            connection_with(&format!("context_role={bad}")).is_err(),
+            "{bad}"
+        );
+    }
+}

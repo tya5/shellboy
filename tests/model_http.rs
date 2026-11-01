@@ -1551,3 +1551,71 @@ async fn without_extra_settings_the_request_is_exactly_the_baseline() {
         }
     }
 }
+
+#[tokio::test]
+async fn context_role_user_sends_inserted_context_as_user_and_default_is_unchanged() {
+    use shellboy::config::{Api, ContextRole};
+    // A conversation whose last item is only a Shellboy event notice (#121).
+    let tail_only_notice = || {
+        response_request(
+            "fixture",
+            vec![
+                json!({"role":"system","content":[{"type":"input_text","text":"base"}]}),
+                json!({"role":"user","content":[{"type":"input_text","text":"hi"}]}),
+                json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}),
+                json!({"role":"developer","content":[{"type":"input_text","text":"Shellboy event v1: {\"kind\":\"shell_ended\"}"}]}),
+            ],
+            None,
+            false,
+        )
+    };
+    for api in [Api::Responses, Api::ChatCompletions] {
+        let mut seen = Vec::new();
+        for role in [ContextRole::Developer, ContextRole::User] {
+            let mut fixture = session_fixture(Connection {
+                api,
+                context_role: role,
+                ..Default::default()
+            })
+            .await;
+            let _ = fixture
+                .client
+                .response(tail_only_notice(), CancellationToken::new(), None)
+                .await;
+            seen.push(fixture.requests.recv().await.unwrap().body);
+        }
+        let list = |body: &Value| -> Vec<Value> {
+            body[if api == Api::Responses {
+                "input"
+            } else {
+                "messages"
+            }]
+            .as_array()
+            .unwrap()
+            .clone()
+        };
+        let (developer, user) = (list(&seen[0]), list(&seen[1]));
+        assert_eq!(developer.len(), user.len());
+        // Default: the notice goes out exactly as before (Chat folds it into system).
+        let last_role = |items: &[Value]| items.last().unwrap()["role"].clone();
+        assert_eq!(
+            last_role(&developer),
+            if api == Api::Responses {
+                "developer"
+            } else {
+                "system"
+            }
+        );
+        // `user`: the conversation ends with a user message carrying the same text.
+        assert_eq!(last_role(&user), "user");
+        assert!(
+            user.last()
+                .unwrap()
+                .to_string()
+                .contains("Shellboy event v1:")
+        );
+        // The leading system message and every other item are untouched.
+        assert_eq!(user[0], developer[0]);
+        assert_eq!(user[1], developer[1]);
+    }
+}

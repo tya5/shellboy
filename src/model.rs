@@ -149,6 +149,22 @@ pub fn shell_tool() -> Value {
         "command":{"type":"string"},"description":{"type":"string","maxLength":80,"description":"Briefly describe what this command actually does in the conversation language, at most 80 characters. Not a substitute for the command."},"background":{"type":"boolean"},"stdin_open":{"type":"boolean"},"initial_stdin":{"type":"string"},"input_encoding":{"type":"string"},"output_encoding":{"type":"string"}
     }}})
 }
+/// Map the role of Shellboy-inserted context on the outgoing copy only. The
+/// leading `system` message stays as is; with `User`, every `developer` item
+/// after it is sent as `user`. Its text, including the `Shellboy ... v1:` marker
+/// that tells the model it is a notification, is not changed.
+pub fn apply_context_role(request: &mut Value, role: crate::config::ContextRole) {
+    if role == crate::config::ContextRole::Developer {
+        return;
+    }
+    if let Some(items) = request["input"].as_array_mut() {
+        for item in items {
+            if item["role"] == "developer" {
+                item["role"] = Value::String("user".into());
+            }
+        }
+    }
+}
 pub fn configure_shell_description(request: &mut Value, enabled: bool) {
     if !enabled && let Some(tools) = request["tools"].as_array_mut() {
         for tool in tools {

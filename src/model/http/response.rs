@@ -213,6 +213,7 @@ impl HttpModelClient {
             .get("tools")
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
+        crate::model::apply_context_role(&mut request, self.connection.context_role);
         let mut request = dialect::encode(self.connection.api, request)?;
         // Shellboy never interprets these. Config validation rejects any key
         // Shellboy owns, so a plain insert can neither override nor reorder.

@@ -196,6 +196,19 @@ Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash o
 
 `connections.<name>.headers` is an optional HTTP header dictionary. Names must be unique ignoring case, and invalid control characters in values are rejected. `api_key_env` cannot be combined with an Authorization header. Prefer environment-variable references to writing secrets directly in headers. `default_effort` is an optional nonempty string accepted by the endpoint. There is no built-in catalog of model capacity or effort support.
 
+### Context role: `context_role`
+
+Shellboy inserts context into a conversation: event notices (`Shellboy event v1: ...`, for example a finished background shell or a changed context) and the per-request context line. By default these are sent as `developer` messages, the meaning OpenAI-style APIs expect, and the saved history is never changed.
+
+Some gateways (for example LiteLLM in front of Claude) move every `developer` message into the system prompt. A conversation whose last message is then an assistant message is rejected as "assistant message prefill" (HTTP 400, `The conversation must end with a user message`), which happens when a notice is the only thing after the model's last answer. For such a connection set:
+
+```toml
+[connections.claude]
+context_role = "user"
+```
+
+With `context_role = "user"`, every `developer` message after the leading system message is sent with `role: user` and unchanged text, so the `Shellboy ... v1:` marker still tells the model it is a notification rather than something you typed. The default is `"developer"`. Only these two values are accepted. The mapping is applied when a request is sent, not when history is saved, so changing it later affects only new requests. Restart the owner after changing it.
+
 ### Provider-specific options: `extra_body` and `extra_headers`
 
 Shellboy sends only what a conversation needs. Everything optional and provider-specific (reasoning settings, sampling, cache hints, beta headers) is yours to add per connection, and **Shellboy does not interpret it**. Providers change what they accept from one model generation to the next, so the list stays in your configuration, not in Shellboy.
