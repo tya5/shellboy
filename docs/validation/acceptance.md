@@ -7717,3 +7717,9 @@ to 14 and explicitly requires `shellboy/resource-usage` in the scanned set;
 the full caption scan, wrong-caption negative control and coverage gate remain
 unchanged. The focused caption test is added to local qualification before the
 next push; a new exact-SHA CI is required. No UI product behavior changes.
+### #118 behaviour boundary: tail no-op
+
+macOS synthetic TestBackend: `cargo test --locked scroll_characterization_tests
+-- --test-threads=2` passed (19 characterizations); fmt passed. Same metrics
+helper: combined91, scroll237, fields15. Native branch CI follows the six-item
+boundary. No real provider/terminal/clipboard/user-data validation.

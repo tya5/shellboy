@@ -214,19 +214,11 @@ fn scroll_down_while_following_is_a_no_op_that_stays_following() {
     assert!(before.contains("anchor=-@0"), "{before}");
     assert!(down(&mut ui).is_empty());
     assert_eq!(rows(&mut ui, &mut t), tail);
-    // characterization: current behaviour, see #118
-    // The rows and `follow` do not change, but `scroll()` still records the
-    // top source row as the model anchor and bumps `view_revision`, so a
-    // no-op wheel at the tail writes state (which would invalidate any read
-    // keyed to the previous revision).
-    let after = snap(&ui);
-    assert!(
-        after.starts_with("follow=true loading=false request=None pending=0"),
-        "{after}"
+    assert_eq!(
+        snap(&ui),
+        before,
+        "tail no-op preserves anchor and request fence"
     );
-    assert!(after.contains("anchor=long@905"), "{after}");
-    assert!(after.ends_with("revision=1"), "{after}");
-    assert!(before.ends_with("revision=0"), "{before}");
 }
 
 // ---- scroll up / down on cached rows ----

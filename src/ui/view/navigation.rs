@@ -458,6 +458,9 @@ impl ThreadView {
             let (width, height) = (self.navigation.scroll.width, self.navigation.scroll.height);
             let layout = self.history_layout(view_key, cache, budget, width, height);
             let top = self.viewport_row(&layout, width, height);
+            if following && amount > 0 && self.at_true_tail(&layout) {
+                return vec![];
+            }
             let top_source = layout.sources.get(top).cloned();
             let origin = top_source
                 .as_ref()
@@ -479,9 +482,6 @@ impl ThreadView {
             let max = layout.lines.saturating_sub(usize::from(height));
             let view = &mut *self;
             view.navigation.on_event(NavEvent::ScrollInitiated);
-            // Empty bodies and missing prefix/suffix ranges have unknown row
-            // counts. Stop at the first such range, consume only known rows, and
-            // move the source checkpoint beside the next bounded body read.
             if let (Some(from), Some(to)) = (
                 top_source,
                 layout

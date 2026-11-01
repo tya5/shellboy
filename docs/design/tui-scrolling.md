@@ -337,3 +337,37 @@ Rebase onto #131 preserves its fixed live-work section and its 33-row fixture /
 initialized getters, not the older 28/8 dimensions. All six doubtful behaviours
 still have their original expectations. Their separate fixes follow this gate,
 not this structural commit.
+
+### #118 behaviour review: tail no-op
+
+A positive scroll already following a confirmed true tail is inert: it must not
+pause, advance the request fence, or replace the source anchor. Partial tail
+windows still use the bounded planner. This decision is recorded before the
+implementation; the marked tail characterization becomes a state-equality test.
+
+### #118 remaining behaviour decisions (before code changes)
+
+- Reverse input while a read is owned cancels obsolete deferred movement, then
+  moves within verified cached rows; if that is impossible, retain the reverse
+  input for replay. Keep the existing owner/fence; never issue a duplicate read.
+- A failed or rejected read ends its deferred movement. A later explicit input
+  retries only that input, not an invisible accumulated displacement. Unrelated
+  refresh failures and stale replies must not release a current owner.
+- Retain Tab's implicit pause as specification: item focus is intentional history
+  navigation, and streamed growth must not move the selected item away. Selecting
+  a visible item pins the same top source row without issuing a read. This is not
+  an accidental wheel/no-op and may advance the navigation fence.
+- Retain frame-time derived checkpoint publication as specification. Width, row,
+  source revision and origin are layout caches, not authoritative source position;
+  first draw/resize must publish actual geometry before subsequent input. Renaming
+  the mutating viewport operation makes that contract explicit. It must not alter
+  the source anchor, following/unseen mode, read ownership or request fence.
+- Retain true-end full-page clamping as specification. A restored paused anchor
+  near EOF should not yield a mostly blank viewport; clamping changes projection
+  only, not the authoritative anchor or follow mode. Appended output must therefore
+  not resume following. Partial windows must not be mistaken for true EOF.
+
+Each item has its own commit and test update/removal of the doubtful marker.
+The approved structural boundary is 91 combined sites / scroll237 / fields15;
+use the same helper after every item. Native branch CI validates the six-commit
+behaviour boundary before handoff; no real provider, user data or clipboard tests.
