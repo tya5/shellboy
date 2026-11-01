@@ -28,7 +28,9 @@ input JSON decreases from 39,706 to 7,123 bytes. The fixture uses the existing
 `summary_max_chars=4000` setting to make the candidate longer than its source
 without issuing a reduce request. The rejected summary reports one mock map
 request, input 321 and output 123 tokens; partial adoption retains that usage
-and the growth gate. Earlier fixture runs exposed tool output clipping, mistook
+and the growth gate. A separate HTTP 400 rejection makes one mock summary request
+with input and output unknown, not zero; repeated 400s also do not report usage.
+Earlier fixture runs exposed tool output clipping, mistook
 a reduce request for a conversation request, and produced an accepted summary;
 these were corrected before the passing result. The earlier post-rebase
 `cargo check --tests` passed. CI and focused unit results are reported separately.
