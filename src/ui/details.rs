@@ -1,8 +1,10 @@
 //! Transient selected-node detail navigation; canonical viewport/draft stay unchanged.
+use super::i18n::local;
 use super::key_hints::Action;
 use super::popup::Item as ListItem;
 use super::theme;
 use super::{ThreadView, UiAction, UiNode, popup};
+use crate::config::UiLanguage;
 use crate::{
     presentation::{PresentationField, PresentationKind},
     protocol::HistoryBody,
@@ -32,6 +34,43 @@ pub struct DetailSourceSnapshot {
     pub observed_at: String,
     pub sources: Vec<DetailSourceFacts>,
 }
+#[derive(Clone, Debug)]
+enum DetailNotice {
+    CheckingSource,
+    SourceChanged,
+    RefreshingOld,
+    FailedPrevious,
+    CheckingChange,
+    Raw(String),
+}
+impl DetailNotice {
+    fn text(&self, language: UiLanguage) -> &str {
+        match self {
+            Self::CheckingSource => {
+                local!(language, "参照元の更新を確認中", "Checking source updates")
+            }
+            Self::SourceChanged => local!(
+                language,
+                "参照元が変わりました。開き直してください",
+                "The source changed. Reopen it."
+            ),
+            Self::RefreshingOld => local!(
+                language,
+                "古い参照元の応答を再取得中",
+                "Refreshing an older source response"
+            ),
+            Self::FailedPrevious => local!(
+                language,
+                "取得失敗 | 前回の観測値を表示",
+                "Fetch failed | Showing the previous observation"
+            ),
+            Self::CheckingChange => {
+                local!(language, "参照元の変更を確認中", "Checking source changes")
+            }
+            Self::Raw(value) => value,
+        }
+    }
+}
 #[derive(Clone, Copy)]
 enum Mode {
     Nodes,
@@ -40,6 +79,7 @@ enum Mode {
     Original,
 }
 pub(super) struct Details {
+    language: Cell<UiLanguage>,
     paint: Cell<Option<popup::PaintBounds>>,
     reader_cache: std::cell::RefCell<popup::ReaderCache>,
     reader_revision: u64,
@@ -52,13 +92,13 @@ pub(super) struct Details {
     source_kind: PresentationKind,
     source_snapshot: Option<DetailSourceSnapshot>,
     sources_dirty: bool,
-    sources_stale: Option<String>,
+    sources_stale: Option<DetailNotice>,
     last_sources_request: Option<Instant>,
     selected_field_key: Option<String>,
     selected_link_url: Option<String>,
     links_pending: bool,
     links_request_id: u64,
-    links_error: Option<String>,
+    links_error: Option<DetailNotice>,
     mode: Mode,
     selected: usize,
     internal_fields: bool,
@@ -82,6 +122,13 @@ fn safe(text: &str) -> String {
 #[cfg(test)]
 thread_local! { static ORIGINAL_PREPARATIONS: Cell<usize> = const { Cell::new(0) }; }
 pub(super) fn original_page_lines(body: &HistoryBody) -> Vec<Line<'static>> {
+    original_page_lines_for(body, UiLanguage::Ja)
+}
+#[allow(dead_code)]
+pub(super) fn original_page_lines_for(
+    body: &HistoryBody,
+    language: UiLanguage,
+) -> Vec<Line<'static>> {
     #[cfg(test)]
     ORIGINAL_PREPARATIONS.with(|count| count.set(count.get() + 1));
     let mut lines = Vec::new();
@@ -91,46 +138,82 @@ pub(super) fn original_page_lines(body: &HistoryBody) -> Vec<Line<'static>> {
         safe(&body.node_id)
     )));
     if let Some(sender) = &body.provenance.sender {
-        lines.extend(sender_lines(sender));
+        lines.extend(sender_lines_for(sender, language));
     }
     if let Some(reason) = &body.tombstone_reason {
-        lines.push(Line::from(format!("原文回収済み: {}", safe(reason))));
+        let reason = safe(reason);
+        lines.push(Line::from(match language {
+            UiLanguage::Ja => format!("原文回収済み: {reason}"),
+            UiLanguage::En => format!("Original reclaimed: {reason}"),
+        }));
     }
     lines.extend(
         safe(&body.text)
             .lines()
             .map(|line| Line::from(line.to_owned())),
     );
-    lines.push(Line::from(safe(&format!(
-        "前 {} / 後 {} / 出典 {}",
-        body.previous_node_ids.join(", "),
-        body.next_node_ids.join(", "),
-        body.source_node_ids.join(", ")
-    ))));
+    let previous = body.previous_node_ids.join(", ");
+    let next = body.next_node_ids.join(", ");
+    let sources = body.source_node_ids.join(", ");
+    let references = match language {
+        UiLanguage::Ja => format!("前 {previous} / 後 {next} / 出典 {sources}"),
+        UiLanguage::En => format!("Previous {previous} / Next {next} / Sources {sources}"),
+    };
+    lines.push(Line::from(safe(&references)));
     for line in &mut lines {
         crate::presentation::expand_tabs(line);
     }
     lines
 }
+#[cfg(test)]
 fn sender_lines(sender: &crate::protocol::MessageSender) -> Vec<Line<'static>> {
-    sender_fields(sender)
+    sender_lines_for(sender, UiLanguage::Ja)
+}
+fn sender_lines_for(
+    sender: &crate::protocol::MessageSender,
+    language: UiLanguage,
+) -> Vec<Line<'static>> {
+    sender_fields_for(sender, language)
         .into_iter()
-        .map(|field| Line::from(format!("{}：{}", field.label, safe(&field.value))))
+        .map(|field| {
+            let label = field.label;
+            let value = safe(&field.value);
+            Line::from(match language {
+                UiLanguage::Ja => format!("{label}：{value}"),
+                UiLanguage::En => format!("{label}: {value}"),
+            })
+        })
         .collect()
 }
+#[cfg(test)]
 fn sender_fields(sender: &crate::protocol::MessageSender) -> Vec<PresentationField> {
+    sender_fields_for(sender, UiLanguage::Ja)
+}
+fn sender_fields_for(
+    sender: &crate::protocol::MessageSender,
+    language: UiLanguage,
+) -> Vec<PresentationField> {
     let kind = match sender.kind {
         crate::protocol::SenderKind::Model => "model (verified Origin)",
         crate::protocol::SenderKind::ExternalCli => "external_cli",
         crate::protocol::SenderKind::Human => "human (TUI)",
         crate::protocol::SenderKind::Unknown => "unknown",
     };
-    let mut fields = vec![("sender.kind", "送り手", kind.to_owned())];
+    let mut fields = vec![(
+        "sender.kind",
+        local!(language, "送り手", "Sender"),
+        kind.to_owned(),
+    )];
     if sender.kind == crate::protocol::SenderKind::Unknown {
         fields.push((
             "sender.evidence",
-            "送り手の記録",
-            "古い記録など、送り手を確認できる記録がありません".into(),
+            local!(language, "送り手の記録", "Sender evidence"),
+            local!(
+                language,
+                "古い記録など、送り手を確認できる記録がありません",
+                "No record is available to verify the sender, for example in older history."
+            )
+            .into(),
         ));
     }
     for (key, value) in [
@@ -145,7 +228,11 @@ fn sender_fields(sender: &crate::protocol::MessageSender) -> Vec<PresentationFie
         }
     }
     if let Some(label) = &sender.label {
-        fields.push(("sender.label", "名乗り", label.clone()));
+        fields.push((
+            "sender.label",
+            local!(language, "名乗り", "Sender label"),
+            label.clone(),
+        ));
     }
     fields
         .into_iter()
@@ -156,7 +243,10 @@ fn sender_fields(sender: &crate::protocol::MessageSender) -> Vec<PresentationFie
                 format!("sender.{key}")
             },
             label: if key.ends_with("_id") {
-                format!("送り手 {label}")
+                match language {
+                    UiLanguage::Ja => format!("送り手 {label}"),
+                    UiLanguage::En => format!("Sender {label}"),
+                }
             } else {
                 label.into()
             },
@@ -166,7 +256,11 @@ fn sender_fields(sender: &crate::protocol::MessageSender) -> Vec<PresentationFie
         })
         .collect()
 }
+#[cfg(test)]
 fn entry(node: &super::UiNode, width: usize) -> (String, String) {
+    entry_for(node, width, UiLanguage::Ja)
+}
+fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (String, String) {
     use crate::presentation::{BlockKind, PresentationKind};
     let has_call = node
         .presentation
@@ -174,8 +268,10 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
         .iter()
         .any(|b| b.kind == BlockKind::ToolCall);
     let label = match node.presentation.kind {
-        PresentationKind::User => "あなた".to_owned(),
-        PresentationKind::Assistant if has_call => "モデル | shell呼出し".into(),
+        PresentationKind::User => local!(language, "あなた", "You").to_owned(),
+        PresentationKind::Assistant if has_call => {
+            local!(language, "モデル | shell呼出し", "Model | shell call").into()
+        }
         PresentationKind::Assistant
             if node
                 .presentation
@@ -188,28 +284,41 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
                     .iter()
                     .any(|b| b.kind == BlockKind::Prose) =>
         {
-            "モデル | 推論".into()
+            local!(language, "モデル | 推論", "Model | reasoning").into()
         }
-        PresentationKind::Assistant => "モデルの回答".into(),
-        PresentationKind::ToolCall => "shell呼出し".into(),
-        PresentationKind::ToolResult => format!("shell結果 | {}", safe(&node.presentation.title)),
-        PresentationKind::Event => format!("状態変更 | {}", safe(&node.presentation.title)),
-        PresentationKind::Summary => "会話の要約".into(),
+        PresentationKind::Assistant => local!(language, "モデルの回答", "Model answer").into(),
+        PresentationKind::ToolCall => local!(language, "shell呼出し", "shell call").into(),
+        PresentationKind::ToolResult => match language {
+            UiLanguage::Ja => format!("shell結果 | {}", safe(&node.presentation.title)),
+            UiLanguage::En => format!("shell result | {}", safe(&node.presentation.title)),
+        },
+        PresentationKind::Event => match language {
+            UiLanguage::Ja => format!("状態変更 | {}", safe(&node.presentation.title)),
+            UiLanguage::En => format!("State change | {}", safe(&node.presentation.title)),
+        },
+        PresentationKind::Summary => local!(language, "会話の要約", "Conversation summary").into(),
         PresentationKind::Spill
             if node.presentation.title == crate::presentation::CONTEXT_TRIM_TITLE =>
         {
-            crate::presentation::CONTEXT_TRIM_TITLE.into()
+            local!(
+                language,
+                "入力範囲を縮小（原文は保持）",
+                "Input range compacted (original retained)"
+            )
+            .into()
         }
-        PresentationKind::Spill => "原文への参照".into(),
+        PresentationKind::Spill => local!(language, "原文への参照", "Reference to original").into(),
         PresentationKind::Interrupted if !node.presentation.title.is_empty() => {
             safe(&node.presentation.title)
         }
-        PresentationKind::Interrupted => "中断情報".into(),
+        PresentationKind::Interrupted => {
+            local!(language, "中断情報", "Interruption details").into()
+        }
         PresentationKind::Unknown => match node.role.as_str() {
-            "user" => "あなた".into(),
-            "assistant" => "モデルの回答".into(),
-            "tool" => "shell結果".into(),
-            _ => "状態・その他".into(),
+            "user" => local!(language, "あなた", "You").into(),
+            "assistant" => local!(language, "モデルの回答", "Model answer").into(),
+            "tool" => local!(language, "shell結果", "shell result").into(),
+            _ => local!(language, "状態・その他", "State / other").into(),
         },
     };
     // Projection blocks contain readable commands/output, unlike canonical JSON envelopes.
@@ -264,13 +373,26 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
         && matches!(node.role.as_str(), "tool" | "developer" | "system")
         && bounded.trim_start().starts_with('{')
     {
-        preview = "構造化データ | Enterで詳細を確認".into();
+        preview = local!(
+            language,
+            "構造化データ | Enterで詳細を確認",
+            "Structured data | Enter opens details"
+        )
+        .into();
     }
     if preview.is_empty() {
         preview = if node.total_chars > 0 {
-            "本文未読込 | Oで原文を確認"
+            local!(
+                language,
+                "本文未読込 | Oで原文を確認",
+                "Text not loaded | O opens original"
+            )
         } else {
-            "本文なし | Enterで詳細を確認"
+            local!(
+                language,
+                "本文なし | Enterで詳細を確認",
+                "No text | Enter opens details"
+            )
         }
         .into();
     }
@@ -287,7 +409,11 @@ fn source_revision(view: &ThreadView, node_id: &str) -> u64 {
     hash.finish()
 }
 // Human field selection is a UI projection; raw/source metadata stays on the node.
+#[cfg(test)]
 fn conversation_fields(node: &UiNode) -> Vec<PresentationField> {
+    conversation_fields_for(node, UiLanguage::Ja)
+}
+fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<PresentationField> {
     let fields = &node.presentation.fields;
     if node.presentation.kind != PresentationKind::Assistant {
         return fields.clone();
@@ -362,27 +488,27 @@ fn conversation_fields(node: &UiNode) -> Vec<PresentationField> {
                 "/items" | "/output" | "/response/output"
             ) && field.value.parse::<usize>().ok() == Some(messages.len())
             {
-                field.label = "回答数".into();
+                field.label = local!(language, "回答数", "Answer count").into();
             }
             for (prefix, ordinal) in &messages {
                 let Some(suffix) = field.key.strip_prefix(&format!("{prefix}/")) else {
                     continue;
                 };
-                let answer = if messages.len() > 1
+                let numbered = messages.len() > 1
                     || prefix
                         .rsplit_once('/')
                         .and_then(|(collection, _)| value(collection))
-                        .is_some_and(|count| count != "1")
-                {
-                    format!("回答 {ordinal} › ")
-                } else {
-                    String::new()
-                };
+                        .is_some_and(|count| count != "1");
                 if matches!(suffix, "role" | "type") {
                     return None;
                 }
                 if suffix == "status" {
-                    field.label = format!("{answer}回答の状態");
+                    field.label = match (language, numbered) {
+                        (UiLanguage::Ja, true) => format!("回答 {ordinal} › 回答の状態"),
+                        (UiLanguage::Ja, false) => "回答の状態".into(),
+                        (UiLanguage::En, true) => format!("Answer {ordinal} > Answer status"),
+                        (UiLanguage::En, false) => "Answer status".into(),
+                    };
                 }
                 if suffix == "content"
                     && field.value == "1"
@@ -395,7 +521,12 @@ fn conversation_fields(node: &UiNode) -> Vec<PresentationField> {
                     return None;
                 }
                 if suffix == "content" {
-                    field.label = format!("{answer}内容の数");
+                    field.label = match (language, numbered) {
+                        (UiLanguage::Ja, true) => format!("回答 {ordinal} › 内容の数"),
+                        (UiLanguage::Ja, false) => "内容の数".into(),
+                        (UiLanguage::En, true) => format!("Answer {ordinal} > Content count"),
+                        (UiLanguage::En, false) => "Content count".into(),
+                    };
                 }
                 let parts = suffix.split('/').collect::<Vec<_>>();
                 if let ["content", index, key] = parts.as_slice()
@@ -412,10 +543,21 @@ fn conversation_fields(node: &UiNode) -> Vec<PresentationField> {
                             return None;
                         }
                         if *key == "text" {
-                            field.label = if value(&format!("{prefix}/content")) == Some("1") {
-                                format!("{answer}本文")
-                            } else {
-                                format!("{answer}本文 {}", index + 1)
+                            let single = value(&format!("{prefix}/content")) == Some("1");
+                            let part = index + 1;
+                            field.label = match (language, numbered, single) {
+                                (UiLanguage::Ja, true, true) => format!("回答 {ordinal} › 本文"),
+                                (UiLanguage::Ja, true, false) => {
+                                    format!("回答 {ordinal} › 本文 {part}")
+                                }
+                                (UiLanguage::Ja, false, true) => "本文".into(),
+                                (UiLanguage::Ja, false, false) => format!("本文 {part}"),
+                                (UiLanguage::En, true, true) => format!("Answer {ordinal} > Text"),
+                                (UiLanguage::En, true, false) => {
+                                    format!("Answer {ordinal} > Text {part}")
+                                }
+                                (UiLanguage::En, false, true) => "Text".into(),
+                                (UiLanguage::En, false, false) => format!("Text {part}"),
                             };
                         }
                     }
@@ -445,6 +587,7 @@ impl Details {
             .unwrap_or_default();
         let revision = source_revision(view, &node_id);
         Self {
+            language: Cell::new(UiLanguage::Ja),
             paint: Cell::new(None),
             reader_cache: Default::default(),
             reader_revision: 0,
@@ -605,10 +748,10 @@ impl Details {
     }
     pub(super) fn invalidate_sources(&mut self) {
         self.sources_dirty = true;
-        self.sources_stale = Some("参照元の更新を確認中".into());
+        self.sources_stale = Some(DetailNotice::CheckingSource);
     }
     pub(super) fn mark_stale(&mut self, reason: &str) {
-        self.sources_stale = Some(safe(reason));
+        self.sources_stale = Some(DetailNotice::Raw(safe(reason)));
     }
     pub(super) fn refresh_wait(&self, now: Instant) -> Option<Duration> {
         (self.copy_choices.is_none() && self.sources_dirty && !self.links_pending).then(|| {
@@ -690,7 +833,7 @@ impl Details {
                     || snapshot.sources.len() != expected.len()
                     || actual != expected
                 {
-                    self.links_error = Some("参照元が変わりました。開き直してください".into());
+                    self.links_error = Some(DetailNotice::SourceChanged);
                     self.sources_stale = self.links_error.clone();
                     return;
                 }
@@ -700,7 +843,7 @@ impl Details {
                     .is_some_and(|old| snapshot.read_revision < old.read_revision)
                 {
                     self.sources_dirty = true;
-                    self.sources_stale = Some("古い参照元の応答を再取得中".into());
+                    self.sources_stale = Some(DetailNotice::RefreshingOld);
                     return;
                 }
                 for source in &mut snapshot.sources {
@@ -744,8 +887,8 @@ impl Details {
                 }
             }
             Err(error) => {
-                self.links_error = Some(safe(&error));
-                self.sources_stale = Some("取得失敗 | 前回の観測値を表示".into());
+                self.links_error = Some(DetailNotice::Raw(safe(&error)));
+                self.sources_stale = Some(DetailNotice::FailedPrevious);
             }
         }
     }
@@ -757,7 +900,7 @@ impl Details {
             .find(|source| source.node_id == self.node_id)?;
         let mut fields = vec![PresentationField {
             key: "node_id".into(),
-            label: "履歴node ID".into(),
+            label: local!(self.language.get(), "履歴node ID", "History node ID").into(),
             value: self.node_id.clone(),
             display: None,
             value_omitted: false,
@@ -765,7 +908,12 @@ impl Details {
         if let Some(reason) = &source.unavailable_reason {
             fields.push(PresentationField {
                 key: "/ui/source_unavailable".into(),
-                label: "参照元を取得できません".into(),
+                label: local!(
+                    self.language.get(),
+                    "参照元を取得できません",
+                    "Source unavailable"
+                )
+                .into(),
                 value: reason.clone(),
                 display: None,
                 value_omitted: false,
@@ -786,7 +934,7 @@ impl Details {
             fields.extend(if self.internal_fields {
                 source.fields.clone()
             } else {
-                conversation_fields(&node)
+                conversation_fields_for(&node, self.language.get())
             });
         }
         // Sender provenance is immutable and comes from the explicit original
@@ -796,7 +944,7 @@ impl Details {
             .as_ref()
             .and_then(|body| body.provenance.sender.as_ref())
         {
-            for field in sender_fields(sender) {
+            for field in sender_fields_for(sender, self.language.get()) {
                 if !fields.iter().any(|saved| saved.key == field.key) {
                     fields.push(field);
                 }
@@ -829,14 +977,14 @@ impl Details {
             value_omitted: false,
             display: None,
             key: "node_id".into(),
-            label: "履歴node ID".into(),
+            label: local!(self.language.get(), "履歴node ID", "History node ID").into(),
             value: self.node_id.clone(),
         }];
         if let Some(node) = view.nodes().iter().find(|n| n.node_id == self.node_id) {
             fields.extend(if self.internal_fields {
                 node.presentation.fields.clone()
             } else {
-                conversation_fields(node)
+                conversation_fields_for(node, self.language.get())
             });
         }
         if let Some(sender) = self
@@ -844,12 +992,20 @@ impl Details {
             .as_ref()
             .and_then(|body| body.provenance.sender.as_ref())
         {
-            fields.extend(sender_fields(sender));
+            fields.extend(sender_fields_for(sender, self.language.get()));
         }
         fields.sort_by_key(|field| crate::presentation::fields::group(&field.key).0);
         fields
     }
+    #[cfg(test)]
     fn described_command_context(&self, view: &ThreadView) -> Option<String> {
+        self.described_command_context_for(view, UiLanguage::Ja)
+    }
+    fn described_command_context_for(
+        &self,
+        view: &ThreadView,
+        language: UiLanguage,
+    ) -> Option<String> {
         if !view.describe_calls {
             return None;
         }
@@ -871,16 +1027,18 @@ impl Details {
             })
             .max_by_key(|(_, _, block, _)| super::presentation::tool_observation_rank(block))
             .map(|(_, _, _, tool)| {
-                format!(
-                    "shell | call {} | コマンドpreview {}",
-                    safe(&tool.call_id.chars().take(48).collect::<String>()),
-                    safe(&tool.command)
-                )
+                let call_id = safe(&tool.call_id.chars().take(48).collect::<String>());
+                let command = safe(&tool.command);
+                match language {
+                    UiLanguage::Ja => format!("shell | call {call_id} | コマンドpreview {command}"),
+                    UiLanguage::En => format!("shell | call {call_id} | Command preview {command}"),
+                }
             })
     }
+    #[cfg(test)]
     fn shared_original_context(&self, view: &ThreadView) -> String {
         self.described_command_context(view)
-            .map(|s| format!("共有assistant原文（隣接callを含む） | {s} | "))
+            .map(|value| format!("共有assistant原文（隣接callを含む） | {value} | "))
             .unwrap_or_default()
     }
     pub(super) fn open_source(&mut self, node_id: String, next: &mut u64) -> UiAction {
@@ -904,7 +1062,7 @@ impl Details {
             self.source_node_ids = vec![node_id.clone()];
             self.source_snapshot = None;
             self.sources_dirty = true;
-            self.sources_stale = Some("参照元の変更を確認中".into());
+            self.sources_stale = Some(DetailNotice::CheckingChange);
             self.links_error = None;
             self.selected_field_key = None;
             self.selected_link_url = None;
@@ -1179,6 +1337,7 @@ impl Details {
         view: &ThreadView,
         language: crate::config::UiLanguage,
     ) -> Vec<crate::terminal_links::LinkRegion> {
+        self.language.set(language);
         if let Some(choices) = &self.copy_choices {
             choices.draw(frame, area, &self.paint, language);
             return vec![];
@@ -1190,56 +1349,71 @@ impl Details {
             Mode::Original => 0,
         };
         let mode = match self.mode {
-            Mode::Nodes => "会話の詳細",
-            Mode::Fields if self.internal_fields => "保持中の内部項目",
-            Mode::Fields => "選択した内容の詳細",
-            Mode::Links => "リンク",
-            Mode::Original => "原文",
+            Mode::Nodes => local!(language, "会話の詳細", "Conversation details"),
+            Mode::Fields if self.internal_fields => {
+                local!(language, "保持中の内部項目", "Retained internal fields")
+            }
+            Mode::Fields => local!(language, "選択した内容の詳細", "Selected item details"),
+            Mode::Links => local!(language, "リンク", "Links"),
+            Mode::Original => local!(language, "原文", "Original"),
         };
         let context = if matches!(self.mode, Mode::Nodes) {
-            format!(
-                "{} / {}件 | 内容を選んでEnterで詳細を表示",
-                self.selected.saturating_add(1).min(count),
-                count
-            )
+            let selected = self.selected.saturating_add(1).min(count);
+            match language {
+                UiLanguage::Ja => format!("{selected} / {count}件 | 内容を選んでEnterで詳細を表示"),
+                UiLanguage::En => format!(
+                    "{selected} / {count} items | Select an item and press Enter for details"
+                ),
+            }
         } else if matches!(self.mode, Mode::Fields) {
-            self.described_command_context(view).unwrap_or_else(|| {
-                view.nodes()
-                    .iter()
-                    .find(|node| node.node_id == self.node_id)
-                    .map(|node| {
-                        let (label, preview) =
-                            entry(node, usize::from(area.width.saturating_sub(16)));
-                        format!("{label} | {preview}")
-                    })
-                    .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
-            })
+            self.described_command_context_for(view, language)
+                .unwrap_or_else(|| {
+                    view.nodes()
+                        .iter()
+                        .find(|node| node.node_id == self.node_id)
+                        .map(|node| {
+                            let (label, preview) = entry_for(
+                                node,
+                                usize::from(area.width.saturating_sub(16)),
+                                language,
+                            );
+                            format!("{label} | {preview}")
+                        })
+                        .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
+                })
         } else if matches!(self.mode, Mode::Original) {
             self.original
                 .as_ref()
                 .map(|body| {
-                    format!(
-                        "{}保存 {} | 表示受信 {}",
-                        self.shared_original_context(view),
-                        safe(&body.provenance.created_at),
-                        self.original_observed_at.as_deref().unwrap_or("未確認")
-                    )
+                    let saved = safe(&body.provenance.created_at);
+                    let observed = self.original_observed_at.as_deref()
+                        .unwrap_or(local!(language, "未確認", "unknown"));
+                    match (language, self.described_command_context_for(view, language)) {
+                        (UiLanguage::Ja, Some(command)) => format!("共有assistant原文（隣接callを含む） | {command} | 保存 {saved} | 表示受信 {observed}"),
+                        (UiLanguage::Ja, None) => format!("保存 {saved} | 表示受信 {observed}"),
+                        (UiLanguage::En, Some(command)) => format!("Shared assistant original (including adjacent calls) | {command} | Saved {saved} | Display received {observed}"),
+                        (UiLanguage::En, None) => format!("Saved {saved} | Display received {observed}"),
+                    }
                 })
                 .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
         } else {
-            format!(
-                "{} / {}件 | node {}",
-                self.selected.saturating_add(1).min(count),
-                count,
-                safe(&self.node_id)
-            )
+            let selected = self.selected.saturating_add(1).min(count);
+            let node = safe(&self.node_id);
+            match language {
+                UiLanguage::Ja => format!("{selected} / {count}件 | node {node}"),
+                UiLanguage::En => format!("{selected} / {count} items | node {node}"),
+            }
         };
         let footer = super::key_hints::detail_footer_for(self.hint_context(), language);
         let mut body = popup::panel_recorded(frame, area, mode, &context, footer, &self.paint);
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
             frame.render_widget(
-                ratatui::widgets::Paragraph::new("表示が更新されました。node参照を維持しています")
-                    .style(Style::default().fg(theme::WARNING)),
+                ratatui::widgets::Paragraph::new(local!(
+                    language,
+                    "表示が更新されました。node参照を維持しています",
+                    "The display changed. The node reference is retained."
+                ))
+                .style(Style::default().fg(theme::WARNING)),
                 Rect { height: 1, ..body },
             );
             body.y += 1;
@@ -1253,13 +1427,13 @@ impl Details {
         {
             let mut parts = Vec::new();
             if self.links_pending {
-                parts.push("参照元を取得中".to_owned());
+                parts.push(local!(language, "参照元を取得中", "Retrieving sources").to_owned());
             }
             if let Some(stale) = &self.sources_stale {
-                parts.push(stale.clone());
+                parts.push(stale.text(language).to_owned());
             }
             if let Some(error) = &self.links_error {
-                parts.push(error.clone());
+                parts.push(error.text(language).to_owned());
             }
             if let Some(snapshot) = &self.source_snapshot {
                 if snapshot
@@ -1267,9 +1441,19 @@ impl Details {
                     .iter()
                     .any(|source| source.unavailable_reason.is_some())
                 {
-                    parts.push("参照元が利用不可 | 原文の表示済みコピーとは別".into());
+                    parts.push(
+                        local!(
+                            language,
+                            "参照元が利用不可 | 原文の表示済みコピーとは別",
+                            "Source unavailable | This is separate from the displayed original copy"
+                        )
+                        .into(),
+                    );
                 }
-                parts.push(format!("観測 {} | R再取得", snapshot.observed_at));
+                parts.push(match language {
+                    UiLanguage::Ja => format!("観測 {} | R再取得", snapshot.observed_at),
+                    UiLanguage::En => format!("Observed {} | R Refresh", snapshot.observed_at),
+                });
             }
             frame.render_widget(
                 ratatui::widgets::Paragraph::new(safe(&parts.join(" | ")))
@@ -1286,12 +1470,22 @@ impl Details {
             .and_then(|node| {
                 let p = &node.presentation;
                 if p.metadata_limited {
-                    Some(format!(
-                        "詳細{}項目を保持・上限あり | A 対象を照会",
-                        p.fields.len()
-                    ))
+                    let count = p.fields.len();
+                    Some(match language {
+                        UiLanguage::Ja => format!("詳細{count}項目を保持・上限あり | A 対象を照会"),
+                        UiLanguage::En => format!(
+                            "{count} detail fields retained; limit reached | A Inspect target"
+                        ),
+                    })
                 } else if p.details_omitted && p.body_omitted_chars == 0 && !p.body_extent_unknown {
-                    Some("表示情報の保持範囲は未確認 | A 対象を照会".into())
+                    Some(
+                        local!(
+                            language,
+                            "表示情報の保持範囲は未確認 | A 対象を照会",
+                            "Retained display extent is unknown | A Inspect target"
+                        )
+                        .into(),
+                    )
                 } else {
                     None
                 }
@@ -1317,7 +1511,8 @@ impl Details {
                 .iter()
                 .enumerate()
                 .map(|(index, node)| {
-                    let (label, preview) = entry(node, usize::from(body.width.saturating_sub(5)));
+                    let (label, preview) =
+                        entry_for(node, usize::from(body.width.saturating_sub(5)), language);
                     popup::item(&format!("{} | {label}\n  {preview}", index + 1), body.width)
                 })
                 .collect(),
@@ -1342,7 +1537,7 @@ impl Details {
                             &format!(
                                 "{}{}{}",
                                 safe(&field.label),
-                                if field.key == "sender.label" {
+                                if field.key == "sender.label" && language == UiLanguage::Ja {
                                     "："
                                 } else {
                                     ": "
@@ -1378,7 +1573,11 @@ impl Details {
                 })
                 .collect(),
             Mode::Original => {
-                let loading = [Line::from("原文を取得中.")];
+                let loading = [Line::from(local!(
+                    language,
+                    "原文を取得中.",
+                    "Loading original."
+                ))];
                 let lines = if self.original.is_some() {
                     self.original_lines.as_slice()
                 } else {
@@ -1397,9 +1596,17 @@ impl Details {
         };
         if count == 0 {
             let message = if matches!(self.mode, Mode::Links) {
-                "このwindowにHTTP(S)リンクはありません。O原文から別pageも確認できます"
+                local!(
+                    language,
+                    "このwindowにHTTP(S)リンクはありません。O原文から別pageも確認できます",
+                    "No HTTP(S) links in this window. O opens the original to inspect other pages."
+                )
             } else {
-                "表示できる項目はありません"
+                local!(
+                    language,
+                    "表示できる項目はありません",
+                    "No items to display"
+                )
             };
             popup::reader(frame, body, &[Line::from(message)], 0);
         } else {
@@ -1440,7 +1647,9 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use ratatui::{Terminal, backend::TestBackend};
     fn state() -> UiState {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("anonymous".into());
         *ui.view_mut().nodes_mut_for_test() = vec![UiNode {
             node_id: "source-node".into(),
@@ -1482,6 +1691,73 @@ mod tests {
             .join("\n")
     }
     #[test]
+    fn detail_screen_is_bilingual_at_standard_widths() {
+        fn configure(ui: &mut UiState) {
+            ui.details = Some(Details::new(ui.view(), false));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Conversation details", "No items to display", "Esc Back"],
+                UiLanguage::Ja => &["会話の詳細", "表示できる項目はありません", "Esc 戻る"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn localized_original_metadata_never_changes_original_text_or_copy() {
+        let ui = state();
+        let original = "RAW ORIGINAL: abc 123\nsecond line".to_owned();
+        let body = HistoryBody {
+            node_id: "source-node".into(),
+            kind: "assistant_response".into(),
+            text: original.clone(),
+            context: serde_json::from_value(serde_json::json!({"state":"present","node_id":"source-node","created_at":"2026-10-25T00:00:00Z"})).unwrap(),
+            provenance: crate::protocol::NodeProvenance {
+                sender: Some(crate::protocol::MessageSender::default()),
+                kind: "assistant_response".into(),
+                created_at: "2026-10-25T00:00:00Z".into(),
+                source_revision: 0,
+                turn_id: None,
+                run_id: None,
+                origin_thread_id: None,
+            },
+            source_node_ids: vec!["source-id".into()],
+            previous_node_ids: vec!["previous-id".into()],
+            next_node_ids: vec!["next-id".into()],
+            next_cursor: None,
+            tombstone_reason: Some("OPAQUE-REASON".into()),
+        };
+        for (language, heading) in [
+            (UiLanguage::En, "Original reclaimed"),
+            (UiLanguage::Ja, "原文回収済み"),
+        ] {
+            let display = original_page_lines_for(&body, language);
+            let text = display
+                .iter()
+                .map(Line::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(heading) && text.contains("OPAQUE-REASON"));
+            assert!(
+                text.contains(&original)
+                    && text.contains("source-id")
+                    && text.contains("previous-id")
+                    && text.contains("next-id")
+            );
+            let mut details = Details::for_node(ui.view(), "source-node".into(), false);
+            details.mode = Mode::Original;
+            details.request_id = 9;
+            details.accept(9, body.clone(), display);
+            let mut next = 9;
+            assert!(
+                matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { text: ref copied, .. } if copied == &original))
+            );
+            assert_eq!(body.text, original);
+        }
+    }
+
+    #[test]
     fn detail_footer_uses_configured_language_in_the_actual_ui() {
         for (language, expected) in [
             (crate::config::UiLanguage::En, "Esc Back"),
@@ -1510,7 +1786,14 @@ mod tests {
         ui.action_rejected(&action);
         let details = ui.details.as_ref().unwrap();
         assert!(!details.links_pending);
-        assert!(details.links_error.as_ref().unwrap().contains("再試行"));
+        assert!(
+            details
+                .links_error
+                .as_ref()
+                .unwrap()
+                .text(UiLanguage::Ja)
+                .contains("再試行")
+        );
     }
     fn snapshot_for(
         details: &Details,
