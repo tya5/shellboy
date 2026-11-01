@@ -15,6 +15,8 @@ pub struct ThreadView {
     pub(super) selecting_agents: Option<String>,
     pub connection: Option<String>,
     pub model: Option<String>,
+    /// Latest saved provider-reported usage; replaced only by an adopted snapshot.
+    pub(super) context_usage: ContextUsage,
     pub effort: Option<String>,
     pub title: String,
     pub state: String,
@@ -379,6 +381,7 @@ impl ThreadView {
             draft_restore_pending: false,
             run_id: None,
             turn_id: None,
+            context_usage: Default::default(),
             tool_calls: 0,
             cancelled_calls: 0,
             view_revision: 0,
@@ -2354,7 +2357,7 @@ mod completion_notice_tests {
             false,
             true,
         );
-        let text = crate::ui::chrome::footer_lines(&view, 100, "", palette, vec![], None)
+        let text = crate::ui::chrome::footer_lines(&view, 100, "", palette, vec![], None, None)
             .into_iter()
             .map(|line| {
                 line.spans

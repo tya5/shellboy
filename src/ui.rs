@@ -818,6 +818,23 @@ pub struct DraftRecoveryTarget {
     pub generation: u64,
     pub thread_id: Option<String>,
 }
+/// Provider-reported tokens of the latest adopted attempt; `None` is unknown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ContextUsage {
+    pub input_tokens: Option<u64>,
+    pub cached_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+impl From<crate::usage::StandardUsage> for ContextUsage {
+    fn from(u: crate::usage::StandardUsage) -> Self {
+        Self {
+            input_tokens: u.input_tokens,
+            cached_tokens: u.cached_tokens,
+            output_tokens: u.output_tokens,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
     ConfirmationSourcesChanged,
@@ -864,6 +881,7 @@ pub enum UiUpdate {
     CurrentView {
         generation: u64,
         details: ThreadDetails,
+        context_usage: ContextUsage,
         history: Box<UiUpdate>,
         received: Option<Box<UiUpdate>>,
         tool_facts: Option<ToolObservation>,
@@ -2139,6 +2157,7 @@ impl UiState {
         if let UiUpdate::CurrentView {
             generation,
             details,
+            context_usage,
             history,
             received,
             tool_facts,
@@ -2146,7 +2165,12 @@ impl UiState {
         } = update
         {
             self.apply_current_view(
-                generation, details, *history, received, tool_facts, committed,
+                generation,
+                (details, context_usage),
+                *history,
+                received,
+                tool_facts,
+                committed,
             );
             return;
         }
@@ -2282,7 +2306,7 @@ impl UiState {
     fn apply_current_view(
         &mut self,
         generation: u64,
-        details: ThreadDetails,
+        (details, context_usage): (ThreadDetails, ContextUsage),
         history: UiUpdate,
         received: Option<Box<UiUpdate>>,
         tool_facts: Option<ToolObservation>,
@@ -2344,6 +2368,12 @@ impl UiState {
             details,
             draft: None,
         });
+        if let Some(view) = self.view_for(&thread, generation)
+            && view.context_usage != context_usage
+        {
+            view.context_usage = context_usage;
+            self.dirty = true;
+        }
         for (attempt_id, node_id) in committed {
             self.apply_inner(UiUpdate::StreamCommitted {
                 thread_id: thread.clone(),
@@ -6082,7 +6112,23 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let hints = state
         .key_hints
         .text(state.hint_context(), area.width, &state.config);
-    let lines = chrome::footer_lines(view, area.width, &hints, state.palette, spans, notice);
+    let context = view.thread_id.is_some().then(|| chrome::ContextBar {
+        usage: view.context_usage,
+        auto_at: state.config.compaction.auto_at_tokens_for(
+            view.connection
+                .as_deref()
+                .and_then(|name| state.config.connections.get(name)),
+        ),
+    });
+    let lines = chrome::footer_lines(
+        view,
+        area.width,
+        &hints,
+        state.palette,
+        spans,
+        notice,
+        context,
+    );
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -7640,6 +7686,7 @@ mod tool_refresh_tests {
         UiUpdate::CurrentView {
             generation: ui.view().generation,
             details: details(),
+            context_usage: Default::default(),
             history: Box::new(UiUpdate::History {
                 thread_id: "t".into(),
                 generation: ui.view().generation,
@@ -7718,6 +7765,41 @@ mod tool_refresh_tests {
             ui.apply(frame(&ui, 10, Some(observed.clone())));
         }
         assert!(ui.take_deferred_actions().is_empty());
+    }
+    #[test]
+    fn context_usage_changes_only_with_an_adopted_snapshot_and_never_on_the_clock() {
+        let mut ui = paused();
+        let with = |ui: &UiState, input| {
+            let mut update = frame(ui, 10, None);
+            if let UiUpdate::CurrentView { context_usage, .. } = &mut update {
+                *context_usage = ContextUsage {
+                    input_tokens: Some(input),
+                    cached_tokens: Some(1),
+                    output_tokens: Some(2),
+                };
+            }
+            update
+        };
+        ui.apply(with(&ui, 100));
+        assert_eq!(ui.view().context_usage.input_tokens, Some(100));
+        // The same adopted usage in later snapshots is not a context change.
+        let mut redraws = 0;
+        for _ in 0..5 {
+            ui.dirty = false;
+            ui.apply(with(&ui, 100));
+            ui.dirty = false;
+            let base = Instant::now();
+            for second in 1..=10 {
+                ui.animation_tick(base + Duration::from_secs(second));
+            }
+            // Idle clock ticks never invalidate the screen for the context bar.
+            redraws += usize::from(ui.dirty);
+        }
+        assert_eq!(redraws, 0);
+        ui.dirty = false;
+        ui.apply(with(&ui, 150));
+        assert!(ui.dirty);
+        assert_eq!(ui.view().context_usage.input_tokens, Some(150));
     }
     #[tokio::test]
     async fn paired_history_preserves_shrink_and_stale_diagnostics_with_one_retention_pass() {

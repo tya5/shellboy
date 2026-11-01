@@ -34,6 +34,12 @@ impl RawContextUsage {
         })
     }
 }
+impl RawContextUsage {
+    /// Provider-reported usage of the same latest attempt; all-unknown when none.
+    pub(crate) fn reported_usage(&self) -> StandardUsage {
+        self.latest.as_ref().map(|l| l.usage).unwrap_or_default()
+    }
+}
 #[cfg(test)]
 impl RawContextUsage {
     fn scope(&self) -> (&str, &str, &str) {

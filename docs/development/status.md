@@ -35,6 +35,15 @@ compaction.md, D-019 in decisions. Local evidence is recorded in acceptance;
 3-OS CI on the pushed branch is the remaining qualification. Resume point:
 review and integration of that branch.
 
+## Footer context size (#130)
+
+Branch issue-130/ctxbar shows `↑入力/閾値 ↓出力 キャッシュ%` at the end of the footer's
+first row from the saved latest-attempt usage. The existing bounded
+`read_context_usage_tx` now also runs inside the current-view snapshot; the
+threshold is `auto_at_tokens_for` of the view's connection at render time. No new
+query, table, worker or clock redraw. Guide: tui.md "Context size in the footer".
+Local unit/render tests only; 3-OS CI on the pushed branch is the remaining check.
+
 ## Historical v0.5.0 release preparation
 ## Compact read-only forecast (#113)
 

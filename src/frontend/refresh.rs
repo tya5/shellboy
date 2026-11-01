@@ -25,6 +25,7 @@ struct RawVisible {
     usage: Vec<usage::Observation>,
     received: Option<received::RawSnapshot>,
     activity: activity::RawProjection,
+    context_usage: crate::ui::ContextUsage,
     tool_scope: Option<ToolObservation>,
     observed_at: std::time::Instant,
 }
@@ -35,6 +36,7 @@ struct ProjectedVisible {
     before_cursor: Option<String>,
     received: Option<received::Prepared>,
     activity: activity::Projection,
+    context_usage: crate::ui::ContextUsage,
     tool_scope: Option<ToolObservation>,
 }
 
@@ -92,6 +94,13 @@ fn read_visible_tx_limited(
         },
     )?;
     let activity = activity::read_tx_with_limit(db, thread, waits, limit)?;
+    // Existing bounded display read; a limit error is an unknown value, not a failed view.
+    let context_usage =
+        match crate::compaction::context_usage::read_context_usage_tx(db, thread, Some(512)) {
+            Ok(raw) => raw.reported_usage().into(),
+            Err(StorageError::Operation(_)) => Default::default(),
+            Err(error) => return Err(error),
+        };
     // Admission order belongs to the whole paired observation, not read completion.
     history.set_read_revision(sequence);
     Ok(RawVisible {
@@ -104,6 +113,7 @@ fn read_visible_tx_limited(
         usage,
         received,
         activity,
+        context_usage,
         tool_scope,
         observed_at: std::time::Instant::now(),
     })
@@ -120,6 +130,7 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
         usage,
         received,
         activity,
+        context_usage,
         mut tool_scope,
         observed_at,
     } = raw;
@@ -150,6 +161,7 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
         before_cursor: before_cursor?,
         received,
         activity,
+        context_usage,
         tool_scope,
     })
 }
@@ -282,7 +294,7 @@ pub(super) async fn run(
             }));
             let info=frame.info;
             update(&updates,UiUpdate::CurrentView {
-                generation,details:frame.details,
+                generation,details:frame.details,context_usage:frame.context_usage,
                 history:Box::new(UiUpdate::History {
                     thread_id:thread.clone(),generation,nodes:frame.nodes,pending:info.pending,
                     read_revision:info.read_revision,before_cursor:frame.before_cursor,append:false,
@@ -349,7 +361,7 @@ mod tests {
             tx.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','before','/','','p','m','now');
                 INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','now','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','now','now');
-                INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','now');
+                INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','{\"input_tokens\":140,\"output_tokens\":20,\"input_tokens_details\":{\"cached_tokens\":120}}','now');
                 INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('g','a','u','completed','now');
                 INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g','call',0,'shell','{\"command\":\"printf saved\"}','completed');")?;
             shellboy_fixture_input(&tx,"input",true)?;
@@ -402,6 +414,14 @@ mod tests {
             .unwrap();
         assert_eq!(frame.details.title, "before");
         assert_eq!(frame.details.model, "m");
+        assert_eq!(
+            frame.context_usage,
+            crate::ui::ContextUsage {
+                input_tokens: Some(140),
+                cached_tokens: Some(120),
+                output_tokens: Some(20)
+            }
+        );
         assert_eq!(frame.info.pending.total, 1);
         assert_eq!(frame.info.pending.items[0].message_id, "queued");
         assert!(admitted_sequence > 0);

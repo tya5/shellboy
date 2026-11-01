@@ -516,6 +516,29 @@ reports that limit; F6 retains the full saved references. F7 remains HTTP links.
 Unlike row groups have nonselectable spacing; consecutive tools stay dense.
 The `◉` work-region heading is reserved for #86, not drawn by this change.
 
+## Context size in the footer
+
+The footer's first row ends with the current Thread's latest adopted model
+attempt, for example `↑140K/200K ↓20K キャッシュ86%`.
+
+- `↑` is the provider-reported input tokens, `↓` the output tokens, and
+  `キャッシュN%` is cached tokens divided by input tokens. Nothing is estimated:
+  an unreported value shows `—`, the percentage is omitted when either side is
+  unknown, and `↑—` stays until the first response is adopted. After `/model`
+  the value is `↑—` again until the new model answers.
+- `/200K` is the effective `auto_at_tokens` of the Thread's connection (the
+  connection's own setting, else `[compaction] auto_at_tokens`). When it is `0`
+  (proactive compaction off) the denominator is not shown.
+- Units: below 1000 as is, then `10.2K`, `140K`, `1.2M` (rounded down).
+- At 80% or more of the threshold the text is drawn in the attention color; with
+  `NO_COLOR` it is prefixed with `!` instead.
+- Narrow terminals follow the footer's existing rule (other facts keep their
+  space; this text uses what is left) and drop `キャッシュ%`, then `↓`, then
+  `/閾値`, then `↑`.
+- The value comes from the saved usage already read with each current-view
+  snapshot (`context.last_successful_attempt`). It changes only when a response
+  is adopted; no clock redraw, extra query or table is involved.
+
 ## Activity phase and elapsed time
 
 The footer's request age belongs to the current model attempt, not the whole

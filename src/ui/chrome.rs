@@ -128,6 +128,79 @@ fn header(view: &ThreadView, width: u16, selection: bool) -> String {
     .collect()
 }
 
+/// Saved reported usage of the Thread's latest adopted attempt plus the effective
+/// `auto_at_tokens` (0 = off). Pure projection: no estimate, no clock.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ContextBar {
+    pub usage: super::ContextUsage,
+    pub auto_at: u64,
+}
+/// 999 -> `999`, 10200 -> `10.2K`, 140000 -> `140K`, 1200000 -> `1.2M` (floored).
+pub(super) fn compact_tokens(n: u64) -> String {
+    fn scaled(n: u64, unit: u64, suffix: &str) -> String {
+        let tenths = n / (unit / 10);
+        if tenths >= 1000 || tenths.is_multiple_of(10) {
+            format!("{}{suffix}", tenths / 10)
+        } else {
+            format!("{}.{}{suffix}", tenths / 10, tenths % 10)
+        }
+    }
+    if n < 1000 {
+        n.to_string()
+    } else if n < 1_000_000 {
+        scaled(n, 1000, "K")
+    } else {
+        scaled(n, 1_000_000, "M")
+    }
+}
+impl ContextBar {
+    /// Input is at least 80% of an enabled threshold.
+    pub(super) fn warn(&self) -> bool {
+        self.auto_at > 0
+            && self
+                .usage
+                .input_tokens
+                .is_some_and(|input| u128::from(input) * 100 >= u128::from(self.auto_at) * 80)
+    }
+    fn variants(&self, plain: bool) -> Vec<String> {
+        let u = &self.usage;
+        let mark = if plain && self.warn() { "!" } else { "" };
+        if u.input_tokens.is_none() && u.output_tokens.is_none() && u.cached_tokens.is_none() {
+            return vec![format!("{mark}↑—")];
+        }
+        let show = |v: Option<u64>| v.map_or("—".to_owned(), compact_tokens);
+        let up = format!("{mark}↑{}", show(u.input_tokens));
+        let up_limit = if self.auto_at > 0 {
+            format!("{up}/{}", compact_tokens(self.auto_at))
+        } else {
+            up.clone()
+        };
+        let down = format!("↓{}", show(u.output_tokens));
+        let cache = match (u.cached_tokens, u.input_tokens) {
+            (Some(cached), Some(input)) if input > 0 => Some(format!(
+                "キャッシュ{}%",
+                ((u128::from(cached) * 100 + u128::from(input) / 2) / u128::from(input)).min(100)
+            )),
+            _ => None,
+        };
+        let mut out = Vec::new();
+        if let Some(cache) = cache {
+            out.push(format!("{up_limit} {down} {cache}"));
+        }
+        out.push(format!("{up_limit} {down}"));
+        out.push(up_limit.clone());
+        out.push(up);
+        out.dedup();
+        out
+    }
+    /// Drop order on narrow widths: cache, output, denominator, then input.
+    pub(super) fn text(&self, width: usize, plain: bool) -> Option<String> {
+        self.variants(plain)
+            .into_iter()
+            .find(|text| text.width() <= width)
+    }
+}
+
 /// Two quiet footer rows. Caller owns animation and transient-notice lifetime.
 pub(super) fn footer_lines(
     view: &ThreadView,
@@ -136,6 +209,7 @@ pub(super) fn footer_lines(
     palette: super::theme::Palette,
     mut activity_spans: Vec<ratatui::text::Span<'static>>,
     notice: Option<(&str, bool)>,
+    context: Option<ContextBar>,
 ) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::{
         style::Style,
@@ -263,6 +337,21 @@ pub(super) fn footer_lines(
             activity_spans.push(Span::raw(" · "));
         }
         activity_spans.push(Span::styled(facts, Style::default().fg(palette.muted())));
+    }
+    if let Some(bar) = context {
+        let used: usize = activity_spans.iter().map(|s| s.content.width()).sum();
+        let room = usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 });
+        if let Some(text) = bar.text(room, palette.plain()) {
+            if used > 0 {
+                activity_spans.push(Span::raw(" · "));
+            }
+            let style = if bar.warn() && !palette.plain() {
+                Style::default().fg(super::theme::ATTENTION)
+            } else {
+                Style::default().fg(palette.muted())
+            };
+            activity_spans.push(Span::styled(text, style));
+        }
     }
     let (hint, error) = notice.unwrap_or((hints, false));
     let navigation_hint = (view.loading && view.scroll.request.is_some() && !error)
@@ -632,7 +721,15 @@ mod tests {
             assert!(metadata.content.contains("fixture-link"));
             assert!(metadata.content.ends_with("/project"));
             assert_eq!(metadata.style.fg, Some(palette.muted()));
-            let rows = footer_lines(ui.view(), 100, "F1", palette, vec![Span::raw("✓")], None);
+            let rows = footer_lines(
+                ui.view(),
+                100,
+                "F1",
+                palette,
+                vec![Span::raw("✓")],
+                None,
+                None,
+            );
             let text = rows
                 .iter()
                 .flat_map(|line| line.spans.iter())
@@ -647,6 +744,7 @@ mod tests {
                 palette,
                 vec![],
                 Some(("saved operation failed", true)),
+                None,
             );
             assert_eq!(
                 rows[1].style,
@@ -721,6 +819,91 @@ mod tests {
 }
 
 #[cfg(test)]
+mod context_bar_tests {
+    use super::*;
+    use crate::ui::ContextUsage;
+    fn bar(input: Option<u64>, out: Option<u64>, cached: Option<u64>, auto_at: u64) -> ContextBar {
+        ContextBar {
+            usage: ContextUsage {
+                input_tokens: input,
+                output_tokens: out,
+                cached_tokens: cached,
+            },
+            auto_at,
+        }
+    }
+    #[test]
+    fn token_units() {
+        let shown: Vec<_> = [0, 999, 1000, 10_200, 20_000, 140_000, 999_999, 1_200_000]
+            .map(compact_tokens)
+            .into();
+        assert_eq!(
+            shown,
+            ["0", "999", "1K", "10.2K", "20K", "140K", "999K", "1.2M"]
+        );
+    }
+    #[test]
+    fn known_unknown_disabled_and_narrow() {
+        let known = bar(Some(140_000), Some(20_000), Some(120_400), 200_000);
+        assert_eq!(
+            known.text(80, false).unwrap(),
+            "↑140K/200K ↓20K キャッシュ86%"
+        );
+        // Drop order: cache, output, denominator, input.
+        assert_eq!(known.text(18, false).unwrap(), "↑140K/200K ↓20K");
+        assert_eq!(known.text(14, false).unwrap(), "↑140K/200K");
+        assert_eq!(known.text(9, false).unwrap(), "↑140K");
+        assert_eq!(known.text(4, false), None);
+        // Disabled threshold hides the denominator; unknown cache hides the percentage.
+        assert_eq!(
+            bar(Some(5), Some(7), None, 0).text(80, false).unwrap(),
+            "↑5 ↓7"
+        );
+        assert_eq!(
+            bar(Some(5), None, Some(1), 100).text(80, false).unwrap(),
+            "↑5/100 ↓— キャッシュ20%"
+        );
+        assert_eq!(
+            bar(None, None, None, 200_000).text(80, false).unwrap(),
+            "↑—"
+        );
+        assert_eq!(
+            bar(None, Some(3), None, 0).text(80, false).unwrap(),
+            "↑— ↓3"
+        );
+    }
+    #[test]
+    fn eighty_percent_warns_with_color_or_a_plain_mark() {
+        let ok = bar(Some(159_999), None, None, 200_000);
+        let hot = bar(Some(160_000), None, None, 200_000);
+        assert!(!ok.warn() && hot.warn());
+        assert!(!bar(Some(999_999), None, None, 0).warn());
+        assert_eq!(hot.text(80, true).unwrap(), "!↑160K/200K ↓—");
+        assert_eq!(ok.text(80, true).unwrap(), "↑159K/200K ↓—");
+        use ratatui::style::Color;
+        let view = crate::ui::ThreadView::new(&crate::config::Config::default(), "/".into());
+        let rich = crate::ui::theme::Palette::from_capabilities(
+            crate::config::PaletteMode::Dark,
+            false,
+            true,
+        );
+        let line = footer_lines(&view, 80, "", rich, vec![], None, Some(hot));
+        let span = line[0].spans.last().unwrap();
+        assert_eq!(span.style.fg, Some(crate::ui::theme::ATTENTION));
+        assert!(!span.content.contains('!'));
+        let plain = crate::ui::theme::Palette::from_capabilities(
+            crate::config::PaletteMode::Dark,
+            true,
+            false,
+        );
+        let line = footer_lines(&view, 80, "", plain, vec![], None, Some(hot));
+        let span = line[0].spans.last().unwrap();
+        assert!(span.content.starts_with('!'));
+        assert_ne!(span.style.fg, Some(Color::LightRed));
+    }
+}
+
+#[cfg(test)]
 mod terminal_time_tests {
     use super::*;
     use crate::{
@@ -763,6 +946,7 @@ mod terminal_time_tests {
                     true,
                 ),
                 vec![],
+                None,
                 None,
             );
             let text = lines
@@ -807,7 +991,7 @@ mod context_wait_footer_tests {
                 ..Default::default()
             },
         );
-        let text = footer_lines(&view, 140, "", palette, vec![], None)
+        let text = footer_lines(&view, 140, "", palette, vec![], None, None)
             .iter()
             .flat_map(|l| &l.spans)
             .map(|s| s.content.as_ref())
@@ -821,7 +1005,7 @@ mod context_wait_footer_tests {
                 ..Default::default()
             },
         );
-        let text = footer_lines(&view, 140, "", palette, vec![], None)
+        let text = footer_lines(&view, 140, "", palette, vec![], None, None)
             .iter()
             .flat_map(|l| &l.spans)
             .map(|s| s.content.as_ref())
