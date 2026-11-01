@@ -248,3 +248,37 @@ the execution split. Keep the original single Windows job and four test threads;
 remove experimental partition tooling and its coverage audit. The two failures
 exposed during split execution are tracked separately in #95 and do not block
 reuse qualification under the original unsplit native configuration.
+
+## Windows Tests step speed (#136)
+
+Run 41292925592 spent 599 s in the Windows Tests step and 137 s in the Python
+timing-gate step, against 276 s on Linux. `scripts/test-timings.py` now records
+per-test durations (libtest `--report-time` through `RUSTC_BOOTSTRAP=1`; no test is
+selected or skipped) as `slowest` per harness in `results.json`. The four
+concurrent test threads saturate the four vCPUs (summed test time was about four
+times the harness wall time), so total CPU work, not an idle wait, set the time.
+
+The leading costs were one algorithmic and one platform cause:
+
+- `docs::tests::pages_reconstruct_unicode_and_reject_cross_document_cursor`
+  (59-106 s on Windows) paged a guide in 17-byte steps; each page rebuilt and hashed
+  the whole catalogue and reparsed Markdown for sections and links. The bundled
+  catalogue, its version, per-guide sections, links and content hash are now built
+  once per process. The test and its assertions are unchanged (8.9 s to 0.3 s on macOS).
+- `index::search_filters_precede_knn_even_beyond_four_hundred_nearer_chunks`
+  (47-69 s) inserted 405 fixture nodes in 405 durable commits. They are one
+  transaction now; indexing still runs per node.
+- The remaining Windows overhead was file and process work under real-time
+  scanning and a temp directory on the system volume. The job now excludes the
+  workspace, runner temp and Cargo/Rustup directories from Defender (ephemeral
+  runner only; a failure is a warning) and points `TEMP`/`TMP` at `RUNNER_TEMP`.
+
+The timing gate (`python -m unittest discover -s scripts/tests`) is 95 unit tests of the
+repository's own tooling (timing-runner failure gates including the strict-ASCII
+Windows console, error catalog, replace/record-delta/conflict-forecast tools that
+spawn `git`, installers, release upgrade). It is process-spawn bound and runs on all
+three OSes because the timing runner and Windows console handling are Windows
+concerns; it is not restricted to Windows nor removed from it.
+
+Measured Windows-only four-thread runs (`windows_test_threads=4`; seconds; facts for
+these runners, not promises): see the status entry.

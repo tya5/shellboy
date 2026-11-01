@@ -20,6 +20,16 @@ byte comparisons; [acceptance](../validation/acceptance.md#v050-publication-vali
 records the macOS synthetic upgrades and untested public installer/Linux/Windows
 upgrade paths.
 
+## Windows CI speed (#136)
+
+Branch issue-136/win-speed: per-test durations in timing results, cached bundled
+docs catalogue, one-commit index fixture inserts, and Defender exclusion plus
+`TEMP` on the work volume for the Windows job. Windows Tests step, Windows-only
+four-thread runs (seconds): before 462/572/655 (docs-test 59-106 s, index test
+47-69 s); code fixes alone 546/558/621 (runner variance dominated by build
+195-293 s); with runner I/O change 295/322/391 (Clippy 119-139, timing gate
+16-19 versus 42-89). Resume point: review; final three-OS run on the final SHA.
+
 ## Compaction summary request usage (#133)
 
 Branch issue-133/summary-usage records provider-reported usage (input, cached,
