@@ -337,8 +337,11 @@ Record: `automatic_trim_attempt` on the triggering completed attempt (existing
 field and `automatic_compaction_turn` partial index) with `reason =
 "proactive_threshold"`, `outcome`, `summary`/`error` like stage 2, and
 `trigger.auto_at_tokens` / `trigger.input_tokens` / `trigger.run_id`. `compact
-list` shows it as `automatic_reduction` with `reason` (`failure` for existing
-failure-driven records) and those trigger values. A second Run triggered by the
+list` shows it as `automatic_reduction` with `metrics.reason` mirrored in the
+existing top-level `reason` (`failure` for existing failure-driven records) and
+those trigger values. The bounded attempt reason already read by the projection
+is reused; no extra source lookup or raw error parsing is introduced (#132).
+A second Run triggered by the
 same measurement overwrites the earlier record on that attempt.
 
 ## Summary request usage (#133 / D-020)

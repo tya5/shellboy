@@ -3466,3 +3466,10 @@ carry the reviewed marker; stale execution refreshes preview and requires a new
 Y. No marker is issued for incomplete target coverage. Schema17/RAG3/protocol2
 and worker/queue/admission budgets are unchanged. Local focused checks pass;
 exact pushed-SHA standard/native3OS CI remains required before handoff.
+## #132 compact-list automatic reason
+
+Two-line projector fix mirrors the saved automatic reason (or unchanged failure
+fallback) into metrics.reason while preserving top-level reason. Real proactive
+boundary/adoption regression is RED then GREEN; readback10 and proactive3 pass
+locally. No SQL, budget, storage/trigger/schema or worker changes. Exact-source
+native3OS CI is required before handoff.

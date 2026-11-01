@@ -391,7 +391,7 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
         );
     }
     for row in automatic {
-        let stats = parse(row.raw)?;
+        let mut stats = parse(row.raw)?;
         if !window.includes(row.at.as_deref()) {
             continue;
         }
@@ -415,6 +415,7 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
             .reason
             .filter(|reason| reason.len() <= 64)
             .unwrap_or_else(|| "failure".into());
+        stats["reason"] = json!(reason);
         insert(
             &mut events,
             key.clone(),

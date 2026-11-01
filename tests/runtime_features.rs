@@ -3505,6 +3505,8 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0]["state"], "adopted");
+    assert_eq!(events[0]["kind"], "automatic_reduction");
+    assert_eq!(events[0]["metrics"]["reason"], "proactive_threshold");
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
     assert_eq!(events[0]["trigger"]["input_tokens"], 150);
     assert!(events[0]["metrics"]["summary_node_id"].is_string());

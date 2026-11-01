@@ -2759,3 +2759,11 @@ snapshot; a manual compaction between Runs belongs to Thread scope only.
 Revisit if per-request (not per-compaction) rows are needed for grouped
 breakdowns, if record counts per Thread grow enough that the range read matters,
 or if a provider reports summary usage only in a form `StandardUsage` ignores.
+## #132: Automatic Compaction Metrics Reason
+
+Mirror the already bounded saved automatic_trim_attempt.reason into metrics.reason
+using the same <=64-byte value and failure fallback as top-level reason. Keep the
+existing top-level field for consumers. This repairs #125 readback only: no SQL,
+row/text limit, provider path, trigger, persistence or schema change. Verify the
+actual mocked model-response -> request-boundary -> adopted path, not just a
+hand-inserted proactive record, plus absent-reason failure records.

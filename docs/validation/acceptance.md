@@ -7476,3 +7476,18 @@ was not run; standard checks and native3OS qualification run on the pushed SHA.
 Initial compile failed on SHA0.11 hex formatting and the new error hint arm; both
 were corrected without dependency changes. An exact-block patch refusal wrote
 nothing and that repeated compile is not claimed as a successful qualification.
+## #132 automatic compact-list reason
+
+The real #125 mock response -> reported usage -> next boundary -> adopted summary
+fixture reproduced metrics.reason=null before the fix (execution7296dff1,
+1 executed/failed, exact expected proactive_threshold assertion). Copy the already
+bounded reason used by top-level reason into metrics; no SQL/row/text/admission
+change. Existing top-level output and failure fallback remain. Own-path rust-slot
+check --tests and readback10/0 plus proactive integration3/0 pass (2e638f9a).
+The latter exercises adoption, below/disabled thresholds and summary failure.
+Readback regression includes both legacy automatic_trim and automatic_trim_attempt
+without a replacement node and asserts failure in both reason fields. Existing
+indexed/physical count gates pass. No user-data edits or provider requests; mock
+loopback responses only. Standard/native3OS CI must qualify the pushed final SHA;
+no local full standard suite is claimed. Project hybrid search found no task
+history; unavailable docs semantics was not rebuilt.

@@ -252,6 +252,8 @@ fn compaction_sources_merge_without_merging_restore_into_its_omission() {
         assert_eq!(rows.len(), 3, "{page}");
         assert_eq!(rows[0]["kind"], "restore");
         assert_eq!(rows[1]["kind"], "automatic_reduction");
+        assert_eq!(rows[1]["reason"], "failure");
+        assert_eq!(rows[1]["metrics"]["reason"], "failure");
         assert_eq!(rows[1]["metrics"]["after_current_request_nodes"], 1);
         assert_eq!(
             rows[1]["trigger"]["retained_failures_in_turn_through_attempt"],
@@ -520,4 +522,26 @@ fn shell_list_common_description_is_bounded_sanitized_and_does_not_replace_comma
         let result = shells(&c, &args()).unwrap();
         assert!(result["items"][0].get("description").is_none());
     });
+}
+
+#[test]
+fn automatic_metrics_reason_falls_back_to_failure_without_a_replacement() {
+    let c = db();
+    for (id, record) in [
+        ("legacy", json!({"automatic_trim":{"no_target":true}})),
+        (
+            "attempt",
+            json!({"automatic_trim_attempt":{"outcome":"no_safe_reduction"}}),
+        ),
+    ] {
+        c.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES(?1,'t',0,0,'p','m',0,'failed','{}',?2,'2026-10-31T00:00:00Z')",params![id,record.to_string()]).unwrap();
+    }
+    let page = compactions(&c, "t", &comp_args()).unwrap();
+    let rows = page["items"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        assert_eq!(row["kind"], "automatic_reduction");
+        assert_eq!(row["reason"], "failure");
+        assert_eq!(row["metrics"]["reason"], "failure");
+    }
 }
