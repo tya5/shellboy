@@ -93,7 +93,10 @@ mod localized_metadata_tests {
         without_translation.ui_messages = Default::default();
         finish(&mut without_translation, &serde_json::json!({}));
         finish(&mut p, &serde_json::json!({}));
-        assert_eq!(serde_json::to_value(&p).unwrap(), serde_json::to_value(&without_translation).unwrap());
+        assert_eq!(
+            serde_json::to_value(&p).unwrap(),
+            serde_json::to_value(&without_translation).unwrap()
+        );
         assert!(p.metadata_bytes() <= MAX_METADATA_BYTES);
         assert!(p.ui_messages.title.is_none());
         assert!(p.ui_messages.bodies.is_empty());
@@ -116,7 +119,7 @@ mod localized_metadata_tests {
         }
         assert!(accepted > 0 && accepted < 128);
         for (_, messages) in &p.ui_messages.bodies {
-            assert_eq!(messages, &[sentence.clone()]);
+            assert_eq!(messages, std::slice::from_ref(&sentence));
         }
     }
 }

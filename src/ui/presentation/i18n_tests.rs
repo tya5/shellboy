@@ -218,3 +218,45 @@ fn quiet_event_title_retains_changed_values_and_failure_facts_in_both_languages(
         }));
     }
 }
+
+fn recovery_banner(ui: &mut UiState) {
+    history(ui, Vec::new());
+    ui.apply(UiUpdate::Activity {
+        thread_id: "fixture-thread".into(),
+        generation: ui.view().generation,
+        epoch: 1,
+        observed_at: std::time::Instant::now(),
+        snapshot: super::super::activity::ActivitySnapshot {
+            phase: crate::activity::ActivityPhase::Recovery,
+            recovery: Some(super::super::activity::RecoverySnapshot {
+                stage: "request".into(),
+                message: "Synthetic provider failure".into(),
+                pending_messages: 1,
+                saved_tool_results: 2,
+                live_shells: 1,
+                uncollected_shells: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+    });
+}
+#[test]
+fn actual_recovery_banner_screen_bilingual() {
+    crate::ui::i18n::verify_screen(recovery_banner, |lang| match lang {
+        UiLanguage::En => &[
+            "Awaiting recovery",
+            "Synthetic provider failure",
+            "/retry",
+            "Ctrl+C",
+            "F8",
+        ],
+        UiLanguage::Ja => &[
+            "復旧待ち",
+            "Synthetic provider failure",
+            "/retry",
+            "Ctrl+C",
+            "F8",
+        ],
+    });
+}
