@@ -1,4 +1,4 @@
-//! Proactive threshold compaction (#125): only the trigger decision lives here.
+//! Proactive threshold compaction and measured retry policy (#125, #153).
 //! Uses ordinary safe boundaries, recording partial spill adoption separately.
 use super::*;
 

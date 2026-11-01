@@ -10,8 +10,28 @@ result recorded `rejected` and omitted the spill counts. Trigger input was
 though intervening changes prevent assigning the full difference to spill.
 The rejected summary's `summary_usage`: 1 map / 0 reduce, input 2,895,
 cached 0, cache-creation unknown, output 1,051. This is provider-reported usage,
-not a cost in currency. The synthetic acceptance below additionally tests that
-partial adoption retains failure usage and that the next actual request shrinks.
+not a cost in currency. The rejected source was 1,741 characters and its
+candidate summary 1,840 characters (not a reduction). By the trigger, that
+Turn had 193 completed conversation requests with reported output sum 74,417,
+of which reasoning tokens were 30,759. These are generated-token totals, not
+measurements of replayed or retained tokens: output includes other item types,
+and reasoning replay is encoded/provider-dependent. They illustrate potential
+growth, not an exact remaining footprint. The synthetic acceptance below
+additionally tests that partial adoption retains failure usage and that the next
+actual request shrinks.
+
+Review regression on native macOS: rust-slot execution
+`af851bd4-f1b9-4dbd-aaef-938e084937c2` passes all six proactive integration
+tests. In the partial-adoption case the summary source is below 3,000 characters
+and two safe current-Turn tool outputs are spilled; the next ordinary request's
+input JSON decreases from 39,706 to 7,123 bytes. The fixture uses the existing
+`summary_max_chars=4000` setting to make the candidate longer than its source
+without issuing a reduce request. The rejected summary reports one mock map
+request, input 321 and output 123 tokens; partial adoption retains that usage
+and the growth gate. Earlier fixture runs exposed tool output clipping, mistook
+a reduce request for a conversation request, and produced an accepted summary;
+these were corrected before the passing result. The earlier post-rebase
+`cargo check --tests` passed. CI and focused unit results are reported separately.
 
 Test scope: synthetic temporary data-dir and loopback Responses mock; no user data,
 real provider, installed binary or paid API. Every new mock loop is capped at

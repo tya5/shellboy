@@ -3458,7 +3458,7 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
     crate::test_watchdog::watchdog("proactive partial spill adoption", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\n").await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
         for text in ["hi", "yo"] {
@@ -3481,14 +3481,24 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
         before.reply.send((200, tool_response(2, 200))).unwrap();
         let summary = incoming(&control, &mut receive).await;
         assert_eq!(summary.body["tools"], json!([]));
-        let mut rejected = answer(&"too-long-summary ".repeat(400));
+        let mut rejected = answer(&"too-long-summary ".repeat(180));
         rejected["usage"] = json!({"input_tokens":321,"output_tokens":123,"total_tokens":444});
         summary.reply.send((200, rejected)).unwrap();
         let after = incoming(&control, &mut receive).await;
+        assert_ne!(after.body["tools"], json!([]), "the measured request must be an ordinary conversation request, not a summary reduce request");
         let after_size = after.body["input"].to_string().len();
         assert!(after_size < before_size / 3, "actual replay input must shrink: {before_size} -> {after_size}");
-        let replay = after.body["input"].to_string();
-        assert!(replay.contains("\\\"omitted\\\":true"), "replacement must be present in replay");
+        let omitted = after.body["input"].as_array().unwrap().iter()
+            .filter_map(|item| item.get("output").and_then(Value::as_str))
+            .filter_map(|output| serde_json::from_str::<Value>(output).ok())
+            .filter(|output| output["omitted"] == true).count();
+        assert!(omitted >= 2, "both tool output replacements must be replayed: {omitted}; input={}", after.body["input"]);
+        let first_events = proactive_events(&control, &target).await;
+        assert_eq!(first_events.len(), 1, "{first_events:#?}");
+        assert_eq!(first_events[0]["metrics"]["summary_rejected"], true, "{first_events:#?}");
+        assert!(first_events[0]["metrics"]["source_characters"].as_u64().unwrap() < 3_000, "tiny summary source: {first_events:#?}");
+        assert_eq!(first_events[0]["metrics"]["summary_usage"]["requests"], 1);
+        assert_eq!(first_events[0]["metrics"]["summary_usage"]["reduce_requests"], 0);
         after.reply.send((200, tool_response(3, 205))).unwrap();
         let gated = incoming(&control, &mut receive).await;
         assert_ne!(gated.body["tools"], json!([]), "partial adoption must not bypass failed-summary retry gate");
@@ -3697,6 +3707,10 @@ async fn proactive_summary_failure_waits_for_measured_growth() {
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0]["state"], "rejected");
     assert_eq!(events[0]["trigger"]["input_tokens"], 150);
+    let usage = &events[0]["metrics"]["summary_usage"];
+    assert_eq!(usage["requests"], 1);
+    assert_eq!(usage["input_tokens"]["unknown_count"], 1);
+    assert_eq!(usage["output_tokens"]["unknown_count"], 1);
     let (summary_nodes, turn_state) = control
         .store
         .database
@@ -3808,14 +3822,16 @@ async fn proactive_retries_after_growth_and_bounds_repeated_rejections() {
         );
         assert_eq!(events[0]["state"], "rejected");
         for event in &events[1..] {
-            assert_eq!(
-                event["state"],
-                if eventually_adopts {
-                    "adopted"
-                } else {
-                    "rejected"
-                }
-            );
+            if eventually_adopts {
+                assert_eq!(event["state"], "adopted");
+                assert!(event["metrics"]["summary_node_id"].is_string());
+            } else if event["state"] == "adopted" {
+                assert_eq!(event["metrics"]["summary_rejected"], true);
+                assert!(event["metrics"]["spilled_groups"].as_u64().unwrap() > 0);
+                assert!(event["metrics"]["summary_node_id"].is_null());
+            } else {
+                assert_eq!(event["state"], "rejected");
+            }
         }
         let runs = proactive_run_ids(&control, &events).await;
         assert!(runs.iter().all(|run| run == &runs[0]), "same Run: {runs:?}");
