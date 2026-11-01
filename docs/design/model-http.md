@@ -246,6 +246,64 @@ which dialect it belongs to:
   A dialect decoder is what turns an unknown provider block into this envelope,
   so the rule "keep the original, never guess" lives with the dialect, not here.
 
+### Anthropic Messages dialect (#120 stage 3)
+
+`api = "anthropic_messages"` sends `POST {base_url}/messages`. Sources are the
+public Anthropic documentation (Messages, streaming, errors, versions, caching,
+models) read on 2026-11-01; no real provider call has been made.
+
+- Headers: `anthropic-version` is a constant in the dialect (`2023-06-01`, the
+  version whose streaming format is documented in detail), never inferred.
+  Raising it is a deliberate code change. `content-type` and the credential path
+  stay as for the other dialects: `api_key_env` sends `Authorization: Bearer`,
+  which the API accepts; `x-api-key` is available through `headers`.
+- Request: `model`, `max_tokens` (required by the API), `stream: true`,
+  `messages`, a top-level `system` string, and `tools`. Nothing optional is sent:
+  no `thinking`, effort, temperature, `tool_choice`, `cache_control` or beta
+  header; the user adds them with `extra_body` and `extra_headers` (#119). Reserved
+  `extra_body` keys: `model`, `max_tokens`, `stream`, `messages`, `system`, `tools`.
+- `max_tokens`: connection setting `max_tokens` (positive integer), default 32768,
+  chosen to be below the documented 128K output cap of current models and large
+  enough that routine coding turns do not stop at `max_tokens`. It is only valid
+  with `api = "anthropic_messages"`.
+- Conversation mapping from the Responses-shaped items: system and developer
+  items before the first user message become `system`; developer items after it
+  (event notices, context lines) are sent as user messages (`context_role` does
+  not apply here because the dialect cannot carry them anywhere else). Consecutive
+  items of one role are merged into one message with several content blocks;
+  `function_call` items become `tool_use` blocks of the assistant message and
+  `function_call_output` items become `tool_result` blocks at the start of the
+  next user message, ordered as Anthropic requires (all results of one assistant
+  turn together, before other user content). Images map to `image` blocks with a
+  `base64` or `url` source. The final message must be a user message; if replay
+  would end with an assistant message the request fails locally with
+  `input_invalid` instead of sending a prefill that current models reject.
+- Opaque blocks: `thinking`, `redacted_thinking` and any unknown block type are
+  stored as `provider_opaque` items with `dialect = "anthropic_messages"` and
+  returned inside the assistant message in their original position and unchanged
+  (stage 2). `text` and `tool_use` are the only blocks the core reads.
+- Streaming: `message_start`, `content_block_start|delta|stop`, `message_delta`,
+  `message_stop`, `ping` (ignored) and `error` are read. `text_delta` feeds the
+  existing text events; `input_json_delta` accumulates the tool arguments by block
+  index (checked against `MAX_TOOL_ARGUMENT_BYTES`), parsed once at the block's
+  stop; `thinking_delta`, `signature_delta` and unknown deltas accumulate into the
+  opaque block unread. Unknown event types are skipped and counted. A stream is
+  complete only after `message_stop`; EOF before it is `incomplete`.
+- `stop_reason`: `end_turn`, `stop_sequence` and `tool_use` complete the response;
+  `max_tokens` and `model_context_window_exceeded` are `incomplete` (the latter
+  classified as a context limit); `pause_turn`, `refusal` and any other value are
+  failures that keep the original response, never guessed around.
+- Usage: `input_tokens` plus `cache_creation_input_tokens` plus
+  `cache_read_input_tokens` is the total input; `cached_tokens` is
+  `cache_read_input_tokens`; `output_tokens` is taken from the last (cumulative)
+  `message_delta`. Missing counters stay unknown. Totals are not invented.
+- Errors: an in-stream `error` event and an HTTP error body
+  `{"type":"error","error":{"type","message"}}` map `error.type` to the provider
+  code. `overloaded_error` (529) and `rate_limit_error` (429) are retried by the
+  existing transient rules; `request_too_large` (413) and `invalid_request_error`
+  (400) are not.
+- Summary requests and `input_characters` use the same encoder.
+
 ### D-010 fact-preserving Chat tolerances (#64 review)
 
 Accept stop with calls only when every call has a nonempty name and identity
