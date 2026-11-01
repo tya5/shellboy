@@ -187,6 +187,7 @@ mod tests {
         }
         clear_terminal_width();
     }
+
     #[test]
     fn measured_and_unknown_width_are_conservative() {
         set_terminal_width(Some(1));

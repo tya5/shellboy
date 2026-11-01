@@ -73,13 +73,18 @@ mod tests {
         buffer[(0, 0)].set_symbol("·");
         super::assert_invariant_ui_symbols(&buffer, Some(1));
         for observed in [Some(2), None] {
-            let rejected = std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, observed));
+            let rejected =
+                std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, observed));
             assert!(rejected.is_err());
         }
         buffer[(0, 0)].set_symbol("●");
-        assert!(std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, Some(1))).is_err());
+        assert!(
+            std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, Some(1)))
+                .is_err()
+        );
         crate::ui::text_width::clear_terminal_width();
     }
+
     #[test]
     fn fixed_messages_select_the_explicit_language() {
         assert_eq!(local!(UiLanguage::Ja, "日本語", "English"), "日本語");
