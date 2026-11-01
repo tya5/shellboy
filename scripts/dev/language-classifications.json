@@ -1,0 +1,127 @@
+{
+  "src/presentation/messages.rs:0bff270c09be9c78:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:0c8bd08fbeb8fe7a:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:2d85efb0da176a01:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:2ee12a032677caa4:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:389f767af5a90d85:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:3e7a697a9be63ac3:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:62a142b415a31d33:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:64e9d98e1b8291cf:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:66389b2695f5dccb:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:6a7b140150cb0e91:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:6fde8b967c304887:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:84d027ce84868593:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:850486352b42fc11:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:a0cb0c2efd5aa53f:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:a11d38283bd0d638:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:a22a6d4826ea9101:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:a7cf2cdf54017602:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:ab5c381a330c4429:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:ac169d556eefae57:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:b057652dd4bf22f3:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:d1df57e28c5bfa57:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:d52f11044f4b193b:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:d6165bfb6d8626d0:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:e90446cae41655cf:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  },
+  "src/presentation/messages.rs:ea4d36dfd460f0c0:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "source_tokens_sha256": "b704067c899e1c1ef22d1d6112e76e6b6b587883b440c290d82c1a3e88fcb874"
+  }
+}

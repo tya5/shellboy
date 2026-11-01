@@ -157,13 +157,14 @@ def inventory(root, classifications=None):
         source = path.read_text(encoding='utf-8')
         items = tokens(source)
         fixture, localized, modules = ranges(items, groups(items))
-        prepared[path] = source, items, fixture, localized
+        fingerprint = hashlib.sha256(json.dumps([(t.kind, t.text) for t in items]).encode()).hexdigest()
+        prepared[path] = source, items, fixture, localized, fingerprint
         for module in modules:
             parent = path.parent if path.name in ('lib.rs', 'main.rs', 'mod.rs') else path.with_suffix('')
             fixture_paths.update([parent / (module + '.rs'), parent / module / 'mod.rs'])
     decisions = classifications or {}
     seen, records = set(), []
-    for path, (source, items, fixture, localized) in prepared.items():
+    for path, (source, items, fixture, localized, fingerprint) in prepared.items():
         occurrences = Counter()
         for token in items:
             if token.kind not in ('string', 'raw_string') or not JAPANESE.search(decoded(token)):
@@ -184,9 +185,12 @@ def inventory(root, classifications=None):
                 entry = decisions[identity]
                 if entry.get('category') not in ('a', 'b', 'c') or not entry.get('reason', '').strip():
                     raise ValueError(f'invalid reviewed decision: {identity}')
+                if entry.get('source_tokens_sha256') != fingerprint:
+                    raise ValueError(f'reviewed source changed; re-review required: {identity}')
                 category, reason = entry['category'], entry['reason']
             records.append(dict(id=identity, path=relative, line=source.count('\n', 0, token.start) + 1,
-                                kind=token.kind, category=category, reason=reason, literal=token.text))
+                                kind=token.kind, category=category, reason=reason, literal=token.text,
+                                source_tokens_sha256=fingerprint))
     stale = set(decisions) - seen
     if stale:
         raise ValueError('stale reviewed decisions: ' + ', '.join(sorted(stale)))
@@ -200,7 +204,8 @@ def main():
         'never authorization to translate source data. No writes, DB or network access. '
         'Exit 0: inventory (or zero c under --check); 1: remaining c; 2: input error.'))
     parser.add_argument('--repo', type=Path, default=Path('.'))
-    parser.add_argument('--classifications', type=Path, help='Reviewed ID -> {category,reason} JSON map')
+    parser.add_argument('--classifications', type=Path,
+                        help='Reviewed ID -> {category,reason,source_tokens_sha256} JSON map')
     parser.add_argument('--summary', action='store_true', help='Omit individual literals')
     parser.add_argument('--check', action='store_true', help='Fail if any category c remains')
     args = parser.parse_args()

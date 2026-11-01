@@ -74,12 +74,23 @@ class LanguageAuditTests(unittest.TestCase):
     def test_review_ids_stable_across_line_shifts_but_not_literal_changes(self):
         path = self.source(f'const A: &str = "{JA}";')
         identity = self.records()[0]['id']
-        decisions = {identity: {'category': 'a', 'reason': 'reviewed typed Message Japanese branch'}}
+        decisions = {identity: {'category': 'a', 'reason': 'reviewed typed Message Japanese branch',
+                                'source_tokens_sha256': self.records()[0]['source_tokens_sha256']}}
         path.write_text('\n' + path.read_text(encoding='utf-8'), encoding='utf-8')
         self.assertEqual(AUDIT['inventory'](self.root, decisions)['records'][0]['category'], 'a')
         path.write_text('const A: &str = "English";', encoding='utf-8')
         with self.assertRaisesRegex(ValueError, 'stale reviewed decisions'):
             AUDIT['inventory'](self.root, decisions)
+
+    def test_changed_en_predicate_requires_review_even_when_literal_id_is_unchanged(self):
+        path = self.source(f'fn f() {{ let en = true; if !en {{ use_it("{JA}"); }} }}')
+        row = self.records()[0]
+        decision = {row['id']: {'category': 'a', 'reason': 'reviewed Ja branch',
+                               'source_tokens_sha256': row['source_tokens_sha256']}}
+        path.write_text(path.read_text(encoding='utf-8').replace('!en', 'en'), encoding='utf-8')
+        self.assertEqual(self.records()[0]['id'], row['id'])
+        with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
+            AUDIT['inventory'](self.root, decision)
 
     def test_pending_gate_and_error_never_modify_inputs(self):
         path = self.source(f'const A: &str = "{JA}";')
