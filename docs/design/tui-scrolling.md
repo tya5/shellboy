@@ -182,3 +182,12 @@ reduction. The existing stage-1 table remains the historical reference. Retain
 source references with measurements and do not use timing as an acceptance gate.
 If the complete migration does not reduce write sites, scroll size and stored
 fields, revisit the representation rather than count only relocated wrappers.
+
+Baseline at `2e58321d` (before ownership movement): `scroll()` 395 physical
+lines (the UiState forwarding wrapper is separately 7); 20 stored fields =
+7 on ThreadView (anchor, follow, unseen, loading, rebase flag, committed-preview
+pair and view_revision) + 13 on VisualScroll. Aggregate wrapper fields are not
+counted twice. `scripts/dev/scroll-metrics.py` emits the source sites and distinguishes
+mutable takes and visual-anchor writes that the original assignment-only table
+did not count. Its before/after results, not the historical table's narrower
+categories, are the consistent automated comparison.
