@@ -674,8 +674,7 @@ impl WatchState {
                 "確認履歴の保持範囲外"
             }
             WatchCategory::Confirming => "確認中",
-            WatchCategory::Stopped if entry.summary.interrupted => "停止（終了で中断）",
-            WatchCategory::Stopped => "停止",
+            WatchCategory::Stopped if entry.summary.interrupted => "中断済み（アプリ終了）",
             _ => entry.summary.phase.column_label(),
         };
         Some(WatchRow {
@@ -836,13 +835,6 @@ fn state_label(phase: ActivityPhase, age: Option<&WatchAge>, now: Instant) -> St
         age.map(|age| age_label(age, now)).unwrap_or_default()
     }
 }
-/// Watch names a stopped Run `停止`; List keeps its own `中断済み` column label.
-fn phase_text(phase: ActivityPhase) -> &'static str {
-    match phase {
-        ActivityPhase::Stopped => "停止",
-        other => other.column_label(),
-    }
-}
 /// "13:42 完了" today, "10/31 22:05 完了" otherwise; never an invented time.
 fn transition_label(
     phase: ActivityPhase,
@@ -859,7 +851,7 @@ fn transition_label(
     } else {
         "%m/%d %H:%M"
     };
-    format!("{} {}", local.format(format), phase_text(phase))
+    format!("{} {}", local.format(format), phase.column_label())
 }
 fn elapsed(duration: Duration) -> String {
     crate::presentation::elapsed_text(duration.as_secs().saturating_mul(1000), false)
@@ -1150,8 +1142,11 @@ mod tests {
                 "no-answer"
             ]
         );
-        assert_eq!(state.row("restarted").unwrap().status, "停止（終了で中断）");
-        assert_eq!(state.row("stopped").unwrap().status, "停止");
+        assert_eq!(
+            state.row("restarted").unwrap().status,
+            "中断済み（アプリ終了）"
+        );
+        assert_eq!(state.row("stopped").unwrap().status, "中断済み");
         let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T13:42:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
@@ -1164,7 +1159,7 @@ mod tests {
         let utc = chrono::FixedOffset::east_opt(0).unwrap();
         assert_eq!(
             transition_label(ActivityPhase::Stopped, Some(&age), at, utc),
-            "13:42 停止"
+            "13:42 中断済み"
         );
         assert_eq!(
             transition_label(ActivityPhase::Stopped, None, at, utc),
