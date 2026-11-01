@@ -9,7 +9,7 @@ macro_rules! local {
         }
     };
 }
-pub(super) use local;
+pub(crate) use local;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Message {
