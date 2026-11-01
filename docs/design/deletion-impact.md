@@ -17,3 +17,33 @@ completed_replacement_source_nodesはselected path nodeのうちcompleted replac
 attachment_reference_countはselected path nodeを出典とするattachment_refのdistinct ID数。同じパスへの複数添付は別参照。外部/managed内訳を返す。選択外Threadの参照を含め物理ファイル数・実体存在・unlink対象を推定しない。外部ファイルを削除しない既存契約を維持する。
 
 `reclaimable_bytes=null`と理由を返す。GCの段階的到達性判定を独立に再実装しない。容量は共有・pin・保持policy・別spaceの索引・DB/WALによって変わり、path payload bytesを足した値を物理空き容量と見なせない。previewはGC実行や直後の領域回収を保証しない。
+
+## Guarded Target-Set Deletion (#122)
+
+`ThreadDeleteArgs.preview_marker` is optional. Omission preserves existing CLI/
+client deletion semantics, including its unbounded descendant traversal. A marker
+contains `thread_count` and `ids_hash`, never the IDs. Both exact and bounded
+previews expose `preview_marker` or null plus `preview_marker_unavailable_reason`.
+The UI carries the reviewed marker into execution and requests a fresh preview
+on typed `preview_stale`, never automatically retrying deletion.
+
+The marker covers the distinct selected live Thread IDs, including the root.
+It uses the bounded observation's existing indexed successor traversal: at most
+256 physical descendants plus one sentinel, depth8, no traversal through deleted
+Threads, and no incomplete/cyclic subtree accepted. Thus a complete selected
+scope contains at most257 IDs. Root-only selection remains complete even when
+unselected descendants exceed that bound. Reference-witness limits are separate
+from target identity completeness; a marker is not permission or a GC estimate.
+
+Hash algorithm: SHA-256 over ASCII `shellboy.thread.delete.v1` followed by NUL,
+then for each distinct ID in lexicographic UTF-8-byte order a four-byte big-endian
+byte length and the ID bytes. Wire digest is64 lowercase hex characters. Count
+must be1..257; malformed markers are invalid_argument. No snapshot/token table,
+new worker, persistence schema or reservation is introduced.
+
+Inside the same execution transaction, before any deletion/receipt cancellation/
+root revision/GC changes, bounded selection is recomputed and compared. Missing,
+incomplete, added, removed or same-count-substituted targets produce preview_stale
+and roll back the mutation. Existing current live/stopping Run blockers still
+apply even when identity matches. The marker does not fence content/reference
+changes or authorize an operation; normal execution checks remain authoritative.

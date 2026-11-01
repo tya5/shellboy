@@ -2715,3 +2715,20 @@ cache_creation in saved usage: added. Anthropic reports
 bounded to the signed-64-bit range like the others, no new table or column.
 It stays included in `input_tokens`. SQL readers, totals and the UI do not
 project or aggregate it yet; revisit if usage totals need a cache-write column.
+
+## #122: Optional Bounded Deletion Target Marker
+
+Adopt a stateless count plus domain-separated SHA-256 digest of sorted,
+length-prefixed selected Thread IDs. Reuse the #109 bounded observation subtree
+collector and its256 physical descendants/depth8 limits rather than inventing
+a second traversal or sending IDs. Keep absent-marker behavior intact for old
+clients and CLI; protocol2 gains an optional field and typed preview_stale error.
+No Core historical-format shim or schema migration is involved. Compare inside
+the mutation transaction and mutate the exact compared vector, not a later
+unbounded recomputation. Incomplete scope has no marker and fails marked
+execution closed. Reference completeness is not target identity completeness.
+The dedicated UI attaches the marker and refreshes after stale rejection; a new
+Y is always required. Revisit only if preview admission limits or traversal
+semantics change, in which case both consumers must change together. Verification
+is synthetic database/protocol/UI tests plus exact-SHA native three-OS CI; no
+user data, provider calls, installed binaries or live deletion are used.
