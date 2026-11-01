@@ -7752,3 +7752,10 @@ make mutation explicit. The regression now checks width/height publication on
 resize while authoritative navigation stays equal; the existing repeated-frame
 check remains. Same helper: combined91 / scroll237 / fields15. No production
 lines added and no watchdog allowance/deadline changes. Final Rust checks pending.
+
+### #118 true-end clamp review: retain projection-only full pages
+
+Doubtful marker removed. Regression now requires the source anchor and request
+revision to survive clamping, appended growth to remain paused at that source,
+and partial body windows not to clamp as EOF. No production code added.
+Same helper: combined91 / scroll237 / fields15. Final focused checks/CI pending.
