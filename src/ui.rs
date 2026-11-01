@@ -1336,6 +1336,7 @@ impl UiUpdate {
 // bodies. Normal input/status drawing therefore does no history-body scan.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct HistoryLayoutKey {
+    language: crate::config::UiLanguage,
     view: String,
     thread: Option<String>,
     history_revision: u64,
@@ -1357,6 +1358,7 @@ struct HistoryLayout {
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct RenderUnitKey {
+    language: crate::config::UiLanguage,
     start: usize,
     end: usize,
     width: u16,
@@ -1380,6 +1382,7 @@ impl RenderUnitKey {
         links: &[Arc<str>],
     ) -> Option<Self> {
         Some(Self {
+            language: view.language,
             start,
             end,
             width,
@@ -1471,6 +1474,7 @@ struct HistoryLayoutCache {
 impl HistoryLayoutKey {
     fn new(view_key: &str, view: &ThreadView, width: u16, _height: u16) -> Self {
         Self {
+            language: view.language,
             view: view_key.into(),
             thread: view.thread_id.clone(),
             history_revision: view.history_revision(),

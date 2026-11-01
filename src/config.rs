@@ -505,7 +505,7 @@ pub enum ProgramStatus {
     Off,
 }
 /// UI language is chosen once from configuration and never from the OS locale.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UiLanguage {
     #[default]

@@ -7,6 +7,7 @@ pub(super) use navigation::{NavEvent, ReadEvent};
 
 #[derive(Debug)]
 pub struct ThreadView {
+    pub(super) language: crate::config::UiLanguage,
     pub(super) palette: theme::Palette,
     pub(super) describe_calls: bool,
     pub(super) items: history_items::ItemState,
@@ -302,6 +303,7 @@ impl ThreadView {
         let mut live_work = super::live_work::LiveWorkView::default();
         live_work.set_language(config.ui.language);
         Self {
+            language: config.ui.language,
             palette: theme::Palette::from_capabilities(config.ui.palette, false, true),
             describe_calls: config.shell.describe_calls,
             items: Default::default(),
@@ -1526,6 +1528,34 @@ impl ThreadView {
 #[cfg(test)]
 mod owner_tests {
     use super::*;
+
+    #[test]
+    fn language_follows_config_for_new_views_and_separates_render_caches() {
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut state = UiState::new(&config, std::env::temp_dir());
+        assert_eq!(state.view().language, crate::config::UiLanguage::Ja);
+        let whole_ja = HistoryLayoutKey::new("owner", state.view(), 80, 20);
+        let unit_ja = RenderUnitKey::new(state.view(), 0, 0, 80, &[]).unwrap();
+        state.new_chat();
+        assert_eq!(state.view().language, crate::config::UiLanguage::Ja);
+        state.select_thread("saved-thread".into());
+        assert_eq!(state.view().language, crate::config::UiLanguage::Ja);
+
+        let mut english = ThreadView::new(&Config::default(), std::env::temp_dir());
+        english.language = crate::config::UiLanguage::Ja;
+        let whole_same = HistoryLayoutKey::new("owner", &english, 80, 20);
+        let unit_same = RenderUnitKey::new(&english, 0, 0, 80, &[]).unwrap();
+        english.language = crate::config::UiLanguage::En;
+        assert_ne!(whole_same, HistoryLayoutKey::new("owner", &english, 80, 20));
+        assert_ne!(
+            unit_same,
+            RenderUnitKey::new(&english, 0, 0, 80, &[]).unwrap()
+        );
+        assert_eq!(whole_ja.language, crate::config::UiLanguage::Ja);
+        assert_eq!(unit_ja.language, crate::config::UiLanguage::Ja);
+    }
+
     #[test]
     fn scroll_uses_its_own_sources_and_preserves_source_anchor_across_widths() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
