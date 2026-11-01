@@ -1057,7 +1057,7 @@ fn a_new_stream_tail_keeps_reasoning_folded_in_the_anchored_old_window() {
 #[test]
 fn reasoning_metadata_capacity_counts_towards_nonvisible_body_cache() {
     let mut config = Config::default();
-    config.cache.body_bytes = 512;
+    config.cache.body_bytes = (std::mem::size_of::<UiNode>() + 256) as u64;
     let mut ui = UiState::new(&config, cwd());
     ui.select_thread("old".into());
     let generation = ui.view().generation;
