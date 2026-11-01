@@ -1332,6 +1332,33 @@ mod tests {
         assert!(!ui.dirty, "blocked wheel must not redraw the popup");
     }
 }
+#[allow(dead_code)]
+pub(super) fn shutdown_title(language: crate::config::UiLanguage) -> &'static str {
+    local!(language, "終了処理", "Shutdown")
+}
+#[allow(dead_code)]
+pub(super) fn shutdown_context(language: crate::config::UiLanguage) -> &'static str {
+    local!(language, "保存と実行停止の状態", "Save and stop status")
+}
+#[allow(dead_code)]
+pub(super) fn shutdown_footer(language: crate::config::UiLanguage) -> &'static str {
+    local!(language, "W / Enter 待機継続 | F 強制終了を選択", "W / Enter Keep waiting | F Choose force quit")
+}
+#[allow(dead_code)]
+pub(super) fn shutdown_starting(language: crate::config::UiLanguage) -> &'static str {
+    local!(language, "終了処理を開始しています。保存・停止を待っています", "Starting shutdown. Waiting for saves and work to stop.")
+}
+#[allow(dead_code)]
+pub(super) fn shutdown_progress(language: crate::config::UiLanguage, elapsed_ms: u64, detail: &str, force: bool) -> String {
+    use crate::config::UiLanguage;
+    match (language, force) {
+        (UiLanguage::Ja, true) => format!("終了処理中 {elapsed_ms}ms\n{detail}\nW/Enter: 待機継続  F: 強制終了を選択（保存/回収未完了の可能性）"),
+        (UiLanguage::Ja, false) => format!("終了処理中 {elapsed_ms}ms\n{detail}\n正常終了の保存・停止を待っています"),
+        (UiLanguage::En, true) => format!("Shutting down {elapsed_ms}ms\n{detail}\nW/Enter: Keep waiting  F: Choose force quit (saving/cleanup may be incomplete)"),
+        (UiLanguage::En, false) => format!("Shutting down {elapsed_ms}ms\n{detail}\nWaiting for saves and work to stop normally"),
+    }
+}
+
 // The shared confirmation dispatcher falls back for force quit and other owners.
 pub(super) fn confirmation_title(
     confirmation: &Confirmation,
@@ -1521,6 +1548,40 @@ mod confirmation_language_tests {
                     "category=Some(Raw)",
                     "Y 実行",
                 ],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn shutdown_progress_preserves_raw_detail_and_force_state_in_both_languages() {
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            for force in [false, true] {
+                let text = shutdown_progress(language, 1234, "OPAQUE-SHUTDOWN-DETAIL", force);
+                assert!(text.contains("OPAQUE-SHUTDOWN-DETAIL") && text.contains("1234ms"));
+                let force_text = match language {
+                    UiLanguage::Ja => "強制終了を選択",
+                    UiLanguage::En => "Choose force quit",
+                };
+                assert_eq!(text.contains(force_text), force, "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn shutdown_screen_is_bilingual_and_preserves_raw_progress() {
+        fn configure(ui: &mut UiState) {
+            ui.event(Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)));
+            ui.apply(UiUpdate::ShutdownProgress {
+                elapsed_ms: 1234,
+                detail: "OPAQUE-SHUTDOWN-DETAIL".into(),
+                force_available: true,
+            });
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Shutdown", "1234ms", "OPAQUE-SHUTDOWN-DETAIL", "Keep waiting"],
+                UiLanguage::Ja => &["終了処理", "1234ms", "OPAQUE-SHUTDOWN-DETAIL", "待機継続"],
             }
         }
         super::super::i18n::verify_screen(configure, expected);
