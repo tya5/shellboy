@@ -3967,7 +3967,8 @@ mod tests {
                         }
                     }
                     assert!(captions_removed > 0, "generated caption must be excluded");
-                    let body_lines = node_lines(&body_node, false, 0, 50, &mut Vec::new());
+                    let body_lines =
+                        node_lines(UiLanguage::Ja, &body_node, false, 0, 50, &mut Vec::new());
                     let mut body_buffer = ratatui::buffer::Buffer::empty(area);
                     Paragraph::new(borrowed(&body_lines))
                         .style(Style::default().fg(terminal_foreground))
