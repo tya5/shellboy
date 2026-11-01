@@ -3559,3 +3559,15 @@ release-binary JSON artifacts; memory and time have no acceptance thresholds.
 No Core changes, credentials, real-provider mode or other-agent comparison is
 included. Reproduction, exact workload/provenance and measurement limits are in
 `scripts/bench/README.md`. Stage 2 still requires separate user authorization.
+
+## Cross-Agent Fake-Model Comparison (#116, Stage 2)
+
+`scripts/bench/compare.py` runs Shellboy (stage-1 runner), Claude Code 2.1.316,
+Codex CLI 0.166.0, opencode 1.19.5 and jcode v0.99.1 on one Linux runner against
+`scripts/bench/fake_model.py` (Responses, Chat Completions and Anthropic
+Messages SSE; bounded tool calls). `install_agents.py` installs pinned versions
+without login and records provenance. The same opt-in `footprint` dispatch runs
+the `compare` job and uploads `agent-comparison-linux-<SHA>/result.json`; there
+are no thresholds. All five agents completed the workload in CI (see
+acceptance). Resume point: stage 3 (publication) needs a separate decision;
+real-model use stays out of scope.

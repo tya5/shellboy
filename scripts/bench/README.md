@@ -195,9 +195,14 @@ The full settings are recorded in each agent's `config` in the JSON. Sandboxes
 and approvals are off for every agent because the workload writes a file and
 Shellboy has no sandbox; Codex's sandbox helpers therefore do not run.
 
-Recorded in the first complete CI run (see the JSON `model` of each case):
-Claude Code, Codex and jcode made exactly 9 requests per session; opencode made
-10, its extra one an auxiliary title request.
+Observed in CI (see each case's `model` and `processes` in the JSON): Claude
+Code (`Bash`), Codex (`exec_command`) and jcode (`bash`) made exactly 9 requests
+per session; opencode (`bash`) made 10, its extra one an auxiliary title
+request. Shellboy and jcode run as one process, opencode as one process, Claude
+Code as one process per session; at N=20 Codex left a few extra descendant
+processes alive after the rounds, which are counted. Process-per-session
+agents get no readiness signal before their first turn, so every adapter idles
+3 s before the baseline sample (as jcode's script does).
 
 ### Startup
 
@@ -207,8 +212,13 @@ renders counts. Common terminal queries (cursor position, device attributes,
 colours, kitty keyboard, size) are answered. `first_visible_ms` is spawn to the
 first three alphanumeric characters after removing escape sequences;
 `input_echo_ms` is spawn to the visible echo of a typed probe (`zqxjvk`),
-typed at first visible text and retyped at most once per second
-(`probe_writes`). Nothing is submitted. First-run dialogs are pre-answered so
+typed at first visible text and retyped every 50 ms until it is seen
+(`probe_writes`), so agents that discard input typed during startup (Shellboy
+does, by design, until "入力できます") are resolved to about 50 ms. The echo is
+found in the escape-stripped output stream, or, when an agent renders the
+probe across two frames, in the repository's cell decoder (`echo_detector`;
+the decoder is dropped for an agent whose sequences it does not model).
+Nothing is submitted. First-run dialogs are pre-answered so
 the probe reaches the composer: Claude Code's onboarding, dummy-key approval and
 folder trust (`~/.claude.json`) and Codex's project trust. This generic method
 differs from stage 1's Shellboy-specific completed-frame/paste method, so the
@@ -229,4 +239,6 @@ two Shellboy startup numbers are not interchangeable.
   change memory relative to a default install. opencode loads its provider
   package at runtime; any network fetch it makes is part of its startup.
 - One runner, sequential agents, shared CI hardware; repeat runs to see
-  variance. PSS is sampled after rounds, not a peak.
+  variance. PSS is sampled after rounds, not a peak. Agents that keep
+  short-lived helpers get up to ten snapshots (`snapshot_attempts`) instead of
+  stage 1's three; persistent process churn is still an error.

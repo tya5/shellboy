@@ -12,6 +12,7 @@ as jcode's scripts/bench_headless_memory.py): Shellboy and opencode run one
 server hosting N sessions; Claude Code and Codex CLI run one process per session.
 """
 import argparse
+import codecs
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import fcntl
@@ -39,6 +40,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import footprint  # noqa: E402
 from fake_model import MODEL, FakeModel  # noqa: E402
+from dev.vt_screen import Screen  # noqa: E402  (footprint put scripts/ on sys.path)
 
 PROMPTS, ANSWERS = footprint.PROMPTS, footprint.ANSWERS
 TURN_TIMEOUT = 180
@@ -591,7 +593,11 @@ def measure_startup(argv, cwd, env, timeout=60):
     os.close(slave)
     raw, text, since_probe = b'', '', ''
     first, ready, probes, last_probe = None, None, 0, 0.0
-    excerpt = ''
+    excerpt, detector = '', None
+    decoder = codecs.getincrementaldecoder('utf-8')('replace')
+    # Shellboy's strict cell decoder sees probes split across frames; it gives
+    # up (None) on sequences it does not model, leaving the escape-stripped stream.
+    screen = Screen(COLS, ROWS)
     try:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline and ready is None:
@@ -607,7 +613,13 @@ def measure_startup(argv, cwd, env, timeout=60):
                     while query in raw:
                         os.write(master, answer)
                         raw = raw.replace(query, b'', 1)
-                visible = ESCAPES.sub('', chunk.decode('utf-8', 'replace'))
+                decoded = decoder.decode(chunk)
+                if screen is not None:
+                    try:
+                        screen.feed(decoded)
+                    except (ValueError, IndexError):
+                        screen = None
+                visible = ESCAPES.sub('', decoded)
                 text = (text + visible)[-20000:]
                 elapsed = (time.perf_counter_ns() - start) / 1e6
                 if first is None and re.search(r'[A-Za-z0-9]{3}', text):
@@ -615,21 +627,23 @@ def measure_startup(argv, cwd, env, timeout=60):
                     excerpt = ' '.join(text.split())[:120]
                 if probes:
                     since_probe = (since_probe + visible)[-20000:]
-                    if PROBE in since_probe:
+                    if PROBE in since_probe or (screen is not None and PROBE in screen.text()):
+                        detector = 'stream' if PROBE in since_probe else 'screen'
                         ready = elapsed
                         break
             if process.poll() is not None:
                 raise RuntimeError('TUI exited before input probe: ' + text[-500:])
             now = time.monotonic()
-            # Type the probe at first visible text; retype once per second if never echoed.
-            if first is not None and (not probes or now - last_probe >= 1.0) and probes < 20:
+            # Type the probe at first visible text; retype every 50 ms until echoed
+            # (agents may discard input typed before they are ready).
+            if first is not None and (not probes or now - last_probe >= .05) and probes < 600:
                 os.write(master, PROBE.encode())
                 probes += 1
                 last_probe = now
         if ready is None:
             raise TimeoutError('PTY startup/input watchdog: ' + text[-800:])
         return {'first_visible_ms': first, 'input_echo_ms': ready, 'probe_writes': probes,
-                'first_visible_excerpt': excerpt}
+                'echo_detector': detector, 'first_visible_excerpt': excerpt}
     finally:
         kill_group(process)
         os.close(master)

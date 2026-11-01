@@ -7600,3 +7600,23 @@ for the source panic and comparison with #124. Local focused repetition and
 three ordinary exact-SHA Linux/macOS workflow runs qualify this change; their
 actual outcomes and URLs belong to the handoff evidence, not a presumed pass
 in this acceptance definition. Windows remains an integration-batch check.
+## Resource Benchmark Stage 2 (#116)
+
+Scope: Python bench scripts, docs and an opt-in Linux CI job; no Rust/Core
+change. `scripts/tests/test_fake_model.py` checks, on any OS, that each of the
+three wires yields four tool calls then five fixed answers, schema-shaped shell
+arguments, auxiliary replies, the per-round tool budget and the request cap.
+These are correctness tests, not thresholds.
+
+Local macOS `--smoke` runs (no PSS; not observations) drove Claude Code, Codex
+and opencode through all rounds for N=1/3 and jcode for N=1/2 before jcode was
+restricted to Linux: its first macOS TUI start registered a launchd hotkey
+agent outside the temporary HOME (removed; no other home state remained).
+
+Linux observations come only from `ci.yml` dispatched with `footprint=true`:
+inspect the `compare` artifact's `status`, every agent's `status`, four N
+cases with five rounds, the fake model's per-round tool/answer counts, PSS
+process lists and startup samples. CI 41306805531 (fac69f4f) completed all five
+agents; the final branch SHA's run is recorded in the #116 handoff. Real-model
+behaviour, tokens, peak memory, physical display latency, Windows/macOS PSS and
+default-install variants (jcode memory, sandboxes) are not measured.
