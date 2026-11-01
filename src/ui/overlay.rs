@@ -1,4 +1,5 @@
 //! UI input ownership, derived from existing overlay state without replacing stacking.
+use super::i18n::local;
 use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Overlay {
@@ -193,16 +194,33 @@ impl UiState {
                     None => self.insert(&text, true),
                     Some(Overlay::Selection) => {
                         self.selection_mode = false;
-                        self.input_notice =
-                            Some("未反映: 選択モードを解除したので再貼付してください");
+                        self.input_notice = Some(local!(
+                            self.config.ui.language,
+                            "未反映: 選択モードを解除したので再貼付してください",
+                            "Denied: Selection mode ended; paste again"
+                        ));
                     }
                     Some(Overlay::Shutdown) => {
-                        self.input_notice = Some("未反映: 終了処理中は貼付けできません")
+                        self.input_notice = Some(local!(
+                            self.config.ui.language,
+                            "未反映: 終了処理中は貼付けできません",
+                            "Denied: Cannot paste during shutdown"
+                        ))
                     }
                     Some(Overlay::Confirmation) => {
-                        self.input_notice = Some("未反映: 確認を閉じてから再貼付してください")
+                        self.input_notice = Some(local!(
+                            self.config.ui.language,
+                            "未反映: 確認を閉じてから再貼付してください",
+                            "Denied: Close the confirmation and paste again"
+                        ))
                     }
-                    _ => self.input_notice = Some("未反映: Escで戻って再貼付してください"),
+                    _ => {
+                        self.input_notice = Some(local!(
+                            self.config.ui.language,
+                            "未反映: Escで戻って再貼付してください",
+                            "Denied: Press Esc, then paste again"
+                        ))
+                    }
                 }
                 vec![]
             }
@@ -1084,6 +1102,41 @@ mod tests {
         text
     }
     #[test]
+    fn rejected_paste_notice_is_bilingual_and_does_not_insert_text() {
+        fn configure(ui: &mut UiState) {
+            let config = ui.config.clone();
+            ui.show_help(help::Page::guide(&config));
+            ui.event(Event::Paste("PRIVATE-PASTE".into()));
+            assert!(!ui.view().draft.text.contains("PRIVATE-PASTE"));
+        }
+        fn expected(language: crate::config::UiLanguage) -> &'static [&'static str] {
+            match language {
+                crate::config::UiLanguage::En => &["Denied:"],
+                crate::config::UiLanguage::Ja => &["未反映:"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+    #[test]
+    fn english_rejection_keeps_its_outcome_at_eight_columns() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let mut ui = state();
+        ui.config.ui.language = crate::config::UiLanguage::En;
+        ui.show_help(help::Page::guide(&ui.config.clone()));
+        let draft = ui.view().draft.clone();
+        ui.event(Event::Resize(8, 5));
+        ui.event(Event::Paste("PRIVATE-PASTE".into()));
+        assert_eq!(ui.view().draft, draft);
+        let mut terminal = Terminal::new(TestBackend::new(8, 5)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let screen = rendered(&terminal);
+        assert!(
+            screen.lines().last().unwrap().contains("Denied"),
+            "{screen}"
+        );
+        assert!(!screen.contains("PRIVATE-PASTE"));
+    }
+    #[test]
     fn rejected_paste_is_visible_for_every_blocked_owner_without_changing_input() {
         use ratatui::{Terminal, backend::TestBackend};
         for owner in [
@@ -1097,6 +1150,7 @@ mod tests {
         ] {
             for (width, height) in [(8, 5), (100, 25)] {
                 let mut ui = state();
+                ui.config.ui.language = crate::config::UiLanguage::Ja;
                 ui.insert("retained draft", false);
                 install(&mut ui, owner);
                 let draft = ui.view().draft.clone();
@@ -1128,6 +1182,7 @@ mod tests {
         use ratatui::{Terminal, backend::TestBackend};
         for (width, height) in [(8, 5), (12, 8), (40, 12), (80, 24), (160, 60)] {
             let mut ui = state();
+            ui.config.ui.language = crate::config::UiLanguage::Ja;
             ui.show_help(help::Page::info(
                 "fixture reader",
                 "fixture",
