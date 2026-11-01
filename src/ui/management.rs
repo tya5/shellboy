@@ -1904,6 +1904,11 @@ mod initial_management_screen_tests {
                     &["Config · Create template", "Accepted work continues"]
                 }
                 UiLanguage::En => &["Config | Create template", "Accepted work continues"],
+                UiLanguage::Ja
+                    if super::super::text_width::terminal_width_observation() == Some(1) =>
+                {
+                    &["設定 · テンプレート作成", "閉じても受付済みの処理は続行"]
+                }
                 UiLanguage::Ja => &["設定 | テンプレート作成", "閉じても受付済みの処理は続行"],
             }
         }
