@@ -324,6 +324,11 @@ async fn permanent_adoption_error_is_typed_recovers_and_leaves_no_partial_attemp
         .store
         .database
         .call(|db| {
+            let (turn, generation): (String, i64) =
+                db.query_row("SELECT id,generation FROM turn", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?;
+            super::recovery_notification_tests::assert_reason_and_event(db, &turn, generation);
             assert_eq!(
                 db.query_row("SELECT state FROM turn", [], |r| r.get::<_, String>(0))?,
                 "recovery_wait"
@@ -393,6 +398,11 @@ async fn client_initialization_failure_recovers_once_instead_of_rekicking_prepar
         .store
         .database
         .call(|db| {
+            let (turn, generation): (String, i64) =
+                db.query_row("SELECT id,generation FROM turn", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?;
+            super::recovery_notification_tests::assert_reason_and_event(db, &turn, generation);
             assert_eq!(
                 db.query_row("SELECT state FROM turn", [], |r| r.get::<_, String>(0))?,
                 "recovery_wait"

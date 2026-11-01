@@ -266,7 +266,15 @@ pub(super) fn recover_turn_tx(
     generation: i64,
     error: &ApiError,
 ) -> Result<bool, crate::storage::StorageError> {
-    let changed=tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json=?2 WHERE id=?1 AND generation=?3 AND state IN ('preparing','running','waiting')",params![turn,serde_json::to_string(error).unwrap_or_default(),generation])?;
+    let mut reason = error.clone();
+    let mut details = match reason.details.take() {
+        None => serde_json::Map::new(),
+        Some(Value::Object(details)) => details,
+        Some(original) => serde_json::Map::from_iter([("original_details".into(), original)]),
+    };
+    details.insert("last_failure_at".into(), Value::String(now()));
+    reason.details = Some(Value::Object(details));
+    let changed=tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json=?2 WHERE id=?1 AND generation=?3 AND state IN ('preparing','running','waiting')",params![turn,serde_json::to_string(&reason).unwrap_or_default(),generation])?;
     if changed > 0 {
         tx.execute(
             "UPDATE attachment_delivery SET status='held' WHERE thread_id=?1 AND status='accepted'",
@@ -277,7 +285,7 @@ pub(super) fn recover_turn_tx(
             run,
             &format!("child-recovery-{turn}-{generation}"),
             "child_recovery_wait",
-            json!({"thread_id":thread,"run_id":run,"turn_id":turn,"generation":generation,"state":"recovery_wait","error":error}),
+            json!({"thread_id":thread,"run_id":run,"turn_id":turn,"generation":generation,"state":"recovery_wait","error":reason}),
         )?;
     }
     Ok(changed > 0)

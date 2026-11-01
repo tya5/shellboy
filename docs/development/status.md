@@ -3482,3 +3482,7 @@ confirmations are open. The index view retains the previous same-scope preview a
 the failed or invalidated preview never authorizes a cost-bearing operation.
 Core and protocol are unchanged. Validation is recorded in acceptance; 3-OS
 branch CI and independent review are required before integration.
+
+Recovery transitions now persist their actual failure time in the existing
+reason and durable recovery event; no new state table or background reader is
+introduced. Older reasons retain Watch's existing unknown-time fallback.

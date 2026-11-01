@@ -7499,3 +7499,14 @@ change is submitted through the real CLI and owner. Separate index and deletion
 confirmation cases check unrelated changes, retained evidence, disabled Y, and
 no second preview response. No real provider or user data is used. Full standard
 checks and native Linux/Windows coverage run in branch CI.
+
+### Recovery transition time (#129)
+
+A committed transition from preparing, running, or waiting to `recovery_wait`
+stores one RFC3339 `details.last_failure_at` in the existing reason JSON. The
+same enriched error is in the durable recovery event. Existing code, message,
+hint, and object details are preserved; non-object details are retained under
+`original_details`. A stale generation, settled Turn, repeated transition, or
+rolled-back transaction cannot replace the prior reason or add an event. The
+original caller-visible error remains unchanged. Older, malformed, and oversized
+reasons still follow Watch's existing bounded unknown-time behavior.
