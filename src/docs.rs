@@ -433,10 +433,10 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
         } => {
             limit(count, 200)?;
             if let Some(p) = &parent {
-                find(&docs, p)?;
+                find(docs, p)?;
             }
             let scope = serde_json::to_string(&json!(["list", parent])).expect("scope");
-            let offset = read_cursor(cursor.as_deref(), &version, &scope)?;
+            let offset = read_cursor(cursor.as_deref(), version, &scope)?;
             let items: Vec<_> = docs
                 .iter()
                 .filter(|d| {
@@ -450,8 +450,8 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
             }
             let end = offset.saturating_add(count).min(items.len());
             Ok(paginated(
-                json!({"version":version,"items":items[offset..end].iter().map(|d|summary(d,&version)).collect::<Vec<_>>()}),
-                (end < items.len()).then(|| next_cursor(&version, &scope, end)),
+                json!({"version":version,"items":items[offset..end].iter().map(|d|summary(d,version)).collect::<Vec<_>>()}),
+                (end < items.len()).then(|| next_cursor(version, &scope, end)),
             ))
         }
         DocsCommand::Get {
@@ -461,7 +461,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
             cursor,
         } => {
             limit(limit_bytes, 65536)?;
-            let d = find(&docs, &id)?;
+            let d = find(docs, &id)?;
             let index = docs
                 .iter()
                 .position(|candidate| candidate.id == d.id)
@@ -480,7 +480,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
             let scope =
                 serde_json::to_string(&json!(["get", id, section, content_hash])).expect("scope");
             let offset = if cursor.is_some() {
-                read_cursor(cursor.as_deref(), &version, &scope)?
+                read_cursor(cursor.as_deref(), version, &scope)?
             } else {
                 start
             };
@@ -497,7 +497,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
             }
             Ok(paginated(
                 json!({"id":d.id,"title":d.title,"version":version,"content_hash":content_hash,"text":&d.text[offset..page_end],"start":offset,"end":page_end,"total_bytes":d.text.len(),"section":section,"sections":sections,"links":bundled.links[index].get_or_init(|| links(d, docs))}),
-                (page_end < end).then(|| next_cursor(&version, &scope, page_end)),
+                (page_end < end).then(|| next_cursor(version, &scope, page_end)),
             ))
         }
         DocsCommand::Search {
@@ -511,17 +511,17 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
                 return Err("invalid_argument: Query must contain 1 to 4096 bytes".into());
             }
             if let Some(p) = &parent {
-                find(&docs, p)?;
+                find(docs, p)?;
             }
             let scope = serde_json::to_string(&json!(["search", query, parent])).expect("scope");
-            let offset = read_cursor(cursor.as_deref(), &version, &scope)?;
+            let offset = read_cursor(cursor.as_deref(), version, &scope)?;
             let needle = query.to_lowercase();
             let mut hits = Vec::new();
             for d in docs {
                 if category(&d.id)
                     || parent
                         .as_ref()
-                        .is_some_and(|p| d.id != *p && !descendant(d, p, &docs))
+                        .is_some_and(|p| d.id != *p && !descendant(d, p, docs))
                 {
                     continue;
                 }
@@ -548,7 +548,7 @@ pub fn execute(command: DocsCommand) -> Result<Value, String> {
             let end = offset.saturating_add(count).min(hits.len());
             Ok(paginated(
                 json!({"version":version,"mode":"keyword","items":hits[offset..end]}),
-                (end < hits.len()).then(|| next_cursor(&version, &scope, end)),
+                (end < hits.len()).then(|| next_cursor(version, &scope, end)),
             ))
         }
     }
