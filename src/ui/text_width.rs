@@ -179,6 +179,15 @@ pub(super) fn probe() -> Option<u8> {
 mod tests {
     use super::*;
     #[test]
+    fn glyph_separator_requires_a_measured_single_column() {
+        for (observed, expected) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            set_terminal_width(observed);
+            assert_eq!(glyphs::separator(), expected);
+            assert_eq!(UnicodeWidthStr::width(glyphs::separator()), 3);
+        }
+        clear_terminal_width();
+    }
+    #[test]
     fn measured_and_unknown_width_are_conservative() {
         set_terminal_width(Some(1));
         assert_eq!(UnicodeWidthStr::width("A·日"), 4);
@@ -189,5 +198,16 @@ mod tests {
         assert_eq!(UnicodeWidthStr::width("👩\u{200d}💻"), 4);
         assert_eq!(UnicodeWidthStr::width("❤\u{fe0f}"), 2);
         clear_terminal_width();
+    }
+}
+
+/// App-owned separators selected only from the measured terminal policy.
+pub(crate) mod glyphs {
+    pub(crate) fn separator() -> &'static str {
+        if super::terminal_width_observation() == Some(1) {
+            " · "
+        } else {
+            " | "
+        }
     }
 }

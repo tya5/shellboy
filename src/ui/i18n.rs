@@ -67,6 +67,20 @@ mod tests {
     }
 
     #[test]
+    fn measured_symbol_check_rejects_unsafe_ambiguous_widths() {
+        use ratatui::{buffer::Buffer, layout::Rect};
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 1));
+        buffer[(0, 0)].set_symbol("·");
+        super::assert_invariant_ui_symbols(&buffer, Some(1));
+        for observed in [Some(2), None] {
+            let rejected = std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, observed));
+            assert!(rejected.is_err());
+        }
+        buffer[(0, 0)].set_symbol("●");
+        assert!(std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, Some(1))).is_err());
+        crate::ui::text_width::clear_terminal_width();
+    }
+    #[test]
     fn fixed_messages_select_the_explicit_language() {
         assert_eq!(local!(UiLanguage::Ja, "日本語", "English"), "日本語");
         assert_eq!(local!(UiLanguage::En, "日本語", "English"), "English");
@@ -109,7 +123,10 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
             let narrow = value.width();
             crate::ui::text_width::set_terminal_width(Some(2));
             let wide = value.width_cjk();
-            assert_eq!(narrow, wide, "ambiguous UI symbol {value:?}");
+            assert!(
+                narrow == wide || (policy == Some(1) && value == '·'),
+                "ambiguous UI symbol {value:?} under {policy:?}"
+            );
         }
     }
     crate::ui::text_width::set_terminal_width(policy);

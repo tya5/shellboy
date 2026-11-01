@@ -419,7 +419,8 @@ impl LiveWorkView {
     fn output_age_label(&self, index: usize) -> Option<String> {
         let age = self.seconds.get(index)?.1?;
         Some(format!(
-            " | {}",
+            "{}{}",
+            crate::ui::text_width::glyphs::separator(),
             WorkMessage::OutputAge(age).render(self.language)
         ))
     }
