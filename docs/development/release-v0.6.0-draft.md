@@ -34,10 +34,10 @@ Messages support, and new request and resource inspection tools.
   If the terminal does not return consistent measurements, the width is unknown
   and layout reserves two columns. This is a measured terminal capability, not
   a locale guess or a width setting (#139).
-- The symbols `◉`, `›`, `↳` and `⋯` are restored. Branches, separators,
-  vertical lines, arrows and ellipses use box-drawing and other symbols only
-  when their width measures one column at startup; they use ASCII when the
-  measured width is two columns or unavailable (#156).
+- The fixed-width symbols `◉`, `›`, `↳` and `⋯` are restored. Ambiguous-width
+  branches, separators, vertical lines, arrows and ellipses use box-drawing and
+  other symbols only when startup measurement confirms one-column width; they
+  use ASCII when the measured width is two columns or unavailable (#156).
 
 ## Proactive compaction and usage
 
@@ -118,8 +118,7 @@ all archives and installer scripts against `SHA256SUMS` when candidates exist.
 snapshot SHA after #156 lands on main. #149, #150 and the remaining #152 work
 are deferred beyond v0.6.0. CI, candidate archives/installers/checksums and
 upgrade verification are separate gates; this preparation does not create a tag,
-publish
-a release, replace an installed binary or modify user data.
+publish a release, replace an installed binary or modify user data.
 
 After the reviewer builds a candidate, run the synthetic upgrade check on a Unix
 host with the public v0.5.0 binary and the candidate executable. The fixture root
