@@ -218,6 +218,12 @@ pub fn clear_terminal_width() {
     TERMINAL_WIDTH.with(|width| width.set(0));
 }
 
+/// Whether a non-ASCII character is a Unicode emoji-variation base.
+/// ASCII digits and punctuation remain valid width-invariant UI text.
+pub fn is_emoji_variation_base(value: char) -> bool {
+    !value.is_ascii() && tables::starts_emoji_presentation_seq(value)
+}
+
 pub use tables::UNICODE_VERSION;
 
 mod tables;

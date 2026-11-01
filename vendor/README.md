@@ -8,7 +8,8 @@ These vendored packages are based on the exact crate versions pinned in
 - `unicode-width` 0.2.2: apply the terminal's measured ambiguous-width policy
   across UI and presentation workers, including conservative emoji sequence
   reservation, consistently in ratatui and application layout. A thread-local
-  override isolates independent rendering tests.
+  override isolates independent rendering tests; the existing upstream emoji
+  variation table is exposed for UI-symbol tests without a new dependency.
 
 Keep patches small and reassess them on dependency upgrades; do not use locale
 or terminal-name heuristics as a substitute for the probe.

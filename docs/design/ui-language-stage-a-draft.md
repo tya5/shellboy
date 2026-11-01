@@ -106,6 +106,7 @@ keep overflow discoverable in the existing detail surface.
 For stage B, register each synthetic screen with `ui::i18n::verify_screen`:
 provide setup and the essential complete phrases for both languages. It renders
 80/120 columns for measured width one/two and unknown, checks generated symbol
-width invariance, popup borders and essential phrases. Fixtures containing user
+width invariance, emoji-variation bases from the pinned Unicode width table,
+popup borders and essential phrases. Fixtures containing user
 or model data need separate source/copy-preservation assertions; never sanitize
 that data merely to satisfy a symbol test.

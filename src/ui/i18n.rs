@@ -48,6 +48,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn emoji_variation_bases_are_rejected_without_rejecting_ascii_digits() {
+        assert!(unicode_width::is_emoji_variation_base('\u{21aa}'));
+        assert!(unicode_width::is_emoji_variation_base('\u{2764}'));
+        assert!(!unicode_width::is_emoji_variation_base('1'));
+        assert!(!unicode_width::is_emoji_variation_base('▸'));
+    }
+
+    #[test]
     fn complete_messages_handle_zero_one_and_many() {
         assert_eq!(
             Message::DeletedConversations { count: 0 }.render(UiLanguage::En),
@@ -75,8 +83,9 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
     for cell in &buffer.content {
         for value in cell.symbol().chars() {
             assert!(
-                !matches!(value, '\u{fe0f}' | '\u{200d}' | '\u{21aa}')
-                    && !('\u{1f000}'..='\u{1faff}').contains(&value),
+                !matches!(value, '\u{fe0f}' | '\u{200d}')
+                    && !('\u{1f000}'..='\u{1faff}').contains(&value)
+                    && !unicode_width::is_emoji_variation_base(value),
                 "emoji in generated UI symbol {value:?}"
             );
             unicode_width::set_terminal_width(Some(1));

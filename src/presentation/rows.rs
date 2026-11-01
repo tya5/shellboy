@@ -132,7 +132,12 @@ mod tests {
             let (mark, label, _) = kind.spec();
             assert_eq!(mark.width(), 1);
             assert_eq!(mark.width_cjk(), 1);
-            assert!(!mark.contains(['\u{21aa}', '\u{fe0f}', '\u{200d}']));
+            assert!(
+                mark.chars()
+                    .all(|value| !matches!(value, '\u{fe0f}' | '\u{200d}')
+                        && !('\u{1f000}'..='\u{1faff}').contains(&value)
+                        && !unicode_width::is_emoji_variation_base(value))
+            );
             assert!(!label.is_empty());
         }
         for mark in EXTERNAL_MARK_CANDIDATES {
