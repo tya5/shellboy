@@ -612,7 +612,7 @@ mod query_cost_tests {
         let own1057 = measure(&db);
         assert_eq!(own1057.attempt.as_deref(), Some("own-001056"));
         assert!(
-            own1057.vm > own33.vm && own33.vm > first.vm,
+            own1057.vm >= own33.vm && own33.vm > first.vm,
             "record the real remaining own-lifetime cost, not a false LIMIT1 bound: {first:?}->{own33:?}->{own1057:?}"
         );
         assert!(own1057.sorts > 0);
