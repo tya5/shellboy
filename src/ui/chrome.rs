@@ -223,9 +223,12 @@ pub(super) fn footer_lines(
         .as_ref()
         .and_then(|s| s.recovery.as_ref())
         .filter(|r| !r.resolved)
-        .and_then(|r| r.limit_summary())
+        .and_then(|r| r.limit_summary_localized(view.language))
     {
         facts.push(limit);
+    }
+    if let Some(retry) = view.activity.snapshot.as_ref().and_then(|s| s.automatic_retry.as_ref()) {
+        facts.push(retry.label_localized(view.language));
     }
 
     if let Some(reason) = view
@@ -234,7 +237,7 @@ pub(super) fn footer_lines(
         .as_ref()
         .and_then(|snapshot| snapshot.waiting_reason.as_ref())
     {
-        facts.push(super::activity::context_wait_label(reason));
+        facts.push(super::activity::context_wait_label_localized(reason, view.language));
     }
     if !view.navigation.follow() {
         facts.push(if view.navigation.unseen() {
@@ -251,25 +254,24 @@ pub(super) fn footer_lines(
     ) && let Some(snapshot) = view.activity.snapshot.as_ref()
         && snapshot.run_id.is_some()
     {
-        if let Some(offset) = chrono::FixedOffset::east_opt(snapshot.timing.local_offset_seconds) {
-            facts.push(crate::presentation::ended_text(
-                snapshot.timing.ended_at.as_ref(),
-                chrono::Utc::now(),
-                offset,
-            ));
+        if let (Some(ended), Some(offset)) = (
+            snapshot.timing.ended_at.as_ref(),
+            chrono::FixedOffset::east_opt(snapshot.timing.local_offset_seconds),
+        ) {
+            facts.push(crate::presentation::ended_text(Some(ended), chrono::Utc::now(), offset));
         } else {
-            facts.push(crate::presentation::TIME_TEXT[3].1.into());
+            facts.push(super::activity::FooterText::EndedUnknown.localized(view.language).into());
         }
     }
     let send = view.sending();
     if let Some((send_phase, count, started)) = send {
         facts.push(format!(
             "{} {count} | {}",
-            send_phase.label(),
-            crate::presentation::elapsed_text(
-                started.elapsed().as_secs().saturating_mul(1000),
-                false
-            )
+            crate::presentation::messages::phase_label(send_phase, view.language),
+            crate::presentation::messages::Message::Elapsed {
+                ms: started.elapsed().as_secs().saturating_mul(1000),
+                decimal: false,
+            }.render(view.language)
         ));
     } else if view
         .activity
@@ -277,7 +279,7 @@ pub(super) fn footer_lines(
         .as_ref()
         .is_some_and(|snapshot| snapshot.turn_in_progress)
         && phase != super::activity::ActivityPhase::Recovery
-        && let Some(elapsed) = view.activity.phase_time_note(std::time::Instant::now())
+        && let Some(elapsed) = view.activity.phase_time_note_localized(std::time::Instant::now(), view.language)
     {
         facts.push(elapsed);
     }
@@ -290,11 +292,14 @@ pub(super) fn footer_lines(
     {
         facts.push(work);
     }
-    if let Some(secondary) = view.activity.secondary_note(std::time::Instant::now()) {
+    if let Some(secondary) = view.activity.secondary_note_localized(std::time::Instant::now(), view.language) {
         facts.push(secondary);
     }
     if view.pending_messages.total > 0 {
-        facts.push(format!("待ち {}", view.pending_messages.total));
+        facts.push(match view.language {
+            crate::config::UiLanguage::Ja => format!("待ち {}", view.pending_messages.total),
+            crate::config::UiLanguage::En => format!("Pending {}", view.pending_messages.total),
+        });
     }
     if view.tool_calls > 0 {
         facts.push(format!("{} tools", view.tool_calls));
@@ -303,9 +308,6 @@ pub(super) fn footer_lines(
         facts.push(format!("x {}", view.cancelled_calls));
     }
     if let Some(snapshot) = view.activity.snapshot.as_ref() {
-        if let Some(retry) = snapshot.automatic_retry.as_ref() {
-            facts.push(retry.label());
-        }
         if let Some(revisit) = snapshot.revisit.as_ref() {
             facts.push(revisit.clone());
         }
@@ -315,7 +317,7 @@ pub(super) fn footer_lines(
             facts.push(reduction.clone());
         }
     }
-    if let Some(gap) = view.activity.receive_gap_note(std::time::Instant::now()) {
+    if let Some(gap) = view.activity.receive_gap_note_localized(std::time::Instant::now(), view.language) {
         facts.push(gap);
     }
     if view.navigation.is_loading() {

@@ -6103,14 +6103,18 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         if view.thread_id.is_some() && view.activity.snapshot.is_none() && view.sending().is_none()
         {
             vec![Span::styled(
-                "状態を確認中",
+                match state.config.ui.language {
+                    crate::config::UiLanguage::Ja => "状態を確認中",
+                    crate::config::UiLanguage::En => "Observing state",
+                },
                 Style::default().fg(state.palette.muted()),
             )]
         } else {
-            state.animation.spans(
+            state.animation.spans_localized(
                 phase,
                 Style::default().fg(state.palette.muted()),
                 Instant::now(),
+                state.config.ui.language,
             )
         };
     let recovery = view
@@ -6122,7 +6126,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         .map(|r| {
             (
                 if r.usage_limit.is_some() {
-                    activity::FooterText::RecoveryActions.text()
+                    activity::FooterText::RecoveryActions.localized(state.config.ui.language)
                 } else {
                     r.message.as_str()
                 },
