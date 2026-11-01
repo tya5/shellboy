@@ -328,6 +328,7 @@ fn setup_report_is_pure_and_minimal_template_matches_bundled_defaults() {
     assert!(Config::parse("[indexing]\nauto_history='off'").is_err());
     let config = Config::parse(MINIMAL).unwrap();
     let full = Config::parse(TEMPLATE).unwrap();
+    assert_eq!(full.ui.language, shellboy::config::UiLanguage::En);
     assert_eq!(config.default_connection, full.default_connection);
     assert_eq!(config.default_model, full.default_model);
     assert_eq!(
