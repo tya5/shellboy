@@ -41,7 +41,7 @@ connection-scoped progress/length hooks are removed, not raised or made optional
 
 ## Small Query Maintenance
 
-GC output-size sampling uses one streaming indexed batch and its original shared
+GC output-size sampling uses one indexed bounded batch and its original shared
 output-witness budget; an outer LIMIT after a whole-range sort is not a bound.
 Empty/unconfirmed executions and the one combined sentinel retain their meaning.
 Shell inspection reads one indexed last-sequence chunk for both its timestamp
@@ -89,13 +89,16 @@ Display coverage retains `latest_complete` through raw capture, preparation and
 UI adoption; incomplete records are labeled bounded candidates, not no matches
 or canonical latest. CLI history, source bytes and transaction state are unchanged.
 
-The GC batch is a bounded UNION ALL of indexed per-execution streams. A single
-outer output limit applies the shared budget plus one sentinel. There is no
-whole-range sort, per-owner materialized JSON aggregate, or budget refill.
+The GC batch is one bounded recursive walk over the indexed execution/sequence
+ranges, with explicit step ordering. Each step emits one chunk or advances past
+one empty execution. The walk stops at the shared output budget plus one witness;
+its final sort contains at most that many output rows, never a lifetime range.
+Owner order does not rely on an unordered UNION ALL concatenation. There is no
+per-owner JSON aggregate, query preparation, or budget refill.
 
 `CLI_BINDINGS` is initialized once from the pure clap command tree. Owned syntax
 strings live in that immutable catalogue, without leaked allocations or
-self-referential storage. Only operation/path/field/alias semantic links remain
+self-referential storage. Only operation/path/ArgId-to-field/alias semantic links remain
 explicit. Effects, permissions, confirmation, TUI defaults and its intentional
 form limits are not inferred from syntax. In particular attachment forms still
 prefer file before image, independently of clap's enum declaration order.

@@ -343,24 +343,36 @@ fn output_samples(
     budget: usize,
 ) -> Result<Vec<Vec<Option<i64>>>, ApiError> {
     let mut out = vec![Vec::new(); ids.len()];
-    if budget == 0 {
+    if budget == 0 || ids.is_empty() {
         return Ok(out);
     }
-    let mut values = Vec::new();
-    let arms = ids.iter().enumerate().filter_map(|(ordinal,id)| {
-        let id = (*id)?;
-        values.push(id);
-        Some(format!("SELECT * FROM (SELECT {ordinal},length(bytes) FROM output_chunk WHERE execution_id=?{} ORDER BY sequence LIMIT {})", values.len(), budget+1))
-    }).collect::<Vec<_>>();
-    if arms.is_empty() {
-        return Ok(out);
-    }
-    // UNION ALL is a streaming concatenation. No outer ORDER BY or materialized
-    // per-owner aggregate may consume history before the one shared sentinel.
-    let sql = format!("{} LIMIT {}", arms.join(" UNION ALL "), budget + 1);
-    let mut statement = db.prepare(&sql).map_err(sql_error)?;
+    let owners = serde_json::to_string(ids).expect("bounded UTF8 execution identifiers serialize");
+    // Each step either emits the next indexed chunk or advances past one empty
+    // owner. The walk and its final sort are bounded before eligibility filters.
+    // CASE makes the first seek include every valid sequence, including gaps.
+    let sql="WITH RECURSIVE owners AS MATERIALIZED (
+ SELECT CAST(key AS INTEGER) ordinal,value id FROM json_each(?1)
+), walk(step,owner,sequence,size,witnesses,has_chunk) AS (
+ SELECT 0,0,NULL,NULL,0,0
+ UNION ALL
+ SELECT w.step+1,CASE WHEN c.rowid IS NULL THEN w.owner+1 ELSE w.owner END,
+ c.sequence,length(c.bytes),w.witnesses+(c.rowid IS NOT NULL),c.rowid IS NOT NULL
+ FROM walk w CROSS JOIN owners o ON o.ordinal=w.owner
+ LEFT JOIN output_chunk c ON c.rowid=CASE WHEN w.sequence IS NULL THEN
+  (SELECT rowid FROM output_chunk WHERE execution_id=o.id ORDER BY sequence LIMIT 1)
+ ELSE
+  (SELECT rowid FROM output_chunk WHERE execution_id=o.id AND sequence>w.sequence ORDER BY sequence LIMIT 1)
+ END
+ WHERE w.witnesses<?2 AND w.owner<?3 AND w.step<?4
+) SELECT owner,size FROM walk WHERE has_chunk ORDER BY step";
+    let mut statement = db.prepare(sql).map_err(sql_error)?;
     let mut rows = statement
-        .query(rusqlite::params_from_iter(values))
+        .query(rusqlite::params![
+            owners,
+            (budget + 1) as i64,
+            ids.len() as i64,
+            (budget + ids.len() + 2) as i64
+        ])
         .map_err(sql_error)?;
     while let Some(row) = rows.next().map_err(sql_error)? {
         let owner = row.get::<_, i64>(0).map_err(sql_error)? as usize;
