@@ -1885,12 +1885,7 @@ pub(crate) fn thread_display_title(
             }
         }
     }
-    Ok(if user_exists {
-        "名称未設定"
-    } else {
-        "未送信"
-    }
-    .into())
+    Ok(if user_exists { "Untitled" } else { "Unsent" }.into())
 }
 
 fn thread_excerpt(connection: &Connection, thread: &str) -> Result<String> {

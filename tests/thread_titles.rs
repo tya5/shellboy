@@ -119,7 +119,7 @@ fn user(text: &str) -> Value {
 async fn real_send_populates_blank_display_title_from_first_user_not_latest_output() {
     let (_root, store) = fixture().await;
     let thread = create(&store).await;
-    assert_eq!(thread.title, "未送信");
+    assert_eq!(thread.title, "Unsent");
     let accepted = send(&store, &thread.thread_id, "  最初の\n依頼\tを確認  ").await;
     assert_eq!(
         details(&store, &thread.thread_id).await.title,
@@ -238,12 +238,12 @@ async fn only_known_user_input_text_counts_and_empty_inputs_have_explicit_fallba
         Some(json!({"text":"not a user title"})),
     )
     .await;
-    assert_eq!(details(&store, &thread.thread_id).await.title, "未送信");
+    assert_eq!(details(&store, &thread.thread_id).await.title, "Unsent");
     append(&store,&thread.thread_id,"user",Some(json!({"role":"user","metadata":{"text":"SECRET_METADATA"},"content":[{"type":"input_image","text":"not input text"},{"type":"function_call","text":"TOOL_METADATA"}]}))).await;
-    assert_eq!(details(&store, &thread.thread_id).await.title, "名称未設定");
+    assert_eq!(details(&store, &thread.thread_id).await.title, "Untitled");
     append(&store, &thread.thread_id, "user", Some(user(" \n\t "))).await;
     append(&store, &thread.thread_id, "user", None).await;
-    assert_eq!(details(&store, &thread.thread_id).await.title, "名称未設定");
+    assert_eq!(details(&store, &thread.thread_id).await.title, "Untitled");
     append(&store,&thread.thread_id,"user",Some(json!({"role":"user","content":[{"type":"input_text","text":"後続の最初"},{"type":"text","text":"の本文"}]}))).await;
     assert_eq!(
         details(&store, &thread.thread_id).await.title,
@@ -289,10 +289,7 @@ async fn only_known_user_input_text_counts_and_empty_inputs_have_explicit_fallba
         Some(json!({"role":"user","content":{"text":"OBJECT_METADATA_ONLY"}})),
     )
     .await;
-    assert_eq!(
-        details(&store, &metadata.thread_id).await.title,
-        "名称未設定"
-    );
+    assert_eq!(details(&store, &metadata.thread_id).await.title, "Untitled");
     assert!(
         list(&store, 50, None, Some("OBJECT_METADATA_ONLY"))
             .await
@@ -446,7 +443,7 @@ async fn pending_accepted_and_held_titles_do_not_leak_other_threads_or_unselecte
         })
         .await
         .unwrap();
-    assert_eq!(details(&store, &target.thread_id).await.title, "未送信");
+    assert_eq!(details(&store, &target.thread_id).await.title, "Unsent");
     append(
         &store,
         &target.thread_id,
@@ -641,7 +638,7 @@ async fn title_setter_validates_single_line_unicode_limit_before_mutation_and_ac
             ErrorCode::InvalidArgument
         );
     }
-    assert_eq!(details(&store, &thread.thread_id).await.title, "未送信");
+    assert_eq!(details(&store, &thread.thread_id).await.title, "Unsent");
     let exact = "名".repeat(512);
     let result = execute(
         &store,
@@ -661,7 +658,7 @@ async fn title_setter_validates_single_line_unicode_limit_before_mutation_and_ac
         "omission retains old operation fingerprints"
     );
     let reset = execute(&store, set_title(Some(&thread.thread_id), Some(""), None)).await;
-    assert_eq!(reset["title"], "未送信");
+    assert_eq!(reset["title"], "Unsent");
     store.database.shutdown().await.unwrap();
 }
 
@@ -732,5 +729,43 @@ async fn list_excerpt_uses_selected_speech_not_event_reasoning_tools_or_other_th
             .excerpt,
         "依頼の本文"
     );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn english_fallbacks_do_not_rewrite_blank_or_saved_japanese_titles() {
+    let (_root, store) = fixture().await;
+    let thread = create(&store).await;
+    let id = thread.thread_id.clone();
+    assert_eq!(details(&store, &id).await.title, "Unsent");
+    let stored_id = id.clone();
+    store
+        .database
+        .call(move |db| {
+            let title: String = db.query_row(
+                "SELECT title FROM thread WHERE id=?1",
+                [&stored_id],
+                |row| row.get(0),
+            )?;
+            assert_eq!(title, "");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    for title in ["名称未設定", "未送信"] {
+        let stored_id = id.clone();
+        store
+            .database
+            .call(move |db| {
+                db.execute(
+                    "UPDATE thread SET title=?2 WHERE id=?1",
+                    rusqlite::params![stored_id, title],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(details(&store, &id).await.title, title);
+    }
     store.database.shutdown().await.unwrap();
 }

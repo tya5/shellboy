@@ -3713,3 +3713,13 @@ also passes context10/storage24/hot-query5. Python121, layout102 and diff checks
 pass. Next inspection now skips comparison selection when disabled, with a
 missing-index positive/negative control. Push the non-force review1 branch and
 require its new exact-SHA CI, not the prior rejected head's success.
+
+## Non-UI English wording (#152 task 1)
+
+Core blank-title fallbacks are now `Untitled` / `Unsent`; startup data-directory
+and IPC errors/hints and model-facing summary headings are always English.
+Fallback titles are read-time values, not stored defaults. Explicit stored titles
+and existing summary bodies remain verbatim. Summary prompt v2 separates new
+cache entries without migrating old data. UI modules and intentional Japanese
+fixtures are outside this task. Focused validation is recorded in acceptance;
+full language-mixing audit and bilingual acceptance belong to later #152 work.

@@ -748,6 +748,10 @@ fn startup_failures_explain_the_phase_without_mutation_recovery_advice() {
         assert_eq!(error.code, crate::protocol::ErrorCode::IoFailed);
         assert!(!error.message.contains("Permission denied"));
         let hint = error.hint.as_deref().unwrap();
+        assert!(error.message.is_ascii());
+        assert!(hint.is_ascii());
+        assert!(error.message.ends_with('.'));
+        assert!(hint.ends_with('.'));
         assert!(!hint.contains("receipt"));
         assert!(!hint.contains("Restart the owner"));
         let details = error.details.as_ref().unwrap();

@@ -50,9 +50,9 @@ impl OwnerLock {
                 .map_err(|error| {
                     ApiError::new(
                         ErrorCode::IoFailed,
-                        "保存先を安全に開けません。保存先の末端はsymlinkではなく、自分が所有する実ディレクトリが必要です",
+                        "Cannot open the data directory safely. The final path component must be a real directory you own, not a symlink.",
                     )
-                    .hint("自分が所有する実ディレクトリを --data-dir で指定し、読み書き権限を確認してください")
+                    .hint("Use --data-dir to specify a real directory you own, and check its read and write permissions.")
                     .details(serde_json::json!({"component":"data_directory", "reason":"directory_open_failed", "os_error":error.raw_os_error(), "cause":error.to_string()}))
                 })?;
             let metadata = directory.metadata().map_err(io_error)?;
@@ -63,7 +63,7 @@ impl OwnerLock {
             {
                 return Err(ApiError::new(
                     ErrorCode::IoFailed,
-                    "保存先を専用にできません。自分が所有する実ディレクトリを --data-dir で指定してください",
+                    "Cannot secure the data directory for private use. Use --data-dir to specify a real directory you own.",
                 ));
             }
             if metadata.mode() & 0o7777 != 0o700 {

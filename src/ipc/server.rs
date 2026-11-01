@@ -127,20 +127,20 @@ fn server_error(context: &str, error: impl std::fmt::Display) -> ApiError {
 fn startup_error(reason: &str, error: impl std::fmt::Display) -> ApiError {
     let (message, hint) = match reason {
         "existing_socket_live" => (
-            "前回の通信先が応答しているため、起動を中止しました",
-            "既存のShellboyを通常終了してから、起動し直してください",
+            "Startup was aborted because the existing endpoint is responding.",
+            "Shut down the existing Shellboy instance normally, then start it again.",
         ),
         "existing_socket_probe_timeout" | "existing_socket_probe_failed" => (
-            "前回の通信先が停止済みか確認できないため、起動を中止しました",
-            "既存のShellboyの状態を確認してください。通信先は安全のため削除していません",
+            "Startup was aborted because the existing endpoint could not be confirmed inactive.",
+            "Check the existing Shellboy instance's state. The endpoint was left in place for safety.",
         ),
         "namespace_lease_failed" => (
-            "一時通信領域を専有できないため、起動を中止しました",
-            "OSの一時領域の権限とロック利用可否を確認して、起動し直してください",
+            "Startup was aborted because exclusive access to the temporary IPC namespace could not be acquired.",
+            "Check permissions and lock availability in the OS temporary directory, then start Shellboy again.",
         ),
         _ => (
-            "ローカル通信の待受を開始できません",
-            "OSの一時通信領域の空き容量・権限と通信資源の使用状況を確認して、起動し直してください",
+            "Cannot start the local IPC listener.",
+            "Check free space and permissions in the OS temporary IPC namespace and communication resource usage, then start Shellboy again.",
         ),
     };
     ApiError::new(ErrorCode::IoFailed, message)

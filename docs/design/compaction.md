@@ -22,7 +22,7 @@ fence, avoiding unnecessary discard of completed summary API work.
 
 通常の要約対象は現在Turnと直近完了Turnより前の連続prefix。未反映のユーザー指示と未完結groupは対象外。64,000 Unicode文字の初期segmentを完結group境界で分け、明確なcontext超過だけ深さ8まで二分する。opaque reasoningは除外し、現在epochの送信対象推論のみを入力へ含める。部分成功はDBへ保存するが、経路採用は全成功時だけ。最終統合APIは呼ばない。
 
-要約promptの見出しは「目的」「制約」「現在状態」「未解決・次作業」「重要参照」。見出し欠落を理由に追加APIを呼ばない。空の要約は原文を失う恐れがあるため採用を拒否する。出典IDはShellboyが付ける。
+Summary instructions always use English headings: Goal, Constraints, Current state, Open issues and next steps, and Key references, regardless of UI language. Missing headings do not trigger another API call. Empty summaries are rejected to avoid losing original content. Shellboy supplies source IDs. Prompt version v2 separates new summary-cache entries from v1; saved summaries remain verbatim and are not migrated or translated.
 
 Driverは明確なcontext超過だけ、古いspill→通常retry1→最新spillと要約→通常retry2を行う。spill対象なしならretry1を省略する。通信の一時失敗はDriverの連続再試行予算で扱い、明示context超過とは混同しない。実行済みtoolは再実行しない。回数はTurn/generation単位で保持し、手動圧縮でリセットしない。
 
