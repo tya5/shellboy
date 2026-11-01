@@ -175,32 +175,6 @@ pub(super) fn probe() -> Option<u8> {
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn glyph_separator_requires_a_measured_single_column() {
-        for (observed, expected) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
-            set_terminal_width(observed);
-            assert_eq!(glyphs::separator(), expected);
-            assert_eq!(UnicodeWidthStr::width(glyphs::separator()), 3);
-        }
-        clear_terminal_width();
-    }
-    #[test]
-    fn measured_and_unknown_width_are_conservative() {
-        set_terminal_width(Some(1));
-        assert_eq!(UnicodeWidthStr::width("A·日"), 4);
-        set_terminal_width(Some(2));
-        assert_eq!(UnicodeWidthStr::width("A·日"), 5);
-        set_terminal_width(None);
-        assert_eq!(UnicodeWidthStr::width("A·日"), 5);
-        assert_eq!(UnicodeWidthStr::width("👩\u{200d}💻"), 4);
-        assert_eq!(UnicodeWidthStr::width("❤\u{fe0f}"), 2);
-        clear_terminal_width();
-    }
-}
-
 /// App-owned decoration selected only from the measured terminal policy.
 pub(crate) mod glyphs {
     use super::terminal_width_observation;
@@ -243,5 +217,31 @@ pub(crate) mod glyphs {
     // Only app-generated labels may be passed here, never user or model text.
     pub(crate) fn decorate(text: &str) -> String {
         text.replace(" | ", separator())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn glyph_separator_requires_a_measured_single_column() {
+        for (observed, expected) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            set_terminal_width(observed);
+            assert_eq!(glyphs::separator(), expected);
+            assert_eq!(UnicodeWidthStr::width(glyphs::separator()), 3);
+        }
+        clear_terminal_width();
+    }
+    #[test]
+    fn measured_and_unknown_width_are_conservative() {
+        set_terminal_width(Some(1));
+        assert_eq!(UnicodeWidthStr::width("A·日"), 4);
+        set_terminal_width(Some(2));
+        assert_eq!(UnicodeWidthStr::width("A·日"), 5);
+        set_terminal_width(None);
+        assert_eq!(UnicodeWidthStr::width("A·日"), 5);
+        assert_eq!(UnicodeWidthStr::width("👩\u{200d}💻"), 4);
+        assert_eq!(UnicodeWidthStr::width("❤\u{fe0f}"), 2);
+        clear_terminal_width();
     }
 }
