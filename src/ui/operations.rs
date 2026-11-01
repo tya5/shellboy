@@ -230,82 +230,57 @@ impl Field {
         }
     }
     fn displayed_for(&self, language: UiLanguage) -> &str {
-        if language == UiLanguage::Ja || !matches!(self.kind, Kind::Boolean | Kind::Choice(_)) {
-            return self.displayed();
-        }
-        match self.value.as_str() {
-            "true" => "Yes",
-            "false" => "No",
-            "" => "Not specified",
-            "thread_settled" => "Conversation completed, awaiting recovery, or stopped",
-            "turn_completed" => "Turn answer completed",
-            "run_ended" => "Run ended",
-            "shell_ended" => "Command ended",
-            "shell_output" => "Command output updated",
-            "threads" => "Specified conversations",
-            "all" => "All",
-            "raw" => "Saved output",
-            "managed_images" => "Managed images",
-            "history" => "History",
-            "index" => "Index",
-            "file" => "File",
-            "image" => "Image",
-            "keep" => "Keep unchanged",
-            "set" => "Set",
-            "auto" => "Automatic",
-            "deferred" => "Compact at next boundary",
-            "maximal" => "Maximum automatic compaction",
-            "spill" => "Spill selected range",
-            "summary" => "Summarize selected range",
-            "trim" => "Trim through selected end",
-            "omit" => "Omit selected range",
-            "restore" => "Restore omitted or spilled range",
-            "previous" => "Previous",
-            "next" => "Next",
-            "sources" => "Sources",
-            "replacements" => "Replacements",
-            _ => &self.value,
-        }
-    }
-    fn displayed(&self) -> &str {
         if !matches!(self.kind, Kind::Boolean | Kind::Choice(_)) {
             return &self.value;
         }
         match self.value.as_str() {
-            "true" => "はい",
-            "false" => "いいえ",
-            "" => "未指定",
-            "thread_settled" => "会話の完了・復旧・停止",
-            "turn_completed" => "応答処理の回答完了",
-            "run_ended" => "作業の終了",
-            "shell_ended" => "コマンドの終了",
-            "shell_output" => "コマンド出力の更新",
-            "threads" => "指定した会話",
-            "all" => "全体",
-            "raw" => "保存出力",
-            "managed_images" => "管理画像",
-            "history" => "履歴",
-            "index" => "索引",
-            "file" => "ファイル",
-            "image" => "画像",
-            "keep" => "変更しない",
-            "set" => "設定する",
-            "auto" => "自動",
-            "deferred" => "次の境界で圧縮",
-            "maximal" => "自動で最大圧縮",
-            "spill" => "指定範囲を退避",
-            "summary" => "指定範囲を要約",
-            "trim" => "指定末尾まで除去",
-            "omit" => "指定範囲を省略",
-            "restore" => "省略・退避を復元",
-            "previous" => "直前",
-            "next" => "直後",
-            "sources" => "出典",
-            "replacements" => "置換関係",
+            "true" => local!(language, "はい", "Yes"),
+            "false" => local!(language, "いいえ", "No"),
+            "" => local!(language, "未指定", "Not specified"),
+            "thread_settled" => local!(
+                language,
+                "会話の完了・復旧・停止",
+                "Conversation completed, awaiting recovery, or stopped"
+            ),
+            "turn_completed" => local!(language, "応答処理の回答完了", "Turn answer completed"),
+            "run_ended" => local!(language, "作業の終了", "Run ended"),
+            "shell_ended" => local!(language, "コマンドの終了", "Command ended"),
+            "shell_output" => local!(language, "コマンド出力の更新", "Command output updated"),
+            "threads" => local!(language, "指定した会話", "Specified conversations"),
+            "all" => local!(language, "全体", "All"),
+            "raw" => local!(language, "保存出力", "Saved output"),
+            "managed_images" => local!(language, "管理画像", "Managed images"),
+            "history" => local!(language, "履歴", "History"),
+            "index" => local!(language, "索引", "Index"),
+            "file" => local!(language, "ファイル", "File"),
+            "image" => local!(language, "画像", "Image"),
+            "keep" => local!(language, "変更しない", "Keep unchanged"),
+            "set" => local!(language, "設定する", "Set"),
+            "auto" => local!(language, "自動", "Automatic"),
+            "deferred" => local!(language, "次の境界で圧縮", "Compact at next boundary"),
+            "maximal" => local!(language, "自動で最大圧縮", "Maximum automatic compaction"),
+            "spill" => local!(language, "指定範囲を退避", "Spill selected range"),
+            "summary" => local!(language, "指定範囲を要約", "Summarize selected range"),
+            "trim" => local!(language, "指定末尾まで除去", "Trim through selected end"),
+            "omit" => local!(language, "指定範囲を省略", "Omit selected range"),
+            "restore" => local!(
+                language,
+                "省略・退避を復元",
+                "Restore omitted or spilled range"
+            ),
+            "previous" => local!(language, "直前", "Previous"),
+            "next" => local!(language, "直後", "Next"),
+            "sources" => local!(language, "出典", "Sources"),
+            "replacements" => local!(language, "置換関係", "Replacements"),
             _ => &self.value,
         }
     }
+    #[cfg(test)]
+    fn displayed(&self) -> &str {
+        self.displayed_for(UiLanguage::Ja)
+    }
 }
+
 pub(super) struct Operations {
     language: UiLanguage,
     selected: usize,

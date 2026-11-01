@@ -1,9 +1,9 @@
 //! A live model picker; no built-in model/capability catalog.
+use super::i18n::local;
 use super::*;
 use crate::config::UiLanguage;
 use crate::protocol::ThreadSetArgs;
 
-const FOOTER: &str = "Esc 戻る | Enter 変更\n^v 選択 | Ctrl+R 再取得 | Ctrl+Y コピー";
 pub(super) struct ModelPicker {
     language: UiLanguage,
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
@@ -33,10 +33,11 @@ fn notice_height(body_height: u16) -> u16 {
 }
 impl ModelPicker {
     fn footer(&self) -> &'static str {
-        match self.language {
-            UiLanguage::En => "Esc Back | Enter Change\n^v Select | Ctrl+R Refresh | Ctrl+Y Copy",
-            UiLanguage::Ja => FOOTER,
-        }
+        local!(
+            self.language,
+            "Esc 戻る | Enter 変更\n^v 選択 | Ctrl+R 再取得 | Ctrl+Y コピー",
+            "Esc Back | Enter Change\n^v Select | Ctrl+R Refresh | Ctrl+Y Copy"
+        )
     }
     fn notice_text(&self, notice: &super::observation_notice::ObservationNotice) -> String {
         use super::observation_notice::{Freshness, NextAction};
@@ -71,10 +72,7 @@ impl ModelPicker {
         }
     }
     fn key(&mut self, key: KeyEvent, area: Rect) -> Outcome {
-        let title = match self.language {
-            UiLanguage::En => "Models",
-            UiLanguage::Ja => "モデル一覧",
-        };
+        let title = local!(self.language, "モデル一覧", "Models");
         let body_height = popup::body_area(area, title, self.footer(), None).height;
         let page = usize::from(body_height.saturating_sub(notice_height(body_height)))
             .saturating_sub(1)
@@ -255,10 +253,7 @@ impl ModelPicker {
                 self.connection, self.query
             ),
         };
-        let title = match self.language {
-            UiLanguage::En => "Ctrl+T Details",
-            UiLanguage::Ja => "Ctrl+T 情報",
-        };
+        let title = local!(self.language, "Ctrl+T 情報", "Ctrl+T Details");
         let body = popup::panel_recorded(frame, area, title, &context, self.footer(), &self.paint);
         let notice_text = self.notice_text(&notice);
         if let Some(scroll) = self.notice_scroll {
@@ -308,10 +303,11 @@ impl ModelPicker {
         );
         if self.loading && self.captured_at.is_none() {
             frame.render_widget(
-                Paragraph::new(match self.language {
-                    UiLanguage::En => "Loading models.",
-                    UiLanguage::Ja => "モデル一覧を取得中.",
-                })
+                Paragraph::new(local!(
+                    self.language,
+                    "モデル一覧を取得中.",
+                    "Loading models."
+                ))
                 .style(Style::default().fg(theme::ACCENT)),
                 body,
             );
@@ -329,11 +325,18 @@ impl ModelPicker {
             );
         } else if filtered.is_empty() {
             frame.render_widget(
-                Paragraph::new(match (self.language, self.models.is_empty()) {
-                    (UiLanguage::En, true) => "The connection has no models",
-                    (UiLanguage::En, false) => "No models match",
-                    (UiLanguage::Ja, true) => "接続先のモデル一覧は空です",
-                    (UiLanguage::Ja, false) => "一致するモデルがありません",
+                Paragraph::new(if self.models.is_empty() {
+                    local!(
+                        self.language,
+                        "接続先のモデル一覧は空です",
+                        "The connection has no models"
+                    )
+                } else {
+                    local!(
+                        self.language,
+                        "一致するモデルがありません",
+                        "No models match"
+                    )
                 }),
                 body,
             );
@@ -365,10 +368,11 @@ impl UiState {
         };
         let Some(connection) = connection.filter(|name| self.config.connections.contains_key(name))
         else {
-            let message = match self.config.ui.language {
-                UiLanguage::En => "Specify a configured connection name with /models [connection]",
-                UiLanguage::Ja => "/models [connection] に設定済みの接続名を指定してください",
-            };
+            let message = local!(
+                self.config.ui.language,
+                "/models [connection] に設定済みの接続名を指定してください",
+                "Specify a configured connection name with /models [connection]"
+            );
             return self.command_error(message);
         };
         self.next_model_request = self.next_model_request.wrapping_add(1);

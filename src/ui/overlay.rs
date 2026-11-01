@@ -1332,74 +1332,97 @@ mod tests {
         assert!(!ui.dirty, "blocked wheel must not redraw the popup");
     }
 }
-// Shared confirmation dispatcher calls these only for application-owned text.
-#[allow(dead_code)]
+// The shared confirmation dispatcher falls back for force quit and other owners.
 pub(super) fn confirmation_title(
     confirmation: &Confirmation,
     language: crate::config::UiLanguage,
 ) -> Option<&'static str> {
-    (language == crate::config::UiLanguage::En && !matches!(confirmation, Confirmation::ForceQuit))
-        .then_some("Confirm action")
+    (!matches!(confirmation, Confirmation::ForceQuit))
+        .then(|| local!(language, "実行の確認", "Confirm action"))
 }
-#[allow(dead_code)]
 pub(super) fn confirmation_context(
     confirmation: &Confirmation,
     language: crate::config::UiLanguage,
 ) -> Option<&'static str> {
-    (language == crate::config::UiLanguage::En && !matches!(confirmation, Confirmation::ForceQuit))
-        .then_some("Review the details")
+    (!matches!(confirmation, Confirmation::ForceQuit))
+        .then(|| local!(language, "内容を確認してください", "Review the details"))
 }
-#[allow(dead_code)]
 pub(super) fn confirmation_footer(
     confirmation: &Confirmation,
     language: crate::config::UiLanguage,
 ) -> Option<&'static str> {
-    if language != crate::config::UiLanguage::En {
-        return None;
-    }
     match confirmation {
         Confirmation::ThreadDeletion(_) | Confirmation::ForceQuit => None,
-        Confirmation::StaleIndex { .. } => Some("N / Esc Back | Review again\n^v/PgUp/PgDn Scroll"),
-        _ => Some("Y Execute | N / Esc Back\n^v/PgUp/PgDn Scroll"),
+        Confirmation::StaleIndex { .. } => Some(local!(
+            language,
+            "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧",
+            "N / Esc Back | Review again\n^v/PgUp/PgDn Scroll"
+        )),
+        _ => Some(local!(
+            language,
+            "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧",
+            "Y Execute | N / Esc Back\n^v/PgUp/PgDn Scroll"
+        )),
     }
 }
-#[allow(dead_code)]
 pub(super) fn confirmation_text(
     confirmation: &Confirmation,
     language: crate::config::UiLanguage,
 ) -> Option<String> {
-    if language != crate::config::UiLanguage::En {
-        return None;
-    }
+    use crate::config::UiLanguage;
     match confirmation {
         Confirmation::Watch(target) if target.kind == watch::WatchActionKind::Stop => {
-            Some(format!(
-                "Stop the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
-                target.thread_id, target.run_id
-            ))
+            Some(match language {
+                UiLanguage::Ja => format!(
+                    "表示中の保存済み対象を停止しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
+                    target.thread_id, target.run_id
+                ),
+                UiLanguage::En => format!(
+                    "Stop the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
+                    target.thread_id, target.run_id
+                ),
+            })
         }
-        Confirmation::Watch(target) => Some(format!(
-            "Retry the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
-            target.thread_id, target.run_id
-        )),
-        Confirmation::EditStop { run_id, .. } => Some(format!(
-            "Stop prior work {run_id}?\nAfter its final state is confirmed, a new conversation is forked just before the original request and the edited text is sent as a new request. The original request and old history are unchanged."
-        )),
+        Confirmation::Watch(target) => Some(match language {
+            UiLanguage::Ja => format!(
+                "表示中の保存済み対象を再試行しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
+                target.thread_id, target.run_id
+            ),
+            UiLanguage::En => format!(
+                "Retry the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
+                target.thread_id, target.run_id
+            ),
+        }),
+        Confirmation::EditStop { run_id, .. } => Some(match language {
+            UiLanguage::Ja => format!(
+                "旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"
+            ),
+            UiLanguage::En => format!(
+                "Stop prior work {run_id}?\nAfter its final state is confirmed, a new conversation is forked just before the original request and the edited text is sent as a new request. The original request and old history are unchanged."
+            ),
+        }),
         Confirmation::Index {
             command, detail, ..
-        } => match command {
-            Command::IndexBackfill(_) => {
-                Some(format!("Confirm index operation | backfill\n{detail}"))
-            }
-            Command::IndexRetry(_) => Some(format!("Confirm index operation | retry\n{detail}")),
-            Command::IndexRebuild(_) => {
-                Some(format!("Confirm index operation | rebuild\n{detail}"))
-            }
-            _ => Some(format!("Confirm index operation\n{detail}")),
-        },
-        Confirmation::StaleIndex { detail } => Some(format!(
-            "This confirmation is stale and cannot execute. Close it and preview again.\n{detail}"
-        )),
+        } => {
+            let action = match command {
+                Command::IndexBackfill(_) => "backfill",
+                Command::IndexRetry(_) => "retry",
+                Command::IndexRebuild(_) => "rebuild",
+                _ => local!(language, "索引操作", "index"),
+            };
+            Some(match language {
+                UiLanguage::Ja => format!("索引処理の実行確認 | {action}\n{detail}"),
+                UiLanguage::En => format!("Confirm index operation | {action}\n{detail}"),
+            })
+        }
+        Confirmation::StaleIndex { detail } => Some(match language {
+            UiLanguage::Ja => format!(
+                "確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"
+            ),
+            UiLanguage::En => format!(
+                "This confirmation is stale and cannot execute. Close it and preview again.\n{detail}"
+            ),
+        }),
         _ => None,
     }
 }
@@ -1514,7 +1537,11 @@ mod confirmation_language_tests {
         let footer = confirmation_footer(&confirmation, UiLanguage::En).unwrap();
         assert!(!footer.contains("Y Execute"));
         assert!(footer.contains("N / Esc"));
-        assert!(confirmation_text(&confirmation, UiLanguage::Ja).is_none());
+        assert!(
+            confirmation_text(&confirmation, UiLanguage::Ja)
+                .unwrap()
+                .contains("実行できません")
+        );
     }
 
     #[test]

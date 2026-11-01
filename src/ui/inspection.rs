@@ -120,99 +120,83 @@ impl State {
             detail_pointer: None,
         }
     }
+    #[cfg(test)]
     pub fn label(&self) -> String {
-        let mut text = if self.has_snapshot {
-            format!("状態取得 {}", self.metadata_observed_at)
-        } else {
-            "保存状態を取得中".into()
-        };
-        if let InspectionTarget::RetainedSources(scope) = &self.target {
-            text.push_str(&format!(
-                " | 取得済み結果 {} を保持 | 再実行は a から明示操作",
-                scope.captured_at
-            ));
-        }
-        if let InspectionTarget::HistorySources(scope) = &self.target {
-            text.push_str(&format!(
-                " | 取得時の結果 {} を保持 | 再取得:aから同じ履歴照会",
-                scope.captured_at
-            ));
-        }
-        if let InspectionTarget::Lists(scope) = &self.target {
-            text.push_str(&format!(
-                " | 取得時の一覧 {} を保持 | 新しい行はaから再取得",
-                scope.captured_at
-            ));
-        }
-        if let Some(at) = &self.usage_observed_at {
-            text.push_str(&format!(" | 使用量取得 {at}"));
-        }
-        for (kind, error) in [
-            ("状態", &self.metadata_error),
-            ("使用量", &self.usage_error),
-        ] {
-            if let Some((_, error)) = error {
-                text.push_str(&format!(" | {kind}未更新: {error}"));
-            }
-        }
-        if self.selection_unavailable {
-            if matches!(self.target, InspectionTarget::Attachments { .. }) {
-                text.push_str(
-                    " | 選択した添付は今回の取得範囲で未確認・上下キーで選び直してください",
-                );
-            } else {
-                text.push_str(" | 選択元は利用不可・上下キーで選び直してください");
-            }
-        }
-        text
+        self.label_for(crate::config::UiLanguage::Ja)
     }
     pub(super) fn label_for(&self, language: crate::config::UiLanguage) -> String {
-        if language == crate::config::UiLanguage::Ja {
-            return self.label();
-        }
+        use super::i18n::local;
+        use crate::config::UiLanguage;
         let mut messages = Vec::new();
         if self.has_snapshot {
             let at = &self.metadata_observed_at;
-            messages.push(format!("Saved state captured at {at}."));
+            messages.push(match language {
+                UiLanguage::Ja => format!("状態取得 {at}"),
+                UiLanguage::En => format!("Saved state captured at {at}."),
+            });
         } else {
-            messages.push("Retrieving saved state.".to_owned());
+            messages
+                .push(local!(language, "保存状態を取得中", "Retrieving saved state.").to_owned());
         }
         match &self.target {
             InspectionTarget::RetainedSources(scope) => {
                 let at = &scope.captured_at;
-                messages.push(format!(
-                    "Results captured at {at} are retained. Use a to rerun explicitly."
-                ));
+                messages.push(match language {
+                    UiLanguage::Ja => format!("取得済み結果 {at} を保持 | 再実行は a から明示操作"),
+                    UiLanguage::En => {
+                        format!("Results captured at {at} are retained. Use a to rerun explicitly.")
+                    }
+                });
             }
             InspectionTarget::HistorySources(scope) => {
                 let at = &scope.captured_at;
-                messages.push(format!(
-                    "History results captured at {at} are retained. Use a to repeat the same query."
-                ));
+                messages.push(match language {
+                    UiLanguage::Ja => format!("取得時の結果 {at} を保持 | 再取得:aから同じ履歴照会"),
+                    UiLanguage::En => format!("History results captured at {at} are retained. Use a to repeat the same query."),
+                });
             }
             InspectionTarget::Lists(scope) => {
                 let at = &scope.captured_at;
-                messages.push(format!(
-                    "The list captured at {at} is retained. Use a to fetch new rows."
-                ));
+                messages.push(match language {
+                    UiLanguage::Ja => format!("取得時の一覧 {at} を保持 | 新しい行はaから再取得"),
+                    UiLanguage::En => {
+                        format!("The list captured at {at} is retained. Use a to fetch new rows.")
+                    }
+                });
             }
             _ => {}
         }
         if let Some(at) = &self.usage_observed_at {
-            messages.push(format!("Usage captured at {at}."));
+            messages.push(match language {
+                UiLanguage::Ja => format!("使用量取得 {at}"),
+                UiLanguage::En => format!("Usage captured at {at}."),
+            });
         }
         if let Some((_, error)) = &self.metadata_error {
-            messages.push(format!("Saved state was not refreshed: {error}"));
+            messages.push(match language {
+                UiLanguage::Ja => format!("状態未更新: {error}"),
+                UiLanguage::En => format!("Saved state was not refreshed: {error}"),
+            });
         }
         if let Some((_, error)) = &self.usage_error {
-            messages.push(format!("Usage was not refreshed: {error}"));
+            messages.push(match language {
+                UiLanguage::Ja => format!("使用量未更新: {error}"),
+                UiLanguage::En => format!("Usage was not refreshed: {error}"),
+            });
         }
         if self.selection_unavailable {
             if matches!(self.target, InspectionTarget::Attachments { .. }) {
-                messages.push("The selected attachment was not confirmed in this capture. Use Up/Down to select again.".into());
+                messages.push(local!(language,
+                    "選択した添付は今回の取得範囲で未確認・上下キーで選び直してください",
+                    "The selected attachment was not confirmed in this capture. Use Up/Down to select again.").into());
             } else {
                 messages.push(
-                    "The selected source is unavailable. Use Up/Down to select again.".into(),
+                    local!(
+                        language,
+                        "選択元は利用不可・上下キーで選び直してください",
+                        "The selected source is unavailable. Use Up/Down to select again."
+                    )
+                    .into(),
                 );
             }
         }

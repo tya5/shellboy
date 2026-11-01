@@ -1,4 +1,5 @@
 //! Request-scoped deletion review on the existing confirmation overlay.
+use super::i18n::local;
 use super::*;
 use crate::config::UiLanguage;
 use serde_json::Value;
@@ -16,10 +17,6 @@ fn failure_text(error: &crate::protocol::ApiError, language: UiLanguage) -> Stri
         (UiLanguage::Ja, false) => format!("削除できません: {}", error.message),
     }
 }
-const FOOTER_READY: &str =
-    "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧";
-const FOOTER_DISABLED: &str =
-    "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧";
 #[derive(Clone, Debug)]
 enum Phase {
     Loading,
@@ -40,15 +37,18 @@ pub(super) struct DeletionDialog {
 }
 impl DeletionDialog {
     pub(super) fn footer(&self) -> &'static str {
-        match (self.language, self.can_execute()) {
-            (UiLanguage::Ja, true) => FOOTER_READY,
-            (UiLanguage::Ja, false) => FOOTER_DISABLED,
-            (UiLanguage::En, true) => {
+        if self.can_execute() {
+            local!(
+                self.language,
+                "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧",
                 "D / Space Toggle descendants | N / Esc Back\nY Delete | ^v/PgUp/PgDn Scroll"
-            }
-            (UiLanguage::En, false) => {
+            )
+        } else {
+            local!(
+                self.language,
+                "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧",
                 "D / Space Toggle descendants | N / Esc Back\nY disabled | ^v/PgUp/PgDn Scroll"
-            }
+            )
         }
     }
     fn matches(&self, request_id: u64, args: &ThreadDeleteArgs) -> bool {
