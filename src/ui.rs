@@ -2194,7 +2194,7 @@ impl UiState {
             let status = self
                 .thread_browser
                 .descendant_root()
-                .and_then(|root| self.descendants.label(root));
+                .and_then(|root| self.descendants.label_in(root, self.config.ui.language));
             self.thread_browser.set_descendant_count(count);
             self.thread_browser.set_descendant_status(status);
         }
@@ -3009,7 +3009,7 @@ impl UiState {
                     let status = self
                         .thread_browser
                         .descendant_root()
-                        .and_then(|root| self.descendants.label(root));
+                        .and_then(|root| self.descendants.label_in(root, self.config.ui.language));
                     self.thread_browser.set_descendant_count(count);
                     self.thread_browser.set_descendant_status(status);
                     self.dirty = true;
@@ -6175,7 +6175,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     if let Some(label) = view
         .thread_id
         .as_deref()
-        .and_then(|root| state.descendants.label(root))
+        .and_then(|root| state.descendants.label_in(root, state.config.ui.language))
     {
         spans.push(Span::raw(format!(" | {label}")));
     }
