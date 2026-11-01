@@ -5593,26 +5593,18 @@ impl UiState {
             link_regions.clear();
         }
         if self.is_quitting() {
+            let language = self.config.ui.language;
             let text = if let Some((elapsed, detail, force)) = self.lifecycle.progress() {
-                format!(
-                    "終了処理中 {}ms\n{}\n{}",
-                    elapsed,
-                    detail,
-                    if *force {
-                        "W/Enter: 待機継続  F: 強制終了を選択（保存/回収未完了の可能性）"
-                    } else {
-                        "正常終了の保存・停止を待っています"
-                    }
-                )
+                overlay::shutdown_progress(language, *elapsed, detail, *force)
             } else {
-                "終了処理を開始しています。保存・停止を待っています".into()
+                overlay::shutdown_starting(language).into()
             };
             let body = popup::compact_recorded(
                 frame,
                 area,
-                "終了処理",
-                "保存と実行停止の状態",
-                "W / Enter 待機継続 | F 強制終了を選択",
+                overlay::shutdown_title(language),
+                overlay::shutdown_context(language),
+                overlay::shutdown_footer(language),
                 12,
                 &self.aux_popup_paint,
             );
