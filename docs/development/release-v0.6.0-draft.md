@@ -22,7 +22,8 @@ Messages support, and new request and resource inspection tools.
   Japanese, add the following to the configuration and restart the TUI; use
   `"en"` to select English. Help, conversation and browser surfaces are
   migrating in stages; saved content and model/user text are not translated
-  (#35, #139, #145-#148).
+  (#35, #139, #145-#148). Core fallback titles, startup diagnostics and new
+  compaction summary headings use English without rewriting saved data (#152).
 
   ```toml
   [ui]
@@ -105,11 +106,12 @@ Windows x64, macOS Apple Silicon and Linux x64 archives are intended to include
 an executable, LICENSE, configuration example and offline documentation. Verify
 all archives and installer scripts against `SHA256SUMS` when candidates exist.
 
-**Draft cut:** pending the 2026-11-02 08:30 JST main cutoff. The final notes must
-record the exact main SHA and confirm whether #149, #150, #153 and #156 landed;
-items not in the cutoff are deferred to the next release. Later commits are not
-part of this release cut. CI, candidate archives/installers/checksums and upgrade
-verification are separate gates; this preparation does not create a tag, publish
+**Draft snapshot:** main `b12a8291b1950a5f7db58de4dccbb12101a2a074` before
+2026-11-02 08:30 JST. At the cutoff, confirm whether #149, #150, #153 and #156
+landed and update the cut; items not in the cutoff are deferred to the next
+release. Later commits require the user's direction. CI, candidate
+archives/installers/checksums and upgrade verification are separate gates;
+this preparation does not create a tag, publish
 a release, replace an installed binary or modify user data.
 
 After the reviewer builds a candidate, run the synthetic upgrade check on a Unix
