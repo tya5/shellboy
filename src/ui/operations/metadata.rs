@@ -1768,8 +1768,10 @@ mod paired_message_tests {
             );
             let en = text_for(text, UiLanguage::En);
             assert!(
-                en.chars().all(|ch| ch.is_ascii() || (matches!(text.key, crate::operations::TextKey::Label(_)) && ch == '·')),
-                "{:?}: {en}", text.key
+                en.chars().all(|ch| ch.is_ascii()
+                    || (matches!(text.key, crate::operations::TextKey::Label(_)) && ch == '·')),
+                "{:?}: {en}",
+                text.key
             );
         }
         for &id in OperationId::ALL {
