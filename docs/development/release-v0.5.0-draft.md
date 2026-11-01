@@ -139,8 +139,9 @@ Windows x64, macOS Apple Silicon and Linux x64 archives include the executable,
 LICENSE, configuration example and offline documentation. Verify all three
 archives and both installer scripts against `SHA256SUMS`.
 
-These notes include #101 and #117 from main `1f519332`. Release-preparation CI,
-candidate archives/installers/checksums and final-candidate upgrade checks are
+These notes include #101, #117, #120 stage 1, #119 and #121 from main `a3e00bed`.
+Release-preparation CI, candidate archives/installers/checksums and final-candidate
+upgrade checks are
 separate gates; see the v0.5.0 section in `publication.md` for their status.
 No tag, GitHub Release or installed-binary replacement is performed by this
 preparation. Candidate builds and actual publication remain reviewer-owned.

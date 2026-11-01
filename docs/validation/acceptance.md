@@ -7096,3 +7096,27 @@ branch CI must follow integration/rebase; author-branch docs are not a main pass
 The #117-only preliminary tree passes Python95, layout95/watchdog, package/lock
 0.5.0 parsing and diff checks (executiondbe00421 exit0/cleanup); these results do
 not qualify the not-yet-integrated extended cut. No new build/tag/install ran.
+
+## v0.5.0 complete-cut source finalization
+
+All requested delivery is now integrated at exact main
+`a3e00bed359172d331951831ebf7ea3b8d769d65`: #101/#117 plus #120stage1/#119/#121.
+The four preparation commits rebase without conflicts onto it. Ordinary native3OS
+CI41266782750 attempt1 is verified success at that exact main; preparation's
+version/embedded-guide/helper changes still require their own exact-SHA branch CI.
+
+The final notes are checked against integrated src/config.rs and configuration
+and CLI/Agent guides. Extras remain opaque/non-overriding/credential-restricted;
+context_role defaults developer and maps at send time, with user recommended
+for Claude via LiteLLM. No native Messages/opaque provider-block support or real
+provider/cache guarantee is claimed. Schema17/RAG3/protocol2 and package/lock0.5.0
+remain unchanged by finalization. No local Rust compiler/build, installer, tag,
+release workflow, paid provider or user-data operation is run. Prior synthetic
+upgrade evidence retains its original source/binary hashes; final-candidate-byte
+checks remain reviewer-controlled after preparation/main admission.
+
+Complete-cut build-free checks pass at the final preparation tree: Python95
+(including all9 release-upgrade SQL/WAL cases), layout95/watchdog, package/lock
+TOML agreement at0.5.0 and `git diff --check`. Executione78698fd exits0 with cleanup
+confirmed. No Rust slot is used while the shared cache is being cleared; standard
+Rust/native3OS checks run only on the pushed preparation SHA in GitHub CI.

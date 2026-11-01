@@ -2,13 +2,12 @@
 
 ## v0.5.0 release preparation
 
-Preparation is rebased without conflicts onto main `1f519332` with both #101 and
-#117 included. Package/lock version is 0.5.0; user-facing notes summarize E/F/G,
-shell labels, headless owners, bounded usage and the scrolling reversal fix.
-Reviewer extends the release cut to #120 stage1, #119 extras and #121 context role;
-notes are drafted from author branches, but finalization/push/CI now wait for
-those integrations and a rebase onto their exact main. No native Messages/opaque
-provider-block support is claimed from stage1.
+Preparation is rebased without conflicts onto main `a3e00bed` with #101, #117,
+#120 stage1, #119 extras and #121 context role included. Package/lock version is
+0.5.0; notes cover E/F/G, shell labels, headless owners, usage, scrolling reversal
+and connection-specific settings. Current configuration guides and source match
+the notes; Claude via LiteLLM recommends context_role=user. Stage1 adds no native
+Messages/opaque provider-block support. Final branch checks/CI precede handoff.
 The broader #41 and unmerged followups are not claimed complete. Candidate
 validation is planned in [publication](publication.md#candidate-validation-plan-not-results);
 reviewer dispatch and actual publication are separate. Release-artifact builds
@@ -17,8 +16,9 @@ public14 -> 17 and staged synthetic16 -> 17 PTY upgrades, preserving saved data,
 ledger/index facts, pending work, usage and RAG3, plus mock exec/clean shutdown.
 Nine SQL/WAL unit tests pass. Public v0.4.0 is schema14, not16; staging is labeled
 synthetic. Preparation-branch native3OS CI and exact final-candidate upgrade checks
-remain pending; main1f519332's CI41265533220 is green but is not the new branch's
-qualification. Build/release/tag/install require separate explicit permission.
+remain pending; maina3e00bed's CI41266782750 attempt1 is green but is not the
+preparation branch's qualification. Build/release/tag/install need separate
+explicit permission; this task performs no new local Rust build.
 
 ## G latest-main admission batch
 
