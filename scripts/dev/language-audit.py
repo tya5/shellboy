@@ -162,6 +162,8 @@ def inventory(root, classifications=None):
         for module in modules:
             parent = path.parent if path.name in ('lib.rs', 'main.rs', 'mod.rs') else path.with_suffix('')
             fixture_paths.update([parent / (module + '.rs'), parent / module / 'mod.rs'])
+    if classifications is not None and not isinstance(classifications, dict):
+        raise ValueError('reviewed decisions must be a JSON object')
     decisions = classifications or {}
     seen, records = set(), []
     for path, (source, items, fixture, localized, fingerprint) in prepared.items():
@@ -183,7 +185,9 @@ def inventory(root, classifications=None):
                 category, reason = 'c', 'review required; not proof this is generated copy'
             if identity in decisions:
                 entry = decisions[identity]
-                if entry.get('category') not in ('a', 'b', 'c', 'protected') or not entry.get('reason', '').strip():
+                if (not isinstance(entry, dict)
+                        or entry.get('category') not in ('a', 'b', 'c', 'protected')
+                        or not isinstance(entry.get('reason'), str) or not entry['reason'].strip()):
                     raise ValueError(f'invalid reviewed decision: {identity}')
                 if entry.get('source_tokens_sha256') != fingerprint:
                     raise ValueError(f'reviewed source changed; re-review required: {identity}')

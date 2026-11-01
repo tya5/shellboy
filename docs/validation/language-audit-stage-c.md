@@ -201,7 +201,7 @@ separators must not be changed without approval; this audit has no symbol edits.
 Regenerate this table after their exact commits reach main; current counts
 do not measure those branches and do not claim zero mixed-language output.
 
-Local script fixtures: 12 tests pass (133 in the complete Python suite), including
+Local script fixtures: 13 tests pass (134 in the complete Python suite), including
 protected-token evidence requirements and deterministic owner-aware table output.
 No Rust/product behavior change or
 full Stage C CI result is claimed by the inventory commit.

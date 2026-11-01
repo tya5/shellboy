@@ -119,6 +119,16 @@ class LanguageAuditTests(unittest.TestCase):
         self.assertEqual(first.stdout, second.stdout)
         self.assertIn('| `src/lib.rs` | 0 | 0 | 0 | 1 | W6 |', first.stdout)
 
+    def test_malformed_reviewed_input_is_a_controlled_input_error(self):
+        self.source(f'const A: &str = "{JA}";')
+        row = self.records()[0]
+        for invalid in [[], [row['id']], 7]:
+            with self.assertRaisesRegex(ValueError, 'JSON object'):
+                AUDIT['inventory'](self.root, invalid)
+        for entry in [None, 7, {'category': 'a', 'reason': 7}]:
+            with self.assertRaisesRegex(ValueError, 'invalid reviewed decision'):
+                AUDIT['inventory'](self.root, {row['id']: entry})
+
     def test_pending_gate_and_error_never_modify_inputs(self):
         path = self.source(f'const A: &str = "{JA}";')
         before = path.read_bytes()
