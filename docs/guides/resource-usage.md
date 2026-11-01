@@ -140,12 +140,12 @@ default-install behavior and OS-wide resource use are outside these results.
 
 ## Reproduce
 
-From a source checkout on Linux, using the pinned Rust toolchain, Python 3.11+,
+From a source checkout on Linux x86_64, in Bash, using the pinned Rust toolchain, Python 3.11+,
 Node/npm (recorded run: Node 22.23.4, npm 10.9.9) and ordinary Unix tools.
 Use a fresh checkout of the measured source SHA above to recreate that setup;
 use your chosen current commit for a new observation and record that commit:
 
-```sh
+```bash
 cargo build --locked --release --bin shellboy
 work=$(mktemp -d)
 python3 scripts/bench/footprint.py --binary target/release/shellboy --out "$work/footprint.json"

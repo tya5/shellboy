@@ -30,7 +30,8 @@ It separates the two jobs' runners and startup definitions; it makes no ranking
 or real-model claim. The new bundled reference guide retains existing IDs and
 requires no owner or API. Source measurements are verified public artifacts,
 not new benchmark executions; branch qualification is recorded in acceptance
-and the exact-SHA CI handoff. Stage 2 at `4d6f128a` is the branch prerequisite.
+and the exact-SHA CI handoff. Stage 2 at `4d6f128a` supplied the input; the guide
+branch is rebased onto its integrated equivalent on main `3faff898`.
 
 ## Schema 18 release-upgrade validation
 
