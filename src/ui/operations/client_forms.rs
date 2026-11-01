@@ -551,7 +551,7 @@ pub(super) fn confirmation_lines_for(
 ) -> Vec<Line<'static>> {
     let id = operation.catalogue();
     let mut lines = vec![
-        Line::from(super::metadata::text_for(id.label_text(), language).replace('·', "|")),
+        Line::from(super::metadata::text_for(id.label_text(), language)),
         Line::from(super::metadata::text_for(id.meaning_text(), language)),
         Line::from(super::metadata::text_for(
             operation.effect().text(),
