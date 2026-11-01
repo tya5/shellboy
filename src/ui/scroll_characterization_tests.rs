@@ -569,7 +569,7 @@ fn tab_into_history_focus_pauses_on_the_visible_top_row_without_a_read() {
     assert_eq!(rows(&mut ui, &mut t), screen, "same rows, now paused");
     let v = ui.view();
     assert!(!v.loading && v.scroll.request.is_none() && v.scroll.pending == 0);
-    assert!(v.scroll.initialized && v.unseen == false);
+    assert!(v.scroll.initialized && !v.unseen);
 }
 
 // ---- resize ----
