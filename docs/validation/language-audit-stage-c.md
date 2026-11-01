@@ -27,7 +27,7 @@ user, model, provider or shell content. Reviewed ID decisions require a reason;
 stale IDs fail instead of silently hiding changed literals. Unknown contexts
 remain (c); there are no whole-production-file exemptions.
 
-Initial scan: 353 Rust files; 3339 literals; a=238, b=1133, c=1968.
+Initial scan: 353 Rust files; 3339 literals; a=234, b=1133, c=1972.
 The zero-(c) gate intentionally fails at this stage. Final classification,
 fresh En/Ja rendering/plural checks and three-OS CI remain outstanding.
 
@@ -152,7 +152,7 @@ fresh En/Ja rendering/plural checks and three-OS CI remain outstanding.
 | `src/ui/performance_stream.rs` | 0 | 1 | 0 | review in C |
 | `src/ui/popup.rs` | 0 | 7 | 0 | review in C |
 | `src/ui/popup/reader.rs` | 0 | 2 | 1 | defer B-5 |
-| `src/ui/presentation.rs` | 7 | 94 | 9 | defer B-6 |
+| `src/ui/presentation.rs` | 3 | 94 | 13 | defer B-6 |
 | `src/ui/presentation/i18n_tests.rs` | 0 | 34 | 0 | defer B-6 |
 | `src/ui/reader_tests.rs` | 0 | 6 | 0 | defer B-5 |
 | `src/ui/redraw.rs` | 0 | 4 | 0 | review in C |
@@ -178,5 +178,5 @@ B-5/B-6 owner files until those tasks land.
 Regenerate this table after their exact commits reach main; current counts
 do not measure those branches and do not claim zero mixed-language output.
 
-Local script fixtures: 8 tests pass. No Rust/product behavior change or
+Local script fixtures: 9 tests pass. No Rust/product behavior change or
 full Stage C CI result is claimed by the inventory commit.

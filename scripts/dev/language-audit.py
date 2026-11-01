@@ -135,7 +135,7 @@ def ranges(items, pairs):
             if texts[j:j + 2] == ['=', '>']:
                 begin = j + 2
                 j = begin
-                while j < len(items) and texts[j] != ',':
+                while j < len(items) and texts[j] not in (',', '}', ';'):
                     j = pairs[j] + 1 if j in pairs else j + 1
                 if begin < len(items):
                     localized.append((items[begin].start, items[j - 1].end))

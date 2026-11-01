@@ -54,6 +54,11 @@ class LanguageAuditTests(unittest.TestCase):
                     f'UiLanguage::En => "{JA}".into(), }} after("{JA}"); }}')
         self.assertEqual([r['category'] for r in self.records()], ['a', 'c', 'c'])
 
+    def test_terminal_japanese_arm_without_comma_cannot_hide_neighbor_literals(self):
+        self.source(f'fn f() {{ match lang {{ UiLanguage::En => "English", '
+                    f'UiLanguage::Ja => "{JA}" }} after("{JA}"); }}')
+        self.assertEqual([r['category'] for r in self.records()], ['a', 'c'])
+
     def test_test_module_and_async_test_items_but_not_production_siblings(self):
         self.source(f'#[cfg(test)] mod tests {{ fn fixture() {{ use_it("{JA}"); }} }}\n'
                     f'#[tokio::test(flavor="multi_thread")] async fn t() {{ use_it("{JA}"); }}\n'

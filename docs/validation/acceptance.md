@@ -8053,7 +8053,7 @@ bilingual UI acceptance is claimed by these synthetic tests.
 
 On main13d5ac86, the read-only scanner enumerates Japanese-containing Rust
 string literals and conservatively classifies proven Japanese local!/language
-arms and test-only scopes, leaving other candidates for explicit review. Eight
+arms and test-only scopes, leaving other candidates for explicit review. Nine
 synthetic Python tests pass (raw/multiline/escaped strings, comments, lifetimes,
 bounded branches, external test modules, stable/stale IDs and no-write failures).
 The [initial per-file table](language-audit-stage-c.md) is an inventory, not a
