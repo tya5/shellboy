@@ -134,7 +134,7 @@ mod tests {
                 (0..200).map(|n| format!("saved row {n}\n")).collect(),
             ));
             paint(&mut ui, width, height);
-            let before = ui.view().anchor.clone();
+            let before = ui.view().navigation.anchor.clone();
             let draft = ui.view().draft.text.clone();
             let (x, y) = inside(&ui);
             wheel(&mut ui, MouseEventKind::ScrollUp, x, y);
@@ -144,7 +144,7 @@ mod tests {
             wheel(&mut ui, MouseEventKind::ScrollDown, x, y);
             assert!(ui.dirty);
             assert_eq!(ui.help_scroll, 3);
-            assert_eq!(ui.view().anchor, before);
+            assert_eq!(ui.view().navigation.anchor, before);
             assert_eq!(ui.view().draft.text, draft);
             for _ in 0..200 {
                 wheel(&mut ui, MouseEventKind::ScrollDown, x, y);

@@ -87,22 +87,22 @@ impl UiState {
         }
         let input_owner = self.active.clone();
         let selection_before = self.selection_mode;
-        let follow_before = self.view().follow;
+        let follow_before = self.view().navigation.follow;
         let actions = self.event_inner(event);
         if self.selection_mode != selection_before {
             self.selection_frozen_at = self
                 .selection_mode
                 .then(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         }
-        if self.active == input_owner && self.view().follow != follow_before {
+        if self.active == input_owner && self.view().navigation.follow != follow_before {
             let view = self.view();
             self.trace_history(crate::diagnostics::UiHistoryTrace {
                 reason: crate::diagnostics::UiHistoryReason::UserFollow,
                 generation: view.generation,
-                view_revision: view.view_revision,
+                view_revision: view.navigation.view_revision,
                 read_revision: view.delivery_read_revision,
                 follow_before,
-                follow_after: view.follow,
+                follow_after: view.navigation.follow,
                 before_nodes: view.nodes().len() as u64,
                 after_nodes: view.nodes().len() as u64,
                 ..Default::default()
@@ -236,7 +236,7 @@ impl UiState {
             }
             Event::Mouse(mouse)
                 if self.history_mouse_active()
-                    && self.view().scroll.area.is_none_or(|area| {
+                    && self.view().navigation.scroll.area.is_none_or(|area| {
                         area.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
                     }) =>
             {
@@ -367,8 +367,8 @@ impl UiState {
                     view.items.active = false;
                     view.live_work.active = false;
                     view.cancel_navigation();
-                    view.follow = true;
-                    view.unseen = false;
+                    view.navigation.follow = true;
+                    view.navigation.unseen = false;
                     return view
                         .thread_id
                         .clone()
@@ -452,10 +452,25 @@ impl UiState {
                 self.active_view_mut().draft.move_cursor(key.code);
             }
             KeyCode::PageUp => {
-                return self.scroll(-(self.view().scroll.height.saturating_sub(1).max(1) as isize));
+                return self.scroll(
+                    -(self
+                        .view()
+                        .navigation
+                        .scroll
+                        .height
+                        .saturating_sub(1)
+                        .max(1) as isize),
+                );
             }
             KeyCode::PageDown => {
-                return self.scroll(self.view().scroll.height.saturating_sub(1).max(1) as isize);
+                return self.scroll(
+                    self.view()
+                        .navigation
+                        .scroll
+                        .height
+                        .saturating_sub(1)
+                        .max(1) as isize,
+                );
             }
             KeyCode::Up | KeyCode::Down => self.active_view_mut().draft.move_cursor(key.code),
             _ => {}
@@ -1215,7 +1230,7 @@ mod tests {
     fn ignored_events_never_request_a_frame_or_erase_an_existing_request() {
         use crossterm::event::{MouseButton, MouseEvent};
         let mut ui = state();
-        ui.view_mut().scroll.area = Some(Rect::new(5, 5, 20, 10));
+        ui.view_mut().navigation.scroll.area = Some(Rect::new(5, 5, 20, 10));
         let mouse = |kind, column, row| {
             Event::Mouse(MouseEvent {
                 kind,

@@ -102,11 +102,11 @@ mod tests {
             config.default_connection = Some("fixture".into());
             let mut ui = UiState::new(&config, std::env::temp_dir());
             ui.insert("keep this draft\n日本語", false);
-            ui.view_mut().anchor = ViewAnchor {
+            ui.view_mut().navigation.anchor = ViewAnchor {
                 node_id: Some("retained".into()),
                 char_offset: 37,
             };
-            ui.view_mut().follow = false;
+            ui.view_mut().navigation.follow = false;
             ui.input_notice = Some("preserve existing notice");
             match owner {
                 "help" => {
@@ -137,7 +137,7 @@ mod tests {
                 _ => {}
             }
             let draft = ui.view().draft.clone();
-            let anchor = ui.view().anchor.clone();
+            let anchor = ui.view().navigation.anchor.clone();
             let overlay = ui.top_overlay();
             let selected = ui.thread_selection();
             let fixed = ui.selection_mode;
@@ -166,12 +166,12 @@ mod tests {
             draw_terminal(&mut terminal, &mut ui, &snapshot).unwrap();
             assert_eq!(terminal.backend().buffer(), &clean, "{owner}");
             assert_eq!(ui.view().draft, draft, "{owner}");
-            assert_eq!(ui.view().anchor, anchor, "{owner}");
+            assert_eq!(ui.view().navigation.anchor, anchor, "{owner}");
             assert_eq!(ui.top_overlay(), overlay, "{owner}");
             assert_eq!(ui.thread_selection(), selected, "{owner}");
             assert_eq!(ui.selection_mode, fixed, "{owner}");
             assert_eq!(ui.input_notice, notice, "{owner}");
-            assert!(!ui.view().follow, "{owner}");
+            assert!(!ui.view().navigation.follow, "{owner}");
         }
     }
     #[test]
@@ -199,7 +199,7 @@ mod tests {
         draw_terminal(&mut terminal, &mut ui, &links).unwrap();
         let frozen = terminal.backend().buffer().clone();
         let draft = ui.view().draft.clone();
-        let follow = ui.view().follow;
+        let follow = ui.view().navigation.follow;
         let frame = Duration::from_millis(100);
         ui.dirty = false;
 
@@ -226,7 +226,7 @@ mod tests {
         assert!(shown.contains("表示固定"));
         assert!(!shown.contains("BEFORE_FREEZE"));
         assert_eq!(ui.view().draft, draft);
-        assert_eq!(ui.view().follow, follow);
+        assert_eq!(ui.view().navigation.follow, follow);
         assert!(ui.selection_mode);
 
         sender.send(update("AFTER_MANUAL_REDRAW")).unwrap();

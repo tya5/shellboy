@@ -1233,7 +1233,7 @@ mod tests {
             .draw(|frame| super::super::draw(frame, &mut ui))
             .unwrap();
         let area = ui.view().live_work.area.unwrap();
-        assert!(ui.view().scroll.area.unwrap().height >= 3);
+        assert!(ui.view().navigation.scroll.area.unwrap().height >= 3);
         // Wide graphemes own multiple terminal columns. The continuation
         // cell contains a blank, which is geometry rather than an extra space
         // inside the displayed Japanese label. Preserve real spaces/row breaks.
@@ -1256,11 +1256,11 @@ mod tests {
         assert!(!text.contains("answered-turn"));
         assert!(!text.contains("child-run"));
         ui.insert("draft stays", false);
-        let anchor = ui.view().anchor.clone();
+        let anchor = ui.view().navigation.anchor.clone();
         assert!(ui.live_work_click(area.x, area.y + 3));
         assert!(ui.view().live_work.active);
         assert_eq!(ui.view().draft.text, "draft stays");
-        assert_eq!(ui.view().anchor, anchor);
+        assert_eq!(ui.view().navigation.anchor, anchor);
         let actions = ui
             .live_work_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE))
             .unwrap();

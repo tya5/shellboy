@@ -15,8 +15,8 @@ impl Signature {
             draft_id: view.draft.draft_id.clone(),
             revision: view.draft.revision,
             cursor: view.draft.cursor,
-            anchor: view.anchor.clone(),
-            follow: view.follow,
+            anchor: view.navigation.anchor.clone(),
+            follow: view.navigation.follow,
         }
     }
 }
@@ -83,8 +83,8 @@ impl UiState {
                     action: UiAction::SaveDraft {
                         thread_id: thread_id.clone(),
                         draft: view.draft.clone(),
-                        anchor: view.anchor.clone(),
-                        follow: view.follow,
+                        anchor: view.navigation.anchor.clone(),
+                        follow: view.navigation.follow,
                     },
                 });
             }
@@ -137,8 +137,8 @@ impl UiState {
                 view.thread_id.as_ref().map(|thread| UiAction::SaveDraft {
                     thread_id: thread.clone(),
                     draft: view.draft.clone(),
-                    anchor: view.anchor.clone(),
-                    follow: view.follow,
+                    anchor: view.navigation.anchor.clone(),
+                    follow: view.navigation.follow,
                 })
             })
             .collect()

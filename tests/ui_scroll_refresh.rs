@@ -83,8 +83,8 @@ fn transient_raw_preview_failure_does_not_jump_up_after_a_downward_wheel() {
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().follow = false;
-    ui.view_mut().anchor = ViewAnchor {
+    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("prior".into()),
         char_offset: 65 * 5,
     };
@@ -100,11 +100,14 @@ fn transient_raw_preview_failure_does_not_jump_up_after_a_downward_wheel() {
     ui.apply(UiUpdate::NodeWindow {
         thread_id: "fixture".into(),
         generation: ui.view().generation,
-        view_revision: ui.view().view_revision,
+        view_revision: ui.view().navigation.view_revision,
         node: tool_node(false),
     });
     assert_eq!(ui.view().nodes()[1].text, original);
-    assert_eq!(ui.view().anchor.node_id.as_deref(), Some("prior"));
+    assert_eq!(
+        ui.view().navigation.anchor.node_id.as_deref(),
+        Some("prior")
+    );
     let after_reply = top_source(&mut ui, &mut terminal);
     assert!(
         after_reply >= after_wheel,
@@ -138,8 +141,8 @@ fn transient_neighbor_preview_failure_cannot_clamp_a_paused_history_refresh_upwa
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().follow = false;
-    ui.view_mut().anchor = ViewAnchor {
+    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("prior".into()),
         char_offset: 65 * 5,
     };
@@ -163,7 +166,10 @@ fn transient_neighbor_preview_failure_cannot_clamp_a_paused_history_refresh_upwa
         selection_revision: 1,
         total_nodes: 2,
     });
-    assert_eq!(ui.view().anchor.node_id.as_deref(), Some("prior"));
+    assert_eq!(
+        ui.view().navigation.anchor.node_id.as_deref(),
+        Some("prior")
+    );
     let after_reply = top_source(&mut ui, &mut terminal);
     assert!(
         after_reply >= after_wheel,
@@ -186,8 +192,8 @@ fn paused_tool() -> UiState {
         selection_revision: 1,
         total_nodes: 1,
     });
-    ui.view_mut().follow = false;
-    ui.view_mut().anchor = ViewAnchor {
+    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("tool".into()),
         char_offset: 0,
     };
@@ -197,7 +203,7 @@ fn body_reply(ui: &mut UiState, node: UiNode) {
     ui.apply(UiUpdate::NodeWindow {
         thread_id: "fixture".into(),
         generation: ui.view().generation,
-        view_revision: ui.view().view_revision,
+        view_revision: ui.view().navigation.view_revision,
         node,
     });
 }
@@ -281,9 +287,9 @@ fn successful_changed_rendering_and_different_source_ranges_are_accepted() {
 #[test]
 fn following_keeps_paid_raw_after_transient_failure_until_new_successful_preview() {
     let mut ui = paused_tool();
-    ui.view_mut().follow = true;
+    ui.view_mut().navigation.follow = true;
     body_reply(&mut ui, tool_node(false));
-    assert!(ui.view().follow);
+    assert!(ui.view().navigation.follow);
     assert!(
         has_raw(&ui),
         "a temporary read failure must not erase paid output"
@@ -307,7 +313,7 @@ fn following_keeps_paid_raw_after_transient_failure_until_new_successful_preview
         ui.view().nodes()[0].presentation.blocks[0].text,
         "NEW SUCCESSFUL FOLLOWING PREVIEW"
     );
-    assert!(ui.view().follow);
+    assert!(ui.view().navigation.follow);
     assert!(
         !ui.view().nodes()[0]
             .presentation

@@ -428,10 +428,11 @@ fn conversation_fields(node: &UiNode) -> Vec<PresentationField> {
 
 impl Details {
     pub fn new(view: &ThreadView, links: bool) -> Self {
-        let selected_node = if view.follow {
+        let selected_node = if view.navigation.follow {
             view.nodes().len().saturating_sub(1)
         } else {
-            view.anchor
+            view.navigation
+                .anchor
                 .node_id
                 .as_ref()
                 .and_then(|id| view.nodes().iter().position(|node| &node.node_id == id))
@@ -2059,9 +2060,9 @@ mod tests {
         let mut latest = ui.view().nodes()[0].clone();
         latest.node_id = "latest".into();
         ui.view_mut().nodes_mut_for_test().push(latest);
-        ui.view_mut().anchor.node_id = Some("source-node".into());
+        ui.view_mut().navigation.anchor.node_id = Some("source-node".into());
         for follow in [true, false] {
-            ui.view_mut().follow = follow;
+            ui.view_mut().navigation.follow = follow;
             let expected = if follow { "latest" } else { "source-node" };
             for links in [false, true] {
                 let mut details = Details::new(ui.view(), links);
@@ -2390,7 +2391,7 @@ mod tests {
     #[test]
     fn selected_last_url_has_fixed_controls_exact_copy_and_matching_hit_cells() {
         let ui = state();
-        let anchor = ui.view().anchor.clone();
+        let anchor = ui.view().navigation.anchor.clone();
         let draft = ui.view().draft.clone();
         for (width, height) in [(80, 24), (32, 12), (8, 5)] {
             let mut details = Details::new(ui.view(), true);
@@ -2438,7 +2439,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(ui.view().anchor, anchor);
+        assert_eq!(ui.view().navigation.anchor, anchor);
         assert_eq!(ui.view().draft, draft);
     }
     #[test]

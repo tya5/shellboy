@@ -515,7 +515,7 @@ mod tests {
         let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.insert("保持する下書き", false);
         let draft = ui.view().draft.clone();
-        let anchor = ui.view().anchor.clone();
+        let anchor = ui.view().navigation.anchor.clone();
         key(&mut ui, KeyCode::F(1));
         let first = screen(&mut ui, 80, 24);
         for expected in [
@@ -559,7 +559,7 @@ mod tests {
         key(&mut ui, KeyCode::Enter);
         assert!(!ui.help_visible);
         assert_eq!(ui.view().draft, draft);
-        assert_eq!(ui.view().anchor, anchor);
+        assert_eq!(ui.view().navigation.anchor, anchor);
         key(&mut ui, KeyCode::F(1));
         assert!(screen(&mut ui, 80, 24).contains("よく使う操作"));
         for (width, height) in [(32, 12), (8, 5)] {

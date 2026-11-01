@@ -169,7 +169,7 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     let writer = rusqlite::Connection::open(path).unwrap();
@@ -284,7 +284,7 @@ async fn cleared_f8_thread_target_is_not_replaced_by_reply_owner_context() {
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
@@ -331,7 +331,7 @@ async fn f8_foreign_run_inspection_tracks_real_stop_without_switching_conversati
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     // Use the real F8/filter/form editing route. No handcrafted Manage request
@@ -474,7 +474,7 @@ async fn f8_storage_separates_saved_metadata_from_physical_samples_and_refreshes
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     open_form(&mut ui, &sender, "storage status");
@@ -576,7 +576,7 @@ async fn f8_delete_preview_refreshes_live_blocker_after_actual_stop_without_dele
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     open_form(&mut ui, &sender, "thread delete-preview");
@@ -774,7 +774,7 @@ async fn f8_index_pages_saved_sources_preserves_window_on_enqueue_and_only_posts
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     open_form(&mut ui, &sender, "index status");
@@ -987,7 +987,7 @@ async fn visible_storage_observes_real_pending_runtime_receipt_before_held_probe
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     open_form(&mut ui, &sender, "storage status");
@@ -1114,7 +1114,7 @@ async fn f8_standalone_usage_reads_foreign_run_root_and_follows_real_saved_stop(
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
@@ -1312,7 +1312,7 @@ async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
@@ -1544,7 +1544,7 @@ async fn f8_operation_and_saved_reference_react_to_actual_message_cancel_without
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_operation_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     });
     key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
     dispatch(&sender, ui.event(Event::Paste("operation get".into())));
@@ -1653,7 +1653,7 @@ async fn f8_history_body_retains_original_detail_while_current_source_facts_chan
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     let writer = rusqlite::Connection::open(path).unwrap();
@@ -1759,7 +1759,7 @@ async fn f8_history_list_keeps_captured_foreign_page_when_selected_path_changes(
     dispatch(&sender, ui.select_thread("thread".into()));
     let mut proofs = Vec::new();
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
-        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().loading
+        ui.view().thread_id.as_deref() == Some("thread") && !ui.view().navigation.loading
     })
     .await;
     key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);

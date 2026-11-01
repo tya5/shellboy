@@ -506,7 +506,7 @@ mod tests {
         let old_window = UiUpdate::HistoryWindow {
             thread_id: "thread".into(),
             generation: view.generation,
-            view_revision: view.view_revision,
+            view_revision: view.navigation.view_revision,
             nodes: vec![selected("stale-window")],
             pending: PendingMessages {
                 items: vec![queued("q")],
@@ -771,7 +771,7 @@ mod tests {
                     UiUpdate::HistoryWindow {
                         thread_id: thread.into(),
                         generation: embedded_generation,
-                        view_revision: ui.view().view_revision,
+                        view_revision: ui.view().navigation.view_revision,
                         nodes: vec![],
                         pending: PendingMessages::default(),
                         read_revision: 2,

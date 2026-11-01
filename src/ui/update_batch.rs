@@ -359,7 +359,7 @@ mod committed_source_tests {
         assert!(ui.history_layout(80, 20).text.contains("paid output"));
         // The next canonical body may arrive from a source-window request,
         // independently of another full history page.
-        let revision = ui.view().view_revision;
+        let revision = ui.view().navigation.view_revision;
         ui.active_view_mut().on_node_window(
             revision,
             UiNode {

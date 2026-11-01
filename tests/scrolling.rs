@@ -80,10 +80,10 @@ fn wheel_moves_three_visible_rows_and_inverse_restores_the_full_last_page() {
             wheel(&mut ui, MouseEventKind::ScrollUp);
             let up = rows(&mut ui, &mut terminal);
             assert_eq!(&up[3..], &before[..before.len() - 3], "width={width}");
-            assert!(!ui.view().follow);
+            assert!(!ui.view().navigation.follow);
             wheel(&mut ui, MouseEventKind::ScrollDown);
             assert_eq!(rows(&mut ui, &mut terminal), before);
-            assert!(ui.view().follow);
+            assert!(ui.view().navigation.follow);
         }
     }
 }
@@ -135,7 +135,7 @@ fn overlays_and_composer_wheel_do_not_move_hidden_history() {
         key(&mut ui, KeyCode::Esc);
         key(&mut ui, KeyCode::Esc);
         assert_eq!(rows(&mut ui, &mut terminal), before, "{overlay:?}");
-        assert!(ui.view().follow);
+        assert!(ui.view().navigation.follow);
         ui.event(Event::Mouse(MouseEvent {
             kind: MouseEventKind::ScrollUp,
             column: 10,
@@ -170,8 +170,8 @@ fn burst_wheel_and_new_output_preserve_the_rows_being_read() {
         ack: None,
     });
     assert_eq!(rows(&mut ui, &mut terminal), pinned);
-    assert!(ui.view().unseen);
-    assert!(!ui.view().follow);
+    assert!(ui.view().navigation.unseen);
+    assert!(!ui.view().navigation.follow);
 }
 
 #[test]
@@ -194,7 +194,7 @@ fn uncached_neighbor_is_loaded_before_paging_can_skip_its_unknown_height() {
     ui.apply(UiUpdate::ViewState {
         thread_id: "scroll-test".into(),
         generation: ui.view().generation,
-        view_revision: ui.view().view_revision,
+        view_revision: ui.view().navigation.view_revision,
         anchor: ViewAnchor {
             node_id: Some("n-5".into()),
             char_offset: 0,
@@ -215,14 +215,14 @@ fn uncached_neighbor_is_loaded_before_paging_can_skip_its_unknown_height() {
     ui.apply(UiUpdate::NodeWindow {
         thread_id: "scroll-test".into(),
         generation: ui.view().generation,
-        view_revision: ui.view().view_revision,
+        view_revision: ui.view().navigation.view_revision,
         node: complete[4].clone(),
     });
     let (mut reference, mut reference_terminal) = fixture(complete, 60, 28);
     reference.apply(UiUpdate::ViewState {
         thread_id: "scroll-test".into(),
         generation: reference.view().generation,
-        view_revision: reference.view().view_revision,
+        view_revision: reference.view().navigation.view_revision,
         anchor: ViewAnchor {
             node_id: Some("n-5".into()),
             char_offset: 0,

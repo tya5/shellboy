@@ -229,7 +229,7 @@ impl UiState {
             .history_focus_item
             .as_ref()
             .map(|item| item.primary_node_id.clone())
-            .or_else(|| self.view().anchor.node_id.clone())
+            .or_else(|| self.view().navigation.anchor.node_id.clone())
             .or_else(|| {
                 self.view()
                     .nodes()
@@ -286,7 +286,7 @@ mod tests {
         use ratatui::{Terminal, backend::TestBackend};
         for (width, height) in [(80, 24), (140, 40)] {
             let mut ui = UiState::new(&Config::default(), PathBuf::from("/fixture"));
-            let before = ui.view().anchor.clone();
+            let before = ui.view().navigation.anchor.clone();
             let mut details = details::Details::for_node(ui.view(), "node".into(), false);
             let mut choices = Choices::new(ui.view(), "node".into(), 1, false);
             assert!(!choices.wheel(3), "pending chooser is not scrollable");
@@ -341,7 +341,7 @@ mod tests {
                 bounds.body.y,
             );
             assert!(!ui.dirty, "last choice is a no-op");
-            assert_eq!(ui.view().anchor, before);
+            assert_eq!(ui.view().navigation.anchor, before);
             let actions = ui.event(Event::Key(KeyEvent::new(
                 KeyCode::Enter,
                 KeyModifiers::NONE,

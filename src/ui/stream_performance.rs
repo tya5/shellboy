@@ -146,7 +146,7 @@ fn performance_long_history_stream_layout_and_resize() {
                 80,
             );
             crate::frontend::stream_metrics::seal(&mut node);
-            let view_revision = ui.view().view_revision;
+            let view_revision = ui.view().navigation.view_revision;
             ui.apply(UiUpdate::NodeWindow {
                 thread_id: "layout-benchmark".into(),
                 generation,
@@ -351,7 +351,7 @@ fn resize_reprojects_every_visible_short_node_and_defers_offscreen_nodes() {
                 .find(|node| node.node_id == id)
                 .unwrap();
             let node = source(id.clone(), old.text.clone(), 80);
-            let view_revision = ui.view().view_revision;
+            let view_revision = ui.view().navigation.view_revision;
             ui.apply(UiUpdate::NodeWindow {
                 thread_id: "layout-benchmark".into(),
                 generation,

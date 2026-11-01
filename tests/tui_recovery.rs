@@ -507,7 +507,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
             thread_id: thread.clone(),
             generation: ui.view().generation,
             revision: u64::MAX,
-            view_revision: ui.view().view_revision,
+            view_revision: ui.view().navigation.view_revision,
             nodes: early_nodes,
         }],
     );

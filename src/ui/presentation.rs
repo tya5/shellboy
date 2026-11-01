@@ -2953,7 +2953,7 @@ mod tests {
             view.thread_id = Some("thread".into());
             *view.nodes_mut_for_test() = vec![leading, rendered];
             view.total_nodes = 2;
-            view.follow = false;
+            view.navigation.follow = false;
             if !interruption {
                 let tool = view.nodes()[1].presentation.blocks[0]
                     .tool
@@ -2988,7 +2988,7 @@ mod tests {
                 1,
                 "trailing blank follows the body source"
             );
-            view.anchor = crate::ui::ViewAnchor {
+            view.navigation.anchor = crate::ui::ViewAnchor {
                 node_id: Some(actual.into()),
                 char_offset: expected,
             };
@@ -2997,9 +2997,9 @@ mod tests {
             let layout = view.history_layout("fixture", &mut cache, budget, 100, 2);
             view.viewport_row(&layout, 100, 2);
             assert!(view.scroll(1, "fixture", &mut cache, budget).is_empty());
-            assert_eq!(view.anchor.node_id.as_deref(), Some(actual));
+            assert_eq!(view.navigation.anchor.node_id.as_deref(), Some(actual));
             let expected_next = base + body[..body.find(next).unwrap()].chars().count();
-            assert_eq!(view.anchor.char_offset, expected_next);
+            assert_eq!(view.navigation.anchor.char_offset, expected_next);
             let mut requested = false;
             for _ in 0..150 {
                 for action in view.scroll(1, "fixture", &mut cache, budget) {
@@ -4790,7 +4790,7 @@ mod conversation_item_tests {
             })
             .collect();
         *view.nodes_mut_for_test() = nodes;
-        view.scroll.focus = Some("q269".into());
+        view.navigation.scroll.focus = Some("q269".into());
         let (begin, end) = projection_bounds(&view);
         assert_eq!(end, 270);
         assert_eq!(end - begin, 128);

@@ -64,7 +64,7 @@ impl Fixture {
             incoming,
             bridge,
         };
-        let _ = f.until(|ui, _| !ui.view().loading).await;
+        let _ = f.until(|ui, _| !ui.view().navigation.loading).await;
         f
     }
     fn dispatch(&self, actions: Vec<UiAction>) {

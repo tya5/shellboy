@@ -103,8 +103,8 @@ impl ThreadView {
 
 impl UiState {
     fn item_layout(&mut self) -> Arc<HistoryLayout> {
-        let width = self.view().scroll.width;
-        let height = self.view().scroll.height;
+        let width = self.view().navigation.scroll.width;
+        let height = self.view().navigation.scroll.height;
         self.history_layout(width, height)
     }
     pub(super) fn selected_history_item(&mut self) -> Option<Arc<ItemRegion>> {
@@ -125,12 +125,16 @@ impl UiState {
                 return Some(Arc::clone(item));
             }
         }
-        let row = self.viewport_row(&layout, self.view().scroll.width, self.view().scroll.height);
+        let row = self.viewport_row(
+            &layout,
+            self.view().navigation.scroll.width,
+            self.view().navigation.scroll.height,
+        );
         layout
             .sources
             .iter()
             .skip(row)
-            .take(usize::from(self.view().scroll.height))
+            .take(usize::from(self.view().navigation.scroll.height))
             .rev()
             .find_map(|source| source.item.as_ref().map(Arc::clone))
     }
@@ -150,8 +154,8 @@ impl UiState {
         (layout, items)
     }
     fn select_history_item(&mut self, row: usize, item: Arc<ItemRegion>, layout: &HistoryLayout) {
-        let width = self.view().scroll.width;
-        let height = self.view().scroll.height;
+        let width = self.view().navigation.scroll.width;
+        let height = self.view().navigation.scroll.height;
         let current = self.viewport_row(layout, width, height);
         let height = usize::from(height).max(1);
         let top = if row < current {
@@ -167,15 +171,15 @@ impl UiState {
         view.items.active = true;
         view.items.focus = Some(item.key.clone());
         view.history_focus_item = Some(item);
-        view.follow = false;
+        view.navigation.follow = false;
         if let Some(source) = source
             && let Some(node) = view.nodes().get(source.node)
         {
-            view.anchor = ViewAnchor {
+            view.navigation.anchor = ViewAnchor {
                 node_id: Some(node.node_id.clone()),
                 char_offset: source.offset,
             };
-            view.scroll.anchor = view.anchor.clone();
+            view.navigation.scroll.anchor = view.navigation.anchor.clone();
             let first = layout
                 .sources
                 .iter()
@@ -183,11 +187,11 @@ impl UiState {
                     candidate.node == source.node && candidate.offset == source.offset
                 })
                 .unwrap_or(top);
-            view.scroll.within = top.saturating_sub(first);
-            view.scroll.row = top;
-            view.scroll.revision = view.history_revision();
-            view.scroll.origin = layout.sources.first().map_or(0, |source| source.node);
-            view.scroll.initialized = true;
+            view.navigation.scroll.within = top.saturating_sub(first);
+            view.navigation.scroll.row = top;
+            view.navigation.scroll.revision = view.history_revision();
+            view.navigation.scroll.origin = layout.sources.first().map_or(0, |source| source.node);
+            view.navigation.scroll.initialized = true;
         }
         self.dirty = true;
     }
@@ -207,14 +211,17 @@ impl UiState {
                 return None;
             }
             let layout = self.item_layout();
-            let row =
-                self.viewport_row(&layout, self.view().scroll.width, self.view().scroll.height);
+            let row = self.viewport_row(
+                &layout,
+                self.view().navigation.scroll.width,
+                self.view().navigation.scroll.height,
+            );
             if let Some((index, item)) = layout
                 .sources
                 .iter()
                 .enumerate()
                 .skip(row)
-                .take(usize::from(self.view().scroll.height))
+                .take(usize::from(self.view().navigation.scroll.height))
                 .rev()
                 .find_map(|(index, source)| {
                     source.item.as_ref().map(|item| (index, Arc::clone(item)))
@@ -533,7 +540,7 @@ impl UiState {
         action.into_iter().collect()
     }
     pub(super) fn history_click(&mut self, column: u16, row: u16) -> Vec<UiAction> {
-        let Some(area) = self.view().scroll.area else {
+        let Some(area) = self.view().navigation.scroll.area else {
             return vec![];
         };
         if !area
@@ -543,7 +550,7 @@ impl UiState {
             return vec![];
         }
         let layout = self.item_layout();
-        let y = self.view().scroll.row + usize::from(row.saturating_sub(area.y + 1));
+        let y = self.view().navigation.scroll.row + usize::from(row.saturating_sub(area.y + 1));
         let Some(item) = layout
             .sources
             .get(y)
@@ -972,7 +979,7 @@ mod tests {
         node.total_chars = node.text.chars().count();
         let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
         terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-        assert!(ui.view().scroll.row > 0);
+        assert!(ui.view().navigation.scroll.row > 0);
         key(&mut ui, KeyCode::Tab);
         assert!(ui.view().items.active);
         assert_eq!(ui.view().items.focus, Some(ItemKey::Node("source".into())));
@@ -980,7 +987,7 @@ mod tests {
     #[test]
     fn click_uses_inner_history_rows_and_never_selection_mode() {
         let mut ui = fixture();
-        let area = ui.view().scroll.area.unwrap();
+        let area = ui.view().navigation.scroll.area.unwrap();
         assert!(ui.history_click(area.x, area.y).is_empty());
         assert!(!ui.view().items.active);
         ui.selection_mode = true;
@@ -1149,8 +1156,8 @@ mod description_original_identity_tests {
     #[test]
     fn described_original_targets_exact_call_source_not_adjacent_result() {
         let mut ui = UiState::new(&crate::config::Config::default(), std::env::temp_dir());
-        ui.active_view_mut().scroll.width = 80;
-        ui.active_view_mut().scroll.height = 24;
+        ui.active_view_mut().navigation.scroll.width = 80;
+        ui.active_view_mut().navigation.scroll.height = 24;
         let tools = ["a", "b"].map(|call| ToolPresentation {
             group_id: Some("g".into()),
             call_id: call.into(),

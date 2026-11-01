@@ -236,8 +236,8 @@ pub(super) fn footer_lines(
     {
         facts.push(super::activity::context_wait_label(reason));
     }
-    if !view.follow {
-        facts.push(if view.unseen {
+    if !view.navigation.follow {
+        facts.push(if view.navigation.unseen {
             "↓ new".into()
         } else {
             "↓".into()
@@ -318,7 +318,7 @@ pub(super) fn footer_lines(
     if let Some(gap) = view.activity.receive_gap_note(std::time::Instant::now()) {
         facts.push(gap);
     }
-    if view.loading {
+    if view.navigation.loading {
         facts.push("…".into());
     }
     let facts = fit(
@@ -354,8 +354,9 @@ pub(super) fn footer_lines(
         }
     }
     let (hint, error) = notice.unwrap_or((hints, false));
-    let navigation_hint = (view.loading && view.scroll.request.is_some() && !error)
-        .then(|| format!("履歴読込中 · {hint}"));
+    let navigation_hint =
+        (view.navigation.loading && view.navigation.scroll.request.is_some() && !error)
+            .then(|| format!("履歴読込中 · {hint}"));
     let hint = navigation_hint.as_deref().unwrap_or(hint);
     let notice_style = if error && !palette.plain() {
         Style::default().fg(super::theme::ATTENTION)
@@ -583,7 +584,7 @@ mod tests {
     fn selection_fixed_header_is_visible_and_exit_preserves_the_source_anchor() {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
-        let before = ui.view().anchor.clone();
+        let before = ui.view().navigation.anchor.clone();
         ui.event(Event::Key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
         let shown = frame_text(&mut ui, 60, 20);
         assert!(shown.lines().next().unwrap().contains("表示固定"));
@@ -592,10 +593,10 @@ mod tests {
             thread_id: None,
             text: "background status changed".into(),
         });
-        assert_eq!(ui.view().anchor, before);
+        assert_eq!(ui.view().navigation.anchor, before);
         ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         assert!(!ui.selection_mode);
-        assert_eq!(ui.view().anchor, before);
+        assert_eq!(ui.view().navigation.anchor, before);
         assert!(
             !frame_text(&mut ui, 60, 20)
                 .lines()
@@ -645,7 +646,7 @@ mod tests {
                 "{width}x{height}: {shown}"
             );
             assert!(
-                ui.view().scroll.area.unwrap().height >= 3,
+                ui.view().navigation.scroll.area.unwrap().height >= 3,
                 "a padded source row remains available"
             );
         }
@@ -777,7 +778,7 @@ mod tests {
     fn descendant_count_stays_visible_when_other_footer_facts_fill_the_row() {
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
         ui.select_thread("t".into());
-        ui.view_mut().loading = false;
+        ui.view_mut().navigation.loading = false;
         ui.view_mut().tool_calls = 9999;
         ui.apply(UiUpdate::Activity {
             thread_id: "t".into(),

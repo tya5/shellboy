@@ -324,7 +324,7 @@ mod tests {
             .draw(|frame| crate::ui::draw(frame, &mut ui))
             .unwrap();
         assert_eq!(
-            ui.view().scroll.area.unwrap().height,
+            ui.view().navigation.scroll.area.unwrap().height,
             18,
             "one folded line uses a three-row input box"
         );
@@ -343,7 +343,7 @@ mod tests {
             .draw(|frame| crate::ui::draw(frame, &mut ui))
             .unwrap();
         assert_eq!(
-            ui.view().scroll.area.unwrap().height,
+            ui.view().navigation.scroll.area.unwrap().height,
             15,
             "expanded input is capped at one quarter of 24 rows"
         );

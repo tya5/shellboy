@@ -987,8 +987,8 @@ fn request_pinned_history_navigation(ui: &mut crate::ui::UiState) -> Vec<UiActio
         char_offset: first.base_char_offset,
     };
     assert!(ui.view().first_ordinal > 0);
-    ui.view_mut().follow = false;
-    ui.view_mut().anchor = anchor;
+    ui.view_mut().navigation.follow = false;
+    ui.view_mut().navigation.anchor = anchor;
     // Use the actual navigation owner: it registers scroll.request/view_revision
     // before dispatch. A handcrafted LoadHistoryWindow lacks that read fence.
     let actions = ui.event(Event::Key(KeyEvent::new(
@@ -1040,7 +1040,10 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
                     sender.try_send(action).unwrap();
                 }
             }
-            if initial_history_reads > 0 && ui.view().total_nodes == 61 && !ui.view().loading {
+            if initial_history_reads > 0
+                && ui.view().total_nodes == 61
+                && !ui.view().navigation.loading
+            {
                 break;
             }
             tokio::task::yield_now().await;
@@ -1079,7 +1082,7 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
         "the requested source window must complete, not just a metadata notification"
     );
     // Pin only after the required history read has actually supplied the node.
-    ui.view_mut().anchor = ViewAnchor {
+    ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("call-node".into()),
         char_offset: 0,
     };
@@ -1160,7 +1163,10 @@ async fn changed_refreshes_a_pinned_tool_outside_the_latest_fifty_nodes_without_
         .unwrap();
     assert_eq!(refreshed.text, original.text);
     assert_eq!(refreshed.base_char_offset, original.base_char_offset);
-    assert_eq!(ui.view().anchor.node_id.as_deref(), Some("call-node"));
+    assert_eq!(
+        ui.view().navigation.anchor.node_id.as_deref(),
+        Some("call-node")
+    );
     sender.try_send(UiAction::Quit).unwrap();
     finish_bridge(bridge, &incoming).await;
 }
@@ -2028,14 +2034,14 @@ async fn pinned_history_navigation_keeps_a_required_window_after_a_newer_read() 
             .iter()
             .any(|n| n.node_id == "call-node")
     );
-    legacy.view_mut().follow = false;
-    legacy.view_mut().anchor = ViewAnchor {
+    legacy.view_mut().navigation.follow = false;
+    legacy.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("call-node".into()),
         char_offset: 0,
     };
     reader
         .window(
-            &super::WindowReply::new("thread", generation, legacy.view().view_revision),
+            &super::WindowReply::new("thread", generation, legacy.view().navigation.view_revision),
             super::history_reader::WindowRequest::new(
                 0,
                 0,

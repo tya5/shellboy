@@ -104,7 +104,7 @@ fn ctrl_end(ui: &mut UiState) -> Vec<UiAction> {
     )))
 }
 fn set_anchor(ui: &mut UiState, node_id: &str, char_offset: usize) {
-    let (generation, view_revision) = (ui.view().generation, ui.view().view_revision);
+    let (generation, view_revision) = (ui.view().generation, ui.view().navigation.view_revision);
     ui.apply(UiUpdate::ViewState {
         thread_id: THREAD.into(),
         generation,
@@ -121,25 +121,26 @@ fn snap(ui: &UiState) -> String {
     let v = ui.view();
     format!(
         "follow={} loading={} request={:?} pending={} rebase={} unseen={} anchor={}@{} within={} moved={} initialized={} revision={}",
-        v.follow,
-        v.loading,
-        v.scroll
+        v.navigation.follow,
+        v.navigation.loading,
+        v.navigation
+            .scroll
             .request
             .as_ref()
-            .map(|(r, n)| (*r - v.view_revision.min(*r), n.clone())),
-        v.scroll.pending,
-        v.history_rebase_pending,
-        v.unseen,
-        v.anchor.node_id.as_deref().unwrap_or("-"),
-        v.anchor.char_offset,
-        v.scroll.within,
-        v.scroll.moved_during_read,
-        v.scroll.initialized,
-        v.view_revision,
+            .map(|(r, n)| (*r - v.navigation.view_revision.min(*r), n.clone())),
+        v.navigation.scroll.pending,
+        v.navigation.history_rebase_pending,
+        v.navigation.unseen,
+        v.navigation.anchor.node_id.as_deref().unwrap_or("-"),
+        v.navigation.anchor.char_offset,
+        v.navigation.scroll.within,
+        v.navigation.scroll.moved_during_read,
+        v.navigation.scroll.initialized,
+        v.navigation.view_revision,
     )
 }
 fn node_window(ui: &mut UiState, node: UiNode) {
-    let (generation, view_revision) = (ui.view().generation, ui.view().view_revision);
+    let (generation, view_revision) = (ui.view().generation, ui.view().navigation.view_revision);
     ui.apply(UiUpdate::NodeWindow {
         thread_id: THREAD.into(),
         generation,
@@ -181,7 +182,7 @@ fn following_tail_is_the_initial_state_and_render_does_not_change_it() {
     // The first render is the one that initializes the visual scroll cache.
     assert!(before.contains("initialized=false"), "{before}");
     assert!(after_first.contains("initialized=true"), "{after_first}");
-    assert!(ui.view().scroll.row > 0 && ui.view().scroll.height == 28 - 8);
+    assert!(ui.view().navigation.scroll.row > 0 && ui.view().navigation.scroll.height == 28 - 8);
 }
 
 #[test]
@@ -204,7 +205,7 @@ fn following_tail_tracks_streamed_growth_without_unseen() {
     });
     let screen = rows(&mut ui, &mut t);
     assert!(last_text(&screen) == "R209", "{screen:?}");
-    assert!(ui.view().follow && !ui.view().unseen);
+    assert!(ui.view().navigation.follow && !ui.view().navigation.unseen);
 }
 
 #[test]
@@ -244,11 +245,14 @@ fn wheel_up_from_tail_pauses_on_a_source_anchor_with_a_within_row_offset() {
         "three rows per wheel"
     );
     let v = ui.view();
-    assert!(!v.follow && !v.loading && v.scroll.request.is_none());
-    assert_eq!(v.scroll.pending, 0);
-    assert_eq!(v.anchor.node_id.as_deref(), Some("long"));
-    assert!(v.anchor.char_offset > 0);
-    assert_eq!(v.scroll.anchor, v.anchor, "visual anchor mirrors the model");
+    assert!(!v.navigation.follow && !v.navigation.loading && v.navigation.scroll.request.is_none());
+    assert_eq!(v.navigation.scroll.pending, 0);
+    assert_eq!(v.navigation.anchor.node_id.as_deref(), Some("long"));
+    assert!(v.navigation.anchor.char_offset > 0);
+    assert_eq!(
+        v.navigation.scroll.anchor, v.navigation.anchor,
+        "visual anchor mirrors the model"
+    );
 }
 
 #[test]
@@ -262,11 +266,11 @@ fn paused_wheel_down_short_of_the_tail_stays_paused_then_reaching_it_follows() {
     for _ in 0..3 {
         down(&mut ui);
         rows(&mut ui, &mut t);
-        assert!(!ui.view().follow, "short of the tail");
+        assert!(!ui.view().navigation.follow, "short of the tail");
     }
     down(&mut ui);
     assert_eq!(rows(&mut ui, &mut t), tail);
-    assert!(ui.view().follow && !ui.view().unseen);
+    assert!(ui.view().navigation.follow && !ui.view().navigation.unseen);
 }
 
 #[test]
@@ -279,12 +283,12 @@ fn reversal_near_the_tail_returns_to_follow_exactly_at_the_tail() {
             up(&mut ui);
         }
         rows(&mut ui, &mut t);
-        assert!(!ui.view().follow);
+        assert!(!ui.view().navigation.follow);
         for _ in 0..steps {
             down(&mut ui);
             rows(&mut ui, &mut t);
         }
-        assert!(ui.view().follow, "steps={steps}");
+        assert!(ui.view().navigation.follow, "steps={steps}");
         assert_eq!(rows(&mut ui, &mut t), tail, "steps={steps}");
     }
 }
@@ -310,19 +314,19 @@ fn growth_while_paused_near_the_tail_keeps_the_rows_and_marks_unseen() {
         ack: None,
     });
     assert_eq!(rows(&mut ui, &mut t), paused);
-    assert!(ui.view().unseen && !ui.view().follow);
+    assert!(ui.view().navigation.unseen && !ui.view().navigation.follow);
     // One wheel down does not reach the new tail, so it stays paused.
     down(&mut ui);
     rows(&mut ui, &mut t);
-    assert!(!ui.view().follow && ui.view().unseen);
+    assert!(!ui.view().navigation.follow && ui.view().navigation.unseen);
     // Up remains available (the stopped-growth near-tail case of #117).
     assert!(up(&mut ui).is_empty());
-    assert!(!ui.view().follow);
+    assert!(!ui.view().navigation.follow);
     // Ctrl+End jumps to the new tail and clears unseen.
     ctrl_end(&mut ui);
     let tail = rows(&mut ui, &mut t);
     assert!(last_text(&tail) == "R229");
-    assert!(ui.view().follow && !ui.view().unseen);
+    assert!(ui.view().navigation.follow && !ui.view().navigation.unseen);
 }
 
 // ---- reads: gaps, pages, reversal ----
@@ -340,18 +344,21 @@ fn page_up_into_an_uncached_neighbour_owns_one_read_and_keeps_the_screen() {
     assert_eq!(reads.len(), 1, "{actions:?}");
     assert_eq!(actions.len(), 1);
     let v = ui.view();
-    assert!(v.loading && v.scroll.request.is_some() && !v.follow);
+    assert!(v.navigation.loading && v.navigation.scroll.request.is_some() && !v.navigation.follow);
     assert!(
-        v.scroll.pending < 0,
+        v.navigation.scroll.pending < 0,
         "movement is retained: {}",
-        v.scroll.pending
+        v.navigation.scroll.pending
     );
     assert_eq!(rows(&mut ui, &mut t), screen, "old screen until the reply");
     node_window(&mut ui, complete[4].clone());
     let v = ui.view();
-    assert!(!v.loading && v.scroll.request.is_none());
-    assert_eq!(v.scroll.pending, 0, "deferred movement consumed on reply");
-    assert!(!v.follow);
+    assert!(!v.navigation.loading && v.navigation.scroll.request.is_none());
+    assert_eq!(
+        v.navigation.scroll.pending, 0,
+        "deferred movement consumed on reply"
+    );
+    assert!(!v.navigation.follow);
     assert_ne!(rows(&mut ui, &mut t), screen);
 }
 
@@ -361,15 +368,22 @@ fn same_direction_input_while_awaiting_accumulates_without_another_read() {
     set_anchor(&mut ui, "n-5", 0);
     rows(&mut ui, &mut t);
     key(&mut ui, KeyCode::PageUp);
-    let pending = ui.view().scroll.pending;
-    let request = ui.view().scroll.request.clone();
+    let pending = ui.view().navigation.scroll.pending;
+    let request = ui.view().navigation.scroll.request.clone();
     // The uncached node is the next one up, so cached rows cannot satisfy this.
     let again = key(&mut ui, KeyCode::PageUp);
     assert!(again.is_empty(), "no duplicate read: {again:?}");
-    assert_eq!(ui.view().scroll.request, request, "same owner and revision");
-    assert!(ui.view().scroll.pending <= pending, "movement accumulates");
+    assert_eq!(
+        ui.view().navigation.scroll.request,
+        request,
+        "same owner and revision"
+    );
+    assert!(
+        ui.view().navigation.scroll.pending <= pending,
+        "movement accumulates"
+    );
     node_window(&mut ui, complete[4].clone());
-    assert_eq!(ui.view().scroll.pending, 0);
+    assert_eq!(ui.view().navigation.scroll.pending, 0);
     // A repeated reply for the same revision finds no owner and changes nothing.
     let settled = snap(&ui);
     let screen = rows(&mut ui, &mut t);
@@ -387,14 +401,17 @@ fn reversing_while_awaiting_drops_the_pending_movement() {
     set_anchor(&mut ui, "n-5", 0);
     rows(&mut ui, &mut t);
     key(&mut ui, KeyCode::PageUp);
-    assert!(ui.view().scroll.pending < 0);
+    assert!(ui.view().navigation.scroll.pending < 0);
     let actions = key(&mut ui, KeyCode::PageDown);
     assert!(actions.is_empty());
-    assert_eq!(ui.view().scroll.pending, 0, "{}", snap(&ui));
-    assert!(ui.view().scroll.request.is_some(), "the read stays owned");
+    assert_eq!(ui.view().navigation.scroll.pending, 0, "{}", snap(&ui));
+    assert!(
+        ui.view().navigation.scroll.request.is_some(),
+        "the read stays owned"
+    );
     node_window(&mut ui, complete[4].clone());
-    assert!(ui.view().scroll.request.is_none());
-    assert_eq!(ui.view().scroll.pending, 0);
+    assert!(ui.view().navigation.scroll.request.is_none());
+    assert_eq!(ui.view().navigation.scroll.pending, 0);
 }
 
 #[test]
@@ -403,13 +420,16 @@ fn ctrl_end_during_a_read_cancels_it_and_the_old_reply_is_ignored() {
     set_anchor(&mut ui, "n-5", 0);
     rows(&mut ui, &mut t);
     key(&mut ui, KeyCode::PageUp);
-    let stale_revision = ui.view().view_revision;
+    let stale_revision = ui.view().navigation.view_revision;
     ctrl_end(&mut ui);
     let tail = rows(&mut ui, &mut t);
     let v = ui.view();
-    assert!(v.follow && !v.loading && v.scroll.request.is_none());
-    assert_eq!(v.scroll.pending, 0);
-    assert_ne!(v.view_revision, stale_revision, "cancel bumps the fence");
+    assert!(v.navigation.follow && !v.navigation.loading && v.navigation.scroll.request.is_none());
+    assert_eq!(v.navigation.scroll.pending, 0);
+    assert_ne!(
+        v.navigation.view_revision, stale_revision,
+        "cancel bumps the fence"
+    );
     let settled = snap(&ui);
     let generation = ui.view().generation;
     ui.apply(UiUpdate::NodeWindow {
@@ -429,11 +449,12 @@ fn load_failure_keeps_pending_for_an_explicit_retry_and_rejection_releases_the_r
         set_anchor(&mut ui, "n-5", 0);
         rows(&mut ui, &mut t);
         let actions = key(&mut ui, KeyCode::PageUp);
-        let pending = ui.view().scroll.pending;
+        let pending = ui.view().navigation.scroll.pending;
         if rejected {
             ui.action_rejected(&actions[0]);
         } else {
-            let (generation, view_revision) = (ui.view().generation, ui.view().view_revision);
+            let (generation, view_revision) =
+                (ui.view().generation, ui.view().navigation.view_revision);
             ui.apply(UiUpdate::LoadFailed {
                 thread_id: THREAD.into(),
                 generation,
@@ -443,13 +464,13 @@ fn load_failure_keeps_pending_for_an_explicit_retry_and_rejection_releases_the_r
         }
         let v = ui.view();
         assert!(
-            !v.loading && v.scroll.request.is_none(),
+            !v.navigation.loading && v.navigation.scroll.request.is_none(),
             "rejected={rejected}"
         );
         // characterization: current behaviour, see #118
         // The deferred movement survives the failure; the next scroll replays it
         // (added to the new input) and issues a fresh read. No automatic retry.
-        assert_eq!(v.scroll.pending, pending, "rejected={rejected}");
+        assert_eq!(v.navigation.scroll.pending, pending, "rejected={rejected}");
         let retry = key(&mut ui, KeyCode::PageUp);
         assert!(
             retry
@@ -501,10 +522,10 @@ fn history_page_before_the_oldest_cached_node_is_requested_and_keeps_the_anchor(
         .unwrap_or_else(|| panic!("{actions:?}"));
     assert_eq!(load, (4, true));
     let v = ui.view();
-    assert!(v.loading && !v.follow);
-    assert!(matches!(v.scroll.request, Some((_, None))));
-    assert!(v.scroll.pending < 0);
-    assert_eq!(v.anchor.node_id.as_deref(), Some("n-5"));
+    assert!(v.navigation.loading && !v.navigation.follow);
+    assert!(matches!(v.navigation.scroll.request, Some((_, None))));
+    assert!(v.navigation.scroll.pending < 0);
+    assert_eq!(v.navigation.anchor.node_id.as_deref(), Some("n-5"));
     assert_eq!(
         rows(&mut ui, &mut t),
         screen,
@@ -514,8 +535,8 @@ fn history_page_before_the_oldest_cached_node_is_requested_and_keeps_the_anchor(
     let older: Vec<UiNode> = (3..6)
         .map(|i| node(&format!("n-{i}"), numbered(&format!("N{i}-"), 100)))
         .collect();
-    let (generation, view_revision) = (ui.view().generation, ui.view().view_revision);
-    let anchor = ui.view().anchor.clone();
+    let (generation, view_revision) = (ui.view().generation, ui.view().navigation.view_revision);
+    let anchor = ui.view().navigation.anchor.clone();
     ui.apply(UiUpdate::HistoryWindow {
         thread_id: THREAD.into(),
         generation,
@@ -529,8 +550,8 @@ fn history_page_before_the_oldest_cached_node_is_requested_and_keeps_the_anchor(
         anchor,
     });
     let v = ui.view();
-    assert!(!v.loading && v.scroll.request.is_none() && !v.follow);
-    assert_eq!(v.scroll.pending, 0);
+    assert!(!v.navigation.loading && v.navigation.scroll.request.is_none() && !v.navigation.follow);
+    assert_eq!(v.navigation.scroll.pending, 0);
     assert!(v.first_ordinal <= 3);
     // The retained movement was applied once: the viewport now shows rows that
     // precede the former top, in the older node.
@@ -544,32 +565,36 @@ fn history_page_before_the_oldest_cached_node_is_requested_and_keeps_the_anchor(
 fn view_state_update_replaces_anchor_and_follow_and_clears_unseen() {
     let (mut ui, mut t) = single(200);
     rows(&mut ui, &mut t);
-    ui.view_mut().unseen = true;
+    ui.view_mut().navigation.unseen = true;
     set_anchor(&mut ui, "long", 40);
     let v = ui.view();
-    assert!(!v.follow && !v.unseen);
-    assert_eq!(v.anchor.char_offset, 40);
+    assert!(!v.navigation.follow && !v.navigation.unseen);
+    assert_eq!(v.navigation.anchor.char_offset, 40);
     let screen = rows(&mut ui, &mut t);
     assert!(first_text(&screen).starts_with("R008"), "{screen:?}");
-    assert!(ui.view().scroll.initialized);
+    assert!(ui.view().navigation.scroll.initialized);
 }
 
 #[test]
 fn tab_into_history_focus_pauses_on_the_visible_top_row_without_a_read() {
     let (mut ui, mut t, _) = ten(None);
     let screen = rows(&mut ui, &mut t);
-    assert!(ui.view().follow);
+    assert!(ui.view().navigation.follow);
     let actions = key(&mut ui, KeyCode::Tab);
     assert!(actions.is_empty(), "{actions:?}");
     // characterization: current behaviour, see #118
     // Entering item focus leaves following and pins the screen: `select_history_item`
     // writes follow/anchor/within/row/revision/origin/initialized directly,
     // bypassing `scroll()`, and rebases (not cancels) navigation.
-    assert!(!ui.view().follow, "{}", snap(&ui));
+    assert!(!ui.view().navigation.follow, "{}", snap(&ui));
     assert_eq!(rows(&mut ui, &mut t), screen, "same rows, now paused");
     let v = ui.view();
-    assert!(!v.loading && v.scroll.request.is_none() && v.scroll.pending == 0);
-    assert!(v.scroll.initialized && !v.unseen);
+    assert!(
+        !v.navigation.loading
+            && v.navigation.scroll.request.is_none()
+            && v.navigation.scroll.pending == 0
+    );
+    assert!(v.navigation.scroll.initialized && !v.navigation.unseen);
 }
 
 // ---- resize ----
@@ -582,7 +607,7 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
     t.backend_mut().resize(40, 28);
     let narrow = rows(&mut ui, &mut t);
     assert!(last_text(&narrow) == "R199", "{narrow:?}");
-    assert!(ui.view().follow);
+    assert!(ui.view().navigation.follow);
     t.backend_mut().resize(60, 28);
     assert_eq!(rows(&mut ui, &mut t), tail);
     // Paused: the source anchor is unchanged by width and height changes.
@@ -590,12 +615,12 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
         up(&mut ui);
     }
     let paused = rows(&mut ui, &mut t);
-    let anchor = ui.view().anchor.clone();
+    let anchor = ui.view().navigation.anchor.clone();
     t.backend_mut().resize(40, 34);
     rows(&mut ui, &mut t);
-    assert_eq!(ui.view().anchor, anchor);
-    assert!(!ui.view().follow && ui.view().scroll.request.is_none());
-    assert!(ui.view().scroll.initialized);
+    assert_eq!(ui.view().navigation.anchor, anchor);
+    assert!(!ui.view().navigation.follow && ui.view().navigation.scroll.request.is_none());
+    assert!(ui.view().navigation.scroll.initialized);
     t.backend_mut().resize(60, 28);
     assert_eq!(
         rows(&mut ui, &mut t),
@@ -615,7 +640,7 @@ fn render_writes_viewport_cache_fields_and_then_settles() {
     up(&mut ui);
     rows(&mut ui, &mut t);
     let state = |ui: &UiState| {
-        let s = &ui.view().scroll;
+        let s = &ui.view().navigation.scroll;
         (
             s.row,
             s.within,
@@ -631,7 +656,7 @@ fn render_writes_viewport_cache_fields_and_then_settles() {
     assert_eq!(first.3, 58, "text width excludes the border and scrollbar");
     assert_eq!(first.4, 20);
     assert_eq!(first.5, ui.view().history_revision());
-    assert_eq!(first.6, ui.view().anchor);
+    assert_eq!(first.6, ui.view().navigation.anchor);
     assert!(first.7);
     rows(&mut ui, &mut t);
     assert_eq!(state(&ui), first);
@@ -648,5 +673,8 @@ fn paused_anchor_beyond_a_true_end_is_clamped_to_a_full_last_page_on_render() {
     set_anchor(&mut ui, "long", numbered("R", 199).chars().count());
     let screen = rows(&mut ui, &mut t);
     assert_eq!(screen, tail);
-    assert!(!ui.view().follow, "clamp does not restore follow");
+    assert!(
+        !ui.view().navigation.follow,
+        "clamp does not restore follow"
+    );
 }

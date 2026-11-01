@@ -3505,3 +3505,15 @@ branch CI and independent review are required before integration.
 Recovery transitions now persist their actual failure time in the existing
 reason and durable recovery event; no new state table or background reader is
 introduced. Older reasons retain Watch's existing unknown-time fallback.
+
+## #118 stage 2, ownership boundary (partial)
+
+Design/state-transition table precedes implementation. Baseline 19/0 passed.
+ThreadView/VisualScroll's 20 stored fields now have one Navigation owner;
+all current transitions and six doubtful characterization expectations remain.
+Ownership-only local check --tests, characterization19 and view-unit regressions
+pass. This intermediate movement is not the completed state machine: writes137,
+scroll401 vs baseline395, fields20 are not improvements. Next replace flags with
+explicit states and split orchestration; do not claim completion from relocation.
+The pre-existing frontend watchdog allowance fingerprint follows only the field
+access change: no deadline, guard count or assertion was weakened.
