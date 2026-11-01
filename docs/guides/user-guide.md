@@ -260,6 +260,12 @@ context without a summary API; `/retry` separately resends and may charge again.
 `/restore` can recover omitted text. Core no longer estimates tokens or uses a
 75k threshold. Last successful measured usage and its time are in thread get.
 
+Before changing a valuable range, use `shellboy compact --dry-run --thread THREAD`
+(or add `--dry-run` to summary/spill/trim/omit/maximal). This current-main feature
+calls no model and changes no saved path. Check predicted failures and coverage
+limits; generated-summary length is unknown. The preview does not authorize a
+later edit if the conversation changes. See the CLI reference for bounds.
+
 ## Storage and resources
 
 Conversations, answers, reasoning and summaries are saved in the data directory

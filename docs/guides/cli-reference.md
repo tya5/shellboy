@@ -754,3 +754,45 @@ are excluded and counted in `excluded_time_count` for each scan window. Valid
 UTC timestamps outside the period appear in `outside_period_count`.
 `elapsed_ms` is an observation, not a pass/fail
 threshold. Summary/embedding usage and monetary cost are not inferred.
+
+## Compaction forecast (`compact --dry-run`, unreleased)
+
+Use a matching current owner and CLI; published v0.5.0 does not expose this
+additive command. Preview before changing a valuable conversation:
+
+```sh
+shellboy compact --dry-run --thread THREAD
+shellboy compact --summary --from FIRST --to LAST --dry-run --thread THREAD
+shellboy compact --maximal --dry-run --thread THREAD
+```
+
+`--dry-run` also supports `--spill`, `--trim` and `--omit` with their ordinary
+whole-group endpoints and summary size overrides. It cannot be mixed with list
+or restore. It reads one query-only snapshot on the existing presentation pool:
+no model/embedding requests, mutation receipts, queue admission, saved markers,
+spills, summary parts or path changes. Actual compact remains a separate request.
+
+Inspect `predicted_failure` even when the CLI returns `ok:true`. It contains a
+canonical code/message/hint for an anticipated boundary, protection, stopping,
+indivisible-group or summary-map-budget refusal. A coverage limit instead returns
+`input_limit` with `coverage_complete:false`; it is not evidence that compaction
+would fail. A preview never reserves selection or permits adopting stale results.
+
+`target_nodes` reports distinct affected original IDs by saved node kind (a bounded
+sample, not a body dump). `source_nodes` counts stage inputs, including virtual
+spill replacements consumed by default summary, matching compact's combined
+accounting. Character counts are replay JSON Unicode characters, not tokenizer,
+SQLite-byte, full fixed-prompt or wrapped-terminal-line counts.
+`removed_original_messages` counts replay user/assistant message records.
+Deterministic after-size is exact within coverage; summary `after_characters`
+is null because no text is generated. `summary` reports source characters,
+configured text bound and valid cached/uncached segment counts, not factual
+quality, final text length or provider acceptance. Default mode plans virtual
+spill then summary; real execution can save spill before a later summary fails.
+
+Collection is limited to 4096 combined selected/hidden nodes, 512 Turns, 4096
+receipt/tool/attachment/ancestry rows per family, 16 ancestry layers, 1MiB per
+payload/cache entry and 8MiB copied input text. At most 28 indexed/batched SQL
+statements are used. An oversized scope stays unknown rather than becoming an
+empty successful forecast. Large context-marker provenance uses the canonical
+short outbound notice; genuinely oversized visible groups remain refusals.

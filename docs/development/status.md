@@ -12,6 +12,22 @@ records the macOS synthetic upgrades and untested public installer/Linux/Windows
 upgrade paths.
 
 ## Historical v0.5.0 release preparation
+## Compact read-only forecast (#113)
+
+The author branch adds CLI compact --dry-run for default, summary, spill, trim,
+omit and maximal, routed to compact.preview on the existing presentation pool.
+No receipt, queue, model request, marker/spill write or path adoption is used.
+Forecasts reuse canonical pure policy and replay size; generated summary length
+is unknown and collection overflow is unavailable coverage, not false success.
+Read coverage is bounded to4096 combined nodes,512 Turns,8MiB input text and28
+collection statements. Backward indexed ancestry avoids lifetime seed scans.
+Registered tests include real held-writer IPC with a counted loopback endpoint.
+Current local evidence passes14 unit cases,1 registered IPC case and strict tests
+Clippy. Final exact-source standard/native3OS CI remains pending. No real
+provider/user data is used, and no full local standard suite is claimed.
+
+
+## v0.5.0 release preparation
 
 Preparation is rebased without conflicts onto main `a3e00bed` with #101, #117,
 #120 stage1, #119 extras and #121 context role included. Package/lock version is

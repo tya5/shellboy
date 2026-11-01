@@ -215,6 +215,19 @@ async fn default_applies_virtual_spill_before_summary_and_does_not_request_model
         policy::summary_range(&virtual_spill, false),
         policy::summary_range(&actual, false)
     );
+    let rendered_sizes = |snapshot: &Snapshot| {
+        snapshot
+            .groups
+            .iter()
+            .map(|g| {
+                g.sources
+                    .iter()
+                    .map(|s| render(s, snapshot.epoch).chars().count())
+                    .sum::<usize>()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rendered_sizes(&virtual_spill), rendered_sizes(&actual));
     f.close().await;
 }
 #[tokio::test]
@@ -390,6 +403,10 @@ async fn summary_budget_and_stopping_are_forecast_errors() {
             .contains("budget")
     );
     assert_eq!(p["after_characters"], p["before_characters"]);
+    assert_eq!(
+        p["removed_original_messages"],
+        json!({"user":0,"assistant":0})
+    );
     f.db.call(|db| {
         db.execute(
             "INSERT INTO run(id,thread_id,state,created_at)VALUES('stopping','t','stopping','now')",
@@ -508,6 +525,7 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
     .unwrap();
     assert_eq!(p["summary"]["uncached_segments"], 1);
     assert!(p["after_characters"].is_null());
+    let original_path = f.path().await;
     f.compactor = Compactor::new(f.db.clone(), Arc::new(c));
     let result = f
         .compactor
@@ -532,6 +550,36 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
         result.compact.source_characters.unwrap()
     );
     assert_eq!(server.await.unwrap(), 1);
+    // Synthetic rewind proves the same sources hit the actual saved map cache.
+    f.db.call(move |db| {
+        let tx = db.transaction()?;
+        let revision: i64 = tx.query_row(
+            "SELECT selection_revision FROM thread WHERE id='t'",
+            [],
+            |r| r.get(0),
+        )?;
+        history::select_path(&tx, "t", revision as u64, &original_path, "now")?;
+        tx.commit()?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let request = args(Some(ContextEditAction::Summary), Some("a"), Some("b"));
+    let cached = forecast_config(&f, &request, &f.compactor.config).unwrap();
+    assert_eq!(cached["summary"]["cached_segments"], 1);
+    assert_eq!(cached["summary"]["uncached_segments"], 0);
+    f.db.call(|db| {
+        db.execute(
+            "UPDATE app_meta SET value='malformed cache' WHERE key LIKE 'summary.part.%'",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let missing = forecast_config(&f, &request, &f.compactor.config).unwrap();
+    assert_eq!(missing["summary"]["cached_segments"], 0);
+    assert_eq!(missing["summary"]["uncached_segments"], 1);
     f.close().await;
 }
 
@@ -570,5 +618,21 @@ async fn hidden_marker_after_multi_source_tool_groups_uses_group_not_node_ordina
     assert!(p["predicted_failure"].is_null(), "{p}");
     assert_eq!(p["target_nodes"]["count"], 2);
     assert!(p["after_characters"].is_null());
+    let marker_for_update = marker.clone();
+    f.db.call(move|db| {
+        db.execute("UPDATE node SET payload_json=json_set(payload_json,'$.source_node_ids',json('[\"forged-first\",\"forged-last\"]')) WHERE id=?1",[marker_for_update])?;Ok(())
+    }).await.unwrap();
+    assert!(
+        forecast_config(
+            &f,
+            &args(
+                Some(ContextEditAction::Summary),
+                Some("forged-first"),
+                Some("forged-last")
+            ),
+            &config()
+        )
+        .is_err()
+    );
     f.close().await;
 }

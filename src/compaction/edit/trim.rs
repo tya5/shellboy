@@ -458,50 +458,6 @@ impl Compactor {
     }
 }
 
-#[cfg(test)]
-mod budget_tests {
-    use super::*;
-    #[test]
-    fn oversized_automatic_history_uses_an_available_bounded_window_and_retains_anchors() {
-        let mut snapshot = crate::compaction::tests::staged_snapshot();
-        let mut prototype = snapshot.groups[0].clone();
-        prototype.sources[0].payload = json!({"role":"user","content":"small"});
-        prototype.sources[0].turn = None;
-        snapshot.current_turn = None;
-        snapshot.protected.clear();
-        snapshot.groups = (0..TURN_BOUNDARY_IDS + 16)
-            .map(|index| {
-                let mut group = prototype.clone();
-                group.sources[0].id = format!("node-{index}");
-                group
-            })
-            .collect();
-        snapshot.protected.insert("node-1".into());
-        let plan = disconnect_plan(&snapshot, "manual_maximal", false);
-        assert!(plan.provenance_limited);
-        assert_eq!(plan.omitted.len(), TURN_BOUNDARY_IDS - 1);
-        assert!(plan.omitted.contains(&0));
-        assert!(!plan.omitted.contains(&1));
-        assert!(!plan.omitted.contains(&TURN_BOUNDARY_IDS));
-        let marker = plan.marker.unwrap();
-        assert_eq!(
-            marker["context_trim"]["original_order"]
-                .as_array()
-                .unwrap()
-                .len(),
-            TURN_BOUNDARY_IDS
-        );
-        assert_eq!(
-            marker["context_trim"]["retained_node_ids"],
-            json!(["node-1"])
-        );
-        assert_eq!(
-            marker["source_node_ids"].as_array().unwrap().len(),
-            TURN_BOUNDARY_IDS - 1
-        );
-    }
-}
-
 /// Share the exact deterministic plans with a read-only forecast; never adopt.
 pub(in crate::compaction) fn preview_trim(
     snapshot: &Snapshot,
@@ -567,4 +523,48 @@ pub(in crate::compaction) fn preview_trim(
         .flat_map(|(_, g)| g.sources.iter().map(|s| s.id.clone()))
         .collect();
     Ok((projected, ids))
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+    #[test]
+    fn oversized_automatic_history_uses_an_available_bounded_window_and_retains_anchors() {
+        let mut snapshot = crate::compaction::tests::staged_snapshot();
+        let mut prototype = snapshot.groups[0].clone();
+        prototype.sources[0].payload = json!({"role":"user","content":"small"});
+        prototype.sources[0].turn = None;
+        snapshot.current_turn = None;
+        snapshot.protected.clear();
+        snapshot.groups = (0..TURN_BOUNDARY_IDS + 16)
+            .map(|index| {
+                let mut group = prototype.clone();
+                group.sources[0].id = format!("node-{index}");
+                group
+            })
+            .collect();
+        snapshot.protected.insert("node-1".into());
+        let plan = disconnect_plan(&snapshot, "manual_maximal", false);
+        assert!(plan.provenance_limited);
+        assert_eq!(plan.omitted.len(), TURN_BOUNDARY_IDS - 1);
+        assert!(plan.omitted.contains(&0));
+        assert!(!plan.omitted.contains(&1));
+        assert!(!plan.omitted.contains(&TURN_BOUNDARY_IDS));
+        let marker = plan.marker.unwrap();
+        assert_eq!(
+            marker["context_trim"]["original_order"]
+                .as_array()
+                .unwrap()
+                .len(),
+            TURN_BOUNDARY_IDS
+        );
+        assert_eq!(
+            marker["context_trim"]["retained_node_ids"],
+            json!(["node-1"])
+        );
+        assert_eq!(
+            marker["source_node_ids"].as_array().unwrap().len(),
+            TURN_BOUNDARY_IDS - 1
+        );
+    }
 }

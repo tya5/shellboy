@@ -259,6 +259,10 @@ actual input, if reported) and `history list`'s large ranges as evidence. Do not
 start a new conversation as a substitute for this cleanup. Spill large tool outputs from completed work that are no longer
 needed with `compact --spill --from NODE --to NODE`; summarize a completed range
 with `compact --summary --from NODE --to NODE` when only its key facts are needed.
+On current main, add `--dry-run` to inspect targets, projected characters and
+predicted failures without model calls, queueing or adoption. Check coverage
+limits; summary after-size is unknown, and a preview is not permission to execute
+an edit after the source changes. The published v0.5.0 binary lacks this flag.
 Leave unfinished work, unapplied user instructions and information required for
 the current task untouched. If no completed range is safely dispensable, do not
 edit it. Do this once per task boundary, not on every request: path edits can

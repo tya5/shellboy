@@ -7162,3 +7162,45 @@ observational, not an acceptance threshold.
 Full branch CI on all three OSes, the maximum-row hidden-output count gate, an
 exact-tree matched-baseline performance observation and review
 remain outstanding. No real provider, installed executable, or user data is used.
+## #113 compact --dry-run qualification
+
+New own worktree issue-113-compact-preview starts at main02fda155; the old
+preparation-only worktree is not reused. compact.preview is additive/read-only
+and all ordinary compact mutation modes remain unchanged. Collection runs on one
+query-only WAL snapshot via the existing finite presentation pool. Original-node
+counts and stage source_nodes are separate when a virtual spill is summarized;
+synthetic replacement IDs have the same36-character width as actual UUIDs.
+
+Initial rust-slot check --tests succeeds. The first focused build was interrupted
+by the owner restart and is not a test pass. Restarted lib run6c12f610 passes12/0;
+extended lib runs9ff8a5e/e6fa5110 pass14/0, including actual deterministic adoption
+sizes/targets, #112 short-marker versus real visible indivisible refusal, default
+spill order, source protections, ancestry equivalence, bounded unknown coverage,
+SQL trace/query plans and CLI variants. The first IPC compilation fails on an
+untyped fixture channel; its explicit unit type/unused import are corrected.
+The next IPC run reaches the watchdog because Control.start was first attempted
+after the writer gate: owner startup legitimately uses its writer. The fixture
+now finishes startup before capturing baseline counts/holding its WAL writer;
+no watchdog duration or behavior assertion is relaxed.
+
+Warm-owner real local IPC in executiona944a9cb passes1/0, across all6 modes with
+the writer still held and an uncommitted title change. Node/replacement/source/
+path/app_meta/operation_receipt/attempt counts remain unchanged, writer rollback
+is observed and counted provider requests stay0. Unit summary comparison itself
+uses one synthetic loopback response, not a paid provider. All stores are temporary
+and the OS clipboard/config/user data are untouched.
+
+Strict lib Clippy first rejects tuple type complexity and a single-range array;
+use a domain type alias and from_ref without lint suppression. Tests Clippy then
+rejects a pure helper placed after a test module; the helper is moved before it.
+Those failures remain unqualified. Latest tests add actual saved-part reuse and
+malformed-cache miss after an explicitly synthetic path rewind, plus rendered
+virtual/actual spill size equality. Their final result and exact-source native3OS
+CI must be recorded separately. Python95, layout96/watchdog and diff checks pass.
+
+Final corrected local qualification passes focused14/0 and strict tests Clippy
+through rust-slot (log issue113-qualified), with positive-count guard. Cached
+parts/invalid cache, virtual UUID rendered size, forged hidden bounds, and zero
+removed messages for preflight budget refusal are covered. Registered real IPC1/0
+is qualified on the unchanged routing/fixture above. Full standard/native3OS CI
+is deliberately left to the exact pushed branch; no full local suite is claimed.

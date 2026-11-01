@@ -269,6 +269,15 @@ fn load(
             if original.is_empty() {
                 return Err(invalid("Context marker source list is unavailable").into());
             }
+            if (marker.id != from || from != to)
+                && (original.first().is_none_or(|s| s.id != from)
+                    || original.last().is_none_or(|s| s.id != to))
+            {
+                return Err(invalid(
+                    "Context marker source boundaries changed; no forecast is available",
+                )
+                .into());
+            }
             if original.len() + sources.len() > ROWS {
                 return Err(limit());
             }
@@ -536,10 +545,8 @@ fn message_counts(snapshot: &Snapshot) -> (usize, usize) {
     }
     counts
 }
-fn spill(
-    snapshot: &Snapshot,
-    ranges: Vec<Range<usize>>,
-) -> Result<(Snapshot, HashMap<String, Vec<String>>, usize), ApiError> {
+type SpillProjection = (Snapshot, HashMap<String, Vec<String>>, usize);
+fn spill(snapshot: &Snapshot, ranges: Vec<Range<usize>>) -> Result<SpillProjection, ApiError> {
     range::validate(snapshot, &ranges, range::RangeMode::Spill)?;
     let mut projected = snapshot.clone();
     let mut original = HashMap::new();
@@ -652,9 +659,10 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
         } else if let Some((index, groups)) = &loaded.hidden {
             // Canonical explicit summaries reintroduce exactly one marker's originals.
             let index = *index;
+            let marker_range = index..index + 1;
             range::validate(
                 &plan.projected,
-                &[index..index + 1],
+                std::slice::from_ref(&marker_range),
                 range::RangeMode::Summary,
             )?;
             let end = index + groups.len();
@@ -785,6 +793,7 @@ pub(crate) fn read_tx(
             plan.failure=Some(invalid("Summary requires more map requests than the configured budget")
                 .details(json!({"uncached_segments":uncached,"request_budget":config.compaction.summary_map_max_requests})));
             plan.after = Some(plan.intermediate_after);
+            plan.removed = (0, 0);
         }
     }
     if sql > SQL_MAX {

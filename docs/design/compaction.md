@@ -283,9 +283,11 @@ The collection envelope is 4096 combined selected/hidden nodes, 512 Thread Turns
 copy (IDs1024, kinds/states64, paths128KiB). Every query uses literal Thread or
 exact-ID indexes with LIMIT+1; overflow yields InputLimit with unknown coverage.
 Backward replacement ancestry from selected roots avoids scanning lifetime Turn
-seeds; edges/cycles/depth are bounded, never guessed. At most26 SQL statements
-(9 collection/preflight/cache plus16 ancestry layers and one hidden-source read)
-are allowed; counts and indexed plans are tested, not timing thresholds.
+seeds; edges/cycles/depth are bounded, never guessed. At most28 SQL statements
+(10 collection/preflight/cache plus16 ancestry layers and two hidden-source reads)
+are allowed; counts and indexed plans are tested, not timing thresholds. This
+counts the collection itself; connection query_only and BEGIN/COMMIT add three
+fixed statements outside that counter.
 
 Original context markers are rendered via #112's short outbound notice, excluding
 provenance arrays. Explicit summary of one marker/full omitted-source range uses
