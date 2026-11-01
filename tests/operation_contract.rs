@@ -383,6 +383,7 @@ async fn attachment_replay_precedes_deleted_target_preflight_and_checks_content_
         .request(request(
             &owner.instance_id,
             Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
                 thread_id: thread,
                 descendants: false,
             }),

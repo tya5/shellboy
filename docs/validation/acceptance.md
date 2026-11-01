@@ -7418,3 +7418,34 @@ own entry-path recompilation rather than changing the source API to fit stale
 shared artifacts. Final source will be checked again before Windows qualification.
 Five consecutive actual Windows4-thread CI passes at one frozen SHA remain the
 acceptance gate; build/OS/CI results are not inferred from macOS focused passes.
+
+## #122 bounded deletion marker
+
+Base48a85799; synthetic temporary SQLite/data directories only, no installed
+binary changes, user-data deletion or provider/embedding requests. Marker wire
+compatibility is tested with the exact old protocol2 Request shape, omitted and
+null optional args, and malformed count/hash rejection; an old released executable
+was not used. Project hybrid RAG had no relevant task history and reported its
+docs semantic scope not ready; it was not rebuilt. Current issue122 and adopted
+repository sources are authoritative for this change.
+
+macOS own-entry rust-slot check --tests passes. Focused executioncc809752 gives
+registered marker6/0, UI18/0, bounded/real frontend deletion unit22/0. The latter
+includes existing indexed/physical-count SQL gates and new exact/bounded digest,
+deleted-bridge, depth overflow and known SHA-256 encoding checks. Later execution
+31c652a4 passes strict tests Clippy, catalogue9/0, canonical deletion plus UI23/0
+(5 canonical and18 UI), and marker6/0 at the shared-derived admission ceiling.
+Marker tests assert added descendants and same-count substitution refuse without
+changing physical/deleted Thread counts, root revision or GC admission; a fresh
+marker succeeds; root-only leaves new unselected children live; current live Run
+blockers remain;256 descendants attest257 IDs, overflow yields explicit no-marker,
+guarded execution fails closed, and legacy unmarked deletion still handles258.
+UI tests verify exact marker transfer, no Y without a marker, stale-triggered fresh
+preview/request ID, rejection of old responses and a newly required explicit Y.
+Operation-form entry also uses the existing guarded confirmation, not an unmarked
+mutation. No new real-time guard, timeout increase or weakened SQL/count assertion.
+Integration registration100 and watchdog policy pass. Local full standard suite
+was not run; standard checks and native3OS qualification run on the pushed SHA.
+Initial compile failed on SHA0.11 hex formatting and the new error hint arm; both
+were corrected without dependency changes. An exact-block patch refusal wrote
+nothing and that repeated compile is not claimed as a successful qualification.

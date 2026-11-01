@@ -321,6 +321,7 @@ mod tests {
         UiUpdate::ThreadDeletion {
             request_id,
             args: ThreadDeleteArgs {
+                preview_marker: None,
                 thread_id: "t".into(),
                 descendants: false,
             },
@@ -853,6 +854,7 @@ mod tests {
                 out.defer(UiUpdate::ThreadDeletion {
                     request_id: n as u64,
                     args: ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: "t".into(),
                         descendants: false
                     },
@@ -947,6 +949,7 @@ mod tests {
                 out.defer(UiUpdate::ThreadDeletion {
                     request_id: n as u64,
                     args: ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: "t".into(),
                         descendants: false
                     },
@@ -1012,6 +1015,7 @@ mod tests {
                 out.defer(UiUpdate::ThreadDeletion {
                     request_id: n as u64,
                     args: ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: "t".into(),
                         descendants: false
                     },

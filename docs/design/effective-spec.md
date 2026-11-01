@@ -331,3 +331,13 @@ Adopt [the external catalogue](error-catalog.md) for explicitly built, sanitized
 rebuildable failure statistics and observed recovery associations. This is an
 optional script, not Rust Core, UI, an owner worker, automatic guidance or LLM
 processing. Conversation data is read-only; derived data has independent bounds.
+
+## Guarded Thread Deletion (#122)
+
+Adopt the optional bounded target marker and transaction-local comparison in
+[deletion impact](deletion-impact.md#guarded-target-set-deletion-122). Protocol2
+adds no mandatory request field. Marked execution never falls back to unbounded
+selection; incomplete or different targets return typed preview_stale before
+mutation. Legacy unmarked behavior and existing Run-state checks remain. The UI
+uses a fresh preview and new confirmation after stale rejection, never an
+automatic deletion retry. No schema/queue/worker is added.

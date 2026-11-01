@@ -283,6 +283,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     assert_eq!(held.turn_id, None);
     assert!(effects.wake_threads.is_empty());
     let delete = request(Command::ThreadDelete(ThreadDeleteArgs {
+        preview_marker: None,
         thread_id: thread.thread_id.clone(),
         descendants: false,
     }));
@@ -306,6 +307,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     execute(
         &store,
         Command::ThreadDelete(ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: thread.thread_id.clone(),
             descendants: false,
         }),
@@ -1829,6 +1831,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
             thread_id: Some(thread.thread_id.clone()),
         }),
         Command::ThreadDeletePreview(ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: thread.thread_id.clone(),
             descendants: false,
         }),

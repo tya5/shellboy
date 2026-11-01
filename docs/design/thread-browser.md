@@ -173,3 +173,11 @@ than assume a character count.
 The review's low-priority timestamp observation is retained: latest Turn
 selection uses created_at/id, so wall-clock rollback can affect chronology.
 No ordering/schema change is part of this label-only follow-up.
+
+## Guarded Confirmation (#122)
+
+Browser and operation-form deletion share the same preview dialog. It retains
+the optional bounded target marker and includes it in execution; a missing marker
+cannot enable Y. `preview_stale` leaves every Thread visible, requests a new
+preview with a new request fence, and requires another explicit Y. Closing the
+dialog never causes a mutation retry. CLI omission remains supported by Core.

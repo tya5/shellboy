@@ -71,7 +71,7 @@ fn request(actions: Vec<UiAction>, execute_expected: bool) -> (u64, ThreadDelete
     (request_id, args)
 }
 fn preview(args: &ThreadDeleteArgs, deletable: bool) -> Value {
-    json!({"thread_id":args.thread_id,"descendants":args.descendants,"deletable_now":deletable,
+    json!({"preview_marker":{"thread_count":if args.descendants{2}else{1},"ids_hash":"0".repeat(64)},"thread_id":args.thread_id,"descendants":args.descendants,"deletable_now":deletable,
         "selection":{"thread_count":if args.descendants {2}else{1},"descendant_thread_count":1},
         "blockers":{"live_run_count":if deletable {0}else{1},"stopping_run_count":0,"runs":if deletable {json!([])}else{json!([{"id":"blocking-run","state":"live"}])}},
         "references":{"shared_path_nodes":2,"completed_replacement_source_nodes":3,"attachment_reference_count":4}})
@@ -331,6 +331,7 @@ fn images_in_an_edit_fork_draft_are_owned_by_the_source_thread_for_deletion() {
     ui.apply(UiUpdate::ThreadDeletion {
         request_id: 0,
         args: ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: "source".into(),
             descendants: false,
         },
@@ -577,4 +578,50 @@ fn an_overlay_covering_the_browser_does_not_consume_an_unseen_deletion_notice() 
             .lines()
             .any(|line| line.contains("covered deletion notice") && line.contains("検索"))
     );
+}
+
+#[test]
+fn reviewed_marker_is_forwarded_and_stale_execution_requests_preview_not_mutation_retry() {
+    let mut ui = ui();
+    list(&mut ui, &["parent"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    let expected: shellboy::protocol::DeletionPreviewMarker =
+        serde_json::from_value(preview(&args, true)["preview_marker"].clone()).unwrap();
+    accept(&mut ui, id, &args, true);
+    let (execute_id, execute_args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    assert_eq!(execute_args.preview_marker, Some(expected));
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: execute_id,
+        args: execute_args,
+        execute: true,
+        result: Err(ApiError::new(ErrorCode::PreviewStale, "target set changed")),
+    });
+    assert!(key(&mut ui, KeyCode::Char('y')).is_empty());
+    let (refresh_id, refresh_args) = request(ui.take_deferred_actions(), false);
+    assert_ne!(refresh_id, execute_id);
+    assert!(refresh_args.preview_marker.is_none());
+    accept(&mut ui, id, &args, true);
+    assert!(
+        key(&mut ui, KeyCode::Char('y')).is_empty(),
+        "late old preview cannot authorize a deletion"
+    );
+    accept(&mut ui, refresh_id, &refresh_args, true);
+    request(key(&mut ui, KeyCode::Char('y')), true);
+}
+
+#[test]
+fn complete_looking_preview_without_target_marker_cannot_enable_y() {
+    let mut ui = ui();
+    list(&mut ui, &["parent"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    let mut value = preview(&args, true);
+    value["preview_marker"] = Value::Null;
+    value["preview_marker_unavailable_reason"] = json!("input_limit");
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: id,
+        args,
+        execute: false,
+        result: Ok(ThreadDeletionReply::Preview(value, chrono::Utc::now())),
+    });
+    assert!(key(&mut ui, KeyCode::Char('y')).is_empty());
 }

@@ -995,6 +995,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::ThreadDelete(ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: form.owned("thread")?,
                         descendants: form.boolean("descendants")?,
                     }))
@@ -1496,6 +1497,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::ThreadDeletePreview(ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: form.owned("thread")?,
                         descendants: form.boolean("descendants")?,
                     }))

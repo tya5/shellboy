@@ -439,3 +439,17 @@ The response exposes `items`, `more`, `next_cursor`, `requested_period`,
 `statistics_scope`, `excluded_time_count`, `outside_period_count`, coverage and
 observed `elapsed_ms`. No migration/index is added. No receipt or new lifecycle
 state is created. Existing ungrouped response shape is unchanged.
+
+## Optional Deletion Target Marker (#122)
+
+Protocol2 `thread.delete` accepts optional `args.preview_marker` with
+`thread_count` (1..257) and `ids_hash` (64 lowercase SHA-256 hex characters).
+Old requests omitting it, or using null, retain unguarded current behavior;
+serialization of None omits the field. Preview responses include the marker or
+null plus `preview_marker_unavailable_reason: "input_limit"` for incomplete
+bounded target selection. A marked execution recomputes the bounded selection
+inside its write transaction and returns typed `preview_stale` before deletion
+when identities differ or cannot be enumerated completely. Re-preview and obtain
+new human confirmation; never automatically retry the mutation. See
+[deletion-impact](deletion-impact.md) for canonical hash encoding and bounds.
+The marker is not a permission token, Run-state snapshot or GC byte estimate.

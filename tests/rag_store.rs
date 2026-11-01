@@ -663,6 +663,7 @@ async fn history_keyword_hides_deleted_thread_exclusive_nodes_before_physical_gc
             shellboy::protocol::Request::new(
                 "keyword-delete:dead",
                 shellboy::protocol::Command::ThreadDelete(shellboy::protocol::ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "dead".into(),
                     descendants: false,
                 }),
@@ -699,6 +700,7 @@ async fn history_keyword_hides_deleted_thread_exclusive_nodes_before_physical_gc
             shellboy::protocol::Request::new(
                 "keyword-delete:live",
                 shellboy::protocol::Command::ThreadDelete(shellboy::protocol::ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "live".into(),
                     descendants: false,
                 }),

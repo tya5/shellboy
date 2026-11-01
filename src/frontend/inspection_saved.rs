@@ -888,6 +888,7 @@ mod tests {
                 let deletion = super::super::management_request(
                     &control,
                     Command::ThreadDeletePreview(crate::protocol::ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: "target".into(),
                         descendants: false,
                     }),

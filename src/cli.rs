@@ -820,10 +820,12 @@ impl Cli {
                     cwd: path_option(a.cwd)?,
                 }),
                 ThreadCommand::Delete(a) => C::ThreadDelete(wire::ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: a.thread_id,
                     descendants: a.descendants,
                 }),
                 ThreadCommand::DeletePreview(a) => C::ThreadDeletePreview(wire::ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: a.thread_id,
                     descendants: a.descendants,
                 }),

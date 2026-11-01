@@ -1219,6 +1219,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
     for (command, success, stop) in [
         (
             Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
                 thread_id: "deletable".into(),
                 descendants: false,
             }),
@@ -1227,6 +1228,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
         ),
         (
             Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
                 thread_id: "missing".into(),
                 descendants: false,
             }),

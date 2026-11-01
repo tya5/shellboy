@@ -171,6 +171,7 @@ mod tests {
             .try_send(UiAction::ThreadDeletion {
                 request_id,
                 args: ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "thread".into(),
                     descendants: false,
                 },
@@ -262,6 +263,7 @@ mod tests {
             .try_send(UiAction::ThreadDeletion {
                 request_id: 144,
                 args: ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "thread".into(),
                     descendants: false,
                 },
@@ -373,6 +375,7 @@ mod tests {
         .await
         .unwrap();
         let args = ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: "thread".into(),
             descendants: true,
         };
@@ -538,6 +541,7 @@ mod tests {
             .try_send(UiAction::ThreadDeletion {
                 request_id: 99,
                 args: ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "thread".into(),
                     descendants: false,
                 },
@@ -650,6 +654,7 @@ mod tests {
             .await
             .unwrap();
         let args = ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: "thread".into(),
             descendants: false,
         };
@@ -758,6 +763,7 @@ mod tests {
         run(
             &control,
             ThreadDeleteArgs {
+                preview_marker: None,
                 thread_id: "thread".into(),
                 descendants: false,
             },

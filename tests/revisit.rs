@@ -623,6 +623,7 @@ async fn startup_captures_pending_instruction_then_drops_it_without_automatic_de
     request(
         &control,
         Command::ThreadDelete(ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: thread.clone(),
             descendants: false,
         }),

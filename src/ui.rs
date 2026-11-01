@@ -5204,14 +5204,7 @@ impl UiState {
                 ];
             }
             Command::ThreadDelete(args) => {
-                self.set_confirmation(Confirmation::Operation {
-                    command: command.clone(),
-                    detail: format!(
-                        "会話 {} を削除します。子孫を含む: {}。現在の実行状態を再確認してから削除します",
-                        args.thread_id, args.descendants
-                    ),
-                });
-                return vec![];
+                return self.begin_thread_deletion_scope(args.thread_id.clone(), args.descendants);
             }
             Command::StorageCollect(args) => {
                 self.set_confirmation(Confirmation::Operation {

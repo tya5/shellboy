@@ -246,6 +246,7 @@ async fn stopping_holds_existing_acceptance_and_thread_deletion_cancels_without_
             Request::new(
                 "instance:delete",
                 Command::ThreadDelete(ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "thread".into(),
                     descendants: false,
                 }),

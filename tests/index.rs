@@ -2404,6 +2404,7 @@ async fn real_thread_delete_hides_path_only_sources_until_gc_reclaims_payload_an
             shellboy::protocol::Request::new(
                 "delete-fixture:delete",
                 shellboy::protocol::Command::ThreadDelete(shellboy::protocol::ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "deleted".into(),
                     descendants: false,
                 }),

@@ -56,7 +56,8 @@ impl DeletionDialog {
         };
     }
     fn can_execute(&self) -> bool {
-        matches!(&self.phase,Phase::Ready(value) if value.get("deletable_now").and_then(Value::as_bool)==Some(true))
+        self.args.preview_marker.is_some()
+            && matches!(&self.phase,Phase::Ready(value) if value.get("deletable_now").and_then(Value::as_bool)==Some(true))
     }
     pub(super) fn text(&self) -> String {
         let mut text = format!(
@@ -96,6 +97,8 @@ impl DeletionDialog {
                 };
                 text.push_str(if matches!(self.phase, Phase::Stale(_)) {
                     "\n確認が古くなりました。閉じて再確認してください。Y は使えません。"
+                } else if self.args.preview_marker.is_none() {
+                    "\n確認の目印を取得できません。対象範囲を狭めて再確認してください。Y は使えません。"
                 } else if self.can_execute() {
                     "\n削除できます。Y で実行します。"
                 } else {
@@ -145,6 +148,13 @@ impl UiState {
         }
     }
     pub(super) fn begin_thread_deletion(&mut self, thread: String) -> Vec<UiAction> {
+        self.begin_thread_deletion_scope(thread, false)
+    }
+    pub(super) fn begin_thread_deletion_scope(
+        &mut self,
+        thread: String,
+        descendants: bool,
+    ) -> Vec<UiAction> {
         if thread.starts_with("draft:") {
             self.thread_browser
                 .notice("未保存の下書きは会話の削除対象ではありません".into());
@@ -170,8 +180,9 @@ impl UiState {
             captured_at: None,
             request_id: self.next_thread_deletion_request,
             args: ThreadDeleteArgs {
+                preview_marker: None,
                 thread_id: thread,
-                descendants: false,
+                descendants,
             },
             phase: Phase::Loading,
         };
@@ -215,6 +226,7 @@ impl UiState {
             && matches!(key.code, KeyCode::Char('d' | 'D' | ' '))
         {
             dialog.args.descendants = !dialog.args.descendants;
+            dialog.args.preview_marker = None;
             dialog.captured_at = None;
             dialog.phase = Phase::Loading;
             execute = Some(false);
@@ -280,6 +292,10 @@ impl UiState {
                     && matches!(dialog.phase, Phase::Loading)
                 {
                     dialog.captured_at = Some(captured_at);
+                    dialog.args.preview_marker = value
+                        .get("preview_marker")
+                        .cloned()
+                        .and_then(|marker| serde_json::from_value(marker).ok());
                     dialog.phase = if value.get("thread_id").and_then(Value::as_str)
                         == Some(args.thread_id.as_str())
                         && value.get("descendants").and_then(Value::as_bool)
@@ -295,6 +311,26 @@ impl UiState {
                 }
             }
             Err(error) => {
+                if execute && matches && error.code == crate::protocol::ErrorCode::PreviewStale {
+                    // A stale compare never retries the mutation: get a new
+                    // snapshot/request fence, then require a fresh confirmation.
+                    self.next_thread_deletion_request =
+                        self.next_thread_deletion_request.wrapping_add(1);
+                    if let Some(Confirmation::ThreadDeletion(mut dialog)) = self.confirmation.take()
+                    {
+                        dialog.request_id = self.next_thread_deletion_request;
+                        dialog.args.preview_marker = None;
+                        dialog.captured_at = None;
+                        dialog.phase = Phase::Loading;
+                        let action = self.deletion_action(&dialog, false);
+                        self.deferred_actions.push(action);
+                        self.set_confirmation(Confirmation::ThreadDeletion(dialog));
+                    }
+                    self.thread_browser
+                        .notice("削除対象が変わりました。再確認してください".into());
+                    self.dirty = true;
+                    return;
+                }
                 if execute {
                     let message = failure_text(&error);
                     self.thread_browser.notice(message.clone());
@@ -558,5 +594,25 @@ mod invalidation_tests {
             actions.as_slice(),
             [UiAction::ThreadDeletion { execute: false, .. }]
         ));
+    }
+}
+
+#[cfg(test)]
+mod marker_entry_tests {
+    use super::*;
+    #[test]
+    fn operation_form_also_requests_review_instead_of_an_unmarked_confirmation() {
+        let mut ui = UiState::new(&crate::config::Config::default(), std::env::temp_dir());
+        let actions = ui.execute_operation(Command::ThreadDelete(ThreadDeleteArgs {
+            thread_id: "root".into(),
+            descendants: true,
+            preview_marker: None,
+        }));
+        assert!(
+            matches!(&actions[..],[UiAction::ThreadDeletion{args,execute:false,..}] if args.thread_id=="root" && args.descendants && args.preview_marker.is_none())
+        );
+        assert!(
+            matches!(&ui.confirmation,Some(Confirmation::ThreadDeletion(dialog)) if !dialog.can_execute())
+        );
     }
 }

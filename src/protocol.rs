@@ -52,6 +52,7 @@ states!(ErrorCode {
     OperationExpired,
     OperationNotFound,
     InvalidState,
+    PreviewStale,
     RevisitLimitReached,
     WaitCycle,
     CursorExpired,
@@ -158,6 +159,7 @@ impl ApiError {
             ErrorCode::OperationConflict => "Query the existing receipt with shellboy operation get --operation OPERATION_ID; do not change the ID to repeat the same side effect",
             ErrorCode::OperationExpired | ErrorCode::OperationNotFound => "Inspect saved target state and history; an unavailable receipt does not prove the mutation was never applied",
             ErrorCode::InvalidState => "Inspect the target with its get command; read shellboy docs get --id shellboy/recovery-and-storage before choosing retry or stop",
+            ErrorCode::PreviewStale => "Request thread.delete_preview again and explicitly confirm its new target marker; never retry deletion with the stale preview",
             ErrorCode::RevisitLimitReached => "Inspect revisit get and the configured per-Run limit; continue or stop this Run explicitly rather than retrying registration",
             ErrorCode::WaitCycle => "Inspect Run ownership and wait dependencies; correct the wait direction instead of polling around the cycle",
             ErrorCode::CursorExpired => "Restart the same list/read with its original target and filters, without the old cursor; previously returned items or bytes may repeat",
@@ -418,10 +420,16 @@ args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(defa
 args!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });
 args!(ThreadCreateArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default)] parent_id: Option<String> });
 args!(ThreadForkArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, thread_id: String, node_id: String, #[serde(default)] cwd: Option<String> });
+args!(DeletionPreviewMarker {
+    thread_count: u32,
+    ids_hash: String
+});
 args!(ThreadDeleteArgs {
     thread_id: String,
     #[serde(default)]
-    descendants: bool
+    descendants: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    preview_marker: Option<DeletionPreviewMarker>
 });
 args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<String> });
 args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default)] now: bool });

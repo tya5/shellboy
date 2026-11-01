@@ -9,7 +9,7 @@ use crate::{
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
-const THREAD_LIMIT: usize = 256;
+pub(super) const THREAD_LIMIT: usize = 256;
 const WITNESS_LIMIT: usize = 1024;
 // Deleted physical children consume admission before exclusion, but unlike
 // Watch lineage they do NOT bridge traversal into their live grandchildren.
@@ -169,6 +169,49 @@ fn boundary_error(error: rusqlite::Error) -> StorageError {
     }
     error.into()
 }
+fn read_members(db: &Connection, thread: &str) -> Result<Vec<Member>, StorageError> {
+    let members = db
+        .prepare(SCOPE)?
+        .query_map([thread], |row| {
+            Ok(Member {
+                id: scalar(row, 0)?,
+                deleted: row.get(1)?,
+                cycle: row.get(2)?,
+                updated: scalar(row, 3)?,
+                depth_limited: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(boundary_error)?;
+    Ok(members)
+}
+
+pub(super) fn selected_targets(
+    db: &Connection,
+    args: &ThreadDeleteArgs,
+) -> Result<Option<Vec<String>>, StorageError> {
+    if args.thread_id.len() > 256 {
+        return Ok(None);
+    }
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+        [&args.thread_id],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Ok(None);
+    }
+    let mut selected = BTreeSet::from([args.thread_id.clone()]);
+    if args.descendants {
+        let members = read_members(db, &args.thread_id)?;
+        if members.len() > THREAD_LIMIT || members.iter().any(|r| r.cycle || r.depth_limited) {
+            return Ok(None);
+        }
+        selected.extend(members.into_iter().filter(|r| !r.deleted).map(|r| r.id));
+    }
+    Ok(Some(selected.into_iter().collect()))
+}
+
 pub(crate) fn read_tx(
     db: &Connection,
     args: &ThreadDeleteArgs,
@@ -197,19 +240,7 @@ pub(crate) fn read_tx(
     let root_revision = revision.parse().map_err(|_| {
         StorageError::from(crate::storage::save_error("invalid root revision metadata"))
     })?;
-    let mut members = db
-        .prepare(SCOPE)?
-        .query_map([&args.thread_id], |row| {
-            Ok(Member {
-                id: scalar(row, 0)?,
-                deleted: row.get(1)?,
-                cycle: row.get(2)?,
-                updated: scalar(row, 3)?,
-                depth_limited: row.get(4)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(boundary_error)?;
+    let mut members = read_members(db, &args.thread_id)?;
     let scope_truncated =
         members.len() > THREAD_LIMIT || members.iter().any(|row| row.cycle || row.depth_limited);
     members.truncate(THREAD_LIMIT);
@@ -410,7 +441,9 @@ pub(crate) fn prepare(raw: RawObservation) -> Value {
     } else {
         raw.updated.clone()
     };
-    json!({"thread_id":raw.args.thread_id,"descendants":raw.args.descendants,"updated_at":raw.updated,"root_revision":raw.root_revision,"snapshot_only":true,"deletable_now":deletable,
+    let marker =
+        selected_complete.then(|| super::target_marker(selected.iter().map(String::as_str)));
+    json!({"preview_marker":marker,"preview_marker_unavailable_reason":if selected_complete{None}else{Some("input_limit")},"thread_id":raw.args.thread_id,"descendants":raw.args.descendants,"updated_at":raw.updated,"root_revision":raw.root_revision,"snapshot_only":true,"deletable_now":deletable,
         "selection":{"thread_count":if selected_complete{Some(selected.len())}else{None},"descendant_thread_count":if raw.scope_truncated{None}else{Some(descendants.len())},"surviving_descendant_thread_count":if raw.args.descendants{Some(0)}else if raw.scope_truncated{None}else{Some(descendants.len())},"latest_updated_at":if selected_complete{Some(latest)}else{None}},
         "blockers":{"live_run_count":if selected_complete{Some(live)}else{None},"stopping_run_count":if selected_complete{Some(stopping)}else{None},"runs":runs,"truncated":raw.runs.len()>50||!selected_complete},
         "reference_scope":"direct_references_not_gc_reachability","references":references,
@@ -448,6 +481,7 @@ mod tests {
     }
     fn args(descendants: bool) -> ThreadDeleteArgs {
         ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: "root".into(),
             descendants,
         }
@@ -707,5 +741,32 @@ mod tests {
         let mut after = prepare(read_tx(&db, &args(false)).unwrap());
         after.as_object_mut().unwrap().remove("observation");
         assert_eq!(after, original);
+    }
+    #[test]
+    fn marker_matches_exact_preview_and_never_attests_incomplete_depth() {
+        let db = fixture();
+        thread(&db, "child", Some("root"), false);
+        thread(&db, "dead", Some("root"), true);
+        thread(&db, "hidden", Some("dead"), false);
+        let mut request = args(true);
+        let exact = crate::deletion::preview(&db, &request).unwrap();
+        let bounded = prepare(read_tx(&db, &request).unwrap());
+        assert_eq!(exact["preview_marker"], bounded["preview_marker"]);
+        assert_eq!(exact["preview_marker"]["thread_count"], 2);
+        let mut parent = "child".to_owned();
+        for i in 0..9 {
+            let id = format!("deep-{i}");
+            thread(&db, &id, Some(&parent), false);
+            parent = id;
+        }
+        let bounded = prepare(read_tx(&db, &request).unwrap());
+        assert!(bounded["preview_marker"].is_null());
+        assert_eq!(bounded["preview_marker_unavailable_reason"], "input_limit");
+        assert!(crate::deletion::preview(&db, &request).unwrap()["preview_marker"].is_null());
+        request.descendants = false;
+        assert_eq!(
+            prepare(read_tx(&db, &request).unwrap())["preview_marker"]["thread_count"],
+            1
+        );
     }
 }

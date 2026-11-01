@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 fn request(descendants: bool) -> ThreadDeleteArgs {
     ThreadDeleteArgs {
+        preview_marker: None,
         thread_id: "parent".into(),
         descendants,
     }
@@ -116,6 +117,7 @@ async fn deleted_parent_does_not_bridge_descendants_and_deleted_target_is_unavai
                 preview(
                     db,
                     &ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: target.into(),
                         descendants: true
                     }

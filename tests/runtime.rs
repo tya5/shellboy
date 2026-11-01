@@ -632,6 +632,7 @@ async fn incomplete_response_created_after_gc_roots_survives_sweep() {
     command(
         &control,
         Command::ThreadDelete(ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: deleted_thread,
             descendants: false,
         }),
@@ -2254,6 +2255,7 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
     command(
         &control,
         Command::ThreadDelete(ThreadDeleteArgs {
+            preview_marker: None,
             thread_id: target.clone(),
             descendants: false,
         }),

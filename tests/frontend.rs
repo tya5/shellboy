@@ -1039,6 +1039,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .unwrap();
     assert!(characters > 64 * 1024);
     let deletion = ThreadDeleteArgs {
+        preview_marker: None,
         thread_id: "source".into(),
         descendants: false,
     };

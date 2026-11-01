@@ -408,7 +408,20 @@ impl Command {
             Self::ThreadCreate(a) => a.validate(),
             Self::ThreadFork(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
-                nonempty(&a.thread_id, "thread_id")
+                nonempty(&a.thread_id, "thread_id")?;
+                if let Some(marker) = &a.preview_marker
+                    && (!(1..=crate::deletion::MAX_PREVIEW_THREADS).contains(&marker.thread_count)
+                        || marker.ids_hash.len() != 64
+                        || !marker
+                            .ids_hash
+                            .bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+                {
+                    return Err(invalid(
+                        "preview_marker requires thread_count 1..257 and a 64-character lowercase SHA-256 ids_hash",
+                    ));
+                }
+                Ok(())
             }
             Self::ThreadSet(a) => a.validate(),
             Self::MessageSend(a) => {

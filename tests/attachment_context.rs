@@ -75,6 +75,7 @@ async fn human_cli_attachment_is_anchored_to_its_own_immutable_event_once_withou
             Request::new(
                 "instance:delete",
                 Command::ThreadDelete(ThreadDeleteArgs {
+                    preview_marker: None,
                     thread_id: "thread".into(),
                     descendants: false,
                 }),

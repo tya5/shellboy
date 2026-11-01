@@ -2228,8 +2228,24 @@ fn delete_thread(
     args: &ThreadDeleteArgs,
     now: &str,
 ) -> Result<MutationResult> {
-    thread_details(tx, &args.thread_id)?;
-    let targets = if args.descendants {
+    if args.preview_marker.is_none() {
+        thread_details(tx, &args.thread_id)?;
+    }
+    let targets = if let Some(expected) = &args.preview_marker {
+        let targets = crate::deletion::guarded_targets(tx, args)?.ok_or_else(|| {
+            error(
+                ErrorCode::PreviewStale,
+                "deletion preview is stale or exceeds its target limit; request a new preview",
+            )
+        })?;
+        if crate::deletion::target_marker(targets.iter().map(String::as_str)) != *expected {
+            return Err(error(
+                ErrorCode::PreviewStale,
+                "deletion preview target set changed; request a new preview",
+            ));
+        }
+        targets
+    } else if args.descendants {
         let mut statement=tx.prepare("WITH RECURSIVE children(id) AS(SELECT ?1 UNION SELECT t.id FROM thread t JOIN children c ON t.parent_thread_id=c.id WHERE t.deleted_at IS NULL) SELECT id FROM children").map_err(sql_error)?;
         statement
             .query_map([&args.thread_id], |row| row.get::<_, String>(0))
@@ -2239,6 +2255,9 @@ fn delete_thread(
     } else {
         vec![args.thread_id.clone()]
     };
+    if args.preview_marker.is_some() {
+        thread_details(tx, &args.thread_id)?;
+    }
     for id in &targets {
         if count(
             tx,
@@ -3556,6 +3575,7 @@ mod thread_deletion_notification_tests {
         Request::new(
             format!("{instance}:delete-notification"),
             Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
                 thread_id: "parent".into(),
                 descendants,
             }),

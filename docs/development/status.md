@@ -3445,3 +3445,14 @@ Branch `issue-90/motion` on main `63952ab2`: `ui.motion` (on/off), one
 (`ui/motion.rs::select`) and the owned-work heading blink. Spinner shape uses the
 braille candidate until the user picks from real PTY samples. Checks and gaps are
 recorded in [acceptance](../validation/acceptance.md#90-one-motion-per-region).
+
+## #122 guarded Thread deletion
+
+Implemented optional `ThreadDeleteArgs.preview_marker` (bounded count plus sorted
+ID digest), typed `preview_stale`, shared bounded observation selection, and
+transaction-local compare before deleting the exact compared vector. Unmarked
+CLI/old-client behavior is unchanged. Browser and operation-form confirmation
+carry the reviewed marker; stale execution refreshes preview and requires a new
+Y. No marker is issued for incomplete target coverage. Schema17/RAG3/protocol2
+and worker/queue/admission budgets are unchanged. Local focused checks pass;
+exact pushed-SHA standard/native3OS CI remains required before handoff.

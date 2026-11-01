@@ -5,6 +5,45 @@ use serde_json::{Value, json};
 
 use crate::protocol::{ApiError, ErrorCode, ThreadDeleteArgs};
 
+pub(crate) const MAX_PREVIEW_THREADS: u32 = observation::THREAD_LIMIT as u32 + 1;
+
+/// Canonical digest of a complete, bounded, sorted distinct target set.
+pub(crate) fn target_marker<'a>(
+    ids: impl IntoIterator<Item = &'a str>,
+) -> crate::protocol::DeletionPreviewMarker {
+    use sha2::{Digest, Sha256};
+    let ids = ids.into_iter().collect::<std::collections::BTreeSet<_>>();
+    let mut hash = Sha256::new();
+    hash.update(b"shellboy.thread.delete.v1\0");
+    for id in &ids {
+        hash.update((id.len() as u32).to_be_bytes());
+        hash.update(id.as_bytes());
+    }
+    crate::protocol::DeletionPreviewMarker {
+        thread_count: ids.len() as u32,
+        ids_hash: hash.finalize().iter().map(|b| format!("{b:02x}")).collect(),
+    }
+}
+
+/// Reuses the observation's physical candidate/depth limits. A partial scope
+/// cannot be attested; it must never fall back to unbounded guarded execution.
+pub(crate) fn guarded_targets(
+    db: &Connection,
+    args: &ThreadDeleteArgs,
+) -> Result<Option<Vec<String>>, ApiError> {
+    match observation::selected_targets(db, args) {
+        Ok(targets) => Ok(targets),
+        Err(error) => {
+            let error = error.into_api_error();
+            if error.code == ErrorCode::InputLimit {
+                Ok(None)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
 // Match delete_thread's subtree: deleted Threads do not bridge traversal.
 const SCOPE: &str = "WITH RECURSIVE descendants(id) AS (
  SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL
@@ -85,7 +124,12 @@ fn inspect(db: &Connection, args: &ThreadDeleteArgs) -> Result<Value, ApiError> 
     let external = count(
         "SELECT count(*) FROM attachment_ref a JOIN path_nodes n ON n.id=a.source_node_id WHERE a.ownership='external'",
     )?;
+    let targets = guarded_targets(db, args)?;
+    let marker = targets
+        .as_ref()
+        .map(|ids| target_marker(ids.iter().map(String::as_str)));
     Ok(json!({
+        "preview_marker":marker,"preview_marker_unavailable_reason":if targets.is_some(){None}else{Some("input_limit")},
         "thread_id":args.thread_id,"descendants":args.descendants,"updated_at":updated_at,
         "root_revision":root_revision,"snapshot_only":true,"deletable_now":live+stopping==0,
         "selection":{"thread_count":thread_count,"descendant_thread_count":descendant_count,"surviving_descendant_thread_count":descendant_count-(thread_count-1),"latest_updated_at":latest_updated_at},
@@ -98,4 +142,19 @@ fn inspect(db: &Connection, args: &ThreadDeleteArgs) -> Result<Value, ApiError> 
 
 fn sql_error(error: rusqlite::Error) -> ApiError {
     crate::storage::save_error(format!("deletion preview database error: {error}"))
+}
+
+#[cfg(test)]
+mod marker_tests {
+    use super::*;
+    #[test]
+    fn marker_sorts_deduplicates_and_length_prefixes_ids() {
+        assert_eq!(target_marker(["b", "a", "a"]), target_marker(["a", "b"]));
+        assert_ne!(target_marker(["ab", "c"]), target_marker(["a", "bc"]));
+        assert_eq!(target_marker(["a", "b"]).thread_count, 2);
+        assert_eq!(
+            target_marker(["a", "b"]).ids_hash,
+            "78469718155562294aa2f7c0e0278a4e86c9bf642dc2bbb0db48349c64bd326c"
+        );
+    }
 }

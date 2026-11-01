@@ -848,6 +848,7 @@ mod tests {
             Overlay::Confirmation => {
                 ui.confirmation = Some(Confirmation::Operation {
                     command: Command::ThreadDelete(crate::protocol::ThreadDeleteArgs {
+                        preview_marker: None,
                         thread_id: "thread".into(),
                         descendants: false,
                     }),
