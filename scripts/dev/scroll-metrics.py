@@ -52,10 +52,12 @@ def measure(root):
         for name in FIELDS:
             # Ignore request-builder fields and other UI domains. This is the
             # stage-1 inventory, not an instruction/event execution counter.
-            pattern = rf'\.(?:navigation\.)?(?:scroll\.)?{name}(?:\.(?:node_id|char_offset))?\s*(?:=(?!=)|\+=|-=|\.take\(\))'
+            owner = r'(?:self|view)\s*(?:\.\s*(?:active_)?view_mut\(\))?'
+            path_pattern = owner + r'\s*\.\s*(?:navigation\s*\.\s*)?(?:scroll\s*\.\s*)?'
+            pattern = path_pattern + rf'{name}(?:\s*\.\s*(?:node_id|char_offset))?\s*(?:=(?!=)|\+=|-=|\.take\(\))'
             for m in re.finditer(pattern, code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
-            for m in re.finditer(rf'&mut\s+\w+(?:\.navigation)?(?:\.scroll)?\.{name}\b', code):
+            for m in re.finditer(rf'&mut\s+{path_pattern}{name}\b', code):
                 sites[name].append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
         for m in re.finditer(r'\.(?:cancel_navigation|rebase_navigation)\(', code):
             transitions.append(f'{path}:{code.count(chr(10), 0, m.start()) + 1}')
