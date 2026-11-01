@@ -7517,3 +7517,20 @@ client initialization failure; and a permanent provider failure through the
 retry/overflow path. These converge on the same transaction writer. The tests
 count the saved field and compare the durable event to the saved reason; the
 provider failure is synthetic and does not contact a server.
+
+## Post-v0.5.0 schema 18 synthetic upgrade
+
+On macOS arm64, `scripts/check-release-upgrade.py` used the public v0.5.0
+archive (SHA-256 `641a01415bc73e56dd3b4287207b2966bf054faeafdb1f071974360727f01e61`;
+extracted executable `06a25d8ca88678e0f3cdf0f1a0b0cd51b795c9e6c44982425955046794bf215c`)
+and a debug candidate built from `5cb06aaa` (binary SHA-256
+`dcc4dad4690022da0df918642c8973306d830c23a8443a276c64241d20fe4bd5`).
+Both report version 0.5.0. The temporary synthetic public-schema 17 fixture
+upgraded directly to 18 without staged migrations. The unchanged ledger prefix
+plus migration 18, both indexes, integrity/foreign keys, saved originals and
+lineage, held delivery, usage, conversation and RAG search, mock exec, and clean
+shutdown passed; RAG remained schema 3. Five model and twelve embedding calls
+used loopback mocks. The `scripts/tests` cases also cover historical schema
+14/16 paths, an existing synthetic summary-usage row, incorrect indexes and
+invalid schema arguments. This is not a real-data, paid-provider, native
+Linux/Windows binary-upgrade, installer, or future-release qualification.

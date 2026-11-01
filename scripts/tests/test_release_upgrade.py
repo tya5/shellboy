@@ -16,7 +16,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
         self.addCleanup(db.close)
         db.execute('PRAGMA foreign_keys=ON')
         current = (ROOT / 'src/storage/current.sql').read_text(encoding='utf-8')
-        db.executescript(current.split('-- Derived readback paths only:')[0])
+        base = current.split('-- Derived readback paths only:')[0]
+        # The canonical schema has the version-18 index; model the old index.
+        suffix = " OR key LIKE 'summary.usage.%'"
+        self.assertEqual(base.count(suffix), 1)
+        db.executescript(base.replace(suffix, ''))
         for ident, parent in [('parent', None), ('child', 'parent')]:
             db.execute('INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at) '
                        'VALUES(?,?,?,?,?,?,?)', (ident, parent, '/synthetic', '', 'fixture', 'mock', '2026-11-01T00:00:00Z'))
@@ -27,11 +31,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
         checks.prepare_schema(db, schema)
         return db
 
-    def upgrade(self, db, start=16):
+    def upgrade(self, db, start=16, target=17):
         before, records = checks.ledger(db), checks.snapshot(db)
-        for version in range(start + 1, 18):
+        for version in range(start + 1, target + 1):
             db.executescript(checks.DERIVED[version].read_text(encoding='utf-8'))
-        checks.check_migration(db, before, start, 17)
+        checks.check_migration(db, before, start, target)
         checks.preserved(db, records)
         return before, records
 
@@ -116,3 +120,44 @@ class ReleaseUpgradeTests(unittest.TestCase):
                 self.assertNotIn('immutable', uri)
                 with closing(sqlite3.connect(uri, uri=True)) as reader:
                     self.assertEqual(reader.execute('SELECT * FROM sample').fetchall(), [(17,)])
+
+    def test_public_schema17_to18_preserves_records_and_extends_index(self):
+        db = self.fixture(17)
+        db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.synthetic', '{\"tokens\":7}')")
+        db.commit()
+        before, records = self.upgrade(db, 17, 18)
+        self.assertEqual(checks.ledger(db), before + [(18, '0018_summary_usage_metadata')])
+        self.assertEqual(checks.snapshot(db), records)
+        self.assertEqual(records['summary_usage'], [('summary.usage.synthetic', '{"tokens":7}')])
+        self.assertIn("key LIKE 'summary.usage.%'", db.execute(
+            "SELECT sql FROM sqlite_master WHERE name='gc_bytes_app_meta_history'").fetchone()[0])
+
+    def test_historical_schema14_to18_keeps_complete_prefix(self):
+        db = self.fixture(14)
+        before, _ = self.upgrade(db, 14, 18)
+        self.assertEqual(checks.ledger(db)[14:], [(n, checks.DERIVED[n].stem) for n in (15, 16, 17, 18)])
+        self.assertEqual(len(before), 14)
+
+    def test_schema18_rejects_old_history_index_and_parent_index(self):
+        db = self.fixture(17)
+        before, _ = self.upgrade(db, 17, 18)
+        db.executescript("DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%';")
+        with self.assertRaisesRegex(AssertionError, 'history accounting index'):
+            checks.check_migration(db, before, 17, 18)
+        db.executescript(checks.DERIVED[18].read_text(encoding='utf-8').split('INSERT INTO schema_migration')[0])
+        db.executescript('DROP INDEX thread_parent; CREATE INDEX thread_parent ON thread(id);')
+        with self.assertRaises(AssertionError):
+            checks.check_migration(db, before, 17, 18)
+
+    def test_arguments_default_to_public_v050_schema17_and_target18(self):
+        required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
+        args = checks.parse_args(required)
+        self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema), ('0.5.0', 17, 18))
+        historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
+        self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
+        staged = checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '16'])
+        self.assertEqual(staged.start_schema, 16)
+        with self.assertRaises(SystemExit):
+            checks.parse_args(required + ['--start-schema', '14'])
+        with self.assertRaises(SystemExit):
+            checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '17', '--expected-new-schema', '15'])

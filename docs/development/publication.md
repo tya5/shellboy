@@ -404,7 +404,7 @@ execute with command fallback and verbatim replay.
    17 `0017_thread_parent`, and standalone RAG 3. Check integrity/foreign keys,
    saved originals/senders/pending work/usage, search, mock exec and clean stop.
    Use loopback mocks and temporary stores only, never user data or paid APIs.
-   `check-release-upgrade.py` now defaults to public v0.4.0 and schema17. The
+   At the time, `check-release-upgrade.py` defaulted to public v0.4.0 and schema17. The
    public v0.4.0 tag (`dae2ba1f`) is schema14, not16. In addition to that actual
    release path, run `--start-schema 16` to apply only production derived-index
    migrations15/16 to a stopped synthetic copy before candidate startup. This
@@ -413,8 +413,10 @@ execute with command fallback and verbatim replay.
 
    ```sh
    python3 scripts/check-release-upgrade.py --old VERIFIED_PUBLIC_040_BINARY \
+     --old-version 0.4.0 --expected-new-schema 17 \
      --new EXACT_CANDIDATE_BINARY --root NEW_EMPTY_PATH_14
    python3 scripts/check-release-upgrade.py --old VERIFIED_PUBLIC_040_BINARY \
+     --old-version 0.4.0 --expected-new-schema 17 \
      --new EXACT_CANDIDATE_BINARY --root NEW_EMPTY_PATH_16 --start-schema 16
    ```
 
@@ -437,3 +439,22 @@ Rerun against the exact final candidate after preparation/main integration; the
 private pre-#117 build does not qualify final release bytes. Build, release, tag
 and install still require separate explicit permission. The unmodified workflow
 supplies candidate mode; no publication permission/workflow change is needed.
+
+## Post-v0.5.0 synthetic upgrade check
+
+For the next candidate, `check-release-upgrade.py` defaults to the independently
+verified public v0.5.0 binary (schema 17) and candidate schema 18. Supply an
+empty, nonexistent fixture path and the candidate's actual version if it changes:
+
+```sh
+python3 scripts/check-release-upgrade.py --old VERIFIED_PUBLIC_050_BINARY \
+  --new EXACT_CANDIDATE_BINARY --expected-version CANDIDATE_VERSION \
+  --root NEW_EMPTY_PATH
+```
+
+The script checks the original migration ledger plus entry 18, the complete
+history-accounting and thread-parent indexes, saved records, integrity, pending
+work, synthetic search, RAG and mock exec. `public_schema`, `schema_before`, and
+`synthetic_schema_staging` distinguish a real public start from a staged copy.
+Historical v0.3.0/v0.4.0 paths remain selectable explicitly; only synthetic,
+owned fixtures and loopback mock endpoints are used.

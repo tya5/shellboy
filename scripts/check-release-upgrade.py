@@ -22,7 +22,8 @@ import time
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17)}
+           for version in (15, 16, 17, 18)}
+PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17}
 
 
 def read_only_uri(path, stopped=False):
@@ -41,13 +42,18 @@ def snapshot(db):
             for table in ('node', 'edge', 'thread_path', 'output_item', 'tool_call',
                           'tool_result', 'output_chunk', 'attachment_ref', 'managed_file')}
     rows['thread_lineage'] = db.execute('SELECT id,parent_thread_id,cwd FROM thread').fetchall()
+    rows['summary_usage'] = db.execute("SELECT key,value FROM app_meta WHERE key LIKE 'summary.usage.%'").fetchall()
     return rows
 
 
 def preserved(db, before):
     for table, rows in before.items():
-        query = ('SELECT id,parent_thread_id,cwd FROM thread' if table == 'thread_lineage'
-                 else f'SELECT * FROM "{table}"')
+        if table == 'thread_lineage':
+            query = 'SELECT id,parent_thread_id,cwd FROM thread'
+        elif table == 'summary_usage':
+            query = "SELECT key,value FROM app_meta WHERE key LIKE 'summary.usage.%'"
+        else:
+            query = f'SELECT * FROM "{table}"'
         after = set(db.execute(query).fetchall())
         assert all(row in after for row in rows), f'saved data changed: {table}'
 
@@ -59,14 +65,20 @@ def check_migration(db, before, start, target):
     assert ledger(db) == expected, 'migration ledger prefix or suffix changed'
     assert db.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
     assert db.execute('PRAGMA foreign_key_check').fetchall() == []
-    if target == 17:
+    if target >= 17:
         assert [row[2] for row in db.execute('PRAGMA index_info(thread_parent)')] == [
             'parent_thread_id', 'id']
+    if target >= 18:
+        row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='gc_bytes_app_meta_history'").fetchone()
+        expected_index = next(line for line in DERIVED[18].read_text(encoding='utf-8').splitlines()
+                              if line.startswith('CREATE INDEX gc_bytes_app_meta_history '))
+        assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
+            'history accounting index differs from migration 18'
 
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
-    assert start == 14 and target in (14, 16), 'unexpected synthetic fixture schema'
+    assert start in (14, 17) and target in (14, 16, 17) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
@@ -74,20 +86,29 @@ def prepare_schema(db, target):
     preserved(db, records)
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--old-version', choices=('0.3.0', '0.4.0'), default='0.4.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16), default=14,
-                        help='16 stages derived indexes on a stopped synthetic copy; public v0.4.0 is 14')
+    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.5.0')
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17), default=None,
+                        help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default='0.5.0')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17), default=17,
-                        help='17 for v0.5.0; 14/15 retain historical release checks')
-    args = parser.parse_args()
-    if args.expected_new_schema < args.start_schema:
-        parser.error('target schema must not precede fixture schema')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18), default=18,
+                        help='18 for the current candidate; 14/15/17 retain historical release checks')
+    args = parser.parse_args(argv)
+    public_schema = PUBLIC_SCHEMA[args.old_version]
+    if args.start_schema is None:
+        args.start_schema = public_schema
+    if args.start_schema < public_schema or args.expected_new_schema < args.start_schema:
+        parser.error('schemas must not precede the public or fixture schema')
+    return args
+
+
+def main():
+    args = parse_args()
+    public_schema = PUBLIC_SCHEMA[args.old_version]
     old, new = args.old.resolve(), args.new.resolve()
     assert subprocess.check_output([str(old), '--version'], text=True).strip() == 'shellboy ' + args.old_version
     assert subprocess.check_output([str(new), '--version'], text=True).strip() == 'shellboy ' + args.expected_version
@@ -226,7 +247,7 @@ def main():
         previous = Owner(old, data)
         owners.append(previous)
         ready(old, data)
-        assert sql(data, 'PRAGMA user_version') == [(14,)]
+        assert sql(data, 'PRAGMA user_version') == [(public_schema,)]
         seed = thread(old, data)
         first = cli(old, data, 'message', 'send', '--thread', seed, '--text', 'SYNTHETIC_SEED')['result']['message_id']
         settled(data, seed, 'completed')
@@ -310,8 +331,8 @@ def main():
         result = dict(old_public_version=args.old_version, new_version=args.expected_version,
                       old_binary_sha256=hashlib.sha256(old.read_bytes()).hexdigest(),
                       new_binary_sha256=hashlib.sha256(new.read_bytes()).hexdigest(),
-                      public_schema=14, schema_before=args.start_schema, schema_after=args.expected_new_schema,
-                      synthetic_schema_staging=(args.start_schema != 14),
+                      public_schema=public_schema, schema_before=args.start_schema, schema_after=args.expected_new_schema,
+                      synthetic_schema_staging=(args.start_schema != public_schema),
                       migration_ledger_before=before_ledger, migration_ledger_after=after_ledger,
                       preserved_rows={table: len(rows) for table, rows in before_records.items()},
                       migration_ledger_unchanged=(after_ledger == before_ledger),

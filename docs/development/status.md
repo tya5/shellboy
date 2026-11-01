@@ -1,5 +1,14 @@
 # Development status
 
+## Schema 18 release-upgrade validation
+
+The synthetic upgrade helper defaults to published v0.5.0/schema 17 and candidate
+schema 18, while retaining explicit historical paths. A macOS arm64 run with the
+verified public binary and an exact-source candidate passed the 17 -> 18
+fixture; native Linux/Windows binary upgrades and future releases remain
+untested. See acceptance for evidence; branch CI and independent review precede
+integration.
+
 ## v0.5.0 published
 
 The reviewer published annotated tag `v0.5.0` at main `02fda155` on 2026-11-01.
