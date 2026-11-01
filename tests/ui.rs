@@ -63,7 +63,7 @@ fn argumentless_restore_edits_only_the_current_saved_threads_input_range() {
     let mut unsaved = state();
     unsaved.insert("/restore", false);
     assert!(enter(&mut unsaved).is_empty());
-    assert!(unsaved.view().status.contains("保存済み会話"));
+    assert!(unsaved.view().status.contains("saved conversation"));
 
     let mut invalid = state();
     invalid.select_thread("current-thread".into());
@@ -402,7 +402,7 @@ fn draft_byte_limit_rejects_whole_paste_and_keeps_original() {
     text(&mut ui, "old");
     ui.event(Event::Paste("日本語".into()));
     assert_eq!(ui.view().draft.text, "old");
-    assert!(ui.view().status.contains("上限"));
+    assert!(ui.view().status.contains("draft byte limit"));
 }
 
 #[test]
@@ -1755,7 +1755,7 @@ fn work_status_current_scope_requires_a_saved_thread() {
     let mut ui = state();
     text(&mut ui, "/status thread");
     assert!(enter(&mut ui).is_empty());
-    assert!(ui.view().status.contains("未保存"));
+    assert!(ui.view().status.contains("not saved"));
 }
 
 #[test]
@@ -3475,7 +3475,7 @@ fn slash_rejection_restores_the_complete_input_without_relying_on_status_text() 
         assert_eq!(restored.cursor, original.cursor, "{command}");
         assert_eq!(restored.attachments, original.attachments, "{command}");
         assert!(restored.revision > original.revision);
-        assert!(ui.view().status.contains("復元"));
+        assert!(ui.view().status.contains("restore"));
     }
     let mut ui = state();
     ui.insert("/does-not-exist 日本", false);
