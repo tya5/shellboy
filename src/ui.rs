@@ -1912,8 +1912,16 @@ impl UiState {
             popup_epoch: 0,
             popup_paint: None,
             aux_popup_paint: Default::default(),
-            help_cache: Default::default(),
-            confirmation_cache: Default::default(),
+            help_cache: {
+                let mut cache = popup::ReaderCache::default();
+                cache.set_language(config.ui.language);
+                cache
+            },
+            confirmation_cache: {
+                let mut cache = popup::ReaderCache::default();
+                cache.set_language(config.ui.language);
+                cache
+            },
             palette,
             diagnostics: None,
             bell: bell::Bell::default(),
@@ -5547,6 +5555,7 @@ impl UiState {
             help::footer(self.config.ui.language),
             &self.aux_popup_paint,
         );
+        self.help_cache.set_language(self.config.ui.language);
         self.help_scroll = self
             .help_cache
             .render(frame, body, 0, self.help_scroll, || {
@@ -5620,6 +5629,7 @@ impl UiState {
             let footer = confirmation.footer(language);
             let title = confirmation.title(language);
             let width = popup::reader_width(popup::body_area(area, &context, &footer, None)).max(1);
+            self.confirmation_cache.set_language(language);
             let rows = self
                 .confirmation_cache
                 .prepare(0, width, || confirmation.lines(language));
