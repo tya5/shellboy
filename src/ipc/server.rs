@@ -139,7 +139,7 @@ fn startup_error(reason: &str, error: impl std::fmt::Display) -> ApiError {
             "Check permissions and lock availability in the OS temporary directory, then start Shellboy again.",
         ),
         _ => (
-            "Cannot start the local IPC listener.",
+            "The local IPC listener could not be started.",
             "Check free space and permissions in the OS temporary IPC namespace and communication resource usage, then start Shellboy again.",
         ),
     };

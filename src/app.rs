@@ -50,7 +50,7 @@ impl OwnerLock {
                 .map_err(|error| {
                     ApiError::new(
                         ErrorCode::IoFailed,
-                        "Cannot open the data directory safely. The final path component must be a real directory you own, not a symlink.",
+                        "The data directory cannot be opened safely. The final path component must be a real directory you own, not a symlink.",
                     )
                     .hint("Use --data-dir to specify a real directory you own, and check its read and write permissions.")
                     .details(serde_json::json!({"component":"data_directory", "reason":"directory_open_failed", "os_error":error.raw_os_error(), "cause":error.to_string()}))
@@ -63,7 +63,7 @@ impl OwnerLock {
             {
                 return Err(ApiError::new(
                     ErrorCode::IoFailed,
-                    "Cannot secure the data directory for private use. Use --data-dir to specify a real directory you own.",
+                    "The data directory cannot be secured for private use. Use --data-dir to specify a real directory you own.",
                 ));
             }
             if metadata.mode() & 0o7777 != 0o700 {
