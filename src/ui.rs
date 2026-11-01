@@ -2566,6 +2566,7 @@ impl UiState {
         let mut retry_window = false;
         match update {
             UiUpdate::ConfirmationSourcesChanged => {
+                self.confirmation_cache.clear();
                 self.management.invalidate_index_preview();
                 match &mut self.confirmation {
                     Some(Confirmation::ThreadDeletion(dialog)) => dialog.invalidate(),

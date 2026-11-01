@@ -40,6 +40,7 @@ struct Fixture {
     descendant_snapshots: Vec<(u64, Vec<shellboy::ui::watch::DescendantCount>)>,
     index_preview_ready: usize,
     index_preview_failed: usize,
+    deletion_preview_responses: usize,
     confirmation_changed: usize,
 }
 impl Fixture {
@@ -108,6 +109,7 @@ impl Fixture {
             descendant_snapshots: Vec::new(),
             index_preview_ready: 0,
             index_preview_failed: 0,
+            deletion_preview_responses: 0,
             confirmation_changed: 0,
         };
         fixture
@@ -125,6 +127,7 @@ impl Fixture {
         match index_update {
             UiUpdate::IndexPreviewReady { .. } => self.index_preview_ready += 1,
             UiUpdate::IndexPreviewFailed { .. } => self.index_preview_failed += 1,
+            UiUpdate::ThreadDeletion { execute: false, .. } => self.deletion_preview_responses += 1,
             UiUpdate::ConfirmationSourcesChanged => self.confirmation_changed += 1,
             _ => {}
         }
@@ -1785,5 +1788,101 @@ async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() 
         "Changed must not re-run preview"
     );
     assert_eq!(fixture.index_preview_failed, 0);
+    fixture.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unrelated_owner_changed_invalidates_deletion_preview_without_a_new_probe() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    for action in fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('t'),
+        KeyModifiers::CONTROL,
+    ))) {
+        fixture.actions.send(action).await.unwrap();
+    }
+    fixture
+        .until("selected browser row", |ui, _| {
+            ui.threads_visible() && ui.threads().iter().any(|row| row.thread_id == "reactive")
+        })
+        .await;
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('d'),
+        KeyModifiers::CONTROL,
+    )));
+    assert!(matches!(
+        actions.as_slice(),
+        [UiAction::ThreadDeletion { execute: false, .. }]
+    ));
+    for action in actions {
+        fixture.actions.send(action).await.unwrap();
+    }
+    let before = fixture
+        .observed_until("deletion preview response", |f, _| {
+            f.deletion_preview_responses == 1
+        })
+        .await;
+    assert!(
+        before.contains("削除できます。Y で実行します。"),
+        "{before}"
+    );
+    assert_eq!(before.matches("対象会話: 1").count(), 1, "{before}");
+    assert_eq!(fixture.deletion_preview_responses, 1);
+
+    let cwd = fixture.root.path().to_str().unwrap().to_owned();
+    fixture.control.store.database.call(move |db| {
+        db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('unrelated-delete','before',?1,'','fixture','fixture0','now')", [cwd])?;
+        Ok(())
+    }).await.unwrap();
+    let previous = fixture.confirmation_changed;
+    let (result, _) = fixture
+        .cli_thread(
+            "unrelated-delete",
+            &[
+                "thread",
+                "set",
+                "--thread",
+                "unrelated-delete",
+                "--title",
+                "after",
+            ],
+        )
+        .await;
+    assert_eq!(result["ok"], true, "{result}");
+    let stale = fixture
+        .observed_until("unrelated deletion change reaches frontend", |f, _| {
+            f.confirmation_changed > previous
+        })
+        .await;
+    assert_eq!(fixture.confirmation_changed, previous + 1);
+    assert_eq!(stale.matches("確認が古くなりました").count(), 1, "{stale}");
+    assert_eq!(stale.matches("対象会話: 1").count(), 1, "{stale}");
+    assert!(
+        fixture
+            .ui
+            .event(Event::Key(KeyEvent::new(
+                KeyCode::Char('y'),
+                KeyModifiers::NONE,
+            )))
+            .is_empty()
+    );
+    assert_eq!(
+        fixture.deletion_preview_responses, 1,
+        "Changed must not re-probe"
+    );
+    let live = fixture
+        .control
+        .store
+        .database
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT deleted_at IS NULL FROM thread WHERE id='reactive'",
+                [],
+                |row| row.get::<_, bool>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert!(live, "stale confirmation must not delete the thread");
     fixture.finish().await;
 }

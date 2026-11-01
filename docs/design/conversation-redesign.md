@@ -251,7 +251,10 @@ the same index scope as explicitly stale evidence, alongside the new failure.
 It is not a valid confirmation: only a new successful preview can authorize a
 costly operation. A changed source invalidates pending and completed previews;
 scope changes and closing the management view discard the retained result. No
-background preview, owner protocol, or Core persistence is added.
+background preview, owner protocol, or Core persistence is added. The deletion
+confirmation's rendered body cache is discarded when its matching preview reply
+arrives or a Changed event invalidates the confirmation, so the visible evidence
+and enabled action cannot disagree.
 
 #### Remaining saved pages: captured evidence and current facts
 

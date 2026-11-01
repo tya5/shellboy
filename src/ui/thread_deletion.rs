@@ -345,6 +345,9 @@ impl UiState {
             }
             _ => {}
         }
+        if matches {
+            self.confirmation_cache.clear();
+        }
         self.dirty = true;
     }
     fn remove_deleted_threads(&mut self, ids: &[String]) {

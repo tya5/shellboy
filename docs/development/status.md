@@ -3477,8 +3477,8 @@ native3OS CI is required before handoff.
 
 The owner/frontend regression covers a model catalog success followed
 by a failed explicit refresh, an index cost preview success followed by a failed
-explicit refresh, and an unrelated saved change while an index confirmation is
-open. The index view retains the previous same-scope preview as stale evidence;
+explicit refresh, and an unrelated saved change while index or deletion
+confirmations are open. The index view retains the previous same-scope preview as stale evidence;
 the failed or invalidated preview never authorizes a cost-bearing operation.
 Core and protocol are unchanged. Validation is recorded in acceptance; 3-OS
 branch CI and independent review are required before integration.
