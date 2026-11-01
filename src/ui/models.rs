@@ -14,6 +14,9 @@ pub(super) struct ModelPicker {
     selected: usize,
     loading: bool,
     error: Option<String>,
+    captured_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_attempt_at: Option<chrono::DateTime<chrono::Utc>>,
+    notice_scroll: Option<u16>,
 }
 enum Outcome {
     None,
@@ -22,16 +25,40 @@ enum Outcome {
     Copy(String),
     Select { connection: String, model: String },
 }
+fn notice_height(body_height: u16) -> u16 {
+    // Keep two rows for the selected model's bounded head and tail preview.
+    body_height.saturating_sub(2).min(3)
+}
 impl ModelPicker {
     fn key(&mut self, key: KeyEvent, area: Rect) -> Outcome {
-        let page = usize::from(popup::body_area(area, "モデル一覧", FOOTER, None).height)
+        let body_height = popup::body_area(area, "モデル一覧", FOOTER, None).height;
+        let page = usize::from(body_height.saturating_sub(notice_height(body_height)))
             .saturating_sub(1)
             .max(1);
+        if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.notice_scroll = self.notice_scroll.is_none().then_some(0);
+            return Outcome::None;
+        }
+        if let Some(scroll) = &mut self.notice_scroll {
+            match key.code {
+                KeyCode::Esc => self.notice_scroll = None,
+                KeyCode::Up => *scroll = scroll.saturating_sub(1),
+                KeyCode::Down => *scroll = scroll.saturating_add(1).min(512),
+                KeyCode::PageUp => *scroll = scroll.saturating_sub(body_height.max(1)),
+                KeyCode::PageDown => *scroll = scroll.saturating_add(body_height.max(1)).min(512),
+                _ => {}
+            }
+            return Outcome::None;
+        }
         if key.code == KeyCode::Esc {
             return Outcome::Close;
         }
         if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return Outcome::Reload(self.connection.clone());
+            return if self.loading {
+                Outcome::None
+            } else {
+                Outcome::Reload(self.connection.clone())
+            };
         }
         if key.code == KeyCode::Char('y') && key.modifiers.contains(KeyModifiers::CONTROL) {
             if !self.loading
@@ -75,14 +102,21 @@ impl ModelPicker {
         Outcome::None
     }
 
-    pub(super) fn accept(&mut self, request: u64, result: Result<Vec<String>, String>) {
-        if request != self.request {
+    pub(super) fn accept(
+        &mut self,
+        request: u64,
+        completed_at: chrono::DateTime<chrono::Utc>,
+        result: Result<Vec<String>, String>,
+    ) {
+        if request != self.request || !self.loading {
             return;
         }
         self.paint.set(None);
         self.loading = false;
+        self.last_attempt_at = Some(completed_at);
         match result {
             Ok(models) => {
+                self.captured_at = Some(completed_at);
                 self.models = models;
                 self.rebuild_filter();
                 self.selected = self
@@ -114,6 +148,14 @@ impl ModelPicker {
         self.paint.get()
     }
     pub(super) fn wheel(&mut self, delta: isize) -> bool {
+        if let Some(scroll) = &mut self.notice_scroll {
+            let next = scroll
+                .saturating_add_signed(delta.clamp(-512, 512) as i16)
+                .min(512);
+            let changed = *scroll != next;
+            *scroll = next;
+            return changed;
+        }
         if self.loading || self.error.is_some() {
             return false;
         }
@@ -122,6 +164,9 @@ impl ModelPicker {
         old != self.selected
     }
     pub(super) fn paste(&mut self, text: &str) {
+        if self.notice_scroll.is_some() {
+            return;
+        }
         let available = 256usize.saturating_sub(self.query.chars().count());
         self.query
             .extend(text.chars().filter(|c| !c.is_control()).take(available));
@@ -130,6 +175,26 @@ impl ModelPicker {
     }
     pub(super) fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
         let filtered = self.filtered();
+        let notice = super::observation_notice::ObservationNotice {
+            kind: super::observation_notice::ObservationKind::Models,
+            captured_at: self.captured_at,
+            last_attempt_at: self.last_attempt_at,
+            freshness: if self.captured_at.is_none() {
+                super::observation_notice::Freshness::Unavailable
+            } else if self.loading {
+                super::observation_notice::Freshness::Stale
+            } else if self.error.is_some() {
+                super::observation_notice::Freshness::FailedRefresh
+            } else {
+                super::observation_notice::Freshness::Captured
+            },
+            next_action: if self.loading {
+                super::observation_notice::NextAction::None
+            } else {
+                super::observation_notice::NextAction::RefreshModels
+            },
+            confirmation_enabled: false,
+        };
         let context = format!(
             "{} · 絞込み: {} · {} / {}件",
             self.connection,
@@ -141,13 +206,48 @@ impl ModelPicker {
             },
             filtered.len()
         );
-        let body = popup::panel_recorded(frame, area, "モデル", &context, FOOTER, &self.paint);
-        if self.loading {
+        let body = popup::panel_recorded(frame, area, "Ctrl+T 情報", &context, FOOTER, &self.paint);
+        if let Some(scroll) = self.notice_scroll {
+            let captured = self.captured_at.map_or_else(
+                || "取得時刻なし".to_owned(),
+                |time| {
+                    if body.width < 24 {
+                        format!("取得 UTC\n{}", time.format("%Y-%m-%d\n%H:%M:%S\n%.3f UTC"))
+                    } else {
+                        format!(
+                            "取得 UTC {}",
+                            time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                        )
+                    }
+                },
+            );
+            frame.render_widget(
+                Paragraph::new(format!("{captured}\n{}", notice.text()))
+                    .wrap(Wrap { trim: false })
+                    .scroll((scroll, 0)),
+                body,
+            );
+            return;
+        }
+        let notice_height = notice_height(body.height);
+        frame.render_widget(
+            Paragraph::new(notice.text()).wrap(Wrap { trim: false }),
+            Rect::new(body.x, body.y, body.width, notice_height),
+        );
+        let body = Rect::new(
+            body.x,
+            body.y + notice_height,
+            body.width,
+            body.height - notice_height,
+        );
+        if self.loading && self.captured_at.is_none() {
             frame.render_widget(
                 Paragraph::new("モデル一覧を取得中…").style(Style::default().fg(theme::ACCENT)),
                 body,
             );
-        } else if let Some(error) = &self.error {
+        } else if self.captured_at.is_none()
+            && let Some(error) = &self.error
+        {
             frame.render_widget(
                 Paragraph::new(format!("取得できません: {error}\nCtrl+Rで再取得"))
                     .wrap(Wrap { trim: false })
@@ -211,6 +311,9 @@ impl UiState {
             selected: 0,
             loading: true,
             error: None,
+            captured_at: None,
+            last_attempt_at: None,
+            notice_scroll: None,
         });
         vec![UiAction::LoadModels {
             connection,
@@ -227,7 +330,17 @@ impl UiState {
                 self.models = None;
                 vec![]
             }
-            Outcome::Reload(connection) => self.open_models(&connection),
+            Outcome::Reload(connection) => {
+                self.next_model_request = self.next_model_request.wrapping_add(1);
+                let picker = self.models.as_mut().expect("model picker is open");
+                picker.request = self.next_model_request;
+                picker.loading = true;
+                picker.paint.set(None);
+                vec![UiAction::LoadModels {
+                    connection,
+                    request_id: self.next_model_request,
+                }]
+            }
             Outcome::Copy(text) => vec![UiAction::CopyText {
                 text,
                 scope: super::CopyScope::Value,
@@ -259,6 +372,67 @@ impl UiState {
 mod wheel_tests {
     use super::*;
     #[test]
+    fn failed_refresh_retains_facts_and_ignores_late_or_duplicate_results() {
+        let mut picker = ModelPicker {
+            paint: Default::default(),
+            filtered_indices: vec![],
+            request: 1,
+            connection: "mock".into(),
+            current: None,
+            models: vec![],
+            query: String::new(),
+            selected: 0,
+            loading: true,
+            error: None,
+            captured_at: None,
+            last_attempt_at: None,
+            notice_scroll: None,
+        };
+        picker.accept(1, chrono::Utc::now(), Ok(vec!["saved-model".into()]));
+        let captured = picker.captured_at;
+        picker.request = 2;
+        picker.loading = true;
+        picker.accept(1, chrono::Utc::now(), Ok(vec!["late-model".into()]));
+        assert!(picker.loading);
+        assert_eq!(picker.models, ["saved-model"]);
+        picker.accept(2, chrono::Utc::now(), Err("offline".into()));
+        assert_eq!(picker.models, ["saved-model"]);
+        assert_eq!(picker.captured_at, captured);
+        assert!(picker.last_attempt_at >= captured);
+        assert!(matches!(
+            picker.key(
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                Rect::new(0, 0, 80, 24)
+            ),
+            Outcome::None
+        ));
+        picker.accept(2, chrono::Utc::now(), Ok(vec!["duplicate".into()]));
+        assert_eq!(picker.models, ["saved-model"]);
+        assert_eq!(picker.error.as_deref(), Some("offline"));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| picker.draw(frame, frame.area()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = (0..24)
+            .map(|y| {
+                let mut line = String::new();
+                let mut x = 0;
+                while x < 80 {
+                    let symbol = buffer[(x, y)].symbol();
+                    line.push_str(symbol);
+                    x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+                }
+                line
+            })
+            .collect();
+        assert!(screen.contains("saved-model"));
+        assert!(screen.contains("再取得に失敗"));
+        assert!(screen.contains("取得 UTC"));
+    }
+
+    #[test]
     fn prepared_model_filter_and_wheel_never_select_or_reload_a_model() {
         let mut picker = ModelPicker {
             paint: Default::default(),
@@ -271,8 +445,15 @@ mod wheel_tests {
             selected: 0,
             loading: true,
             error: None,
+            captured_at: None,
+            last_attempt_at: None,
+            notice_scroll: None,
         };
-        picker.accept(1, Ok((0..30).map(|n| format!("model-{n:02}")).collect()));
+        picker.accept(
+            1,
+            chrono::Utc::now(),
+            Ok((0..30).map(|n| format!("model-{n:02}")).collect()),
+        );
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
         terminal
@@ -288,7 +469,9 @@ mod wheel_tests {
         assert_eq!(picker.filtered_indices.len(), 10);
         assert!(picker.wheel(3));
         assert_eq!(picker.filtered()[picker.selected], "model-23");
-        picker.accept(1, Ok(vec!["other".into()]));
+        picker.request = 2;
+        picker.loading = true;
+        picker.accept(2, chrono::Utc::now(), Ok(vec!["other".into()]));
         assert!(picker.filtered_indices.is_empty());
         assert!(picker.paint_bounds().is_none());
         assert!(!picker.wheel(3));

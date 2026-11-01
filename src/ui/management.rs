@@ -39,6 +39,7 @@ pub(super) enum IndexPreviewState {
     Idle,
     Loading(IndexArgs),
     Ready(IndexArgs, String),
+    Stale(IndexArgs, String),
     Failed(IndexArgs, String),
     Hint(String),
 }
@@ -62,6 +63,9 @@ pub struct ManagementPopup {
     pub(super) epoch: u64,
     pub(super) scope: Option<IndexArgs>,
     pub(super) preview: IndexPreviewState,
+    preview_attempt: u64,
+    active_preview_attempt: Option<u64>,
+    pub(super) ready_preview_attempt: Option<u64>,
     pub(super) pending: Option<Command>,
 }
 impl Default for ManagementPopup {
@@ -78,6 +82,9 @@ impl Default for ManagementPopup {
             epoch: 0,
             scope: None,
             preview: IndexPreviewState::Idle,
+            preview_attempt: 0,
+            active_preview_attempt: None,
+            ready_preview_attempt: None,
             pending: None,
         }
     }
@@ -87,7 +94,11 @@ pub(super) enum Outcome {
     Actions(Vec<UiAction>),
     Close,
     Operations,
-    Confirm { command: Command, detail: String },
+    Confirm {
+        command: Command,
+        detail: String,
+        attempt: u64,
+    },
 }
 impl ManagementPopup {
     pub(super) fn start_inspection(&mut self, target: InspectionTarget, title: String) {
@@ -627,6 +638,20 @@ impl ManagementPopup {
     }
     pub(super) fn reset_preview(&mut self) {
         self.preview = IndexPreviewState::Idle;
+        self.active_preview_attempt = None;
+        self.ready_preview_attempt = None;
+    }
+    pub(super) fn invalidate_index_preview(&mut self) {
+        self.active_preview_attempt = None;
+        self.ready_preview_attempt = None;
+        self.pending = None;
+        self.preview = match std::mem::take(&mut self.preview) {
+            IndexPreviewState::Ready(args, text) => IndexPreviewState::Stale(args, text),
+            IndexPreviewState::Loading(args) => {
+                IndexPreviewState::Stale(args, "取得中の確認は無効になりました".into())
+            }
+            other => other,
+        };
     }
     fn matches_preview(&self, args: &IndexArgs) -> bool {
         self.mode == ManagementMode::Index
@@ -635,20 +660,33 @@ impl ManagementPopup {
                 .as_ref()
                 .map_or_else(|| args == &IndexArgs::default(), |scope| scope == args)
     }
-    pub(super) fn begin_preview(&mut self, args: IndexArgs) {
+    pub(super) fn begin_preview(&mut self, args: IndexArgs) -> u64 {
+        self.preview_attempt = self.preview_attempt.wrapping_add(1);
+        let attempt = self.preview_attempt;
         if self.matches_preview(&args) {
+            self.active_preview_attempt = Some(attempt);
+            self.ready_preview_attempt = None;
             self.preview = IndexPreviewState::Loading(args);
         }
+        attempt
     }
-    pub(super) fn accept_preview(&mut self, args: IndexArgs, text: String) -> bool {
-        if !self.matches_preview(&args) {
+    fn pending_preview(&self, attempt: u64, args: &IndexArgs) -> bool {
+        self.active_preview_attempt == Some(attempt)
+            && self.matches_preview(args)
+            && matches!(&self.preview, IndexPreviewState::Loading(pending) if pending == args)
+    }
+    pub(super) fn accept_preview(&mut self, attempt: u64, args: IndexArgs, text: String) -> bool {
+        if !self.pending_preview(attempt, &args) {
             return false;
         }
+        self.active_preview_attempt = None;
+        self.ready_preview_attempt = Some(attempt);
         self.preview = IndexPreviewState::Ready(args, text);
         true
     }
-    pub(super) fn fail_preview(&mut self, args: IndexArgs, message: String) {
-        if self.matches_preview(&args) {
+    pub(super) fn fail_preview(&mut self, attempt: u64, args: IndexArgs, message: String) {
+        if self.pending_preview(attempt, &args) {
+            self.active_preview_attempt = None;
             self.pending = None;
             self.preview = IndexPreviewState::Failed(args, message);
         }
@@ -676,6 +714,14 @@ impl ManagementPopup {
                     "費用preview · 取得済み"
                 } else {
                     "再試行preview · 取得済み"
+                },
+                text.as_str(),
+            ),
+            IndexPreviewState::Stale(args, text) => (
+                if explicit_index_targets(args) {
+                    "古い費用preview · 再取得が必要"
+                } else {
+                    "古い再試行preview · 再取得が必要"
                 },
                 text.as_str(),
             ),
@@ -715,12 +761,7 @@ impl ManagementPopup {
             return area;
         }
         let mut lines = self.preview_lines(area.width);
-        if lines.len() > usize::from(height) {
-            lines.truncate(usize::from(height));
-            if let Some(last) = lines.last_mut() {
-                last.spans.push(Span::raw(" …"));
-            }
-        }
+        mark_truncated_preview(&mut lines, height);
         frame.render_widget(
             Paragraph::new(lines),
             Rect::new(area.x, area.y, area.width, height),
@@ -914,12 +955,14 @@ impl ManagementPopup {
             let Some(preview) = preview else {
                 if action == 't' {
                     self.pending = Some(Command::IndexRetry(args.clone()));
-                    self.begin_preview(args.clone());
-                    return Outcome::Actions(vec![UiAction::IndexPreview(args)]);
+                    let attempt = self.begin_preview(args.clone());
+                    return Outcome::Actions(vec![UiAction::IndexPreview { args, attempt }]);
                 }
-                self.preview = IndexPreviewState::Hint(
-                    "現在の対象のpreviewが必要です。Pで取得してください。".into(),
-                );
+                if !matches!(self.preview, IndexPreviewState::Loading(_)) {
+                    self.preview = IndexPreviewState::Hint(
+                        "現在の対象のpreviewが必要です。Pで取得してください。".into(),
+                    );
+                }
                 return Outcome::Actions(vec![]);
             };
             let command = match action {
@@ -929,6 +972,9 @@ impl ManagementPopup {
             };
             Outcome::Confirm {
                 command,
+                attempt: self
+                    .ready_preview_attempt
+                    .expect("ready preview has an attempt"),
                 detail: format!(
                     "費用対象: {}\n{preview}\n外部embedding APIへ送信し費用が発生します。見積りは取得時点の対象数で、金額未見積です。",
                     if action == 't' && !explicit_index_targets(&args) {
@@ -1195,8 +1241,8 @@ impl ManagementPopup {
                     self.preview = IndexPreviewState::Hint("対象を明示してください。Esc後 /index all または /index thread。失敗分の再試行はTで確認できます。".into());
                     return vec![];
                 };
-                self.begin_preview(args.clone());
-                vec![UiAction::IndexPreview(args)]
+                let attempt = self.begin_preview(args.clone());
+                vec![UiAction::IndexPreview { args, attempt }]
             }
             _ => vec![],
         }
@@ -1345,6 +1391,31 @@ impl ManagementPopup {
         }
     }
 }
+fn mark_truncated_preview(lines: &mut Vec<Line<'static>>, height: u16) {
+    if lines.len() > usize::from(height) {
+        lines.truncate(usize::from(height));
+        if let Some(last) = lines.last_mut() {
+            *last = Line::from("… 省略（取得時刻を含む場合あり）");
+        }
+    }
+}
+
 pub(super) fn explicit_index_targets(args: &IndexArgs) -> bool {
     args.scope.is_some() || !args.thread_ids.is_empty() || !args.source_ids.is_empty()
+}
+
+#[cfg(test)]
+mod preview_notice_tests {
+    use super::*;
+
+    #[test]
+    fn truncation_marks_omission_even_when_only_one_row_fits() {
+        let mut lines = vec![Line::from("title"), Line::from("time")];
+        mark_truncated_preview(&mut lines, 1);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].to_string().starts_with('…'));
+        let mut full = vec![Line::from("time")];
+        mark_truncated_preview(&mut full, 1);
+        assert_eq!(full[0].to_string(), "time");
+    }
 }

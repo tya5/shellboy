@@ -1143,7 +1143,7 @@ mod tests {
         ui.management.mode = management::ManagementMode::Index;
         ui.management.scope = Some(a.clone());
         ui.management.pending = Some(Command::IndexRebuild(a.clone()));
-        ui.management.preview = management::IndexPreviewState::Loading(a.clone());
+        let attempt = ui.management.begin_preview(a.clone());
         scoped(
             &mut ui,
             &context,
@@ -1163,6 +1163,7 @@ mod tests {
             &context,
             UiUpdate::IndexPreviewReady {
                 args: b,
+                attempt,
                 text: "cost for b".into(),
             },
         );
@@ -1191,6 +1192,7 @@ mod tests {
             &context,
             UiUpdate::IndexPreviewReady {
                 args: a,
+                attempt,
                 text: "late old cost".into(),
             },
         );

@@ -1,5 +1,5 @@
 //! Passive bounded labels and request witnesses. No reads, dispatch or clocks.
-//! The G coordinator declares this module pub(crate); #109 does not edit ui.rs.
+//! Existing UI owners retain the result and supply captured times and identities.
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 use std::mem::size_of;

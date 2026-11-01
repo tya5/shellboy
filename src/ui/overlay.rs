@@ -128,7 +128,7 @@ impl UiState {
                 | UiAction::Manage(_)
                 | UiAction::ClientOperation(_)
                 | UiAction::ReloadAttachments { .. }
-                | UiAction::IndexPreview(_)
+                | UiAction::IndexPreview { .. }
                 | UiAction::FollowManagement { .. }
                 | UiAction::LoadManagementDetail { .. } => true,
                 UiAction::Command(command) => {
@@ -840,6 +840,7 @@ mod tests {
                 };
                 ui.apply(UiUpdate::Models {
                     request_id: id,
+                    completed_at: chrono::Utc::now(),
                     result: Ok(vec!["model-a".into(), "LEAK".into()]),
                 });
             }

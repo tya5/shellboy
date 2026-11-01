@@ -13,7 +13,10 @@ mod header;
 mod history_reader;
 mod input_history;
 mod inspection_attachments;
+#[allow(dead_code)]
+mod inspection_confirmations;
 mod inspection_deletion;
+pub(crate) mod inspection_external;
 mod inspection_history;
 mod inspection_index;
 mod inspection_lifecycle;
@@ -448,6 +451,7 @@ enum BackgroundResult {
         request_id: u64,
         args: ThreadDeleteArgs,
         execute: bool,
+        revision: u64,
         known_thread_ids: Vec<String>,
         result: Result<thread_deletion::Outcome, ApiError>,
     },
@@ -503,6 +507,7 @@ enum BackgroundResult {
         result: Result<(CopyOutcome, usize), ApiError>,
     },
     Command {
+        external: Option<inspection_external::ExternalReply>,
         retained: Option<InspectionTarget>,
         list_command: Option<Command>,
         work_status: bool,
@@ -514,6 +519,8 @@ enum BackgroundResult {
     IndexPreview {
         context: Option<ManagementContext>,
         args: IndexArgs,
+        attempt: u64,
+        revision: u64,
         result: Result<String, ApiError>,
     },
     EditRequest {
@@ -569,6 +576,55 @@ fn management_outcome(result: &Result<Value, ApiError>) -> Result<(), ApiError> 
         },
     }
 }
+fn external_owner(context: Option<&ManagementContext>) -> Option<String> {
+    let context = context?;
+    Some(context.owner_thread.as_ref().map_or_else(
+        || format!("draft:{}", context.owner_draft),
+        |id| format!("thread:{id}"),
+    ))
+}
+
+async fn prepare_external(
+    mut response: Result<Value, ApiError>,
+    budget: u64,
+    external: Option<(
+        crate::ui::observation_notice::RequestWitness,
+        crate::ui::observation_notice::ObservationKind,
+        Option<Arc<Value>>,
+    )>,
+) -> (
+    Option<inspection_external::ExternalReply>,
+    Result<management::Report, ApiError>,
+) {
+    let reply = external.map(|(identity, kind, previous)| {
+        let value = response
+            .as_ref()
+            .ok()
+            .filter(|value| {
+                value.get("error").is_none()
+                    && value.get("ok").and_then(Value::as_bool) != Some(false)
+                    && value
+                        .get("exit_code")
+                        .and_then(Value::as_i64)
+                        .is_none_or(|code| code == 0)
+            })
+            .and_then(inspection_external::capture_value);
+        let completed_at = chrono::Utc::now();
+        if value.is_none()
+            && let Some(previous) = previous
+        {
+            response = Ok((*previous).clone());
+        }
+        inspection_external::ExternalReply {
+            identity,
+            kind,
+            completed_at,
+            result: value.ok_or(()),
+        }
+    });
+    (reply, prepare_management(response, budget).await)
+}
+
 async fn prepare_management(
     result: Result<Value, ApiError>,
     budget: u64,
@@ -888,6 +944,14 @@ async fn run_with_delivery(
     let send_slots = Arc::new(Semaphore::new(32));
     let mut render_width = 80_u16;
     let mut management = management_state::Management::default();
+    let mut external_observation: Option<inspection_external::ExternalObservation> = None;
+    let mut pending_external: Option<(u64, inspection_external::ExternalReply)> = None;
+    // Frontend receipt ordering is independent of UI update delivery.
+    let mut confirmation_revision = 0u64;
+    let mut accepted_index: Option<(u64, IndexArgs)> = None;
+    let mut accepted_deletion: Option<(u64, ThreadDeleteArgs)> = None;
+    let mut pending_index: Option<u64> = None;
+    let mut pending_deletion: Option<u64> = None;
     let cancel = CancellationToken::new();
     let mut ui_subscription = control.subscribe_ui();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
@@ -1250,12 +1314,23 @@ async fn run_with_delivery(
                 let (action, expected_copy_hash) = match action {
                     UiAction::CopySelected { node_id, code_block, source_hash } =>
                         (UiAction::Copy { node_id, code_block }, Some(source_hash)),
+                    UiAction::ConfirmedIndex { command, attempt } => {
+                        let args = match &command {
+                            Command::IndexBackfill(args) | Command::IndexRetry(args) | Command::IndexRebuild(args) => Some(args),
+                            _ => None,
+                        };
+                        if !accepted_index.take().is_some_and(|(id, saved)| id == attempt && args == Some(&saved)) {
+                            management_status(&updates, context.clone(), "索引確認が古くなりました。再確認してください").await;
+                            continue;
+                        }
+                        (UiAction::Manage(command), None)
+                    }
                     other => (other, None),
                 };
                 let has_submission = submission.is_some();
                 #[cfg(test)] stream_metrics::FRONTEND_ACTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 match action {
-                    UiAction::CopySelected { .. } => unreachable!("copy selection normalized before dispatch"),
+                    UiAction::CopySelected { .. } | UiAction::ConfirmedIndex { .. } => unreachable!("selection normalized before dispatch"),
                     UiAction::SubmittedCommand { .. } | UiAction::ManagementIntent { .. } => {
                         unreachable!("only one UI submission wrapper is emitted")
                     }
@@ -1327,12 +1402,13 @@ async fn run_with_delivery(
                                     .map(|error| error.to_string())
                                     .unwrap_or_else(|| "一覧を取得できませんでした".into()))
                             };
-                            update(&sender, UiUpdate::Models { request_id, result }).await;
+                            update(&sender, UiUpdate::Models { request_id, completed_at: chrono::Utc::now(), result }).await;
                         }) {
                             update(
                                 &updates,
                                 UiUpdate::Models {
                                     request_id,
+                                    completed_at: chrono::Utc::now(),
                                     result: Err(
                                         "取得キューが満杯です。Ctrl+Rで再取得してください".into()
                                     ),
@@ -1621,6 +1697,20 @@ async fn run_with_delivery(
                         });
                     }
                     UiAction::ThreadDeletion { request_id, args, execute, mut known_thread_ids } => {
+                        if execute {
+                            let accepted = accepted_deletion.take().is_some_and(|(preview_id, saved)|
+                                request_id == preview_id.wrapping_add(1)
+                                    && saved.thread_id == args.thread_id
+                                    && saved.descendants == args.descendants);
+                            if !accepted {
+                                update(&updates, UiUpdate::ThreadDeletion { request_id, args, execute, result: Err(ApiError::new(ErrorCode::InvalidState, "削除確認が古くなりました。再確認してください")) }).await;
+                                continue;
+                            }
+                        } else {
+                            accepted_deletion = None;
+                            pending_deletion = Some(request_id);
+                        }
+                        let revision = confirmation_revision;
                         known_thread_ids = thread_deletion::candidates(known_thread_ids, &selection,
                             draft_saver.threads().chain(images.threads()).cloned());
                         if known_thread_ids.len() > thread_deletion::MAX_KNOWN_THREADS {
@@ -1633,7 +1723,7 @@ async fn run_with_delivery(
                         let refusal_args = args.clone();
                         let work = async move {
                             let result = thread_deletion::guard(thread_deletion::run(&control, action_args, execute)).await;
-                            let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, known_thread_ids, result }).await;
+                            let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, revision, known_thread_ids, result }).await;
                         };
                         if execute {
                             let Ok(permit) = command_slots.clone().try_acquire_owned() else {
@@ -1645,6 +1735,13 @@ async fn run_with_delivery(
                             spawn_work(&mut workers, permit, work);
                         } else if !spawn_read(&mut read_workers, &read_slots, &read_cancel, work) {
                             update(&updates, UiUpdate::ThreadDeletion { request_id, args: refusal_args, execute, result: Err(ApiError::new(ErrorCode::InvalidState, "読取りキューが満杯です。削除確認を再操作してください")) }).await;
+                        }
+                    }
+                    UiAction::ExternalObserved { generation } => {
+                        if management.accepts(generation) && pending_external.as_ref().is_some_and(|(id, _)| *id == generation)
+                            && let Some((_, reply)) = pending_external.take() {
+                            let identity = reply.identity.clone();
+                            inspection_external::completed_observation(&mut external_observation, &identity, reply, true, false);
                         }
                     }
                     UiAction::ClientOperation(operation) => {
@@ -1659,6 +1756,14 @@ async fn run_with_delivery(
                             continue;
                         };
                         let generation = management.next_generation();
+                        let external = (!mutation).then(|| external_owner(context.as_ref()))
+                            .flatten()
+                            .and_then(|owner| inspection_external::request_identity(&owner, &*operation, generation))
+                            .map(|identity| {
+                                let kind = crate::ui::observation_notice::ObservationKind::StandaloneClient;
+                                let previous = inspection_external::retained_result(&external_observation, &identity, kind);
+                                (identity, kind, previous)
+                            });
                         let client_context = client_context.clone();
                         let control = control.clone();
                         let sender = background_tx.clone();
@@ -1679,8 +1784,8 @@ async fn run_with_delivery(
                                 });
                                 update(&outcomes, owner.update(format!("{title} · {}", if success {"処理結果を受信"} else {"失敗 · 詳細を確認してください"}))).await;
                             }
-                            let result = prepare_management(response, control.store.config.cache.body_bytes).await;
-                            let _ = sender.send(BackgroundResult::Command { retained:None,list_command:None, work_status: false, context, generation, title, result }).await;
+                            let (external, result) = prepare_external(response, control.store.config.cache.body_bytes, external).await;
+                            let _ = sender.send(BackgroundResult::Command { external, retained:None,list_command:None, work_status: false, context, generation, title, result }).await;
                         });
                     }
                     UiAction::Command(command) | UiAction::Manage(command) => {
@@ -1741,10 +1846,25 @@ async fn run_with_delivery(
                         let sender = background_tx.clone();
                         let outcomes = updates.worker();
                         let observe = management.observe(&command);
+                        let memory_observation = matches!(&command, Command::Status(args) if args.memory);
+                        let external = memory_observation.then(|| external_owner(context.as_ref())
+                            .and_then(|owner| inspection_external::request_identity(&owner, &command, generation))
+                            .map(|identity| {
+                                let kind = crate::ui::observation_notice::ObservationKind::NativeMemory;
+                                let previous = inspection_external::retained_result(&external_observation, &identity, kind);
+                                (identity, kind, previous)
+                            })).flatten();
                         spawn_work(&mut workers, permit, async move {
                             let retained_command=inspection_history::capture_command(&command);
                             let list_command=inspection_lists::capture_command(&command);
-                            let response = management_request(&control, command, observe).await;
+                            let mut response = management_request(&control, command, observe).await;
+                            if memory_observation && let Ok(value) = &mut response {
+                                value["client_observation"] = serde_json::json!({
+                                    "completed_at": chrono::Utc::now().to_rfc3339(),
+                                    "scope": "native memory observation, not an atomic snapshot",
+                                    "refresh": "Repeat status --memory explicitly to observe again",
+                                });
+                            }
                             let retained=response.as_ref().ok().and_then(|value|retained_command.as_ref().and_then(|command|inspection_history::capture(command,value)));
                             command_outcome(&outcomes, submission, &management_outcome(&response))
                                 .await;
@@ -1755,11 +1875,10 @@ async fn run_with_delivery(
                                 )
                                 .await;
                             }
-                            let result =
-                                prepare_management(response, control.store.config.cache.body_bytes)
-                                    .await;
+                            let (external, result) =
+                                prepare_external(response, control.store.config.cache.body_bytes, external).await;
                             let _ = sender
-                                .send(BackgroundResult::Command { retained,list_command,
+                                .send(BackgroundResult::Command { external, retained,list_command,
                                     work_status,
                                     context,
                                     generation,
@@ -1810,7 +1929,7 @@ async fn run_with_delivery(
                                 prepare_management(response, control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command { retained:None,list_command:None,
+                                .send(BackgroundResult::Command { external:None, retained:None,list_command:None,
                                     work_status: false,
                                     context,
                                     generation,
@@ -1820,17 +1939,19 @@ async fn run_with_delivery(
                                 .await;
                         });
                     }
-                    UiAction::IndexPreview(args) => {
+                    UiAction::IndexPreview { args, attempt } => {
+                        accepted_index = None;
+                        pending_index = Some(attempt);
+                        let revision = confirmation_revision;
                         let Ok(permit) = command_slots.clone().try_acquire_owned() else {
                             management_update(
                                 &updates,
                                 context.clone(),
-                                UiUpdate::IndexPreviewFailed { args, error: "索引操作を準備中です。完了後に再操作してください".into() },
+                                UiUpdate::IndexPreviewFailed { args, attempt, error: "索引操作を準備中です。完了後に再操作してください".into() },
                             )
                             .await;
                             continue;
                         };
-                        management_update(&updates, context.clone(), UiUpdate::IndexPreviewStarted { args: args.clone() }).await;
                         let control = control.clone();
                         let sender = background_tx.clone();
                         spawn_work(&mut workers, permit, async move {
@@ -1838,8 +1959,9 @@ async fn run_with_delivery(
                                 control
                                     .index
                                     .preview(args.clone())
-                                    .await
-                                    .and_then(|preview| {
+                                    .await;
+                            let captured_at = chrono::Utc::now();
+                            let result = result.and_then(|preview| {
                                         serde_json::to_value(preview).map_err(|_| {
                                             ApiError::new(
                                                 ErrorCode::InvalidState,
@@ -1849,7 +1971,7 @@ async fn run_with_delivery(
                                     });
                             let result = match result {
                                 Ok(value) => {
-                                    presentation_work(move || management::index_preview_text(&value)).await
+                                    presentation_work(move || management::index_preview_captured_text(&value, captured_at)).await
                                 }
                                 Err(error) => Err(error),
                             };
@@ -1857,6 +1979,8 @@ async fn run_with_delivery(
                                 .send(BackgroundResult::IndexPreview {
                                     context,
                                     args,
+                                    attempt,
+                                    revision,
                                     result,
                                 })
                                 .await;
@@ -2133,7 +2257,7 @@ async fn run_with_delivery(
                             let response=watch_action::execute(&control,target).await;
                             if output {
                                 let result=prepare_management(response,control.store.config.cache.body_bytes).await;
-                                let _=results.send(BackgroundResult::Command { retained:None,list_command:None,work_status:false,context:None,generation,title,result}).await;
+                                let _=results.send(BackgroundResult::Command { external:None,retained:None,list_command:None,work_status:false,context:None,generation,title,result}).await;
                             } else {match response {Ok(_)=>status(&outcomes,selected,format!("{title}を受け付けました")).await,Err(error)=>status(&outcomes,selected,format!("{title}は未適用 · {error}")).await,}}
                         });
                     },
@@ -2788,7 +2912,7 @@ async fn run_with_delivery(
                                 prepare_management(Ok(observed), control.store.config.cache.body_bytes)
                                     .await;
                             let _ = sender
-                                .send(BackgroundResult::Command { retained,list_command,
+                                .send(BackgroundResult::Command { external:None, retained,list_command,
                                     work_status,
                                     context,
                                     generation,
@@ -2987,9 +3111,18 @@ async fn run_with_delivery(
                         }
                     } else { status_dirty = true; }
                 }
-                Some(BackgroundResult::ThreadDeletion { request_id, args, execute, mut known_thread_ids, result }) => {
+                Some(BackgroundResult::ThreadDeletion { request_id, args, execute, revision, mut known_thread_ids, result }) => {
+                    if !execute {
+                        if revision != confirmation_revision || pending_deletion != Some(request_id) {
+                            continue;
+                        }
+                        pending_deletion = None;
+                        if result.is_ok() {
+                            accepted_deletion = Some((request_id, args.clone()));
+                        }
+                    }
                     let result = match result {
-                        Ok(thread_deletion::Outcome::Preview(value)) => Ok(ThreadDeletionReply::Preview(value)),
+                        Ok(thread_deletion::Outcome::Preview(value, captured_at)) => Ok(ThreadDeletionReply::Preview(value, captured_at)),
                         Ok(thread_deletion::Outcome::Applied) => {
                             known_thread_ids.push(args.thread_id.clone());
                             known_thread_ids = thread_deletion::candidates(known_thread_ids, &selection,
@@ -3274,7 +3407,7 @@ async fn run_with_delivery(
                 }
                 Some(BackgroundResult::Copied {
                     result: Err(error), ..
-                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { retained,list_command,
+                }) => status(&updates, None, error).await,                Some(BackgroundResult::Command { external, retained,list_command,
                     work_status,
                     context,
                     generation,
@@ -3284,9 +3417,26 @@ async fn run_with_delivery(
                     if !management.accepts(generation) {
                         continue;
                     }
+                    let mut external_owner_for_delivery = None;
+                    let notice = external.and_then(|reply| {
+                        let identity = reply.identity.clone();
+                        let mut preview = external_observation.clone();
+                        let outcome = inspection_external::completed_observation(&mut preview, &identity, reply.clone(), true, false);
+                        match outcome {
+                            inspection_external::CompletionOutcome::Accepted | inspection_external::CompletionOutcome::FailedRetained | inspection_external::CompletionOutcome::FailedUnavailable => {
+                                external_owner_for_delivery = Some(identity.owner.clone());
+                                pending_external = Some((generation, reply));
+                                preview.as_ref().map(|observation| inspection_external::prepare_refresh_notice(observation, &identity, true, false, false).text())
+                            }
+                            _ => None,
+                        }
+                    });
                     let management_id = management.begin_result();
                     match result {
-                        Ok(report) => {
+                        Ok(mut report) => {
+                            if let Some(notice) = notice {
+                                report.fields.insert(0, crate::presentation::PresentationField { key: "/observation_notice".into(), label: "観測".into(), value: notice, display: None, value_omitted: false });
+                            }
                             management.detail = report.detail.map(Arc::new);
                             let retained = if let Some(command) = list_command {
                                 match management.detail.as_ref() {
@@ -3297,18 +3447,15 @@ async fn run_with_delivery(
                                     None => { management_status(&updates,context.clone(),"一覧の保持予算を超えました。現在状態は未確認です").await; None },
                                 }
                             } else { retained };
-                            management_update(
-                                &updates,
-                                context.clone(),
-                                UiUpdate::StructuredManagement {
-                                    work_status,
-                                    request_id: management_id,
-                                    title,
-                                    fields: report.fields,
-                                    omitted: report.omitted,
-                                },
-                            )
-                            .await;
+                            let structured = UiUpdate::StructuredManagement {
+                                work_status, request_id: management_id, title,
+                                fields: report.fields, omitted: report.omitted,
+                            };
+                            let displayed = match external_owner_for_delivery {
+                                Some(owner) => UiUpdate::ExternalManagement { generation, owner, update: Box::new(structured) },
+                                None => structured,
+                            };
+                            management_update(&updates, context.clone(), displayed).await;
                             if let (Some(target),Some(context))=(retained,context) {
                                 management.inspection.install(generation,context.clone(),target.clone(),None);
                                 management_update(&updates,Some(context),UiUpdate::RetainedInspectionStarted{request_id:management_id,target}).await;
@@ -3335,24 +3482,30 @@ async fn run_with_delivery(
                 Some(BackgroundResult::IndexPreview {
                     context,
                     args,
+                    attempt,
+                    revision,
                     result,
                 }) => match result {
-                    Ok(text) => {
+                    Ok(text) if revision == confirmation_revision && pending_index == Some(attempt) => {
+                        pending_index = None;
+                        accepted_index = Some((attempt, args.clone()));
                         management_update(
                             &updates,
                             context,
-                            UiUpdate::IndexPreviewReady { args, text },
+                            UiUpdate::IndexPreviewReady { args, attempt, text },
                         )
                         .await
                     }
-                    Err(error) => {
+                    Err(error) if revision == confirmation_revision && pending_index == Some(attempt) => {
+                        pending_index = None;
                         management_update(
                             &updates,
                             context,
-                            UiUpdate::IndexPreviewFailed { args, error: error.to_string() },
+                            UiUpdate::IndexPreviewFailed { args, attempt, error: error.to_string() },
                         )
                         .await
                     }
+                    _ => {},
                 },
                 Some(BackgroundResult::EditRequest {
                     thread_id,
@@ -3385,6 +3538,10 @@ async fn run_with_delivery(
                     if ui_subscription.belongs_to(owner) && !reply.is_closed() { update(&updates, UiUpdate::MemoryProbe(reply)).await; }
                 },
                 Ok(EngineEvent::Changed { thread_id, recovery }) => {
+                    confirmation_revision = confirmation_revision.wrapping_add(1);
+                    accepted_index = None;
+                    accepted_deletion = None;
+                    update(&updates, UiUpdate::ConfirmationSourcesChanged).await;
                     status_dirty |= status_enabled;
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
@@ -3440,6 +3597,10 @@ async fn run_with_delivery(
                     status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    confirmation_revision = confirmation_revision.wrapping_add(1);
+                    accepted_index = None;
+                    accepted_deletion = None;
+                    update(&updates, UiUpdate::ConfirmationSourcesChanged).await;
                     status_dirty |= status_enabled;
                     management.inspection.resync();
                     descendants.resync();browser.request_resync("会話一覧の変更通知を取りこぼしました。最新のページから再取得します");

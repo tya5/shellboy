@@ -18,6 +18,20 @@ fn context(action: &UiAction) -> ManagementContext {
         _ => panic!("missing management display context: {action:?}"),
     }
 }
+fn preview_attempt(actions: &[UiAction]) -> u64 {
+    fn unwrap(action: &UiAction) -> Option<u64> {
+        match action {
+            UiAction::SubmittedCommand { action, .. }
+            | UiAction::ManagementIntent { action, .. } => unwrap(action),
+            UiAction::IndexPreview { attempt, .. } => Some(*attempt),
+            _ => None,
+        }
+    }
+    actions
+        .iter()
+        .find_map(unwrap)
+        .expect("index preview action")
+}
 fn request(ui: &mut UiState) -> ManagementContext {
     ui.insert("/status", false);
     let actions = ui.event(key(KeyCode::Enter));
@@ -114,6 +128,7 @@ fn index_preview_is_invalidated_on_close_and_same_scope_reopening_but_not_detail
     ui.insert("/index all", false);
     let actions = ui.event(key(KeyCode::Enter));
     let old = context(&actions[0]);
+    let old_attempt = preview_attempt(&actions);
     let args = ui.management.scope.clone().unwrap();
     ui.management.pending = Some(Command::IndexBackfill(args.clone()));
     ui.event(key(KeyCode::Esc));
@@ -122,10 +137,12 @@ fn index_preview_is_invalidated_on_close_and_same_scope_reopening_but_not_detail
     ui.insert("/index all", false);
     let actions = ui.event(key(KeyCode::Enter));
     let current = context(&actions[0]);
+    let current_attempt = preview_attempt(&actions);
     ui.apply(UiUpdate::ScopedManagement {
         context: old,
         update: Box::new(UiUpdate::IndexPreviewReady {
             args: args.clone(),
+            attempt: old_attempt,
             text: "stale estimate".into(),
         }),
     });
@@ -163,6 +180,7 @@ fn index_preview_is_invalidated_on_close_and_same_scope_reopening_but_not_detail
         context: current,
         update: Box::new(UiUpdate::IndexPreviewReady {
             args,
+            attempt: current_attempt,
             text: "current estimate".into(),
         }),
     });
@@ -496,4 +514,258 @@ fn index_status_key_refreshes_the_index_after_a_structured_retry_receipt() {
             "{input}: {actions:?}"
         );
     }
+}
+
+#[test]
+fn duplicate_index_preview_does_not_replace_completed_evidence() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.insert("/index all", false);
+    let actions = ui.event(key(KeyCode::Enter));
+    let owner = context(&actions[0]);
+    let attempt = preview_attempt(&actions);
+    let args = ui.management.scope.clone().unwrap();
+    let reply = |text: &str| UiUpdate::ScopedManagement {
+        context: owner.clone(),
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args: args.clone(),
+            attempt,
+            text: text.into(),
+        }),
+    };
+    ui.apply(reply("first estimate"));
+    ui.apply(reply("duplicate estimate"));
+    ui.apply(UiUpdate::ScopedManagement {
+        context: owner.clone(),
+        update: Box::new(UiUpdate::IndexPreviewFailed {
+            args: args.clone(),
+            attempt,
+            error: "late failure".into(),
+        }),
+    });
+    assert!(matches!(&ui.management.preview,
+        management::IndexPreviewState::Ready(_, text) if text == "first estimate"));
+}
+
+#[test]
+fn older_same_scope_preview_and_rejection_cannot_replace_new_attempt() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.insert("/index all", false);
+    let first = ui.event(key(KeyCode::Enter));
+    let old_owner = context(&first[0]);
+    let old_attempt = preview_attempt(&first);
+    let old_action = first
+        .iter()
+        .find(|action| {
+            fn is_preview(action: &UiAction) -> bool {
+                match action {
+                    UiAction::SubmittedCommand { action, .. }
+                    | UiAction::ManagementIntent { action, .. } => is_preview(action),
+                    UiAction::IndexPreview { .. } => true,
+                    _ => false,
+                }
+            }
+            is_preview(action)
+        })
+        .unwrap()
+        .clone();
+    let args = ui.management.scope.clone().unwrap();
+    let second = ui.event(key(KeyCode::Char('p')));
+    let new_owner = context(&second[0]);
+    let new_attempt = preview_attempt(&second);
+    assert_ne!(old_owner.epoch, new_owner.epoch);
+    assert_ne!(old_attempt, new_attempt);
+    let ready = |owner: &ManagementContext, attempt, text: &str| UiUpdate::ScopedManagement {
+        context: owner.clone(),
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args: args.clone(),
+            attempt,
+            text: text.into(),
+        }),
+    };
+    ui.apply(ready(&old_owner, old_attempt, "old owner"));
+    ui.apply(ready(&new_owner, old_attempt, "old attempt"));
+    ui.apply(UiUpdate::ScopedManagement {
+        context: new_owner.clone(),
+        update: Box::new(UiUpdate::IndexPreviewFailed {
+            args: args.clone(),
+            attempt: old_attempt,
+            error: "old error".into(),
+        }),
+    });
+    ui.action_rejected(&old_action);
+    assert!(matches!(
+        ui.management.preview,
+        management::IndexPreviewState::Loading(_)
+    ));
+    assert!(ui.management.is_some());
+    ui.apply(ready(&new_owner, new_attempt, "new"));
+    assert!(
+        matches!(&ui.management.preview, management::IndexPreviewState::Ready(_, text) if text == "new")
+    );
+}
+
+#[test]
+fn rejected_current_index_preview_finishes_loading_without_closing_owner() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.insert("/index all", false);
+    ui.event(key(KeyCode::Enter));
+    let actions = ui.event(key(KeyCode::Char('p')));
+    let attempt = preview_attempt(&actions);
+    ui.action_rejected(&actions[0]);
+    assert!(ui.management.is_some());
+    assert!(
+        matches!(&ui.management.preview, management::IndexPreviewState::Failed(_, text) if text.contains("未受付"))
+    );
+    let owner = context(&actions[0]);
+    let args = ui.management.scope.clone().unwrap();
+    ui.apply(UiUpdate::ScopedManagement {
+        context: owner,
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args,
+            attempt,
+            text: "late".into(),
+        }),
+    });
+    assert!(matches!(
+        &ui.management.preview,
+        management::IndexPreviewState::Failed(_, _)
+    ));
+}
+
+#[test]
+fn changed_confirmation_retains_preview_and_rejects_old_reply_and_execution() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.insert("/index all", false);
+    let first = ui.event(key(KeyCode::Enter));
+    let owner = context(&first[0]);
+    let attempt = preview_attempt(&first);
+    let args = ui.management.scope.clone().unwrap();
+    ui.apply(UiUpdate::ScopedManagement {
+        context: owner.clone(),
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args: args.clone(),
+            attempt,
+            text: "captured result at fixed time".into(),
+        }),
+    });
+    assert!(ui.event(key(KeyCode::Char('b'))).is_empty());
+    assert!(matches!(ui.confirmation, Some(Confirmation::Index { .. })));
+    ui.apply(UiUpdate::ConfirmationSourcesChanged);
+    assert!(
+        matches!(&ui.confirmation, Some(Confirmation::StaleIndex { detail }) if detail.contains("captured result at fixed time"))
+    );
+    assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
+    assert!(matches!(
+        ui.confirmation,
+        Some(Confirmation::StaleIndex { .. })
+    ));
+    ui.event(key(KeyCode::Esc));
+    let renewed = ui.event(key(KeyCode::Char('p')));
+    let new_owner = context(&renewed[0]);
+    let new_attempt = preview_attempt(&renewed);
+    assert_ne!(attempt, new_attempt);
+    ui.apply(UiUpdate::ScopedManagement {
+        context: new_owner.clone(),
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args: args.clone(),
+            attempt,
+            text: "late".into(),
+        }),
+    });
+    assert!(matches!(
+        ui.management.preview,
+        management::IndexPreviewState::Loading(_)
+    ));
+    ui.apply(UiUpdate::ScopedManagement {
+        context: new_owner,
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args,
+            attempt: new_attempt,
+            text: "renewed".into(),
+        }),
+    });
+    assert!(
+        matches!(&ui.management.preview, management::IndexPreviewState::Ready(_, text) if text == "renewed")
+    );
+}
+
+#[test]
+fn tiny_index_preview_renders_visible_omission_marker() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.event(Event::Resize(20, 10));
+    ui.insert("/index all", false);
+    let actions = ui.event(key(KeyCode::Enter));
+    let owner = context(&actions[0]);
+    let attempt = preview_attempt(&actions);
+    let args = ui.management.scope.clone().unwrap();
+    ui.apply(UiUpdate::ScopedManagement {
+        context: owner,
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args,
+            attempt,
+            text: "many facts\nsecond fact\n2026-10-30T04:05:06Z".into(),
+        }),
+    });
+    let mut terminal = Terminal::new(TestBackend::new(20, 10)).unwrap();
+    terminal
+        .draw(|frame| crate::ui::draw(frame, &mut ui))
+        .unwrap();
+    let buffer = terminal.backend().buffer();
+    let mut rendered = String::new();
+    for y in 0..10 {
+        let mut x = 0;
+        while x < 20 {
+            let symbol = buffer[(x, y)].symbol();
+            rendered.push_str(symbol);
+            x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
+        }
+        rendered.push('\n');
+    }
+    assert!(rendered.contains("省略"), "{rendered}");
+}
+
+#[test]
+fn external_completion_is_acknowledged_only_by_visible_matching_owner() {
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.select_thread("a".into());
+    let scope = request(&mut ui);
+    let response = |scope: ManagementContext, generation| UiUpdate::ScopedManagement {
+        context: scope,
+        update: Box::new(UiUpdate::ExternalManagement {
+            generation,
+            owner: "thread:a".into(),
+            update: Box::new(UiUpdate::StructuredManagement {
+                work_status: false,
+                request_id: generation,
+                title: "external".into(),
+                fields: vec![],
+                omitted: false,
+            }),
+        }),
+    };
+    ui.deferred_actions.clear();
+    ui.help_visible = true;
+    ui.help_above_popups = true;
+    ui.apply(response(scope.clone(), 1));
+    assert!(
+        !ui.deferred_actions
+            .iter()
+            .any(|a| matches!(a, UiAction::ExternalObserved { .. }))
+    );
+    ui.help_visible = false;
+    ui.apply(response(scope.clone(), 2));
+    assert!(
+        ui.deferred_actions
+            .iter()
+            .any(|a| matches!(a, UiAction::ExternalObserved { generation: 2 }))
+    );
+    ui.deferred_actions.clear();
+    ui.event(key(KeyCode::Esc));
+    ui.apply(response(scope, 3));
+    assert!(
+        !ui.deferred_actions
+            .iter()
+            .any(|a| matches!(a, UiAction::ExternalObserved { .. }))
+    );
 }

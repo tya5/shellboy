@@ -41,6 +41,7 @@ fn response(state: &mut UiState, action: &UiAction, result: Result<Vec<&str>, &s
     };
     state.apply(UiUpdate::Models {
         request_id: *request_id,
+        completed_at: chrono::Utc::now(),
         result: result
             .map(|ids| ids.into_iter().map(String::from).collect())
             .map_err(String::from),
@@ -134,6 +135,35 @@ fn loading_filter_is_preserved_and_escape_refresh_reject_late_results() {
     assert!(screen(&mut state, 100, 30).contains("一覧は空"));
     assert!(key(&mut state, KeyCode::Enter).is_empty());
 }
+#[test]
+fn failed_explicit_refresh_keeps_previous_facts_and_does_not_repeat_request() {
+    let mut state = state(true);
+    let initial = open(&mut state, "/models");
+    response(&mut state, &initial, Ok(vec!["saved-model"]));
+    let refresh = state.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('r'),
+        KeyModifiers::CONTROL,
+    )));
+    assert_eq!(refresh.len(), 1);
+    assert!(matches!(&refresh[0], UiAction::LoadModels { .. }));
+    assert!(
+        state
+            .event(Event::Key(KeyEvent::new(
+                KeyCode::Char('r'),
+                KeyModifiers::CONTROL,
+            )))
+            .is_empty()
+    );
+    response(&mut state, &refresh[0], Err("offline"));
+    let shown = screen(&mut state, 100, 30);
+    assert!(shown.contains("saved-model"), "{shown}");
+    assert!(shown.contains("再取得に失敗"), "{shown}");
+    assert!(shown.contains("取得 UTC"), "{shown}");
+    assert!(key(&mut state, KeyCode::Enter).is_empty());
+    response(&mut state, &initial, Ok(vec!["late-model"]));
+    assert!(!screen(&mut state, 100, 30).contains("late-model"));
+}
+
 #[test]
 fn modal_paste_and_wheel_do_not_edit_or_scroll_the_background_and_full_id_can_be_copied() {
     let mut state = state(true);
@@ -247,6 +277,45 @@ fn oversized_model_stays_visible_without_truncating_the_copy_target() {
 }
 
 #[test]
+fn tiny_picker_exposes_captured_time_without_requery_or_losing_selection() {
+    let mut state = state(true);
+    let request = open(&mut state, "/models");
+    let UiAction::LoadModels { request_id, .. } = request else {
+        panic!("expected model request");
+    };
+    state.apply(UiUpdate::Models {
+        request_id,
+        completed_at: chrono::DateTime::parse_from_rfc3339("2026-01-02T12:34:56Z")
+            .unwrap()
+            .to_utc(),
+        result: Ok(vec!["fixture-model".into()]),
+    });
+    let initial = screen(&mut state, 20, 10);
+    assert!(initial.contains("Ctrl+T"), "{initial}");
+    assert!(
+        state
+            .event(Event::Key(KeyEvent::new(
+                KeyCode::Char('t'),
+                KeyModifiers::CONTROL
+            )))
+            .is_empty()
+    );
+    let mut visible = String::new();
+    for _ in 0..8 {
+        visible.push_str(&screen(&mut state, 20, 10));
+        assert!(key(&mut state, KeyCode::Down).is_empty());
+    }
+    assert!(visible.contains("2026-01-02"), "{visible}");
+    assert!(visible.contains("12:34:56"), "{visible}");
+    assert!(key(&mut state, KeyCode::Esc).is_empty());
+    assert!(screen(&mut state, 20, 10).contains("fixture"));
+    let actions = key(&mut state, KeyCode::Enter);
+    assert!(
+        matches!(&actions[..], [UiAction::Command(Command::ThreadSet(args))] if args.model.as_deref() == Some("fixture-model"))
+    );
+}
+
+#[test]
 fn model_page_uses_resize_before_drawing_and_never_reuses_an_old_list_height() {
     for old_draw in [false, true] {
         let mut state = state(true);
@@ -264,7 +333,7 @@ fn model_page_uses_resize_before_drawing_and_never_reuses_an_old_list_height() {
         key(&mut state, KeyCode::PageDown);
         let actions = key(&mut state, KeyCode::Enter);
         assert!(
-            matches!(&actions[..],[UiAction::Command(Command::ThreadSet(args))] if args.model.as_deref() == Some("m006")),
+            matches!(&actions[..],[UiAction::Command(Command::ThreadSet(args))] if args.model.as_deref() == Some("m003")),
             "{actions:?}"
         );
     }

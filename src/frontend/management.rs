@@ -103,6 +103,7 @@ pub(super) fn report(value: Value, budget: usize) -> Report {
             "notice",
             "view_limits",
             "view_observation",
+            "client_observation",
             "/management/coverage_scope",
             "/management/coverage_window/window_complete",
             "/management/coverage_window/scope_exhausted",
@@ -515,6 +516,16 @@ pub(super) fn index_preview_text(value: &Value) -> String {
     lines.push("API未送信 · 金額は未見積".into());
     lines.join("\n")
 }
+pub(super) fn index_preview_captured_text(
+    value: &Value,
+    captured_at: chrono::DateTime<chrono::Utc>,
+) -> String {
+    format!(
+        "{}\n取得時刻: {}\n再確認: 対象指定時は P、その他は閉じて再操作",
+        index_preview_text(value),
+        captured_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    )
+}
 #[cfg(test)]
 fn preview_text(value: &Value) -> String {
     let mut text = String::new();
@@ -617,12 +628,44 @@ mod tests {
         })));
     }
     #[test]
+    fn explicit_observation_completion_and_repeat_route_survive_field_budget() {
+        let value = serde_json::json!({
+            "caches": (0..500).map(|i| (format!("cache-{i}"), serde_json::json!(i))).collect::<serde_json::Map<_, _>>(),
+            "client_observation": {
+                "completed_at": "2026-11-01T00:00:00Z",
+                "scope": "native memory observation",
+                "refresh": "Repeat status --memory explicitly"
+            }
+        });
+        let result = report(value, MAX_FRAME_BYTES);
+        assert!(
+            result
+                .fields
+                .iter()
+                .any(|field| field.key == "/client_observation/completed_at"
+                    && field.value == "2026-11-01T00:00:00Z")
+        );
+        assert!(
+            result
+                .fields
+                .iter()
+                .any(|field| field.key == "/client_observation/refresh"
+                    && field.value.contains("explicitly"))
+        );
+    }
+    #[test]
     fn fee_preview_uses_human_structure_while_raw_detail_keeps_pointer_and_values() {
         let value = serde_json::json!({"coverage":{"eligible_sources":3},"sources":5,"segments":7,"characters":0,"already_indexed":2,"unavailable":1});
         let preview = preview_text(&value);
         let index_preview = index_preview_text(&value);
         assert!(index_preview.starts_with("資料数: 5\n区間数: 7\n対象文字数: 0"));
         assert!(index_preview.contains("API未送信 · 金額は未見積"));
+        let captured = chrono::DateTime::parse_from_rfc3339("2026-11-01T12:34:56.789Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let text = index_preview_captured_text(&value, captured);
+        assert!(text.contains("取得時刻: 2026-11-01T12:34:56.789Z"));
+        assert!(text.contains("再確認: 対象指定時は P"));
         assert!(preview.contains("索引状況 › 対象資料数: 3"), "{preview}");
         for text in [
             "資料数: 5",

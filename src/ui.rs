@@ -44,6 +44,8 @@ pub use inspection::{
 };
 mod message_queue;
 mod models;
+#[allow(dead_code)]
+pub(crate) mod observation_notice;
 pub use message_queue::{PendingMessage, PendingMessages, SubmittedMessage};
 #[cfg(test)]
 mod send_tests;
@@ -504,6 +506,9 @@ pub struct ToolObservation {
 }
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    ExternalObserved {
+        generation: u64,
+    },
     ProgramStatusSeen {
         thread_id: String,
         run_id: String,
@@ -678,8 +683,15 @@ pub enum UiAction {
     ReloadAttachments {
         thread_id: String,
     },
-    IndexPreview(IndexArgs),
+    IndexPreview {
+        args: IndexArgs,
+        attempt: u64,
+    },
     ClientOperation(Box<crate::client_operation::ClientOperation>),
+    ConfirmedIndex {
+        command: Command,
+        attempt: u64,
+    },
     Manage(Command),
     Command(Command),
     RestoreSnapshot {
@@ -805,6 +817,7 @@ pub struct DraftRecoveryTarget {
 }
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
+    ConfirmationSourcesChanged,
     WatchDetails {
         generation: u64,
         read_sequence: u64,
@@ -933,6 +946,7 @@ pub enum UiUpdate {
     },
     Models {
         request_id: u64,
+        completed_at: chrono::DateTime<chrono::Utc>,
         result: Result<Vec<String>, String>,
     },
     RecalledInput {
@@ -950,6 +964,11 @@ pub enum UiUpdate {
         request_id: u64,
         body: crate::protocol::HistoryBody,
         display: Vec<Line<'static>>,
+    },
+    ExternalManagement {
+        generation: u64,
+        owner: String,
+        update: Box<UiUpdate>,
     },
     StructuredManagement {
         /// True only for a Status overview; operation receipt lookup is a general report.
@@ -1195,13 +1214,12 @@ pub enum UiUpdate {
     },
     IndexPreviewReady {
         args: IndexArgs,
+        attempt: u64,
         text: String,
-    },
-    IndexPreviewStarted {
-        args: IndexArgs,
     },
     IndexPreviewFailed {
         args: IndexArgs,
+        attempt: u64,
         error: String,
     },
     ShutdownProgress {
@@ -1235,7 +1253,7 @@ pub struct ManagementView {
 }
 #[derive(Clone, Debug)]
 pub enum ThreadDeletionReply {
-    Preview(serde_json::Value),
+    Preview(serde_json::Value, chrono::DateTime<chrono::Utc>),
     Deleted(Vec<String>),
     DeletedWithWarning { ids: Vec<String>, warning: String },
 }
@@ -1254,6 +1272,10 @@ enum Confirmation {
     },
     Index {
         command: Command,
+        detail: String,
+        attempt: u64,
+    },
+    StaleIndex {
         detail: String,
     },
     Operation {
@@ -1591,8 +1613,10 @@ const CONFIRMATION_FOOTER: &str = "N / Esc 戻る · Y 実行\n↑↓/PgUp/PgDn 
 const CONFIRMATION_CONTEXT: &str = "内容を確認してください";
 impl Confirmation {
     fn footer(&self) -> &'static str {
-        if matches!(self, Self::ThreadDeletion(_)) {
-            thread_deletion::FOOTER
+        if let Self::ThreadDeletion(dialog) = self {
+            dialog.footer()
+        } else if matches!(self, Self::StaleIndex { .. }) {
+            "N / Esc 戻る · 再確認が必要\n↑↓/PgUp/PgDn 閲覧"
         } else {
             CONFIRMATION_FOOTER
         }
@@ -1609,7 +1633,8 @@ impl Confirmation {
                 Confirmation::MessageQueue {detail,..}=>detail.clone(),
                 Confirmation::ThreadDeletion(dialog)=>dialog.text(),
                 Confirmation::EditStop{run_id,..}=>format!("旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"),
-                Confirmation::Index{command,detail}=>format!("索引処理の実行確認 · {}\n{detail}",match command { Command::IndexBackfill(_)=>"backfill", Command::IndexRetry(_)=>"retry", Command::IndexRebuild(_)=>"rebuild", _=>"索引操作" }),
+                Confirmation::Index{command,detail,..}=>format!("索引処理の実行確認 · {}\n{detail}",match command { Command::IndexBackfill(_)=>"backfill", Command::IndexRetry(_)=>"retry", Command::IndexRebuild(_)=>"rebuild", _=>"索引操作" }),
+                Confirmation::StaleIndex{detail}=>format!("確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"),
                 Confirmation::Operation{detail,..}=>detail.clone(),
                 Confirmation::ForceQuit=>"強制終了しますか？\n保存/回収が未完了の可能性があります。プロセスを終了し、次回起動で復旧します。".into(),
             }
@@ -2501,6 +2526,19 @@ impl UiState {
         };
         let mut retry_window = false;
         match update {
+            UiUpdate::ConfirmationSourcesChanged => {
+                self.management.invalidate_index_preview();
+                match &mut self.confirmation {
+                    Some(Confirmation::ThreadDeletion(dialog)) => dialog.invalidate(),
+                    Some(Confirmation::Index { detail, .. }) => {
+                        self.confirmation = Some(Confirmation::StaleIndex {
+                            detail: detail.clone(),
+                        });
+                    }
+                    _ => {}
+                }
+                self.dirty = true;
+            }
             UiUpdate::SendOperation {
                 draft_id,
                 revision,
@@ -2657,9 +2695,13 @@ impl UiState {
                     self.deferred_actions.push(action);
                 }
             }
-            UiUpdate::Models { request_id, result } => {
+            UiUpdate::Models {
+                request_id,
+                completed_at,
+                result,
+            } => {
                 if let Some(picker) = &mut self.models {
-                    picker.accept(request_id, result);
+                    picker.accept(request_id, completed_at, result);
                 }
             }
             UiUpdate::RecalledInput {
@@ -2705,6 +2747,26 @@ impl UiState {
             } => {
                 if let Some(details) = &mut self.details {
                     details.accept(request_id, body, display);
+                }
+            }
+            UiUpdate::ExternalManagement {
+                generation,
+                owner,
+                update,
+            } => {
+                let current = self.view().thread_id.as_ref().map_or_else(
+                    || format!("draft:{}", self.view().draft.draft_id),
+                    |id| format!("thread:{id}"),
+                );
+                if owner == current
+                    && matches!(
+                        self.top_overlay(),
+                        None | Some(overlay::Overlay::Management)
+                    )
+                {
+                    self.deferred_actions
+                        .push(UiAction::ExternalObserved { generation });
+                    self.apply(*update);
                 }
             }
             UiUpdate::StructuredManagement {
@@ -3420,12 +3482,17 @@ impl UiState {
                     }
                 }
             }
-            UiUpdate::IndexPreviewStarted { args } => self.management.begin_preview(args),
-            UiUpdate::IndexPreviewFailed { args, error } => {
-                self.management.fail_preview(args, error)
-            }
-            UiUpdate::IndexPreviewReady { args, text } => {
-                if self.management.accept_preview(args, text.clone())
+            UiUpdate::IndexPreviewFailed {
+                args,
+                attempt,
+                error,
+            } => self.management.fail_preview(attempt, args, error),
+            UiUpdate::IndexPreviewReady {
+                args,
+                attempt,
+                text,
+            } => {
+                if self.management.accept_preview(attempt, args, text.clone())
                     && let Some(command) = self.management.pending.take()
                 {
                     let label = if matches!(&command, Command::IndexRetry(args) if !management::explicit_index_targets(args))
@@ -3436,6 +3503,7 @@ impl UiState {
                     };
                     self.set_confirmation(Confirmation::Index {
                         command,
+                        attempt,
                         detail: format!(
                             "{label}\n{text}\n外部embedding APIの費用が発生します。Yで実行 / Nで取消"
                         ),
@@ -3638,6 +3706,35 @@ impl UiState {
         }
         let rejected_agents = self.reject_agents_selection(action);
 
+        if let UiAction::ManagementIntent {
+            context,
+            action: inner,
+        } = action
+            && let UiAction::IndexPreview { args, attempt } = inner.as_ref()
+        {
+            if self.management.accepts(
+                context,
+                &self.view().draft.draft_id,
+                self.view().thread_id.as_deref(),
+            ) {
+                self.management.fail_preview(
+                    *attempt,
+                    args.clone(),
+                    "索引previewは未受付です。P/Tで再操作してください".into(),
+                );
+                self.dirty = true;
+            }
+            return;
+        }
+        if let UiAction::IndexPreview { args, attempt } = action {
+            self.management.fail_preview(
+                *attempt,
+                args.clone(),
+                "索引previewは未受付です。P/Tで再操作してください".into(),
+            );
+            self.dirty = true;
+            return;
+        }
         if let UiAction::ManagementIntent { action, .. } = action {
             self.invalidate_management();
             self.action_rejected(action);
@@ -3648,7 +3745,10 @@ impl UiState {
                 submission.clone(),
                 Err("受付キューが満杯または終了済みです。再操作してください".into()),
             );
-            if matches!(action.as_ref(), UiAction::ManagementIntent { .. }) {
+            if matches!(action.as_ref(), UiAction::ManagementIntent { action, .. } if matches!(action.as_ref(), UiAction::IndexPreview { .. }))
+            {
+                self.action_rejected(action);
+            } else if matches!(action.as_ref(), UiAction::ManagementIntent { .. }) {
                 self.invalidate_management();
             }
             return;
@@ -3759,6 +3859,7 @@ impl UiState {
         if let UiAction::LoadModels { request_id, .. } = action {
             self.apply(UiUpdate::Models {
                 request_id: *request_id,
+                completed_at: chrono::Utc::now(),
                 result: Err("取得キューが満杯です。Ctrl+Rで再取得してください".into()),
             });
             return;
@@ -4874,8 +4975,11 @@ impl UiState {
         let args = selection.clone().unwrap_or_default();
         let mut actions = vec![UiAction::Manage(Command::IndexStatus(args))];
         if let Some(selection) = selection.filter(management::explicit_index_targets) {
-            self.management.begin_preview(selection.clone());
-            actions.push(UiAction::IndexPreview(selection));
+            let attempt = self.management.begin_preview(selection.clone());
+            actions.push(UiAction::IndexPreview {
+                args: selection,
+                attempt,
+            });
         }
         actions
     }
@@ -4945,7 +5049,11 @@ impl UiState {
         self.management.close();
         if matches!(
             self.confirmation,
-            Some(Confirmation::Index { .. } | Confirmation::Operation { .. })
+            Some(
+                Confirmation::Index { .. }
+                    | Confirmation::StaleIndex { .. }
+                    | Confirmation::Operation { .. }
+            )
         ) {
             self.confirmation = None;
         }
@@ -5031,7 +5139,7 @@ impl UiState {
                 self.management.reset_preview();
                 self.management.pending = Some(command.clone());
                 self.management.mode = management::ManagementMode::Index;
-                self.management.begin_preview(args.clone());
+                let attempt = self.management.begin_preview(args.clone());
                 self.management.open_text(ManagementView {
                     title: "索引 · 費用preview".into(),
                     text: "対象件数を確認しています。まだ実行していません".into(),
@@ -5039,7 +5147,10 @@ impl UiState {
                 });
                 return vec![
                     UiAction::Manage(Command::IndexStatus(args.clone())),
-                    UiAction::IndexPreview(args.clone()),
+                    UiAction::IndexPreview {
+                        args: args.clone(),
+                        attempt,
+                    },
                 ];
             }
             Command::ThreadDelete(args) => {
@@ -5097,8 +5208,16 @@ impl UiState {
                 self.open_operations(None);
                 vec![]
             }
-            management::Outcome::Confirm { command, detail } => {
-                self.set_confirmation(Confirmation::Index { command, detail });
+            management::Outcome::Confirm {
+                command,
+                detail,
+                attempt,
+            } => {
+                self.set_confirmation(Confirmation::Index {
+                    command,
+                    detail,
+                    attempt,
+                });
                 vec![]
             }
         }
@@ -5172,9 +5291,15 @@ impl UiState {
                 }
                 self.send_current(Some(run_id))
             }
-            Some(Confirmation::Index { command, .. }) => {
+            Some(Confirmation::Index {
+                command, attempt, ..
+            }) => {
                 self.management.reset_preview();
-                vec![UiAction::Manage(command)]
+                vec![UiAction::ConfirmedIndex { command, attempt }]
+            }
+            Some(Confirmation::StaleIndex { detail }) => {
+                self.set_confirmation(Confirmation::StaleIndex { detail });
+                vec![]
             }
             Some(Confirmation::Operation { command, .. }) => vec![UiAction::Manage(command)],
             Some(Confirmation::ThreadDeletion(_)) => {

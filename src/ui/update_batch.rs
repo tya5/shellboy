@@ -28,6 +28,7 @@ impl UiUpdate {
             | Self::WatchDetails { .. }
             | Self::Descendants { .. }
             | Self::ProgramStatus(_)
+            | Self::ConfirmationSourcesChanged
             | Self::BrowserPatch { .. }
             | Self::BrowserPatchFailed { .. }
             | Self::BrowserResync { .. }
@@ -44,6 +45,7 @@ impl UiUpdate {
             | Self::AgentsSelected { .. }
             | Self::ThreadDeletion { .. }
             | Self::ScopedManagement { .. }
+            | Self::ExternalManagement { .. }
             | Self::RecoveryBell
             | Self::CommandOutcome { .. }
             | Self::Activity { .. }
@@ -75,7 +77,6 @@ impl UiUpdate {
             | Self::EditConfirmationRequired { .. }
             | Self::Management { .. }
             | Self::IndexPreviewReady { .. }
-            | Self::IndexPreviewStarted { .. }
             | Self::IndexPreviewFailed { .. }
             | Self::ShutdownProgress { .. }
             | Self::ForceShutdown

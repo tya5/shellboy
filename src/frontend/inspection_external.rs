@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::{mem::size_of, sync::Arc};
 
+#[derive(Clone)]
 pub(crate) struct ExternalReply {
     pub identity: RequestWitness,
     pub kind: ObservationKind,
@@ -15,6 +16,7 @@ pub(crate) struct ExternalReply {
     pub result: Result<Arc<Value>, ()>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ExternalObservation {
     identity: RequestWitness,
     kind: ObservationKind,
@@ -26,12 +28,15 @@ pub(crate) struct ExternalObservation {
     metadata_bytes: usize,
 }
 impl ExternalObservation {
+    #[cfg(test)]
     pub fn result(&self) -> Option<&Arc<Value>> {
         self.result.as_ref()
     }
+    #[cfg(test)]
     pub fn captured_identity(&self) -> Option<&RequestWitness> {
         self.captured_identity.as_ref()
     }
+    #[cfg(test)]
     pub fn metadata_bytes(&self) -> usize {
         self.metadata_bytes
     }
@@ -152,6 +157,71 @@ pub(crate) fn prepare_refresh_notice(
         next_action,
         confirmation_enabled: false,
     }
+}
+
+/// Hash the exact typed request without retaining form input or credentials.
+/// Abort rather than retain a partial identity for unusually large requests.
+pub(super) fn request_identity(
+    owner: &str,
+    request: &impl std::fmt::Debug,
+    sequence: u64,
+) -> Option<RequestWitness> {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    struct HashWriter {
+        hash: Sha256,
+        bytes: usize,
+    }
+    impl std::fmt::Write for HashWriter {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.bytes = self.bytes.checked_add(s.len()).ok_or(std::fmt::Error)?;
+            if self.bytes > MAX_METADATA_BYTES {
+                return Err(std::fmt::Error);
+            }
+            self.hash.update(s.as_bytes());
+            Ok(())
+        }
+    }
+    let mut writer = HashWriter {
+        hash: Sha256::new(),
+        bytes: 0,
+    };
+    write!(&mut writer, "{request:?}").ok()?;
+    let mut target = String::from("sha256:");
+    for byte in writer.hash.finalize() {
+        write!(&mut target, "{byte:02x}").ok()?;
+    }
+    let witness = RequestWitness {
+        owner: owner.to_owned(),
+        target,
+        request: sequence,
+        generation: 0,
+        revision: 0,
+    };
+    witness.metadata_bytes()?;
+    Some(witness)
+}
+
+pub(super) fn retained_result(
+    slot: &Option<ExternalObservation>,
+    current: &RequestWitness,
+    kind: ObservationKind,
+) -> Option<Arc<Value>> {
+    let old = slot.as_ref()?;
+    (old.identity.owner == current.owner
+        && old.identity.target == current.target
+        && old.identity.generation == current.generation
+        && old.kind == kind)
+        .then(|| old.result.clone())
+        .flatten()
+}
+
+pub(super) fn capture_value(value: &Value) -> Option<Arc<Value>> {
+    let reserve = size_of::<ExternalObservation>()
+        + 2 * (size_of::<RequestWitness>() + 2 * MAX_IDENTITY_BYTES);
+    // A delivered fact and one awaiting UI acknowledgement can coexist.
+    result_metadata_bytes(value, (MAX_METADATA_BYTES / 2).checked_sub(reserve)?)?;
+    Some(Arc::new(value.clone()))
 }
 
 #[cfg(test)]

@@ -2126,3 +2126,61 @@ async fn pinned_history_navigation_keeps_a_required_window_after_a_newer_read() 
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn external_refresh_failure_keeps_exact_accepted_result_and_reports_failure() {
+    use super::inspection_external::{self, CompletionOutcome};
+    use crate::ui::observation_notice::ObservationKind;
+    let kind = ObservationKind::StandaloneClient;
+    let first = inspection_external::request_identity("thread:a", &"same request", 1).unwrap();
+    let mut slot = None;
+    let (reply, report) = super::prepare_external(
+        Ok(serde_json::json!({"ok":true,"fact":"original"})),
+        65536,
+        Some((first.clone(), kind, None)),
+    )
+    .await;
+    assert!(
+        report
+            .unwrap()
+            .fields
+            .iter()
+            .any(|field| field.value == "original")
+    );
+    let reply = reply.unwrap();
+    let captured_at = reply.completed_at;
+    assert_eq!(
+        inspection_external::completed_observation(&mut slot, &first, reply, true, false),
+        CompletionOutcome::Accepted
+    );
+    let second = inspection_external::request_identity("thread:a", &"same request", 2).unwrap();
+    let previous = inspection_external::retained_result(&slot, &second, kind).unwrap();
+    let (reply, report) = super::prepare_external(
+        Ok(serde_json::json!({"ok":false,"error":"failed"})),
+        65536,
+        Some((second.clone(), kind, Some(previous))),
+    )
+    .await;
+    assert!(
+        report
+            .unwrap()
+            .fields
+            .iter()
+            .any(|field| field.value == "original")
+    );
+    assert_eq!(
+        inspection_external::completed_observation(&mut slot, &second, reply.unwrap(), true, false),
+        CompletionOutcome::FailedRetained
+    );
+    let notice = inspection_external::prepare_refresh_notice(
+        slot.as_ref().unwrap(),
+        &second,
+        true,
+        false,
+        false,
+    );
+    assert_eq!(notice.captured_at, Some(captured_at));
+    assert!(notice.text().contains("再取得に失敗"));
+    let other = inspection_external::request_identity("thread:b", &"same request", 3).unwrap();
+    assert!(inspection_external::retained_result(&slot, &other, kind).is_none());
+}

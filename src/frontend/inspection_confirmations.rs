@@ -1,5 +1,5 @@
 //! Passive confirmation evidence for one existing G owner, never execution authority.
-//! G supplies request/revision fences and registers this leaf after G main lands.
+//! Existing request owners supply the request and committed-change fences.
 use crate::ui::observation_notice::{
     Freshness, MAX_METADATA_BYTES, NextAction, ObservationKind, ObservationNotice, RequestWitness,
     TargetWitnesses, result_metadata_bytes,
