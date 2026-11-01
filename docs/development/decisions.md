@@ -2767,3 +2767,14 @@ existing top-level field for consumers. This repairs #125 readback only: no SQL,
 row/text limit, provider path, trigger, persistence or schema change. Verify the
 actual mocked model-response -> request-boundary -> adopted path, not just a
 hand-inserted proactive record, plus absent-reason failure records.
+
+## D-116: Stage-1 Resource Benchmark Workload (2026-11-01)
+
+Adopt the explicit #116/reviewer list/create-file/grep/count-lines/done workload
+for the deterministic Shellboy-only fixture. The named upstream jcode script
+at `12a0dd30e4ad9d6351ca83bb7795d9f8aae9d522` (and its first revision) instead
+uses read-title/summarize in rounds 2/4. Preserve provenance and disclose that
+difference rather than claiming byte-identical prompts or cross-agent validity.
+Revisit only when stage 2 is separately authorized and one exact common workload
+is agreed. No real provider or comparative performance claim is authorized by
+stage 1. The optional CI job records observations, not performance thresholds.

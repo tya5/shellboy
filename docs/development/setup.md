@@ -350,3 +350,11 @@ Tests use temporary synthetic current-schema databases only:
 `python3 scripts/measure-error-catalog.py` builds10,000 synthetic executions,
 records one full/changed-fact incremental duration under the60s watchdog and
 removes all generated data. It never locates or reads a real user's data-dir.
+
+## Optional Linux Resource Benchmark
+
+For cost-free, deterministic owner-tree PSS and PTY startup observations, see
+[`scripts/bench/README.md`](../../scripts/bench/README.md) (#116 stage 1).
+Use `python3 scripts/bench/footprint.py --help` for arguments. The existing
+`ci.yml` workflow has an opt-in `footprint` input and retains a JSON artifact;
+there are no performance thresholds and no cross-agent/provider comparisons.

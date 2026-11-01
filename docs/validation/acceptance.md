@@ -7559,3 +7559,29 @@ First branch CI 41300987588 (3d5dc0fb) failed strict Clippy on the new test modu
 preceding impl ThreadView; no behavioural test failure is claimed. Move that
 module to EOF, without suppressing the lint. Local strict clippy --tests and
 characterization19/navigation2 pass (2aa2b2d6). Replacement exact-SHA CI required.
+
+## Resource Benchmark Stage 1 (#116)
+
+Scope: Python scripts, documentation and an opt-in Linux CI job only; no Rust,
+Core, schema, provider account or other-agent changes. Portable synthetic tests
+exercise owner/descendant PSS (not RSS), missing metrics/owner, PID-start-time
+churn, deterministic SSE progression, per-Thread bounded tools and environment
+isolation. These are correctness tests, not performance thresholds.
+
+The local macOS debug binary is source-built through rust-slot and copied in
+the same slot before transport checks. A real disposable PTY verifies visible
+first frame and pasted composer echo; disposable `serve`/loopback SSE checks
+exercise all five rounds, exact saved answers and successful native shell
+cleanup. Local transport checks replace only the PSS reader with an explicit
+`transport_smoke_no_linux_pss` stub: they are **not Linux PSS observations**.
+
+Linux release-binary PSS and startup are qualified by manually dispatching
+`ci.yml` with `footprint=true`. Inspect its exact-SHA artifact's `status`, all
+four N cases, five rounds each, PSS process sums, nine requests/four tool calls
+per conversation and startup fields, in addition to workflow/job conclusion.
+The artifact records machine/OS/binary hash and CI source SHA. Broken sampling
+must be error, not zero or incomplete success. Normal native Linux/macOS checks
+remain independent; Windows PSS is not supported. Real-provider performance,
+physical display latency, peak memory and cross-agent comparisons are untested
+and outside stage 1. See `scripts/bench/README.md` for the workload discrepancy
+with the upstream reference and the full measurement boundary.

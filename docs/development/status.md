@@ -3527,3 +3527,13 @@ boundary. Full-field metrics161 ->155 combined sites, scroll395 ->307, fields20
 stream/refresh11/0 integration regressions pass (57f169e8). Source/checkpoint
 encapsulation and all six individually committed behaviour fixes remain; this
 is an explicitly partial delivery, not the completed #118 stage 2.
+
+## Reproducible Resource Observations (#116, Stage 1)
+
+`scripts/bench/footprint.py` provides cost-free Linux owner-tree PSS after five
+fixed concurrent rounds for N=1/5/10/20, plus a separate disposable-TUI PTY
+startup/input-echo observation. An opt-in `footprint` input on `ci.yml` records
+release-binary JSON artifacts; memory and time have no acceptance thresholds.
+No Core changes, credentials, real-provider mode or other-agent comparison is
+included. Reproduction, exact workload/provenance and measurement limits are in
+`scripts/bench/README.md`. Stage 2 still requires separate user authorization.

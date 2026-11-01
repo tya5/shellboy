@@ -8,6 +8,10 @@ on:
         description: Repeat native overflow, proxy and attachment observations
         type: boolean
         default: false
+      footprint:
+        description: Record cost-free Linux owner PSS and PTY startup (no performance thresholds)
+        type: boolean
+        default: false
       performance:
         description: Compare baseline/current Windows timings and four-thread contention
         type: boolean
@@ -170,3 +174,27 @@ jobs:
         with:
           name: test-performance-${{ matrix.sample }}
           path: ${{ runner.temp }}/test-performance-${{ matrix.sample }}
+  footprint:
+    if: github.event_name == 'workflow_dispatch' && inputs.footprint == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: footprint-release-v1
+      - name: Build the measured release binary
+        run: cargo build --locked --release --bin shellboy
+      - name: Record observations (no memory or time thresholds)
+        run: python3 scripts/bench/footprint.py --binary target/release/shellboy --out .local/footprint/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shellboy-footprint-linux-${{ github.sha }}
+          path: .local/footprint
+          include-hidden-files: true
+          if-no-files-found: warn
