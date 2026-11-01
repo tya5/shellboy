@@ -99,9 +99,9 @@ pub(super) fn read_scoped_tx(
                 )?;
                 Body::Lists(super::inspection_lists::read_list_facts_tx(db, captured)?)
             }
-            InspectionTarget::RetainedSources(scope) => {
-                Body::Retained(Box::new(super::inspection_retained::read_retained_source_facts_tx(db,scope)?))
-            }
+            InspectionTarget::RetainedSources(scope) => Body::Retained(Box::new(
+                super::inspection_retained::read_retained_source_facts_tx(db, scope)?,
+            )),
             InspectionTarget::HistorySources(scope) => {
                 if scope.scope_limited {
                     return Err(ApiError::new(
@@ -258,8 +258,8 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             )
         }
         Body::Retained(raw) => {
-            let value=super::inspection_retained::prepare_inspection(*raw)?;
-            (String::new(),value)
+            let value = super::inspection_retained::prepare_inspection(*raw)?;
+            (String::new(), value)
         }
         Body::History(raw) => {
             let mut value = crate::history::observation::prepare(raw);

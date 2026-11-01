@@ -81,7 +81,9 @@ pub(crate) fn read_bounded_tx(
     thread: Option<&str>,
     channel: usize,
 ) -> Result<Raw, StorageError> {
-    if channel > CHANNEL { return Err(limit()); }
+    if channel > CHANNEL {
+        return Err(limit());
+    }
     if ids.len() > 200
         || ids.iter().any(|id| id.is_empty() || id.len() > 512)
         || thread.is_some_and(|id| id.is_empty() || id.len() > 512)

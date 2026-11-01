@@ -604,8 +604,11 @@ to #107, remaining retained references/pages/waits to #108, and confirmation plu
 external/native snapshot labels to #109, outside #41. Their product requirements
 below remain adopted. G retains existing inspectors and HistoryGet/List plus its
 own reader/SQL qualification. Worker-owned files/functions and count gates are
-listed in those issues; shared glue/registration is coordinator-owned after G,
-so workers do not modify active G files. No unregistered-code success claim.
+listed in those issues. Before G lands, workers do not modify active G files.
+After G main, reviewer update2026-11-01 in #108 assigns permanent module/target/
+dispatcher/dirty/test registration to each task's author on their own branch;
+main integration order stays #107 -> #108 -> #109. No unregistered-code success
+claim is allowed.
 
 
 These mandatory additions supersede any blanket rule that reference navigation,

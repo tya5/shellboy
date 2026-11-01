@@ -46,6 +46,18 @@ synthetic. Preparation-branch native3OS CI and exact final-candidate upgrade che
 remain pending; maina3e00bed's CI41266782750 attempt1 is green but is not the
 preparation branch's qualification. Build/release/tag/install need separate
 explicit permission; this task performs no new local Rust build.
+## Retained source observation (#108, qualification pending)
+
+Author wiring now extends G's retained detail/current metadata split to relation
+and search references, shell pages and completed waits. Uses the existing
+inspection admission owner/presentation pool, history observation and exact-ID
+raw/lifecycle batches; no new worker/queue/command/schema. Shared metadata budget
+is256KiB, <=200 targets and <=4 SQL statements; original query/body/cursor/outcome
+remain immutable, refresh never repeats search/raw/wait. G base811852f is retained
+in history; current preparation is on maincdcb70da before #107 integration.
+Nineteen focused executions are planned (14 retained,3 raw witness,2 IPC).
+Rust compile/tests/native CI remain unrun; final acceptance follows #107 main.
+Reviewer priority requires returning to release preparation when #117 lands.
 
 ## G latest-main admission batch
 

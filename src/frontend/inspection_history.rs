@@ -10,17 +10,24 @@ pub(super) enum CapturedCommand {
 }
 pub(super) fn capture_command(command: &Command) -> Option<CapturedCommand> {
     if !(matches!(command, Command::HistoryGet(_) | Command::HistoryList(_))
-        || super::inspection_retained::supports(command)) { return None; }
+        || super::inspection_retained::supports(command))
+    {
+        return None;
+    }
     // Count borrowed JSON before cloning the request's query/filter strings.
     Some(if super::inspection_retained::request_fits(command) {
         CapturedCommand::Full(command.clone())
-    }else{CapturedCommand::Limited(super::inspection_retained::route(command))})
+    } else {
+        CapturedCommand::Limited(super::inspection_retained::route(command))
+    })
 }
-pub(super) fn capture_saved(command:&CapturedCommand,value:&Value)->Option<InspectionTarget> {
+pub(super) fn capture_saved(command: &CapturedCommand, value: &Value) -> Option<InspectionTarget> {
     match command {
-        CapturedCommand::Full(command)=>capture(command,value),
-        CapturedCommand::Limited(route) if value.get("error").is_none()=>Some(super::inspection_retained::limited_scope(*route)),
-        _=>None,
+        CapturedCommand::Full(command) => capture(command, value),
+        CapturedCommand::Limited(route) if value.get("error").is_none() => {
+            Some(super::inspection_retained::limited_scope(*route))
+        }
+        _ => None,
     }
 }
 #[derive(serde::Serialize)]
@@ -64,7 +71,9 @@ pub(super) async fn request(
     .await?
 }
 pub(super) fn capture(command: &Command, value: &Value) -> Option<InspectionTarget> {
-    if let Some(target)=super::inspection_retained::capture_response(command,value) { return Some(target); }
+    if let Some(target) = super::inspection_retained::capture_response(command, value) {
+        return Some(target);
+    }
     let (rows, thread) = match command {
         Command::HistoryGet(_) => (vec![value], None),
         Command::HistoryList(args) => (

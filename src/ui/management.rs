@@ -576,7 +576,9 @@ impl ManagementPopup {
                             scope.captured_at.clone()
                         }
                         InspectionTarget::RetainedSources(scope)
-                            if pointer != "/current_source" && !pointer.starts_with("/current_source/") => {
+                            if pointer != "/current_source"
+                                && !pointer.starts_with("/current_source/") =>
+                        {
                             scope.captured_at.to_string()
                         }
                         _ => state.metadata_observed_at.clone(),

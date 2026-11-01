@@ -74,6 +74,20 @@ Earlier successful startup-only runs do not replace these post-stop results.
 Corrected-source focused9 and full Python95 tests pass (executionbda9f9bf,
 exit0/cleanup), with layout95/watchdog and diff checks successful. Full Rust
 standard/native3OS CI and exact final-candidate upgrade runs remain pending.
+## #108 current-main preflight (Rust unrun)
+
+Task branch rebases without conflicts onto maincdcb70da; original G delivery base
+is811852f. Permanent author-owned module/target/dispatcher/dirty/test registration
+follows the reviewer2026-11-01 update, not the superseded coordinator-only draft.
+Rustfmt is applied to task changes; original captured values and observation
+contracts are unchanged. Current planned positive filters are
+`frontend::inspection_retained::`14, `history::raw_witness::`3 and registered
+integration `retained_sources::`2, total19. Two IPC cases label test-side GC,
+output growth/terminal/tombstone as synthetic changes and use real IPC for the
+notification/inspection path. Existing cursor replay is explicit test-side work,
+not automatic notification refresh. No timing-performance gate is introduced.
+Compile, targeted Rust and native3OS CI remain unrun. Source-ready is not a
+passing result; final #107-main rebase and new exact-source checks are required.
 
 ## G latest-main fixture correction and final gate records
 
