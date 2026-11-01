@@ -7909,3 +7909,13 @@ cases remain pre-rebase evidence, not an unrun new CI result.
 
 Explicit task-branch push approval has been requested and is not recorded yet.
 No push or branch CI has occurred; integrator handoff is gated on that CI.
+
+### #142 Approved Branch Dispatch
+
+Task-branch push/CI approval is received. Pre-push execution
+`e95dc948-4c6d-4400-b9a9-4453dbb7e80b` exits 0 after fresh fetch/rebase,
+all-target check, cache library 40 pass/1 existing ignored and JSON/SSE suites
+2 pass on source-equivalent `abb91c5b`. The next action is default task-branch
+Linux/macOS full standard CI; Windows, review and main inclusion remain separate.
+The resulting exact-SHA CI URL/conclusion will accompany the formal handoff;
+this pending-dispatch record is not CI success evidence.

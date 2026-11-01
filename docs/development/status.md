@@ -3655,3 +3655,13 @@ loopback suites (2), storage integration (25) and library (4), and CLI selector
 all pass again. Worktree is not pushed: explicit task-branch push approval was
 requested; full branch CI and formal integrator handoff remain pending. No
 Windows/native public-binary upgrade/physical-terminal/provider claim is added.
+
+### #142 Task-Branch CI Admission
+
+Reviewer approves the task-branch push and CI dispatch. A fresh fetch/rebase
+keeps base `acb476bc8d51745f9d17f2b01877137da88c6e8b`; the source-equivalent
+`abb91c5b` tree passes all-target check, 40 cache-related library cases (one
+existing ignored), and both loopback suites again before push. This record-only
+follow-up admits the branch to Linux/macOS CI; success, independent review and
+integration are not claimed by this pending-CI record. Main remains exclusively
+the integrator's responsibility.
