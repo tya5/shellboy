@@ -119,7 +119,11 @@ impl Fixture {
                 title: Some(title.into()),
                 ..Default::default()
             }),
-            Some(uuid::Uuid::new_v4().to_string()),
+            Some(format!(
+                "{}:{}",
+                self.control.store.instance_id,
+                uuid::Uuid::new_v4()
+            )),
             None,
         )
         .await
@@ -221,7 +225,7 @@ async fn retained_shell_page_keeps_bytes_and_cursor_across_growth_terminal_and_t
         assert_eq!(f.detail(&next,"/text").await,original);assert_eq!(f.detail(&next,"/cursor").await,original_cursor);
         // This is an EXPLICIT test-side repeat, not notification refresh.
         let token=serde_json::from_str::<String>(&original_cursor).unwrap_or_else(|_|original_cursor.clone());
-        let read=ipc::call(&f.data,Command::ShellRead(ShellReadArgs{execution_id:"e".into(),cursor:Some(token),encoding:None,limit_bytes:1024}),Some(uuid::Uuid::new_v4().to_string()),None).await.unwrap();
+        let read=ipc::call(&f.data,Command::ShellRead(ShellReadArgs{execution_id:"e".into(),cursor:Some(token),encoding:None,limit_bytes:1024}),Some(format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4())),None).await.unwrap();
         assert!(read.ok,"{read:?}");assert!(read.result.unwrap()["text"].as_str().unwrap().contains("def"));
         f.control.store.database.call(|db|{db.execute_batch("INSERT INTO app_meta(key,value)VALUES('raw_tombstone.e','{\"reason\":\"synthetic collection\"}');DELETE FROM output_chunk WHERE execution_id='e';UPDATE shell_execution SET retention_generation=3 WHERE id='e';")?;Ok(())}).await.unwrap();
         f.changed("actual IPC notification after raw loss").await;

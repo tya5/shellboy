@@ -7287,3 +7287,16 @@ and checked-converts ordinals/nonnegative metadata, preserves NULL and rejects
 negative values. Existing raw test adds0/i64::MAX/NULL/negative assertions; test
 count remains14+3+2. Corrected source is formatted but Rust-unverified until a
 new explicit slot; no automatic retry or full local standard check is performed.
+
+## #108 checked-integer qualification and IPC fixture correction
+
+At sourced225f8ec/basecdcb70da, explicit executionefae60c2 passes fmt and
+`cargo check --tests`, then retained14/0 and raw3/0 with positive count guards.
+Own-path compile is confirmed; no Fresh substitute is used. Registered IPC2
+both fail at their first real ThreadSet: fixture supplies bare UUID operation
+IDs and receives OperationExpired (no active instance prefix). This is not an
+observation pass. Execution exits1/cleanup confirmed and releases the slot;
+there is no automatic retry. Test-only correction uses the actual owner instance
+prefix for ThreadSet and the later explicit ShellRead. Production/leaf source and
+the17 passing cases are unchanged; corrected IPC2 and latest exact-source CI
+remain unrun. Full standard is still CI-only; final acceptance awaits107main.
