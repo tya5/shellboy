@@ -7495,6 +7495,7 @@ history; unavailable docs semantics was not rebuilt.
 
 The focused owner/frontend integration cases use a bounded loopback
 model-catalog responder and an isolated SQLite owner; the unrelated Thread
-change is submitted through the real CLI and owner. No real provider or user
-data is used. Full standard checks and native Linux/Windows coverage run in
-branch CI.
+change is submitted through the real CLI and owner. Separate index and deletion
+confirmation cases check unrelated changes, retained evidence, disabled Y, and
+no second preview response. No real provider or user data is used. Full standard
+checks and native Linux/Windows coverage run in branch CI.
