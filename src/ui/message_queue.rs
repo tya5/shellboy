@@ -1232,10 +1232,24 @@ mod language_tests {
                 "source-preview",
             ],
         });
-        i18n::verify_screen(|ui| { pending(ui); ui.queue_popup.visible = false; }, |language| match language {
-            UiLanguage::En => &["Person | Held | Deliver now | Waiting for recovery", "source-preview", "/queue | 1 saved input"],
-            UiLanguage::Ja => &["人 | 保留 | すぐ渡す | 復旧待ち", "source-preview", "/queue | 保存済み1件"],
-        });
+        i18n::verify_screen(
+            |ui| {
+                pending(ui);
+                ui.queue_popup.visible = false;
+            },
+            |language| match language {
+                UiLanguage::En => &[
+                    "Person | Held | Deliver now | Waiting for recovery",
+                    "source-preview",
+                    "/queue | 1 saved input",
+                ],
+                UiLanguage::Ja => &[
+                    "人 | 保留 | すぐ渡す | 復旧待ち",
+                    "source-preview",
+                    "/queue | 保存済み1件",
+                ],
+            },
+        );
         i18n::verify_screen(archives, |language| match language {
             UiLanguage::En => &[
                 "Saved drafts",
