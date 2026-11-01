@@ -1,6 +1,25 @@
 //! Task-oriented help and contextual readouts, rendered by the shared popup reader.
 use super::theme;
-use crate::config::Config;
+use crate::config::{Config, UiLanguage};
+
+// Each pair is one complete UI message, selected without ambient locale.
+struct HelpMessage {
+    ja: &'static str,
+    en: &'static str,
+}
+impl HelpMessage {
+    fn render(self, language: UiLanguage) -> &'static str {
+        match language {
+            UiLanguage::Ja => self.ja,
+            UiLanguage::En => self.en,
+        }
+    }
+}
+macro_rules! local {
+    ($language:expr, $ja:literal, $en:literal) => {
+        HelpMessage { ja: $ja, en: $en }.render($language)
+    };
+}
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
@@ -18,11 +37,12 @@ enum Content {
 enum Row {
     Section(String),
     Entry(String, String),
-    Note(String),
+    Note(String, UiLanguage),
     Blank,
 }
 struct Guide {
     rows: Vec<Row>,
+    language: UiLanguage,
 }
 
 impl super::UiState {
@@ -52,8 +72,11 @@ impl Page {
     }
 
     pub fn guide(config: &Config) -> Self {
-        let mut page = Guide { rows: Vec::new() };
-        page.section("よく使う操作");
+        let mut page = Guide {
+            rows: Vec::new(),
+            language: config.ui.language,
+        };
+        page.section(local!(config.ui.language, "よく使う操作", "Common actions"));
         use super::key_hints::Action;
         for action in [
             Action::Help,
@@ -65,17 +88,35 @@ impl Page {
             Action::Interrupt,
             Action::Stop,
         ] {
-            page.entry(&action.binding(config), action.description());
+            page.entry(
+                &action.binding(config),
+                action.description(config.ui.language),
+            );
         }
-        page.entry("/help", "操作ガイドを開く（F1と同じ）");
-        page.section("回答をコピーする");
+        page.entry(
+            "/help",
+            local!(
+                config.ui.language,
+                "操作ガイドを開く（F1と同じ）",
+                "Open the operation guide (same as F1)"
+            ),
+        );
+        page.section(local!(
+            config.ui.language,
+            "回答をコピーする",
+            "Copy an answer"
+        ));
         page.entry(
             &format!(
                 "{} > {}",
                 Action::History.binding(config),
                 Action::Copy.binding(config)
             ),
-            "焦点を当てた項目の原文を丸ごとコピーする",
+            local!(
+                config.ui.language,
+                "焦点を当てた項目の原文を丸ごとコピーする",
+                "Copy the complete original of the focused item"
+            ),
         );
         page.entry(
             &format!(
@@ -83,25 +124,51 @@ impl Page {
                 Action::History.binding(config),
                 Action::Code.binding(config)
             ),
-            Action::Code.description(),
+            Action::Code.description(config.ui.language),
         );
         page.entry(
             "o > c",
-            "詳細から原文を開き、表示中の原文ページをコピーする",
+            local!(
+                config.ui.language,
+                "詳細から原文を開き、表示中の原文ページをコピーする",
+                "Open the original from details and copy the displayed page"
+            ),
         );
         page.entry(
             "/copy",
-            "焦点（なければ読んでいる位置）のコードが1つならコピー、複数なら番号を選ぶ。コードなしなら本文全体",
+            local!(config.ui.language, "焦点（なければ読んでいる位置）のコードが1つならコピー、複数なら番号を選ぶ。コードなしなら本文全体", "Copy the only code block in the focused item (or reading position); choose a number if there are several, or copy the full text if there are none"),
         );
-        page.entry("/copy all", "コードだけでなく本文全体をコピーする");
-        page.note("番号の表示は1始まり。/copy 項目ID 番号の指定は0始まりです。64KiBを超える本文はoで原文、nで続き、pで先頭を確認します。F2は見えている画面だけの範囲選択です。");
-        page.section("画像やファイルを添付する");
+        page.entry(
+            "/copy all",
+            local!(
+                config.ui.language,
+                "コードだけでなく本文全体をコピーする",
+                "Copy the full text, not only code"
+            ),
+        );
+        page.note(local!(config.ui.language, "番号の表示は1始まり。/copy 項目ID 番号の指定は0始まりです。64KiBを超える本文はoで原文、nで続き、pで先頭を確認します。F2は見えている画面だけの範囲選択です。", "Displayed numbers start at 1; /copy item ID and number start at 0. For text over 64 KiB, use o for original, n for the next page, and p for the first. F2 selects only the visible terminal screen."));
+        page.section(local!(
+            config.ui.language,
+            "画像やファイルを添付する",
+            "Attach images and files"
+        ));
         page.entry(
             "/image",
-            "クリップボードの画像を下書きに添付する（送信はしない）",
+            local!(
+                config.ui.language,
+                "クリップボードの画像を下書きに添付する（送信はしない）",
+                "Attach a clipboard image to the draft without sending it"
+            ),
         );
-        page.entry("/attach パス", "画像やファイルを下書きに添付する");
-        page.note("普通の貼り付けは文字です。画像を取り出せない環境では /attach パス を使います。添付の印・状態は下書きで確認し、上限は設定のlimitsに従います。");
+        page.entry(
+            local!(config.ui.language, "/attach パス", "/attach PATH"),
+            local!(
+                config.ui.language,
+                "画像やファイルを下書きに添付する",
+                "Attach an image or file to the draft"
+            ),
+        );
+        page.note(local!(config.ui.language, "普通の貼り付けは文字です。画像を取り出せない環境では /attach パス を使います。添付の印・状態は下書きで確認し、上限は設定のlimitsに従います。", "Ordinary paste is text. If clipboard images are unavailable, use /attach PATH. Check attachment marks and status in the draft; configured limits apply."));
         if !config.ui.send_key.eq_ignore_ascii_case("Ctrl+U")
             && !config
                 .ui
@@ -111,31 +178,110 @@ impl Page {
         {
             page.entry(
                 "Ctrl+U",
-                "現在の下書きと添付参照を消去する。送信済み依頼は保持",
+                local!(
+                    config.ui.language,
+                    "現在の下書きと添付参照を消去する。送信済み依頼は保持",
+                    "Clear the current draft and attachment references; sent requests are retained"
+                ),
             );
         }
         if super::redraw::binding_available(config) {
-            page.entry("Ctrl+L", "画面全体を描き直す。下書き・選択・表示位置は保持");
+            page.entry("Ctrl+L", local!(config.ui.language, "画面全体を描き直す。下書き・選択・表示位置は保持", "Redraw the entire screen without changing draft, selection, or reading position"));
         } else {
-            page.entry("Ctrl+L", "画面再描画は無効（送信・改行キーの設定と重複）");
+            page.entry(
+                "Ctrl+L",
+                local!(
+                    config.ui.language,
+                    "画面再描画は無効（送信・改行キーの設定と重複）",
+                    "Redraw is disabled because its key conflicts with send or newline"
+                ),
+            );
         }
-        page.entry("Ctrl+C", "Runと所有する背景の作業を停止する");
-        page.entry("Ctrl+Q / /quit", "保存・停止処理をしてアプリを終了する");
-        page.entry("/", "コマンド候補を表示。^vで選び、Tabで補完");
+        page.entry(
+            "Ctrl+C",
+            local!(
+                config.ui.language,
+                "Runと所有する背景の作業を停止する",
+                "Stop the Run and its background work"
+            ),
+        );
+        page.entry(
+            "Ctrl+Q / /quit",
+            local!(
+                config.ui.language,
+                "保存・停止処理をしてアプリを終了する",
+                "Save and stop work before quitting the application"
+            ),
+        );
+        page.entry(
+            "/",
+            local!(
+                config.ui.language,
+                "コマンド候補を表示。^vで選び、Tabで補完",
+                "Show commands; select with ^v and complete with Tab"
+            ),
+        );
 
-        page.section("会話を読む・切り替える");
-        page.entry("ホイール", "会話を上下にスクロールする");
-        page.entry("PgUp / PgDn", "会話を画面単位で前後に読む");
-        page.entry("Ctrl+End", "会話の末尾へ戻り、新しい出力に追従する");
-        page.entry("Ctrl+T", "一覧/Watchを直前のモードで開く（/threadsは一覧）");
-        page.entry("一覧内 Tab", "一覧とWatchを切り替える。文字入力は絞り込み");
+        page.section(local!(
+            config.ui.language,
+            "会話を読む・切り替える",
+            "Read and switch conversations"
+        ));
+        page.entry(
+            local!(config.ui.language, "ホイール", "Mouse wheel"),
+            local!(
+                config.ui.language,
+                "会話を上下にスクロールする",
+                "Scroll the conversation up or down"
+            ),
+        );
+        page.entry(
+            "PgUp / PgDn",
+            local!(
+                config.ui.language,
+                "会話を画面単位で前後に読む",
+                "Read the conversation one screen at a time"
+            ),
+        );
+        page.entry(
+            "Ctrl+End",
+            local!(
+                config.ui.language,
+                "会話の末尾へ戻り、新しい出力に追従する",
+                "Return to the end and follow new output"
+            ),
+        );
+        page.entry(
+            "Ctrl+T",
+            local!(
+                config.ui.language,
+                "一覧/Watchを直前のモードで開く（/threadsは一覧）",
+                "Open the last list or Watch mode (/threads opens the list)"
+            ),
+        );
+        page.entry(
+            local!(config.ui.language, "一覧内 Tab", "List Tab"),
+            local!(
+                config.ui.language,
+                "一覧とWatchを切り替える。文字入力は絞り込み",
+                "Switch between list and Watch; typing filters the list"
+            ),
+        );
         page.entry(
             "/threads active",
-            "復旧待ち・失敗・未読完了・実行中の作業を監視",
+            local!(
+                config.ui.language,
+                "復旧待ち・失敗・未読完了・実行中の作業を監視",
+                "Watch recovery, failures, unread completions, and running work"
+            ),
         );
         page.entry(
             "/threads descendants",
-            "現在の会話を親とする子孫の作業を監視",
+            local!(
+                config.ui.language,
+                "現在の会話を親とする子孫の作業を監視",
+                "Watch descendants of the current conversation"
+            ),
         );
         let descendant_key = crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('d'),
@@ -148,204 +294,689 @@ impl Page {
                 .iter()
                 .any(|binding| super::key_matches(binding, descendant_key))
         {
-            page.entry("Alt+D", "現在の会話の子孫をWatchで開く");
+            page.entry(
+                "Alt+D",
+                local!(
+                    config.ui.language,
+                    "現在の会話の子孫をWatchで開く",
+                    "Open descendants of the current conversation in Watch"
+                ),
+            );
         } else {
             page.entry(
                 "Alt+D",
-                "子孫監視の短縮キーは無効（送信・改行と重複）。/threads descendants を使用",
+                local!(config.ui.language, "子孫監視の短縮キーは無効（送信・改行と重複）。/threads descendants を使用", "Descendant Watch shortcut is disabled by a send/newline conflict; use /threads descendants"),
             );
         }
         page.entry(
-            "Watch内 Ctrl+S / Alt+R",
-            "表示中のRunを停止／復旧待ちを再試行。確認対象が変われば未適用",
+            local!(
+                config.ui.language,
+                "Watch内 Ctrl+S / Alt+R",
+                "Watch Ctrl+S / Alt+R"
+            ),
+            local!(
+                config.ui.language,
+                "表示中のRunを停止／復旧待ちを再試行。確認対象が変われば未適用",
+                "Stop a displayed Run or retry recovery; a changed target is not applied"
+            ),
         );
         page.entry(
-            "Watch内 Alt+O / Enter",
-            "保存出力を読む／会話を開く。削除は一覧側で操作",
+            local!(
+                config.ui.language,
+                "Watch内 Alt+O / Enter",
+                "Watch Alt+O / Enter"
+            ),
+            local!(
+                config.ui.language,
+                "保存出力を読む／会話を開く。削除は一覧側で操作",
+                "Read saved output or open a conversation; delete from the list"
+            ),
         );
         page.entry(
-            "一覧内 Delete / Ctrl+D",
-            "選んだ会話の削除影響を確認する。まだ削除しない",
+            local!(
+                config.ui.language,
+                "一覧内 Delete / Ctrl+D",
+                "List Delete / Ctrl+D"
+            ),
+            local!(
+                config.ui.language,
+                "選んだ会話の削除影響を確認する。まだ削除しない",
+                "Review deletion effects for the selected conversation; this does not delete yet"
+            ),
         );
-        page.note("削除確認ではD/Spaceで子孫も含めるか変更。影響の取得中や実行中の作業がある場合はYで実行できません。Yで削除、N/Escで一覧へ戻ります。文字入力とBackspaceは一覧の絞り込みです。");
-        page.note(
+        page.note(local!(config.ui.language, "削除確認ではD/Spaceで子孫も含めるか変更。影響の取得中や実行中の作業がある場合はYで実行できません。Yで削除、N/Escで一覧へ戻ります。文字入力とBackspaceは一覧の絞り込みです。", "In deletion confirmation, D/Space toggles descendants. Y cannot execute while effects are loading or work is running. Y deletes; N/Esc returns to the list. Typing and Backspace filter the list."));
+        page.note(local!(
+            config.ui.language,
             "macOSのノートのdeleteはBackspaceです。削除確認にはCtrl+Dかfn+deleteを使ってください。",
+            "On macOS laptops delete is Backspace. Use Ctrl+D or fn+delete to confirm deletion."
+        ));
+        page.entry(
+            "Ctrl+N",
+            local!(
+                config.ui.language,
+                "新しい会話の下書きを作る（/new）",
+                "Create a new conversation draft (/new)"
+            ),
         );
-        page.entry("Ctrl+N", "新しい会話の下書きを作る（/new）");
-        page.entry("/switch ID", "指定した会話へ切り替える");
-        page.entry("^ / v", "入力の先頭行で送信履歴を呼び出す。vで新しい履歴へ");
-        page.note("送信履歴の最新からさらにvで、書きかけの下書きに戻ります。");
+        page.entry(
+            "/switch ID",
+            local!(
+                config.ui.language,
+                "指定した会話へ切り替える",
+                "Switch to the specified conversation"
+            ),
+        );
+        page.entry(
+            "^ / v",
+            local!(
+                config.ui.language,
+                "入力の先頭行で送信履歴を呼び出す。vで新しい履歴へ",
+                "Recall sent history on the first input line; v selects newer history"
+            ),
+        );
+        page.note(local!(
+            config.ui.language,
+            "送信履歴の最新からさらにvで、書きかけの下書きに戻ります。",
+            "Press v after the newest sent entry to restore the unfinished draft."
+        ));
 
-        page.section("反映待ち・中断・復元");
+        page.section(local!(
+            config.ui.language,
+            "反映待ち・中断・復元",
+            "Queued input, interruption, and recovery"
+        ));
         if !config.ui.send_key.eq_ignore_ascii_case("Ctrl+Enter") {
-            page.entry("Ctrl+Enter", "すぐ渡す（応答生成は中断しない）");
+            page.entry(
+                "Ctrl+Enter",
+                local!(
+                    config.ui.language,
+                    "すぐ渡す（応答生成は中断しない）",
+                    "Deliver now without interrupting generation"
+                ),
+            );
         }
-        page.entry("Ctrl+X > Ctrl+S", "すぐ渡す。前景shellの待機だけを解除する");
-        page.entry("/queue", "保存済みの反映待ち・保留入力を確認／取消");
+        page.entry(
+            "Ctrl+X > Ctrl+S",
+            local!(
+                config.ui.language,
+                "すぐ渡す。前景shellの待機だけを解除する",
+                "Deliver now and release only the foreground shell wait"
+            ),
+        );
+        page.entry(
+            "/queue",
+            local!(
+                config.ui.language,
+                "保存済みの反映待ち・保留入力を確認／取消",
+                "Inspect or cancel saved queued and held input"
+            ),
+        );
         page.entry(
             "/restore list / /restore draft ID",
-            "保存した取消入力・未確定送信を復元",
+            local!(
+                config.ui.language,
+                "保存した取消入力・未確定送信を復元",
+                "Restore saved cancelled input or an unconfirmed send"
+            ),
         );
-        page.entry("Esc", "画面を閉じる。通常の会話ではTurnだけ中断");
+        page.entry(
+            "Esc",
+            local!(
+                config.ui.language,
+                "画面を閉じる。通常の会話ではTurnだけ中断",
+                "Close a screen; in the conversation, interrupt only the Turn"
+            ),
+        );
 
-        page.section(crate::presentation::rows::RowKind::LiveWork.spec().1);
+        page.section(row_label(
+            crate::presentation::rows::RowKind::LiveWork,
+            config.ui.language,
+        ));
         page.entry(
-            "Shift+Tab / クリック",
-            "入力欄の上にある作業を選ぶ。^vで移動",
+            local!(
+                config.ui.language,
+                "Shift+Tab / クリック",
+                "Shift+Tab / click"
+            ),
+            local!(
+                config.ui.language,
+                "入力欄の上にある作業を選ぶ。^vで移動",
+                "Select work above the input; use ^v to move"
+            ),
         );
         page.entry(
-            "Alt+W / 見出しクリック",
-            "作業の中身を開閉。開いた高さは ui.live_work_rows 行で固定",
+            local!(
+                config.ui.language,
+                "Alt+W / 見出しクリック",
+                "Alt+W / click heading"
+            ),
+            local!(
+                config.ui.language,
+                "作業の中身を開閉。開いた高さは ui.live_work_rows 行で固定",
+                "Toggle work details; expanded height is fixed by ui.live_work_rows"
+            ),
         );
         page.entry(
-            "作業内 Space / F6 / o",
-            "shell出力の開閉／詳細フォーム／子の会話へ",
+            local!(
+                config.ui.language,
+                "作業内 Space / F6 / o",
+                "Within work Space / F6 / o"
+            ),
+            local!(
+                config.ui.language,
+                "shell出力の開閉／詳細フォーム／子の会話へ",
+                "Toggle shell output, open details, or open a child conversation"
+            ),
         );
-        page.note("Escで入力へ戻ります。回答後も残る作業は保存時刻から経過を表示します。抜粋を開いても実行・停止しません。");
+        page.note(local!(config.ui.language, "Escで入力へ戻ります。回答後も残る作業は保存時刻から経過を表示します。抜粋を開いても実行・停止しません。", "Esc returns to input. Work that remains after an answer shows elapsed time from the saved timestamp. Opening an excerpt does not execute or stop work."));
 
-        page.section("内容・処理状況を調べる");
-        page.entry("F6", "会話の内容を選び、詳細・原文・IDを確認（/details）");
-        page.entry("F7", "現在の項目のリンクを確認・完全URLをコピー（/links）");
+        page.section(local!(
+            config.ui.language,
+            "内容・処理状況を調べる",
+            "Inspect content and activity"
+        ));
+        page.entry(
+            "F6",
+            local!(
+                config.ui.language,
+                "会話の内容を選び、詳細・原文・IDを確認（/details）",
+                "Select conversation content to inspect details, original, and ID (/details)"
+            ),
+        );
+        page.entry(
+            "F7",
+            local!(
+                config.ui.language,
+                "現在の項目のリンクを確認・完全URLをコピー（/links）",
+                "Inspect links in the current item and copy complete URLs (/links)"
+            ),
+        );
         page.entry(
             "F8",
-            "操作を選び、対象や引数をフォームで指定（/actions / /operations）",
+            local!(
+                config.ui.language,
+                "操作を選び、対象や引数をフォームで指定（/actions / /operations）",
+                "Select an action and enter target and arguments in a form (/actions / /operations)"
+            ),
         );
         page.entry(
             "/status thread",
-            "現在の会話の処理・背景コマンド・子の状態を確認",
+            local!(
+                config.ui.language,
+                "現在の会話の処理・背景コマンド・子の状態を確認",
+                "Inspect the current conversation's work, background commands, and children"
+            ),
         );
         page.entry(
             "/status",
-            "全会話の作業を確認。終了済みも見るには /status all",
+            local!(
+                config.ui.language,
+                "全会話の作業を確認。終了済みも見るには /status all",
+                "Inspect work across conversations; use /status all to include finished work"
+            ),
         );
-        page.entry("/search 検索語", "過去の会話を検索する");
         page.entry(
-            "/received [ページ]",
-            "失敗・ストリーム差分の受信記録を一覧し、原文を読む",
+            local!(config.ui.language, "/search 検索語", "/search QUERY"),
+            local!(
+                config.ui.language,
+                "過去の会話を検索する",
+                "Search past conversations"
+            ),
         );
-        page.note("詳細画面: ^vで選択 > Enterで詳細。Oで原文、Cでコピー。");
-        page.note("回答が終わっても背景処理が続く場合があります。受付と処理完了は別です。");
-
-        page.section("失敗・復旧待ち");
-        page.note("新しい復旧待ちは端末ベルで通知します（他の会話・子も対象、2秒以内はまとめます）。ui.bell = false で無効化できます。");
-        page.note("音・点滅・タブ表示は端末設定に従います。tmux等ではベルの通過設定が必要な場合があります。");
-        page.entry("/retry", "現在の復旧待ちを同じ内容で明示的に再試行する");
         page.entry(
-            "入力して送信",
-            "新しい指示で再開する。元の指示と区別して保存",
+            local!(config.ui.language, "/received [ページ]", "/received [PAGE]"),
+            local!(
+                config.ui.language,
+                "失敗・ストリーム差分の受信記録を一覧し、原文を読む",
+                "List failed and stream-difference receipts and read their originals"
+            ),
         );
-        page.entry("/stop / /cancel / Ctrl+C", "現在の作業を停止する");
-        page.note("原因と未反映指示は会話下部に残ります。F8で作業・応答処理の詳細を確認できます。");
-        page.note("保存済みツール結果は再利用します。結果が不明な副作用は詳細で確認してください。");
+        page.note(local!(
+            config.ui.language,
+            "詳細画面: ^vで選択 > Enterで詳細。Oで原文、Cでコピー。",
+            "Details: select with ^v and open with Enter. O opens the original; C copies."
+        ));
+        page.note(local!(
+            config.ui.language,
+            "回答が終わっても背景処理が続く場合があります。受付と処理完了は別です。",
+            "Background work can continue after an answer. Acceptance and completion are distinct."
+        ));
 
-        page.section("背景処理・待機");
+        page.section(local!(
+            config.ui.language,
+            "失敗・復旧待ち",
+            "Failures and recovery"
+        ));
+        page.note(local!(config.ui.language, "新しい復旧待ちは端末ベルで通知します（他の会話・子も対象、2秒以内はまとめます）。ui.bell = false で無効化できます。", "A terminal bell signals new recovery work, including other conversations and children; events within two seconds are grouped. Disable with ui.bell = false."));
+        page.note(local!(config.ui.language, "音・点滅・タブ表示は端末設定に従います。tmux等ではベルの通過設定が必要な場合があります。", "Sound, flashing, and tab indicators depend on terminal settings. Multiplexers such as tmux may need bell passthrough."));
+        page.entry(
+            "/retry",
+            local!(
+                config.ui.language,
+                "現在の復旧待ちを同じ内容で明示的に再試行する",
+                "Explicitly retry the current recovery work with the same input"
+            ),
+        );
+        page.entry(
+            local!(config.ui.language, "入力して送信", "Type and send"),
+            local!(
+                config.ui.language,
+                "新しい指示で再開する。元の指示と区別して保存",
+                "Resume with a new instruction, saved separately from the original"
+            ),
+        );
+        page.entry(
+            "/stop / /cancel / Ctrl+C",
+            local!(
+                config.ui.language,
+                "現在の作業を停止する",
+                "Stop the current work"
+            ),
+        );
+        page.note(local!(config.ui.language, "原因と未反映指示は会話下部に残ります。F8で作業・応答処理の詳細を確認できます。", "The cause and pending instruction remain at the bottom of the conversation. F8 shows work and response details."));
+        page.note(local!(
+            config.ui.language,
+            "保存済みツール結果は再利用します。結果が不明な副作用は詳細で確認してください。",
+            "Saved tool results are reused. Check details for side effects with unknown results."
+        ));
+
+        page.section(local!(
+            config.ui.language,
+            "背景処理・待機",
+            "Background work and waiting"
+        ));
         page.entry(
             "Ctrl+B",
-            "手前で待っているshellコマンドを背景で継続（/background）",
+            local!(
+                config.ui.language,
+                "手前で待っているshellコマンドを背景で継続（/background）",
+                "Continue the foreground shell command in the background (/background)"
+            ),
         );
         page.entry(
             "/cancel-wait",
-            "待機の観測だけをやめる。待機対象の処理は続く",
+            local!(
+                config.ui.language,
+                "待機の観測だけをやめる。待機対象の処理は続く",
+                "Stop observing the wait only; the target work continues"
+            ),
         );
-        page.note("Ctrl+Cは処理の中断です。待機の観測をやめる操作とは異なります。");
+        page.note(local!(
+            config.ui.language,
+            "Ctrl+Cは処理の中断です。待機の観測をやめる操作とは異なります。",
+            "Ctrl+C interrupts work; it is different from stopping wait observation."
+        ));
 
-        page.section("モデル・作業フォルダー");
-        page.entry("/models", "モデル一覧を開き、選んで変更する");
-        page.entry("/model", "現在の接続・モデル・推論強度を確認する");
+        page.section(local!(
+            config.ui.language,
+            "モデル・作業フォルダー",
+            "Model and working folder"
+        ));
         page.entry(
-            "/model 接続名 モデル名",
-            "接続とモデルを名前で指定して変更する",
+            "/models",
+            local!(
+                config.ui.language,
+                "モデル一覧を開き、選んで変更する",
+                "Open the model list and select a model"
+            ),
         );
-        page.entry("/effort 値", "推論強度を変更。指定解除は /effort none");
-        page.entry("/agents [パス]", "指示ファイル参照を確認／変更する");
-        page.entry("/cwd", "現在の作業フォルダーを確認する");
-        page.entry("/cwd パス", "作業フォルダーを変更する");
+        page.entry(
+            "/model",
+            local!(
+                config.ui.language,
+                "現在の接続・モデル・推論強度を確認する",
+                "Inspect the current connection, model, and reasoning effort"
+            ),
+        );
+        page.entry(
+            local!(
+                config.ui.language,
+                "/model 接続名 モデル名",
+                "/model CONNECTION MODEL"
+            ),
+            local!(
+                config.ui.language,
+                "接続とモデルを名前で指定して変更する",
+                "Change connection and model by name"
+            ),
+        );
+        page.entry(
+            local!(config.ui.language, "/effort 値", "/effort VALUE"),
+            local!(
+                config.ui.language,
+                "推論強度を変更。指定解除は /effort none",
+                "Change reasoning effort; /effort none clears it"
+            ),
+        );
+        page.entry(
+            local!(config.ui.language, "/agents [パス]", "/agents [PATH]"),
+            local!(
+                config.ui.language,
+                "指示ファイル参照を確認／変更する",
+                "Inspect or change the instruction-file reference"
+            ),
+        );
+        page.entry(
+            "/cwd",
+            local!(
+                config.ui.language,
+                "現在の作業フォルダーを確認する",
+                "Inspect the current working folder"
+            ),
+        );
+        page.entry(
+            local!(config.ui.language, "/cwd パス", "/cwd PATH"),
+            local!(
+                config.ui.language,
+                "作業フォルダーを変更する",
+                "Change the working folder"
+            ),
+        );
 
-        page.section("添付・貼付け・コピー");
-        page.entry("/attach パス", "ファイルを添付する");
-        page.entry("/attachments", "添付の一覧・詳細を確認する");
-        page.entry("/detach 添付ID", "指定した添付を外す");
+        page.section(local!(
+            config.ui.language,
+            "添付・貼付け・コピー",
+            "Attachments, paste, and copy"
+        ));
+        page.entry(
+            local!(config.ui.language, "/attach パス", "/attach PATH"),
+            local!(config.ui.language, "ファイルを添付する", "Attach a file"),
+        );
+        page.entry(
+            "/attachments",
+            local!(
+                config.ui.language,
+                "添付の一覧・詳細を確認する",
+                "Inspect the attachment list and details"
+            ),
+        );
+        page.entry(
+            local!(
+                config.ui.language,
+                "/detach 添付ID",
+                "/detach ATTACHMENT_ID"
+            ),
+            local!(
+                config.ui.language,
+                "指定した添付を外す",
+                "Remove the specified attachment"
+            ),
+        );
         page.entry(
             "/reload-attachments",
-            "保存済みの添付を再読込する（モデルへは送信しない）",
+            local!(
+                config.ui.language,
+                "保存済みの添付を再読込する（モデルへは送信しない）",
+                "Reload saved attachments without sending them to the model"
+            ),
         );
-        page.entry("/image / /paste-image", "クリップボードの画像を添付する");
-        page.entry("F3 / F4 / F5", "最新の長文貼付けを確認 / 編集 / 削除する");
+        page.entry(
+            "/image / /paste-image",
+            local!(
+                config.ui.language,
+                "クリップボードの画像を添付する",
+                "Attach a clipboard image"
+            ),
+        );
+        page.entry(
+            "F3 / F4 / F5",
+            local!(
+                config.ui.language,
+                "最新の長文貼付けを確認 / 編集 / 削除する",
+                "Inspect, edit, or remove the latest long paste"
+            ),
+        );
         page.entry(
             "/paste ID show",
-            "指定した貼付けを確認。編集はedit、削除はremove",
+            local!(
+                config.ui.language,
+                "指定した貼付けを確認。編集はedit、削除はremove",
+                "Inspect the specified paste; use edit to change it and remove to delete it"
+            ),
         );
-        page.entry("/copy", "現在の項目の原文をコピーする");
         page.entry(
-            "/copy 項目ID コード番号",
-            "指定したコードをコピーする（番号は0始まり）",
+            "/copy",
+            local!(
+                config.ui.language,
+                "現在の項目の原文をコピーする",
+                "Copy the original of the current item"
+            ),
         );
-        page.entry("F2", "端末の範囲選択・コピーへ切り替える（/select）");
-        page.note("長文の折りたたみ表示も、送信時は全文を送ります。");
-        page.note("貼付けだけでは送信しません。貼付けた / から始まる文も本文として扱います。");
+        page.entry(
+            local!(
+                config.ui.language,
+                "/copy 項目ID コード番号",
+                "/copy ITEM_ID CODE_NUMBER"
+            ),
+            local!(
+                config.ui.language,
+                "指定したコードをコピーする（番号は0始まり）",
+                "Copy the specified code block (numbers start at 0)"
+            ),
+        );
+        page.entry(
+            "F2",
+            local!(
+                config.ui.language,
+                "端末の範囲選択・コピーへ切り替える（/select）",
+                "Switch to terminal selection and copy (/select)"
+            ),
+        );
+        page.note(local!(
+            config.ui.language,
+            "長文の折りたたみ表示も、送信時は全文を送ります。",
+            "Collapsed long pastes are sent in full."
+        ));
+        page.note(local!(
+            config.ui.language,
+            "貼付けだけでは送信しません。貼付けた / から始まる文も本文として扱います。",
+            "Pasting does not send. Pasted text beginning with / remains message text."
+        ));
 
-        page.section("会話の行の印");
+        page.section(local!(
+            config.ui.language,
+            "会話の行の印",
+            "Conversation row marks"
+        ));
         for kind in crate::presentation::rows::RowKind::ALL {
-            let (mark, label, _) = kind.spec();
-            page.entry(mark, label);
+            let (mark, _, _) = kind.spec();
+            page.entry(mark, row_label(kind, config.ui.language));
         }
-        page.note("背景は並行して続く shell です。経過は保存された開始時刻が基準です。通知を選んで Enter で元の行・子の会話へ移れます。");
+        page.note(local!(config.ui.language, "背景は並行して続く shell です。経過は保存された開始時刻が基準です。通知を選んで Enter で元の行・子の会話へ移れます。", "Background means a shell continuing concurrently. Elapsed time uses the saved start time. Select a notice and press Enter to open its original row or child conversation."));
         page.note(
-            "種類の境目は空行で分け、続く tool は詰めて表示します。空行は選択対象ではありません。",
+            local!(config.ui.language, "種類の境目は空行で分け、続く tool は詰めて表示します。空行は選択対象ではありません。", "Blank lines separate kinds; consecutive tool rows stay together. Blank lines are not selectable."),
         );
 
-        page.section("履歴の整理・検索の管理");
+        page.section(local!(
+            config.ui.language,
+            "履歴の整理・検索の管理",
+            "History and search management"
+        ));
         page.entry(
-            "/fork [項目ID]",
-            "指定位置から会話を分岐。省略時は閲覧位置を使う",
+            local!(config.ui.language, "/fork [項目ID]", "/fork [ITEM_ID]"),
+            local!(
+                config.ui.language,
+                "指定位置から会話を分岐。省略時は閲覧位置を使う",
+                "Fork the conversation at the specified position; defaults to the reading position"
+            ),
         );
         page.entry(
-            "/edit [依頼の項目ID]",
-            "以前の依頼を編集し、送信時に別の会話へ分岐する",
+            local!(
+                config.ui.language,
+                "/edit [依頼の項目ID]",
+                "/edit [REQUEST_ITEM_ID]"
+            ),
+            local!(
+                config.ui.language,
+                "以前の依頼を編集し、送信時に別の会話へ分岐する",
+                "Edit a previous request and fork into a new conversation when sent"
+            ),
         );
         page.entry(
             "/compact-max",
-            "APIなしで保護外を最大縮小（再試行は別操作）",
-        );
-        page.entry("/compact", "会話の要約・圧縮を依頼する");
-        page.entry(
-            "/restore（引数なし）",
-            "現在の会話で、縮小した入力範囲を元に戻す。後から付いた履歴も残す",
-        );
-        page.entry(
-            "/reasoning [項目ID]",
-            "モデルから返された推論テキストの表示を切り替える",
+            local!(
+                config.ui.language,
+                "APIなしで保護外を最大縮小（再試行は別操作）",
+                "Shrink unprotected history without an API call; retry is separate"
+            ),
         );
         page.entry(
-            "/restore 番号",
-            "失敗時の下書きを復元する。番号は状態表示を参照",
+            "/compact",
+            local!(
+                config.ui.language,
+                "会話の要約・圧縮を依頼する",
+                "Request conversation summary and compaction"
+            ),
         );
-        page.entry("/index status", "検索索引の進み具合を確認する");
-        page.entry("/index thread", "現在の会話を索引管理の対象にする");
-        page.entry("/index all", "全会話を索引管理の対象にする");
-        page.entry("/index threads ID.", "指定した会話を索引管理の対象にする");
         page.entry(
-            "/index space ID [対象]",
-            "指定した埋め込み空間の索引を管理する",
+            local!(
+                config.ui.language,
+                "/restore（引数なし）",
+                "/restore (no arguments)"
+            ),
+            local!(
+                config.ui.language,
+                "現在の会話で、縮小した入力範囲を元に戻す。後から付いた履歴も残す",
+                "Restore compacted input in the current conversation while retaining later history"
+            ),
         );
-        page.note("索引の更新は対象・費用を確認してから実施します。");
+        page.entry(
+            local!(
+                config.ui.language,
+                "/reasoning [項目ID]",
+                "/reasoning [ITEM_ID]"
+            ),
+            local!(
+                config.ui.language,
+                "モデルから返された推論テキストの表示を切り替える",
+                "Toggle model-returned reasoning text"
+            ),
+        );
+        page.entry(
+            local!(config.ui.language, "/restore 番号", "/restore NUMBER"),
+            local!(
+                config.ui.language,
+                "失敗時の下書きを復元する。番号は状態表示を参照",
+                "Restore a failed-send draft; see status for its number"
+            ),
+        );
+        page.entry(
+            "/index status",
+            local!(
+                config.ui.language,
+                "検索索引の進み具合を確認する",
+                "Inspect search indexing progress"
+            ),
+        );
+        page.entry(
+            "/index thread",
+            local!(
+                config.ui.language,
+                "現在の会話を索引管理の対象にする",
+                "Manage indexing for the current conversation"
+            ),
+        );
+        page.entry(
+            "/index all",
+            local!(
+                config.ui.language,
+                "全会話を索引管理の対象にする",
+                "Manage indexing for all conversations"
+            ),
+        );
+        page.entry(
+            "/index threads ID.",
+            local!(
+                config.ui.language,
+                "指定した会話を索引管理の対象にする",
+                "Manage indexing for the specified conversation"
+            ),
+        );
+        page.entry(
+            local!(
+                config.ui.language,
+                "/index space ID [対象]",
+                "/index space ID [TARGET]"
+            ),
+            local!(
+                config.ui.language,
+                "指定した埋め込み空間の索引を管理する",
+                "Manage indexing in the specified embedding space"
+            ),
+        );
+        page.note(local!(
+            config.ui.language,
+            "索引の更新は対象・費用を確認してから実施します。",
+            "Review target and cost before updating the index."
+        ));
 
-        page.section("詳しいガイドを読む");
-        page.note("次のコマンドは端末のshellで使います。会話入力欄の / コマンドとは別です。");
+        page.section(local!(
+            config.ui.language,
+            "詳しいガイドを読む",
+            "Read detailed guides"
+        ));
+        page.note(local!(
+            config.ui.language,
+            "次のコマンドは端末のshellで使います。会話入力欄の / コマンドとは別です。",
+            "Run these commands in a terminal shell, not in the conversation input."
+        ));
         page.entry(
             "shellboy docs get --id shellboy/tui",
-            "画面操作の詳しい説明を読む",
+            local!(
+                config.ui.language,
+                "画面操作の詳しい説明を読む",
+                "Read detailed screen-operation documentation"
+            ),
         );
-        page.entry("shellboy docs list", "ほかのガイドを探す");
-        page.note("[ ] は省略可能な引数です。項目ID・パスなどは実際の値に置き換えます。");
+        page.entry(
+            "shellboy docs list",
+            local!(
+                config.ui.language,
+                "ほかのガイドを探す",
+                "Find other guides"
+            ),
+        );
+        page.note(local!(
+            config.ui.language,
+            "[ ] は省略可能な引数です。項目ID・パスなどは実際の値に置き換えます。",
+            "[ ] denotes optional arguments. Replace item IDs and paths with actual values."
+        ));
 
-        page.section("参考：メモリに保持するデータの設定");
+        page.section(local!(
+            config.ui.language,
+            "参考：メモリに保持するデータの設定",
+            "Reference: retained in-memory data settings"
+        ));
         let cache = &config.cache;
         for (label, bytes) in [
-            ("本文・表示情報", cache.body_bytes),
-            ("画面レイアウト", cache.layout_bytes),
-            ("モデル送信用の履歴", cache.history_bytes),
-            ("添付の送信用データ", cache.attachment_base64_bytes),
+            (
+                local!(
+                    config.ui.language,
+                    "本文・表示情報",
+                    "Bodies and display information"
+                ),
+                cache.body_bytes,
+            ),
+            (
+                local!(config.ui.language, "画面レイアウト", "Screen layout"),
+                cache.layout_bytes,
+            ),
+            (
+                local!(
+                    config.ui.language,
+                    "モデル送信用の履歴",
+                    "History for model requests"
+                ),
+                cache.history_bytes,
+            ),
+            (
+                local!(
+                    config.ui.language,
+                    "添付の送信用データ",
+                    "Attachment data for sending"
+                ),
+                cache.attachment_base64_bytes,
+            ),
         ] {
             page.entry(label, &format!("{bytes} bytes"));
         }
@@ -353,8 +984,15 @@ impl Page {
             + u128::from(cache.layout_bytes)
             + u128::from(cache.history_bytes)
             + u128::from(cache.attachment_base64_bytes);
-        page.entry("合計", &format!("{total} bytes"));
-        page.note("保持量の設定です。処理中の作業領域などを含むアプリ全体の使用量ではありません。");
+        page.entry(
+            local!(config.ui.language, "合計", "Total"),
+            &format!("{total} bytes"),
+        );
+        page.note(local!(
+            config.ui.language,
+            "保持量の設定です。処理中の作業領域などを含むアプリ全体の使用量ではありません。",
+            "These are retention settings, not total application memory including work in progress."
+        ));
         page.section(&super::i18n::Message::TerminalWidthHeading.render(config.ui.language));
         page.note(
             &super::i18n::Message::TerminalWidth {
@@ -363,8 +1001,12 @@ impl Page {
             .render(config.ui.language),
         );
         Self {
-            title: "ヘルプ",
-            context: super::HELP,
+            title: local!(config.ui.language, "ヘルプ", "Help"),
+            context: local!(
+                config.ui.language,
+                "操作するときはEscで会話へ戻る | / でコマンド候補を表示",
+                "Esc returns to the conversation | / shows commands"
+            ),
             content: Content::Guide(page.rows),
         }
     }
@@ -372,52 +1014,106 @@ impl Page {
         use crate::ui::text_width::UnicodeWidthStr;
         match &self.content {
             Content::Fixed(lines) => std::borrow::Cow::Borrowed(lines),
-            Content::Guide(rows) => std::borrow::Cow::Owned(
-                rows.iter()
-                    .flat_map(|row| {
-                        let key_style = Style::default()
-                            .fg(theme::EMPHASIS)
-                            .add_modifier(Modifier::BOLD);
-                        match row {
-                            Row::Blank => vec![Line::default()],
-                            Row::Section(title) => vec![Line::from(Span::styled(
-                                title.clone(),
-                                Style::default()
-                                    .fg(theme::SECTION_HEADING)
-                                    .add_modifier(Modifier::BOLD),
-                            ))],
-                            Row::Entry(key, description) => {
-                                let columns = width >= 46;
-                                let description_indent = if columns { 22 } else { 2 };
-                                if columns && key.width() <= 18 {
-                                    vec![Line::from(vec![
-                                        Span::styled(
-                                            format!("  {key}{}", " ".repeat(20 - key.width())),
-                                            key_style,
-                                        ),
-                                        Span::styled(
-                                            description.clone(),
-                                            Style::default().fg(theme::TEXT),
-                                        ),
-                                    ])]
-                                } else {
-                                    vec![
-                                        Line::from(Span::styled(format!("  {key}"), key_style)),
-                                        Line::from(format!(
-                                            "{}{description}",
-                                            " ".repeat(description_indent)
-                                        )),
-                                    ]
-                                }
-                            }
-                            Row::Note(text) => vec![Line::from(format!("  補足: {text}"))],
-                        }
+            Content::Guide(rows) => {
+                let column = rows
+                    .iter()
+                    .filter_map(|row| match row {
+                        Row::Entry(key, _) => Some(key.width()),
+                        _ => None,
                     })
-                    .collect(),
-            ),
+                    .max()
+                    .unwrap_or(0)
+                    .min(usize::from(width) / 5);
+                std::borrow::Cow::Owned(
+                    rows.iter()
+                        .flat_map(|row| {
+                            let key_style = Style::default()
+                                .fg(theme::EMPHASIS)
+                                .add_modifier(Modifier::BOLD);
+                            match row {
+                                Row::Blank => vec![Line::default()],
+                                Row::Section(title) => vec![Line::from(Span::styled(
+                                    title.clone(),
+                                    Style::default()
+                                        .fg(theme::SECTION_HEADING)
+                                        .add_modifier(Modifier::BOLD),
+                                ))],
+                                Row::Entry(key, description) => {
+                                    let columns = width >= 46;
+                                    let description_indent = if columns { column + 4 } else { 2 };
+                                    if columns && key.width() <= column {
+                                        vec![Line::from(vec![
+                                            Span::styled(
+                                                format!(
+                                                    "  {key}{}",
+                                                    " ".repeat(column + 2 - key.width())
+                                                ),
+                                                key_style,
+                                            ),
+                                            Span::styled(
+                                                description.clone(),
+                                                Style::default().fg(theme::TEXT),
+                                            ),
+                                        ])]
+                                    } else {
+                                        vec![
+                                            Line::from(Span::styled(format!("  {key}"), key_style)),
+                                            Line::from(format!(
+                                                "{}{description}",
+                                                " ".repeat(description_indent)
+                                            )),
+                                        ]
+                                    }
+                                }
+                                Row::Note(text, language) => vec![Line::from(format!(
+                                    "  {}{text}",
+                                    match language {
+                                        UiLanguage::En => "Note: ",
+                                        UiLanguage::Ja => "補足: ",
+                                    }
+                                ))],
+                            }
+                        })
+                        .collect(),
+                )
+            }
         }
     }
 }
+#[allow(dead_code)]
+pub(super) fn footer(language: UiLanguage) -> &'static str {
+    local!(
+        language,
+        "Esc / Enter / F1 戻る | ^v / PgUp / PgDn 閲覧",
+        "Esc / Enter / F1 Back | ^v / PgUp / PgDn Scroll"
+    )
+}
+fn row_label(kind: crate::presentation::rows::RowKind, language: UiLanguage) -> &'static str {
+    use crate::presentation::rows::RowKind::*;
+    if language == UiLanguage::Ja {
+        return kind.spec().1;
+    }
+    match kind {
+        Human => "User",
+        External => "External",
+        Parent => "Parent",
+        SelfModel => "Self",
+        OtherModel => "Model",
+        Revisit => "Revisit",
+        Assistant => "Answer",
+        ToolCall => "Tool call",
+        Running => "Running",
+        Unknown => "Unknown",
+        Success => "Completed",
+        Failure => "Failed",
+        Cancelled => "Cancelled / not started",
+        Notice => "Notice",
+        Summary => "Summary",
+        Spill => "Spilled",
+        LiveWork => "Live work",
+    }
+}
+
 impl Guide {
     fn section(&mut self, title: &str) {
         if !self.rows.is_empty() {
@@ -430,7 +1126,7 @@ impl Guide {
             .push(Row::Entry(key.to_owned(), description.to_owned()));
     }
     fn note(&mut self, text: &str) {
-        self.rows.push(Row::Note(text.to_owned()));
+        self.rows.push(Row::Note(text.to_owned(), self.language));
     }
 }
 
@@ -442,6 +1138,11 @@ mod tests {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{Terminal, backend::TestBackend};
 
+    fn japanese_config() -> Config {
+        let mut config = Config::default();
+        config.ui.language = UiLanguage::Ja;
+        config
+    }
     fn key(ui: &mut UiState, code: KeyCode) {
         assert!(
             ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
@@ -468,7 +1169,7 @@ mod tests {
     }
     #[test]
     fn thread_deletion_help_distinguishes_confirmation_from_filter_editing() {
-        let shown = Page::guide(&Config::default())
+        let shown = Page::guide(&japanese_config())
             .lines(160)
             .iter()
             .map(ToString::to_string)
@@ -495,7 +1196,7 @@ mod tests {
             content: Content::Guide(vec![
                 Row::Entry("F1".into(), "操作ガイド".into()),
                 Row::Entry("Ctrl+Q".into(), "保存して終了".into()),
-                Row::Note("補足の情報".into()),
+                Row::Note("補足の情報".into(), UiLanguage::Ja),
             ]),
         };
         let wide = page.lines(80);
@@ -519,8 +1220,22 @@ mod tests {
         );
     }
     #[test]
+    fn help_renders_in_both_languages_at_standard_widths() {
+        fn show(ui: &mut UiState) {
+            let config = ui.config.clone();
+            ui.show_help(Page::guide(&config));
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Common actions", "Copy an answer"],
+                UiLanguage::Ja => &["よく使う操作", "回答をコピーする"],
+            }
+        }
+        super::super::i18n::verify_screen(show, expected);
+    }
+    #[test]
     fn first_page_uses_current_bindings_and_help_scrolling_preserves_the_draft() {
-        let mut config = Config::default();
+        let mut config = japanese_config();
         config.ui.send_key = "Ctrl+Enter".into();
         config.ui.newline_keys = vec!["Enter".into()];
         let mut ui = UiState::new(&config, std::env::temp_dir());
@@ -563,7 +1278,9 @@ mod tests {
         }
         let end = screen(&mut ui, 80, 24);
         assert!(
-            end.contains("メモリに保持するデータ") && end.contains("bytes"),
+            all.contains("メモリに保持するデータ")
+                && end.contains("端末の表示")
+                && end.contains("bytes"),
             "{end}"
         );
         assert!(end.contains("Esc"));
@@ -579,7 +1296,7 @@ mod tests {
     }
     #[test]
     fn large_help_windows_show_the_final_sentence_after_paging_and_resizing() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut ui = UiState::new(&japanese_config(), std::env::temp_dir());
         key(&mut ui, KeyCode::F(1));
         for (width, height) in [(80, 24), (120, 40), (180, 65), (80, 24)] {
             screen(&mut ui, width, height);
@@ -602,7 +1319,7 @@ mod tests {
     }
     #[test]
     fn information_readouts_have_their_own_titles_and_return_to_the_operation_guide() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut ui = UiState::new(&japanese_config(), std::env::temp_dir());
         for (command, title) in [("/model", "モデル設定"), ("/cwd", "作業フォルダー")] {
             assert!(ui.slash(command).is_empty());
             let text = screen(&mut ui, 80, 24);

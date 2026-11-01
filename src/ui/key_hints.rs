@@ -47,7 +47,7 @@ pub(super) enum Action {
     Refresh,
 }
 impl Action {
-    // Variant names are stable UI text keys for the future #35 translator.
+    // Bindings are stable input identities; display text is localized separately.
     pub fn spec(self) -> (&'static str, &'static str) {
         match self {
             Self::Help => ("F1", "操作ガイド"),
@@ -86,21 +86,66 @@ impl Action {
             Self::Refresh => ("r", "再取得"),
         }
     }
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::Send => "次の区切りでメッセージを渡す",
-            Self::Newline => "入力中に改行する",
-            Self::Interrupt => "現在のTurnを中断する（Runと背景の停止はCtrl+C）",
-            Self::Stop => "Runと所有する背景の作業を停止する",
-            Self::Commands => "コマンド候補を表示。^vで選び、Tabで補完",
-            Self::Code => "保存された原文のコードの塊を番号で選んでコピーする",
-            _ => self.spec().1,
+    pub fn description(self, language: crate::config::UiLanguage) -> &'static str {
+        use crate::config::UiLanguage::{En, Ja};
+        match (language, self) {
+            (Ja, Self::Send) => "次の区切りでメッセージを渡す",
+            (Ja, Self::Newline) => "入力中に改行する",
+            (Ja, Self::Interrupt) => "現在のTurnを中断する（Runと背景の停止はCtrl+C）",
+            (Ja, Self::Stop) => "Runと所有する背景の作業を停止する",
+            (Ja, Self::Commands) => "コマンド候補を表示。^vで選び、Tabで補完",
+            (Ja, Self::Code) => "保存された原文のコードの塊を番号で選んでコピーする",
+            (Ja, action) => action.spec().1,
+            (En, Self::Help) => "Open the operation guide",
+            (En, Self::Commands) => "Show commands; select with ^v and complete with Tab",
+            (En, Self::History) => "History",
+            (En, Self::Threads) => "Threads",
+            (En, Self::Send) => "Deliver the message at the next boundary",
+            (En, Self::Newline) => "Insert a newline in the draft",
+            (En, Self::Interrupt) => {
+                "Interrupt the current Turn; Ctrl+C stops the Run and its background work"
+            }
+            (En, Self::Stop) => "Stop the Run and its background work",
+            (En, Self::Toggle) => "Toggle",
+            (En, Self::Original) => "Original",
+            (En, Self::Copy) => "Copy",
+            (En, Self::Code) => "Select and copy a numbered code block from the saved original",
+            (En, Self::CopyBody) => "Full text",
+            (En, Self::Back | Self::SelectionBack) => "Back",
+            (En, Self::LongCopy) => "Copy a long answer",
+            (En, Self::Move | Self::Choose) => "Select",
+            (En, Self::NextPage) => "Next page",
+            (En, Self::FirstPage) => "Reload first page",
+            (En, Self::Fields) => "Summary / fields",
+            (En, Self::Operations) => "Actions",
+            (En, Self::Complete) => "Complete",
+            (En, Self::NextField) => "Next field",
+            (En, Self::Display) => "Show",
+            (En, Self::Execute) => "Run",
+            (En, Self::Submit) => "Send",
+            (En, Self::Refresh) => "Refresh",
+        }
+    }
+    fn short_label(self, language: crate::config::UiLanguage) -> &'static str {
+        use crate::config::UiLanguage::{En, Ja};
+        match (language, self) {
+            (Ja, action) => action.spec().1,
+            (En, Self::Send | Self::Submit) => "Send",
+            (En, Self::Newline) => "Newline",
+            (En, Self::Interrupt) => "Interrupt",
+            (En, Self::Stop) => "Stop",
+            (En, Self::Commands) => "Commands",
+            (En, Self::Code) => "Copy code",
+            (En, action) => action.description(En),
         }
     }
     pub fn binding(self, config: &Config) -> String {
         match self {
             Self::Send => config.ui.send_key.clone(),
             Self::Newline => config.ui.newline_keys.join("/"),
+            Self::LongCopy if config.ui.language == crate::config::UiLanguage::En => {
+                "History c".into()
+            }
             _ => self.spec().0.into(),
         }
     }
@@ -112,7 +157,11 @@ impl Action {
         if self == Self::Help {
             "F1".into()
         } else {
-            format!("{} {}", self.binding(config), self.spec().1)
+            format!(
+                "{} {}",
+                self.binding(config),
+                self.short_label(config.ui.language)
+            )
         }
     }
 }
@@ -174,7 +223,8 @@ pub(super) fn detail_footer(context: Context) -> &'static str {
     use std::sync::LazyLock;
     static FOOTERS: LazyLock<[String; 5]> = LazyLock::new(|| {
         use Action::*;
-        let config = Config::default();
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
         [
             vec![Refresh, Original, Copy, Operations],
             vec![Refresh, Original, Copy, Fields, Operations],
@@ -202,6 +252,30 @@ pub(super) fn detail_footer(context: Context) -> &'static str {
     }]
 }
 
+#[allow(dead_code)]
+pub(super) fn detail_footer_for(
+    context: Context,
+    language: crate::config::UiLanguage,
+) -> &'static str {
+    use crate::config::UiLanguage;
+    if language == UiLanguage::Ja {
+        return detail_footer(context);
+    }
+    match context {
+        Context::Fields => {
+            "Esc Back | ^v/PgUp/PgDn Move\nr Refresh | o Original | c Copy | v Fields | a Actions"
+        }
+        Context::Original { next: true } => {
+            "Esc Back | ^v/PgUp/PgDn Move\nc Copy | n Next page | p First page | o Original"
+        }
+        Context::Original { next: false } => {
+            "Esc Back | ^v/PgUp/PgDn Move\nc Copy | p First page | o Original"
+        }
+        Context::OriginalPending => "Esc Back | ^v/PgUp/PgDn Move\np First page | o Original",
+        _ => "Esc Back | ^v/PgUp/PgDn Move\nr Refresh | o Original | c Copy | a Actions",
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Cache(RefCell<Option<Entry>>);
 struct Entry {
@@ -209,6 +283,7 @@ struct Entry {
     width: u16,
     send: String,
     newline: Vec<String>,
+    language: crate::config::UiLanguage,
     text: String,
 }
 impl Cache {
@@ -219,6 +294,7 @@ impl Cache {
                 && e.width == width
                 && e.send == config.ui.send_key
                 && e.newline == config.ui.newline_keys
+                && e.language == config.ui.language
         }) {
             let mut labels = context
                 .actions()
@@ -248,6 +324,7 @@ impl Cache {
                 width,
                 send: config.ui.send_key.clone(),
                 newline: config.ui.newline_keys.clone(),
+                language: config.ui.language,
                 text,
             });
         }
@@ -314,9 +391,21 @@ mod tests {
         }
     }
     #[test]
+    fn language_changes_invalidate_the_hint_cache() {
+        let cache = Cache::default();
+        let mut config = Config::default();
+        assert!(cache.text(Context::Typing, 120, &config).contains("Send"));
+        config.ui.language = crate::config::UiLanguage::Ja;
+        assert!(cache.text(Context::Typing, 120, &config).contains("送信"));
+        assert!(
+            detail_footer_for(Context::Details, crate::config::UiLanguage::En).contains("Back")
+        );
+    }
+    #[test]
     fn binding_changes_invalidate_but_clock_repaints_reuse_the_string() {
         let cache = Cache::default();
         let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
         let pointer = cache.text(Context::Typing, 120, &config).as_ptr();
         assert_eq!(pointer, cache.text(Context::Typing, 120, &config).as_ptr());
         config.ui.send_key = "Ctrl+Enter".into();
@@ -330,6 +419,7 @@ mod tests {
         use crate::operations::EnterVerb;
         let cache = Cache::default();
         let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
         config.ui.send_key = "Ctrl+Enter".into();
         for (verb, expected) in [
             (EnterVerb::Display, "Enter 表示"),
@@ -421,7 +511,9 @@ mod selection_tests {
     #[test]
     fn selection_tip_does_not_toggle_an_existing_history_focus_back_to_composer() {
         let cache = Cache::default();
-        let text = cache.text(Context::Selection, 100, &Config::default());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let text = cache.text(Context::Selection, 100, &config);
         assert!(text.contains("F2/Esc 戻る"));
         assert!(text.contains("会話の履歴で c"));
         assert!(!text.contains("Tab"));
