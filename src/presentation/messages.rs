@@ -2,68 +2,261 @@
 use super::rows::RowKind;
 use crate::config::UiLanguage;
 
-macro_rules! sentences {
-    ($($name:ident => ($en:literal, $ja:literal)),* $(,)?) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-        pub enum Text { $($name),* }
-        impl Text {
-            pub fn render(self, language: UiLanguage) -> &'static str {
-                match (language, self) {
-                    $((UiLanguage::En, Self::$name) => $en,
-                      (UiLanguage::Ja, Self::$name) => $ja),*
-                }
+// Language-independent provenance tokens; copy uses the one shared UI macro.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Text {
+    ReasoningExpanded,
+    ContextTrim,
+    MetadataLimited,
+    NoticeSourceUnavailable,
+    NoticeCallUnavailable,
+    NoticeCommandUnrecorded,
+    NoticeDeletedThread,
+    NoticeThreadUnavailable,
+    NoticeUntitled,
+    User,
+    Reasoning,
+    ToolResult,
+    Event,
+    ReviewChange,
+    History,
+    Summary,
+    Spill,
+    Interrupted,
+    Uncached,
+    Details,
+    Collapsed,
+    StreamGap,
+    UnknownExtent,
+    CommandPreview,
+    OutputFailed,
+    RefreshFailed,
+    Refreshing,
+    OutputRetry,
+    OutputLoading,
+    OutputUnavailable,
+    OutputEvicted,
+    OutputOriginal,
+    SourceOutsideWindow,
+    ElapsedUnavailable,
+    Background,
+    HumanBackground,
+    InputBackground,
+    OutputIncomplete,
+    AwaitingRecovery,
+    Delivered,
+    ResultUnknown,
+    IndexPaused,
+    ResultUncertain,
+    NoReplay,
+    SavedTargets,
+    WaitInterrupted,
+    SavedObservation,
+    UnknownCount,
+    PreviousShutdown,
+    PreviousInterruption,
+    PreviousRecord,
+}
+impl Text {
+    pub fn render(self, language: UiLanguage) -> &'static str {
+        match self {
+            Self::ReasoningExpanded => {
+                crate::ui::i18n::local!(language, "▸ 推論（展開中）", "▸ Reasoning (expanded)")
+            }
+            Self::ContextTrim => crate::ui::i18n::local!(
+                language,
+                "入力範囲を縮小（原文は保持）",
+                "Input scope reduced (original retained)"
+            ),
+            Self::MetadataLimited => crate::ui::i18n::local!(
+                language,
+                "表示情報を制限 | 完全な情報はF6 原文",
+                "Display details limited | F6 Original for complete facts"
+            ),
+            Self::NoticeSourceUnavailable => crate::ui::i18n::local!(
+                language,
+                "元の結果を参照できません",
+                "Source result is unavailable"
+            ),
+            Self::NoticeCallUnavailable => crate::ui::i18n::local!(
+                language,
+                "呼出し情報を参照できません",
+                "Call information is unavailable"
+            ),
+            Self::NoticeCommandUnrecorded => {
+                crate::ui::i18n::local!(language, "コマンド未記録", "Command not recorded")
+            }
+            Self::NoticeDeletedThread => crate::ui::i18n::local!(
+                language,
+                "参照先の会話は削除済み",
+                "Referenced conversation was deleted"
+            ),
+            Self::NoticeThreadUnavailable => crate::ui::i18n::local!(
+                language,
+                "参照先の会話を取得できません",
+                "Referenced conversation is unavailable"
+            ),
+            Self::NoticeUntitled => crate::ui::i18n::local!(language, "無題", "Untitled"),
+            Self::User => crate::ui::i18n::local!(language, "あなた", "You"),
+            Self::Reasoning => crate::ui::i18n::local!(language, "推論", "Reasoning"),
+            Self::ToolResult => crate::ui::i18n::local!(language, "実行結果", "Execution result"),
+            Self::Event => crate::ui::i18n::local!(language, "状態変更", "State change"),
+            Self::ReviewChange => {
+                crate::ui::i18n::local!(language, "変更内容を確認", "Review the change")
+            }
+            Self::History => crate::ui::i18n::local!(language, "履歴", "History"),
+            Self::Summary => crate::ui::i18n::local!(language, "要約", "Summary"),
+            Self::Spill => crate::ui::i18n::local!(language, "原文参照", "Original reference"),
+            Self::Interrupted => crate::ui::i18n::local!(
+                language,
+                "前回処理の中断情報",
+                "Previous work was interrupted"
+            ),
+            Self::Uncached => crate::ui::i18n::local!(
+                language,
+                "本文未キャッシュ | 詳細から原文を取得",
+                "Body not cached | Open details to load the original"
+            ),
+            Self::Details => crate::ui::i18n::local!(
+                language,
+                "詳細で内容・参照を確認",
+                "Review content and references in details"
+            ),
+            Self::Collapsed => crate::ui::i18n::local!(
+                language,
+                ". 本文を折りたたみ | Enterで開く",
+                ". Body collapsed | Enter to open"
+            ),
+            Self::StreamGap => crate::ui::i18n::local!(
+                language,
+                "途中表示の更新欠落を検出。確定本文の保存後に再取得 | F6 詳細",
+                "Live updates were missed. Reload after the final body is saved | F6 Details"
+            ),
+            Self::UnknownExtent => crate::ui::i18n::local!(
+                language,
+                "出力の表示範囲・省略量は未確認 | F6 詳細",
+                "Output extent and omitted amount are unknown | F6 Details"
+            ),
+            Self::CommandPreview => crate::ui::i18n::local!(
+                language,
+                "コマンド（プレビュー） | o コマンド原文（ページ表示）",
+                "Command preview | o Original command (paged)"
+            ),
+            Self::OutputFailed => {
+                crate::ui::i18n::local!(language, "出力取得に失敗", "Output retrieval failed")
+            }
+            Self::RefreshFailed => crate::ui::i18n::local!(
+                language,
+                "更新失敗 | 前回の取得内容を表示",
+                "Refresh failed | Showing the previous result"
+            ),
+            Self::Refreshing => crate::ui::i18n::local!(
+                language,
+                "再取得中 | 前回の取得内容を表示",
+                "Refreshing | Showing the previous result"
+            ),
+            Self::OutputRetry => crate::ui::i18n::local!(
+                language,
+                "出力取得に失敗 | 閉じて開くと再試行 | F6 原文",
+                "Output retrieval failed | Close and reopen to retry | F6 Original"
+            ),
+            Self::OutputLoading => crate::ui::i18n::local!(
+                language,
+                "出力を取得中 | F6 原文",
+                "Loading output | F6 Original"
+            ),
+            Self::OutputUnavailable => crate::ui::i18n::local!(
+                language,
+                "出力を取得できませんでした | F6 原文",
+                "Could not retrieve output | F6 Original"
+            ),
+            Self::OutputEvicted => crate::ui::i18n::local!(
+                language,
+                "出力未保持 | 閉じて開くと再取得 | F6 原文",
+                "Output not retained | Close and reopen to reload | F6 Original"
+            ),
+            Self::OutputOriginal => crate::ui::i18n::local!(
+                language,
+                "出力は原文で確認 | F6 詳細",
+                "Review output in the original | F6 Details"
+            ),
+            Self::SourceOutsideWindow => crate::ui::i18n::local!(
+                language,
+                "元のtool行は表示範囲外です | F6で保存済み参照を確認",
+                "Source tool row is outside this window | F6 Saved reference"
+            ),
+            Self::ElapsedUnavailable => {
+                crate::ui::i18n::local!(language, "経過未取得", "Elapsed time unavailable")
+            }
+            Self::Background => crate::ui::i18n::local!(language, "背景", "Background"),
+            Self::HumanBackground => {
+                crate::ui::i18n::local!(language, "背景（利用者）", "Background (user)")
+            }
+            Self::InputBackground => crate::ui::i18n::local!(
+                language,
+                "背景（追加入力）",
+                "Background (additional input)"
+            ),
+            Self::OutputIncomplete => {
+                crate::ui::i18n::local!(language, "出力不完全", "Output incomplete")
+            }
+            Self::AwaitingRecovery => {
+                crate::ui::i18n::local!(language, "復旧待ち", "Awaiting recovery")
+            }
+            Self::Delivered => crate::ui::i18n::local!(
+                language,
+                "モデルに渡した | Enter 参照先",
+                "Delivered to model | Enter Referenced target"
+            ),
+            Self::ResultUnknown => {
+                crate::ui::i18n::local!(language, "結果未記録", "Result not recorded")
+            }
+            Self::IndexPaused => crate::ui::i18n::local!(
+                language,
+                "索引更新の停止記録です。現在の状態確認と再試行: /index > T。会話は続行できます。",
+                "Index update pause recorded | /index > T to inspect and retry. Conversation can continue."
+            ),
+            Self::ResultUncertain => crate::ui::i18n::local!(
+                language,
+                "外部での実行結果は未確認 | F6で保存済みの対象を確認",
+                "External execution results are unconfirmed | F6 Saved targets"
+            ),
+            Self::NoReplay => crate::ui::i18n::local!(
+                language,
+                "自動での再実行はしません",
+                "Commands will not be replayed automatically"
+            ),
+            Self::SavedTargets => crate::ui::i18n::local!(
+                language,
+                "保存した対象はF6 詳細・原文で確認",
+                "Review saved targets in F6 Details / Original"
+            ),
+            Self::WaitInterrupted => crate::ui::i18n::local!(
+                language,
+                "前回の待機観測は中断済み",
+                "Previous wait observation was interrupted"
+            ),
+            Self::SavedObservation => crate::ui::i18n::local!(
+                language,
+                "観測の記録を保持 | F6 原文",
+                "Observation saved | F6 Original"
+            ),
+            Self::UnknownCount => crate::ui::i18n::local!(
+                language,
+                "件数は原文で確認",
+                "Review the count in the original"
+            ),
+            Self::PreviousShutdown => {
+                crate::ui::i18n::local!(language, "前回の終了時の記録", "Previous shutdown record")
+            }
+            Self::PreviousInterruption => {
+                crate::ui::i18n::local!(language, "前回の中断記録", "Previous interruption record")
+            }
+            Self::PreviousRecord => {
+                crate::ui::i18n::local!(language, "前回処理の保存記録", "Previous work record")
             }
         }
-    };
-}
-
-sentences! {
-    ReasoningExpanded => ("▸ Reasoning (expanded)", "▸ 推論（展開中）"),
-    ContextTrim => ("Input scope reduced (original retained)", "入力範囲を縮小（原文は保持）"),
-    MetadataLimited => ("Display details limited | F6 Original for complete facts", "表示情報を制限 | 完全な情報はF6 原文"),
-    NoticeSourceUnavailable => ("Source result is unavailable", "元の結果を参照できません"),
-    NoticeCallUnavailable => ("Call information is unavailable", "呼出し情報を参照できません"),
-    NoticeCommandUnrecorded => ("Command not recorded", "コマンド未記録"),
-    NoticeDeletedThread => ("Referenced conversation was deleted", "参照先の会話は削除済み"),
-    NoticeThreadUnavailable => ("Referenced conversation is unavailable", "参照先の会話を取得できません"),
-    NoticeUntitled => ("Untitled", "無題"),
-    User => ("You", "あなた"), Reasoning => ("Reasoning", "推論"),
-    ToolResult => ("Execution result", "実行結果"), Event => ("State change", "状態変更"),
-    ReviewChange => ("Review the change", "変更内容を確認"), History => ("History", "履歴"),
-    Summary => ("Summary", "要約"), Spill => ("Original reference", "原文参照"),
-    Interrupted => ("Previous work was interrupted", "前回処理の中断情報"),
-    Uncached => ("Body not cached | Open details to load the original", "本文未キャッシュ | 詳細から原文を取得"),
-    Details => ("Review content and references in details", "詳細で内容・参照を確認"),
-    Collapsed => (". Body collapsed | Enter to open", ". 本文を折りたたみ | Enterで開く"),
-    StreamGap => ("Live updates were missed. Reload after the final body is saved | F6 Details", "途中表示の更新欠落を検出。確定本文の保存後に再取得 | F6 詳細"),
-    UnknownExtent => ("Output extent and omitted amount are unknown | F6 Details", "出力の表示範囲・省略量は未確認 | F6 詳細"),
-    CommandPreview => ("Command preview | o Original command (paged)", "コマンド（プレビュー） | o コマンド原文（ページ表示）"),
-    OutputFailed => ("Output retrieval failed", "出力取得に失敗"),
-    RefreshFailed => ("Refresh failed | Showing the previous result", "更新失敗 | 前回の取得内容を表示"),
-    Refreshing => ("Refreshing | Showing the previous result", "再取得中 | 前回の取得内容を表示"),
-    OutputRetry => ("Output retrieval failed | Close and reopen to retry | F6 Original", "出力取得に失敗 | 閉じて開くと再試行 | F6 原文"),
-    OutputLoading => ("Loading output | F6 Original", "出力を取得中 | F6 原文"),
-    OutputUnavailable => ("Could not retrieve output | F6 Original", "出力を取得できませんでした | F6 原文"),
-    OutputEvicted => ("Output not retained | Close and reopen to reload | F6 Original", "出力未保持 | 閉じて開くと再取得 | F6 原文"),
-    OutputOriginal => ("Review output in the original | F6 Details", "出力は原文で確認 | F6 詳細"),
-    SourceOutsideWindow => ("Source tool row is outside this window | F6 Saved reference", "元のtool行は表示範囲外です | F6で保存済み参照を確認"),
-    ElapsedUnavailable => ("Elapsed time unavailable", "経過未取得"),
-    Background => ("Background", "背景"), HumanBackground => ("Background (user)", "背景（利用者）"),
-    InputBackground => ("Background (additional input)", "背景（追加入力）"),
-    OutputIncomplete => ("Output incomplete", "出力不完全"),
-    AwaitingRecovery => ("Awaiting recovery", "復旧待ち"),
-    Delivered => ("Delivered to model | Enter Referenced target", "モデルに渡した | Enter 参照先"),
-    ResultUnknown => ("Result not recorded", "結果未記録"),
-    IndexPaused => ("Index update pause recorded | /index > T to inspect and retry. Conversation can continue.", "索引更新の停止記録です。現在の状態確認と再試行: /index > T。会話は続行できます。"),
-    ResultUncertain => ("External execution results are unconfirmed | F6 Saved targets", "外部での実行結果は未確認 | F6で保存済みの対象を確認"),
-    NoReplay => ("Commands will not be replayed automatically", "自動での再実行はしません"),
-    SavedTargets => ("Review saved targets in F6 Details / Original", "保存した対象はF6 詳細・原文で確認"),
-    WaitInterrupted => ("Previous wait observation was interrupted", "前回の待機観測は中断済み"),
-    SavedObservation => ("Observation saved | F6 Original", "観測の記録を保持 | F6 原文"),
-    UnknownCount => ("Review the count in the original", "件数は原文で確認"),
-    PreviousShutdown => ("Previous shutdown record", "前回の終了時の記録"),
-    PreviousInterruption => ("Previous interruption record", "前回の中断記録"),
-    PreviousRecord => ("Previous work record", "前回処理の保存記録"),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
