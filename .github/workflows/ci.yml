@@ -17,6 +17,10 @@ on:
         type: choice
         options: ['default', '2', '4']
         default: 'default'
+      all_oses:
+        description: Include Windows on a task branch (main and integration/* always run all three OSes)
+        type: boolean
+        default: false
       baseline_ref:
         description: Baseline commit for the optional Windows comparison
         type: string
@@ -47,7 +51,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.windows_test_threads == '4' && '["windows-latest"]' || '["ubuntu-latest","macos-latest","windows-latest"]') }}
+        # Task branches check Linux/macOS; Windows (the slow job) runs on main,
+        # integration/* batches and on request, before anything lands.
+        os: ${{ fromJSON(inputs.windows_test_threads == '4' && '["windows-latest"]' || (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/integration/') || inputs.all_oses || inputs.windows_test_threads == '2') && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
