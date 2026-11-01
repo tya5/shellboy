@@ -27,6 +27,7 @@ pub(super) struct RawInspection {
 enum Body {
     History(crate::history::observation::Raw),
     Lists(super::inspection_lists::RawLists),
+    Retained(Box<super::inspection_retained::OwnedRetainedRaw>),
     Thread(
         Arc<header::RawHeader>,
         Box<crate::thread_observation::RawLatest>,
@@ -97,6 +98,9 @@ pub(super) fn read_scoped_tx(
                     &scope.threads,
                 )?;
                 Body::Lists(super::inspection_lists::read_list_facts_tx(db, captured)?)
+            }
+            InspectionTarget::RetainedSources(scope) => {
+                Body::Retained(Box::new(super::inspection_retained::read_retained_source_facts_tx(db,scope)?))
             }
             InspectionTarget::HistorySources(scope) => {
                 if scope.scope_limited {
@@ -252,6 +256,10 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
                     ApiError::new(ErrorCode::InvalidState, "Cannot prepare Thread facts")
                 })?,
             )
+        }
+        Body::Retained(raw) => {
+            let value=super::inspection_retained::prepare_inspection(*raw)?;
+            (String::new(),value)
         }
         Body::History(raw) => {
             let mut value = crate::history::observation::prepare(raw);

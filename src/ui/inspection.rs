@@ -4,6 +4,7 @@ use super::*;
 pub enum InspectionTarget {
     Lists(ListInspectionScope),
     HistorySources(HistorySourceScope),
+    RetainedSources(Box<crate::frontend::inspection_retained::RetainedScope>),
     Operation(String),
     Usage(crate::protocol::UsageGetArgs),
     Thread(String),
@@ -36,7 +37,7 @@ pub struct ListInspectionScope {
 }
 impl InspectionTarget {
     pub(crate) fn retains_history(&self) -> bool {
-        matches!(self, Self::HistorySources(_) | Self::Lists(_))
+        matches!(self, Self::HistorySources(_) | Self::Lists(_) | Self::RetainedSources(_))
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,6 +123,9 @@ impl State {
         } else {
             "保存状態を取得中".into()
         };
+        if let InspectionTarget::RetainedSources(scope) = &self.target {
+            text.push_str(&format!(" · 取得済み結果 {} を保持 · 再実行は a から明示操作",scope.captured_at));
+        }
         if let InspectionTarget::HistorySources(scope) = &self.target {
             text.push_str(&format!(
                 " · 取得時の結果 {} を保持 · 再取得:aから同じ履歴照会",

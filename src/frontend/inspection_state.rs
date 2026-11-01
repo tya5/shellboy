@@ -30,6 +30,7 @@ fn global_saved(target: &InspectionTarget) -> bool {
             | InspectionTarget::Deletion(_)
             | InspectionTarget::Index(_)
             | InspectionTarget::HistorySources(_)
+            | InspectionTarget::RetainedSources(_)
     )
 }
 
@@ -392,7 +393,7 @@ impl Observation {
             scope.visible
                 && matches!(
                     scope.target,
-                    InspectionTarget::Index(_) | InspectionTarget::Storage
+                    InspectionTarget::Index(_) | InspectionTarget::Storage | InspectionTarget::RetainedSources(_)
                 )
         })
     }
@@ -401,7 +402,7 @@ impl Observation {
             scope.visible
                 && matches!(
                     scope.target,
-                    InspectionTarget::Storage | InspectionTarget::Operation(_)
+                    InspectionTarget::Storage | InspectionTarget::Operation(_) | InspectionTarget::RetainedSources(_)
                 )
         })
     }
@@ -410,7 +411,7 @@ impl Observation {
             scope.visible
                 && matches!(
                     scope.target,
-                    InspectionTarget::Storage | InspectionTarget::Operation(_)
+                    InspectionTarget::Storage | InspectionTarget::Operation(_) | InspectionTarget::RetainedSources(_)
                 )
         }) {
             scope.metadata_dirty = true;
@@ -421,7 +422,7 @@ impl Observation {
             scope.visible
                 && matches!(
                     scope.target,
-                    InspectionTarget::Storage | InspectionTarget::Index(_)
+                    InspectionTarget::Storage | InspectionTarget::Index(_) | InspectionTarget::RetainedSources(_)
                 )
         }) {
             scope.metadata_dirty = true;
@@ -460,7 +461,7 @@ impl Observation {
             scope.visible
                 && matches!(
                     scope.target,
-                    InspectionTarget::Index(_) | InspectionTarget::Storage
+                    InspectionTarget::Index(_) | InspectionTarget::Storage | InspectionTarget::RetainedSources(_)
                 )
         }) {
             scope.metadata_dirty = true;

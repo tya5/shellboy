@@ -4,8 +4,24 @@ use crate::{
     ui::{HistorySourceScope, InspectionTarget},
 };
 use serde_json::Value;
-pub(super) fn capture_command(command: &Command) -> Option<Command> {
-    matches!(command, Command::HistoryGet(_) | Command::HistoryList(_)).then(|| command.clone())
+pub(super) enum CapturedCommand {
+    Full(Command),
+    Limited,
+}
+pub(super) fn capture_command(command: &Command) -> Option<CapturedCommand> {
+    if !(matches!(command, Command::HistoryGet(_) | Command::HistoryList(_))
+        || super::inspection_retained::supports(command)) { return None; }
+    // Count borrowed JSON before cloning the request's query/filter strings.
+    Some(if super::inspection_retained::request_fits(command) {
+        CapturedCommand::Full(command.clone())
+    }else{CapturedCommand::Limited})
+}
+pub(super) fn capture_saved(command:&CapturedCommand,value:&Value)->Option<InspectionTarget> {
+    match command {
+        CapturedCommand::Full(command)=>capture(command,value),
+        CapturedCommand::Limited if value.get("error").is_none()=>Some(super::inspection_retained::limited_scope()),
+        _=>None,
+    }
 }
 #[derive(serde::Serialize)]
 #[serde(untagged)]
@@ -48,6 +64,7 @@ pub(super) async fn request(
     .await?
 }
 pub(super) fn capture(command: &Command, value: &Value) -> Option<InspectionTarget> {
+    if let Some(target)=super::inspection_retained::capture_response(command,value) { return Some(target); }
     let (rows, thread) = match command {
         Command::HistoryGet(_) => (vec![value], None),
         Command::HistoryList(args) => (

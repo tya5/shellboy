@@ -18,6 +18,7 @@ mod inspection_confirmations;
 mod inspection_deletion;
 pub(crate) mod inspection_external;
 mod inspection_history;
+pub(crate) mod inspection_retained;
 mod inspection_index;
 mod inspection_lifecycle;
 mod inspection_lists;
@@ -1865,7 +1866,8 @@ async fn run_with_delivery(
                                     "refresh": "Repeat status --memory explicitly to observe again",
                                 });
                             }
-                            let retained=response.as_ref().ok().and_then(|value|retained_command.as_ref().and_then(|command|inspection_history::capture(command,value)));
+                            let retained=response.as_ref().ok().and_then(|value|retained_command.as_ref().and_then(|command|inspection_history::capture_saved(command,value)));
+                            if let Ok(value)=&mut response { inspection_retained::decorate_original(value,&retained); }
                             command_outcome(&outcomes, submission, &management_outcome(&response))
                                 .await;
                             if mutation && let Some(owner) = notice_owner {
@@ -2907,7 +2909,9 @@ async fn run_with_delivery(
                                 .await;
                                 return;
                             }
-                            let retained=retained_command.as_ref().and_then(|command|inspection_history::capture(command,&observed));
+                            let retained=retained_command.as_ref().and_then(|command|inspection_history::capture_saved(command,&observed));
+                            let mut observed=observed;
+                            inspection_retained::decorate_original(&mut observed,&retained);
                             let result =
                                 prepare_management(Ok(observed), control.store.config.cache.body_bytes)
                                     .await;
