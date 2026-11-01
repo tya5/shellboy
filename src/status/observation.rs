@@ -101,49 +101,87 @@ fn invalid(error: ApiError) -> StorageError {
 
 /// Native PK batches only; all correlated metadata uses indexed owner/key ranges.
 pub(crate) fn point_sql(kind: Kind) -> String {
-    let (table, id, fields, joins, thread, owner, answer, operation, connection, model) = match kind {
+    let (table, id, fields, joins, thread, owner, answer, operation, connection, model) = match kind
+    {
         Kind::Run => (
-            "run r", "r.id",
+            "run r",
+            "r.id",
             "r.state,r.thread_id,r.id,t.id,r.created_at,NULL,r.ended_at,NULL,substr(r.stop_reason,1,512)",
             "LEFT JOIN turn t ON t.id=(SELECT id FROM (SELECT id,created_at FROM turn INDEXED BY turns_by_run WHERE run_id=r.id AND created_at=(SELECT max(created_at) FROM turn INDEXED BY turns_by_run WHERE run_id=r.id) LIMIT 201) ORDER BY id DESC LIMIT 1)",
-            "r.thread_id", "r.owner_run_id", "t.answer_node_id", "NULL", "NULL", "NULL",
+            "r.thread_id",
+            "r.owner_run_id",
+            "t.answer_node_id",
+            "NULL",
+            "NULL",
+            "NULL",
         ),
         Kind::Turn => (
-            "turn r", "r.id",
+            "turn r",
+            "r.id",
             "r.state,r.thread_id,r.run_id,r.id,r.created_at,NULL,r.ended_at,NULL,CASE WHEN json_valid(r.recovery_reason_json) THEN substr(COALESCE(json_extract(r.recovery_reason_json,'$.kind'),json_extract(r.recovery_reason_json,'$.code')),1,512) END",
             "JOIN run t ON t.id=r.run_id",
-            "r.thread_id", "t.owner_run_id", "r.answer_node_id", "NULL", "NULL", "NULL",
+            "r.thread_id",
+            "t.owner_run_id",
+            "r.answer_node_id",
+            "NULL",
+            "NULL",
+            "NULL",
         ),
         Kind::Shell => (
-            "shell_execution r", "r.id",
+            "shell_execution r",
+            "r.id",
             "r.state,t.thread_id,r.owner_run_id,r.turn_id,NULL,r.started_at,r.ended_at,NULL,substr(r.end_reason,1,512)",
             "JOIN run t ON t.id=r.owner_run_id",
-            "t.thread_id", "t.owner_run_id", "NULL", "NULL", "NULL", "NULL",
+            "t.thread_id",
+            "t.owner_run_id",
+            "NULL",
+            "NULL",
+            "NULL",
+            "NULL",
         ),
         Kind::Message => (
-            "receipt r INDEXED BY receipt_message_node", "r.message_node_id",
+            "receipt r INDEXED BY receipt_message_node",
+            "r.message_node_id",
             "r.state,r.target_thread_id,r.run_id,r.turn_id,r.created_at,NULL,NULL,NULLIF(r.updated_at,''),substr(r.hold_reason,1,512)",
             "LEFT JOIN run t ON t.id=r.run_id LEFT JOIN turn u ON u.id=r.turn_id",
-            "r.target_thread_id", "t.owner_run_id", "u.answer_node_id",
-            "CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=r.client_operation_id) THEN r.client_operation_id END", "NULL", "NULL",
+            "r.target_thread_id",
+            "t.owner_run_id",
+            "u.answer_node_id",
+            "CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=r.client_operation_id) THEN r.client_operation_id END",
+            "NULL",
+            "NULL",
         ),
         Kind::Attempt => (
-            "model_attempt r", "r.id",
+            "model_attempt r",
+            "r.id",
             "r.state,t.thread_id,t.run_id,r.turn_id,NULL,r.started_at,r.ended_at,NULL,CASE WHEN json_valid(r.error_json) THEN substr(COALESCE(json_extract(r.error_json,'$.kind'),json_extract(r.error_json,'$.code')),1,512) END",
             "JOIN turn t ON t.id=r.turn_id JOIN run u ON u.id=t.run_id",
-            "t.thread_id", "u.owner_run_id", "t.answer_node_id", "NULL", "substr(r.profile_id,1,128)", "substr(r.model_id,1,256)",
+            "t.thread_id",
+            "u.owner_run_id",
+            "t.answer_node_id",
+            "NULL",
+            "substr(r.profile_id,1,128)",
+            "substr(r.model_id,1,256)",
         ),
     };
     // No reservation text/output payload crosses the raw boundary unchecked.
     // A saturated latest-Turn prefix cannot claim canonical lexical tie ordering.
     let (revisit, guard) = if kind == Kind::Run {
-        ("(SELECT CASE WHEN octet_length(value)<=16384 THEN value END FROM app_meta WHERE key='revisit.'||r.id)",
-         "CASE WHEN EXISTS(SELECT 1 FROM turn INDEXED BY turns_by_run WHERE run_id=r.id AND created_at=(SELECT max(created_at) FROM turn INDEXED BY turns_by_run WHERE run_id=r.id) LIMIT 1 OFFSET 200) THEN 'latest_turn_prefix_limit' WHEN EXISTS(SELECT 1 FROM app_meta WHERE key='revisit.'||r.id AND octet_length(value)>16384) THEN 'revisit_metadata_limit' END")
-    } else { ("NULL", "NULL") };
+        (
+            "(SELECT CASE WHEN octet_length(value)<=16384 THEN value END FROM app_meta WHERE key='revisit.'||r.id)",
+            "CASE WHEN EXISTS(SELECT 1 FROM turn INDEXED BY turns_by_run WHERE run_id=r.id AND created_at=(SELECT max(created_at) FROM turn INDEXED BY turns_by_run WHERE run_id=r.id) LIMIT 1 OFFSET 200) THEN 'latest_turn_prefix_limit' WHEN EXISTS(SELECT 1 FROM app_meta WHERE key='revisit.'||r.id AND octet_length(value)>16384) THEN 'revisit_metadata_limit' END",
+        )
+    } else {
+        ("NULL", "NULL")
+    };
     let (elapsed, output) = if kind == Kind::Shell {
-        ("CAST(CASE WHEN json_valid(r.shell_json) AND json_type(r.shell_json,'$.completion.elapsed_ms')='integer' AND json_extract(r.shell_json,'$.completion.elapsed_ms') BETWEEN 0 AND 9223372036854775807 THEN json_extract(r.shell_json,'$.completion.elapsed_ms') END AS TEXT)",
-         "(SELECT received_at FROM output_chunk WHERE execution_id=r.id ORDER BY sequence DESC LIMIT 1)")
-    } else { ("NULL", "NULL") };
+        (
+            "CAST(CASE WHEN json_valid(r.shell_json) AND json_type(r.shell_json,'$.completion.elapsed_ms')='integer' AND json_extract(r.shell_json,'$.completion.elapsed_ms') BETWEEN 0 AND 9223372036854775807 THEN json_extract(r.shell_json,'$.completion.elapsed_ms') END AS TEXT)",
+            "(SELECT received_at FROM output_chunk WHERE execution_id=r.id ORDER BY sequence DESC LIMIT 1)",
+        )
+    } else {
+        ("NULL", "NULL")
+    };
     format!(
         "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
     )
@@ -212,7 +250,10 @@ pub(crate) fn read_status_tx(
                 continue;
             }
             if row.get_ref(22)?.as_str_or_null().ok().flatten().is_some() {
-                result.limited.push(Limited { id: id.into(), reason: "canonical_metadata_unconfirmed" });
+                result.limited.push(Limited {
+                    id: id.into(),
+                    reason: "canonical_metadata_unconfirmed",
+                });
                 continue;
             }
             let borrowed = (1..22)
@@ -221,9 +262,19 @@ pub(crate) fn read_status_tx(
                         .map(|v| v.as_str_or_null().ok().flatten())
                 })
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            if borrowed.iter().enumerate().any(|(column, value)| value.is_some_and(|s| s.len() > if column == 18 { 16384 } else if column == 8 { 2048 } else { 1024 }))
-                || !budget
-                    .take(id.len() + borrowed.iter().flatten().map(|s| s.len()).sum::<usize>())
+            if borrowed.iter().enumerate().any(|(column, value)| {
+                value.is_some_and(|s| {
+                    s.len()
+                        > if column == 18 {
+                            16384
+                        } else if column == 8 {
+                            2048
+                        } else {
+                            1024
+                        }
+                })
+            }) || !budget
+                .take(id.len() + borrowed.iter().flatten().map(|s| s.len()).sum::<usize>())
             {
                 result.limited.push(Limited {
                     id: id.into(),
@@ -391,9 +442,19 @@ pub(crate) fn matches_filters(
     }
     Some(true)
 }
-fn canonical_item(fact: &RawFact, observed: chrono::DateTime<chrono::Utc>) -> Result<super::WorkItem, ApiError> {
+fn canonical_item(
+    fact: &RawFact,
+    observed: chrono::DateTime<chrono::Utc>,
+) -> Result<super::WorkItem, ApiError> {
     let get = |column: usize| fact.fields.get(column).cloned().flatten();
-    let required = |column| get(column).ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Canonical Status metadata unavailable"));
+    let required = |column| {
+        get(column).ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidState,
+                "Canonical Status metadata unavailable",
+            )
+        })
+    };
     let kind = fact.key.kind.canonical();
     let id = &fact.key.id;
     let state = required(0)?;
@@ -402,29 +463,55 @@ fn canonical_item(fact: &RawFact, observed: chrono::DateTime<chrono::Utc>) -> Re
     let ended_at = get(6);
     let updated_at = get(7);
     let activity = [&created_at, &started_at, &ended_at, &updated_at]
-        .into_iter().filter_map(|v| v.as_deref())
+        .into_iter()
+        .filter_map(|v| v.as_deref())
         .map(|v| super::stamp(v).map(|at| (at, v)))
-        .collect::<Result<Vec<_>, _>>()?.into_iter().max_by_key(|(at, _)| *at)
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .max_by_key(|(at, _)| *at)
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Work has no recorded timestamp"))?;
     let elapsed_ms = if fact.key.kind == Kind::Shell {
         if matches!(state.as_str(), "starting" | "running" | "stopping") {
-            started_at.as_deref().and_then(|s| super::stamp(s).ok())
+            started_at
+                .as_deref()
+                .and_then(|s| super::stamp(s).ok())
                 .map(|at| observed.signed_duration_since(at).num_milliseconds().max(0) as u64)
-        } else { get(19).and_then(|s| s.parse().ok()) }
-    } else { None };
+        } else {
+            get(19).and_then(|s| s.parse().ok())
+        }
+    } else {
+        None
+    };
     let mut item = super::WorkItem {
-        kind: kind.as_str().into(), id: id.clone(), state,
-        thread_id: required(1)?, thread_title: required(14)?,
-        parent_thread_id: get(15), current_connection: required(16)?, current_model: required(17)?,
-        run_id: get(2), owner_run_id: get(9), turn_id: get(3),
+        kind: kind.as_str().into(),
+        id: id.clone(),
+        state,
+        thread_id: required(1)?,
+        thread_title: required(14)?,
+        parent_thread_id: get(15),
+        current_connection: required(16)?,
+        current_model: required(17)?,
+        run_id: get(2),
+        owner_run_id: get(9),
+        turn_id: get(3),
         execution_id: (fact.key.kind == Kind::Shell).then(|| id.clone()),
         message_id: (fact.key.kind == Kind::Message).then(|| id.clone()),
         attempt_id: (fact.key.kind == Kind::Attempt).then(|| id.clone()),
-        operation_id: get(10), answer_node_id: get(11),
-        activity_at: activity.1.into(), elapsed_ms, last_output_at: get(20),
-        created_at, started_at, ended_at, updated_at,
-        attempt_connection: get(12), attempt_model: get(13), reason: get(8),
-        revisit: get(18).as_deref().and_then(crate::control::revisit::summary_from_body),
+        operation_id: get(10),
+        answer_node_id: get(11),
+        activity_at: activity.1.into(),
+        elapsed_ms,
+        last_output_at: get(20),
+        created_at,
+        started_at,
+        ended_at,
+        updated_at,
+        attempt_connection: get(12),
+        attempt_model: get(13),
+        reason: get(8),
+        revisit: get(18)
+            .as_deref()
+            .and_then(crate::control::revisit::summary_from_body),
         targets: Vec::new(),
     };
     item.targets = super::links(kind, &item)?;
@@ -438,8 +525,13 @@ pub(crate) fn prepare(raw: Raw) -> Value {
     let mut rows = Vec::new();
     for fact in raw.facts {
         match canonical_item(&fact, observed) {
-            Ok(current) => rows.push(serde_json::json!({"kind":fact.key.kind.name(),"id":fact.key.id,"current":current})),
-            Err(_) => limited.push(Limited { id: fact.key.id, reason: "canonical_metadata_unavailable" }),
+            Ok(current) => rows.push(
+                serde_json::json!({"kind":fact.key.kind.name(),"id":fact.key.id,"current":current}),
+            ),
+            Err(_) => limited.push(Limited {
+                id: fact.key.id,
+                reason: "canonical_metadata_unavailable",
+            }),
         }
     }
     serde_json::json!({"items":rows,"missing_ids":raw.missing.into_iter().map(|k|serde_json::json!({"kind":k.kind.name(),"id":k.id})).collect::<Vec<_>>(),"limited_fields":limited.into_iter().map(|w|serde_json::json!({"id":w.id,"reason":w.reason})).collect::<Vec<_>>(),"sql_statements":raw.statements})
@@ -581,8 +673,19 @@ mod tests {
         db
     }
     fn retained_keys() -> Vec<Key> {
-        [(Kind::Run,"r"),(Kind::Turn,"t"),(Kind::Shell,"s"),(Kind::Message,"message"),(Kind::Attempt,"a")]
-            .into_iter().map(|(kind,id)| Key {kind,id:id.into()}).collect()
+        [
+            (Kind::Run, "r"),
+            (Kind::Turn, "t"),
+            (Kind::Shell, "s"),
+            (Kind::Message, "message"),
+            (Kind::Attempt, "a"),
+        ]
+        .into_iter()
+        .map(|(kind, id)| Key {
+            kind,
+            id: id.into(),
+        })
+        .collect()
     }
     #[test]
     fn every_native_dto_matches_canonical_status_including_targets_and_mutated_metadata() {
@@ -597,18 +700,28 @@ mod tests {
                   INSERT INTO output_chunk VALUES('s',2,'stderr',0,X'62','2026-11-01T00:00:00.5Z');
                 "#).unwrap();
             }
-            let args = crate::protocol::StatusArgs {thread_id:Some("scope".into()),all:true,limit:200,..Default::default()};
-            let canonical = super::super::snapshot(&db,&args,"fixture").unwrap();
-            assert_eq!(canonical.items.len(),5);
+            let args = crate::protocol::StatusArgs {
+                thread_id: Some("scope".into()),
+                all: true,
+                limit: 200,
+                ..Default::default()
+            };
+            let canonical = super::super::snapshot(&db, &args, "fixture").unwrap();
+            assert_eq!(canonical.items.len(), 5);
             let mut budget = TextBudget::default();
-            let raw = read_status_tx(&db,&retained_keys(),&mut budget).unwrap();
-            assert_eq!(raw.statements,5);
+            let raw = read_status_tx(&db, &retained_keys(), &mut budget).unwrap();
+            assert_eq!(raw.statements, 5);
             assert!(raw.limited.is_empty());
             let prepared = prepare(raw);
-            assert_eq!(prepared["items"].as_array().unwrap().len(),5);
+            assert_eq!(prepared["items"].as_array().unwrap().len(), 5);
             for expected in canonical.items {
-                let actual = prepared["items"].as_array().unwrap().iter().find(|row|row["kind"]==expected.kind && row["id"]==expected.id).unwrap();
-                assert_eq!(actual["current"],serde_json::to_value(expected).unwrap());
+                let actual = prepared["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["kind"] == expected.kind && row["id"] == expected.id)
+                    .unwrap();
+                assert_eq!(actual["current"], serde_json::to_value(expected).unwrap());
             }
             assert!(budget.used <= TEXT_BYTES);
         }
@@ -619,15 +732,19 @@ mod tests {
         for n in 0..200 {
             db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'scope','r','completed','2026-11-01T00:00:00Z')",[format!("t{n:03}")]).unwrap();
         }
-        let raw = read_status_tx(&db,&retained_keys(),&mut TextBudget::default()).unwrap();
-        assert!(!raw.facts.iter().any(|fact|fact.key.kind==Kind::Run));
-        assert!(raw.limited.iter().any(|limited|limited.id=="r"));
+        let raw = read_status_tx(&db, &retained_keys(), &mut TextBudget::default()).unwrap();
+        assert!(!raw.facts.iter().any(|fact| fact.key.kind == Kind::Run));
+        assert!(raw.limited.iter().any(|limited| limited.id == "r"));
         assert!(raw.missing.is_empty());
-        db.execute("DELETE FROM turn WHERE id<>'t'",[]).unwrap();
-        db.execute("UPDATE app_meta SET value=?1 WHERE key='revisit.r'",["x".repeat(16385)]).unwrap();
-        let raw = read_status_tx(&db,&retained_keys(),&mut TextBudget::default()).unwrap();
-        assert!(!raw.facts.iter().any(|fact|fact.key.kind==Kind::Run));
-        assert!(raw.limited.iter().any(|limited|limited.id=="r"));
+        db.execute("DELETE FROM turn WHERE id<>'t'", []).unwrap();
+        db.execute(
+            "UPDATE app_meta SET value=?1 WHERE key='revisit.r'",
+            ["x".repeat(16385)],
+        )
+        .unwrap();
+        let raw = read_status_tx(&db, &retained_keys(), &mut TextBudget::default()).unwrap();
+        assert!(!raw.facts.iter().any(|fact| fact.key.kind == Kind::Run));
+        assert!(raw.limited.iter().any(|limited| limited.id == "r"));
         assert!(raw.missing.is_empty());
     }
 }
