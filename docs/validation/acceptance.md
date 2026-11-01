@@ -7300,3 +7300,24 @@ there is no automatic retry. Test-only correction uses the actual owner instance
 prefix for ThreadSet and the later explicit ShellRead. Production/leaf source and
 the17 passing cases are unchanged; corrected IPC2 and latest exact-source CI
 remain unrun. Full standard is still CI-only; final acceptance awaits107main.
+
+## #108 latest lightweight positive results before #107 main
+
+Explicit slotf37d7ca1 on sourcef78663e445068d39cf954788f282f351fbd7bc00 /
+basecdcb70da passes fmt, `cargo check --tests` and registered IPC2/0. SHA/base/clean
+and positive exact-count guards pass, own entry-file mtimes force own-path
+recompilation, exit0/cleanup confirmed and shared Rust slot released. Production
+source and the17 cases are unchanged from d225f8ec's retained14/0 plus raw3/0;
+this is split-source evidence, not a claim that all19 ran in the last chain.
+No full local standard, Clippy, PTY or native3OS result is inferred. Real IPC now
+exercises the title-change notifications using the actual instance ID; synthetic
+GC/output growth/terminal/tombstone are labeled, and original revision/bytes/cursor
+stay retained through current metadata refresh. Explicit test-side cursor replay
+succeeds without a raw-read/registration call in the observation reader.
+
+Textual conflict forecast before #107 landing reports frontend.rs,
+frontend/inspection_read.rs and ui/inspection.rs between the task branches.
+The #108 author owns resolving the rebase while retaining both list and retained
+source dispatch/targets. Final acceptance requires that #107-main rebase plus
+refreshed checks; preliminary branch CI cannot replace it. #117-main release
+preparation remains the reviewer's priority interrupt.

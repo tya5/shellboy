@@ -55,8 +55,10 @@ raw/lifecycle batches; no new worker/queue/command/schema. Shared metadata budge
 is256KiB, <=200 targets and <=4 SQL statements; original query/body/cursor/outcome
 remain immutable, refresh never repeats search/raw/wait. G base811852f is retained
 in history; current preparation is on maincdcb70da before #107 integration.
-Nineteen focused executions are planned (14 retained,3 raw witness,2 IPC).
-Rust compile/tests/native CI remain unrun; final acceptance follows #107 main.
+Lightweight qualification passes check --tests, retained14/raw3 at sourced225f8ec,
+and registered IPC2 at test-only correctionf78663e4. Source/type and test operation
+ID failures remain in acceptance. Full standard/native CI are pending on the
+pushed branch; this is preliminary until rebase/qualification after #107 main.
 Reviewer priority requires returning to release preparation when #117 lands.
 
 ## G latest-main admission batch
