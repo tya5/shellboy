@@ -3468,11 +3468,12 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
         }
         send(&control, &target, "long current turn").await;
         let tool_response = |index: u32, tokens: u32| json!({"id":format!("small-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("small-{index}"),"name":"shell","arguments":json!({"command":"echo last"}).to_string()}]});
+        let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
         for index in 0..2 {
             let current = incoming(&control, &mut receive).await;
             current.reply.send((200, json!({"id":format!("large-{index}"),"status":"completed", "usage":{"input_tokens":100,"output_tokens":1}, "output":[{
                 "type":"function_call","call_id":format!("large-{index}"),"name":"shell",
-                "arguments":json!({"command":"printf '%050000d' 0"}).to_string()
+                "arguments":json!({"command":large_command}).to_string()
             }]}))).unwrap();
         }
         let before = incoming(&control, &mut receive).await;
