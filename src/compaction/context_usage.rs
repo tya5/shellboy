@@ -597,9 +597,14 @@ mod query_cost_tests {
         let first = measure(&db);
         attempts(&db, "other-u", "foreign", 0, 5000);
         let foreign = measure(&db);
+        // A deeper foreign b-tree may add a page-seek step; a scan would add thousands.
         assert_eq!(
-            foreign, first,
-            "unrelated matching profile/model attempts must not become a global rowid scan"
+            (foreign.attempt.as_ref(), foreign.sorts, foreign.fullscan),
+            (first.attempt.as_ref(), first.sorts, first.fullscan)
+        );
+        assert!(
+            foreign.vm <= first.vm + 4,
+            "unrelated matching profile/model attempts must not become a global rowid scan: {first:?}->{foreign:?}"
         );
         attempts(&db, "u", "own", 1, 33);
         let own33 = measure(&db);
@@ -614,21 +619,18 @@ mod query_cost_tests {
         assert_eq!(own1057.fullscan, 0);
         let details = prepared(&db);
         assert_eq!(
-            details["bounded_observation"]["candidate"]["attempt_id"],
+            details["last_successful_attempt"]["attempt_id"],
             "own-001056"
         );
-        assert_eq!(
-            details["bounded_observation"]["candidate"]["input_tokens"],
-            11
-        );
-        assert!(details["last_successful_attempt"].is_null());
+        assert_eq!(details["last_successful_attempt"]["input_tokens"], 11);
+        assert!(details["bounded_observation"].is_null());
         let plan = plan(&db);
         assert!(
             plan.iter().any(|p| p.contains("turns_by_thread")),
             "{plan:?}"
         );
         assert!(
-            plan.iter().any(|p| p.contains("attempts_by_turn")),
+            plan.iter().any(|p| p.contains("attempts_completed_scope")),
             "{plan:?}"
         );
         assert!(plan.iter().any(|p| p.contains("TEMP B-TREE")), "{plan:?}");
@@ -698,6 +700,7 @@ mod query_cost_tests {
 #[cfg(test)]
 mod bounded_cost_tests {
     use super::*;
+    use crate::frontend::sql_trace::Statements;
     use rusqlite::StatementStatus;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -738,6 +741,76 @@ mod bounded_cost_tests {
             q.get_status(StatementStatus::FullscanStep),
         )
     }
+    /// #141: any thread past 33 turns used to read as unknown on the status bar.
+    #[test]
+    fn long_thread_display_read_equals_cli_read_within_a_fixed_statement_and_row_bound() {
+        let db = fixture();
+        // 120 turns, 40 attempts each (>33), interleaved failures, a compaction
+        // replacement per turn, and a trailing run of turns with no usable attempt.
+        db.execute_batch("BEGIN").unwrap();
+        for i in 0..120usize {
+            let turn = format!("u{i:06}");
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'t','r','completed',?2)",params![turn,format!("{i:08}")]).unwrap();
+            for a in 0..40 {
+                let state = if i >= 100 || a % 7 == 0 {
+                    "failed"
+                } else {
+                    "completed"
+                };
+                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'p','m',0,?3,'{}',?4,?5)",
+                    params![format!("a{i:06}-{a:02}"),turn,state,format!("{{\"input_tokens\":{},\"input_tokens_details\":{{\"cached_tokens\":{}}}}}",1000+i*10+a,i),format!("{a:08}")]).unwrap();
+            }
+            let id = format!("edit{i:06}");
+            db.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,'marker',?1,'summary-v1','fixture','completed','0000')",[&id]).unwrap();
+            db.execute(
+                "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES('t',?1)",
+                [id],
+            )
+            .unwrap();
+        }
+        db.execute_batch("COMMIT").unwrap();
+        let exact = prepare_context_usage(read_context_usage_tx(&db, "t", None).unwrap()).0;
+        assert_eq!(exact["last_successful_attempt"]["attempt_id"], "a000099-39");
+        // The newest 20 turns have only failed attempts but the witness is within 33 turns.
+        let trace = Statements::new(&db);
+        let raw = read_context_usage_tx(&db, "t", Some(512)).unwrap();
+        assert_eq!(trace.count(), 2, "scope read plus one bounded statement");
+        drop(trace);
+        assert_eq!(raw.reported_usage().input_tokens, Some(1000 + 99 * 10 + 39));
+        let shown = prepare_context_usage(raw).0;
+        assert_eq!(
+            shown["last_successful_attempt"]["attempt_id"],
+            exact["last_successful_attempt"]["attempt_id"]
+        );
+        assert_eq!(
+            shown["last_successful_attempt"]["input_tokens"],
+            exact["last_successful_attempt"]["input_tokens"]
+        );
+        assert_eq!(
+            shown["last_successful_attempt"]["cached_tokens"],
+            exact["last_successful_attempt"]["cached_tokens"]
+        );
+        // Fixed result rows and bounded work independent of history size.
+        let mut q = db.prepare(&bounded::query()).unwrap();
+        let rows = q.query_map(params!["t", 512], |_| Ok(())).unwrap().count();
+        assert_eq!(rows, 1);
+        // Only the materialized candidate sets (33 turns, 201 audit rows) are scanned.
+        assert!(q.get_status(StatementStatus::FullscanStep) < 1_000);
+        assert!(
+            q.get_status(StatementStatus::VmStep) < 60_000,
+            "{}",
+            q.get_status(StatementStatus::VmStep)
+        );
+        // Truly unreported: 33 recent turns with no completed attempt stay unknown.
+        db.execute(
+            "UPDATE model_attempt SET state='failed' WHERE state='completed'",
+            [],
+        )
+        .unwrap();
+        let v = prepare_context_usage(read_context_usage_tx(&db, "t", Some(512)).unwrap()).0;
+        assert!(v["last_successful_attempt"].is_null());
+        assert_eq!(v["bounded_observation"]["latest_complete"], false);
+    }
     #[test]
     fn tenfold_owned_growth_keeps_actual_display_query_vm_constant() {
         let db = fixture();
@@ -751,9 +824,9 @@ mod bounded_cost_tests {
             "unbounded native work: {a:?} {b:?}"
         );
         let v = prepare_context_usage(read_context_usage_tx(&db, "t", Some(512)).unwrap()).0;
-        assert!(v["last_successful_attempt"].is_null());
-        assert_eq!(v["bounded_observation"]["latest_complete"], false);
-        assert!(v["bounded_observation"]["candidate"]["next_request_pending"].is_null());
+        assert_eq!(v["last_successful_attempt"]["attempt_id"], "a000639-63");
+        assert_eq!(v["last_successful_attempt"]["input_tokens"], 11);
+        assert!(v["last_successful_attempt"]["next_request_pending"].is_null());
         let plan = db
             .prepare(&format!("EXPLAIN QUERY PLAN {}", bounded::query()))
             .unwrap()
@@ -762,11 +835,7 @@ mod bounded_cost_tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert!(
-            plan.iter().any(|s| s.contains("attempts_by_turn")),
-            "{plan:?}"
-        );
-        assert!(
-            plan.iter().any(|s| s.contains("INTEGER PRIMARY KEY")),
+            plan.iter().any(|s| s.contains("attempts_completed_scope")),
             "{plan:?}"
         );
         assert!(!plan.iter().any(|s| s.contains("AUTOMATIC")), "{plan:?}");
@@ -775,24 +844,15 @@ mod bounded_cost_tests {
         );
     }
     #[test]
-    fn rollback_rowid_winner_is_not_falsely_claimed_as_timestamp_prefix_latest() {
+    fn rowid_winner_with_older_timestamp_is_the_exact_latest_in_display_too() {
         let db = fixture();
         grow(&db, 0, 1);
         db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('late-rowid','u000000',0,0,'p','m',0,'completed','{}','00000000')",[]).unwrap();
         let exact = read_context_usage_tx(&db, "t", None).unwrap();
         assert_eq!(exact.latest.as_ref().unwrap().attempt_id, "late-rowid");
         assert!(exact.latest.as_ref().unwrap().usage.input_tokens.is_none());
-        let v = prepare_context_usage(read_context_usage_tx(&db, "t", Some(512)).unwrap()).0;
-        assert!(v["last_successful_attempt"].is_null());
-        assert_eq!(v["bounded_observation"]["latest_complete"], false);
-        assert_ne!(
-            v["bounded_observation"]["candidate"]["attempt_id"],
-            "late-rowid"
-        );
         let bounded = read_context_usage_tx(&db, "t", Some(512)).unwrap();
-        assert!(
-            bounded.reported_usage().input_tokens.is_none(),
-            "footer must not label the candidate as canonical latest usage"
-        );
+        assert_eq!(bounded.latest.as_ref().unwrap().attempt_id, "late-rowid");
+        assert!(bounded.reported_usage().input_tokens.is_none());
     }
 }

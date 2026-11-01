@@ -409,3 +409,9 @@ PRAGMA user_version=17;
 
 INSERT INTO schema_migration(version,name) VALUES(18,'0018_summary_usage_metadata');
 PRAGMA user_version=18;
+
+-- Display context usage (#141): exact newest matching completed attempt per
+-- turn in one seek. Derived index only; implicit trailing rowid orders it.
+CREATE INDEX attempts_completed_scope ON model_attempt(turn_id,profile_id,model_id) WHERE state='completed';
+INSERT INTO schema_migration(version,name) VALUES(19,'0019_context_attempt_scope');
+PRAGMA user_version=19;

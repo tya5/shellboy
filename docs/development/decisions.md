@@ -2844,3 +2844,13 @@ static header of that name is still overridden. Consequence: an existing
 static `x-litellm-session-id` in `headers` now fails `config check` until the
 list is overridden (accepted pre-1.0; the message says how). No new table,
 worker, queue or dependency. Revisit if a gateway needs a per-request name.
+
+## D-141: Context Display Latest Is Exact Per Turn (2026-11-01)
+
+The status-bar read treated any full 33-Turn or 33-Attempt window as incomplete,
+so every Thread with 33 or more Turns showed `↑—`. Migration 0019 adds the
+derived partial index `attempts_completed_scope(turn_id,profile_id,model_id)`;
+the display read takes the exact newest matching Attempt per recent Turn and is
+incomplete only when 33 Turns hold no match. Assumes attempts of an older Turn do
+not outrank a newer Turn's (one open Turn per Thread); revisit if Attempts can be
+added to closed Turns.

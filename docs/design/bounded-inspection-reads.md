@@ -70,7 +70,13 @@ pretend otherwise. Revisit this choice if an indexed canonical ordering witness
 is separately approved. The #125 proactive trigger continues to call the exact
 reader with no display bound; bounded observations cannot trigger compaction.
 
-For context usage, saturation produces `bounded_observation` with a candidate and
+For context usage (#141), each of the 33 recent Turns contributes its exact newest
+matching completed Attempt through the partial index `attempts_completed_scope`
+(one seek per Turn, no 33-Attempt cap). A Thread has one open Turn at a time, so
+the newest Turn holding a match holds the latest Attempt. Saturation of the Turn
+window alone is not incompleteness: the latest is incomplete only when all 33
+Turns hold no match. Merely having 33 or more Turns used to read as unknown.
+Otherwise saturation produces `bounded_observation` with a candidate and
 explicit latest/replacement coverage. `last_successful_attempt` is null when
 canonical latest is unconfirmed; pending is null without canonical evidence.
 Small complete scopes retain their original shape. A positive replacement

@@ -49,6 +49,9 @@ impl Fixture {
         Self::with_initial_view_hold(url, false).await
     }
     async fn with_initial_view_hold(url: &str, hold: bool) -> Self {
+        Self::build(url, hold, false).await
+    }
+    async fn build(url: &str, hold: bool, long_usage: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
         let data = root.path().join("data");
@@ -61,6 +64,17 @@ impl Fixture {
             let tx=db.transaction()?;
             tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('reactive','BASE_TITLE',?1,'','fixture','fixture0','now')",[cwd])?;
             shellboy::history::append_node(&tx,"reactive","paid-baseline",None,"assistant_response",&json!({"text":"PAID_R6_HISTORY remains visible"}),"now")?;
+            if long_usage {
+                // 90 turns x 40 attempts, newest turns hold the only provider usage.
+                tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('lr','reactive','completed','now','now')")?;
+                for i in 0..90usize {
+                    tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,'reactive','lr','completed',?2,?2)",rusqlite::params![format!("lt{i:03}"),format!("2026-01-01T00:{:02}:{:02}Z",i/60,i%60)])?;
+                    for a in 0..40usize {
+                        let usage=(i==89&&a==39).then(||"{\"input_tokens\":159534,\"input_tokens_details\":{\"cached_tokens\":103424}}".to_owned());
+                        tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,?2,0,0,'fixture','fixture0',0,'completed','{}',?3,?4)",rusqlite::params![format!("la{i:03}-{a:02}"),format!("lt{i:03}"),usage,format!("2026-01-01T00:00:{a:02}Z")])?;
+                    }
+                }
+            }
             tx.commit()?;Ok(())
         }).await.unwrap();
         let control = Control::new(&owner, root.path().into());
@@ -1960,4 +1974,18 @@ async fn unrelated_owner_changed_invalidates_deletion_preview_without_a_new_prob
         .unwrap();
     assert!(live, "stale confirmation must not delete the thread");
     fixture.finish().await;
+}
+
+/// #141: the status bar must show saved provider usage for a thread past the
+/// bounded display window (more than 33 turns), through the real owner path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn status_bar_shows_saved_context_usage_for_a_long_thread_through_the_real_owner() {
+    let mut fixture = Fixture::build("http://127.0.0.1:9/v1", false, true).await;
+    let screen = fixture
+        .until("saved context usage on the status bar", |_ui, screen| {
+            screen.contains("↑159K")
+        })
+        .await;
+    assert!(!screen.contains("↑—"), "{screen}");
+    assert!(screen.contains("キャッシュ65%"), "{screen}");
 }
