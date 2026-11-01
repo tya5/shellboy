@@ -20,6 +20,7 @@ mod chrome;
 mod code_copy;
 pub(crate) use code_copy::caption as code_copy_caption;
 pub use code_copy::{CopyBlock, CopyOffer};
+mod command_diagnostics;
 mod composer;
 mod details;
 pub mod live_work;
@@ -2481,6 +2482,7 @@ impl UiState {
         self.dirty = true;
     }
     fn apply_inner(&mut self, update: UiUpdate) {
+        let language = self.config.ui.language;
         if let UiUpdate::ProgramStatus(snapshot) = update {
             if self.config.ui.program_status == crate::config::ProgramStatus::Off {
                 return;
@@ -2728,7 +2730,12 @@ impl UiState {
                             .is_some_and(|p| p.snapshot.draft_id == draft_id)
                 }) {
                     view.thread_id = Some(thread_id);
-                    view.status = "入力は保存済みです。会話と反映待ちを取得中です".into();
+                    view.status = i18n::local!(
+                        language,
+                        "入力は保存済みです。会話と反映待ちを取得中です",
+                        "Input saved. Loading the conversation and pending messages"
+                    )
+                    .into();
                 }
             }
             UiUpdate::DraftRecovery {
@@ -3016,7 +3023,9 @@ impl UiState {
                         self.active_view_mut().cwd = cwd;
                     }
                 } else {
-                    self.active_view_mut().status = "起動cwdが未解決です".into();
+                    self.active_view_mut().status =
+                        i18n::local!(language, "起動cwdが未解決です", "Startup cwd is unresolved")
+                            .into();
                 }
             }
             UiUpdate::WatchDetails {
@@ -3054,7 +3063,7 @@ impl UiState {
                     let status = self
                         .thread_browser
                         .descendant_root()
-                        .and_then(|root| self.descendants.label_in(root, self.config.ui.language));
+                        .and_then(|root| self.descendants.label_in(root, language));
                     self.thread_browser.set_descendant_count(count);
                     self.thread_browser.set_descendant_status(status);
                     self.dirty = true;
@@ -3152,7 +3161,7 @@ impl UiState {
                         }
                     }
                     Err(error) => {
-                        view.status = format!("AGENTS参照を選択できません: {}", error.message)
+                        view.status = command_diagnostics::agents_failure(language, error.message)
                     }
                 }
             }
@@ -3430,7 +3439,8 @@ impl UiState {
                         view.on_load_failed(message.clone());
                     }
                     if selected && let Some(details) = &mut self.details {
-                        details.mark_stale(&details_refresh_failure(language, &message));
+                        details
+                            .mark_stale(&command_diagnostics::refresh_failure(language, &message));
                     }
                 }
             }
@@ -3583,7 +3593,7 @@ impl UiState {
                 }
                 if text.len() > self.config.limits.draft_bytes as usize {
                     self.active_view_mut().status =
-                        "原依頼が下書き上限を超えています。取得内容を切り詰めず編集を中止しました"
+                        i18n::local!(language, "原依頼が下書き上限を超えています。取得内容を切り詰めず編集を中止しました", "The original request exceeds the draft limit. Editing stopped without truncating it")
                             .into();
                     return;
                 }
@@ -3593,7 +3603,8 @@ impl UiState {
                 view.connection = previous.connection.clone();
                 view.model = previous.model.clone();
                 view.effort = previous.effort.clone();
-                view.title = "依頼を編集して分岐".into();
+                view.title =
+                    i18n::local!(language, "依頼を編集して分岐", "Edit request and branch").into();
                 view.draft.cursor = text.len();
                 view.draft.text = text;
                 view.draft.literal_paste = true;
@@ -3604,7 +3615,7 @@ impl UiState {
                     node_id,
                     run_id,
                 });
-                view.status = "原依頼・元会話は変更しません。編集後Enterで新しい会話へ送信".into();
+                view.status = i18n::local!(language, "原依頼・元会話は変更しません。編集後Enterで新しい会話へ送信", "The original request and conversation stay unchanged. Edit, then Enter to send in a new conversation").into();
                 let key = view.draft.draft_id.clone();
                 self.views.insert(key.clone(), view);
                 self.active_view_mut().items.cancel_pending();
@@ -3724,6 +3735,7 @@ impl UiState {
         self.dirty = true;
     }
     fn command_outcome(&mut self, submission: CommandSubmission, result: Result<(), String>) {
+        let language = self.config.ui.language;
         let Some((key, view)) = self
             .views
             .iter_mut()
@@ -3759,11 +3771,12 @@ impl UiState {
                     let next = view.draft.revision + 1;
                     view.draft = pending.snapshot.clone();
                     view.draft.revision = next;
-                    view.status = format!("操作は失敗しました | 入力を復元しました: {error}");
+                    view.status = command_diagnostics::failed_operation(language, None, &error);
                 } else {
-                    view.status = format!(
-                        "操作は失敗しました | 現在の入力を保持 | /restore {} で元の操作を復元: {error}",
-                        submission.revision
+                    view.status = command_diagnostics::failed_operation(
+                        language,
+                        Some(submission.revision),
+                        &error,
                     );
                 }
                 view.promote_status_notice(history_interaction::NoticeKind::Failure);
@@ -3787,9 +3800,12 @@ impl UiState {
                         && v.selecting_agents.as_deref() == Some(request_id.as_str())
                 }) {
                     view.selecting_agents = None;
-                    view.status =
-                        "AGENTS参照の選択は未受付です。本文を保持しています。再操作してください"
-                            .into();
+                    view.status = i18n::local!(
+                        self.config.ui.language,
+                        "AGENTS参照の選択は未受付です。本文を保持しています。再操作してください",
+                        "AGENTS selection was not accepted. Text kept; try again"
+                    )
+                    .into();
                 }
                 true
             }
@@ -3827,7 +3843,12 @@ impl UiState {
             {
                 view.navigation
                     .on_event(NavEvent::Read(ReadEvent::OwnerRejected));
-                view.status = "履歴の取得は未受付です。スクロールで再試行できます".into();
+                view.status = i18n::local!(
+                    self.config.ui.language,
+                    "履歴の取得は未受付です。スクロールで再試行できます",
+                    "History read was not accepted. Scroll to retry"
+                )
+                .into();
                 self.dirty = true;
                 return;
             }
@@ -3864,8 +3885,11 @@ impl UiState {
             && matches!(inner.as_ref(), UiAction::LoadManagementDetail { .. })
             && self.management.inspection.is_some()
         {
-            self.management
-                .detail_rejected("詳細の取得は未受付です。R/Pで再取得できます");
+            self.management.detail_rejected(i18n::local!(
+                self.config.ui.language,
+                "詳細の取得は未受付です。R/Pで再取得できます",
+                "Details read was not accepted. R/P retries"
+            ));
             self.dirty = true;
             return;
         }
@@ -3908,7 +3932,12 @@ impl UiState {
         if let UiAction::SubmittedCommand { submission, action } = action {
             self.command_outcome(
                 submission.clone(),
-                Err("受付キューが満杯または終了済みです。再操作してください".into()),
+                Err(i18n::local!(
+                    self.config.ui.language,
+                    "受付キューが満杯または終了済みです。再操作してください",
+                    "The request queue is full or closed. Try again"
+                )
+                .into()),
             );
             if matches!(action.as_ref(), UiAction::ManagementIntent { action, .. } if matches!(action.as_ref(), UiAction::IndexPreview { .. }))
             {
@@ -3924,7 +3953,11 @@ impl UiState {
         if let UiAction::SaveDraft { thread_id, .. } = action {
             self.retry_save(
                 thread_id,
-                "下書き保存キューが満杯または終了済みです。本文を保持し再試行します",
+                i18n::local!(
+                    self.config.ui.language,
+                    "下書き保存キューが満杯または終了済みです。本文を保持し再試行します",
+                    "The draft-save queue is full or closed. Text kept; saving will retry"
+                ),
             );
             return;
         }
@@ -3946,7 +3979,12 @@ impl UiState {
                 generation: *generation,
                 key: key.clone(),
                 request_revision: *request_revision,
-                result: Err("出力の取得キューが満杯です。閉じて開くと再試行できます".into()),
+                result: Err(i18n::local!(
+                    self.config.ui.language,
+                    "出力の取得キューが満杯です。閉じて開くと再試行できます",
+                    "The output-read queue is full. Close and reopen to retry"
+                )
+                .into()),
             });
             return;
         }
@@ -3961,7 +3999,12 @@ impl UiState {
                 thread_id: thread_id.clone(),
                 generation: *generation,
                 request_id: *request_id,
-                result: Err("リンクの取得キューが満杯です。閉じて開くと再試行できます".into()),
+                result: Err(i18n::local!(
+                    self.config.ui.language,
+                    "リンクの取得キューが満杯です。閉じて開くと再試行できます",
+                    "The link-read queue is full. Close and reopen to retry"
+                )
+                .into()),
             });
             return;
         }
@@ -3999,7 +4042,12 @@ impl UiState {
                 thread_id: thread_id.clone(),
                 generation: *generation,
                 view_revision: Some(*view_revision),
-                message: "履歴の再取得キューが満杯です。スクロールで再試行できます".into(),
+                message: i18n::local!(
+                    self.config.ui.language,
+                    "履歴の再取得キューが満杯です。スクロールで再試行できます",
+                    "The history-refresh queue is full. Scroll to retry"
+                )
+                .into(),
             });
             return;
         }
@@ -4016,7 +4064,11 @@ impl UiState {
                 *execute,
                 Err(crate::protocol::ApiError::new(
                     crate::protocol::ErrorCode::InvalidState,
-                    "処理キューが満杯です。削除は未受付です。もう一度開いてください",
+                    i18n::local!(
+                        self.config.ui.language,
+                        "処理キューが満杯です。削除は未受付です。もう一度開いてください",
+                        "The work queue is full. Delete not accepted; reopen to retry"
+                    ),
                 )),
             );
             return;
@@ -4025,7 +4077,12 @@ impl UiState {
             self.apply(UiUpdate::Models {
                 request_id: *request_id,
                 completed_at: chrono::Utc::now(),
-                result: Err("取得キューが満杯です。Ctrl+Rで再取得してください".into()),
+                result: Err(i18n::local!(
+                    self.config.ui.language,
+                    "取得キューが満杯です。Ctrl+Rで再取得してください",
+                    "The read queue is full. Ctrl+R retries"
+                )
+                .into()),
             });
             return;
         }
@@ -4040,7 +4097,12 @@ impl UiState {
                 thread_id: thread_id.clone(),
                 generation: *generation,
                 request_id: *request_id,
-                result: Err("処理キューが満杯です。もう一度上下キーで操作してください".into()),
+                result: Err(i18n::local!(
+                    self.config.ui.language,
+                    "処理キューが満杯です。もう一度上下キーで操作してください",
+                    "The work queue is full. Use Up/Down again to retry"
+                )
+                .into()),
             });
             return;
         }
@@ -4056,18 +4118,30 @@ impl UiState {
                 revision: *revision,
                 thread_id: None,
                 status: ReceiptStatus::Failed,
-                message: Some("受付キューが満杯です。本文を保持しました。再送してください".into()),
+                message: Some(
+                    i18n::local!(
+                        self.config.ui.language,
+                        "受付キューが満杯です。本文を保持しました。再送してください",
+                        "The request queue is full. Text kept; send again"
+                    )
+                    .into(),
+                ),
             });
         } else {
-            self.active_view_mut().status =
-                "操作は未受付です。処理キューが空いてから再操作してください".into();
+            self.active_view_mut().status = i18n::local!(
+                self.config.ui.language,
+                "操作は未受付です。処理キューが空いてから再操作してください",
+                "Operation not accepted. Try again when the work queue has room"
+            )
+            .into();
             self.dirty = true;
         }
     }
     fn begin_edit(&mut self) {
+        let language = self.config.ui.language;
         let view = self.active_view_mut();
         if view.composer.edited() {
-            view.status = "入力できます".into();
+            view.status = i18n::local!(language, "入力できます", "Ready for input").into();
         }
         if view.pending.get(&view.draft.revision).is_some_and(|p| {
             matches!(
@@ -4093,8 +4167,12 @@ impl UiState {
         };
         let existing = self.view().draft.text.len();
         if existing.saturating_add(text.len()) > self.config.limits.draft_bytes as usize {
-            self.active_view_mut().status =
-                "下書きのbyte上限を超えます。貼付けを追加していません".into();
+            self.active_view_mut().status = i18n::local!(
+                self.config.ui.language,
+                "下書きのbyte上限を超えます。貼付けを追加していません",
+                "The paste would exceed the draft byte limit. Nothing added"
+            )
+            .into();
             self.dirty = true;
             return;
         }
@@ -4173,10 +4251,11 @@ impl UiState {
                 latest_run_stop_reason: None,
                 revisit: None,
                 thread_id: format!("draft:{key}"),
-                title: "未送信の下書き".into(),
+                title: i18n::local!(self.config.ui.language, "未送信の下書き", "Unsent draft")
+                    .into(),
                 cwd: view.cwd.to_string_lossy().into(),
                 parent_id: None,
-                state: "未保存".into(),
+                state: i18n::local!(self.config.ui.language, "未保存", "Not saved").into(),
                 updated_at: String::new(),
                 excerpt: view.draft.text.chars().take(80).collect(),
             })
@@ -4342,7 +4421,12 @@ impl UiState {
     }
     fn submit(&mut self) -> Vec<UiAction> {
         if !self.initialized {
-            self.active_view_mut().status = "起動情報の読込み中です".into();
+            self.active_view_mut().status = i18n::local!(
+                self.config.ui.language,
+                "起動情報の読込み中です",
+                "Loading startup information"
+            )
+            .into();
             return vec![];
         }
         self.active_view_mut().composer.stop_recall();
@@ -4435,9 +4519,14 @@ impl UiState {
         self.send_current(None)
     }
     fn send_current(&mut self, confirmed_run_id: Option<String>) -> Vec<UiAction> {
+        let language = self.config.ui.language;
         if self.view().selecting_agents.is_some() {
-            self.active_view_mut().status =
-                "AGENTS参照を選択中です。本文を保持して完了を待ってください".into();
+            self.active_view_mut().status = i18n::local!(
+                language,
+                "AGENTS参照を選択中です。本文を保持して完了を待ってください",
+                "Selecting AGENTS reference. Text kept; wait for completion"
+            )
+            .into();
             return vec![];
         }
 
@@ -4453,7 +4542,7 @@ impl UiState {
             .get(&view.draft.revision)
             .is_some_and(|p| p.status == ReceiptStatus::Accepting)
         {
-            view.status = "受付処理中です".into();
+            view.status = i18n::local!(language, "受付処理中です", "Accepting the request").into();
             return vec![];
         }
         if view
@@ -4485,7 +4574,12 @@ impl UiState {
                 }),
             },
         );
-        view.status = "送信要求を受け付け中".into();
+        view.status = i18n::local!(
+            language,
+            "送信要求を受け付け中",
+            "Accepting the send request"
+        )
+        .into();
         view.follow_tail();
         let snapshot = Some(Box::new(draft.clone()));
         if let Some(edit) = draft.edit {
@@ -4522,9 +4616,16 @@ impl UiState {
         }]
     }
     fn slash_path(&self, argument: &str) -> Result<(PathBuf, String), &'static str> {
+        let language = self.config.ui.language;
         let path = crate::input_path::relative_to(Path::new(unquote(argument)), &self.view().cwd);
         let wire = crate::input_path::utf8(&path)
-            .map_err(|_| "パスはUTF-8で表現できる必要があります。操作は送信していません")?
+            .map_err(|_| {
+                i18n::local!(
+                    language,
+                    "パスはUTF-8で表現できる必要があります。操作は送信していません",
+                    "The path must be representable in UTF-8. Operation not sent"
+                )
+            })?
             .to_owned();
         Ok((path, wire))
     }
@@ -4578,15 +4679,15 @@ impl UiState {
             "/retry" => {
                 let Some(snapshot) = &self.view().activity.snapshot else {
                     return self
-                        .command_error("現在の復旧対象を読込み中です。F8で状態を確認してください");
+                        .command_error(i18n::local!(self.config.ui.language, "現在の復旧対象を読込み中です。F8で状態を確認してください", "Loading the recovery target. F8 shows its state"));
                 };
                 if snapshot.phase != activity::ActivityPhase::Recovery {
                     return self.command_error(
-                        "現在の会話は復旧待ちではありません。F8で状態を確認してください",
+                        i18n::local!(self.config.ui.language, "現在の会話は復旧待ちではありません。F8で状態を確認してください", "This conversation is not awaiting recovery. F8 shows its state"),
                     );
                 }
                 let Some(run_id) = snapshot.run_id.clone() else {
-                    return self.command_error("復旧対象が未取得です。F8で状態を確認してください");
+                    return self.command_error(i18n::local!(self.config.ui.language, "復旧対象が未取得です。F8で状態を確認してください", "The recovery target is not loaded. F8 shows its state"));
                 };
                 vec![UiAction::Command(Command::RunRetry(
                     crate::protocol::RunTarget { run_id },
@@ -4604,14 +4705,14 @@ impl UiState {
                         Some(thread_id) => (Some(thread_id), false),
                         None => {
                             return self.command_error(
-                                "現在の会話は未保存です。全体は /status で確認できます",
+                                i18n::local!(self.config.ui.language, "現在の会話は未保存です。全体は /status で確認できます", "This conversation is not saved. Use /status for global status"),
                             );
                         }
                     },
                     "global" => (None, false),
                     _ => {
                         return self
-                            .command_error("/status [all|thread]。条件の指定はF8の作業状態から");
+                            .command_error(i18n::local!(self.config.ui.language, "/status [all|thread]。条件の指定はF8の作業状態から", "/status [all|thread]. Use F8 Work status to set filters"));
                     }
                 };
                 self.execute_operation(Command::Status(StatusArgs {
@@ -4669,7 +4770,7 @@ impl UiState {
                         draft_revision: self.view().draft.revision,
                     }]
                 } else {
-                    self.command_error("/edit [user-node-id] は保存済み依頼で使えます")
+                    self.command_error(i18n::local!(self.config.ui.language, "/edit [user-node-id] は保存済み依頼で使えます", "/edit [user-node-id] requires a saved request"))
                 }
             }
             "/index" => self.index_command(argument),
@@ -4702,30 +4803,22 @@ impl UiState {
                         cwd: None,
                     }))]
                 } else {
-                    self.command_error("/fork [node-id] は保存済み履歴で使えます")
+                    self.command_error(i18n::local!(self.config.ui.language, "/fork [node-id] は保存済み履歴で使えます", "/fork [node-id] requires saved history"))
                 }
             }
             "/models" => self.open_models(argument),
             "/model" if argument.is_empty() => {
                 let view = self.view();
                 self.show_help(help::Page::info(
-                    "モデル設定",
-                    "現在の会話の設定",
-                    format!(
-                        "接続: {}\nモデル: {}\n推論強度: {}\n\n/models  一覧からモデルを選ぶ\n/model 接続名 モデル名  名前を指定して変更\n/effort 値  推論強度を変更\n/effort none  推論強度の指定を解除",
-                        view.connection.as_deref().unwrap_or("未設定"),
-                        view.model.as_deref().unwrap_or("未設定"),
-                        view.effort
-                            .as_deref()
-                            .filter(|value| !value.is_empty())
-                            .unwrap_or("未指定")
-                    ),
+                    i18n::local!(self.config.ui.language, "モデル設定", "Model settings"),
+                    i18n::local!(self.config.ui.language, "現在の会話の設定", "Settings for the current conversation"),
+                    command_diagnostics::model_settings(self.config.ui.language, view.connection.as_deref(), view.model.as_deref(), view.effort.as_deref()),
                 ))
             }
             "/model" => {
                 let parts: Vec<_> = argument.split_whitespace().collect();
                 if parts.len() != 2 || !self.config.connections.contains_key(parts[0]) {
-                    return self.command_error("/model <connection> <model> を指定してください");
+                    return self.command_error(i18n::local!(self.config.ui.language, "/model <connection> <model> を指定してください", "Specify /model <connection> <model>"));
                 }
                 self.change_model(parts[0].into(), parts[1].into())
             }
@@ -4747,9 +4840,9 @@ impl UiState {
                 }
             }
             "/agents" if argument.is_empty() => self.show_help(help::Page::info(
-                "AGENTS参照",
-                "次の新しいTurnで読む指示ファイル（現在Turnのsnapshotは不変）",
-                format!("{}\n\n変更するには /agents パス", self.view().agents_path),
+                i18n::local!(self.config.ui.language, "AGENTS参照", "AGENTS reference"),
+                i18n::local!(self.config.ui.language, "次の新しいTurnで読む指示ファイル（現在Turnのsnapshotは不変）", "Instruction file for the next new Turn (the current Turn snapshot stays unchanged)"),
+                command_diagnostics::agents_path(self.config.ui.language, &self.view().agents_path),
             )),
             "/agents" => {
                 if let Some(thread_id) = thread_id {
@@ -4763,7 +4856,7 @@ impl UiState {
                     let cwd = match crate::input_path::utf8(&view.cwd) {
                         Ok(cwd) => cwd.to_owned(),
                         Err(_) => {
-                            return self.command_error("作業場所はUTF-8で表現できる必要があります");
+                            return self.command_error(i18n::local!(self.config.ui.language, "作業場所はUTF-8で表現できる必要があります", "The working directory must be representable in UTF-8"));
                         }
                     };
                     let args = crate::protocol::ThreadCreateArgs {
@@ -4778,9 +4871,9 @@ impl UiState {
                 }
             }
             "/cwd" if argument.is_empty() => self.show_help(help::Page::info(
-                "作業フォルダー",
-                "現在の会話でコマンドを実行する場所",
-                format!("{}\n\n変更するには /cwd パス", self.view().cwd.display()),
+                i18n::local!(self.config.ui.language, "作業フォルダー", "Working directory"),
+                i18n::local!(self.config.ui.language, "現在の会話でコマンドを実行する場所", "Where commands run in the current conversation"),
+                command_diagnostics::cwd_path(self.config.ui.language, self.view().cwd.display()),
             )),
             "/cwd" if !argument.is_empty() => {
                 let (path, wire_path) = match self.slash_path(argument) {
@@ -4868,7 +4961,7 @@ impl UiState {
             "/reload-attachments" => thread_id
                 .map(|thread_id| vec![UiAction::ReloadAttachments { thread_id }])
                 .unwrap_or_else(|| {
-                    self.command_error("保存済み会話で /reload-attachments を実行してください")
+                    self.command_error(i18n::local!(self.config.ui.language, "保存済み会話で /reload-attachments を実行してください", "Run /reload-attachments in a saved conversation"))
                 }),
             "/detach" if !argument.is_empty() => {
                 if self
@@ -4899,7 +4992,7 @@ impl UiState {
                         },
                     ))]
                 } else {
-                    self.command_error("指定IDは下書きに存在しません")
+                    self.command_error(i18n::local!(self.config.ui.language, "指定IDは下書きに存在しません", "The specified ID is not in the draft"))
                 }
             }
             "/reasoning" => self.toggle_reasoning(argument),
@@ -4927,7 +5020,7 @@ impl UiState {
                                 code_block: None,
                             }]
                         })
-                        .unwrap_or_else(|| self.command_error("コピー対象の回答がありません")),
+                        .unwrap_or_else(|| self.command_error(i18n::local!(self.config.ui.language, "コピー対象の回答がありません", "There is no response to copy"))),
                     [node] => vec![UiAction::Copy {
                         node_id: (*node).into(),
                         code_block: None,
@@ -4938,10 +5031,10 @@ impl UiState {
                             code_block: Some(index),
                         }],
                         Err(_) => self.command_error(
-                            "コード番号は0以上の整数です。/copy [all | node-id [番号]]",
+                            i18n::local!(self.config.ui.language, "コード番号は0以上の整数です。/copy [all | node-id [番号]]", "Code index must be a non-negative integer. /copy [all | node-id [index]]"),
                         ),
                     },
-                    _ => self.command_error("/copy [all | node-id [番号]]"),
+                    _ => self.command_error(i18n::local!(self.config.ui.language, "/copy [all | node-id [番号]]", "/copy [all | node-id [index]]")),
                 }
             }
             "/select" => {
@@ -4974,7 +5067,7 @@ impl UiState {
             }],
             "/restore" if argument.is_empty() => {
                 let Some(thread_id) = thread_id else {
-                    return self.command_error("入力範囲の復元は保存済み会話で /restore を実行してください。下書きの復元は /restore 番号です");
+                    return self.command_error(i18n::local!(self.config.ui.language, "入力範囲の復元は保存済み会話で /restore を実行してください。下書きの復元は /restore 番号です", "Use /restore in a saved conversation to restore the input range. Use /restore <number> for a draft"));
                 };
                 vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
                     max_chars: None,
@@ -4987,7 +5080,7 @@ impl UiState {
             }
             "/restore" => {
                 let Some(revision) = argument.parse::<u64>().ok() else {
-                    return self.command_error("引数なしの /restore は入力範囲の復元、/restore 番号は失敗した下書きの復元です");
+                    return self.command_error(i18n::local!(self.config.ui.language, "引数なしの /restore は入力範囲の復元、/restore 番号は失敗した下書きの復元です", "/restore restores the input range; /restore <number> restores a failed draft"));
                 };
                 if let Some(pending) = self.view().pending.get(&revision)
                     && let Some(node_id) = &pending.source_node_id
@@ -5010,7 +5103,7 @@ impl UiState {
                     self.active_view_mut().draft.revision = next;
                     vec![]
                 } else {
-                    self.command_error("保存された失敗snapshotがありません")
+                    self.command_error(i18n::local!(self.config.ui.language, "保存された失敗snapshotがありません", "No saved failure snapshot"))
                 }
             }
             "/cancel" => thread_id
@@ -5026,17 +5119,25 @@ impl UiState {
                 actions.push(UiAction::Quit);
                 actions
             }
-            _ => self.command_error("未知のコマンドです。/help を参照してください"),
+            _ => self.command_error(i18n::local!(self.config.ui.language, "未知のコマンドです。/help を参照してください", "Unknown command. See /help")),
         }
     }
     fn paste_command(&mut self, argument: &str) -> Vec<UiAction> {
         let mut parts = argument.split_whitespace();
         let Some(id) = parts.next().and_then(|s| s.parse::<u64>().ok()) else {
-            return self.command_error("/paste <id> show|edit|remove を指定してください");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "/paste <id> show|edit|remove を指定してください",
+                "Specify /paste <id> show|edit|remove"
+            ));
         };
         let mode = parts.next().unwrap_or("show");
         let Some(fold) = self.view().draft.folds.iter().find(|f| f.id == id).cloned() else {
-            return self.command_error("貼付けブロックがありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "貼付けブロックがありません",
+                "No paste block found"
+            ));
         };
         if mode == "remove" {
             let was_pending = self
@@ -5061,7 +5162,11 @@ impl UiState {
             }
             draft.cursor = fold.start;
         } else {
-            return self.command_error("show|edit|remove を指定してください");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "show|edit|remove を指定してください",
+                "Specify show|edit|remove"
+            ));
         }
         vec![]
     }
@@ -9131,5 +9236,42 @@ mod initial_management_language_tests {
                 "閉じても受付済みの処理は続行"
             }));
         }
+    }
+}
+
+#[cfg(test)]
+mod command_diagnostics_screen_tests {
+    use super::*;
+    use crate::config::UiLanguage;
+
+    #[test]
+    fn unknown_command_uses_configured_language() {
+        fn configure(ui: &mut UiState) {
+            ui.slash("/unknown-command");
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Unknown command", "/help"],
+                UiLanguage::Ja => &["未知のコマンド", "/help"],
+            }
+        }
+        i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn model_settings_preserves_raw_names() {
+        fn configure(ui: &mut UiState) {
+            let view = ui.active_view_mut();
+            view.connection = Some("RAW-CONNECTION".into());
+            view.model = Some("RAW-MODEL".into());
+            ui.slash("/model");
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Model settings", "RAW-CONNECTION", "RAW-MODEL"],
+                UiLanguage::Ja => &["モデル設定", "RAW-CONNECTION", "RAW-MODEL"],
+            }
+        }
+        i18n::verify_screen(configure, expected);
     }
 }
