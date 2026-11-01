@@ -34,12 +34,8 @@ pub(super) fn apply(
                         p.kind == PresentationKind::Interrupted,
                         &fields,
                     );
-                    if !p.ui_messages.set_title(title) {
-                        p.metadata_limited = true;
-                    }
-                    if !p.ui_messages.set_body(extra_blocks.len(), body) {
-                        p.metadata_limited = true;
-                    }
+                    p.ui_messages.set_title(title);
+                    p.ui_messages.set_body(extra_blocks.len(), body);
                 }
                 BlockKind::ToolCall => call(p, &mut b, &value, base_char_offset),
                 _ => result(p, &mut b, &value, &fields, base_char_offset, &mut trailing),

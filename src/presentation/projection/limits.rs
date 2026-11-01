@@ -50,8 +50,6 @@ pub(super) fn finish(p: &mut NodePresentation, payload: &Value) {
     // a translated safety sentence or dropping an unrelated source field.
     if p.metadata_bytes() > MAX_METADATA_BYTES {
         p.ui_messages.clear();
-        p.metadata_limited = true;
-        p.details_omitted = true;
     }
     p.bound_metadata();
 }
@@ -91,7 +89,11 @@ mod localized_metadata_tests {
                 value_omitted: false,
             })
             .collect();
+        let mut without_translation = p.clone();
+        without_translation.ui_messages = Default::default();
+        finish(&mut without_translation, &serde_json::json!({}));
         finish(&mut p, &serde_json::json!({}));
+        assert_eq!(serde_json::to_value(&p).unwrap(), serde_json::to_value(&without_translation).unwrap());
         assert!(p.metadata_bytes() <= MAX_METADATA_BYTES);
         assert!(p.ui_messages.title.is_none());
         assert!(p.ui_messages.bodies.is_empty());
