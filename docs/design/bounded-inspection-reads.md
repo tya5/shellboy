@@ -112,3 +112,13 @@ family. These are VM/row-work evidence, not latency thresholds, Python estimates
 or a promise that incomplete candidates are canonical latest. Tests also retain
 the exact unbounded canonical readers as a contrast. Final SHA/OS qualification
 belongs to the task handoff and CI, not these pre-rebase measurements.
+
+The #130 footer also consumes the bounded reader. Its typed `reported_usage`
+export returns all-unknown when latest coverage is incomplete; a candidate's
+numbers must not accidentally escape through that separate consumer as canonical
+current usage. Complete saved scopes keep their reported usage unchanged.
+The compaction display uses exactly six SELECTs: scope, finite source flags,
+bounded node-size preflight, and the three source projections. Paired inspector
+collection reuses its existing header; its statement-count regression explicitly
+accounts for these two additional constant preflights without loosening the
+shared-snapshot or cancellation bounds.

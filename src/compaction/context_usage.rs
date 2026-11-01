@@ -46,6 +46,13 @@ impl RawContextUsage {
 impl RawContextUsage {
     /// Provider-reported usage of the same latest attempt; all-unknown when none.
     pub(crate) fn reported_usage(&self) -> StandardUsage {
+        if self
+            .coverage
+            .as_ref()
+            .is_some_and(|coverage| !coverage.latest_complete)
+        {
+            return StandardUsage::default();
+        }
         self.latest.as_ref().map(|l| l.usage).unwrap_or_default()
     }
 }
@@ -781,6 +788,11 @@ mod bounded_cost_tests {
         assert_ne!(
             v["bounded_observation"]["candidate"]["attempt_id"],
             "late-rowid"
+        );
+        let bounded = read_context_usage_tx(&db, "t", Some(512)).unwrap();
+        assert!(
+            bounded.reported_usage().input_tokens.is_none(),
+            "footer must not label the candidate as canonical latest usage"
         );
     }
 }

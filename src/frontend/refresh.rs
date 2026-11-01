@@ -804,8 +804,8 @@ mod tests {
                 )?;
                 let standalone_inspector_count = trace.count() - before_standalone;
                 assert_eq!(
-                    standalone_inspector_count, 7,
-                    "one header + four compaction + two latest-message queries"
+                    standalone_inspector_count, 9,
+                    "one header + six bounded compaction queries (including two source preflights) + two latest-message queries"
                 );
                 assert_eq!(
                     full_count,
