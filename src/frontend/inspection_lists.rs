@@ -462,6 +462,9 @@ pub(super) fn prepare_list_facts(raw: RawLists) -> Result<Value, ApiError> {
 }
 
 pub(super) fn capture_command(command: &Command) -> Option<Command> {
+    if command.validate().is_err() || command_bytes(command).is_err() {
+        return None;
+    }
     match command {
         Command::Status(args) if !args.memory => Some(command.clone()),
         Command::ThreadList(_) | Command::ShellList(_) | Command::CompactList(_) => {
