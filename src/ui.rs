@@ -1320,6 +1320,15 @@ pub enum UiExitReason {
     Forced,
 }
 
+fn details_refresh_failure(language: crate::config::UiLanguage, message: &str) -> String {
+    match language {
+        crate::config::UiLanguage::En => {
+            format!("Refresh failed | Previous observation: {message}")
+        }
+        crate::config::UiLanguage::Ja => format!("更新失敗 | 前回の観測値: {message}"),
+    }
+}
+
 impl UiUpdate {
     /// Prepare a raw page's display on a presentation worker, before UI delivery.
     pub fn original_page(request_id: u64, body: crate::protocol::HistoryBody) -> Self {
@@ -3402,6 +3411,7 @@ impl UiState {
                 view_revision,
                 message,
             } => {
+                let language = self.config.ui.language;
                 let selected = self.view().matches(&thread_id, generation);
                 if let Some(view) = self.view_for(&thread_id, generation).filter(|v| {
                     view_revision.is_none_or(|revision| revision == v.navigation.view_revision)
@@ -3414,7 +3424,7 @@ impl UiState {
                         view.on_load_failed(message.clone());
                     }
                     if selected && let Some(details) = &mut self.details {
-                        details.mark_stale(&format!("更新失敗 | 前回の観測値: {message}"));
+                        details.mark_stale(&details_refresh_failure(language, &message));
                     }
                 }
             }
@@ -6657,6 +6667,19 @@ fn run_session(
 
 #[cfg(test)]
 mod layout_cache_tests {
+    #[test]
+    fn details_refresh_failure_preserves_raw_reason_in_both_languages() {
+        let reason = "provider: 更新失敗 | opaque error";
+        assert_eq!(
+            super::details_refresh_failure(crate::config::UiLanguage::En, reason),
+            format!("Refresh failed | Previous observation: {reason}")
+        );
+        assert_eq!(
+            super::details_refresh_failure(crate::config::UiLanguage::Ja, reason),
+            format!("更新失敗 | 前回の観測値: {reason}")
+        );
+    }
+
     use super::*;
     fn node(id: &str, text: &str) -> UiNode {
         UiNode {
