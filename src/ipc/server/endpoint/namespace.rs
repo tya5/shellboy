@@ -126,9 +126,9 @@ fn os_user_tmp() -> Option<PathBuf> {
 pub(super) fn runtime_error(reason: &str) -> ApiError {
     ApiError::new(
         crate::protocol::ErrorCode::IoFailed,
-        "一時通信領域を作成できません",
+        "Cannot create the temporary IPC directory",
     )
-    .hint("OSの一時領域の空き容量と書き込み権限を確認して、起動し直してください")
+    .hint("Check free space and write permissions in the OS temporary directory, then restart Shellboy")
     .details(serde_json::json!({"component":"local_ipc", "reason":reason}))
 }
 
@@ -223,6 +223,20 @@ fn usable_socket_path(folder: &Path) -> bool {
 mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn runtime_error_uses_english_without_changing_code_or_source_details() {
+        let reason = "fixture reason: \u{4fdd}\u{5b58}\u{6e08}\u{307f} \u{25c9}";
+        let error = runtime_error(reason);
+        assert_eq!(error.code, crate::protocol::ErrorCode::IoFailed);
+        assert_eq!(error.message, "Cannot create the temporary IPC directory");
+        assert_eq!(error.hint.as_deref(), Some(
+            "Check free space and write permissions in the OS temporary directory, then restart Shellboy"
+        ));
+        assert_eq!(error.details, Some(serde_json::json!({
+            "component": "local_ipc", "reason": reason
+        })));
+    }
     #[cfg(target_os = "linux")]
     #[test]
     fn lease_rejects_busy_replaced_and_symlinked_folders_and_unlocks_its_final_owner() {

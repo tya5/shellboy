@@ -8125,3 +8125,13 @@ UI-projection references, not blanket exemptions. Its current count is zero;
 remaining conservative (c)=1888 is not a confirmed-defect count or completion.
 W6's four files and W8's live_work separator area remain unedited here. No
 user-selected mark, branch or separator was changed by this audit.
+
+### Temporary IPC Diagnostic Copy, Batch 2 (#152, Next Release Only)
+
+The pure namespace runtime-error test checks English message/hint, unchanged
+`IoFailed`, and exact `component`/Japanese-Unicode `reason` details. It performs
+no filesystem or OS clipboard operations. Namespace selection, ownership, path
+bounds and lease logic are untouched; the existing namespace tests remain the
+platform-specific guard checks. Local macOS and branch Linux/macOS CI results
+are reported separately; no Windows-local or physical-terminal claim is made.
+This product batch is not part of0.6.0.

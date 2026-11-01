@@ -462,3 +462,11 @@ limit and cursor. It returns one attempt's IDs/state, bounded standard `usage`
 scalars and `prompt_cache_diagnostics` (provider object or JSON null). Missing
 attempts return `target_unavailable`; aggregate requests/output stay unchanged.
 See [cache diagnostics](cache-diagnostics.md) for bounds and ownership.
+
+### Namespace Failure Copy (#152, Next Release)
+
+Application-generated Unix namespace-creation failure text and its recovery hint
+are English before any interactive locale is available. Keep `io_failed`, the
+`local_ipc` component, the original reason, and all existing directory/lease/
+permission/path guards unchanged. Source details are not translated. This copy
+change is for the release after0.6.0, not the0.6.0 integration batch.

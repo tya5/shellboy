@@ -204,3 +204,23 @@ Local script fixtures: 13 tests pass (134 in the complete Python suite), includi
 protected-token evidence requirements and deterministic owner-aware table output.
 No Rust/product behavior change or
 full Stage C CI result is claimed by the inventory commit.
+
+## Product Copy Review, Batch 2 (Next Release Only)
+
+Confirmed production literals, excluding tests/fixtures and intentional Japanese
+resources. Batch 1 is a separate copy-worker branch; neither batch is for0.6.0.
+B-5/#149 and B-6/#150 owner files remain deferred until they land.
+
+| Production Source | Confirmed Untranslated Literals | Disposition |
+| --- | ---: | --- |
+| `src/frontend/copying.rs` | 6 | Independent batch 1; not included in this branch |
+| `src/ipc/server/endpoint/namespace.rs` | 2 | Batch 2: `runtime_error` message and recovery hint |
+
+`runtime_error` constructs an application-owned startup diagnostic before an
+interactive locale can apply. Its message/hint are Japanese regardless of the
+English-default configuration; they have no other production recognizers. Only
+these two complete strings change. The `IoFailed` code, `component=local_ipc`,
+dynamic `reason`, namespace candidates, permissions, leases, filesystem actions
+and all UI symbols stay unchanged. A pure unit test verifies exact English text
+and preserves Japanese/Unicode in the injected reason. Unknown (c) candidates
+remain unreviewed; this table is not a claim that they are all defects.

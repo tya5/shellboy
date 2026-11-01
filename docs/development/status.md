@@ -3750,3 +3750,11 @@ same-SHA Windows observations passed and #138 is on main. The independent
 protected canonical-token category now requires individual canonical and UI
 projection evidence; no unknown tokens have been reclassified just to reach
 zero. W8/#156 owns the live_work separator restoration; coordinate before edits.
+
+### Stage C Product Copy Review, Batch 2 (#152, Next Release Only)
+
+Two additional confirmed untranslated production strings are the temporary IPC
+namespace failure message/hint in `src/ipc/server/endpoint/namespace.rs`. This
+independent batch changes only their language and adds a pure preservation test.
+The six copy-worker literals are in a separate batch. No B5/B6/W8 source is
+changed. This batch is excluded from0.6.0; CI evidence is reported separately.
