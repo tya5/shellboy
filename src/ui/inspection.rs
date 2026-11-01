@@ -937,6 +937,7 @@ mod tests {
         ui.management.mode = management::ManagementMode::Index;
         ui.management.preview =
             management::IndexPreviewState::Ready(args.clone(), "saved cost preview".into());
+        ui.management.ready_preview_attempt = Some(1);
         ui.management.pending = Some(Command::IndexRetry(args.clone()));
         scoped(
             &mut ui,

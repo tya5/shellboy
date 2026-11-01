@@ -965,6 +965,12 @@ impl ManagementPopup {
                 }
                 return Outcome::Actions(vec![]);
             };
+            let Some(attempt) = self.ready_preview_attempt else {
+                self.preview = IndexPreviewState::Hint(
+                    "現在の対象のpreviewが必要です。Pで取得してください。".into(),
+                );
+                return Outcome::Actions(vec![]);
+            };
             let command = match action {
                 'b' => Command::IndexBackfill(args.clone()),
                 't' => Command::IndexRetry(args.clone()),
@@ -972,9 +978,7 @@ impl ManagementPopup {
             };
             Outcome::Confirm {
                 command,
-                attempt: self
-                    .ready_preview_attempt
-                    .expect("ready preview has an attempt"),
+                attempt,
                 detail: format!(
                     "費用対象: {}\n{preview}\n外部embedding APIへ送信し費用が発生します。見積りは取得時点の対象数で、金額未見積です。",
                     if action == 't' && !explicit_index_targets(&args) {

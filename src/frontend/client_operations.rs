@@ -264,9 +264,14 @@ mod dispatch_tests {
             while let Some(update) = incoming.recv().await {
                 if let UiUpdate::ScopedManagement { context, update } = update
                     && context.epoch == epoch
-                    && let UiUpdate::StructuredManagement { fields, .. } = *update
                 {
-                    return fields;
+                    let update = match *update {
+                        UiUpdate::ExternalManagement { update, .. } => *update,
+                        other => other,
+                    };
+                    if let UiUpdate::StructuredManagement { fields, .. } = update {
+                        return fields;
+                    }
                 }
             }
             panic!("frontend closed before its scoped client result");

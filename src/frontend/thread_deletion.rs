@@ -162,6 +162,44 @@ pub(super) async fn finish_cleanup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn accept_preview(
+        sender: &crate::ui::actions::ActionSender,
+        incoming: &std::sync::mpsc::Receiver<UiUpdate>,
+        request_id: u64,
+    ) {
+        sender
+            .try_send(UiAction::ThreadDeletion {
+                request_id,
+                args: ThreadDeleteArgs {
+                    thread_id: "thread".into(),
+                    descendants: false,
+                },
+                execute: false,
+                known_thread_ids: vec!["thread".into()],
+            })
+            .unwrap();
+        crate::test_watchdog::watchdog("deletion fixture preview", async {
+            loop {
+                while let Ok(update) = incoming.try_recv() {
+                    if let UiUpdate::ThreadDeletion {
+                        request_id: id,
+                        execute: false,
+                        result,
+                        ..
+                    } = update
+                        && id == request_id
+                    {
+                        assert!(matches!(result, Ok(ThreadDeletionReply::Preview(..))));
+                        return;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn panicked_delete_returns_uncertain_outcome_without_claiming_not_applied() {
         let result: Result<Outcome, ApiError> = guard(async {
@@ -219,6 +257,7 @@ mod tests {
             }
         }).await.unwrap();
         let old_draft = ui.view().draft.draft_id.clone();
+        accept_preview(&sender, &incoming, 143).await;
         sender
             .try_send(UiAction::ThreadDeletion {
                 request_id: 144,
@@ -494,6 +533,7 @@ mod tests {
                 follow: true,
             })
             .unwrap();
+        accept_preview(&sender, &incoming, 98).await;
         sender
             .try_send(UiAction::ThreadDeletion {
                 request_id: 99,
