@@ -548,13 +548,15 @@ mod tests {
         assert!(read_list_facts_tx(&db, scope.clone()).is_err());
         let tx = db.transaction().unwrap();
         let raw = super::super::inspection_read::read_retained_list_tx(&tx, scope).unwrap();
+        tx.commit().unwrap();
+        assert!(db.is_autocommit());
+        assert_eq!(db.total_changes(), before);
+        db.close().unwrap();
         let value = super::super::inspection_read::prepare_retained_list(raw).unwrap();
         assert_eq!(value["current"]["missing_ids"][0]["id"], "gone");
         assert_eq!(value["current"]["sql_statements"], 1);
         assert_eq!(value["status_membership"]["sql_statements"], 12);
         assert_eq!(value["status_membership"]["unconfirmed"], true);
-        tx.commit().unwrap();
-        assert_eq!(db.total_changes(), before);
     }
     #[test]
     fn capture_checks_text_and_structure_before_cloning() {
