@@ -7,7 +7,7 @@ provider-reported input growth of ceil(auto_at_tokens/10), with all existing
 unknown/stale usage checks and ordinary summary protections unchanged. New
 synthetic loopback tests cap tool calls at nine and check same-Run adoption after
 a rejection, bounded repeated failures, and missing/decreasing/insufficient usage.
-Local Rust checks pass; post-rebase checks and branch CI are pending.
+Post-rebase local Rust checks pass; branch CI is pending.
 See acceptance for evidence and untested cases.
 
 ## Request inspection (#137)
