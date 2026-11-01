@@ -43,11 +43,9 @@ pub(super) fn agents_failure(language: UiLanguage, error: impl Display) -> Strin
     }
 }
 pub(super) fn refresh_failure(language: UiLanguage, message: &str) -> String {
-    match language {
-        UiLanguage::Ja => format!("更新失敗 | 前回の観測値: {message}"),
-        UiLanguage::En => format!("Refresh failed | Previous observation: {message}"),
-    }
+    super::details_refresh_failure(language, message)
 }
+
 pub(super) fn failed_operation(
     language: UiLanguage,
     restore_revision: Option<u64>,
