@@ -110,7 +110,7 @@ impl BrowserText {
                 "Delete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。"
             }
             (En, Self::ListFullKeys) => {
-                "Esc Back | Enter Open | Ctrl+D Delete | Tab Watch\nUp/Down Select | Left/Right Fold | F1 Info | Ctrl+R Refresh"
+                "Esc Back | ^v Select | <> Fold | Enter Open | Ctrl+D Delete | Tab Watch | F1 Info | Ctrl+R Refresh"
             }
             (Ja, Self::ListFullKeys) => {
                 "Esc戻る ^v選択 <>展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得"
