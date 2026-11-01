@@ -225,7 +225,8 @@ mod tests {
 
     #[tokio::test]
     async fn frontend_cleanup_save_failed_warns_new_draft_and_stops_admission() {
-        let (root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let (root, owner, control, server) =
+            crate::frontend::control_tests::fixture_with_language("ja").await;
         control.store.database.call(|db| {
             db.execute("UPDATE turn SET state='completed' WHERE id='target-run'", [])?;
             db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;

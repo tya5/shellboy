@@ -25,7 +25,7 @@ fn screen(terminal: &Terminal<TestBackend>) -> String {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn persisted_canonical_output_flows_through_frontend_into_human_and_internal_details() {
-    let (root, owner, control, server) = super::fixture().await;
+    let (root, owner, control, server) = super::fixture_with_language("ja").await;
     // This is the actual durable assistant_response shape produced by the
     // runtime, rather than the legacy `items` envelope in the first unit fixture.
     let body = serde_json::json!({"group_id":null,"reasoning_epoch":0,"output":[{

@@ -141,7 +141,7 @@ async fn pump_until(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn foreign_thread_latest_message_limits_keep_source_available_and_read_while_writer_is_held()
 {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     owner.db.call(|db| {
         db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('bounded-answer','independent-run','assistant_response','now',?1)",
             [serde_json::json!({"content":"retained answer","opaque":"x".repeat(2*1024*1024)}).to_string()])?;
@@ -268,7 +268,7 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cleared_f8_thread_target_is_not_replaced_by_reply_owner_context() {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
     let (sender, receiver) = actions::channel(64);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -315,7 +315,7 @@ async fn cleared_f8_thread_target_is_not_replaced_by_reply_owner_context() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_foreign_run_inspection_tracks_real_stop_without_switching_conversation_or_rolling_back_watermarks()
  {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
     let (sender, receiver) = actions::channel(64);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -458,7 +458,7 @@ fn open_form(ui: &mut UiState, sender: &ActionSender, query: &str) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_storage_separates_saved_metadata_from_physical_samples_and_refreshes_real_commits() {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
     let (sender, receiver) = actions::channel(64);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -560,7 +560,7 @@ async fn f8_storage_separates_saved_metadata_from_physical_samples_and_refreshes
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_delete_preview_refreshes_live_blocker_after_actual_stop_without_deleting() {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
     let (sender, receiver) = actions::channel(64);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -725,7 +725,7 @@ async fn index_fixture(
 ) {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"{url}\"\n[embedding]\nconnection=\"fixture\"\nmodel=\"synthetic\"\n[indexing]\nauto_history=true\nretries=0\nretry_delays_ms=[]\n")).unwrap();
+    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[ui]\nlanguage=\"ja\"\n[connections.fixture]\nbase_url=\"{url}\"\n[embedding]\nconnection=\"fixture\"\nmodel=\"synthetic\"\n[indexing]\nauto_history=true\nretries=0\nretry_delays_ms=[]\n")).unwrap();
     let owner = crate::app::DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -1098,7 +1098,7 @@ async fn visible_storage_observes_real_pending_runtime_receipt_before_held_probe
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_standalone_usage_reads_foreign_run_root_and_follows_real_saved_stop() {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
     let (sender, receiver) = actions::channel(64);
     let (updates, incoming) = std::sync::mpsc::sync_channel(128);
@@ -1212,7 +1212,7 @@ fn explicit_saved_usage_reference_enters_the_same_inspection_without_viewer_reta
 
 #[tokio::test]
 async fn standalone_usage_reads_canonical_run_turn_and_children_scope_without_watcher_replay() {
-    let (root, owner, control, _server) = super::control_tests::fixture().await;
+    let (root, owner, control, _server) = super::control_tests::fixture_with_language("ja").await;
     let diagnostics = control.diagnostics().clone();
     owner.db.call(|db| {
         // A live grandchild behind a deleted bridge is intentionally outside
@@ -1280,7 +1280,7 @@ async fn standalone_usage_reads_canonical_run_turn_and_children_scope_without_wa
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no_file_reads() {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     // Fixture-only file creation; observation never stats/decodes this image.
     let managed_path = owner.loaded.data_dir.join("managed/clipboard/example.png");
     std::fs::create_dir_all(managed_path.parent().unwrap()).unwrap();
@@ -1525,7 +1525,7 @@ fn pump_operation_until(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_operation_and_saved_reference_react_to_actual_message_cancel_without_viewer_retargeting()
  {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     owner.db.call(|db| {
         db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('op-message','user','now','{\"role\":\"user\",\"content\":[]}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,hold_reason)VALUES('op-receipt','old:f8-message','{\"kind\":\"human\"}','independent','op-message','held','now','test-held'); INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('old:f8-message','old-owner','null','hash','completed','{\"result\":{\"message_id\":\"op-message\"}}','now');")?;Ok(())
     }).await.unwrap();
@@ -1635,7 +1635,7 @@ async fn f8_operation_and_saved_reference_react_to_actual_message_cancel_without
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_history_body_retains_original_detail_while_current_source_facts_change() {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     owner.db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_revision,payload_json)VALUES('retained-history','user','now',7,'{\"role\":\"user\",\"content\":\"retained history original\"}');")?;Ok(())}).await.unwrap();
     let path = control.store.database.path().to_path_buf();
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
@@ -1742,7 +1742,7 @@ async fn f8_history_body_retains_original_detail_while_current_source_facts_chan
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn f8_history_list_keeps_captured_foreign_page_when_selected_path_changes() {
-    let (root, owner, control, server) = super::control_tests::fixture().await;
+    let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
     owner.db.call(|db|{db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('list-first','user','now','{\"role\":\"user\",\"content\":\"retained first\"}'),('list-second','user','now','{\"role\":\"user\",\"content\":\"retained second\"}');INSERT INTO thread_path VALUES('independent',0,'list-first'),('independent',1,'list-second');")?;Ok(())}).await.unwrap();
     let mut ui = UiState::new(&owner.loaded.config, root.path().into());
     let (sender, receiver) = actions::channel(64);

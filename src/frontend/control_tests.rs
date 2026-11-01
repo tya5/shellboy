@@ -215,9 +215,20 @@ pub(crate) async fn fixture() -> (
     std::sync::Arc<crate::control::Control>,
     crate::ipc::LocalServer,
 ) {
+    fixture_with_language("en").await
+}
+
+pub(crate) async fn fixture_with_language(
+    language: &str,
+) -> (
+    tempfile::TempDir,
+    crate::app::DataOwner,
+    std::sync::Arc<crate::control::Control>,
+    crate::ipc::LocalServer,
+) {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config,"default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n").unwrap();
+    std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[ui]\nlanguage=\"{language}\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n")).unwrap();
     let owner = crate::app::DataOwner::start(
         Some(config),
         Some(root.path().join("data")),

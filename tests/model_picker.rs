@@ -12,6 +12,7 @@ fn config() -> Config {
         default_model: Some("model-b".into()),
         ..Default::default()
     };
+    config.ui.language = shellboy::config::UiLanguage::Ja;
     config.connections.insert(
         "proxy".into(),
         Connection {

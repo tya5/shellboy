@@ -1405,7 +1405,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
     }
     fixture
         .until("exact retry confirmation", |_, screen| {
-            screen.contains("再試行しますか") && screen.contains(&run)
+            screen.contains("Retry the displayed saved target?") && screen.contains(&run)
         })
         .await;
     // Capture a genuinely confirmed UI packet, then delay delivery while another
@@ -1881,7 +1881,13 @@ async fn index_observation_retains_success_after_one_failed_explicit_refresh() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-    let mut fixture = Fixture::new("http://127.0.0.1:9/v1").await;
+    let mut fixture = Fixture::build_in(
+        "http://127.0.0.1:9/v1",
+        false,
+        false,
+        shellboy::config::UiLanguage::Ja,
+    )
+    .await;
     let cwd = fixture.root.path().to_str().unwrap().to_owned();
     fixture.control.store.database.call(move |db| {
         db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('unrelated','before',?1,'','fixture','fixture0','now')", [cwd])?;
