@@ -63,10 +63,22 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         _ => (PresentationKind::Unknown, "未対応の項目", BlockKind::Plain),
     };
     let mut p = NodePresentation {
-        kind: display_kind,
+        kind: display_kind.clone(),
         title: title.into(),
         ..Default::default()
     };
+    use super::messages::{Message, Text};
+    p.ui_messages.title = Some(match display_kind {
+        PresentationKind::User => Message::Text(Text::User),
+        PresentationKind::Assistant if kind == "reasoning" => Message::Text(Text::Reasoning),
+        PresentationKind::Assistant => Message::Raw { text: "Shellboy".into() },
+        PresentationKind::ToolResult => Message::Text(Text::ToolResult),
+        PresentationKind::Event => Message::Text(Text::Event),
+        PresentationKind::Summary => Message::Text(Text::Summary),
+        PresentationKind::Spill => Message::Text(Text::Spill),
+        PresentationKind::Interrupted => Message::Text(Text::Interrupted),
+        _ => Message::UnknownTitle { kind: short(kind, 64) },
+    });
     p.fields = fields_of_value(payload);
     if matches!(kind, "spill" | "context_trim")
         && payload.get("context_trim").is_some_and(Value::is_object)
@@ -75,8 +87,10 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         // event. Keep its notice visible and its canonical text unchanged.
         p.kind = PresentationKind::Spill;
         p.title = CONTEXT_TRIM_TITLE.into();
+        p.ui_messages.title = Some(Message::Text(Text::ContextTrim));
     }
     if let Some(reason) = payload.get("tombstone_reason").and_then(Value::as_str) {
+        p.ui_messages.title = Some(Message::Reclaimed { reason: short(reason, 256) });
         p.title = format!("原文回収済み | {reason}");
         p.kind = PresentationKind::Unknown;
     }
@@ -190,6 +204,9 @@ fn summary_projection<'a>(
             .and_then(Value::as_array)
             .filter(|sources| sources.iter().all(Value::is_string))
     {
+        p.ui_messages.title = Some(super::messages::Message::Summary {
+            count: sources.len(), replaced: decoded_summary.is_some(),
+        });
         p.title = if decoded_summary.is_some() {
             format!(
                 "要約 | 置換{}件 | 出典{}件 | F6>O 原文",

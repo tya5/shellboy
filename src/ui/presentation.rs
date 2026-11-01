@@ -1,3 +1,5 @@
+use crate::config::UiLanguage;
+use crate::presentation::messages::{Message, Text, row_label};
 //! Display-only layout of worker-produced typed blocks and Markdown tokens.
 use super::history_items::{ItemKey, ItemRegion};
 use super::theme;
@@ -25,33 +27,36 @@ fn source_candidate(text: &str) -> &str {
     text.trim_start_matches([' ', '›', '▸', '│', '┃']).trim()
 }
 
-fn label(node: &UiNode) -> &str {
+fn label(language: UiLanguage, node: &UiNode) -> String {
+    if let Some(message) = &node.presentation.ui_messages.title {
+        return message.render(language);
+    }
     if let Some(title) = node
         .presentation
         .fields
         .iter()
         .find(|f| f.key == "/ui_notice/title")
     {
-        return &title.value;
+        return title.value.clone();
     }
     if node.presentation.kind == PresentationKind::Event {
         if let Some(fact) = node.presentation.title.strip_prefix("状態変更 | ") {
-            return fact;
+            return fact.into();
         }
         if node.presentation.title == "状態変更" {
-            return "変更内容を確認";
+            return Text::ReviewChange.render(language).into();
         }
     }
     if !node.presentation.title.is_empty() {
-        return &node.presentation.title;
+        return node.presentation.title.clone();
     }
     match node.role.as_str() {
-        "user" => "あなた",
+        "user" => Text::User.render(language),
         "assistant" => "Shellboy",
-        "developer" | "system" => "状態変更",
-        "tool" => "実行結果",
-        _ => "履歴",
-    }
+        "developer" | "system" => Text::Event.render(language),
+        "tool" => Text::ToolResult.render(language),
+        _ => Text::History.render(language),
+    }.into()
 }
 fn color(node: &UiNode) -> Color {
     if node.presentation.requires_attention()
@@ -120,7 +125,7 @@ impl NodeLines {
         }
     }
 }
-fn node_lines_inner(
+fn node_lines_inner(language: UiLanguage, 
     node: &UiNode,
     expanded: bool,
     start: usize,
@@ -143,23 +148,23 @@ fn node_lines_inner(
     } else {
         vec![Line::from(Span::styled(
             if node.presentation.kind == PresentationKind::ToolResult {
-                format!("{} {}", RowKind::ToolCall.mark(), label(node))
+                format!("{} {}", RowKind::ToolCall.mark(), label(language, node))
             } else {
                 match node.presentation.kind {
                     PresentationKind::Event => format!(
                         "{} {} | {}",
                         RowKind::Notice.mark(),
-                        RowKind::Notice.spec().1,
-                        label(node)
+                        row_label(RowKind::Notice, language),
+                        label(language, node)
                     ),
                     PresentationKind::Summary => {
-                        format!("{} {}", RowKind::Summary.mark(), label(node))
+                        format!("{} {}", RowKind::Summary.mark(), label(language, node))
                     }
-                    PresentationKind::Spill => format!("{} {}", RowKind::Spill.mark(), label(node)),
+                    PresentationKind::Spill => format!("{} {}", RowKind::Spill.mark(), label(language, node)),
                     PresentationKind::Interrupted => {
-                        format!("{} {}", RowKind::Cancelled.mark(), label(node))
+                        format!("{} {}", RowKind::Cancelled.mark(), label(language, node))
                     }
-                    _ => label(node).to_owned(),
+                    _ => label(language, node).to_owned(),
                 }
             },
             Style::default()
@@ -169,14 +174,14 @@ fn node_lines_inner(
     };
     let mut out = NodeLines::new(header);
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
-        out.push(Line::from("本文未キャッシュ | 詳細から原文を取得"));
+        out.push(Line::from(Text::Uncached.render(language)));
         return out;
     }
     if node.presentation.blocks.is_empty() {
         out.role = LineRole::Body;
         if matches!(node.role.as_str(), "developer" | "system" | "tool") {
             out.push(Line::from(Span::styled(
-                "詳細で内容・参照を確認",
+                Text::Details.render(language),
                 Style::default().fg(theme::MUTED),
             )));
         } else {
@@ -197,7 +202,7 @@ fn node_lines_inner(
     }
     let mut tool_result_seen = false;
     let mut previous_tool = None;
-    for block in &node.presentation.blocks {
+    for (block_index, block) in node.presentation.blocks.iter().enumerate() {
         out.role = match block.kind {
             BlockKind::Reasoning => LineRole::Reasoning,
             BlockKind::ToolCall | BlockKind::ToolResult => LineRole::Tool,
@@ -209,17 +214,14 @@ fn node_lines_inner(
         }
         if block.kind == BlockKind::Reasoning && !expanded {
             out.push(Line::from(Span::styled(
-                format!(
-                    "▸ 推論 {}文字 | 折りたたみ /reasoning",
-                    block.source_end.saturating_sub(block.source_start)
-                ),
+                Message::Reasoning { count: block.source_end.saturating_sub(block.source_start) }.render(language),
                 Style::default().fg(theme::MUTED),
             )));
             continue;
         }
         if block.kind == BlockKind::Reasoning {
             out.push(Line::from(Span::styled(
-                "▸ 推論（展開中）",
+                Text::ReasoningExpanded.render(language),
                 Style::default().fg(theme::MUTED),
             )));
         }
@@ -228,7 +230,7 @@ fn node_lines_inner(
         }
         if let Some(tool) = &block.tool {
             if previous_tool.as_deref() != Some(tool.call_id.as_str()) {
-                out.extend(tool_header_lines(
+                out.extend(tool_header_lines(language, 
                     tool,
                     block.kind == BlockKind::ToolCall,
                     width,
@@ -238,7 +240,7 @@ fn node_lines_inner(
                 if !tool.reason.is_empty() {
                     out.extend(hanging_wrap(
                         vec![Line::from(Span::styled(
-                            format!("  | {}", tool.reason),
+                            format!("  | {}", crate::presentation::messages::tool_reason(tool, language)),
                             Style::default().fg(theme::MUTED),
                         ))],
                         width,
@@ -287,7 +289,10 @@ fn node_lines_inner(
                     .skip(start - block.source_start)
                     .collect::<String>()
             } else {
-                block.text.clone()
+                node.presentation.ui_messages.bodies.iter()
+                    .find(|(index, _)| *index == block_index)
+                    .map(|(_, messages)| messages.iter().map(|m| m.render(language)).collect::<Vec<_>>().join("\n"))
+                    .unwrap_or_else(|| block.text.clone())
             };
             if block.kind == BlockKind::ToolCall {
                 let mut command = text
@@ -341,7 +346,7 @@ fn node_lines_inner(
                     let tail = output.split_off(count - 2);
                     output.truncate(3);
                     output.push(Line::from(Span::styled(
-                        format!(". 出力抜粋（表示{count}行中{}行省略）| F6 詳細", count - 5),
+                        Message::Excerpt { rows: count, omitted: count - 5 }.render(language),
                         Style::default()
                             .fg(theme::MUTED)
                             .underline_color(EXCERPT_GAP_MARKER),
@@ -386,7 +391,7 @@ fn node_lines_inner(
         }
     }
     out.role = LineRole::Meta;
-    for notice in omission_notices(node) {
+    for notice in omission_notices(language, node) {
         out.push(Line::from(Span::styled(
             notice,
             Style::default().fg(theme::MUTED),
@@ -394,47 +399,23 @@ fn node_lines_inner(
     }
     out
 }
-fn omission_notices(node: &UiNode) -> Vec<String> {
+fn omission_notices(language: UiLanguage, node: &UiNode) -> Vec<String> {
     let mut parts = Vec::new();
-    let end = node
-        .base_char_offset
-        .saturating_add(node.text.chars().count())
-        .min(node.total_chars);
+    let end = node.base_char_offset.saturating_add(node.text.chars().count()).min(node.total_chars);
     if node.base_char_offset > 0 || end < node.total_chars {
-        parts.push(format!(
-            "{} {}-{end}/{}文字",
-            if node.presentation.provisional_stream {
-                "生成中の表示範囲"
-            } else {
-                "原文の取得範囲"
-            },
-            node.base_char_offset.saturating_add(1),
-            node.total_chars
-        ));
+        parts.push(Message::SourceWindow { start: node.base_char_offset.saturating_add(1), end,
+            total: node.total_chars, live: node.presentation.provisional_stream }.render(language));
     }
     if node.presentation.body_omitted_chars > 0 {
-        parts.push(format!(
-            "本文・出力{}文字省略",
-            node.presentation.body_omitted_chars
-        ));
+        parts.push(Message::BodyOmitted { count: node.presentation.body_omitted_chars }.render(language));
     }
     if node.presentation.body_extent_unknown {
-        parts.push(
-            if node.presentation.provisional_stream {
-                "途中表示の更新欠落を検出。確定本文の保存後に再取得"
-            } else {
-                "出力の表示範囲・省略量は未確認"
-            }
-            .into(),
-        );
+        parts.push(if node.presentation.provisional_stream { Text::StreamGap } else { Text::UnknownExtent }.render(language).into());
     }
-    if parts.is_empty() {
-        Vec::new()
-    } else {
-        vec![format!("{} | F6 詳細", parts.join(" | "))]
-    }
+    if node.presentation.metadata_limited { parts.push(Text::MetadataLimited.render(language).into()); }
+    parts
 }
-fn tool_header_lines(
+fn tool_header_lines(language: UiLanguage, 
     tool: &crate::presentation::ToolPresentation,
     request: bool,
     width: u16,
@@ -442,11 +423,7 @@ fn tool_header_lines(
     targets: &mut Vec<std::sync::Arc<str>>,
 ) -> Vec<Line<'static>> {
     let mut header = vec![Line::from(Span::styled(
-        if request {
-            tool.call_heading()
-        } else {
-            tool.heading()
-        },
+        crate::presentation::messages::tool_heading(tool, request, language),
         Style::default().fg(if tool.requires_attention() {
             theme::ATTENTION
         } else {
@@ -553,16 +530,16 @@ pub(super) fn hanging_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'s
     }
     out
 }
-fn node_lines(
+fn node_lines(language: UiLanguage, 
     node: &UiNode,
     expanded: bool,
     start: usize,
     width: u16,
     links: &mut Vec<std::sync::Arc<str>>,
 ) -> Vec<Line<'static>> {
-    node_lines_with_header(node, expanded, start, width, links, true)
+    node_lines_with_header(language, node, expanded, start, width, links, true)
 }
-fn node_lines_with_header(
+fn node_lines_with_header(language: UiLanguage, 
     node: &UiNode,
     expanded: bool,
     start: usize,
@@ -577,7 +554,7 @@ fn node_lines_with_header(
             .blocks
             .iter()
             .all(|block| block.kind == BlockKind::ToolCall);
-    let mut source = node_lines_inner(
+    let mut source = node_lines_inner(language, 
         node,
         expanded,
         start,
@@ -677,10 +654,10 @@ fn quiet_event(node: &UiNode) -> bool {
         && !node.presentation.requires_attention()
 }
 
-fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
+fn event_group(language: UiLanguage, nodes: &[UiNode]) -> Vec<Line<'static>> {
     let mut facts = Vec::new();
     for node in nodes {
-        let fact = crate::presentation::sanitize_plain(label(node), 0).0;
+        let fact = crate::presentation::sanitize_plain(&label(language, node), 0).0;
         if !fact.trim().is_empty() && !facts.contains(&fact) {
             facts.push(fact);
         }
@@ -689,7 +666,7 @@ fn event_group(nodes: &[UiNode]) -> Vec<Line<'static>> {
         format!(
             "{} {} | {}",
             RowKind::Notice.mark(),
-            RowKind::Notice.spec().1,
+            row_label(RowKind::Notice, language),
             facts.join(" | ")
         ),
         Style::default().fg(theme::MUTED),
@@ -851,6 +828,7 @@ pub(super) fn history_with_cache(
     mut cache: Option<&mut super::HistoryLayoutCache>,
     budget: usize,
 ) -> (Vec<Line<'static>>, Vec<std::sync::Arc<str>>, Vec<RowSource>) {
+    let language = view.language;
     let mut links = Vec::new();
     let mut lines = Vec::new();
     let mut sources = Vec::new();
@@ -906,12 +884,12 @@ pub(super) fn history_with_cache(
             index += summary + 1;
             rendered_index = index - 1;
             let summary = &view.nodes()[rendered_index];
-            let mut chunk = node_lines(summary, false, summary.base_char_offset, width, &mut links);
+            let mut chunk = node_lines(language, summary, false, summary.base_char_offset, width, &mut links);
             group_header_rows = chunk.first().map_or(0, |line| {
                 hanging_wrap(vec![line.clone()], width.max(1)).len()
             });
             chunk.push(Line::from(Span::styled(
-                format!("  原文{}件 | F6 詳細", index - begin),
+                Message::SourceCount { count: index - begin }.render(language),
                 Style::default().fg(theme::MUTED),
             )));
             chunk
@@ -932,7 +910,7 @@ pub(super) fn history_with_cache(
                 .first()
                 .and_then(|block| block.tool.as_ref())
             {
-                let header = tool_header_lines(
+                let header = tool_header_lines(language, 
                     tool,
                     false,
                     width.saturating_sub(2).max(1),
@@ -941,7 +919,7 @@ pub(super) fn history_with_cache(
                 );
                 group_header_rows = hanging_wrap(header, width.max(1)).len();
             }
-            let mut chunk = node_lines(result, false, result.base_char_offset, width, &mut links);
+            let mut chunk = node_lines(language, result, false, result.base_char_offset, width, &mut links);
             // Result commands are enriched from their exact call source. Retain
             // its explicit URL targets when rendering that shared heading.
             annotate_links(&mut chunk, &node.presentation.links, &mut links);
@@ -951,10 +929,10 @@ pub(super) fn history_with_cache(
             while index < end && quiet_event(&view.nodes()[index]) {
                 index += 1;
             }
-            event_group(&view.nodes()[begin..index])
+            event_group(language, &view.nodes()[begin..index])
         } else {
             index += 1;
-            node_lines(
+            node_lines(language, 
                 node,
                 view.reasoning_expanded.contains(&node.node_id),
                 node.base_char_offset,
@@ -972,10 +950,10 @@ pub(super) fn history_with_cache(
         {
             chunk
         } else {
-            vec![Line::from(". 本文を折りたたみ | Enterで開く")]
+            vec![Line::from(Text::Collapsed.render(language))]
         };
         let mut chunk = hanging_wrap(chunk, width.max(1));
-        user_band(&mut chunk, node, width, view.palette);
+        user_band(language, &mut chunk, node, width, view.palette);
         let source_starts = node
             .presentation
             .blocks
@@ -1213,14 +1191,14 @@ impl InputBandRow {
         self.body
     }
 }
-fn input_metadata(node: &UiNode, palette: theme::Palette) -> Option<Span<'static>> {
+fn input_metadata(language: UiLanguage, node: &UiNode, palette: theme::Palette) -> Option<Span<'static>> {
     use crate::presentation::InputSource;
     let mut parts = Vec::new();
     if !matches!(
         node.presentation.input_source,
         InputSource::Human | InputSource::Unknown
     ) {
-        parts.push(input_kind(node).spec().1.to_owned());
+        parts.push(row_label(input_kind(node), language).to_owned());
     }
     if let Some(label) = node.presentation.input_sender_label.as_deref() {
         let label = crate::presentation::sanitize_plain(label, 0).0;
@@ -1247,11 +1225,11 @@ fn input_metadata(node: &UiNode, palette: theme::Palette) -> Option<Span<'static
         )
     })
 }
-fn user_band(lines: &mut [Line<'static>], node: &UiNode, width: u16, palette: theme::Palette) {
+fn user_band(language: UiLanguage, lines: &mut [Line<'static>], node: &UiNode, width: u16, palette: theme::Palette) {
     if node.role != "user" {
         return;
     }
-    let mut metadata = input_metadata(node, palette);
+    let mut metadata = input_metadata(language, node, palette);
     for line in lines {
         let mut body = std::mem::take(line);
         let mark = body
@@ -1331,7 +1309,7 @@ pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> Stri
     }
 }
 
-fn tool_metadata(
+fn tool_metadata(language: UiLanguage, 
     tool: &crate::presentation::ToolPresentation,
     elapsed: Option<u64>,
 ) -> (RowKind, String, Option<String>) {
@@ -1361,18 +1339,18 @@ fn tool_metadata(
     if background {
         parts.push(
             match tool.reason_kind {
-                crate::presentation::ToolReasonKind::HumanBackgrounded => "背景（利用者）",
-                crate::presentation::ToolReasonKind::AdditionalInput => "背景（追加入力）",
-                _ => "背景",
+                crate::presentation::ToolReasonKind::HumanBackgrounded => Text::HumanBackground.render(language),
+                crate::presentation::ToolReasonKind::AdditionalInput => Text::InputBackground.render(language),
+                _ => Text::Background.render(language),
             }
             .to_owned(),
         );
     }
     let outcome = if kind == RowKind::Unknown {
-        Some(kind.spec().1.to_owned())
+        Some(row_label(kind, language).to_owned())
     } else {
-        code.map(|code| format!("終了 {code}")).or_else(|| {
-            matches!(kind, RowKind::Failure | RowKind::Cancelled).then(|| kind.spec().1.to_owned())
+        code.map(|code| Message::Exit { code }.render(language)).or_else(|| {
+            matches!(kind, RowKind::Failure | RowKind::Cancelled).then(|| row_label(kind, language).to_owned())
         })
     };
     let critical = outcome
@@ -1382,14 +1360,11 @@ fn tool_metadata(
         parts.push(outcome);
     }
     if let Some(seconds) = elapsed {
-        parts.push(crate::presentation::elapsed_text(
-            seconds.saturating_mul(1000),
-            false,
-        ));
+        parts.push(Message::Elapsed { ms: seconds.saturating_mul(1000), decimal: false }.render(language));
     } else if let Some(ms) = tool.elapsed_ms {
-        parts.push(crate::presentation::elapsed_text(ms, true));
+        parts.push(Message::Elapsed { ms, decimal: true }.render(language));
     } else if kind == RowKind::Running && tool.started_at.is_some() {
-        parts.push("経過未取得".into());
+        parts.push(Text::ElapsedUnavailable.render(language).into());
     }
     (kind, parts.join(" | "), critical)
 }
@@ -1457,12 +1432,12 @@ fn tool_row(
     }
     .into_line(width, Style::default())
 }
-fn compact_tool_line(
+fn compact_tool_line(language: UiLanguage, 
     tool: &crate::presentation::ToolPresentation,
     width: u16,
     palette: theme::Palette,
 ) -> Line<'static> {
-    let (kind, metadata, critical) = tool_metadata(tool, None);
+    let (kind, metadata, critical) = tool_metadata(language, tool, None);
     let mark = Span::styled(
         format!("{} ", kind.mark()),
         Style::default()
@@ -1584,6 +1559,7 @@ fn append_node_cached(
     cache: &mut Option<&mut super::HistoryLayoutCache>,
     budget: usize,
 ) {
+    let language = view.language;
     let key = ItemKey::Node(node.node_id.clone());
     let unit_key = cache.as_ref().and_then(|_| {
         super::RenderUnitKey::item(view, index, block_index, None, &key, width, links)
@@ -1608,7 +1584,7 @@ fn append_node_cached(
     };
     let node = slice.as_ref().unwrap_or(node);
     let mut chunk = if view.items.is_open(&key, true, "") {
-        node_lines(
+        node_lines(language, 
             node,
             view.reasoning_expanded.contains(&node.node_id),
             start,
@@ -1616,9 +1592,9 @@ fn append_node_cached(
             links,
         )
     } else {
-        vec![Line::from(". 本文を折りたたみ | Enterで開く")]
+        vec![Line::from(Text::Collapsed.render(language))]
     };
-    user_band(&mut chunk, node, width, view.palette);
+    user_band(language, &mut chunk, node, width, view.palette);
     append_item_rows(
         lines,
         sources,
@@ -1702,6 +1678,7 @@ fn typed_history(
     mut cache: Option<&mut super::HistoryLayoutCache>,
     budget: usize,
 ) -> (Vec<Line<'static>>, Vec<Arc<str>>, Vec<RowSource>) {
+    let language = view.language;
     let mut lines = Vec::new();
     let mut sources: Vec<RowSource> = Vec::new();
     let mut links = Vec::new();
@@ -1745,7 +1722,7 @@ fn typed_history(
         if let Some(summary) = interruption_group(&view.nodes()[index..end]) {
             let summary_index = index + summary;
             let summary_node = &view.nodes()[summary_index];
-            let chunk = node_lines(
+            let chunk = node_lines(language, 
                 summary_node,
                 false,
                 summary_node.base_char_offset,
@@ -1793,7 +1770,7 @@ fn typed_history(
                             let mut copy = node.clone();
                             copy.presentation.blocks = vec![block.clone()];
                             copy.presentation.blocks[0].tool = None;
-                            let chunk = node_lines_with_header(
+                            let chunk = node_lines_with_header(language, 
                                 &copy,
                                 false,
                                 block.source_start,
@@ -1885,11 +1862,11 @@ fn typed_history(
                     if !view.describe_calls {
                         label.description = None;
                     }
-                    let mut chunk = vec![compact_tool_line(&label, width, view.palette)];
+                    let mut chunk = vec![compact_tool_line(language, &label, width, view.palette)];
                     let focused = view.items.active && view.items.focus.as_ref() == Some(&key);
                     if label.description.is_some() && (focused || open) {
                         chunk.extend(tool_note(
-                            "コマンド（プレビュー） | o コマンド原文（ページ表示）",
+                            Text::CommandPreview.render(language),
                             width,
                             view.palette,
                         ));
@@ -1915,7 +1892,7 @@ fn typed_history(
                             for block in &mut copy.presentation.blocks {
                                 block.tool = None;
                             }
-                            chunk.extend(node_lines_with_header(
+                            chunk.extend(node_lines_with_header(language, 
                                 &copy, false, 0, width, &mut links, false,
                             ));
                             if let Some(notice) = &preview.notice {
@@ -1923,37 +1900,37 @@ fn typed_history(
                             }
                             if let Some(error) = &preview.refresh_error {
                                 let status = if preview.blocks.is_empty() {
-                                    "出力取得に失敗"
+                                    Text::OutputFailed.render(language)
                                 } else {
-                                    "更新失敗 | 前回の取得内容を表示"
+                                    Text::RefreshFailed.render(language)
                                 };
                                 chunk.extend(tool_note(
-                                    &format!("{status}: {error} | 閉じて開くと再試行"),
+                                    &Message::RetryError { refresh: !preview.text.is_empty(), error: error.clone() }.render(language),
                                     width,
                                     view.palette,
                                 ));
                             } else if view.items.preview_loading(&key, &region.outcome) {
                                 chunk.extend(tool_note(
-                                    "再取得中 | 前回の取得内容を表示",
+                                    Text::Refreshing.render(language),
                                     width,
                                     view.palette,
                                 ));
                             }
                         } else if view.items.preview_failed(&key, &region.outcome) {
                             chunk.extend(tool_note(
-                                "出力取得に失敗 | 閉じて開くと再試行 | F6 原文",
+                                Text::OutputRetry.render(language),
                                 width,
                                 view.palette,
                             ));
                         } else if tool.execution_id.is_some()
                             && (default_open || view.items.preview_loading(&key, &region.outcome))
                         {
-                            chunk.extend(tool_note("出力を取得中 | F6 原文", width, view.palette));
+                            chunk.extend(tool_note(Text::OutputLoading.render(language), width, view.palette));
                         } else if exact_body.source_exact {
                             let mut copy = node.clone();
                             copy.presentation.blocks = vec![exact_body.clone()];
                             copy.presentation.blocks[0].tool = None;
-                            chunk.extend(node_lines_with_header(
+                            chunk.extend(node_lines_with_header(language, 
                                 &copy,
                                 false,
                                 exact_body.source_start,
@@ -1999,7 +1976,7 @@ fn typed_history(
                                 ..Default::default()
                             };
                             copy.presentation.links = source.presentation.links.clone();
-                            chunk.extend(node_lines_with_header(
+                            chunk.extend(node_lines_with_header(language, 
                                 &copy, false, 0, width, &mut links, false,
                             ));
                             if let Some(note) = source.presentation.fields.iter().find(|field| {
@@ -2018,16 +1995,16 @@ fn typed_history(
                                 })
                         {
                             chunk.extend(tool_note(
-                                "出力を取得できませんでした | F6 原文",
+                                Text::OutputUnavailable.render(language),
                                 width,
                                 view.palette,
                             ));
                         } else if tool.execution_id.is_some() {
                             chunk.extend(tool_note(
                                 if view.items.preview_loading(&key, &region.outcome) {
-                                    "出力を取得中 | F6 原文"
+                                    Text::OutputLoading.render(language)
                                 } else {
-                                    "出力未保持 | 閉じて開くと再取得 | F6 原文"
+                                    Text::OutputEvicted.render(language)
                                 },
                                 width,
                                 view.palette,
@@ -2036,7 +2013,7 @@ fn typed_history(
                             chunk.extend(tool_note(&tool.reason, width, view.palette));
                         } else {
                             chunk.extend(tool_note(
-                                "出力は原文で確認 | F6 詳細",
+                                Text::OutputOriginal.render(language),
                                 width,
                                 view.palette,
                             ));
@@ -2163,11 +2140,12 @@ fn quiet_section_tails(
         sources: &mut Vec<RowSource>,
         width: u16,
     ) {
+        let language = view.language;
         // One concrete observation may occur many times inside the bounded
         // projection. Coalesce the fact, not every two underlying records.
         let mut facts: Vec<(String, usize, usize)> = Vec::new();
         for index in pending.iter().copied() {
-            let fact = crate::presentation::sanitize_plain(label(&view.nodes()[index]), 0).0;
+            let fact = crate::presentation::sanitize_plain(&label(language, &view.nodes()[index]), 0).0;
             if let Some((_, count, latest)) = facts.iter_mut().find(|(saved, _, _)| saved == &fact)
             {
                 *count += 1;
@@ -2223,7 +2201,7 @@ fn quiet_section_tails(
                     format!(
                         "{} {} | {}",
                         RowKind::Notice.mark(),
-                        RowKind::Notice.spec().1,
+                        row_label(RowKind::Notice, language),
                         labels.join(" | ")
                     ),
                     Style::default().fg(view.palette.muted()),
@@ -2350,6 +2328,7 @@ pub(super) fn paint_live_times(
     width: u16,
     now: std::time::Instant,
 ) {
+    let language = view.language;
     if !lines.iter().any(|line| {
         line.spans
             .first()
@@ -2388,7 +2367,7 @@ pub(super) fn paint_live_times(
                 .map(|span| Span::styled(span.content.to_string(), span.style))
                 .collect::<Vec<_>>(),
         );
-        let (kind, fallback, critical) = tool_metadata(tool, Some(seconds));
+        let (kind, fallback, critical) = tool_metadata(language, tool, Some(seconds));
         let metadata = cached
             .spans
             .last()
@@ -2399,7 +2378,7 @@ pub(super) fn paint_live_times(
             .map(|span| {
                 let mut parts = span.content.split(" | ").collect::<Vec<_>>();
                 if parts.last().is_some_and(|part| {
-                    *part == "経過未取得" || (part.ends_with('秒') || part.ends_with('分'))
+                    *part == Text::ElapsedUnavailable.render(language) || (part.ends_with('秒') || part.ends_with('分') || (language == UiLanguage::En && part.ends_with('s')))
                 }) {
                     parts.pop();
                 }
@@ -3409,9 +3388,9 @@ mod tests {
         };
         assert!(node.presentation.metadata_limited);
         assert_eq!(node.presentation.body_omitted_chars, 0);
-        let shown = plain(&node_lines(&node, false, 0, 80, &mut Vec::new()));
+        let shown = plain(&node_lines(UiLanguage::Ja, &node, false, 0, 80, &mut Vec::new()));
         assert!(!shown.contains("詳細情報は"));
-        assert!(omission_notices(&node).is_empty());
+        assert!(omission_notices(UiLanguage::Ja, &node).is_empty());
         assert!(
             !shown.contains("表示用抜粋")
                 && !shown.contains("文字省略")
@@ -3426,11 +3405,11 @@ mod tests {
         node.base_char_offset = 50;
         node.text = "あいうえお".into();
         node.total_chars = 100;
-        let notices = omission_notices(&node).join("\n");
+        let notices = omission_notices(UiLanguage::Ja, &node).join("\n");
         assert!(notices.contains("原文の取得範囲 51-55/100文字"));
         node.presentation.body_omitted_chars = 17;
         node.presentation.body_extent_unknown = true;
-        let notices = omission_notices(&node);
+        let notices = omission_notices(UiLanguage::Ja, &node);
         assert_eq!(notices.len(), 1);
         let notices = notices.join("\n");
         assert!(notices.contains("17文字省略"));
@@ -3453,7 +3432,7 @@ mod tests {
                 0,
             ),
         };
-        let shown = plain(&node_lines(&node, false, 0, 40, &mut Vec::new()));
+        let shown = plain(&node_lines(UiLanguage::Ja, &node, false, 0, 40, &mut Vec::new()));
         assert!(shown.contains("future_node"));
         assert!(
             !shown.contains('▸'),
@@ -3494,7 +3473,7 @@ mod tests {
                     },
                 };
                 let mut targets = Vec::new();
-                let lines = node_lines(&node, false, 0, 24, &mut targets);
+                let lines = node_lines(UiLanguage::Ja, &node, false, 0, 24, &mut targets);
                 let regions = link_regions(&lines, &targets, 24, 40, 0);
                 assert!(regions.len() > 1, "{kind:?}: {}", plain(&lines));
                 assert!(regions.iter().all(|region| region.url.as_ref() == url));
@@ -3522,7 +3501,7 @@ mod tests {
                             ..Default::default()
                         });
                     let mut targets = Vec::new();
-                    let lines = node_lines(&typed, false, 0, 24, &mut targets);
+                    let lines = node_lines(UiLanguage::Ja, &typed, false, 0, 24, &mut targets);
                     let regions = link_regions(&lines, &targets, 24, 40, 0);
                     assert!(regions.len() > 1);
                     assert!(regions.iter().all(|region| region.url.as_ref() == url));
@@ -3555,7 +3534,7 @@ mod tests {
             presentation: projected,
         };
         let mut targets = Vec::new();
-        let lines = node_lines(&node, false, 0, width, &mut targets);
+        let lines = node_lines(UiLanguage::Ja, &node, false, 0, width, &mut targets);
         (node, lines, targets)
     }
     fn marked_text(lines: &[Line<'static>], targets: &[std::sync::Arc<str>], url: &str) -> String {
@@ -3685,7 +3664,7 @@ mod tests {
         };
         let mut targets = Vec::new();
         // Viewport clipping slices whole wrapped rows and preserves line styles.
-        let lines = node_lines(&node, false, 0, 20, &mut targets);
+        let lines = node_lines(UiLanguage::Ja, &node, false, 0, 20, &mut targets);
         assert!(plain(&lines).starts_with("▸ "));
         assert!(
             lines
@@ -3746,7 +3725,7 @@ mod tests {
                 reasoning_ranges: vec![],
                 presentation: projected,
             };
-            let lines = node_lines(&node, false, 0, 50, &mut Vec::new());
+            let lines = node_lines(UiLanguage::Ja, &node, false, 0, 50, &mut Vec::new());
             for terminal_foreground in [Color::Black, Color::White] {
                 let area = ratatui::layout::Rect::new(0, 0, 50, 10);
                 let mut buffer = ratatui::buffer::Buffer::empty(area);
@@ -3799,7 +3778,7 @@ mod tests {
             presentation: crate::presentation::project("assistant_response", &payload, &text, 0),
         };
         for expanded in [false, true] {
-            let shown = node_lines(&node, expanded, 0, 80, &mut Vec::new());
+            let shown = node_lines(UiLanguage::Ja, &node, expanded, 0, 80, &mut Vec::new());
             let shown = plain(&shown);
             assert!(
                 shown
@@ -3830,7 +3809,7 @@ mod tests {
                 serde_json::json!({"before":{"model":"A"},"after":{"model":"B"}}),
             ),
         ];
-        let shown = plain(&event_group(&events));
+        let shown = plain(&event_group(UiLanguage::Ja, &events));
         assert!(!shown.contains("状態変更") && !shown.contains("通常通知"));
         assert!(shown.contains("作業開始") && shown.contains("応答処理を開始"));
         assert!(shown.contains("モデル: A > B"));
@@ -3845,7 +3824,7 @@ mod tests {
             ..node
         };
         assert!(
-            plain(&node_lines(&node, false, 0, 80, &mut Vec::new()))
+            plain(&node_lines(UiLanguage::Ja, &node, false, 0, 80, &mut Vec::new()))
                 .starts_with("⬦ 要約 | 出典2件")
         );
     }
@@ -3872,7 +3851,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        let shown = node_lines(&node, false, 0, 80, &mut Vec::new());
+        let shown = node_lines(UiLanguage::Ja, &node, false, 0, 80, &mut Vec::new());
         assert_eq!(plain(&shown), "▹ shell  printf synthetic-marker");
         assert!(
             shown[0]
@@ -3915,7 +3894,7 @@ mod tests {
             },
         };
         for width in [35, 80] {
-            let shown = node_lines(&node, false, 0, width, &mut Vec::new());
+            let shown = node_lines(UiLanguage::Ja, &node, false, 0, width, &mut Vec::new());
             assert!(plain(&shown).contains("出力 00") && plain(&shown).contains("出力 39"));
             assert!(!plain(&shown).contains("出力 20"));
             assert!(plain(&shown).contains("抜粋") && plain(&shown).contains("F6 詳細"));
@@ -3963,7 +3942,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        let lines = node_lines(&node, false, 0, 35, &mut Vec::new());
+        let lines = node_lines(UiLanguage::Ja, &node, false, 0, 35, &mut Vec::new());
         let text = plain(&lines);
         assert!(!text.contains("stdout") && !text.contains("stderr") && !text.contains("Combined"));
         assert!(lines.iter().all(|line| line.width() <= 35));
@@ -4011,7 +3990,7 @@ mod tests {
                 tool.ordinal = Some(1);
                 tool.current_state = Some("exited".into());
                 tool.current_exit_code = code;
-                let lines = node_lines(&node, false, 0, 160, &mut Vec::new());
+                let lines = node_lines(UiLanguage::Ja, &node, false, 0, 160, &mut Vec::new());
                 let header = lines
                     .iter()
                     .flat_map(|line| &line.spans)
@@ -4299,7 +4278,7 @@ mod conversation_item_tests {
         for description in ["", "  ", "\n\t\u{1b}"] {
             let mut value = tool("blank", "completed");
             value.description = Some(description.into());
-            let text = compact_tool_line(
+            let text = compact_tool_line(UiLanguage::Ja, 
                 &value,
                 120,
                 theme::Palette::detect(crate::config::PaletteMode::Dark),
@@ -4330,7 +4309,7 @@ mod conversation_item_tests {
                 value.background = explicit_background;
                 value.reason_kind = reason;
                 for width in [80, 140] {
-                    let line = compact_tool_line(&value, width, palette);
+                    let line = compact_tool_line(UiLanguage::Ja, &value, width, palette);
                     let text = line
                         .spans
                         .iter()
@@ -4355,7 +4334,7 @@ mod conversation_item_tests {
         }
         let mut released = tool("display-only", "running");
         released.current_state = Some("background_current".into());
-        let line = compact_tool_line(&released, 80, palette);
+        let line = compact_tool_line(UiLanguage::Ja, &released, 80, palette);
         assert!(line.spans.last().unwrap().content.contains("背景"));
     }
     #[test]
@@ -4364,7 +4343,7 @@ mod conversation_item_tests {
         let mut value = tool("parts", "completed");
         value.background = true;
         value.elapsed_ms = Some(12_400);
-        let line = compact_tool_line(&value, 80, palette);
+        let line = compact_tool_line(UiLanguage::Ja, &value, 80, palette);
         let body = body_spans(&line)
             .map(|span| span.content.as_ref())
             .collect::<String>();
@@ -4372,7 +4351,7 @@ mod conversation_item_tests {
         assert_eq!(line.spans.last().unwrap().content, "背景 | 終了 0 | 12.4秒");
         assert_eq!(line.width(), 80);
         value.command = "abcdefghijklmnopqrstuvwxyz0123456789".into();
-        let line = compact_tool_line(&value, 30, palette);
+        let line = compact_tool_line(UiLanguage::Ja, &value, 30, palette);
         let body = body_spans(&line)
             .map(|span| span.content.as_ref())
             .collect::<String>();
@@ -4380,7 +4359,7 @@ mod conversation_item_tests {
         assert!(!line.spans.iter().any(|s| s.content.contains("背景")));
         value.status = "failed".into();
         value.exit_code = Some(7);
-        let line = compact_tool_line(&value, 30, palette);
+        let line = compact_tool_line(UiLanguage::Ja, &value, 30, palette);
         assert!(line.spans.last().unwrap().content.contains("終了 7"));
         assert_eq!(
             line.spans.last().unwrap().style.fg,
@@ -4433,7 +4412,7 @@ mod conversation_item_tests {
             for mode in [PaletteMode::Dark, PaletteMode::Light] {
                 for no_color in [false, true] {
                     let palette = theme::Palette::from_capabilities(mode, no_color, true);
-                    let line = compact_tool_line(&value, 80, palette);
+                    let line = compact_tool_line(UiLanguage::Ja, &value, 80, palette);
                     let right = line.spans.last().unwrap();
                     assert!(right.content.ends_with("12.4秒"));
                     assert_eq!(right.style.fg, Some(kind.metadata_color(palette)));
@@ -4872,7 +4851,7 @@ mod conversation_item_tests {
                     ),
                     Line::from("continuation"),
                 ];
-                user_band(&mut lines, &value, 80, palette);
+                user_band(UiLanguage::Ja, &mut lines, &value, 80, palette);
                 let expected_bg = palette.user_band(InputSource::Unknown).bg;
                 for line in &lines {
                     assert_eq!(line.width(), 80);
@@ -4897,7 +4876,7 @@ mod conversation_item_tests {
                     Some(palette.muted())
                 );
                 let mut narrow = vec![Line::from("untruncated")];
-                user_band(&mut narrow, &value, 11, palette);
+                user_band(UiLanguage::Ja, &mut narrow, &value, 11, palette);
                 assert_eq!(plain(&narrow), "untruncated");
                 assert_eq!(body_spans(&narrow[0]).count(), 1);
             }

@@ -45,5 +45,13 @@ pub(super) fn finish(p: &mut NodePresentation, payload: &Value) {
         || p.links.len() >= MAX_LINKS;
     p.details_omitted |= p.metadata_limited || p.body_omitted_chars > 0 || p.body_extent_unknown;
     fields::decorate(&mut p.fields, payload);
+    // A bounded provenance cache is optional. If metadata is full, preserve all
+    // canonical/legacy facts and mark the display as limited instead of cutting
+    // a translated safety sentence or dropping an unrelated source field.
+    if p.metadata_bytes() > MAX_METADATA_BYTES {
+        p.ui_messages.clear();
+        p.metadata_limited = true;
+        p.details_omitted = true;
+    }
     p.bound_metadata();
 }

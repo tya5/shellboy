@@ -26,7 +26,16 @@ pub(super) fn apply(
             p.links
                 .retain(|l| l.source_end <= b.source_start || l.source_start >= b.source_end);
             match b.kind {
-                BlockKind::Event => event(p, &mut b, &value, &fields, kind),
+                BlockKind::Event => {
+                    event(p, &mut b, &value, &fields, kind);
+                    let (title, body) = super::super::messages::event_messages(
+                        &value, kind, p.kind == PresentationKind::Interrupted,
+                    );
+                    p.ui_messages.title = Some(title);
+                    if !p.ui_messages.set_body(extra_blocks.len(), body) {
+                        p.metadata_limited = true;
+                    }
+                }
                 BlockKind::ToolCall => call(p, &mut b, &value, base_char_offset),
                 _ => result(p, &mut b, &value, &fields, base_char_offset, &mut trailing),
             }
