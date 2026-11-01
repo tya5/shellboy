@@ -1,12 +1,18 @@
 //! A transient canonical-code chooser hosted by the existing Details overlay.
 use super::*;
+use crate::config::UiLanguage;
 
-pub(crate) fn caption(index: usize, language: &str) -> String {
+pub(crate) fn caption(index: usize, syntax: &str) -> String {
+    caption_in(index, syntax, UiLanguage::En)
+}
+pub(crate) fn caption_in(index: usize, syntax: &str, language: UiLanguage) -> String {
     let key = key_hints::Action::Code.spec().0;
-    if language.is_empty() {
-        format!("[{}] コピー | {key}で番号を選ぶ", index + 1)
-    } else {
-        format!("[{}] コピー | {key}で番号を選ぶ | {language}", index + 1)
+    let number = index + 1;
+    match (language, syntax.is_empty()) {
+        (UiLanguage::Ja, true) => format!("[{number}] コピー | {key}で番号を選ぶ"),
+        (UiLanguage::Ja, false) => format!("[{number}] コピー | {key}で番号を選ぶ | {syntax}"),
+        (UiLanguage::En, true) => format!("[{number}] Copy | {key} Choose number"),
+        (UiLanguage::En, false) => format!("[{number}] Copy | {key} Choose number | {syntax}"),
     }
 }
 #[derive(Clone, Debug)]
@@ -165,6 +171,7 @@ impl Choices {
         frame: &mut Frame<'_>,
         area: Rect,
         paint: &std::cell::Cell<Option<popup::PaintBounds>>,
+        language: UiLanguage,
     ) {
         let body = popup::panel_recorded(
             frame,

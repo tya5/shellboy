@@ -1,5 +1,6 @@
 //! Current saved input, separate from immutable selected conversation history.
 use super::*;
+use crate::config::UiLanguage;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PendingMessages {
     pub items: Vec<PendingMessage>,
@@ -84,7 +85,7 @@ impl QueuePopup {
         old != self.selected
     }
 
-    pub(super) fn draw(&self, frame: &mut Frame<'_>, area: Rect, pending: &PendingMessages) {
+    pub(super) fn draw(&self, frame: &mut Frame<'_>, area: Rect, pending: &PendingMessages, language: UiLanguage) {
         if !self.visible {
             return;
         }
@@ -196,7 +197,7 @@ fn accepting_excerpt(text: &str) -> String {
     }
     preview
 }
-pub(super) fn draw_compact(frame: &mut Frame<'_>, area: Rect, view: &ThreadView) {
+pub(super) fn draw_compact(frame: &mut Frame<'_>, area: Rect, view: &ThreadView, language: UiLanguage) {
     if area.height == 0 {
         return;
     }
