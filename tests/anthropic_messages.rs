@@ -516,7 +516,9 @@ async fn environment_key_custom_headers_are_sent_raw_and_redacted() {
     // A child-only environment avoids mutating process-global state while other
     // integration tests run concurrently. It never reads a user's API key.
     if std::env::var(CHILD).as_deref() != Ok("1") {
-        let status = std::process::Command::new(std::env::current_exe().unwrap())
+        // Capture the child's libtest output: inherited, its nested summary line
+        // lands in the parent harness output and corrupts the suite's counts.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "anthropic_messages::environment_key_custom_headers_are_sent_raw_and_redacted",
@@ -524,9 +526,16 @@ async fn environment_key_custom_headers_are_sent_raw_and_redacted() {
             ])
             .env(CHILD, "1")
             .env(KEY, SECRET)
-            .status()
+            .stdin(std::process::Stdio::null())
+            .output()
             .unwrap();
-        assert!(status.success(), "isolated credential fixture failed");
+        assert!(
+            output.status.success()
+                && String::from_utf8_lossy(&output.stdout).contains("test result: ok. 1 passed;"),
+            "isolated credential fixture failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         return;
     }
     crate::test_watchdog::watchdog("tests/anthropic_messages.rs: environment header", async {

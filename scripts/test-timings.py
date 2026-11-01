@@ -160,6 +160,9 @@ def main():
                 record[f'{key}_comparison'] = {'missing': missing, 'added': added}
                 if missing or added:
                     record['failures'].append({'stage': 'inventory', 'set': key, 'missing': missing, 'added': added})
+        # Every passing harness can still leave a failure (e.g. a count mismatch).
+        for failure in record['failures']:
+            print('Timing failure: ' + json.dumps(failure, ensure_ascii=True), file=sys.stderr, flush=True)
         return 1 if record['failures'] else 0
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         record['failures'].append({'stage': 'runner', 'error': str(error)})
