@@ -95,6 +95,12 @@ impl Connection {
                 format!("Responses-only setting; omit it for {}", self.api.as_str()),
             ));
         }
+        if self.prompt_cache_key && !self.prompt_caching {
+            return Err(invalid(
+                format!("connections.{name}.prompt_cache_key"),
+                "requires prompt_caching; omit prompt_cache_key when prompt_caching = false",
+            ));
+        }
         match self.max_tokens {
             Some(_) if self.api != Api::AnthropicMessages => {
                 return Err(invalid(

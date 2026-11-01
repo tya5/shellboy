@@ -2677,3 +2677,41 @@ request and $100 in about two hours via LiteLLM. Revisit if Runs are long enough
 that one failed attempt per Run leaves them large, if a provider omits usage
 (feature then inert), or if recording on completed attempts confuses consumers
 that assume error_json implies failure.
+
+## #127: Shellboy-placed cache markers; no top-level automatic caching (2026-11-01)
+
+Active. The common cache hint (tier 1 under the #126 policy, condition (a)) is
+on by default; connection `prompt_caching = false` opts out and sends nothing.
+
+Tail placement deviates from the issue text, which asked for top-level automatic
+caching for the conversation tail. Every Driver request ends with a
+per-request `Shellboy context v1` line (Turn ID, cwd, model) that is not saved
+in history, and attachment/summary notices are appended the same way. Automatic
+caching marks the last block, so each request would write an entry ending on
+that line, and the next request (whose conversation has grown past that
+position) could never read it: only system and tools would hit, while every
+request paid a cache write. Shellboy instead puts an explicit marker on the
+last cacheable block before that trailing context, which is the structure the
+issue says only Shellboy knows. Three explicit markers (tools, system,
+conversation tail), all 5-minute; one slot stays free. The trailing context is
+recognized structurally (the trailing run of system/developer items), so a saved
+event notice that is the very last item is also left after the breakpoint;
+the cost is that item's tokens on one request. Revisit if the per-request
+context moves, if Anthropic changes lookback/breakpoint semantics, or if a
+live check shows cache reads below expectation.
+
+`cache_control` is reserved in `extra_body` for Messages even when
+`prompt_caching = false`, so there is no precedence rule; a user wanting a
+different TTL has no override today. `prompt_cache_key = true` with
+`prompt_caching = false` is rejected as contradictory. Responses and Chat send
+nothing new.
+
+cache_creation in saved usage: added. Anthropic reports
+`cache_creation_input_tokens` and writes cost more than reads (1.25x vs 0.1x at
+5 minutes), so the read count alone cannot explain a bill such as the
+2026-11-01 $100-in-two-hours case. It is stored as one more optional integer,
+`input_tokens_details.cache_creation_tokens`, inside the existing saved
+`model_attempt.usage_json` whitelist (`StandardUsage`): one counter per attempt,
+bounded to the signed-64-bit range like the others, no new table or column.
+It stays included in `input_tokens`. SQL readers, totals and the UI do not
+project or aggregate it yet; revisit if usage totals need a cache-write column.

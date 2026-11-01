@@ -11,6 +11,18 @@ byte comparisons; [acceptance](../validation/acceptance.md#v050-publication-vali
 records the macOS synthetic upgrades and untested public installer/Linux/Windows
 upgrade paths.
 
+## Prompt caching hint (#127)
+
+Branch issue-127/cache adds the common cache hint (`dialect::CacheHint`) and
+connection `prompt_caching` (default true, opt-out). Messages gets explicit
+5-minute `cache_control` on the last tool, the system block and the conversation
+tail before the per-request context line (3 of 4 breakpoints; no top-level
+automatic caching, see the #127 decision); Responses and Chat send nothing new.
+`cache_control` is a reserved Messages `extra_body` key. Saved usage gains
+`input_tokens_details.cache_creation_tokens`. Fixture evidence in acceptance;
+3-OS CI on the pushed branch and the approved live check (second request
+cache_read > 0) remain. Resume point: review and integration of that branch.
+
 ## Proactive threshold compaction (#125)
 
 Branch issue-125/proactive adds `[compaction] auto_at_tokens` (default 200,000,

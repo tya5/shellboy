@@ -1,8 +1,9 @@
 //! Anthropic Messages wire adapter (#120 stage 3). Sources: the public Anthropic
 //! documentation read on 2026-11-01; no real provider call has been made.
-//! The only optional field Shellboy sends is the Thread effort, as
-//! `output_config.effort` (#126). Thinking, sampling, tool_choice and
-//! cache_control are the user's, through `extra_body` (#119).
+//! The only optional request field Shellboy sends is the Thread effort, as
+//! `output_config.effort` (#126). Cache markers come from the common cache
+//! hint (#127) unless the connection opts out. Thinking, sampling and
+//! tool_choice are the user's, through `extra_body` (#119).
 use super::*;
 use crate::model::opaque;
 
@@ -110,73 +111,42 @@ fn effort_name(effort: &str) -> &str {
     }
 }
 
-pub(super) fn encode(request: Value, max_tokens: u64) -> Result<Value, ModelError> {
+/// The one cache marker Shellboy sends: the default 5-minute ephemeral cache.
+/// Every marker has the same TTL, so the required non-increasing order holds.
+fn mark(block: &mut Value) {
+    block["cache_control"] = json!({"type":"ephemeral"});
+}
+
+/// Encode a canonical request. With a cache hint, at most three explicit
+/// breakpoints are placed (the API allows four): the last tool, the last
+/// system block, and the last cacheable block of the conversation tail before
+/// Shellboy's per-request context. No top-level automatic `cache_control` is
+/// sent: it would mark the per-request context, whose prefix never recurs.
+pub(super) fn encode(
+    request: Value,
+    max_tokens: u64,
+    cache: Option<CacheHint>,
+) -> Result<Value, ModelError> {
     let input = request["input"]
         .as_array()
         .ok_or_else(|| protocol("Conversation input must be an array"))?;
     let mut system: Vec<String> = Vec::new();
     let mut messages: Vec<Value> = Vec::new();
-    for item in input {
+    for (index, item) in input.iter().enumerate() {
         if opaque::is_opaque(item) {
             // Only this dialect's own blocks go back, unchanged, in place.
             if let Some(block) = opaque::block_for(item, DIALECT) {
                 push(&mut messages, "assistant", vec![block.clone()]);
             }
-            continue;
+        } else {
+            encode_item(item, &mut system, &mut messages)?;
         }
-        match item["type"].as_str() {
-            Some("reasoning") => {}
-            Some("function_call") => {
-                let arguments = item["arguments"].as_str().unwrap_or("{}");
-                let input: Value = serde_json::from_str(arguments)
-                    .map_err(|_| protocol("Tool call arguments are not valid JSON"))?;
-                let block = json!({"type":"tool_use","id":item["call_id"],"name":item["name"],"input":input});
-                push(&mut messages, "assistant", vec![block]);
-            }
-            Some("function_call_output") => {
-                let output = item["output"]
-                    .as_str()
-                    .map(str::to_owned)
-                    .unwrap_or_else(|| item["output"].to_string());
-                let block =
-                    json!({"type":"tool_result","tool_use_id":item["call_id"],"content":output});
-                // Results of one assistant turn stay together and come first.
-                let results_first = messages.last().is_some_and(|last| last["role"] == "user");
-                if results_first {
-                    let last = messages.last_mut().expect("user message");
-                    let content = last["content"].as_array_mut().expect("content array");
-                    let at = content
-                        .iter()
-                        .take_while(|b| b["type"] == "tool_result")
-                        .count();
-                    content.insert(at, block);
-                } else {
-                    push(&mut messages, "user", vec![block]);
-                }
-            }
-            Some("message") | None => {
-                let role = item["role"].as_str();
-                match role {
-                    Some("system" | "developer") if messages.is_empty() => {
-                        system.push(text_of(&item["content"])?);
-                    }
-                    // Inserted context after the conversation began is a user
-                    // message: Messages has no mid-conversation system role.
-                    Some("system" | "developer" | "user") => {
-                        push(&mut messages, "user", blocks_of(&item["content"])?);
-                    }
-                    Some("assistant") => {
-                        push(&mut messages, "assistant", blocks_of(&item["content"])?);
-                    }
-                    _ => return Err(protocol("Unsupported conversation message role")),
-                }
-            }
-            _ => {
-                return Err(ModelError::new(
-                    "unsupported_item",
-                    "Unsupported Messages replay item; no request sent",
-                ));
-            }
+        // Mark the tail once the conversation is complete, before the
+        // per-request context is merged after it.
+        if cache.is_some_and(|hint| index + 1 == hint.conversation_items)
+            && let Some(block) = last_cacheable(&mut messages)
+        {
+            mark(block);
         }
     }
     if messages.last().is_none_or(|last| last["role"] != "user") {
@@ -195,13 +165,20 @@ pub(super) fn encode(request: Value, max_tokens: u64) -> Result<Value, ModelErro
         result["output_config"] = json!({"effort":effort_name(effort)});
     }
     if !system.is_empty() {
-        result["system"] = json!(system.join("\n\n"));
+        let text = system.join("\n\n");
+        result["system"] = if cache.is_some() {
+            let mut block = json!({"type":"text","text":text});
+            mark(&mut block);
+            json!([block])
+        } else {
+            json!(text)
+        };
     }
     if let Some(tools) = request["tools"]
         .as_array()
         .filter(|tools| !tools.is_empty())
     {
-        let converted = tools
+        let mut converted = tools
             .iter()
             .map(|tool| {
                 if tool["type"] != "function" {
@@ -214,9 +191,99 @@ pub(super) fn encode(request: Value, max_tokens: u64) -> Result<Value, ModelErro
                 Ok(out)
             })
             .collect::<Result<Vec<_>, ModelError>>()?;
+        if cache.is_some()
+            && let Some(last) = converted.last_mut()
+        {
+            mark(last);
+        }
         result["tools"] = json!(converted);
     }
     Ok(result)
+}
+
+/// The last block, in wire order, that may carry `cache_control`. Thinking and
+/// other opaque blocks cannot, so they never become a breakpoint.
+fn last_cacheable(messages: &mut [Value]) -> Option<&mut Value> {
+    messages
+        .iter_mut()
+        .rev()
+        .flat_map(|message| {
+            message["content"]
+                .as_array_mut()
+                .into_iter()
+                .flatten()
+                .rev()
+        })
+        .find(|block| {
+            matches!(
+                block["type"].as_str(),
+                Some("text" | "image" | "tool_use" | "tool_result")
+            )
+        })
+}
+
+/// Encode one non-opaque item.
+fn encode_item(
+    item: &Value,
+    system: &mut Vec<String>,
+    messages: &mut Vec<Value>,
+) -> Result<(), ModelError> {
+    match item["type"].as_str() {
+        Some("reasoning") => {}
+        Some("function_call") => {
+            let arguments = item["arguments"].as_str().unwrap_or("{}");
+            let input: Value = serde_json::from_str(arguments)
+                .map_err(|_| protocol("Tool call arguments are not valid JSON"))?;
+            let block =
+                json!({"type":"tool_use","id":item["call_id"],"name":item["name"],"input":input});
+            push(messages, "assistant", vec![block]);
+        }
+        Some("function_call_output") => {
+            let output = item["output"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| item["output"].to_string());
+            let block =
+                json!({"type":"tool_result","tool_use_id":item["call_id"],"content":output});
+            // Results of one assistant turn stay together and come first.
+            let results_first = messages.last().is_some_and(|last| last["role"] == "user");
+            if results_first {
+                let last = messages.last_mut().expect("user message");
+                let content = last["content"].as_array_mut().expect("content array");
+                let at = content
+                    .iter()
+                    .take_while(|b| b["type"] == "tool_result")
+                    .count();
+                content.insert(at, block);
+            } else {
+                push(messages, "user", vec![block]);
+            }
+        }
+        Some("message") | None => {
+            let role = item["role"].as_str();
+            match role {
+                Some("system" | "developer") if messages.is_empty() => {
+                    system.push(text_of(&item["content"])?);
+                }
+                // Inserted context after the conversation began is a user
+                // message: Messages has no mid-conversation system role.
+                Some("system" | "developer" | "user") => {
+                    push(messages, "user", blocks_of(&item["content"])?);
+                }
+                Some("assistant") => {
+                    push(messages, "assistant", blocks_of(&item["content"])?);
+                }
+                _ => return Err(protocol("Unsupported conversation message role")),
+            }
+        }
+        _ => {
+            return Err(ModelError::new(
+                "unsupported_item",
+                "Unsupported Messages replay item; no request sent",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// One content block being accumulated, by the provider's block index.
@@ -295,8 +362,15 @@ impl Messages {
         if let Some(total) = total_input {
             usage.insert("input_tokens".into(), total.into());
         }
+        let mut details = serde_json::Map::new();
         if let Some(read) = self.cache_read {
-            usage.insert("input_tokens_details".into(), json!({"cached_tokens":read}));
+            details.insert("cached_tokens".into(), read.into());
+        }
+        if let Some(creation) = self.cache_creation {
+            details.insert("cache_creation_tokens".into(), creation.into());
+        }
+        if !details.is_empty() {
+            usage.insert("input_tokens_details".into(), Value::Object(details));
         }
         if let Some(output) = self.output {
             usage.insert("output_tokens".into(), output.into());
@@ -560,7 +634,7 @@ mod usage_tests {
         assert_eq!(
             zero.usage().unwrap(),
             json!({"input_tokens":0,
-            "input_tokens_details":{"cached_tokens":0},"output_tokens":0})
+            "input_tokens_details":{"cached_tokens":0,"cache_creation_tokens":0},"output_tokens":0})
         );
     }
 
@@ -606,7 +680,12 @@ mod usage_tests {
             stream.take_usage(&json!({"cache_read_input_tokens":invalid}));
             let unknown = stream.usage().unwrap();
             assert!(unknown.get("input_tokens").is_none());
-            assert!(unknown.get("input_tokens_details").is_none());
+            assert!(
+                unknown["input_tokens_details"]
+                    .get("cached_tokens")
+                    .is_none()
+            );
+            assert_eq!(unknown["input_tokens_details"]["cache_creation_tokens"], 1);
         }
     }
 }

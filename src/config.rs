@@ -107,6 +107,7 @@ impl Api {
                 "system",
                 "tools",
                 "output_config",
+                "cache_control",
             ],
         }
     }
@@ -163,6 +164,9 @@ pub struct Connection {
     pub ssl_verify: bool,
     pub session_header: bool,
     pub prompt_cache_key: bool,
+    /// Send the dialect's cache markers for the common cache hint (#127).
+    /// Default on; `false` sends nothing cache-related.
+    pub prompt_caching: bool,
     pub response_header_timeout_ms: u64,
     pub stream_idle_timeout_ms: u64,
     pub request_timeout_ms: u64,
@@ -189,6 +193,7 @@ impl Default for Connection {
             ssl_verify: true,
             session_header: true,
             prompt_cache_key: false,
+            prompt_caching: true,
             response_header_timeout_ms: 120_000,
             stream_idle_timeout_ms: 600_000,
             request_timeout_ms: 60_000,
@@ -216,6 +221,7 @@ impl fmt::Debug for Connection {
             .field("ssl_verify", &self.ssl_verify)
             .field("session_header", &self.session_header)
             .field("prompt_cache_key", &self.prompt_cache_key)
+            .field("prompt_caching", &self.prompt_caching)
             .field(
                 "response_header_timeout_ms",
                 &self.response_header_timeout_ms,

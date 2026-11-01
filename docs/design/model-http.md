@@ -264,14 +264,16 @@ models) read on 2026-11-01; no real provider call has been made.
   All resolved values use the existing sensitive-header/redaction path. Real
   Anthropic Bearer authentication remains unverified, not assumed compatible.
 - Request: `model`, `max_tokens` (required by the API), `stream: true`,
-  `messages`, a top-level `system` string, and `tools`. The only
+  `messages`, a top-level `system`, and `tools`, plus the cache markers of the
+  common cache hint (#127, below) unless `prompt_caching = false`. `system` is a
+  string without the hint and one marked text block with it. The only other
   optional field is the Thread effort, sent as `output_config.effort` when set
   and absent otherwise (#126). The mapping lives in one function of the
   dialect: `minimal` becomes `low`, every other string is sent unchanged (no
-  model catalog). No `thinking`, temperature, `tool_choice`, `cache_control` or
-  beta header; the user adds them with `extra_body` and `extra_headers` (#119).
-  Reserved `extra_body` keys: `model`, `max_tokens`, `stream`, `messages`,
-  `system`, `tools`, `output_config`.
+  model catalog). No `thinking`, temperature, `tool_choice` or beta header; the
+  user adds them with `extra_body` and `extra_headers` (#119). Reserved
+  `extra_body` keys: `model`, `max_tokens`, `stream`, `messages`, `system`,
+  `tools`, `output_config`, `cache_control`.
 - Provider settings have three tiers (#126). (1) Shellboy concepts, converted by
   each dialect's encoder; (2) opaque passthrough, `extra_body`/`extra_headers`;
   (3) opaque response blocks stored and returned unchanged. A setting moves from
@@ -319,12 +321,56 @@ models) read on 2026-11-01; no real provider call has been made.
   counters are retained even when the total is unknown. An absent delta counter
   keeps its previous cumulative fact; a present invalid counter replaces it
   with unknown rather than retaining an obsolete value.
+  `cache_creation_input_tokens` is also saved on its own as
+  `input_tokens_details.cache_creation_tokens` (#127).
 - Errors: an in-stream `error` event and an HTTP error body
   `{"type":"error","error":{"type","message"}}` map `error.type` to the provider
   code. `overloaded_error` (529) and `rate_limit_error` (429) are retried by the
   existing transient rules; `request_too_large` (413) and `invalid_request_error`
   (400) are not.
 - Summary requests and `input_characters` use the same encoder.
+
+### Common cache hint (#127)
+
+A tier-1 common concept (promotion condition (a): placing it correctly needs
+structure only Shellboy knows). `dialect::CacheHint` is derived from the
+canonical request before `context_role` mapping:
+
+- `prefix_items`: the leading system/developer items. With the tools they are
+  the stable prefix.
+- `conversation_items`: the end of the growing conversation. Trailing
+  system/developer items after it are per-request context Shellboy appends (the
+  `Shellboy context v1` line, attachment notices, a summary prompt). They change
+  on every request, so a cache entry ending on them is never read again. A saved
+  event notice that happens to be last is indistinguishable and is also left
+  after the breakpoint; the next request's lookback still finds the entry.
+
+Connection `prompt_caching` (bool, default true, opt-out) decides whether the
+hint is passed to the encoder at all. `false` sends nothing cache-related.
+
+- Messages: explicit `cache_control: {"type":"ephemeral"}` on the last tool, on
+  the single system text block, and on the last cacheable block (text, image,
+  `tool_use`, `tool_result`; never thinking or other opaque blocks) of the
+  conversation, in wire order. At most three of the four allowed breakpoints;
+  all use the default 5-minute TTL, so the non-increasing TTL rule holds. Too
+  short a prefix is simply not cached (no error). Each request adds only a few
+  blocks, well within the 20-block lookback. Top-level automatic caching is not
+  used: it would mark the last block, which is the per-request context line, so
+  its entry could never be read (see the #127 decision). `cache_control` is a reserved
+  `extra_body` key.
+- Responses: nothing new. Providers cache prefixes automatically; the existing
+  opt-in `prompt_cache_key` (Thread UUID) and session header stay the routing
+  hints. `prompt_cache_key = true` with `prompt_caching = false` is rejected.
+- Chat Completions: nothing.
+- `input_characters` counts content without markers.
+
+Prefix stability: the system prefix is the fixed system text plus the Turn's
+working-instruction snapshot; the tools are fixed per configuration. Events
+Shellboy inserts mid-conversation are appended as saved history items and never
+rewrite earlier items. What does invalidate the cache, by design: editing
+AGENTS.md (system, next Turn), an attachment update (its source message content
+changes in place), compaction or trim (history replaced), and a connection or
+model change.
 
 ### D-010 fact-preserving Chat tolerances (#64 review)
 

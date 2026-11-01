@@ -228,6 +228,8 @@ fn text_stream_maps_text_ping_and_cache_usage_at_any_chunk_size() {
         // Total input is uncached + cache creation + cache read.
         assert_eq!(usage["input_tokens"], 25 + 100 + 400);
         assert_eq!(usage["input_tokens_details"]["cached_tokens"], 400);
+        // Cache writes are kept as their own saved counter (#127).
+        assert_eq!(usage["input_tokens_details"]["cache_creation_tokens"], 100);
         // Output tokens come from the cumulative message_delta, not message_start.
         assert_eq!(usage["output_tokens"], 15);
         assert!(usage.get("total_tokens").is_none(), "no invented total");
@@ -395,7 +397,7 @@ async fn loopback_sends_version_header_path_and_only_user_extras() {
         config.api_key_env = None;
         config.headers = BTreeMap::from([("x-api-key".into(), "fixture-key".into())]);
         config.extra_body =
-            serde_json::from_value(json!({"cache_control":{"type":"ephemeral"}})).unwrap();
+            serde_json::from_value(json!({"metadata":{"user_id":"fixture"}})).unwrap();
         config.extra_headers = BTreeMap::from([("anthropic-beta".into(), "fixture-beta".into())]);
         let client = HttpModelClient::for_connection("claude", config).unwrap();
         let response = client
@@ -410,7 +412,7 @@ async fn loopback_sends_version_header_path_and_only_user_extras() {
         assert!(lower.contains("x-api-key: fixture-key"));
         assert!(lower.contains("anthropic-beta: fixture-beta"));
         assert_eq!(body["max_tokens"], 2048);
-        assert_eq!(body["cache_control"], json!({"type":"ephemeral"}));
+        assert_eq!(body["metadata"], json!({"user_id":"fixture"}));
         assert!(body.get("thinking").is_none() && body.get("temperature").is_none());
     })
     .await
@@ -519,10 +521,11 @@ fn configuration_validates_max_tokens_and_the_messages_api() {
         "system",
         "tools",
         "output_config",
+        "cache_control",
     ] {
         assert!(ok(&format!("extra_body={{ {key} = 1 }}")).is_err(), "{key}");
     }
-    ok("extra_body={ thinking = { type = 'enabled', budget_tokens = 1024 }, cache_control = { type = 'ephemeral' } }").unwrap();
+    ok("extra_body={ thinking = { type = 'enabled', budget_tokens = 1024 } }").unwrap();
     // The endpoint is /messages.
     use shellboy::config::ApiEndpoint;
     assert_eq!(
@@ -594,4 +597,270 @@ async fn environment_key_custom_headers_are_sent_raw_and_redacted() {
             }
         }
     }).await.unwrap();
+}
+
+// --- Common cache hint (#127) ---
+
+fn developer(text: &str) -> Value {
+    json!({"role":"developer","content":[{"type":"input_text","text":text}]})
+}
+
+/// The shape the Driver sends: system, working instructions, the saved
+/// conversation, then the per-request `Shellboy context v1` line.
+fn driver_request(conversation: Vec<Value>, context: &str) -> Value {
+    let mut input = vec![
+        json!({"role":"system","content":[{"type":"input_text","text":"You are Shellboy."}]}),
+        developer("Working instructions from \"AGENTS.md\": be brief"),
+    ];
+    input.extend(conversation);
+    input.push(developer(&format!("Shellboy context v1: turn={context}")));
+    response_request("claude-fixture", input, None, true)
+}
+
+fn hinted(request: Value) -> Value {
+    let hint = dialect::CacheHint::of(&request);
+    dialect::encode_hinted(Api::AnthropicMessages, request, 100, Some(hint)).unwrap()
+}
+
+/// Every `cache_control` in the body, by JSON pointer.
+fn markers(value: &Value, path: String, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                if key == "cache_control" {
+                    assert_eq!(child, &json!({"type":"ephemeral"}), "5-minute default only");
+                    out.push(path.clone());
+                } else {
+                    markers(child, format!("{path}/{key}"), out);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                markers(child, format!("{path}/{index}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+fn marker_paths(wire: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    markers(wire, String::new(), &mut out);
+    out
+}
+
+/// Message blocks in wire order with their role, markers removed, up to and
+/// including the first marked one when `until_marker`.
+fn blocks(wire: &Value, until_marker: bool) -> Vec<Value> {
+    let mut out = Vec::new();
+    for message in wire["messages"].as_array().unwrap() {
+        for block in message["content"].as_array().unwrap() {
+            let mut plain = block.clone();
+            let marked = plain
+                .as_object_mut()
+                .unwrap()
+                .remove("cache_control")
+                .is_some();
+            out.push(json!([message["role"], plain]));
+            if until_marker && marked {
+                return out;
+            }
+        }
+    }
+    assert!(!until_marker, "no conversation breakpoint in {wire}");
+    out
+}
+
+fn thinking() -> Value {
+    opaque::wrap(
+        "anthropic_messages",
+        "thinking",
+        json!({"type":"thinking","thinking":"plan","signature":"sig"}),
+    )
+}
+
+#[test]
+fn cache_breakpoints_mark_tools_system_and_the_tail_before_per_request_context() {
+    let wire = hinted(driver_request(
+        vec![
+            user("run it"),
+            thinking(),
+            shell_call("toolu_a"),
+            shell_result("toolu_a"),
+            // A saved event notice at the very end cannot be told apart from
+            // per-request context, so it stays after the breakpoint.
+            developer("Shellboy event v1: {}"),
+        ],
+        "t1",
+    ));
+    let paths = marker_paths(&wire);
+    assert!(paths.len() <= 4, "{paths:?}");
+    assert_eq!(
+        paths,
+        [
+            "/messages/2/content/0".to_owned(),
+            "/system/0".to_owned(),
+            "/tools/0".to_owned()
+        ],
+        "{wire}"
+    );
+    // The leading system/developer items are one marked system block.
+    assert_eq!(wire["system"][0]["type"], "text");
+    assert!(
+        wire["system"][0]["text"]
+            .as_str()
+            .unwrap()
+            .ends_with("be brief")
+    );
+    // The tail is the tool result; the trailing context after it is unmarked.
+    let last = wire["messages"][2]["content"].as_array().unwrap();
+    assert_eq!(last.len(), 3);
+    assert_eq!(last[0]["type"], "tool_result");
+    assert!(
+        last[1]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Shellboy event")
+    );
+    assert!(
+        last[2]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("Shellboy context")
+    );
+    // A thinking block is never a breakpoint.
+    assert!(
+        wire["messages"][1]["content"][0]
+            .get("cache_control")
+            .is_none()
+    );
+    // No top-level automatic marker.
+    assert!(wire.get("cache_control").is_none());
+}
+
+#[test]
+fn the_cached_conversation_prefix_recurs_in_the_next_request() {
+    let first_turn = vec![user("run it")];
+    let mut second = first_turn.clone();
+    second.extend([shell_call("toolu_a"), shell_result("toolu_a")]);
+    let mut third = second.clone();
+    third.extend([
+        json!({"role":"assistant","content":[{"type":"output_text","text":"done"}]}),
+        user("again"),
+    ]);
+    let requests = [
+        hinted(driver_request(first_turn, "t1")),
+        hinted(driver_request(second, "t1")),
+        hinted(driver_request(third, "t2")),
+    ];
+    for pair in requests.windows(2) {
+        let (earlier, later) = (&pair[0], &pair[1]);
+        assert_eq!(earlier["system"], later["system"]);
+        assert_eq!(earlier["tools"], later["tools"]);
+        // The block sequence written to the cache by one request is a prefix
+        // of the next, so its tail breakpoint finds it within the lookback.
+        let cached = blocks(earlier, true);
+        let next = blocks(later, false);
+        assert_eq!(&next[..cached.len()], &cached[..], "{earlier}\n{later}");
+        assert!(next.len() - cached.len() < 20);
+    }
+}
+
+#[test]
+fn without_conversation_or_tools_only_present_parts_are_marked() {
+    let input = vec![
+        json!({"role":"system","content":[{"type":"input_text","text":"base"}]}),
+        user("hi"),
+        developer("Shellboy context v1: only"),
+    ];
+    let request = response_request("claude-fixture", input, None, false);
+    assert_eq!(
+        marker_paths(&hinted(request)),
+        ["/messages/0/content/0".to_owned(), "/system/0".to_owned()]
+    );
+}
+
+#[test]
+fn other_dialects_send_nothing_new_for_the_hint() {
+    let request = driver_request(vec![user("run it")], "t1");
+    let hint = dialect::CacheHint::of(&request);
+    assert_eq!(
+        hint,
+        dialect::CacheHint {
+            prefix_items: 2,
+            conversation_items: 3
+        }
+    );
+    for api in [Api::Responses, Api::ChatCompletions] {
+        let plain = dialect::encode(api, request.clone()).unwrap();
+        let with_hint = dialect::encode_hinted(api, request.clone(), 100, Some(hint)).unwrap();
+        assert_eq!(plain, with_hint, "{api:?}");
+        assert!(!with_hint.to_string().contains("cache_control"));
+        assert!(with_hint.get("prompt_cache_key").is_none());
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn caching_is_on_by_default_and_opt_out_sends_no_marker() {
+    crate::test_watchdog::watchdog("tests/anthropic_messages.rs: caching", async {
+        for (prompt_caching, role) in [
+            (true, shellboy::config::ContextRole::User),
+            (true, shellboy::config::ContextRole::Developer),
+            (false, shellboy::config::ContextRole::Developer),
+        ] {
+            let (url, task) = serve_once(200, "text/event-stream", TEXT).await;
+            let mut config = connection(url);
+            config.prompt_caching = prompt_caching;
+            config.context_role = role;
+            let client = HttpModelClient::for_connection("claude", config).unwrap();
+            client
+                .response_for_thread(
+                    "thread-1",
+                    driver_request(vec![user("run it")], "t1"),
+                    CancellationToken::new(),
+                    None,
+                )
+                .await
+                .unwrap();
+            let (_, body) = task.await.unwrap();
+            if prompt_caching {
+                // context_role = user sends the instructions as the first user
+                // block, but must not move the tail onto the context line.
+                let tail = match role {
+                    shellboy::config::ContextRole::User => "/messages/0/content/1",
+                    shellboy::config::ContextRole::Developer => "/messages/0/content/0",
+                };
+                assert_eq!(
+                    marker_paths(&body),
+                    [
+                        tail.to_owned(),
+                        "/system/0".to_owned(),
+                        "/tools/0".to_owned()
+                    ],
+                    "{role:?}: {body}"
+                );
+            } else {
+                assert!(!body.to_string().contains("cache_control"), "{body}");
+                assert!(body["system"].is_string());
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[test]
+fn prompt_caching_configuration() {
+    let parse = |api: &str, extra: &str| {
+        Config::parse(&format!(
+            "[connections.c]\nbase_url='https://api.example/v1'\napi='{api}'\n{extra}"
+        ))
+    };
+    for api in ["responses", "chat_completions", "anthropic_messages"] {
+        assert!(parse(api, "").unwrap().connections["c"].prompt_caching);
+        assert!(!parse(api, "prompt_caching=false").unwrap().connections["c"].prompt_caching);
+    }
+    parse("responses", "prompt_cache_key=true").unwrap();
+    // A routing key without caching is contradictory.
+    assert!(parse("responses", "prompt_caching=false\nprompt_cache_key=true").is_err());
 }

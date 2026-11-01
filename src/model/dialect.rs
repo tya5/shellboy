@@ -18,11 +18,64 @@ pub fn encode(api: Api, request: Value) -> Result<Value, ModelError> {
     encode_with(api, request, crate::config::DEFAULT_MESSAGES_MAX_TOKENS)
 }
 /// `max_tokens` is used only by `anthropic_messages`, which requires it.
+/// Sends no cache hint; see [`encode_hinted`].
 pub fn encode_with(api: Api, request: Value, max_tokens: u64) -> Result<Value, ModelError> {
+    encode_hinted(api, request, max_tokens, None)
+}
+/// Encode with an optional common cache hint (#127). `None` (the connection's
+/// `prompt_caching = false`) sends nothing cache-related.
+pub fn encode_hinted(
+    api: Api,
+    request: Value,
+    max_tokens: u64,
+    cache: Option<CacheHint>,
+) -> Result<Value, ModelError> {
     match api {
+        // Responses providers cache prefixes on their own; the existing
+        // `prompt_cache_key`/session handling is the only routing hint. Chat
+        // has no cache field. Neither sends anything new for the hint.
         Api::Responses => responses::encode(request),
         Api::ChatCompletions => chat::encode(request),
-        Api::AnthropicMessages => messages::encode(request, max_tokens),
+        Api::AnthropicMessages => messages::encode(request, max_tokens, cache),
+    }
+}
+
+/// The common cache hint (#127): structure only Shellboy knows, which a
+/// dialect encoder turns into its own cache markers. Indices are into the
+/// canonical (Responses-shaped) `input`, taken before `context_role` mapping.
+///
+/// - `input[..prefix_items]` are the leading system/developer instructions.
+///   With the tools they form the stable prefix.
+/// - `input[prefix_items..conversation_items]` is the growing conversation,
+///   whose end is the conversation tail.
+/// - `input[conversation_items..]` is per-request context Shellboy appends
+///   after the conversation (the `Shellboy context v1` line, attachment
+///   notices, a summary prompt). It changes on every request, so a cache entry
+///   ending there could never be read again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CacheHint {
+    pub prefix_items: usize,
+    pub conversation_items: usize,
+}
+impl CacheHint {
+    /// Derive the hint from a canonical request.
+    pub fn of(request: &Value) -> Self {
+        let empty = Vec::new();
+        let input = request["input"].as_array().unwrap_or(&empty);
+        let inserted = |item: &Value| {
+            matches!(item["type"].as_str(), Some("message") | None)
+                && matches!(item["role"].as_str(), Some("system" | "developer"))
+        };
+        let prefix_items = input.iter().take_while(|item| inserted(item)).count();
+        let trailing = input[prefix_items..]
+            .iter()
+            .rev()
+            .take_while(|item| inserted(item))
+            .count();
+        Self {
+            prefix_items,
+            conversation_items: input.len() - trailing,
+        }
     }
 }
 

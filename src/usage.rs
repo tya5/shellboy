@@ -10,10 +10,16 @@ const PATHS: [&str; 5] = [
     "$.total_tokens",
 ];
 
+/// The saved usage whitelist. The first five counters are also projected by
+/// SQL readers (`PATHS`). `cache_creation_tokens` (#127, Anthropic
+/// `cache_creation_input_tokens`, already included in `input_tokens`) is kept
+/// in the saved document only: one bounded integer, not aggregated or read by
+/// SQL, so `read` leaves it unknown.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct StandardUsage {
     pub input_tokens: Option<u64>,
     pub cached_tokens: Option<u64>,
+    pub cache_creation_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
@@ -30,6 +36,7 @@ impl StandardUsage {
         Self {
             input_tokens: number("/input_tokens"),
             cached_tokens: number("/input_tokens_details/cached_tokens"),
+            cache_creation_tokens: number("/input_tokens_details/cache_creation_tokens"),
             output_tokens: number("/output_tokens"),
             reasoning_tokens: number("/output_tokens_details/reasoning_tokens"),
             total_tokens: number("/total_tokens"),
@@ -50,13 +57,21 @@ impl StandardUsage {
         for (key, field, count) in [
             ("input_tokens_details", "cached_tokens", self.cached_tokens),
             (
+                "input_tokens_details",
+                "cache_creation_tokens",
+                self.cache_creation_tokens,
+            ),
+            (
                 "output_tokens_details",
                 "reasoning_tokens",
                 self.reasoning_tokens,
             ),
         ] {
             if let Some(count) = count {
-                object.insert(key.into(), serde_json::json!({field: count}));
+                let details = object
+                    .entry(key)
+                    .or_insert_with(|| Value::Object(Map::new()));
+                details[field] = count.into();
             }
         }
         Value::Object(object)
@@ -69,6 +84,7 @@ impl StandardUsage {
         Ok(Self {
             input_tokens: number(start)?,
             cached_tokens: number(start + 1)?,
+            cache_creation_tokens: None,
             output_tokens: number(start + 2)?,
             reasoning_tokens: number(start + 3)?,
             total_tokens: number(start + 4)?,
@@ -137,6 +153,7 @@ mod tests {
             let expected = StandardUsage {
                 input_tokens: expected,
                 cached_tokens: expected,
+                cache_creation_tokens: None,
                 output_tokens: expected,
                 reasoning_tokens: expected,
                 total_tokens: expected,
@@ -190,6 +207,14 @@ mod tests {
         assert_eq!(mixed.cached_tokens, Some(0));
         assert_eq!(mixed.output_tokens, Some(5));
         assert_eq!(mixed.total_tokens, None);
+        let creation = StandardUsage::from_value(
+            &json!({"input_tokens_details":{"cached_tokens":3,"cache_creation_tokens":4,"extra":1}}),
+        );
+        assert_eq!(
+            creation.to_value(),
+            json!({"input_tokens_details":{"cached_tokens":3,"cache_creation_tokens":4}})
+        );
+        assert_eq!(StandardUsage::from_value(&creation.to_value()), creation);
         assert_ne!(mixed, StandardUsage::default());
         assert_eq!(StandardUsage::default().to_value(), json!({}));
     }

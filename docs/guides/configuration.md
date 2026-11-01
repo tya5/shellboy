@@ -176,6 +176,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # ssl_verify = true
 # session_header = true
 # prompt_cache_key = false
+# prompt_caching = true
 # response_header_timeout_ms = 120000
 # stream_idle_timeout_ms = 600000
 # request_timeout_ms = 60000
@@ -215,28 +216,34 @@ base_url = "https://api.anthropic.com/v1"
 api_key_env = "ANTHROPIC_API_KEY" # Set this environment variable before starting Shellboy.
 api_key_header = "x-api-key"     # Raw key value, not Authorization: Bearer.
 # max_tokens = 32768
-extra_body = { cache_control = { type = "ephemeral" } } # Recommended: automatic prompt caching.
-# To also enable thinking, add thinking = { type = "adaptive" } inside extra_body.
+# prompt_caching = true   # Default: Shellboy places the cache markers itself.
+# To enable thinking: extra_body = { thinking = { type = "adaptive" } }
 # extra_headers = { "anthropic-beta" = "..." }
 ```
 
-**Recommended: enable prompt caching.** Without `cache_control`, every request's
-full input is billed at the full rate. For long-running agent conversations,
-this can cost several times more. The active `extra_body` example above is the
-recommended user setting; Shellboy still sends no optional provider fields unless
-you configure them. Cache-read behavior still needs the approved live verification
-described below; synthetic fixtures are not evidence of a real provider cache hit.
+**Prompt caching is on by default.** Without cache markers every request's full
+input is billed at the full rate, which for long agent conversations can cost
+several times more. Shellboy knows where the unchanging start of a request ends
+and where the growing conversation ends, so it places the markers itself: one
+`cache_control: {type: "ephemeral"}` (the default 5-minute cache) on the last
+tool, one on the system prompt, and one on the last block of the conversation,
+before the short per-request context line Shellboy appends (which changes every
+request and would never be read back). That is three of the four markers the API
+allows. `prompt_caching = false` on the connection sends no marker at all.
+`cache_control` is reserved: setting it in `extra_body` is a configuration error.
+Cache-read behavior still needs the approved live verification described below;
+synthetic fixtures are not evidence of a real provider cache hit.
 
 - Shellboy sends the minimum a conversation needs: `model`, `max_tokens`
   (required by the API), `stream`, `messages`, a top-level `system` and `tools`,
-  and the fixed header `anthropic-version: 2023-06-01`. **Nothing optional is
-  sent except the Thread effort**, which goes as `output_config.effort` when one
-  is set (`minimal` is sent as `low`; other values unchanged) and is omitted
-  otherwise. `output_config` is reserved, so `extra_body` cannot set it.
-  Thinking, temperature, `tool_choice`, `cache_control` and beta headers are
-  yours to add with `extra_body` and `extra_headers`. Thinking on/off is not
-  tied to effort: `output_config.effort` guides how much the model works, while
-  `thinking` (for example `{ type = 'enabled', budget_tokens = ... }`) is a
+  and the fixed header `anthropic-version: 2023-06-01`, plus the cache markers
+  above unless `prompt_caching = false`. **Nothing else optional is sent except
+  the Thread effort**, which goes as `output_config.effort` when one is set
+  (`minimal` is sent as `low`; other values unchanged) and is omitted otherwise.
+  `output_config` and `cache_control` are reserved, so `extra_body` cannot set them.
+  Thinking, temperature, `tool_choice` and beta headers are yours to add with
+  `extra_body` and `extra_headers`. Thinking on/off is not tied to effort:
+  `output_config.effort` guides how much the model works, while `thinking` is a
   separate setting, and some models accept only certain combinations or reject
   one of them with HTTP 400. Check the provider's documentation for the model.
   Newer models reject some
@@ -263,8 +270,10 @@ described below; synthetic fixtures are not evidence of a real provider cache hi
   `pause_turn` and any unknown value fail with the original response kept;
   Shellboy does not guess a continuation.
 - Usage: total input is `input_tokens` + `cache_creation_input_tokens` +
-  `cache_read_input_tokens`; the cached count is `cache_read_input_tokens`; output
-  tokens come from the last (cumulative) report. Missing counters stay unknown.
+  `cache_read_input_tokens`; the cached count is `cache_read_input_tokens`; the
+  cache-write count `cache_creation_input_tokens` is saved as
+  `input_tokens_details.cache_creation_tokens`; output tokens come from the last
+  (cumulative) report. Missing counters stay unknown.
   Look at the saved usage to see whether the second request read from the cache.
 - Errors keep the provider's error type as the provider code. HTTP 429, 529 and
   5xx use the existing retry rules; 400 and 413 are not retried. A spend-limit 429
@@ -312,7 +321,7 @@ extra_headers = { "X-Beta-Feature" = "alpha" }
 - `extra_headers` is a table of strings added to each conversation and summary request. It is not sent to model-list or embedding requests.
 - Both apply to every dialect (`responses`, `chat_completions`, and later ones). With neither set, the request is exactly what it was before.
 - Shellboy checks only three things: the value is representable as JSON (no TOML dates or times), it is small (`extra_body` at most 64 KiB serialized, `extra_headers` at most 32 entries of at most 8 KiB each), and it does not collide with a field Shellboy owns. Anything else is passed through and judged by the provider. A rejected value reports `config_invalid` at `shellboy config check` and at startup.
-- Reserved `extra_body` top-level keys (rejected, not overridden). `responses`: `model`, `input`, `tools`, `stream`, `store`, `include`, `reasoning`, `previous_response_id`, `prompt_cache_key`. `chat_completions`: `model`, `messages`, `tools`, `stream`, `stream_options`, `reasoning_effort`. `anthropic_messages`: `model`, `max_tokens`, `stream`, `messages`, `system`, `tools`, `output_config`. A name reserved for one dialect is ordinary for the other.
+- Reserved `extra_body` top-level keys (rejected, not overridden). `responses`: `model`, `input`, `tools`, `stream`, `store`, `include`, `reasoning`, `previous_response_id`, `prompt_cache_key`. `chat_completions`: `model`, `messages`, `tools`, `stream`, `stream_options`, `reasoning_effort`. `anthropic_messages`: `model`, `max_tokens`, `stream`, `messages`, `system`, `tools`, `output_config`, `cache_control`. A name reserved for one dialect is ordinary for the other.
 - `extra_headers` rejects credential-like and transport-owned names (`Authorization`, `Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, `Accept`, `X-Shellboy-Session-Id`, and any name containing `api-key`, `apikey`, `secret`, `token` or `credential`). Use `api_key_env` or `headers` for credentials. A name may not repeat an entry of `headers`.
 - Effort: `default_effort` (and a Thread's effort) is sent as `reasoning` (Responses), `reasoning_effort` (Chat) or `output_config.effort` (Messages). Those keys are reserved, so `extra_body` cannot also set them; there is nothing to prioritize. Provider-specific reasoning shapes (for example `thinking`) go in `extra_body`.
 - Each model attempt records only a SHA-256 hash of the extra fields it sent (`extra_digest` in its input manifest), so you can later tell whether two attempts used the same settings. The contents stay in your configuration file; they are not copied into the database. Treat `extra_body` values as non-secret: use `api_key_env` for keys.
@@ -417,7 +426,7 @@ With default `connections.<name>.session_header = true`, conversation and summar
 
 When automatic attachment is enabled, the Thread UUID takes precedence on conversation requests even if `headers` contains the same header with different casing. `session_header = false` disables only automatic attachment: explicitly configured fixed headers are still sent. Other fixed headers and their application to embedding/model-list requests are unchanged.
 
-Setting `prompt_cache_key = true` in the same connection section additionally sends the Thread UUID as `prompt_cache_key` in Responses conversation and summary request bodies (not Chat). It defaults to `false` and adds nothing to the body. Keep it disabled for providers that do not accept the field. Restart the owner after changing either setting.
+Setting `prompt_cache_key = true` in the same connection section additionally sends the Thread UUID as `prompt_cache_key` in Responses conversation and summary request bodies (not Chat). It defaults to `false` and adds nothing to the body. It is a cache routing hint, so it cannot be combined with `prompt_caching = false`. Responses providers cache request prefixes on their own; `prompt_caching` sends nothing new for `responses` or `chat_completions`. Keep it disabled for providers that do not accept the field. Restart the owner after changing either setting.
 
 These settings provide identifiers the endpoint can use; they do not guarantee cache hits, routing to one backend, or recovery from communication failures. With LiteLLM or similar proxies, check endpoint session-routing settings. A fixed `x-litellm-session-id` or trace ID may take priority over Shellboy's Thread identity in some configurations. Do not combine a shared fixed identity header with Thread identity when conversation isolation is the goal.
 
@@ -530,6 +539,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `connections.<name>` | `ssl_verify=true`; URL/authentication/effort/headers described above | Per-connection TLS verification, enabled by default |
 | `connections.<name>` | `api="responses"` | `"responses"`, `"chat_completions"` or `"anthropic_messages"`; catalog/embedding endpoints stay unchanged |
 | `connections.<name>` | `session_header=true`, `prompt_cache_key=false` | Thread identity header and optional cache identity body field for conversations/summaries |
+| `connections.<name>` | `prompt_caching=true` | Shellboy-placed cache markers (`anthropic_messages` only; nothing new for other dialects); `false` sends none |
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
 | `connections.<name>` | `auto_at_tokens` = unset (uses `[compaction]`) | Per-connection proactive compaction threshold; 0 disables |
 | `compaction` | `auto_at_tokens=200000` | Proactive compaction when the last reported input reaches this; 0 disables |

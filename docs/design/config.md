@@ -24,7 +24,9 @@
 
 `connections.<名前>.prompt_cache_key` はboolで既定false。明示trueの場合だけ、会話と要約のResponses要求本文へ同じThread UUIDの `prompt_cache_key` を付ける。falseならこの自動設定項目を本文へ追加しない。providerがこのフィールドを受理する場合に有効化する。キャッシュhitや同一上流への接続、障害解消を保証しない。
 
-両値ともRust DefaultとTOML省略時を揃え、文字列・整数などbool以外を拒否する。owner再起動後の要求へ反映する。LiteLLM側のroutingでは `x-litellm-session-id` やtrace ID等が優先される構成があるため、意図せず全Thread共通の固定識別headerを併用しない。接続先側の設定・優先順位は [設定ガイド](../guides/configuration.md#per-thread-session-identity) と [model HTTP](model-http.md) を参照する。
+`connections.<名前>.prompt_caching` はboolで既定true（#127、opt-out）。共通のキャッシュの目印を方言のcache markerとして送る。`anthropic_messages` だけが実際に何かを送り、`responses` と `chat_completions` では新しく何も送らない。falseではcache関連を何も送らない。`prompt_cache_key=true` と `prompt_caching=false` の組合せは矛盾として拒否する。配置は [model HTTP](model-http.md#common-cache-hint-127) を参照する。
+
+これらの値はRust DefaultとTOML省略時を揃え、文字列・整数などbool以外を拒否する。owner再起動後の要求へ反映する。LiteLLM側のroutingでは `x-litellm-session-id` やtrace ID等が優先される構成があるため、意図せず全Thread共通の固定識別headerを併用しない。接続先側の設定・優先順位は [設定ガイド](../guides/configuration.md#per-thread-session-identity) と [model HTTP](model-http.md) を参照する。
 
 ## 接続ごとの追加指定（extra_body / extra_headers、#119）
 

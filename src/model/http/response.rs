@@ -213,13 +213,19 @@ impl HttpModelClient {
             .get("tools")
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
+        // The hint reads Shellboy's own roles, before context_role maps them.
+        let cache = self
+            .connection
+            .prompt_caching
+            .then(|| dialect::CacheHint::of(&request));
         crate::model::apply_context_role(&mut request, self.connection.context_role);
-        let mut request = dialect::encode_with(
+        let mut request = dialect::encode_hinted(
             self.connection.api,
             request,
             self.connection
                 .max_tokens
                 .unwrap_or(crate::config::DEFAULT_MESSAGES_MAX_TOKENS),
+            cache,
         )?;
         // Shellboy never interprets these. Config validation rejects any key
         // Shellboy owns, so a plain insert can neither override nor reorder.

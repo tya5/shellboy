@@ -7368,3 +7368,28 @@ Related `cargo test --lib -- readback compact context_usage driver` passes
 180/0. Not run locally: the full standard check and Linux/Windows; those run in
 GitHub CI on the pushed branch. Providers that omit usage are only covered by
 the unknown-usage rule, not by a live provider.
+
+## #127 prompt caching hint
+
+Environment: macOS (darwin) sandbox worktree issue-127-cache from main eca1b81b,
+synthetic requests and a loopback mock Messages endpoint; no real provider or
+user data. Commands via rust-slot: `cargo check --tests`, `cargo clippy --tests
+-- -D warnings` (clean), `cargo test --test integration anthropic_messages`
+(20/0). New fixtures check: breakpoint paths and count (exactly tools, system,
+conversation tail; at most 4; all `{"type":"ephemeral"}`; none on thinking
+blocks or the trailing `Shellboy context v1` line; no top-level marker); the
+cached block sequence of each request is a prefix of the next request's across
+a tool round trip and a new Turn; with `context_role = user` the tail stays
+before the context line; default-on and `prompt_caching = false` over loopback
+(opt-out body contains no `cache_control`, `system` is a string); Responses and
+Chat encode identically with and without the hint; config defaults, opt-out,
+`cache_control` rejected in Messages `extra_body`, and `prompt_cache_key` without
+`prompt_caching` rejected. `cache_creation_tokens` is saved from the Messages
+fixture (100) and round-trips through the usage whitelist (`cargo test --lib
+usage`, 59/0; `--lib -- dialect config compaction`, 116/0).
+Not verified: any real Anthropic cache read or write (requires approval after
+credit returns: second request `cache_read_input_tokens > 0`, record
+`cache_creation_input_tokens`); full standard check and Linux/Windows run in CI.
+Local `runtime_features::headless_stop_boundaries_*` failed in this sandbox with
+the restarted owner reporting the data-directory lock unavailable; it does not
+use the Messages dialect and is left to CI.
