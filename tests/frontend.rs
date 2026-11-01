@@ -270,7 +270,23 @@ async fn work_overview_follows_the_saved_execution_to_get_and_raw_output() {
     .await
     .unwrap();
     let control = Control::new(&owner, root.path().into());
-    owner.db.call(|db|{db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','調査','/','/AGENTS.md','p','m','2026-10-25T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('r','t','completed','2026-10-25T00:00:00Z','2026-10-25T00:01:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at) VALUES('u','t','r','completed','2026-10-25T00:00:00Z','2026-10-25T00:01:00Z'); INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,exit_code,output_complete,started_at,ended_at,saved_sequence) VALUES('saved-execution','r','u','saved-execution','exited','/','{}','UTF-8','UTF-8','closed',0,1,'2026-10-25T00:00:00Z','2026-10-25T00:01:00Z',1);")?;db.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at) VALUES('saved-execution',0,'stdout',0,?1,'2026-10-25T00:01:00Z')",[b"SAVED_OUTPUT_ONLY".as_slice()])?;Ok(())}).await.unwrap();
+    // This verifies retained output navigation, not expiry. Capture a fresh
+    // fixture clock so normal seven-day GC cannot age out a calendar literal.
+    let ended = chrono::Utc::now();
+    let started = (ended - chrono::Duration::minutes(1)).to_rfc3339();
+    let ended = ended.to_rfc3339();
+    owner
+        .db
+        .call(move |db| {
+            db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','調査','/','/AGENTS.md','p','m',?1)", [&ended])?;
+            db.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('r','t','completed',?1,?2)", rusqlite::params![&started, &ended])?;
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at) VALUES('u','t','r','completed',?1,?2)", rusqlite::params![&started, &ended])?;
+            db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,exit_code,output_complete,started_at,ended_at,saved_sequence) VALUES('saved-execution','r','u','saved-execution','exited','/','{}','UTF-8','UTF-8','closed',0,1,?1,?2,1)", rusqlite::params![&started, &ended])?;
+            db.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at) VALUES('saved-execution',0,'stdout',0,?1,?2)", rusqlite::params![b"SAVED_OUTPUT_ONLY".as_slice(), &ended])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let (rpc_send, rpc_receive) = tokio::sync::mpsc::channel(16);
     let server = LocalServer::bind(&owner, rpc_send).await.unwrap();
     tokio::spawn(control.clone().serve(rpc_receive));
