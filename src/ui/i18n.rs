@@ -184,8 +184,11 @@ mod rendering_tests {
         fn show_operations(ui: &mut UiState) {
             ui.open_operations(None);
         }
-        fn help_expected(_: UiLanguage) -> &'static [&'static str] {
-            &["よく使う操作", "Esc"]
+        fn help_expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Common actions", "Esc"],
+                UiLanguage::Ja => &["よく使う操作", "Esc"],
+            }
         }
         fn operations_expected(_: UiLanguage) -> &'static [&'static str] {
             &["CLIと同じ操作", "Esc"]
