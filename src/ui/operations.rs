@@ -655,16 +655,15 @@ impl Operations {
         if let Some(form) = &self.form {
             if let Some(operation) = &form.client_confirmation {
                 let label = form.operation.label_for(form.language);
-                let (title, footer) = match form.language {
-                    UiLanguage::En => (
-                        format!("{label} | Confirm"),
-                        "Y Run | N/Esc Back to form | ^v/PgUp/PgDn Scroll",
-                    ),
-                    UiLanguage::Ja => (
-                        format!("{label} | 確認"),
-                        "Y 実行 | N/Esc 入力欄へ | ^v/PgUp/PgDn 説明を読む",
-                    ),
+                let title = match form.language {
+                    UiLanguage::En => format!("{label} | Confirm"),
+                    UiLanguage::Ja => format!("{label} | 確認"),
                 };
+                let footer = local!(
+                    form.language,
+                    "Y 実行 | N/Esc 入力欄へ | ^v/PgUp/PgDn 説明を読む",
+                    "Y Run | N/Esc Back to form | ^v/PgUp/PgDn Scroll"
+                );
                 let body = popup::panel_recorded(
                     frame,
                     area,
@@ -685,16 +684,15 @@ impl Operations {
             }
             if form.help {
                 let label = form.operation.label_for(form.language);
-                let (title, footer) = match form.language {
-                    UiLanguage::En => (
-                        format!("{label} | Guide"),
-                        "Esc/F1 Back to form | ^v/PgUp/PgDn Scroll",
-                    ),
-                    UiLanguage::Ja => (
-                        format!("{label} | 使い方"),
-                        "Esc/F1 入力欄へ | ^v/PgUp/PgDn 説明を読む",
-                    ),
+                let title = match form.language {
+                    UiLanguage::En => format!("{label} | Guide"),
+                    UiLanguage::Ja => format!("{label} | 使い方"),
                 };
+                let footer = local!(
+                    form.language,
+                    "Esc/F1 入力欄へ | ^v/PgUp/PgDn 説明を読む",
+                    "Esc/F1 Back to form | ^v/PgUp/PgDn Scroll"
+                );
                 let body = popup::panel_recorded(
                     frame,
                     area,
