@@ -5529,14 +5529,37 @@ mod language_tests {
         fn descendant_count(ui: &mut UiState) -> u64 {
             populate(ui, true);
             ui.thread_browser.descendant_root = Some("root".into());
-            let Some(UiAction::ObserveDescendants { generation, .. }) = ui.descendants.observe(vec!["root".into()]) else { panic!("new root must be observed"); };
-            ui.apply(crate::ui::UiUpdate::Descendants { generation, read_sequence: 1, counts: vec![super::super::watch::DescendantCount { root: "root".into(), available: true, active: 2, recovery: 1, truncated: false, cycle: false }], error: None });
+            let Some(UiAction::ObserveDescendants { generation, .. }) =
+                ui.descendants.observe(vec!["root".into()])
+            else {
+                panic!("new root must be observed");
+            };
+            ui.apply(crate::ui::UiUpdate::Descendants {
+                generation,
+                read_sequence: 1,
+                counts: vec![super::super::watch::DescendantCount {
+                    root: "root".into(),
+                    available: true,
+                    active: 2,
+                    recovery: 1,
+                    truncated: false,
+                    cycle: false,
+                }],
+                error: None,
+            });
             generation
         }
-        fn descendant(ui: &mut UiState) { descendant_count(ui); }
+        fn descendant(ui: &mut UiState) {
+            descendant_count(ui);
+        }
         fn stale(ui: &mut UiState) {
             let generation = descendant_count(ui);
-            ui.apply(crate::ui::UiUpdate::Descendants { generation, read_sequence: 2, counts: vec![], error: Some("fixture refresh failure".into()) });
+            ui.apply(crate::ui::UiUpdate::Descendants {
+                generation,
+                read_sequence: 2,
+                counts: vec![],
+                error: Some("fixture refresh failure".into()),
+            });
         }
         fn stale_expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
