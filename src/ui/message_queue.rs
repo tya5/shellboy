@@ -234,15 +234,21 @@ impl QueuePopup {
                 .items
                 .iter()
                 .map(|item| {
-                    popup::Item::new(vec![
-                        Line::from(crate::presentation::sanitize_plain(&item.label(language), 0).0)
+                    let mut lines = presentation::hanging_wrap(
+                        vec![
+                            Line::from(
+                                crate::presentation::sanitize_plain(&item.label(language), 0).0,
+                            )
                             .style(Style::default().fg(theme::EMPHASIS)),
-                        Line::from(
-                            crate::presentation::sanitize_plain(&item.excerpt, 0)
-                                .0
-                                .replace('\n', " "),
-                        ),
-                    ])
+                        ],
+                        body.width.saturating_sub(3).max(1),
+                    );
+                    lines.push(Line::from(
+                        crate::presentation::sanitize_plain(&item.excerpt, 0)
+                            .0
+                            .replace('\n', " "),
+                    ));
+                    popup::Item::new(lines)
                 })
                 .collect()
         };
@@ -282,6 +288,29 @@ fn accepting_excerpt(text: &str) -> String {
     }
     preview
 }
+// Compact rows keep their fixed height; /queue exposes the complete wrapped label.
+fn compact_label(label: &str, width: usize) -> String {
+    use crate::ui::text_width::UnicodeWidthStr;
+    use unicode_segmentation::UnicodeSegmentation;
+    if label.width() <= width {
+        return label.into();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut output = String::new();
+    let mut used = 0;
+    for glyph in label.graphemes(true) {
+        let cells = glyph.width();
+        if used + cells + 1 > width {
+            break;
+        }
+        output.push_str(glyph);
+        used += cells;
+    }
+    output.push('.');
+    output
+}
 pub(super) fn draw_compact(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -293,9 +322,10 @@ pub(super) fn draw_compact(
     }
     let mut lines = vec![];
     for item in view.pending_messages.items.iter().take(3) {
-        lines.push(Line::from(
-            crate::presentation::sanitize_plain(&item.label(language), 0).0,
-        ));
+        lines.push(Line::from(compact_label(
+            &crate::presentation::sanitize_plain(&item.label(language), 0).0,
+            usize::from(area.width),
+        )));
         lines.push(Line::from(
             crate::presentation::sanitize_plain(&item.excerpt, 0)
                 .0
@@ -1376,6 +1406,109 @@ mod language_tests {
         assert_eq!(pending.excerpt, original.excerpt);
         assert_eq!(pending.hold_reason, original.hold_reason);
         assert_eq!(pending.message_id, original.message_id);
+    }
+    fn long_pending(ui: &mut UiState) {
+        pending(ui);
+        let item = &mut ui.view_mut().pending_messages.items[0];
+        item.sender_thread = Some("12345678-rest".into());
+        item.uncertain = true;
+        item.hold_reason = Some("terminal_before_path_admission".into());
+    }
+    #[test]
+    fn real_sender_and_recovery_facts_remain_visible_at_screen_boundaries() {
+        i18n::verify_screen(long_pending, |language| match language {
+            UiLanguage::En => &[
+                "Conversation 12345678",
+                "Delivery unknown",
+                "Deliver now",
+                "Not",
+                "delivered",
+                "before",
+                "interruption",
+            ],
+            UiLanguage::Ja => &[
+                "会話 12345678",
+                "反映状況不明",
+                "すぐ渡す",
+                "中断前の未反映",
+            ],
+        });
+        use crate::ui::text_width::UnicodeWidthStr;
+        for observed in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(observed);
+            for width in [80, 120] {
+                for language in [UiLanguage::En, UiLanguage::Ja] {
+                    let mut config = Config::default();
+                    config.ui.language = language;
+                    let mut ui = UiState::new(&config, PathBuf::new());
+                    long_pending(&mut ui);
+                    let before = ui.view().pending_messages.clone();
+                    let mut terminal =
+                        ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, 30))
+                            .unwrap();
+                    terminal
+                        .draw(|frame| super::super::draw(frame, &mut ui))
+                        .unwrap();
+                    let bounds = ui.queue_popup.paint_bounds().unwrap();
+                    let buffer = terminal.backend().buffer();
+                    for y in bounds.outer.y + 1..bounds.outer.bottom() - 1 {
+                        assert_eq!(buffer[(bounds.outer.x, y)].symbol(), "|");
+                        assert_eq!(buffer[(bounds.outer.right() - 1, y)].symbol(), "|");
+                    }
+                    let mut body = String::new();
+                    for y in bounds.body.y..bounds.body.bottom() {
+                        let mut x = bounds.body.x;
+                        while x < bounds.body.right() {
+                            let symbol = buffer[(x, y)].symbol();
+                            body.push_str(symbol);
+                            x += symbol.width().max(1) as u16;
+                        }
+                        body.push(' ');
+                    }
+                    let body = body.split_whitespace().collect::<Vec<_>>().join(" ");
+                    assert!(
+                        body.contains(&before.items[0].label(language)),
+                        "{language:?} width={width}: {body}"
+                    );
+                    assert_eq!(ui.view().pending_messages, before);
+                    let label = compact_label(&before.items[0].label(language), usize::from(width));
+                    assert!(label.width() <= usize::from(width));
+                    if before.items[0].label(language).width() > usize::from(width) {
+                        assert!(label.ends_with('.'));
+                    }
+                }
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+    #[test]
+    fn compact_ellipsis_preserves_graphemes_cells_and_fixed_height() {
+        use crate::ui::text_width::UnicodeWidthStr;
+        use unicode_segmentation::UnicodeSegmentation;
+        let source = "state 日本語·e\u{301}👩‍💻 trailing";
+        for observed in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(observed);
+            for width in 0..60 {
+                let label = compact_label(source, width);
+                assert!(label.width() <= width);
+                if label != source && !label.is_empty() {
+                    assert!(label.ends_with('.'));
+                    let prefix = label.strip_suffix('.').unwrap();
+                    let count = prefix.graphemes(true).count();
+                    assert_eq!(
+                        prefix,
+                        source.graphemes(true).take(count).collect::<String>()
+                    );
+                }
+            }
+            let mut config = Config::default();
+            config.ui.language = UiLanguage::En;
+            let mut ui = UiState::new(&config, PathBuf::new());
+            long_pending(&mut ui);
+            ui.queue_popup.visible = false;
+            assert_eq!(height(ui.view(), 30), 3);
+        }
+        crate::ui::text_width::clear_terminal_width();
     }
     #[test]
     fn locale_does_not_expand_the_captured_cancellation_scope() {
