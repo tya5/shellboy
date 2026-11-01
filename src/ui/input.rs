@@ -562,7 +562,8 @@ mod language_tests {
                 assert_eq!(serde_json::to_value(&draft).unwrap(), before);
                 let mut config = Config::default();
                 config.ui.language = language;
-                let mut ui = UiState::new(&config, std::path::PathBuf::new());
+                let mut ui = UiState::new(&config, std::env::temp_dir());
+                assert!(crate::ui::valid_draft(&draft));
                 draft.cursor = draft.text.len();
                 ui.view_mut().draft = draft.clone();
                 let actions = ui.event(Event::Key(KeyEvent::new(
