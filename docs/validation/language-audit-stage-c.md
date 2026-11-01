@@ -6,9 +6,9 @@ Baseline: main `13d5ac8665f91f51d503fd5ab7aad682fbffeba5`. B-5/B-6 are not yet i
 ## Reproduce
 
 ```sh
-python3 scripts/dev/language-audit.py > inventory.json
-python3 scripts/dev/language-audit.py --summary
-python3 scripts/dev/language-audit.py --check --summary
+python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json > inventory.json
+python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --summary
+python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --check --summary
 python3 -m unittest discover -s scripts/tests -p test_language_audit.py
 ```
 
@@ -24,10 +24,16 @@ conservative: it includes typed Message branches not proven by the lexical
 classifier, source-recognition constants and pending B-5/B-6 work. It is not
 a count of confirmed defects and is never authorization to translate stored,
 user, model, provider or shell content. Reviewed ID decisions require a reason;
-stale IDs fail instead of silently hiding changed literals. Unknown contexts
+stale IDs fail instead of silently hiding changed literals. Reviewed entries also
+pin a source-token fingerprint: changing an En predicate or surrounding code
+requires re-review even when the literal ID is unchanged. Whitespace/comment-only
+changes do not invalidate a decision. Unknown contexts
 remain (c); there are no whole-production-file exemptions.
 
-Initial scan: 353 Rust files; 3339 literals; a=234, b=1133, c=1972.
+Initial raw scan: 353 Rust files; 3339 literals; a=234, b=1133, c=1972.
+Individual review of 25 `Message::render` Ja branches is recorded in
+`scripts/dev/language-classifications.json`; the table applies those decisions:
+a=259, b=1133, c=1947. No production source was modified to reduce the count.
 The zero-(c) gate intentionally fails at this stage. Final classification,
 fresh En/Ja rendering/plural checks and three-OS CI remain outstanding.
 
@@ -107,7 +113,7 @@ fresh En/Ja rendering/plural checks and three-OS CI remain outstanding.
 | `src/presentation.rs` | 0 | 6 | 42 | defer B-6 |
 | `src/presentation/events.rs` | 0 | 4 | 86 | review in C |
 | `src/presentation/fields.rs` | 0 | 6 | 221 | review in C |
-| `src/presentation/messages.rs` | 70 | 1 | 25 | defer B-6 |
+| `src/presentation/messages.rs` | 95 | 1 | 0 | defer B-6 |
 | `src/presentation/projection.rs` | 0 | 0 | 12 | defer B-6 |
 | `src/presentation/projection/envelopes.rs` | 0 | 0 | 11 | defer B-6 |
 | `src/presentation/projection/limits.rs` | 0 | 1 | 0 | defer B-6 |
@@ -178,5 +184,6 @@ B-5/B-6 owner files until those tasks land.
 Regenerate this table after their exact commits reach main; current counts
 do not measure those branches and do not claim zero mixed-language output.
 
-Local script fixtures: 9 tests pass. No Rust/product behavior change or
+Local script fixtures: 10 tests pass (131 in the complete Python suite).
+No Rust/product behavior change or
 full Stage C CI result is claimed by the inventory commit.
