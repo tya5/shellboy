@@ -1,5 +1,25 @@
 # 開発判断
 
+## Measured proactive retry gate (#153, 2026-11-02)
+
+Replace #125's permanent per-Run failure flag with a provider-usage growth gate.
+After any non-adopted attempt require ceil(threshold/10) additional reported
+input tokens. Ten percent is a fixed retry interval, not a capacity estimate:
+with the default threshold it permits one retry per 20,000 measured tokens of
+growth. No new setting or persisted state is needed. This avoids both a tight
+retry loop and a multi-hour Run being disabled by one rejection. Keep unknown
+and stale usage ineligible, the 200,000 default, and zero opt-out unchanged.
+Revisit the fixed interval if bounded retries are still materially expensive.
+
+Investigation: ordinary summarize(false) uses normal_prefix, ending before the
+current and latest completed Turns. argument_free_compact first spills older
+safe tool groups, then summarizes only that prefix. A long Turn can therefore
+have a tiny summary source despite huge reported input, including when its old
+tool groups are already spilled. Keep the safety contract; this change does
+not make current-Turn text eligible or guarantee input shrinks below threshold.
+The reported 1741-character incident was not reconstructed from private data;
+the likely selection mechanism is established from code and a synthetic policy test.
+
 ## Retained-output fixture clock (#41, 2026-11-01)
 
 The latest-main standard exposed a real calendar dependency in the existing

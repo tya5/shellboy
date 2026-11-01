@@ -5,12 +5,22 @@ use super::*;
 pub(super) const REASON: &str = "proactive_threshold";
 
 /// Ephemeral per-Run budget. One `drive` call owns one Run, so a local value
-/// suffices: after one non-adopted proactive attempt the Run never tries again.
+/// suffices. Non-adopted attempts require measured growth before retrying.
 /// Adopted attempts need a newer reported usage before another evaluation
 /// (`next_request_pending` is true until a new attempt completes).
 #[derive(Default)]
 pub(super) struct ProactiveBudget {
-    failed: bool,
+    last_non_adopted_input: Option<u64>,
+}
+
+impl ProactiveBudget {
+    fn permits(&self, input_tokens: u64, threshold: u64) -> bool {
+        self.last_non_adopted_input.is_none_or(|previous| {
+            input_tokens
+                .checked_sub(previous)
+                .is_some_and(|growth| growth >= threshold.div_ceil(10).max(1))
+        })
+    }
 }
 
 struct Evidence {
@@ -28,9 +38,6 @@ pub(super) async fn maybe_compact(
     slot: &DriverSlot,
     budget: &mut ProactiveBudget,
 ) -> Result<bool, ApiError> {
-    if budget.failed {
-        return Ok(false);
-    }
     let config = &control.store.config;
     let threshold = config
         .compaction
@@ -66,6 +73,9 @@ pub(super) async fn maybe_compact(
         // A non-storage read refusal is not evidence; never trigger on it.
         Err(_) => return Ok(false),
     };
+    if !budget.permits(evidence.input_tokens, threshold) {
+        return Ok(false);
+    }
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
     let mut observation = match super::super::compact::argument_free_compact(
@@ -82,9 +92,7 @@ pub(super) async fn maybe_compact(
         Err(error) => json!({"outcome":"rejected","error":error}),
     };
     let adopted = observation["outcome"] == "adopted";
-    if !adopted {
-        budget.failed = true;
-    }
+    budget.last_non_adopted_input = (!adopted).then_some(evidence.input_tokens);
     observation["reason"] = json!(REASON);
     observation["trigger"] = json!({
         "auto_at_tokens": threshold,
@@ -109,4 +117,33 @@ pub(super) async fn maybe_compact(
         .map_err(storage_error)?;
     control.changed(&snapshot.thread);
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProactiveBudget;
+
+    #[test]
+    fn retry_growth_rounds_up_and_cannot_overflow() {
+        let budget = ProactiveBudget {
+            last_non_adopted_input: Some(200),
+        };
+        for count in [0, 199, 200, 210] {
+            assert!(!budget.permits(count, 101));
+        }
+        assert!(budget.permits(211, 101));
+        assert!(!budget.permits(200, 1));
+        assert!(budget.permits(201, 1));
+        let near_max = ProactiveBudget {
+            last_non_adopted_input: Some(u64::MAX - 1),
+        };
+        assert!(!near_max.permits(u64::MAX, 100));
+        assert!(near_max.permits(u64::MAX, 1));
+        let max = ProactiveBudget {
+            last_non_adopted_input: Some(u64::MAX),
+        };
+        assert!(!max.permits(u64::MAX, 1));
+        assert!(!budget.permits(u64::MAX / 10, u64::MAX));
+        assert!(ProactiveBudget::default().permits(200, 100));
+    }
 }

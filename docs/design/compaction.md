@@ -327,11 +327,32 @@ replay lease and runs the argument-free compact unchanged (spill, then the bound
 summary with the ordinary protections); never maximal omission. Afterwards it
 re-reads the snapshot. No table, worker, queue, timer or HTTP stage is added.
 
-Failure cap: a non-adopted outcome (`rejected`, `no_safe_reduction`) ends proactive
-attempts for the rest of the Run (an ephemeral per-`drive` flag; one Driver owns
-one Run). The request continues normally; the failure is not a Turn failure.
-Storage failures still propagate. So per Run at most one non-adopted attempt
-occurs, and adopted ones need a fresh reported measurement each time.
+Retry gate (#153): a non-adopted outcome (`rejected`, `no_safe_reduction`)
+remembers the triggering provider-reported input count in ephemeral per-`drive`
+state. Another attempt in that Run requires a fresh, non-stale reported count
+at least `ceil(auto_at_tokens / 10)` tokens above that count, and still at or
+above the threshold. Every non-adopted retry moves this baseline forward;
+unchanged, decreasing, unknown and insufficiently increased usage cannot retry.
+There is no estimate, timer or new setting. For a fixed threshold T > 0 and
+non-adopted baseline B, additional non-adopted attempts up to observed high-water
+H are bounded by `floor((H - B) / ceil(T / 10))`. Subtraction avoids overflow at
+u64 limits. Adoption clears the failure baseline but still requires a fresh
+post-replacement measurement. The request continues normally; a rejection is
+not a Turn failure. Storage failures still propagate.
+
+Ordinary summary scope is intentionally narrower than the input: it ends before
+the current Turn and latest completed Turn, or an earlier protected/incomplete
+group or latest complete tool group. Consequently, during a long Turn it may
+only re-summarize a small older prefix (including earlier summary markers),
+while the bulk of the reported input is outside that prefix. Current-Turn old
+complete tool groups can be spilled, excluding the latest group, but even their
+spill markers remain outside ordinary summary scope. Spill omits tool outputs,
+not all model output or current-task text. This boundary can explain #153's small
+summary source despite large input; the particular private path was not inspected.
+Unspilled tool output is not categorically excluded from an eligible summary
+range. Retries do not relax
+these protections or promise that every long Turn can be summarized. Explicit
+overflow recovery remains a separate, wider policy.
 
 Record: `automatic_trim_attempt` on the triggering completed attempt (existing
 field and `automatic_compaction_turn` partial index) with `reason =

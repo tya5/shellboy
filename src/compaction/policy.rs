@@ -142,6 +142,23 @@ mod tests {
     }
 
     #[test]
+    fn ordinary_summary_excludes_long_current_turn_even_after_spilling() {
+        let mut s = staged_snapshot();
+        s.groups[0].sources[0].payload = json!({"role":"assistant","content":"small prefix"});
+        s.groups[3].sources[1].payload = json!({"text":"x".repeat(800_000)});
+        assert_eq!(summary_range(&s, false), Some(0..1));
+        assert_eq!(spill_ranges(&s, false), vec![3..4]);
+        // A spill replacement keeps its selected position; it does not move
+        // the protected current/latest-completed Turn summary boundary.
+        s.groups[3].tool = false;
+        s.groups[3].sources.truncate(1);
+        s.groups[3].sources[0].turn = None;
+        s.groups[3].sources[0].payload = json!({"spill_version":1,"text":"omitted output"});
+        assert_eq!(summary_range(&s, false), Some(0..1));
+        assert!(spill_ranges(&s, false).is_empty());
+    }
+
+    #[test]
     fn manual_and_overflow_policy_tables_keep_existing_group_ranges() {
         let mut snapshot = staged_snapshot();
         assert_eq!(summary_range(&snapshot, false), Some(0..1));

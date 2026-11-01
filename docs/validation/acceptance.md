@@ -1,5 +1,24 @@
 # Validation record
 
+## Proactive retry gate (#153, 2026-11-02)
+
+Scope: synthetic temporary data-dir and loopback Responses mock; no user data,
+real provider, installed binary or paid API. Every new mock loop is capped at
+nine shell tool calls and four summary requests. Acceptance covers same-Run
+rejected -> adopted at input 150 -> 160 with threshold100, repeated rejection
+counts at 150/160/170/180, and no retry at unchanged/decreasing/unknown/159 usage.
+Unit coverage checks rounding, u64 overflow and the ordinary summary boundary
+before/after spilling a large current-Turn tool group. Existing threshold
+and opt-out behavior remain covered by focused tests. Post-adoption stale usage
+is an existing guard and is not independently exercised by these new tests.
+
+On macOS, rust-slot `cargo check --tests`, the retry arithmetic unit test and
+`cargo test --test integration runtime_features::proactive_` passed (five tests,
+execution a859273f-e050-45ac-a0ea-8eb1e7d9cdc1). The strengthened tests and policy fixture also passed on macOS in execution
+8f733d3b-adc2-418c-b674-8dccfae9f327. Linux/macOS branch CI is pending. Real-provider behavior, the private 1741-character incident, and native
+Windows are not locally tested; Windows remains the integrator's three-OS CI
+responsibility.
+
 ## v0.5.0 preparation boundary
 
 Preparation base is main `cdcb70da`, including #101, before #117 main integration.
