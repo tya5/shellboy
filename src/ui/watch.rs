@@ -31,7 +31,9 @@ pub enum WatchCategory {
     Active,
     Background,
     Confirming,
+    Stopped,
     Read,
+    Idle,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WatchAgeOrigin {
@@ -234,6 +236,8 @@ pub struct WatchSummary {
     pub updated_at: String,
     pub latest_run_id: Option<String>,
     pub answer_id: Option<String>,
+    /// The saved stop reason names an app exit/owner restart (never inferred).
+    pub interrupted: bool,
 }
 impl WatchSummary {
     /// Worker-only bounded text preparation. updated_at is cache freshness, not unread identity.
@@ -245,6 +249,10 @@ impl WatchSummary {
             updated_at: summary.updated_at.clone(),
             latest_run_id: None,
             answer_id: None,
+            interrupted: matches!(
+                summary.latest_run_stop_reason.as_deref(),
+                Some("previous_instance_interrupted" | "app_shutdown")
+            ),
         }
     }
     pub fn with_identity(mut self, run: Option<String>, answer: Option<String>) -> Self {
@@ -331,7 +339,8 @@ fn ordinary_category(phase: ActivityPhase) -> WatchCategory {
         ActivityPhase::Recovery => WatchCategory::Recovery,
         ActivityPhase::Failed => WatchCategory::Failed,
         ActivityPhase::Background | ActivityPhase::Continuing => WatchCategory::Background,
-        ActivityPhase::Idle | ActivityPhase::Stopped => WatchCategory::Read,
+        ActivityPhase::Stopped => WatchCategory::Stopped,
+        ActivityPhase::Idle => WatchCategory::Idle,
         ActivityPhase::Completed => WatchCategory::Confirming,
         _ => WatchCategory::Active,
     }
@@ -598,6 +607,8 @@ impl WatchState {
                     Some(_) if !self.seen_overflow || entry.known_new_completion => {
                         WatchCategory::Unread
                     }
+                    // A finished Run without a saved answer has nothing to confirm.
+                    None if entry.summary.latest_run_id.is_some() => WatchCategory::Idle,
                     _ => WatchCategory::Confirming,
                 }
             } else {
@@ -620,14 +631,7 @@ impl WatchState {
         }
     }
     fn rebuild(&mut self) {
-        self.order = self
-            .entries
-            .iter()
-            .filter(|(id, entry)| {
-                entry.category != WatchCategory::Read || self.retained.contains(*id)
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
+        self.order = self.entries.keys().cloned().collect();
         self.order.sort_by(|a, b| {
             let a = &self.entries[a];
             let b = &self.entries[b];
@@ -670,7 +674,8 @@ impl WatchState {
                 "確認履歴の保持範囲外"
             }
             WatchCategory::Confirming => "確認中",
-            WatchCategory::Read => entry.summary.phase.column_label(),
+            WatchCategory::Stopped if entry.summary.interrupted => "停止 · 終了で中断",
+            WatchCategory::Stopped => "停止",
             _ => entry.summary.phase.column_label(),
         };
         Some(WatchRow {
@@ -770,6 +775,8 @@ impl WatchState {
                 if matches!(
                     entry.category,
                     WatchCategory::Read
+                        | WatchCategory::Stopped
+                        | WatchCategory::Idle
                         | WatchCategory::Unread
                         | WatchCategory::Confirming
                         | WatchCategory::Failed
@@ -829,6 +836,13 @@ fn state_label(phase: ActivityPhase, age: Option<&WatchAge>, now: Instant) -> St
         age.map(|age| age_label(age, now)).unwrap_or_default()
     }
 }
+/// Watch names a stopped Run `停止`; List keeps its own `中断済み` column label.
+fn phase_text(phase: ActivityPhase) -> &'static str {
+    match phase {
+        ActivityPhase::Stopped => "停止",
+        other => other.column_label(),
+    }
+}
 /// "13:42 完了" today, "10/31 22:05 完了" otherwise; never an invented time.
 fn transition_label(
     phase: ActivityPhase,
@@ -845,7 +859,7 @@ fn transition_label(
     } else {
         "%m/%d %H:%M"
     };
-    format!("{} {}", local.format(format), phase.column_label())
+    format!("{} {}", local.format(format), phase_text(phase))
 }
 fn elapsed(duration: Duration) -> String {
     crate::presentation::elapsed_text(duration.as_secs().saturating_mul(1000), false)
@@ -1041,6 +1055,7 @@ mod tests {
             updated_at: "saved".into(),
             latest_run_id: None,
             answer_id: None,
+            interrupted: false,
         }
     }
     fn detail(id: &str, run: &str, answer: Option<&str>, phase: ActivityPhase) -> WatchDetail {
@@ -1088,6 +1103,75 @@ mod tests {
         facts.prepare()
     }
     #[test]
+    fn stopped_read_and_idle_rows_follow_live_work_and_name_saved_interruption_only() {
+        let mut state = WatchState::default();
+        let mut done = summary("read", ActivityPhase::Completed);
+        done.latest_run_id = Some("run-read".into());
+        done.answer_id = Some("answer-read".into());
+        let mut unread = summary("unread", ActivityPhase::Completed);
+        unread.latest_run_id = Some("run-unread".into());
+        unread.answer_id = Some("answer-unread".into());
+        let mut restarted = summary("restarted", ActivityPhase::Stopped);
+        restarted.interrupted = true;
+        let mut no_answer = summary("no-answer", ActivityPhase::Completed);
+        no_answer.latest_run_id = Some("run-none".into());
+        state.open(
+            1,
+            vec![
+                summary("idle", ActivityPhase::Idle),
+                done,
+                summary("stopped", ActivityPhase::Stopped),
+                restarted,
+                no_answer,
+                summary("working", ActivityPhase::Running),
+                unread,
+                summary("failed", ActivityPhase::Failed),
+                summary("recover", ActivityPhase::Recovery),
+            ],
+        );
+        state.mark_seen(
+            "read",
+            CompletionIdentity {
+                run_id: "run-read".into(),
+                answer_id: "answer-read".into(),
+            },
+        );
+        assert_eq!(
+            state.ordered_ids(),
+            [
+                "recover",
+                "failed",
+                "unread",
+                "working",
+                "stopped",
+                "restarted",
+                "read",
+                "idle",
+                "no-answer"
+            ]
+        );
+        assert_eq!(state.row("restarted").unwrap().status, "停止 · 終了で中断");
+        assert_eq!(state.row("stopped").unwrap().status, "停止");
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-01T13:42:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let age = WatchAge {
+            elapsed_base: Duration::ZERO,
+            observed_at: Instant::now(),
+            origin: WatchAgeOrigin::SavedTransition,
+            saved_at: Some(at),
+        };
+        let utc = chrono::FixedOffset::east_opt(0).unwrap();
+        assert_eq!(
+            transition_label(ActivityPhase::Stopped, Some(&age), at, utc),
+            "13:42 停止"
+        );
+        assert_eq!(
+            transition_label(ActivityPhase::Stopped, None, at, utc),
+            "時刻不明"
+        );
+    }
+    #[test]
     fn completed_without_identity_is_confirming_and_opened_completion_is_retained_until_reopen() {
         let mut state = WatchState::default();
         state.open(1, vec![summary("t", ActivityPhase::Completed)]);
@@ -1119,9 +1203,10 @@ mod tests {
         );
         state.close();
         state.open(2, vec![settings]);
-        assert!(
-            state.ordered_ids().is_empty(),
-            "read rows are pruned only on reopening"
+        assert_eq!(
+            state.ordered_ids(),
+            ["t"],
+            "read completions stay listed, after unread work"
         );
     }
     #[test]
@@ -1470,7 +1555,7 @@ mod tests {
         assert!(!state.seen_history_limited());
         state.begin_generation(3, true);
         assert!(!state.retains("t"));
-        assert!(state.ordered_ids().is_empty());
+        assert_eq!(state.ordered_ids(), ["t"]);
         state.prune_to(&BTreeSet::new());
         assert!(state.row("t").is_none());
         assert_eq!(

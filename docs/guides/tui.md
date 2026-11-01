@@ -347,8 +347,15 @@ List/Watch mode in this UI process; a new process starts in List. It reopens
 global Watch, not a previous descendant root or filter. `/threads` explicitly
 opens List regardless of the remembered mode.
 
-Watch is a flat priority view: recovery, failed, unread completion, active work
-and background work, with saved details below each title. Enter opens a
+Watch shows the same conversations as List (same scope, filter, limits and
+PgDn paging) and changes only the order and the row presentation. It is a flat
+priority view: recovery, failed, unread completion, active work and background
+work first, then stopped conversations, read completions and idle ones, with
+saved details below each title. A stopped row reads `13:42 停止` (the saved
+stop time; `時刻不明` when none was saved). When the saved stop reason records
+an app exit or an owner restart, the row says `停止 · 終了で中断`; a stop with
+any other or no saved reason is never labelled that way. After an owner restart
+the interrupted conversations therefore stay visible and can be reopened. Enter opens a
 conversation. Ctrl+S confirms a full Run stop; Alt+R confirms retry of a recovery
 Turn; Alt+O reads saved output. Confirmation retains the actual Run/Turn/generation:
 a changed target is rejected rather than retargeted. Typing filters; deletion
@@ -365,8 +372,9 @@ an unread one adds a mark (`完了 ●`). When only finished rows are visible, t
 clock never redraws the screen.
 
 Unread tracks completed Run/answer identities only in this UI process. Opening
-a completion marks it seen. Read rows already painted stay until the Watch
-session closes. The bounded 2000-identity history may become uncertain after
+a completion marks it seen; it then moves below stopped rows but is not
+removed. A new process starts with no seen identities, so earlier completions
+reappear as unread there. The bounded 2000-identity history may become uncertain after
 eviction; changing a title does not create a new unread answer. Nothing expires
 merely because time passed.
 

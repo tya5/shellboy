@@ -553,7 +553,7 @@ pub(super) fn read_tx(
         .filter(|id| permitted(id) || ticket.detail_parent_ids.contains(id))
         .cloned()
         .collect::<Vec<_>>();
-    let mut rows = thread_summary::read_ids_tx(db, &requested)?;
+    let rows = thread_summary::read_ids_tx(db, &requested)?;
     let found = rows
         .iter()
         .map(|row| row.thread_id.clone())
@@ -566,21 +566,13 @@ pub(super) fn read_tx(
         .collect();
     let mut title_only = BTreeSet::new();
     if ticket.mode == BrowserMode::Watch {
-        rows.retain(|row| {
-            let phase = thread_summary::coarse_activity(&row.activity);
-            let candidate = !matches!(
-                phase,
-                crate::activity::ActivityPhase::Idle | crate::activity::ActivityPhase::Stopped
-            ) && (phase != crate::activity::ActivityPhase::Completed
-                || row.identity.answer_id.is_some());
-            let parent_only = ticket.detail_parent_ids.contains(&row.thread_id)
-                && (!permitted(&row.thread_id)
-                    || (!candidate && !ticket.known_requested_ids.contains(&row.thread_id)));
-            if parent_only {
+        // Watch observes the same Threads as List; only parent-title
+        // dependencies outside the permitted scope are title-only.
+        for row in &rows {
+            if ticket.detail_parent_ids.contains(&row.thread_id) && !permitted(&row.thread_id) {
                 title_only.insert(row.thread_id.clone());
             }
-            parent_only || candidate || ticket.known_requested_ids.contains(&row.thread_id)
-        });
+        }
     }
     let patch = if ticket.ids.is_empty() {
         None
@@ -1007,8 +999,7 @@ mod watch_tests {
         assert_eq!(patch.excerpt.as_ref().unwrap().0, "child");
     }
     #[tokio::test(start_paused = true)]
-    async fn new_global_changes_admit_only_candidates_and_parent_title_dependencies_never_add_rows()
-    {
+    async fn new_global_changes_admit_every_saved_thread_like_list() {
         let db = fixture();
         // This parent contributes a title, but has no saved answer/work of its own.
         db.execute(
@@ -1032,7 +1023,9 @@ mod watch_tests {
                 .iter()
                 .map(|row| row.thread_id.as_str())
                 .collect::<BTreeSet<_>>(),
-            BTreeSet::from(["child", "failed", "answered"])
+            BTreeSet::from([
+                "parent", "child", "failed", "idle", "stopped", "noanswer", "answered"
+            ])
         );
         assert_eq!(
             patch
@@ -1052,7 +1045,7 @@ mod watch_tests {
             Some("parent")
         );
         browser.adopt_patch(1, 1, &patch.rows, None);
-        assert!(!browser.scope.as_ref().unwrap().known.contains_key("parent"));
+        assert!(browser.scope.as_ref().unwrap().known.contains_key("parent"));
         browser.complete(&ticket);
         browser
             .scope

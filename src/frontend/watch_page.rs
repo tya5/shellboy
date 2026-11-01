@@ -109,7 +109,7 @@ fn decode(request: &Request, seen_hash: &str) -> Result<Option<Cursor>, ApiError
         || cursor.filter != request.filter
         || cursor.seen_hash != seen_hash
         || cursor.watermark < 0
-        || cursor.last.priority > 5
+        || cursor.last.priority > 8
         || !valid_id(&cursor.last.id)
         || cursor.last.updated_at.len() > 128
     {
@@ -145,6 +145,9 @@ fn candidate_sql(scoped: bool) -> String {
     } else {
         "FROM thread t"
     };
+    // Every saved, undeleted Thread is a candidate (the same set as List); the
+    // priority only orders: recovery, failed, unread, active, background,
+    // uncertain completion, stopped, read completion, idle.
     // These coarse groups are exactly the Watch categories. Inflight/retry/tools
     // refine active labels but do not change candidate priority or membership.
     format!(
@@ -155,18 +158,20 @@ fn candidate_sql(scoped: bool) -> String {
        {from} {} WHERE t.deleted_at IS NULL AND t.rowid<=?1
     ),ranked AS MATERIALIZED (
        SELECT *,CASE
-         WHEN run_state IS NULL OR run_state='stopped' THEN NULL
+         WHEN run_state IS NULL THEN 8
+         WHEN run_state='stopped' THEN 6
          WHEN run_state='failed' THEN 1
-         WHEN run_state='completed' THEN CASE WHEN answer_node_id IS NOT NULL AND answer_node_id<>'' THEN CASE WHEN ?3 THEN 5 ELSE 2 END END
+         WHEN run_state='completed' THEN CASE WHEN answer_node_id IS NOT NULL AND answer_node_id<>'' THEN
+           CASE WHEN EXISTS(SELECT 1 FROM seen WHERE seen.run_id=facts.run_id AND seen.answer_id=facts.answer_node_id) THEN 7
+                WHEN ?3 THEN 5 ELSE 2 END ELSE 8 END
          WHEN run_state='stopping' THEN 3
          WHEN turn_state='recovery_wait' THEN 0
          WHEN turn_state='failed' THEN 1
-         WHEN turn_state='stopped' THEN NULL
+         WHEN turn_state='stopped' THEN 6
          WHEN turn_state IN ('preparing','running','waiting') THEN 3
          ELSE 4 END AS priority FROM facts
     ) SELECT id,title,cwd,updated_at,priority FROM ranked
-    WHERE priority IS NOT NULL AND NOT(priority IN (2,5) AND EXISTS(SELECT 1 FROM seen WHERE seen.run_id=ranked.run_id AND seen.answer_id=ranked.answer_node_id))
-      AND (?4<0 OR priority>?4 OR(priority=?4 AND(updated_at<?5 OR(updated_at=?5 AND id<?6))))
+    WHERE (?4<0 OR priority>?4 OR(priority=?4 AND(updated_at<?5 OR(updated_at=?5 AND id<?6))))
     ORDER BY priority,updated_at DESC,id DESC LIMIT ?8",
         thread_summary::RUN_TURN_JOINS
     )
@@ -477,12 +482,24 @@ mod tests {
                 .page
                 .items
                 .iter()
+                .take(7)
                 .map(|row| row.thread_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["recovery", "failed", "answer", "active", "background"]
+            vec![
+                "recovery",
+                "failed",
+                "answer",
+                "active",
+                "background",
+                "stopped",
+                "no-answer"
+            ]
         );
         assert_eq!(result.read_sequence, 7);
-        assert!(result.page.next_cursor.is_none());
+        assert!(
+            result.page.next_cursor.is_some(),
+            "idle rows follow on later pages"
+        );
         assert_eq!(
             result.watch_summaries[2].latest_run_id.as_deref(),
             Some("run-answer")
@@ -493,6 +510,94 @@ mod tests {
         );
         assert!(result.page.items.iter().all(|row| row.excerpt.is_empty()));
         assert_eq!(result.page.items[3].activity, ActivityPhase::Running);
+    }
+    #[test]
+    fn watch_pages_cover_exactly_the_threads_list_shows_and_order_only_differs() {
+        let db = fixture();
+        add(&db, "recovery", "live", "recovery_wait", false);
+        add(&db, "failed", "failed", "failed", false);
+        add(&db, "unread", "completed", "completed", true);
+        add(&db, "read", "completed", "completed", true);
+        add(&db, "active", "live", "running", false);
+        add(&db, "background", "live", "completed", true);
+        add(&db, "stopped", "stopped", "stopped", false);
+        add(&db, "restarted", "stopped", "stopped", false);
+        db.execute(
+            "UPDATE run SET stop_reason='previous_instance_interrupted' WHERE id='run-restarted'",
+            [],
+        )
+        .unwrap();
+        add(&db, "no-answer", "completed", "completed", false);
+        thread(&db, "idle", None, "idle", "now");
+        thread(&db, "deleted", None, "deleted", "now");
+        db.execute("UPDATE thread SET deleted_at='now' WHERE id='deleted'", [])
+            .unwrap();
+        for n in 0..60 {
+            thread(&db, &format!("more-{n:02}"), None, "more", "2099");
+        }
+        // List pages
+        let mut list = BTreeSet::new();
+        let mut cursor = None;
+        loop {
+            let page = crate::control::db::thread_list(
+                &db,
+                &crate::protocol::ThreadListArgs {
+                    limit: 50,
+                    cursor: cursor.clone(),
+                    query: None,
+                },
+            )
+            .unwrap();
+            list.extend(page.items.iter().map(|row| row.thread_id.clone()));
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let mut query = request();
+        query.seen_completions.push(CompletionIdentity {
+            run_id: "run-read".into(),
+            answer_id: "answer-read".into(),
+        });
+        let mut watch = Vec::new();
+        let mut summaries = Vec::new();
+        loop {
+            let page = collect(&db, &query, 1).unwrap();
+            watch.extend(page.page.items.iter().map(|row| row.thread_id.clone()));
+            summaries.extend(page.watch_summaries);
+            query.cursor = page.page.next_cursor;
+            if query.cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(watch.len(), list.len(), "same count");
+        assert_eq!(watch.iter().cloned().collect::<BTreeSet<_>>(), list);
+        assert_eq!(list.len(), 70);
+        assert_eq!(
+            watch[..8],
+            [
+                "recovery",
+                "failed",
+                "unread",
+                "active",
+                "background",
+                "stopped",
+                "restarted",
+                "read"
+            ]
+        );
+        let restarted = summaries
+            .iter()
+            .find(|row| row.thread_id == "restarted")
+            .unwrap();
+        assert!(restarted.interrupted);
+        assert!(
+            !summaries
+                .iter()
+                .find(|row| row.thread_id == "stopped")
+                .unwrap()
+                .interrupted
+        );
     }
     #[test]
     fn exact_seen_pairs_and_overflow_uncertainty_bind_the_private_cursor() {
@@ -513,7 +618,15 @@ mod tests {
         query.cursor = Some(cursor.clone());
         let next = collect(&db, &query, 2).unwrap();
         assert_eq!(next.page.items[0].thread_id, "b");
-        assert!(next.page.next_cursor.is_none());
+        assert!(
+            next.page.next_cursor.is_some(),
+            "the read completion `a` still follows, after the unread rows"
+        );
+        query.cursor = next.page.next_cursor;
+        let last = collect(&db, &query, 2).unwrap();
+        assert_eq!(last.page.items[0].thread_id, "a");
+        assert!(last.page.next_cursor.is_none());
+        query.cursor = Some(cursor.clone());
         query.seen_completions[0].answer_id = "different-answer".into();
         assert_eq!(
             collect(&db, &query, 3).err().unwrap().code,
@@ -687,7 +800,8 @@ mod tests {
                     ActivityPhase::Recovery => Some(0),
                     ActivityPhase::Failed => Some(1),
                     ActivityPhase::Completed => Some(2),
-                    ActivityPhase::Idle | ActivityPhase::Stopped => None,
+                    ActivityPhase::Stopped => Some(6),
+                    ActivityPhase::Idle => Some(8),
                     ActivityPhase::Background | ActivityPhase::Continuing => Some(4),
                     _ => Some(3),
                 };
