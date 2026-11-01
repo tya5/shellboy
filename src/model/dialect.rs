@@ -4,6 +4,7 @@ use crate::config::Api;
 use std::ops::Deref;
 
 mod chat;
+mod responses;
 use chat::Chat;
 
 fn protocol(message: &str) -> ModelError {
@@ -11,7 +12,10 @@ fn protocol(message: &str) -> ModelError {
 }
 
 pub fn encode(api: Api, request: Value) -> Result<Value, ModelError> {
-    chat::encode(api, request)
+    match api {
+        Api::Responses => responses::encode(request),
+        Api::ChatCompletions => chat::encode(request),
+    }
 }
 
 pub(super) fn usage(value: &Value) -> Value {
@@ -132,5 +136,8 @@ impl Stream {
 }
 
 pub fn decode_json(api: Api, raw: Value) -> Result<Value, ModelError> {
-    chat::decode_json(api, raw)
+    match api {
+        Api::Responses => responses::decode_json(raw),
+        Api::ChatCompletions => chat::decode_json(raw),
+    }
 }

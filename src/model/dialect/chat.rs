@@ -1,10 +1,7 @@
 //! Chat Completions wire adapter (moved verbatim from `dialect.rs`).
 use super::*;
 
-pub(super) fn encode(api: Api, request: Value) -> Result<Value, ModelError> {
-    if api == Api::Responses {
-        return Ok(request);
-    }
+pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
     let input = request["input"]
         .as_array()
         .ok_or_else(|| protocol("Conversation input must be an array"))?;
@@ -389,10 +386,7 @@ impl Chat {
     }
 }
 
-pub(super) fn decode_json(api: Api, raw: Value) -> Result<Value, ModelError> {
-    if api == Api::Responses {
-        return Ok(raw);
-    }
+pub(super) fn decode_json(raw: Value) -> Result<Value, ModelError> {
     if raw.get("error").is_some_and(|v| !v.is_null()) {
         return Err(ModelError::provider(None, &raw));
     }
