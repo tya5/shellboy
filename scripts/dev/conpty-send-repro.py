@@ -61,6 +61,9 @@ def run_case(binary, shell, mode, index):
             raise RuntimeError(f'{shell}/{mode}/{index}: timeout {label}\n{frame}')
         try:
             until(lambda frame: 'Ctrl+T' in frame, 'startup')
+            # Start a synthetic offline run first so the next message stays queued.
+            process.write('synthetic-warmup\r')
+            until(lambda frame: 'Turn started' in frame or 'Retrying' in frame, 'active run')
             marker = f'synthetic-{shell}-{mode}-{index}'
             if mode == 'paste':
                 process.write('\x1b[200~' + marker + '\x1b[201~')
@@ -77,6 +80,12 @@ def run_case(binary, shell, mode, index):
             print(f'=== shell={shell} transport=ConPTY mode={mode} index={index} ===', flush=True)
             print(frame, flush=True)
             print(f'marker_occurrences={frame.count(marker)}', flush=True)
+            process.write('\r')
+            time.sleep(1)
+            while not chunks.empty():
+                stream.feed(chunks.get_nowait())
+            print('=== after second Enter ===', flush=True)
+            print('\n'.join(screen.display), flush=True)
         finally:
             if process.isalive():
                 process.write('\x11')
