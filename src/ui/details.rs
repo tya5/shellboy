@@ -1964,7 +1964,9 @@ mod tests {
 
     #[test]
     fn rejected_link_action_exits_loading_with_an_actionable_error() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         let mut details = Details::for_node(ui.view(), "source".into(), true);
         let mut next = 0;

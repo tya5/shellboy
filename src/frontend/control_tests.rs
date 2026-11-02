@@ -1267,7 +1267,7 @@ async fn stale_mutation_report_retains_authoritative_outcome_on_its_ui_owner() {
             false,
         ),
     ] {
-        let (root, owner, control, server) = fixture().await;
+        let (root, owner, control, server) = fixture_with_language("ja").await;
         owner.db.call(|db| {
             db.execute("UPDATE thread SET updated_at='2026-01-01T00:00:00Z'", [])?;
             db.execute("UPDATE run SET created_at='2026-01-01T00:00:00Z'", [])?;

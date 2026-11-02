@@ -66,6 +66,19 @@ impl Fixture {
         let config = root.path().join("config.toml");
         let data = root.path().join("data");
         std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture0'\n[connections.fixture]\nbase_url='{url}'\nresponse_max_retries=0\nresponse_retry_partial=false\n[connections.alternate]\nbase_url='{url}'\nresponse_max_retries=0\n[io]\nself_reply_grace_ms=10\nshutdown_grace_ms=2000\n")).unwrap();
+        std::fs::write(
+            &config,
+            format!(
+                "{}\n[ui]\nlanguage=\"{}\"\n",
+                std::fs::read_to_string(&config).unwrap(),
+                if language == shellboy::config::UiLanguage::Ja {
+                    "ja"
+                } else {
+                    "en"
+                }
+            ),
+        )
+        .unwrap();
         let owner = DataOwner::start(Some(config.clone()), Some(data.clone()), root.path().into())
             .await
             .unwrap();

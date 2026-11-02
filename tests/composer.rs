@@ -326,7 +326,7 @@ fn recalled_slash_is_sent_as_message_and_read_errors_leave_the_draft_intact() {
     let action = key(&mut ui, KeyCode::Up).remove(0);
     ui.action_rejected(&action);
     assert_eq!(ui.view().draft.text, "unfinished");
-    assert!(ui.view().status.contains("キュー"));
+    assert!(ui.view().status.contains("queue"));
     assert!(matches!(
         &key(&mut ui, KeyCode::Up)[0],
         UiAction::RecallInput { .. }

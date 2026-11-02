@@ -2069,6 +2069,19 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         assert!(notices[0].contains("後続の未実行呼出しはありません"));
         assert!(!notices[0].contains("取消") && !notices[0].contains("取り消"));
     }
+    assert_eq!(
+        control.store.config.ui.language,
+        shellboy::config::UiLanguage::En
+    );
+    let ui_remaining = if has_remaining_call {
+        "Cancelled 1 unexecuted tool call"
+    } else {
+        "No remaining unexecuted calls"
+    };
+    let expected_ui_notice = format!(
+        "Human action ended the wait for shell {} and moved it to the background. {ui_remaining}",
+        results[0]["execution_id"].as_str().unwrap()
+    );
     let ui_notice =
         crate::test_watchdog::watchdog("tests/runtime.rs: assert_human_background_notice", async {
             loop {
@@ -2079,7 +2092,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
                             ref text,
                         } = update
                             && target == &accepted.thread_id
-                            && text == &notices[0]
+                            && text == &expected_ui_notice
                         {
                             break update;
                         }
@@ -2093,7 +2106,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
         .await
         .unwrap();
     ui.apply(ui_notice);
-    assert_eq!(ui.view().status, notices[0]);
+    assert_eq!(ui.view().status, expected_ui_notice);
     next.reply
         .send(final_answer("background running"))
         .ok()

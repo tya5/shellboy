@@ -579,7 +579,7 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
     crate::test_watchdog::watchdog("src/ipc/server/tests.rs: permanent_listener_failure_reaches_the_frontend_once_while_local_work_stays_live", async {
         loop {
             match received.try_recv() {
-                Ok(UiUpdate::Status { text, .. }) if text.contains("CLI受付が停止しました") =>
+                Ok(UiUpdate::Status { text, .. }) if text.contains("CLI intake stopped") =>
                 {
                     break;
                 }
@@ -624,7 +624,7 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
         loop {
             while let Ok(update) = received.try_recv() {
                 match update {
-                    UiUpdate::Status { text, .. } if text.contains("CLI受付が停止しました") =>
+                    UiUpdate::Status { text, .. } if text.contains("CLI intake stopped") =>
                     {
                         duplicates += 1;
                     }
@@ -657,7 +657,7 @@ async fn permanent_listener_failure_reaches_the_frontend_once_while_local_work_s
         ),
         "the owner must actually close its database before the bridge returns"
     );
-    duplicates += received.try_iter().filter(|update| matches!(update, UiUpdate::Status { text, .. } if text.contains("CLI受付が停止しました"))).count();
+    duplicates += received.try_iter().filter(|update| matches!(update, UiUpdate::Status { text, .. } if text.contains("CLI intake stopped"))).count();
     assert_eq!(
         duplicates, 0,
         "the closed watch must not produce repeated UI notices"

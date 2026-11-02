@@ -132,7 +132,7 @@ async fn persisted_recall_uses_db_worker_and_errors_do_not_fail_viewport_loading
         recalled(&incoming, 13)
             .await
             .unwrap_err()
-            .contains("キューが満杯")
+            .contains("queue is full")
     );
     release_tx.send(()).unwrap();
     blocked.await.unwrap().unwrap();

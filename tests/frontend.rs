@@ -7,6 +7,16 @@ use shellboy::{
     ui::{DraftSnapshot, ReceiptStatus, UiAction, UiUpdate, ViewAnchor},
 };
 
+// These legacy wording tests explicitly exercise Japanese UI; data stays original.
+fn japanese_ui_fixture_config(path: &std::path::Path) {
+    let original = std::fs::read_to_string(path).unwrap();
+    let configured = if original.contains("[ui]\n") {
+        original.replacen("[ui]\n", "[ui]\nlanguage=\"ja\"\n", 1)
+    } else {
+        format!("{original}\n[ui]\nlanguage=\"ja\"\n")
+    };
+    std::fs::write(path, configured).unwrap();
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn frontend_first_send_is_saved_and_later_draft_survives_shutdown() {
     let root = tempfile::tempdir().unwrap();
@@ -464,6 +474,7 @@ async fn clipboard_image_is_leased_then_sent_atomically_and_copy_uses_original_b
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n[ui]\ncopy_backend=\"osc52\"\n").unwrap();
+    japanese_ui_fixture_config(&config);
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -870,6 +881,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config,"default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n[ui]\ncopy_backend=\"osc52\"\n").unwrap();
+    japanese_ui_fixture_config(&config);
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -1483,6 +1495,7 @@ async fn draft_database_save_failure_stops_admission_and_owned_shell_but_retains
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='{url}'\n[io]\nterm_grace_ms=50\ndrain_timeout_ms=100\n")).unwrap();
+    japanese_ui_fixture_config(&config);
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -1664,6 +1677,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(&config, "").unwrap();
+    japanese_ui_fixture_config(&config);
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
