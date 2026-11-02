@@ -15,8 +15,9 @@ The integrator owns three-OS validation; Stage C remains incomplete.
 The two reason-specific tool interruption strings are now selected only for
 `UiLanguage::Ja`. English continues through the existing typed
 `PriorCallInterrupted` label. Saved reason codes, `reason_kind`, statuses,
-and source facts are unchanged. Local results are recorded in acceptance; exact-tip
-branch CI and overall Stage C acceptance remain open.
+and source facts are unchanged. Local results are recorded in acceptance; the
+exact-tip task CI result is reported in the integration handoff. Three-OS
+integration and overall Stage C acceptance remain open.
 
 ## Index-source GC scan (#164, branch CI pending)
 
