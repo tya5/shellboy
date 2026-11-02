@@ -8135,3 +8135,20 @@ bounds and lease logic are untouched; the existing namespace tests remain the
 platform-specific guard checks. Local macOS and branch Linux/macOS CI results
 are reported separately; no Windows-local or physical-terminal claim is made.
 This product batch is not part of 0.6.0.
+### #152 Post-0.6.0 Child-State Projection Candidate
+
+The follow-up [file-by-file review](language-audit-stage-c.md#post-060-follow-up-review)
+records eight diagnostic literals in two independent CI-qualified branches and
+one further child-state projection gap. With W8 coordination, the latter changes
+only `src/ui/live_work.rs`: identify child rows by their typed target, project
+known `ActivityPhase::column_label()` values through existing En/Ja phase text,
+and leave `row.state`, classifiers, saved data and all glyph selection unchanged.
+Unknown source state text bypasses decoration; shell/wait states retain their
+previous projection, even if source bytes look like a canonical child label.
+
+New synthetic tests cover all 17 phase variants in default En / explicit Ja,
+byte-preserving unknown and non-child states, legacy child machine codes, and
+1/2/10-child registered rendering at 80/120 columns under 1/2/unknown glyph widths.
+The existing registered empty/folded tests cover the zero-child case. Local and
+exact-tip branch CI results are reported separately; no physical-terminal,
+OS-clipboard, live-provider or combined Stage C completion is implied.

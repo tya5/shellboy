@@ -4,6 +4,44 @@ Status: initial inventory, not completion or permission to translate source data
 Baseline: main `b12a8291b1950a5f7db58de4dccbb12101a2a074` (W6 task 1 landed).
 B-5/B-6 are not yet included. No third-party production source was edited.
 
+## Post-0.6.0 Follow-Up Review
+
+The first two product batches were rebased onto main
+`358ed63b1b3627675d8ac55f2253307539cc142a` after the 0.6.0 release.
+These are post-release candidates, not changes to the released 0.6.0 binary.
+
+| File / Flow | Reviewed Candidates | Result | Disposition |
+| --- | ---: | --- | --- |
+| `src/frontend/copying.rs` | 6 literals | Confirmed application-generated errors; codes, source reasons and copy semantics preserved | `issue-152/product-copy-review-1-v060`, tip `6335def7585fc38a0f09b84a00412d587a6edc91`, CI `41369858817` successful |
+| `src/ipc/server/endpoint/namespace.rs` | 2 literals | Confirmed application-owned diagnostic and recovery hint; dynamic JSON details unchanged | `issue-152/product-ipc-review-2-v060`, tip `4580a4fb06d91397e4ad6de2fa807e2c22d60fa9`, CI `41370110532` successful |
+| `src/ui/threads.rs` | 56 literals | Intentional Ja resources in `BrowserText::render` / `BrowserMessage::render`, with En counterparts | Reread on this base; no resource or glyph changes; no manifest decisions adopted in this follow-up |
+| `src/activity.rs` -> `src/frontend/live_work.rs` -> `src/ui/live_work.rs` | 17 column-label variants | One confirmed projection gap: prepared child states use canonical Ja column labels, but the En renderer only projects machine codes and otherwise passes them through | W8 confirmed no #157 overlap; this branch adds a UI-only child-state projection, retaining canonical labels/state and glyph selection |
+| `src/ui/watch.rs` | 27 literals | Intentional Ja arms in `WatchText::render` / `WatchMessage::render`, with En counterparts | Resource definitions reread; interpolated source labels/reasons remain a separate review, not a whole-screen English guarantee |
+| `src/ui/composer.rs` | 53 inventoried literals | No classification or English-defect count adopted | Consumer/projection review deferred with #150; do not infer resource, protected, or defect status from literal presence |
+
+Both product CI runs succeeded on attempt 1 with actual Linux/macOS `Tests`
+steps. Artifact `source_sha` values match the tips above, and the new regressions
+ran nonignored on both OSes. The copy integration uses an injected clipboard;
+it is not OS-clipboard or physical-terminal acceptance. These two candidates
+have been handed to the integrator, not declared landed by this report.
+
+The initial local IPC check reused a test executable from the other worktree's
+shared target and did not execute its new regression. That run is not acceptance.
+After invalidating this worktree's lib input inside `rust-slot`, fmt/check and
+all six namespace tests passed, including the new regression. Fresh exact-tip
+CI independently confirms it. Copy worker tests (3) and the original-body
+integration (1) also passed locally on macOS.
+
+On the unmodified 358ed63 source, the reviewed manifest reports
+`a=304/b=1196/c=1888/protected=0`. This remains a conservative inventory, not
+1,888 confirmed language defects. The 83 thread/watch resources have not been
+reclassified in the manifest, and checking those resource definitions does not
+establish the language of interpolated dynamic/saved values. The phase issue
+is one projection defect, not 17 approved source-literal replacements. No
+canonical labels, saved values, user/provider/shell text or selected symbols may
+be rewritten as a shortcut. #149/#150 owned ranges remain deferred until their
+exact changes land. Stage C and combined three-OS acceptance remain incomplete.
+
 ## Reproduce
 
 ```sh

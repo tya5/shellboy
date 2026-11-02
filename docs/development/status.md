@@ -3758,3 +3758,19 @@ namespace failure message/hint in `src/ipc/server/endpoint/namespace.rs`. This
 independent batch changes only their language and adds a pure preservation test.
 The six copy-worker literals are in a separate batch. No B5/B6/W8 source is
 changed. This batch is excluded from 0.6.0; CI evidence is reported separately.
+## #152 Post-0.6.0 Product Review
+
+Copy batch 1 and IPC batch 2 were rebased onto the final 0.6.0 main snapshot
+358ed63, with fresh Linux/macOS branch CI 41369858817 and 41370110532 successful
+at exact tips 6335def7 and 4580a4fb. The eight confirmed diagnostic literals are
+handoff candidates, not declared landed here. The follow-up per-file table is
+in validation/language-audit-stage-c.md; 83 thread/watch Ja-resource literals
+were reread without blanket source-file exemptions or manifest refreshes.
+
+Branch issue-152/product-child-phase-review-3 addresses one further UI-only
+projection gap: canonical child phase labels passed through in English owned
+work rows. W8 confirmed no #157 overlap before this edit. Canonical state,
+classifiers, source bytes, glyph policy and filesystem behavior remain unchanged.
+Local focused checks and exact-tip CI qualify this candidate separately; the
+resume point is their evidence and review. #149/#150 dependent ranges and final
+Stage C mixed-language/three-OS acceptance remain pending.

@@ -7,6 +7,7 @@ use crate::ui::text_width::glyphs;
 #[derive(Clone, Copy)]
 enum WorkMessage<'a> {
     State(&'a str),
+    ChildState(&'a str),
     Heading {
         empty: bool,
         folded: bool,
@@ -25,10 +26,46 @@ enum WorkMessage<'a> {
     PreviewNotice,
     PreviewLoading,
 }
-impl WorkMessage<'_> {
+impl<'a> WorkMessage<'a> {
+    fn state(row: &'a LiveWorkRow) -> Self {
+        if matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
+            Self::ChildState(&row.state)
+        } else {
+            Self::State(&row.state)
+        }
+    }
     fn render(self, language: UiLanguage) -> String {
         use UiLanguage::{En, Ja};
         let rendered: String = match (language, self) {
+            (_, Self::ChildState(state)) => {
+                // The frontend prepares child states with canonical phase labels.
+                use crate::activity::ActivityPhase::*;
+                [
+                    Idle,
+                    Sending,
+                    Reflecting,
+                    Preparing,
+                    AwaitingModel,
+                    Retrying,
+                    Receiving,
+                    Tools,
+                    Running,
+                    Waiting,
+                    Background,
+                    Continuing,
+                    Stopping,
+                    Recovery,
+                    Failed,
+                    Stopped,
+                    Completed,
+                ]
+                .into_iter()
+                .find(|phase| phase.column_label() == state)
+                .map_or_else(
+                    || Self::State(state).render(language),
+                    |phase| super::watch::phase_label(phase, language, false).into(),
+                )
+            }
             (En, Self::State(state)) => match state {
                 "starting" => "Starting",
                 "running" | "live" => "Running",
@@ -115,7 +152,7 @@ impl WorkMessage<'_> {
             (Ja, Self::PreviewLoading) => "  |   | 出力を取得中.".into(),
         };
         match self {
-            Self::State(_) => rendered,
+            Self::State(_) | Self::ChildState(_) => rendered,
             Self::PreviewNotice | Self::PreviewLoading => {
                 let prefix = format!("  {}   {} ", glyphs::vertical(), glyphs::vertical());
                 let body = rendered.strip_prefix("  |   | ").unwrap_or(&rendered);
@@ -851,7 +888,7 @@ pub(super) fn draw(
             fit(
                 &format!(
                     "{}{elapsed}{deadline}{age}",
-                    WorkMessage::State(&row.state).render(view.language)
+                    WorkMessage::state(row).render(view.language)
                 ),
                 right_budget.saturating_sub(overflow.width()),
             )
@@ -2070,6 +2107,108 @@ mod language_tests {
         }
         super::super::i18n::verify_screen(folded, folded_expected);
         super::super::i18n::verify_screen(empty, empty_expected);
+    }
+    #[test]
+    fn child_phase_projection_is_english_without_rewriting_source_states() {
+        use crate::activity::ActivityPhase::*;
+        let expected = [
+            (Idle, "Idle"),
+            (Sending, "Sending"),
+            (Reflecting, "Loading saved input"),
+            (Preparing, "Preparing"),
+            (AwaitingModel, "Awaiting model"),
+            (Retrying, "Retrying"),
+            (Receiving, "Receiving"),
+            (Tools, "Running tools"),
+            (Running, "Running"),
+            (Waiting, "Waiting"),
+            (Background, "Background work"),
+            (Continuing, "Continuing"),
+            (Stopping, "Stopping"),
+            (Recovery, "Recovery needed"),
+            (Failed, "Failed"),
+            (Stopped, "Stopped"),
+            (Completed, "Completed"),
+        ];
+        let mut ui = UiState::new(&Config::default(), PathBuf::new());
+        populate(&mut ui);
+        let mut row = ui.view().live_work.snapshot.as_ref().unwrap().rows[1].clone();
+        assert_eq!(ui.view().live_work.language, UiLanguage::En);
+        for (phase, english) in expected {
+            row.state = phase.column_label().into();
+            let source = row.state.clone();
+            for observed in [Some(1), Some(2), None] {
+                crate::ui::text_width::set_terminal_width(observed);
+                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), english);
+                assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), source);
+                assert_eq!(row.state.as_bytes(), source.as_bytes());
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+    #[test]
+    fn state_projection_preserves_unknown_and_non_child_source_bytes() {
+        let mut ui = UiState::new(&Config::default(), PathBuf::new());
+        populate(&mut ui);
+        for mut row in ui.view().live_work.snapshot.as_ref().unwrap().rows.clone() {
+            for source in ["external | 値（raw） -> …", "stopping-now"] {
+                row.state = source.into();
+                for observed in [Some(1), Some(2), None] {
+                    crate::ui::text_width::set_terminal_width(observed);
+                    for language in [UiLanguage::En, UiLanguage::Ja] {
+                        assert_eq!(WorkMessage::state(&row).render(language), source);
+                        assert_eq!(row.state.as_bytes(), source.as_bytes());
+                    }
+                }
+            }
+            row.state = crate::activity::ActivityPhase::Recovery
+                .column_label()
+                .into();
+            if !matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
+                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), row.state);
+            } else {
+                row.state = "live".into();
+                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), "Running");
+                assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), "実行中");
+                assert_eq!(row.state, "live");
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+    #[test]
+    fn canonical_child_states_render_at_both_widths_for_one_two_and_many() {
+        fn children<const COUNT: usize>(ui: &mut UiState) {
+            populate(ui);
+            let view = &mut ui.active_view_mut().live_work;
+            let mut data = view.snapshot.as_ref().unwrap().clone();
+            let child = data.rows[1].clone();
+            data.rows = (0..COUNT)
+                .map(|index| {
+                    let mut row = child.clone();
+                    row.target = LiveWorkTarget::ChildRun {
+                        run_id: format!("child-run-{index}"),
+                        thread_id: format!("child-thread-{index}"),
+                    };
+                    row.state = crate::activity::ActivityPhase::Recovery
+                        .column_label()
+                        .into();
+                    row
+                })
+                .collect();
+            data.children = COUNT as u64;
+            data.shells = 0;
+            data.waits = Some(0);
+            view.accept(Some(data), Instant::now());
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["Owned work", "Recovery needed"],
+                UiLanguage::Ja => &["抱えている作業", "復旧待ち"],
+            }
+        }
+        super::super::i18n::verify_screen(children::<1>, expected);
+        super::super::i18n::verify_screen(children::<2>, expected);
+        super::super::i18n::verify_screen(children::<10>, expected);
     }
     #[test]
     fn clipped_live_work_uses_measured_ellipsis_without_exceeding_width() {
