@@ -235,6 +235,21 @@ pub(crate) fn human_label(pointer: &str, root: &Value) -> String {
 }
 
 /// Stable semantic sections; presentation labels are never parsed as machine keys.
+pub(crate) fn group_label(pointer: &str, language: crate::config::UiLanguage) -> (u8, &'static str) {
+    let (id, japanese) = group(pointer);
+    let label = match language {
+        crate::config::UiLanguage::Ja => japanese,
+        crate::config::UiLanguage::En => match id {
+            0 => "Key facts",
+            1 => "Execution",
+            2 => "Output",
+            3 => "References",
+            _ => "Other",
+        },
+    };
+    (id, label)
+}
+
 pub(crate) fn group(pointer: &str) -> (u8, &'static str) {
     let key = pointer.rsplit('/').next().unwrap_or(pointer);
     if matches!(key, "model_id" | "profile_id") {
@@ -510,6 +525,23 @@ pub(crate) fn prioritized_fields(value: &Value, roots: &[&str]) -> Vec<Presentat
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn group_labels_follow_language_without_changing_group_identity() {
+        use crate::config::UiLanguage::{En, Ja};
+        for (pointer, japanese, english) in [
+            ("/state", "要点", "Key facts"),
+            ("/command", "実行", "Execution"),
+            ("/stdout", "出力", "Output"),
+            ("/node_id", "参照", "References"),
+            ("/unknown", "その他", "Other"),
+        ] {
+            let original = group(pointer);
+            assert_eq!(group_label(pointer, Ja), original);
+            assert_eq!(original.1, japanese);
+            assert_eq!(group_label(pointer, En), (original.0, english));
+            assert!(english.is_ascii());
+        }
+    }
     #[test]
     fn human_terms_leave_canonical_identifiers_and_states_unchanged() {
         let raw = serde_json::json!({"thread_id":"thread-full-id", "run_id":"run-full-id", "turn_id":"turn-full-id", "state":"running"});

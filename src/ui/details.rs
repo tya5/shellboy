@@ -1625,14 +1625,19 @@ impl Details {
                 let mut previous = None;
                 let mut selected_row = 0;
                 for (index, field) in self.fields(view).iter().enumerate() {
-                    let group = crate::presentation::fields::group(&field.key);
+                    let group = crate::presentation::fields::group_label(&field.key, language);
                     if previous != Some(group.0) {
-                        rows.push(popup::Item::new(
-                            Line::from(crate::ui::text_width::glyphs::formatted!(
+                        let heading = if language == UiLanguage::En {
+                            format!("-- {} --", group.1)
+                        } else {
+                            crate::ui::text_width::glyphs::formatted!(
                                 "── {} ──",
                                 "-- {} --",
                                 group.1
-                            ))
+                            )
+                        };
+                        rows.push(popup::Item::new(
+                            Line::from(heading)
                             .style(Style::default().fg(theme::GROUP_HEADING)),
                         ));
                         previous = Some(group.0);
@@ -1866,6 +1871,38 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn field_group_headings_are_bilingual() {
+        fn configure(ui: &mut UiState) {
+            ui.select_thread("thread-fixture".into());
+            *ui.view_mut().nodes_mut_for_test() = vec![UiNode {
+                node_id: "node-fixture".into(),
+                role: "user".into(),
+                presentation: NodePresentation {
+                    kind: PresentationKind::User,
+                    fields: vec![PresentationField {
+                        key: "/state".into(),
+                        label: "State".into(),
+                        value: "RAW-STATE".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            }];
+            let mut details = Details::new(ui.view(), false);
+            details.mode = Mode::Fields;
+            ui.details = Some(details);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["-- Key facts --", "RAW-STATE"],
+                UiLanguage::Ja => &["要点", "RAW-STATE"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
+    }
+
     #[test]
     fn numbered_answer_fields_are_bilingual_and_copy_original_values() {
         fn configure(ui: &mut UiState) {
