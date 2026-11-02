@@ -2449,15 +2449,6 @@ impl ThreadBrowser {
             && let Some(revisit) = crate::presentation::revisit_label(summary)
         {
             // Keep the continuation visible even when the title is long.
-            let revisit = if width < 45 {
-                format!(
-                    "Revisit {}{}",
-                    summary.consumed_count,
-                    if summary.pending { "+" } else { "" }
-                )
-            } else {
-                revisit
-            };
             let reserve = revisit.width().saturating_add(3);
             if width > reserve + 4 && (!interrupted_by_app_exit(thread) || width >= 32) {
                 label = fit(&label, width - reserve);
@@ -3446,22 +3437,173 @@ mod tests {
             ..japanese_browser()
         };
         let row = &browser.rows()[0];
-        assert!(
-            browser
-                .label(row, &item, true, false, 90)
-                .contains("Revisit 5 | next reserved")
-        );
-        assert!(
-            browser
-                .label(row, &item, true, false, 24)
-                .contains("Revisit 5+")
-        );
+        assert!(browser.label(row, &item, true, false, 90).contains("↻5+"));
+        assert!(browser.label(row, &item, true, false, 24).contains("↻5+"));
         item.revisit = None;
-        assert!(
-            !browser
-                .label(row, &item, true, false, 90)
-                .contains("Revisit")
-        );
+        assert!(!browser.label(row, &item, true, false, 90).contains("↻"));
+    }
+
+    #[test]
+    fn revisit_list_drawing_uses_shared_compact_label_in_both_languages_and_widths() {
+        use crate::protocol::RevisitSummary;
+        let states = [
+            (
+                Some(RevisitSummary {
+                    consumed_count: 3,
+                    pending: false,
+                    last_fired_at: None,
+                }),
+                Some("↻3"),
+            ),
+            (
+                Some(RevisitSummary {
+                    consumed_count: 3,
+                    pending: true,
+                    last_fired_at: None,
+                }),
+                Some("↻3+"),
+            ),
+            (
+                Some(RevisitSummary {
+                    consumed_count: 0,
+                    pending: true,
+                    last_fired_at: None,
+                }),
+                Some("↻0+"),
+            ),
+            (
+                Some(RevisitSummary {
+                    consumed_count: 0,
+                    pending: false,
+                    last_fired_at: None,
+                }),
+                None,
+            ),
+        ];
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            for width in [80, 120] {
+                for (revisit, expected) in &states {
+                    let mut row = thread("t03", None);
+                    row.title = "Revisit fixture".into();
+                    row.revisit = revisit.clone();
+                    let rendered = text(&capture_in(&[row], 0, width, 20, None, language));
+                    if let Some(expected) = expected {
+                        assert!(
+                            rendered.contains(expected),
+                            "{language:?} {width}: {rendered}"
+                        );
+                    } else {
+                        assert!(!rendered.contains("↻"), "{language:?} {width}: {rendered}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn revisit_watch_drawing_uses_shared_compact_label_in_both_languages_and_widths() {
+        use super::super::watch::{WatchDetail, WatchState, WatchSummary};
+        use crate::protocol::RevisitSummary;
+        use crate::ui::text_width::UnicodeWidthStr;
+        let states = [
+            (
+                Some(RevisitSummary {
+                    consumed_count: 3,
+                    pending: false,
+                    last_fired_at: None,
+                }),
+                Some("↻3"),
+            ),
+            (
+                Some(RevisitSummary {
+                    consumed_count: 3,
+                    pending: true,
+                    last_fired_at: None,
+                }),
+                Some("↻3+"),
+            ),
+            (
+                Some(RevisitSummary {
+                    consumed_count: 0,
+                    pending: true,
+                    last_fired_at: None,
+                }),
+                Some("↻0+"),
+            ),
+            (
+                Some(RevisitSummary {
+                    consumed_count: 0,
+                    pending: false,
+                    last_fired_at: None,
+                }),
+                None,
+            ),
+        ];
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            for width in [80_u16, 120_u16] {
+                for (revisit, expected) in &states {
+                    let mut state = WatchState::default();
+                    state.set_language(language);
+                    assert!(state.open(
+                        1,
+                        vec![WatchSummary {
+                            thread_id: "t".into(),
+                            title: "Watch fixture".into(),
+                            phase: crate::activity::ActivityPhase::Completed,
+                            updated_at: "saved".into(),
+                            latest_run_id: Some("run".into()),
+                            answer_id: Some("answer".into()),
+                            interrupted: false,
+                        }]
+                    ));
+                    let detail = WatchDetail {
+                        thread_id: "t".into(),
+                        latest_run_id: Some("run".into()),
+                        answer_id: Some("answer".into()),
+                        turn_id: Some("turn".into()),
+                        turn_generation: Some(1),
+                        phase: crate::activity::ActivityPhase::Completed,
+                        parent_title: None,
+                        state_age: None,
+                        model_request_age: None,
+                        work: None,
+                        recovery_reason: None,
+                        answer_preview: Some("answer".into()),
+                        pending_messages: 0,
+                        revisit: revisit.clone(),
+                    };
+                    assert!(state.apply_detail(1, 1, detail.prepare()));
+                    state.set_language(language);
+                    let row = state.row("t").unwrap();
+                    let (first, second) =
+                        watch_lines(&row, language, " ", "", "", usize::from(width));
+                    let rendered_lines = [first, second]
+                        .into_iter()
+                        .map(|line| {
+                            line.spans
+                                .into_iter()
+                                .map(|span| span.content.into_owned())
+                                .collect::<String>()
+                        })
+                        .collect::<Vec<_>>();
+                    let rendered = rendered_lines.join("\n");
+                    if let Some(expected) = expected {
+                        assert!(
+                            rendered.contains(expected),
+                            "{language:?} {width}: {rendered}"
+                        );
+                    } else {
+                        assert!(!rendered.contains("↻"), "{language:?} {width}: {rendered}");
+                    }
+                    for line in rendered_lines {
+                        assert!(
+                            line.width() <= usize::from(width),
+                            "{language:?} {width}: {line}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -3842,6 +3984,17 @@ mod tests {
         height: u16,
         error: Option<&str>,
     ) -> ratatui::buffer::Buffer {
+        capture_in(threads, selected, width, height, error, UiLanguage::Ja)
+    }
+
+    fn capture_in(
+        threads: &[ThreadSummary],
+        selected: usize,
+        width: u16,
+        height: u16,
+        error: Option<&str>,
+        language: UiLanguage,
+    ) -> ratatui::buffer::Buffer {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
         terminal
@@ -3855,7 +4008,8 @@ mod tests {
                     selected,
                     filter: "検索語".into(),
                     error: error.map(str::to_owned),
-                    ..japanese_browser()
+                    language,
+                    ..ThreadBrowser::default()
                 }
                 .draw(frame, frame.area(), Some("t03"), true);
             })

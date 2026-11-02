@@ -49,14 +49,11 @@ pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String
     if summary.consumed_count == 0 && !summary.pending {
         return None;
     }
-    let mut label = format!("Revisit {}", summary.consumed_count);
-    if summary.pending {
-        label.push_str(crate::ui::text_width::glyphs::select(
-            " · next reserved",
-            " | next reserved",
-        ));
-    }
-    Some(label)
+    Some(format!(
+        "↻{}{}",
+        summary.consumed_count,
+        if summary.pending { "+" } else { "" }
+    ))
 }
 
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;

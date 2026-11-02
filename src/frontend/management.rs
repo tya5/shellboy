@@ -850,11 +850,7 @@ mod tests {
     fn work_rows_show_revisit_count_and_pending_without_instruction_text() {
         let value = serde_json::json!({"filters":{},"items":[{"kind":"run","state":"live","thread_title":"Work","id":"run","activity_at":"2026-10-25T00:00:00Z","revisit":{"pending":true,"consumed_count":5}}]});
         let projected = report(value.clone(), MAX_FRAME_BYTES);
-        assert!(
-            projected.fields[0]
-                .value
-                .contains("Revisit 5 | next reserved")
-        );
+        assert!(projected.fields[0].value.contains("↻5+"));
         assert_eq!(projected.detail, Some(value));
     }
 

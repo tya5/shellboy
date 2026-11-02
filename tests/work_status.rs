@@ -662,7 +662,7 @@ async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_foot
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,created_at,result_json) SELECT 'revisit-'||i,'fixture:revisit-'||i,'null','a','revisit-'||i,'root','applied','2026-10-25T08:00:00Z','{"deliver":"complete","delivery_context":{"reason":"run_completion"}}' FROM n;
             INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,hold_reason,created_at,result_json) VALUES('revisit-0','fixture:revisit-0','null','a','revisit-0','held','run_completion','2026-10-25T08:00:00Z','{"deliver":"complete"}');"#)?;
         let activity = shellboy::frontend::activity::project(db,"a")?;
-        assert_eq!(activity.snapshot.revisit.as_deref(),Some("Revisit 5 | next reserved"));
+        assert_eq!(activity.snapshot.revisit.as_deref(),Some("↻5+"));
         Ok(())
     }).await.unwrap();
     let after = f.status(StatusArgs::default()).await.unwrap();
