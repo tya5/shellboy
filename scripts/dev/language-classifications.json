@@ -1,4 +1,9 @@
 {
+  "src/frontend/browser.rs:df7408c68e1bc1b0:1": {
+    "category": "a",
+    "reason": "App-authored browser resync notice. Browser::changed sends complete Japanese and English sentences together; ThreadBrowser::notice_for_language selects the current UI language. Tests preserve Japanese, require ASCII English, and keep raw notices untranslated.",
+    "source_tokens_sha256": "43bd8e377b6ef65d54fff8ee6346db3b632b71572c46f3021ac9ed2f326b1349"
+  },
   "src/presentation/events.rs:0116f480c5739a86:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
