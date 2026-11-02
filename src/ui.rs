@@ -7613,6 +7613,7 @@ mod layout_cache_tests {
             attachment_check_limited: false,
             automatic_retry: None,
             automatic_compaction: None,
+            automatic_compaction_skip: None,
             index_pause: None,
             recovery: None,
             run_id: Some("run".into()),

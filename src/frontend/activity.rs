@@ -119,6 +119,14 @@ pub(super) struct RawProjection {
     live_work: Option<super::live_work::RawLiveWork>,
     waiting_reason: Option<crate::protocol::RunWaitReason>,
     automatic_compaction: Option<crate::ui::activity::AutomaticCompactionSnapshot>,
+    automatic_compaction_skip: Option<crate::ui::activity::AutomaticCompactionSkip>,
+}
+
+#[derive(serde::Deserialize)]
+struct AutomaticCompactionSkipWitness {
+    run_id: String,
+    turn_id: String,
+    reason: crate::ui::activity::AutomaticCompactionSkip,
 }
 
 #[derive(serde::Deserialize)]
@@ -197,6 +205,7 @@ pub(super) fn read_tx_with_limit(
             live_work: None,
             waiting_reason: None,
             automatic_compaction: None,
+            automatic_compaction_skip: None,
         });
     };
     let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
@@ -211,6 +220,7 @@ pub(super) fn read_tx_with_limit(
         waiting_reason: crate::readback::run_wait_reason(db, thread, run_id)
             .map_err(crate::storage::StorageError::from)?,
         automatic_compaction: None,
+        automatic_compaction_skip: None,
         turn: None,
         attempt: None,
         revisit,
@@ -237,6 +247,17 @@ pub(super) fn read_tx_with_limit(
                     |row| row.get(0),
                 )
                 .optional()?;
+            let status: Option<String> = db
+                .query_row(
+                    "SELECT substr(value,1,4096) FROM app_meta WHERE key=?1",
+                    [crate::compaction::CompactionKeys::new(thread).automatic_status()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            raw.automatic_compaction_skip = status
+                .and_then(|body| serde_json::from_str::<AutomaticCompactionSkipWitness>(&body).ok())
+                .filter(|saved| saved.run_id == *run_id && saved.turn_id == saved_turn.id)
+                .map(|saved| saved.reason);
             raw.automatic_compaction = body
                 .and_then(|body| serde_json::from_str::<AutomaticCompactionWitness>(&body).ok())
                 .filter(|w| {
@@ -320,6 +341,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         live_work,
         waiting_reason,
         automatic_compaction,
+        automatic_compaction_skip,
     } = raw;
     let Some((run_id, run_state, stop_reason, ended_at)) = run else {
         return Projection {
@@ -348,6 +370,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         live_work: live_work.map(super::live_work::prepare),
         waiting_reason,
         automatic_compaction,
+        automatic_compaction_skip,
         revisit,
         run_id: Some(run_id),
         ..Default::default()

@@ -750,6 +750,32 @@ fn active_turn_notice(originals: &[String]) -> String {
 
 /// The immutable spill projection is shared by explicit spills and the atomic
 /// disconnect-trim planner; neither operation changes the source payload.
+#[cfg(test)]
+pub(crate) fn test_spill_reduces(sources: &[(String, Value)], epoch: i64) -> bool {
+    let group = Group {
+        sources: sources
+            .iter()
+            .map(|(id, payload)| Source {
+                id: id.clone(),
+                turn: None,
+                payload: payload.clone(),
+                revision: 0,
+                hash: String::new(),
+                attachments: Vec::new(),
+            })
+            .collect(),
+        tool: true,
+        complete: true,
+    };
+    let before = group
+        .sources
+        .iter()
+        .map(|source| edit::projection_characters(&source.payload, epoch))
+        .fold(0u64, u64::saturating_add);
+    spill_payload(&group)
+        .is_some_and(|payload| edit::projection_characters(&payload, epoch) < before)
+}
+
 fn spill_payload(group: &Group) -> Option<Value> {
     let mut output = Vec::new();
     for source in &group.sources {

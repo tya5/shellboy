@@ -335,6 +335,14 @@ pub(super) fn footer_lines_with_db(
     {
         facts.push(auto.label_localized(view.language));
     }
+    if let Some(reason) = view
+        .activity
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.automatic_compaction_skip)
+    {
+        facts.push(reason.label_localized(view.language).into());
+    }
     if let Some(retry) = view
         .activity
         .snapshot
@@ -768,6 +776,58 @@ mod tests {
             pause: Some(PauseReason::Transport),
         });
         assert!(ui.view().activity.snapshot.is_none());
+    }
+
+    #[test]
+    fn automatic_compaction_skip_uses_the_existing_bilingual_footer() {
+        use crate::config::UiLanguage;
+        use crate::ui::{
+            UiState,
+            activity::{ActivityPhase, ActivitySnapshot, AutomaticCompactionSkip},
+        };
+        for (language, expected) in [
+            (UiLanguage::Ja, "自動圧縮を見送り（対象なし）"),
+            (
+                UiLanguage::En,
+                "Auto-compaction deferred (no eligible history)",
+            ),
+        ] {
+            let mut config = crate::config::Config::default();
+            config.ui.language = language;
+            let mut ui = UiState::new(&config, std::path::PathBuf::from("/synthetic"));
+            ui.view_mut().activity.accept(
+                1,
+                ActivitySnapshot {
+                    phase: ActivityPhase::Preparing,
+                    turn_in_progress: true,
+                    run_id: Some("synthetic-run".into()),
+                    automatic_compaction_skip: Some(AutomaticCompactionSkip::NoTarget),
+                    ..Default::default()
+                },
+            );
+            let palette = super::super::theme::Palette::from_capabilities(
+                crate::config::PaletteMode::Dark,
+                false,
+                true,
+            );
+            let activity = ui.animation.spans_localized(
+                ui.view().footer_phase(),
+                ratatui::style::Style::default(),
+                std::time::Instant::now(),
+                language,
+            );
+            let rows = footer_lines(ui.view(), 120, "", palette, activity, None, None);
+            let text = rows[0]
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+            assert!(text.contains(expected), "{text}");
+            assert!(
+                !text.contains("Auto-compacting"),
+                "a deferred attempt is not active"
+            );
+        }
     }
 
     #[test]

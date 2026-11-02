@@ -24,6 +24,12 @@ pub enum DiagnosticEvent {
     ModelStreamDifference,
     AutomaticCompactionStarted,
     AutomaticCompactionFinished,
+    AutomaticCompactionBelowThreshold,
+    AutomaticCompactionSkippedNoTarget,
+    AutomaticCompactionSkippedNoNewTarget,
+    AutomaticCompactionForecastLimited,
+    AutomaticCompactionRejectedInvalidState,
+    AutomaticCompactionRejectedOther,
     MessageSend,
     ShellFailure,
     StorageLimit,
@@ -160,6 +166,13 @@ struct IndexDiscardTrace {
 }
 const LINEAGE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(50);
 
+/// Saturating structural counts; never contains provider or source content.
+#[derive(Debug, Clone, Copy, Serialize)]
+struct AutomaticCompactionCounts {
+    invalid_state_rejections: u32,
+    other_rejections: u32,
+}
+
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct DiagnosticIds {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -286,6 +299,8 @@ struct Entry {
     db_job: Option<DbJobTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     index_discard: Option<IndexDiscardTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    automatic_compaction_counts: Option<AutomaticCompactionCounts>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -366,6 +381,7 @@ struct Record {
     lineage_slow: Option<LineageSlowTrace>,
     db_job: Option<DbJobTrace>,
     index_discard: Option<IndexDiscardTrace>,
+    automatic_compaction_counts: Option<AutomaticCompactionCounts>,
 }
 struct Health {
     failed: AtomicBool,
@@ -407,6 +423,7 @@ impl Diagnostics {
                     lineage_slow,
                     db_job,
                     index_discard,
+                    automatic_compaction_counts,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -425,6 +442,7 @@ impl Diagnostics {
                         lineage_slow,
                         db_job,
                         index_discard,
+                        automatic_compaction_counts,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -494,6 +512,32 @@ impl Diagnostics {
         }
     }
     /// Finite try_send only. This method is safe to call on the UI main thread.
+    pub(crate) fn record_automatic_compaction(
+        &self,
+        event: DiagnosticEvent,
+        ids: DiagnosticIds,
+        invalid_state_rejections: u32,
+        other_rejections: u32,
+    ) {
+        self.enqueue_record(Record {
+            event,
+            ids,
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job_slow: None,
+            index_discard: None,
+            automatic_compaction_counts: Some(AutomaticCompactionCounts {
+                invalid_state_rejections,
+                other_rejections,
+            }),
+        });
+    }
     pub fn record(&self, event: DiagnosticEvent, ids: DiagnosticIds) {
         let failure = matches!(event, DiagnosticEvent::ModelFailure)
             .then(|| ModelFailureDetails::stage(ModelFailureReason::Recovery));
@@ -597,6 +641,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
@@ -618,6 +663,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -643,6 +689,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
     pub(crate) fn record_db_job(
@@ -744,6 +791,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: Some(trace),
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
     /// One aggregate observation after the query; fast queries emit nothing at any level.
@@ -776,6 +824,7 @@ impl Diagnostics {
                 truncated,
             }),
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -856,6 +905,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -872,6 +922,7 @@ impl Diagnostics {
             lineage_slow,
             db_job,
             index_discard,
+            automatic_compaction_counts,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -904,6 +955,7 @@ impl Diagnostics {
                     lineage_slow,
                     db_job,
                     index_discard,
+                    automatic_compaction_counts,
                 })
                 .is_err()
         }) {
@@ -1382,5 +1434,70 @@ mod db_job_slow_tests {
             rows[1]["db_job_slow"],
             serde_json::json!({"kind":"index.next_delay","queue_ms":0,"run_ms":2000})
         );
+    }
+}
+
+#[cfg(test)]
+mod automatic_compaction_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn skip_and_rejection_diagnostics_have_only_fixed_bounded_counts() {
+        crate::test_watchdog::watchdog("automatic compaction diagnostics", async {
+            let root = tempfile::tempdir().unwrap();
+            let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+            let ids = DiagnosticIds {
+                thread_id: Some("synthetic-thread".into()),
+                ..Default::default()
+            };
+            diagnostics.record(
+                DiagnosticEvent::AutomaticCompactionBelowThreshold,
+                ids.clone(),
+            );
+            diagnostics.record_automatic_compaction(
+                DiagnosticEvent::AutomaticCompactionSkippedNoTarget,
+                ids.clone(),
+                0,
+                0,
+            );
+            diagnostics.record_automatic_compaction(
+                DiagnosticEvent::AutomaticCompactionRejectedInvalidState,
+                ids.clone(),
+                1,
+                0,
+            );
+            diagnostics.record_automatic_compaction(
+                DiagnosticEvent::AutomaticCompactionRejectedOther,
+                ids,
+                1,
+                u32::MAX,
+            );
+            diagnostics.record(DiagnosticEvent::Startup, DiagnosticIds::default());
+            diagnostics.shutdown().await;
+            let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+            let rows = body
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(rows.len(), 5);
+            assert_eq!(rows[0]["event"], "automatic_compaction_below_threshold");
+            assert!(rows[0].get("automatic_compaction_counts").is_none());
+            assert_eq!(rows[1]["event"], "automatic_compaction_skipped_no_target");
+            assert_eq!(
+                rows[2]["event"],
+                "automatic_compaction_rejected_invalid_state"
+            );
+            assert_eq!(rows[3]["event"], "automatic_compaction_rejected_other");
+            assert_eq!(
+                rows[3]["automatic_compaction_counts"],
+                serde_json::json!({"invalid_state_rejections":1,"other_rejections":u32::MAX})
+            );
+            assert!(rows[4].get("automatic_compaction_counts").is_none());
+            assert!(!body.contains("synthetic private prompt"));
+            assert!(!body.contains("synthetic provider response"));
+            assert!(!diagnostics.has_failed());
+        })
+        .await
+        .unwrap();
     }
 }
