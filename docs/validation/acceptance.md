@@ -9014,3 +9014,9 @@ No other row-construction surface in the audited UI/presentation paths was found
 to have the same missing nested-body prefix. Unit-level rendered-Line assertions
 verify first-line indentation and wrapped continuation alignment; symbols and
 wording are unchanged.
+### #152 Received List Language Slice
+
+Synthetic tests cover both languages, zero/one/two/many counts, receipt states,
+page bounds, user text preservation and control-character sanitization. Exact
+commands and CI results are recorded in the handoff. These tests do not establish
+physical-terminal behavior or completion of Stage C.

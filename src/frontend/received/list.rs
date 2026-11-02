@@ -19,12 +19,13 @@ pub(super) async fn read(
         .call(move |db| Ok(query(db, &count_thread, page)?))
         .await
         .map_err(storage_error)?;
+    let language = control.store.config.ui.language;
     presentation_work(move || {
         let mut fields = Vec::new();
         if page > 1 {
             fields.push(crate::presentation::PresentationField {
                 key: format!("/received/page/{}", page - 1),
-                label: "前の32件".into(),
+                label: i18n::local!(language, "前の32件", "Previous 32").into(),
                 value: thread.clone(),
                 ..Default::default()
             });
@@ -44,12 +45,16 @@ pub(super) async fn read(
                 label: crate::ui::text_width::glyphs::formatted!(
                     "{} · {} · Turn {}",
                     "{} | {} | Turn {}",
-                    crate::presentation::fields::local_time(&at)
-                        .unwrap_or_else(|| "時刻不明".into()),
-                    classification(&kind, &state),
+                    crate::presentation::fields::local_time(&at).unwrap_or_else(|| i18n::local!(
+                        language,
+                        "時刻不明",
+                        "Time unknown"
+                    )
+                    .into()),
+                    classification(language, &kind, &state),
                     turn.chars().take(8).collect::<String>(),
                 ),
-                display: Some(display(&request, excerpt.as_deref())),
+                display: Some(display(language, &request, excerpt.as_deref())),
                 value: id,
                 ..Default::default()
             });
@@ -57,18 +62,12 @@ pub(super) async fn read(
         if u64::from(page) * 32 < total as u64 {
             fields.push(crate::presentation::PresentationField {
                 key: format!("/received/page/{}", page + 1),
-                label: "次の32件".into(),
+                label: i18n::local!(language, "次の32件", "Next 32").into(),
                 value: thread,
                 ..Default::default()
             });
         }
-        (
-            crate::ui::text_width::glyphs::formatted!(
-                "受信記録 · {total}件 · {page}ページ · Enter 原文 / Esc 閉じる",
-                "受信記録 | {total}件 | {page}ページ | Enter 原文 / Esc 閉じる"
-            ),
-            fields,
-        )
+        (title(language, total, page), fields)
     })
     .await
 }
@@ -122,20 +121,37 @@ fn query(db: &rusqlite::Connection, thread: &str, page: u32) -> rusqlite::Result
     Ok((total, rows))
 }
 
-fn classification(kind: &str, state: &str) -> &'static str {
-    if kind == "model_stream_observation" {
-        return "差分・最終確定済み";
-    }
-    match state {
-        "recovery_wait" => "復旧待ち",
-        "completed" => "保存済み・回復後",
-        "stopped" | "failed" => "保存済み・中断",
-        "preparing" | "running" | "waiting" => "保存済み・処理中",
-        _ => "保存済み・状態不明",
+fn title(language: UiLanguage, total: i64, page: u32) -> String {
+    let separator = crate::ui::text_width::glyphs::separator();
+    match language {
+        UiLanguage::Ja => format!(
+            "受信記録{separator}{total}件{separator}{page}ページ{separator}Enter 原文 / Esc 閉じる"
+        ),
+        UiLanguage::En => {
+            let records = if total == 1 { "record" } else { "records" };
+            format!(
+                "Received records{separator}{total} {records}{separator}page {page}{separator}Enter Original / Esc Close"
+            )
+        }
     }
 }
 
-fn display(request: &Option<String>, excerpt: Option<&str>) -> String {
+fn classification(language: UiLanguage, kind: &str, state: &str) -> &'static str {
+    if kind == "model_stream_observation" {
+        return i18n::local!(language, "差分・最終確定済み", "Delta; finalized");
+    }
+    match state {
+        "recovery_wait" => i18n::local!(language, "復旧待ち", "Awaiting recovery"),
+        "completed" => i18n::local!(language, "保存済み・回復後", "Saved; recovered"),
+        "stopped" | "failed" => i18n::local!(language, "保存済み・中断", "Saved; interrupted"),
+        "preparing" | "running" | "waiting" => {
+            i18n::local!(language, "保存済み・処理中", "Saved; in progress")
+        }
+        _ => i18n::local!(language, "保存済み・状態不明", "Saved; state unknown"),
+    }
+}
+
+fn display(language: UiLanguage, request: &Option<String>, excerpt: Option<&str>) -> String {
     let single_line = |text: &str| {
         crate::presentation::sanitize_plain(text, 0)
             .0
@@ -147,17 +163,18 @@ fn display(request: &Option<String>, excerpt: Option<&str>) -> String {
         .as_deref()
         .map(single_line)
         .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| "依頼本文なし".into());
+        .unwrap_or_else(|| i18n::local!(language, "依頼本文なし", "No request text").into());
     let excerpt = excerpt.map(single_line).filter(|text| !text.is_empty());
     // The request remains the primary identifier even for paid empty receipts.
     excerpt
         .map_or_else(
             || request.clone(),
             |text| {
-                crate::ui::text_width::glyphs::formatted!(
-                    "{request} · 受信: {text}",
-                    "{request} | 受信: {text}"
-                )
+                let separator = crate::ui::text_width::glyphs::separator();
+                match language {
+                    UiLanguage::Ja => format!("{request}{separator}受信: {text}"),
+                    UiLanguage::En => format!("{request}{separator}Received: {text}"),
+                }
             },
         )
         .chars()
@@ -202,6 +219,41 @@ mod tests {
             rusqlite::params![turn, id, at],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn english_and_japanese_labels_keep_user_text_and_plural_counts() {
+        for (total, expected) in [
+            (0, "0 records"),
+            (1, "1 record"),
+            (2, "2 records"),
+            (35, "35 records"),
+        ] {
+            assert!(title(UiLanguage::En, total, 1).contains(expected));
+            assert!(title(UiLanguage::Ja, total, 1).contains(&format!("{total}件")));
+        }
+        for state in [
+            "recovery_wait",
+            "completed",
+            "stopped",
+            "failed",
+            "preparing",
+            "running",
+            "waiting",
+            "unknown",
+        ] {
+            assert_ne!(
+                classification(UiLanguage::En, "incomplete_response", state),
+                classification(UiLanguage::Ja, "incomplete_response", state)
+            );
+        }
+        assert_eq!(
+            classification(UiLanguage::En, "model_stream_observation", "completed"),
+            "Delta; finalized"
+        );
+        assert_eq!(display(UiLanguage::En, &None, None), "No request text");
+        let shown = display(UiLanguage::En, &Some("依頼".into()), Some("応答"));
+        assert!(shown.contains("依頼") && shown.contains("応答") && shown.contains("Received:"));
     }
 
     #[test]
@@ -257,26 +309,34 @@ mod tests {
         let b = rows.iter().find(|row| row.id == "b").unwrap();
         assert_eq!(a.request.as_deref(), Some("first request"));
         assert_eq!(b.request.as_deref(), Some("second request"));
-        assert_eq!(classification(&a.kind, &a.state), "復旧待ち");
-        assert_eq!(classification(&b.kind, &b.state), "保存済み・回復後");
-        assert!(display(&a.request, a.excerpt.as_deref()).starts_with("first request"));
+        assert_eq!(
+            classification(UiLanguage::Ja, &a.kind, &a.state),
+            "復旧待ち"
+        );
+        assert_eq!(
+            classification(UiLanguage::Ja, &b.kind, &b.state),
+            "保存済み・回復後"
+        );
+        assert!(
+            display(UiLanguage::Ja, &a.request, a.excerpt.as_deref()).starts_with("first request")
+        );
         let stopped = rows.iter().find(|row| row.id == "stopped").unwrap();
         assert_eq!(
-            classification(&stopped.kind, &stopped.state),
+            classification(UiLanguage::Ja, &stopped.kind, &stopped.state),
             "保存済み・中断"
         );
         assert_eq!(
-            display(&stopped.request, stopped.excerpt.as_deref()),
+            display(UiLanguage::Ja, &stopped.request, stopped.excerpt.as_deref()),
             "依頼本文なし"
         );
         let unknown = rows.iter().find(|row| row.id == "unknown").unwrap();
         assert_eq!(
-            classification(&unknown.kind, &unknown.state),
+            classification(UiLanguage::Ja, &unknown.kind, &unknown.state),
             "保存済み・状態不明"
         );
         let difference = rows.iter().find(|row| row.id == "difference").unwrap();
         assert_eq!(
-            classification(&difference.kind, &difference.state),
+            classification(UiLanguage::Ja, &difference.kind, &difference.state),
             "差分・最終確定済み"
         );
         assert!(
@@ -310,7 +370,7 @@ mod tests {
             assert_eq!(row.request.as_ref().unwrap().chars().count(), 80);
             assert_eq!(row.excerpt.as_ref().unwrap().chars().count(), 80);
             assert!(
-                display(&row.request, row.excerpt.as_deref())
+                display(UiLanguage::Ja, &row.request, row.excerpt.as_deref())
                     .chars()
                     .count()
                     <= 80
@@ -325,9 +385,12 @@ mod tests {
     #[test]
     fn row_text_strips_terminal_controls_and_collapses_lines() {
         let request = Some("\u{1b}[31m依頼\u{1b}[0m\n\t次行\u{7}".into());
-        let shown = display(&request, Some("\u{1b}[2J回答\r\n続き"));
+        let shown = display(UiLanguage::Ja, &request, Some("\u{1b}[2J回答\r\n続き"));
         assert_eq!(shown, "依頼 次行 | 受信: 回答 続き");
         assert!(!shown.chars().any(char::is_control));
-        assert_eq!(display(&Some(" \n\t".into()), Some("")), "依頼本文なし");
+        assert_eq!(
+            display(UiLanguage::Ja, &Some(" \n\t".into()), Some("")),
+            "依頼本文なし"
+        );
     }
 }

@@ -4198,3 +4198,9 @@ were limited to compact Revisit rendering and tests; the reviewed localized
 resource arms were unchanged. No product resource, canonical symbol or dynamic
 value changed. Other assigned files and cross-boundary source-value provenance
 remain under review.
+### #152 Received List Language Slice
+
+The bounded received-record list uses the startup UI language for generated
+headings, page controls, state labels and missing-text hints. Request and
+received excerpts remain source text, subject to the existing sanitization and
+length limits. This is one Stage C slice, not the full language audit.
