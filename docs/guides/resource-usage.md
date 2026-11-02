@@ -375,8 +375,45 @@ The live attempt stopped before the client started: the controller checked the
 relay TCP port before it was ready and received connection refused. The relay
 started shortly afterward, but the error-stop rule was followed and no inference
 request was sent. jcode's real-model token usage and session headers therefore
-remain **unmeasured**; no zero values or cache ratios are implied. The previously
+were **unmeasured at that point**; no zero values or cache ratios were implied. The previously
 reported 252,082 input-plus-output tokens are unchanged, while earlier failed
 and LiteLLM internal-retry usage remains unknown. The temporary containers and
 networks were removed and Colima stopped; no image was built. A pre-existing
 Python image was pulled for the x86-64 container architecture.
+
+
+### Separately authorized jcode retry
+
+On 2026-11-02 a further retry was authorized after the pre-client readiness
+error. The controller waited for the relay ready marker, without retrying any
+client or model request. Before live inference, the internal-only client reached
+the relay but not the host LiteLLM port, an external address, or the relay's
+external-network address. The relay reached LiteLLM over TCP. The same fixed
+jcode v0.99.1 x86-64 client under emulation completed the five instructions
+and nine chat requests against the fake model, with no errors. The real-model
+run then completed the five instructions in one conversation and 10 Chat
+Completions requests, using `gpt-6.1-terra`.
+
+The relay reported **110,794 input**, **54,272 cached input**, and **216 output**
+tokens. Cached/input was 48.98% overall and 54.21% after the first request.
+The cumulative successful-response input plus output across the experiment was
+363,092. The previously failed request and LiteLLM internal retry usage remain
+unknown; this is not a hard bound on actual provider consumption. All 10
+requests lacked the three recorded LiteLLM session/trace and Shellboy session
+headers. The separately named OpenCode header was not recorded.
+
+| API request | jcode input / cached input / output | Client body bytes |
+| ---: | --- | ---: |
+| 1 | 10,685 / 0 / 33 | 51,120 |
+| 2 | 10,785 / 10,624 / 5 | 51,571 |
+| 3 | 10,826 / 0 / 33 | 51,728 |
+| 4 | 10,964 / 10,624 / 15 | 52,320 |
+| 5 | 11,023 / 10,880 / 39 | 52,560 |
+| 6 | 11,143 / 0 / 44 | 53,074 |
+| 7 | 11,254 / 0 / 5 | 53,565 |
+| 8 | 11,293 / 11,008 / 30 | 53,699 |
+| 9 | 11,392 / 0 / 7 | 54,151 |
+| 10 | 11,429 / 11,136 / 5 | 54,282 |
+
+These are partial observations under this synthetic workload, not a product
+ranking. The disposable relay and networks were removed and Colima was stopped.
