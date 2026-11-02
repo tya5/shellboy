@@ -1654,7 +1654,7 @@ impl Details {
                                 } else {
                                     ": "
                                 },
-                                safe(field.displayed())
+                                safe(crate::presentation::fields::displayed_for(field, language))
                             ),
                             body.width,
                         )
@@ -1869,6 +1869,41 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+    #[test]
+    fn generated_state_display_is_bilingual_but_copy_remains_raw() {
+        fn configure(ui: &mut UiState) {
+            ui.select_thread("thread-fixture".into());
+            *ui.view_mut().nodes_mut_for_test() = vec![UiNode {
+                node_id: "node-fixture".into(),
+                role: "user".into(),
+                presentation: NodePresentation {
+                    kind: PresentationKind::User,
+                    fields: vec![PresentationField {
+                        key: "/state".into(),
+                        label: "State".into(),
+                        value: "running".into(),
+                        display: Some("実行中".into()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            }];
+            let mut details = Details::new(ui.view(), false);
+            details.mode = Mode::Fields;
+            details.selected = details.fields(ui.view()).iter().position(|field| field.key == "/state").unwrap();
+            let mut next = 0;
+            assert!(matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { ref text, .. } if text == "running")));
+            ui.details = Some(details);
+        }
+        fn expected(language: UiLanguage) -> &'static [&'static str] {
+            match language {
+                UiLanguage::En => &["State: Running"],
+                UiLanguage::Ja => &["State: 実行中"],
+            }
+        }
+        super::super::i18n::verify_screen(configure, expected);
     }
     #[test]
     fn field_group_headings_are_bilingual() {

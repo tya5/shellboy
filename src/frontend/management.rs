@@ -320,7 +320,7 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
                             i18n::local!(language, "モデル要求", "Model request"),
                         other => other,
                     },
-                    presentation::fields::state_label(&text(item, "state"))
+                    presentation::fields::state_label_for(&text(item, "state"), language)
                 ),
                 value: crate::ui::text_width::glyphs::formatted!(
                     "{title} · {short} · {}{revisit}",
@@ -845,6 +845,15 @@ mod tests {
         assert!(report.fields[0].value.starts_with("件名未設定"));
         assert!(!report.fields[0].value.contains("T00:00:00Z"));
         assert_eq!(report.detail, Some(value));
+    }
+    #[test]
+    fn work_status_state_is_bilingual_and_preserves_source() {
+        let raw = serde_json::json!({"items":[{"kind":"message","state":"accepted","thread_title":"work","id":"id"}]});
+        let japanese = work_report(UiLanguage::Ja, raw.clone(), MAX_FRAME_BYTES);
+        let english = work_report(UiLanguage::En, raw.clone(), MAX_FRAME_BYTES);
+        assert!(japanese.fields[0].label.contains("受付済み"));
+        assert!(english.fields[0].label.contains("Accepted"));
+        assert_eq!(english.detail, Some(raw));
     }
     #[test]
     fn work_rows_show_revisit_count_and_pending_without_instruction_text() {

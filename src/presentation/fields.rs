@@ -351,6 +351,56 @@ pub(crate) fn state_label(value: &str) -> &str {
         other => other,
     }
 }
+pub(crate) fn state_label_for(value: &str, language: crate::config::UiLanguage) -> &str {
+    if language == crate::config::UiLanguage::Ja {
+        return state_label(value);
+    }
+    match value {
+        "accepted" => "Accepted",
+        "held" => "Held",
+        "applied" => "Applied",
+        "completed" => "Completed",
+        "running" => "Running",
+        "starting" => "Starting",
+        "preparing" => "Preparing",
+        "inflight" => "In flight",
+        "waiting" => "Waiting",
+        "recovery_wait" => "Awaiting recovery",
+        "pending" => "Pending",
+        "live" => "Live",
+        "stopping" => "Stopping",
+        "stopped" => "Stopped",
+        "failed" => "Failed",
+        "incomplete" => "Incomplete",
+        "cancelled" => "Cancelled",
+        "not_started" => "Not started",
+        "interrupted" => "Interrupted; result uncertain",
+        "exited" => "Exited",
+        "idle" => "Idle",
+        "paused" => "Paused",
+        other => other,
+    }
+}
+
+pub(crate) fn displayed_for(
+    field: &PresentationField,
+    language: crate::config::UiLanguage,
+) -> &str {
+    let key = field.key.rsplit('/').next().unwrap_or(&field.key);
+    if language == crate::config::UiLanguage::En {
+        if matches!(key, "state" | "status" | "previous_state" | "startup_state" | "planned_state")
+            && field.display.as_deref() == Some(state_label(&field.value))
+            && state_label(&field.value) != field.value
+        {
+            return state_label_for(&field.value, language);
+        }
+        if key == "exit_code" && field.value == "null" && field.display.as_deref() == Some("未確定") {
+            return "Undetermined";
+        }
+    }
+    field.displayed()
+}
+
 pub(crate) fn local_time(value: &str) -> Option<String> {
     chrono::DateTime::parse_from_rfc3339(value)
         .ok()
@@ -543,6 +593,36 @@ mod tests {
             assert_eq!(original.1, japanese);
             assert_eq!(group_label(pointer, En), (original.0, english));
             assert!(english.is_ascii());
+        }
+    }
+    #[test]
+    fn state_values_localize_only_generated_display_and_keep_raw_values() {
+        use crate::config::UiLanguage::{En, Ja};
+        let raw = serde_json::json!({"state":"running", "exit_code":null, "future":"running"});
+        let mut fields = fields_of_value(&raw);
+        decorate(&mut fields, &raw);
+        let state = fields.iter().find(|f| f.key == "/state").unwrap();
+        assert_eq!(state.value, "running");
+        assert_eq!(displayed_for(state, Ja), "実行中");
+        assert_eq!(displayed_for(state, En), "Running");
+        let exit = fields.iter().find(|f| f.key == "/exit_code").unwrap();
+        assert_eq!(exit.value, "null");
+        assert_eq!(displayed_for(exit, Ja), "未確定");
+        assert_eq!(displayed_for(exit, En), "Undetermined");
+        let opaque = PresentationField {
+            key: "/state".into(),
+            value: "running".into(),
+            display: Some("opaque display".into()),
+            ..Default::default()
+        };
+        assert_eq!(displayed_for(&opaque, En), "opaque display");
+        assert_eq!(state_label_for("future-state", En), "future-state");
+        assert_eq!(state_label_for("保留中", En), "保留中");
+        assert_eq!(displayed_for(fields.iter().find(|f| f.key == "/future").unwrap(), En), "running");
+        for value in ["accepted", "held", "applied", "completed", "running", "starting", "preparing", "inflight", "waiting", "recovery_wait", "pending", "live", "stopping", "stopped", "failed", "incomplete", "cancelled", "not_started", "interrupted", "exited", "idle", "paused"] {
+            assert_eq!(state_label_for(value, Ja), state_label(value));
+            assert!(state_label_for(value, En).is_ascii());
+            assert_ne!(state_label_for(value, En), value);
         }
     }
     #[test]

@@ -1584,7 +1584,10 @@ impl ManagementPopup {
                         if index == structured.selected {
                             selected_row = items.len();
                         }
-                        let value = crate::presentation::sanitize_plain(field.displayed(), 0).0;
+                        let value = crate::presentation::sanitize_plain(
+                            crate::presentation::fields::displayed_for(field, language),
+                            0,
+                        ).0;
                         let label = crate::presentation::sanitize_plain(label, 0)
                             .0
                             .replace('\n', " ");
