@@ -792,11 +792,12 @@ fn notice_kind(node: &UiNode) -> Option<&str> {
 }
 
 fn notice_symbol(kind: Option<&str>) -> &'static str {
+    use crate::ui::text_width::glyphs;
     match kind.unwrap_or("") {
-        "shell_ended" => "$",
-        "child_turn_completed" | "child_run_ended" | "child_report" => "↳",
-        "recovery_wait" | "child_recovery_wait" => "⋯",
-        "revisit" => "↻",
+        "shell_ended" => glyphs::SHELL,
+        "child_turn_completed" | "child_run_ended" | "child_report" => glyphs::CHILD,
+        "recovery_wait" | "child_recovery_wait" => glyphs::WAIT,
+        "revisit" => glyphs::REVISIT,
         "thread_settings"
         | "connection_changed"
         | "model_changed"
@@ -804,15 +805,43 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
         | "instructions_observed"
         | "instruction_changed"
         | "agents_changed"
-        | "agents_reference" => "⌘",
+        | "agents_reference" => glyphs::SETTINGS,
         "previous_instance_interrupted"
         | "app_shutdown"
         | "recovery_resumed"
-        | "interrupted_messages_recovered" => "⏻",
-        "index_state" => "⌕",
-        "turn_started" | "run_started" => "⟡",
+        | "interrupted_messages_recovered" => glyphs::LIFECYCLE,
+        "index_state" => glyphs::INDEX,
+        "turn_started" | "run_started" => glyphs::START,
         _ => RowKind::Unknown.mark(),
     }
+}
+
+enum BackgroundLabel {
+    Requested(bool),
+    Running(crate::presentation::ToolReasonKind),
+}
+
+fn background_label(language: UiLanguage, background: BackgroundLabel) -> &'static str {
+    use crate::presentation::ToolReasonKind;
+    match background {
+        BackgroundLabel::Requested(true) => {
+            crate::ui::i18n::local!(language, "背景指定あり", "Background requested")
+        }
+        BackgroundLabel::Requested(false) => {
+            crate::ui::i18n::local!(language, "背景指定なし", "Foreground requested")
+        }
+        BackgroundLabel::Running(ToolReasonKind::HumanBackgrounded) => {
+            Text::HumanBackground.render(language)
+        }
+        BackgroundLabel::Running(ToolReasonKind::AdditionalInput) => {
+            Text::InputBackground.render(language)
+        }
+        BackgroundLabel::Running(_) => Text::Background.render(language),
+    }
+}
+
+fn exit_code_label(code: i64) -> String {
+    format!("exit {code}")
 }
 
 fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> Line<'static> {
@@ -923,6 +952,7 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
         _ => (None, None, None),
     };
     let mut outcome = match (status, code) {
+        (_, Some(code)) if kind == "shell_ended" => exit_code_label(code),
         (Some(status), code) => crate::presentation::messages::tool_state(status, code, language),
         (None, Some(code)) => Message::Exit { code }.render(language),
         _ => String::new(),
@@ -947,7 +977,10 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
             3 => "SIGQUIT".into(),
             9 => "SIGKILL".into(),
             15 => "SIGTERM".into(),
-            _ => format!("signal {signal}"),
+            _ => format!(
+                "{}{signal}",
+                crate::ui::i18n::local!(language, "シグナル ", "signal ")
+            ),
         };
         if outcome.is_empty() {
             outcome = crate::ui::i18n::local!(language, "停止", "Stopped").into();
@@ -957,17 +990,9 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
     let elapsed = elapsed.map(|ms| Message::Elapsed { ms, decimal: false }.render(language));
     let background = match &node.presentation.ui_messages.notice {
         Some(Message::CommandNotice {
-            background: Some(true),
+            background: Some(requested),
             ..
-        }) => Some(
-            crate::ui::i18n::local!(language, "背景指定あり", "Background requested").to_owned(),
-        ),
-        Some(Message::CommandNotice {
-            background: Some(false),
-            ..
-        }) => Some(
-            crate::ui::i18n::local!(language, "背景指定なし", "Foreground requested").to_owned(),
-        ),
+        }) => Some(background_label(language, BackgroundLabel::Requested(*requested)).to_owned()),
         _ => None,
     };
     let metadata = [
@@ -991,42 +1016,6 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
 
 fn is_notice(node: &UiNode) -> bool {
     node.presentation.kind == PresentationKind::Event && node.role != "received_response"
-}
-
-fn quiet_event(node: &UiNode) -> bool {
-    // Received audit previews retain their paid body even after recovery ends.
-    node.role != "received_response"
-        && !node.presentation.body_evicted
-        && node.presentation.title != "状態変更"
-        && node.presentation.kind == PresentationKind::Event
-        && !node.presentation.fields.iter().any(|f| {
-            f.key == "/kind"
-                && matches!(
-                    f.value.as_str(),
-                    "shell_ended" | "child_turn_completed" | "child_run_ended" | "child_report"
-                )
-        })
-        && !node.presentation.requires_attention()
-}
-
-fn event_group(language: UiLanguage, nodes: &[UiNode]) -> Vec<Line<'static>> {
-    let mut facts = Vec::new();
-    for node in nodes {
-        let fact = crate::presentation::sanitize_plain(&label(language, node), 0).0;
-        if !fact.trim().is_empty() && !facts.contains(&fact) {
-            facts.push(fact);
-        }
-    }
-    vec![Line::from(Span::styled(
-        crate::ui::text_width::glyphs::formatted!(
-            "{} {} · {}",
-            "{} {} | {}",
-            RowKind::Notice.mark(),
-            row_label(RowKind::Notice, language),
-            facts.join(crate::ui::text_width::glyphs::separator())
-        ),
-        Style::default().fg(theme::MUTED),
-    ))]
 }
 
 fn adjacent_tool_pair(call: &UiNode, result: &UiNode) -> bool {
@@ -1210,12 +1199,6 @@ pub(super) fn history_with_cache(
             .is_some_and(|result| adjacent_tool_pair(&view.nodes()[index], result))
         {
             index + 2
-        } else if quiet_event(&view.nodes()[index]) {
-            let mut next = index + 1;
-            while next < end && quiet_event(&view.nodes()[next]) {
-                next += 1;
-            }
-            next
         } else {
             index + 1
         };
@@ -1300,12 +1283,6 @@ pub(super) fn history_with_cache(
             // its explicit URL targets when rendering that shared heading.
             annotate_links(&mut chunk, &node.presentation.links, &mut links);
             chunk
-        } else if quiet_event(node) {
-            index += 1;
-            while index < end && quiet_event(&view.nodes()[index]) {
-                index += 1;
-            }
-            event_group(language, &view.nodes()[begin..index])
         } else {
             index += 1;
             node_lines(
@@ -1515,7 +1492,6 @@ pub(super) fn history_with_cache(
             );
         }
     }
-    let (lines, sources) = quiet_section_tails(view, lines, sources, width);
     (lines, links, sources)
 }
 fn input_kind(node: &UiNode) -> RowKind {
@@ -1726,26 +1702,16 @@ fn tool_metadata(
     let mut parts = Vec::new();
     if background {
         parts.push(
-            match tool.reason_kind {
-                crate::presentation::ToolReasonKind::HumanBackgrounded => {
-                    Text::HumanBackground.render(language)
-                }
-                crate::presentation::ToolReasonKind::AdditionalInput => {
-                    Text::InputBackground.render(language)
-                }
-                _ => Text::Background.render(language),
-            }
-            .to_owned(),
+            background_label(language, BackgroundLabel::Running(tool.reason_kind)).to_owned(),
         );
     }
     let outcome = if kind == RowKind::Unknown {
         Some(row_label(kind, language).to_owned())
     } else {
-        code.map(|code| Message::Exit { code }.render(language))
-            .or_else(|| {
-                matches!(kind, RowKind::Failure | RowKind::Cancelled)
-                    .then(|| row_label(kind, language).to_owned())
-            })
+        code.map(exit_code_label).or_else(|| {
+            matches!(kind, RowKind::Failure | RowKind::Cancelled)
+                .then(|| row_label(kind, language).to_owned())
+        })
     };
     let critical = outcome
         .clone()
@@ -2103,29 +2069,40 @@ fn append_notice_run(
     }
     let key = ItemKey::NoticeGroup(first.node_id.clone());
     let open = view.items.is_open(&key, false, "");
-    let mut counts = BTreeMap::<&str, usize>::new();
+    let mut counts = Vec::<(&str, usize)>::new();
     for node in nodes {
-        *counts.entry(notice_symbol(notice_kind(node))).or_default() += 1;
+        let symbol = notice_symbol(notice_kind(node));
+        if let Some((_, count)) = counts.iter_mut().find(|(seen, _)| *seen == symbol) {
+            *count += 1;
+        } else {
+            counts.push((symbol, 1));
+        }
     }
     let count_text = counts
         .into_iter()
         .map(|(symbol, count)| format!("{symbol} {}{count}", glyphs::select("×", "x")))
         .collect::<Vec<_>>()
         .join("  ");
-    let title = match view.language {
-        UiLanguage::Ja => format!("通知 {}件  {count_text}", nodes.len()),
-        UiLanguage::En => format!("{} notices  {count_text}", nodes.len()),
-    };
-    let action = match (view.language, open) {
-        (UiLanguage::Ja, false) => "展開",
-        (UiLanguage::Ja, true) => "折り畳み",
-        (UiLanguage::En, false) => "Expand",
-        (UiLanguage::En, true) => "Collapse",
+    let title = format!(
+        "{}{}{}  {count_text}",
+        crate::ui::i18n::local!(view.language, "通知 ", ""),
+        nodes.len(),
+        crate::ui::i18n::local!(view.language, "件", " notices")
+    );
+    let action = if open {
+        crate::ui::i18n::local!(view.language, "折り畳み", "Collapse")
+    } else {
+        crate::ui::i18n::local!(view.language, "展開", "Expand")
     };
     let prefix = format!("{} ", RowKind::Notice.mark());
     let (label, gap, right) =
         super::live_work::row_columns(usize::from(width), &prefix, &title, action, "");
-    let header = Line::from(format!("{prefix}{label}{}{right}", " ".repeat(gap)));
+    let header = Line::from(vec![
+        Span::styled(prefix, Style::default().fg(theme::TEXT)),
+        Span::raw(label),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(right, Style::default().fg(theme::MUTED)),
+    ]);
     let region = ItemRegion {
         key: key.clone(),
         source_node_ids: nodes.iter().map(|node| node.node_id.clone()).collect(),
@@ -2141,19 +2118,10 @@ fn append_notice_run(
     }
     if open {
         for (i, node) in nodes.iter().enumerate() {
-            let marker = if view.items.active
-                && view.items.focus.as_ref() == Some(&ItemKey::Node(node.node_id.clone()))
-            {
-                glyphs::SELECTED
-            } else {
-                " "
-            };
+            let selected = view.items.active
+                && view.items.focus.as_ref() == Some(&ItemKey::Node(node.node_id.clone()));
             let symbol = notice_symbol(notice_kind(node));
-            let prefix = format!(
-                "{}[{}]{marker}{symbol} ",
-                glyphs::branch(i + 1 == nodes.len()),
-                i + 1
-            );
+            let prefix = glyphs::numbered_branch(i + 1 == nodes.len(), i + 1, selected, symbol);
             append_item_rows(
                 lines,
                 sources,
@@ -2645,136 +2613,6 @@ fn row_boundaries(
     (output, mapped)
 }
 
-fn quiet_section_tails(
-    view: &ThreadView,
-    lines: Vec<Line<'static>>,
-    sources: Vec<RowSource>,
-    width: u16,
-) -> (Vec<Line<'static>>, Vec<RowSource>) {
-    fn flush(
-        view: &ThreadView,
-        pending: &mut BTreeSet<usize>,
-        lines: &mut Vec<Line<'static>>,
-        sources: &mut Vec<RowSource>,
-        width: u16,
-    ) {
-        let language = view.language;
-        // One concrete observation may occur many times inside the bounded
-        // projection. Coalesce the fact, not every two underlying records.
-        let mut facts: Vec<(String, usize, usize)> = Vec::new();
-        for index in pending.iter().copied() {
-            let fact =
-                crate::presentation::sanitize_plain(&label(language, &view.nodes()[index]), 0).0;
-            if let Some((_, count, latest)) = facts.iter_mut().find(|(saved, _, _)| saved == &fact)
-            {
-                *count += 1;
-                *latest = index;
-            } else {
-                facts.push((fact, 1, index));
-            }
-        }
-        let Some(last_pending) = pending.last().copied() else {
-            return;
-        };
-        for (group_index, group) in facts.chunks(2).enumerate() {
-            let first = group[0].2;
-            let fallback = &view.nodes()[first];
-            let anchor = sources.last().cloned().unwrap_or(RowSource {
-                node: pending.first().copied().unwrap(),
-                covered_end: pending.first().copied().unwrap() + 1,
-                offset: fallback.base_char_offset,
-                item: None,
-            });
-            let ids = group
-                .iter()
-                .map(|(_, _, latest)| view.nodes()[*latest].node_id.clone())
-                .collect();
-            let labels = group
-                .iter()
-                .map(|(fact, count, _)| {
-                    if *count > 1 {
-                        crate::ui::text_width::glyphs::formatted!(
-                            "{fact} ×{count}",
-                            "{fact} x{count}"
-                        )
-                    } else {
-                        fact.clone()
-                    }
-                })
-                .collect::<Vec<_>>();
-            let region = Arc::new(ItemRegion {
-                key: ItemKey::Node(fallback.node_id.clone()),
-                source_node_ids: ids,
-                primary_node_id: fallback.node_id.clone(),
-                execution_id: None,
-                expandable: false,
-                default_open: true,
-                outcome: String::new(),
-            });
-            let covered_end = anchor
-                .covered_end
-                .max(if (group_index + 1) * 2 >= facts.len() {
-                    last_pending + 1
-                } else {
-                    group.iter().map(|(_, _, latest)| latest + 1).max().unwrap()
-                });
-            for line in hanging_wrap(
-                vec![Line::from(Span::styled(
-                    crate::ui::text_width::glyphs::formatted!(
-                        "{} {} · {}",
-                        "{} {} | {}",
-                        RowKind::Notice.mark(),
-                        row_label(RowKind::Notice, language),
-                        labels.join(crate::ui::text_width::glyphs::separator())
-                    ),
-                    Style::default().fg(view.palette.muted()),
-                ))],
-                width.max(1),
-            ) {
-                lines.push(line);
-                sources.push(RowSource {
-                    node: anchor.node,
-                    covered_end,
-                    offset: anchor.offset,
-                    item: Some(region.clone()),
-                });
-            }
-        }
-        pending.clear();
-    }
-    let mut section_by_node = Vec::new();
-    let mut section = None;
-    for (index, node) in view.nodes().iter().enumerate() {
-        if node.role == "user" {
-            section = Some(index);
-        }
-        section_by_node.push(section);
-    }
-    let mut output = Vec::new();
-    let mut mapped: Vec<RowSource> = Vec::new();
-    let mut pending = BTreeSet::new();
-    let mut active_section = None;
-    for (line, source) in lines.into_iter().zip(sources) {
-        let next_section = section_by_node.get(source.node).copied().flatten();
-        if next_section != active_section {
-            flush(view, &mut pending, &mut output, &mut mapped, width);
-            active_section = next_section;
-        }
-        if view.nodes().get(source.node).is_some_and(quiet_event) {
-            for index in source.node..source.covered_end.min(view.nodes().len()) {
-                if quiet_event(&view.nodes()[index]) {
-                    pending.insert(index);
-                }
-            }
-        } else {
-            output.push(line);
-            mapped.push(source);
-        }
-    }
-    flush(view, &mut pending, &mut output, &mut mapped, width);
-    (output, mapped)
-}
-
 fn excerpt_tail_match(
     source: &str,
     text: &str,
@@ -3119,6 +2957,53 @@ mod tests {
     }
 
     #[test]
+    fn shell_exit_and_unknown_signal_are_localized() {
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+            view.language = language;
+            let mut node = UiNode {
+                presentation: crate::presentation::NodePresentation {
+                    kind: PresentationKind::Event,
+                    ui_messages: crate::presentation::messages::PresentationMessages {
+                        title: Some(Message::EventIdentity {
+                            kind: "shell_ended".into(),
+                            identity: "id".into(),
+                            status: Some("completed".into()),
+                            code: Some(0),
+                            elapsed_ms: None,
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let shown = plain(&[notice_row(&view, &node, 120, "".into())]);
+            assert!(shown.contains("exit 0"), "{shown}");
+            assert!(
+                !shown.contains("Result saved") && !shown.contains("結果あり"),
+                "{shown}"
+            );
+            node.presentation
+                .fields
+                .push(crate::presentation::PresentationField {
+                    key: "/payload/exit_signal".into(),
+                    value: "99".into(),
+                    ..Default::default()
+                });
+            let shown = plain(&[notice_row(&view, &node, 120, "".into())]);
+            assert!(
+                shown.contains(if language == UiLanguage::Ja {
+                    "シグナル 99"
+                } else {
+                    "signal 99"
+                }),
+                "{shown}"
+            );
+        }
+    }
+
+    #[test]
     fn notification_group_preserves_individual_sources_and_measured_rows() {
         use crate::ui::text_width::UnicodeWidthStr;
         fn event(id: &str, kind: &str) -> UiNode {
@@ -3149,6 +3034,11 @@ mod tests {
                 let (lines, _, sources) = history(&view, width);
                 assert_eq!(sources.iter().filter(|s| s.item.is_some()).count(), 1);
                 assert!(plain(&lines).contains("⁂"));
+                let header = plain(&lines);
+                assert!(
+                    header.find("⟡ ×1").unwrap() < header.find("⌕ ×1").unwrap(),
+                    "{header}"
+                );
                 assert!(
                     lines
                         .iter()
@@ -3798,8 +3688,8 @@ mod tests {
         let shown = plain(&history(&view, 120).0);
         assert_eq!(shown.matches("echo first").count(), 1);
         assert_eq!(shown.matches("echo second").count(), 1);
-        assert_eq!(shown.matches("終了 0").count(), 1);
-        assert_eq!(shown.matches("終了 7").count(), 1);
+        assert_eq!(shown.matches("exit 0").count(), 1);
+        assert_eq!(shown.matches("exit 7").count(), 1);
         assert!(!shown.contains("#1") && !shown.contains("#2"));
         let (_, _, sources) = history(&view, 120);
         let tools = sources
@@ -4558,32 +4448,6 @@ mod tests {
             assert!(shown.lines().any(|line| line.starts_with("▸ 回答の本文")));
             assert!(!shown.lines().any(|line| line.starts_with("▸ 推論")));
         }
-        let event = |kind: &str, change: serde_json::Value| {
-            let payload = serde_json::json!({"text":format!("Shellboy event v1: {}",serde_json::json!({"kind":kind,"change":change}))});
-            let text = crate::history::text_of_payload(&payload);
-            UiNode {
-                node_id: kind.into(),
-                role: "shellboy".into(),
-                text: text.clone(),
-                base_char_offset: 0,
-                total_chars: text.chars().count(),
-                reasoning_ranges: vec![],
-                presentation: crate::presentation::project("event", &payload, &text, 0),
-            }
-        };
-        let events = vec![
-            event("run_started", serde_json::json!({})),
-            event("turn_started", serde_json::json!({})),
-            event(
-                "thread_settings",
-                serde_json::json!({"before":{"model":"A"},"after":{"model":"B"}}),
-            ),
-        ];
-        let shown = plain(&event_group(UiLanguage::Ja, &events));
-        assert!(!shown.contains("状態変更") && !shown.contains("通常通知"));
-        assert!(shown.contains("作業開始") && shown.contains("応答処理を開始"));
-        assert!(shown.contains("モデル: A > B"));
-        assert!(!shown.contains("作業開始 / 応答処理を開始"));
         let payload = serde_json::json!({"text":"要約の本文","source_node_ids":["one","two"]});
         let text = crate::history::text_of_payload(&payload);
         let node = UiNode {
@@ -5158,7 +5022,7 @@ mod conversation_item_tests {
             .map(|span| span.content.as_ref())
             .collect::<String>();
         assert_eq!(body, "printf synthetic");
-        assert_eq!(line.spans.last().unwrap().content, "背景 | 終了 0 | 12.4秒");
+        assert_eq!(line.spans.last().unwrap().content, "背景 | exit 0 | 12.4秒");
         assert_eq!(line.width(), 80);
         value.command = "abcdefghijklmnopqrstuvwxyz0123456789".into();
         let line = compact_tool_line(UiLanguage::Ja, &value, 30, palette);
@@ -5170,7 +5034,7 @@ mod conversation_item_tests {
         value.status = "failed".into();
         value.exit_code = Some(7);
         let line = compact_tool_line(UiLanguage::Ja, &value, 30, palette);
-        assert!(line.spans.last().unwrap().content.contains("終了 7"));
+        assert!(line.spans.last().unwrap().content.contains("exit 7"));
         assert_eq!(
             line.spans.last().unwrap().style.fg,
             Some(RowKind::Failure.metadata_color(palette))

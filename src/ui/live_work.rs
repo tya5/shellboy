@@ -805,11 +805,7 @@ pub(super) fn draw(
         None => Line::styled(heading, palette.live_work()),
     });
     for (index, row) in view.rows().iter().take(view.visible_rows).enumerate() {
-        let marker = if view.active && view.selected.as_ref() == Some(&row.target) {
-            glyphs::SELECTED
-        } else {
-            " "
-        };
+        let selected = view.active && view.selected.as_ref() == Some(&row.target);
         // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
         let kind = match row.target {
             LiveWorkTarget::Shell { .. } => glyphs::SHELL,
@@ -817,7 +813,7 @@ pub(super) fn draw(
             LiveWorkTarget::Wait { .. } => glyphs::WAIT,
         };
         let last_item = index + 1 == view.visible_rows;
-        let connector = glyphs::branch(last_item && !separate_overflow);
+
         let elapsed = view
             .seconds
             .get(index)
@@ -897,8 +893,8 @@ pub(super) fn draw(
             String::new()
         };
         let prefix = format!(
-            "{connector}[{}]{marker}{kind} {}",
-            index + 1,
+            "{}{}",
+            glyphs::numbered_branch(last_item && !separate_overflow, index + 1, selected, kind),
             linked
                 .map(|i| format!("{} [{}] ", glyphs::arrow(), i + 1))
                 .unwrap_or_default()

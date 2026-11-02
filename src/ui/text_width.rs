@@ -213,6 +213,11 @@ pub(crate) mod glyphs {
     pub(crate) const SHELL: &str = "$";
     pub(crate) const CHILD: &str = "↳";
     pub(crate) const WAIT: &str = "⋯";
+    pub(crate) const REVISIT: &str = "↻";
+    pub(crate) const SETTINGS: &str = "⌘";
+    pub(crate) const LIFECYCLE: &str = "⏻";
+    pub(crate) const INDEX: &str = "⌕";
+    pub(crate) const START: &str = "⟡";
 
     pub(crate) fn select(narrow: &'static str, fallback: &'static str) -> &'static str {
         if terminal_width_observation() == Some(1) {
@@ -245,6 +250,10 @@ pub(crate) mod glyphs {
             (false, true) => "\\-",
             (false, false) => "+-",
         }
+    }
+    pub(crate) fn numbered_branch(last: bool, number: usize, selected: bool, kind: &str) -> String {
+        let marker = if selected { SELECTED } else { " " };
+        format!("{}[{number}]{marker}{kind} ", branch(last))
     }
     pub(crate) fn ellipsis() -> &'static str {
         if terminal_width_observation() == Some(1) {
@@ -327,6 +336,24 @@ mod tests {
             set_terminal_width(observed);
             let shown = glyphs::formatted!("title · {value} · {}", "title | {value} | {}", 7);
             assert_eq!(shown, format!("title{separator}{value}{separator}7"));
+        }
+        clear_terminal_width();
+    }
+
+    #[test]
+    fn branch_and_count_glyphs_fall_back_for_wide_or_unknown_terminals() {
+        for observed in [Some(2), None] {
+            set_terminal_width(observed);
+            assert_eq!(
+                glyphs::numbered_branch(false, 1, false, glyphs::SHELL),
+                "+-[1] $ "
+            );
+            assert_eq!(
+                glyphs::numbered_branch(true, 2, false, glyphs::CHILD),
+                "\\-[2] ↳ "
+            );
+            assert_eq!(glyphs::vertical(), "|");
+            assert_eq!(glyphs::formatted!("×{}", "x{}", 3), "x3");
         }
         clear_terminal_width();
     }

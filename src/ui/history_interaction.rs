@@ -803,6 +803,68 @@ mod tests {
         assert_eq!(ui.view().thread_id.as_deref(), Some("child"));
     }
     #[test]
+    fn single_notice_enter_and_copy_target_original_in_both_languages() {
+        for language in [crate::config::UiLanguage::Ja, crate::config::UiLanguage::En] {
+            let mut ui = fixture();
+            ui.config.ui.language = language;
+            ui.view_mut().language = language;
+            let mut fields = crate::presentation::fields_of_value(
+                &serde_json::json!({"kind":"shell_ended", "payload":{"execution_id":"missing"}}),
+            );
+            fields.push(crate::presentation::PresentationField {
+                key: "/ui_notice/source_node".into(),
+                value: "original".into(),
+                ..Default::default()
+            });
+            for (key, value) in [("group_id", "group"), ("call_id", "call")] {
+                fields.push(crate::presentation::PresentationField {
+                    key: format!("/ui_notice/{key}"),
+                    value: value.into(),
+                    ..Default::default()
+                });
+            }
+            let notice = UiNode {
+                node_id: "notice".into(),
+                role: "event".into(),
+                text: "canonical notice text".into(),
+                presentation: crate::presentation::NodePresentation {
+                    kind: crate::presentation::PresentationKind::Event,
+                    fields,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            ui.apply(UiUpdate::History {
+                thread_id: "thread".into(),
+                generation: ui.view().generation,
+                nodes: vec![notice],
+                pending: Default::default(),
+                read_revision: 2,
+                before_cursor: None,
+                append: false,
+                first_ordinal: 0,
+                selection_revision: 2,
+                total_nodes: 1,
+            });
+            Terminal::new(TestBackend::new(80, 28))
+                .unwrap()
+                .draw(|frame| draw(frame, &mut ui))
+                .unwrap();
+            key(&mut ui, KeyCode::Tab);
+            assert_eq!(ui.view().items.focus, Some(ItemKey::Node("notice".into())));
+            let actions = key(&mut ui, KeyCode::Char('c'));
+            assert!(
+                matches!(actions.as_slice(), [UiAction::Copy { node_id, code_block: None }] if node_id == "notice")
+            );
+            let actions = key(&mut ui, KeyCode::Enter);
+            assert!(
+                matches!(actions.as_slice(), [UiAction::LoadOriginal { node_id, .. }] if node_id == "original")
+            );
+            assert_eq!(ui.view().nodes()[0].text, "canonical notice text");
+        }
+    }
+
+    #[test]
     fn expanded_notice_group_preserves_each_original_and_enter_target() {
         let mut ui = fixture();
         let notice = |id: &str, source: &str| {
