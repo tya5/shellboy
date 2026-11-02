@@ -637,6 +637,7 @@ pub(super) async fn search(
     let mut fatal = !failures.is_empty();
     let mut resolved_sources = HashSet::new();
     let mut breaker = ProviderBreaker::default();
+    let mut history_budget = history::KEYWORD_NODE_LIMIT;
     for scope in &scopes {
         let mut keyword = if mode == SearchMode::Semantic {
             "not_requested"
@@ -676,7 +677,7 @@ pub(super) async fn search(
                 }
                 if mode != SearchMode::Semantic {
                     keyword = "error";
-                    let page = history::keyword(&context.history, query, thread, limit as usize, cursor)?;
+                    let page = history::keyword(&context.history, query, thread, limit as usize, cursor, &mut history_budget)?;
                     let has_hits = !page.hits.is_empty();
                     lists.push(page.hits);
                     keyword = if page.next.is_some() { "partial" } else { "ok" };

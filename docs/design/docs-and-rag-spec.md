@@ -110,8 +110,9 @@ Hits distinguish `thread_scope.on_current_path`; merged matches from several
 explicit Threads retain `thread_scopes`. `provenance.current_thread_paths`
 remains a current-path-only projection. The same SQL scope helper is used for
 ranking, candidate filtering and snapshot revalidation. A deleted/missing Thread
-is a scope failure, not an implicit all-history search. Keyword retrieval bounds
-nodes examined per call before checking Thread membership. A `partial` scope
+is a scope failure, not an implicit all-history search. Keyword retrieval shares
+a 2,000-node per-call budget across history scopes, before Thread membership
+checks; an unvisited scope receives a start cursor. A `partial` scope
 emits `history_keyword_limit` and a `next_cursor` that resumes the same query and
 history scope in keyword mode; a single history scope also exposes it at
 `result.next_cursor`. Continue until null. Result-count and response-byte budgets

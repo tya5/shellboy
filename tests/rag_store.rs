@@ -1164,6 +1164,40 @@ async fn history_keyword_warns_when_node_limit_truncates_search() {
         c.execute("UPDATE node SET payload_json=?1 WHERE id='limit-0'", [&payload])?;
         Ok(())
     }).await.unwrap();
+    let shared = call(
+        root,
+        RagCommand::Search {
+            query: "NO_SUCH_MATCH".into(),
+            scope: vec!["history".into(), "history:old-thread".into()],
+            mode: SearchMode::Keyword,
+            limit: 10,
+            cursor: None,
+        },
+    )
+    .await;
+    use base64::Engine;
+    let positions: Vec<Value> = shared["result"]["scope_status"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|status| {
+            serde_json::from_slice(
+                &base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(status["next_cursor"].as_str().unwrap())
+                    .unwrap(),
+            )
+            .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        positions[0]["bound"], 8002,
+        "first scope examined exactly 2,000 nodes: {shared}"
+    );
+    assert_eq!(
+        positions[1]["bound"], 10001,
+        "second scope resumes without consuming another budget: {shared}"
+    );
+    assert_eq!(positions[1]["inclusive"], true);
     let scoped = search(
         root,
         "history:old-thread",

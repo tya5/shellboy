@@ -209,7 +209,7 @@ fn validate_thread(db: &Connection, thread: Option<&str>) -> Result<()> {
     }
     Ok(())
 }
-const KEYWORD_NODE_LIMIT: usize = 2_000;
+pub(super) const KEYWORD_NODE_LIMIT: usize = 2_000;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct KeywordCursor {
@@ -234,16 +234,7 @@ pub(super) fn keyword(
     thread: Option<&str>,
     limit: usize,
     cursor: Option<&str>,
-) -> Result<KeywordPage> {
-    keyword_with_budget(path, query, thread, limit, cursor, KEYWORD_NODE_LIMIT)
-}
-fn keyword_with_budget(
-    path: &Path,
-    query: &str,
-    thread: Option<&str>,
-    limit: usize,
-    cursor: Option<&str>,
-    node_budget: usize,
+    node_budget: &mut usize,
 ) -> Result<KeywordPage> {
     if query.trim().is_empty() {
         return Err(err("invalid_argument", "Provide a nonempty keyword query"));
@@ -252,7 +243,6 @@ fn keyword_with_budget(
     // node snapshot; source witnesses, not one whole-history transaction, bind hits.
     let db = open(path)?;
     validate_thread(&db.connection, thread)?;
-    let mut scanned = 0usize;
     let watermark =
         db.connection
             .query_row("SELECT COALESCE(MAX(rowid),0) FROM node", [], |r| {
@@ -301,16 +291,29 @@ fn keyword_with_budget(
     let mut hits = Vec::new();
     let mut hit_bytes = 0usize;
     while let Some((bound, inclusive)) = after {
+        if *node_budget == 0 {
+            return Ok(KeywordPage {
+                hits,
+                next: Some(make_cursor(
+                    bound,
+                    inclusive,
+                    resume.as_ref().map_or(0, |c| c.skip),
+                    resume.as_ref().and_then(|c| c.node_hash.clone()),
+                    resume.as_ref().and_then(|c| c.signature.clone()),
+                )),
+                restart,
+            });
+        }
         let rows = {
             // Collect only IDs here. Membership is checked using indexed reverse
             // ancestry in each node snapshot, before loading/scoring its body.
             let sql = if inclusive {
-                "SELECT rowid,id FROM node WHERE rowid<=?1 ORDER BY rowid DESC LIMIT 32"
+                "SELECT rowid,id FROM node WHERE rowid<=?1 ORDER BY rowid DESC LIMIT ?2"
             } else {
-                "SELECT rowid,id FROM node WHERE rowid<?1 ORDER BY rowid DESC LIMIT 32"
+                "SELECT rowid,id FROM node WHERE rowid<?1 ORDER BY rowid DESC LIMIT ?2"
             };
             let mut q = db.connection.prepare_cached(sql)?;
-            q.query_map([bound], |r| {
+            q.query_map(params![bound, (*node_budget).min(32) as i64], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?
@@ -325,15 +328,6 @@ fn keyword_with_budget(
             break;
         }
         for (rowid, id) in rows {
-            if scanned == node_budget {
-                let (last, inclusive) =
-                    after.expect("a scanned node supplies the continuation position");
-                return Ok(KeywordPage {
-                    hits,
-                    next: Some(make_cursor(last, inclusive, 0, None, None)),
-                    restart,
-                });
-            }
             if resume.as_ref().is_some_and(|c| {
                 c.bound != rowid || c.node_hash.as_deref() != Some(hash(id.as_bytes()).as_str())
             }) {
@@ -342,7 +336,7 @@ fn keyword_with_budget(
                     "History cursor node no longer exists",
                 ));
             }
-            scanned += 1;
+            *node_budget -= 1;
             after = Some((rowid, false));
             // A previous node releases its snapshot. Do not return a candidate
             // from an obsolete Thread path/replacement set in this new snapshot.
@@ -724,9 +718,8 @@ mod measurement {
                 BENCH_STEPS.store(0, Ordering::SeqCst);
                 BENCH_STEPS_ENABLED.store(true, Ordering::SeqCst);
                 let start = std::time::Instant::now();
-                let result =
-                    keyword_with_budget(&path, "absent", thread, 100, None, total as usize)
-                        .unwrap();
+                let mut budget = total as usize;
+                let result = keyword(&path, "absent", thread, 100, None, &mut budget).unwrap();
                 let elapsed = start.elapsed();
                 BENCH_STEPS_ENABLED.store(false, Ordering::SeqCst);
                 assert!(result.hits.is_empty());
@@ -746,8 +739,8 @@ mod measurement {
             BENCH_STEPS.store(0, Ordering::SeqCst);
             BENCH_STEPS_ENABLED.store(true, Ordering::SeqCst);
             let start = std::time::Instant::now();
-            let result =
-                keyword_with_budget(&path, "absent", None, 100, None, total as usize).unwrap();
+            let mut budget = total as usize;
+            let result = keyword(&path, "absent", None, 100, None, &mut budget).unwrap();
             let elapsed = start.elapsed();
             BENCH_STEPS_ENABLED.store(false, Ordering::SeqCst);
             assert!(result.hits.is_empty());

@@ -227,8 +227,9 @@ A writer migrates schema 1-3 transactionally, validating old chunk text before
 dropping it. Read-only commands require migration first. Freed SQLite pages may
 be reused; the database file does not necessarily shrink.
 
-History keyword search bounds the number of examined nodes per call before Thread
-membership checks. A partial scope has a `next_cursor`; use the same query and
+History keyword search shares one 2,000-node budget across all history scopes in
+a call, before Thread membership checks. An unvisited scope still gets a cursor
+at its initial boundary. A partial scope has a `next_cursor`; use the same query and
 that one history scope in keyword mode with `--cursor` until it is null. The cursor
 records the last examined rowid and the initial high-water position; it is bound
 to the history database, exact query and Thread. Newer inserts do not move the
@@ -257,7 +258,7 @@ that arbitrary calls have a fixed VM or time ceiling.
 
 On macOS 15.7.2 arm64, unoptimized Rust test build, a disposable SQLite database
 with synthetic short Japanese-containing user payloads, a no-match query, and no
-conversation content or identifiers produced these single-run measurements:
+real conversation content or identifiers produced these single-run measurements:
 
 | Nodes | Unlinked global steps / ms | Linked global steps / ms | Linked Thread steps / ms |
 | ---: | ---: | ---: | ---: |

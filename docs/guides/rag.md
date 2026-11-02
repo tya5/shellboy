@@ -156,7 +156,8 @@ History-scoped semantic/hybrid queries still search retained vectors, but report
 `degraded=true` and `scope_status.reason=auto_history_disabled` because newer
 conversation nodes may be absent. Keyword history retrieval remains available, subject to the limit below.
 
-History keyword search processes a bounded number of nodes per call. If a scope is
+History keyword search processes at most 2,000 nodes per call across all history
+scopes. Unvisited scopes get a start cursor. If a scope is
 `partial`, repeat the same query and one history scope in keyword mode with the
 scope's `next_cursor`; a single-scope result also has `result.next_cursor`:
 
