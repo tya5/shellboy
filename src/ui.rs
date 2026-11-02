@@ -954,6 +954,9 @@ pub enum UiUpdate {
         submission: CommandSubmission,
         result: Result<(), String>,
     },
+    DraftIndexPause {
+        pause: Option<crate::index::PauseReason>,
+    },
     Activity {
         thread_id: String,
         generation: u64,
@@ -3016,6 +3019,22 @@ impl UiState {
                         text,
                         next_cursor,
                     );
+                }
+            }
+            UiUpdate::DraftIndexPause { pause } => {
+                let view = self.active_view_mut();
+                if view.thread_id.is_none() {
+                    if let Some(snapshot) = view.activity.snapshot.as_mut() {
+                        let changed = snapshot.index_pause != pause;
+                        snapshot.index_pause = pause;
+                        self.dirty |= changed;
+                    } else if pause.is_some() {
+                        view.activity.snapshot = Some(activity::ActivitySnapshot {
+                            index_pause: pause,
+                            ..Default::default()
+                        });
+                        self.dirty = true;
+                    }
                 }
             }
             UiUpdate::Initialize { cwd } => {
@@ -7546,6 +7565,7 @@ mod layout_cache_tests {
             attachment_check_limited: false,
             automatic_retry: None,
             automatic_compaction: None,
+            index_pause: None,
             recovery: None,
             run_id: Some("run".into()),
             turn_id: Some("turn".into()),

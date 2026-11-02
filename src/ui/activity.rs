@@ -226,6 +226,8 @@ pub struct ActivitySnapshot {
     pub attachment_check_limited: bool,
     pub automatic_retry: Option<AutomaticRetrySnapshot>,
     pub automatic_compaction: Option<AutomaticCompactionSnapshot>,
+    /// Persisted index pause, read on the existing snapshot cadence.
+    pub index_pause: Option<crate::index::PauseReason>,
     pub recovery: Option<RecoverySnapshot>,
     pub run_id: Option<String>,
     pub turn_id: Option<String>,

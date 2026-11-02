@@ -904,6 +904,11 @@ impl Page {
             "索引の更新は対象・費用を確認してから実施します。",
             "Review target and cost before updating the index."
         ));
+        page.note(local!(
+            config.ui.language,
+            "⌕ 索引停止中は /index を開き T で停止理由と再試行を確認します。",
+            "When ⌕ shows indexing paused, open /index and press T to inspect and retry."
+        ));
 
         page.section(local!(
             config.ui.language,

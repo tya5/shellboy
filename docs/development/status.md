@@ -3998,3 +3998,16 @@ The same private-mode, owner, protected-ancestor, non-symlink, path-length and
 identity/lease checks apply; endpoint publication and cleanup retain their
 ordering. Windows named pipes and configuration are unchanged. Validation
 results and untested environments are reported separately in acceptance.
+
+### #169 Persisted Index Pause In The Footer (In Progress)
+
+The selected conversation footer projects the saved index pause through the
+existing read-only activity snapshot; the draft view uses a bounded snapshot
+when initialized or notified. The endpoint-family key takes precedence
+over the configured profile key; absent keys do not imply a pause. The footer
+uses fixed bilingual classifications rather than provider prose. Pause-change
+notifications request a fresh snapshot without reading the database on render.
+This work is not yet validated or handed off; no post-integration behavior is
+claimed. In particular, initial/draft-without-selected-thread behavior still needs
+validation, and the planned #173 removal of `pause_cleanup::pause_id` needs
+author rebase coordination.

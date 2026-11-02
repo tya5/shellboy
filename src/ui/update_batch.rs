@@ -48,6 +48,7 @@ impl UiUpdate {
             | Self::ExternalManagement { .. }
             | Self::RecoveryBell
             | Self::CommandOutcome { .. }
+            | Self::DraftIndexPause { .. }
             | Self::Activity { .. }
             | Self::ActivityUnavailable { .. }
             | Self::ModelReceive { .. }

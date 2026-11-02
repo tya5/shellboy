@@ -138,7 +138,11 @@ async fn read_until_text(terminal: &mut File, output: &mut Vec<u8>, label: &str)
 // reused cells. Ask the real UI for a complete repaint, then require all labels
 // in that same fresh frame rather than joining unrelated historical diffs.
 async fn read_repaint_text(terminal: &mut File, output: &mut Vec<u8>, labels: &[&str]) {
-    eprintln!("PTY awaiting fresh repaint: {labels:?}");
+    read_repaint_facts(terminal, output, labels, &[]).await;
+}
+
+async fn read_repaint_facts(terminal: &mut File, output: &mut Vec<u8>, labels: &[&str], absent: &[&str]) {
+    eprintln!("PTY awaiting fresh repaint: {labels:?}; absent: {absent:?}");
     let mut frame = Vec::new();
     crate::test_watchdog::watchdog("fresh repaint containing expected labels", async {
         terminal.write_all(&[0x0c]).unwrap();
@@ -164,7 +168,7 @@ async fn read_repaint_text(terminal: &mut File, output: &mut Vec<u8>, labels: &[
             if let Some(clear) = frame.windows(4).rposition(|v| v == b"\x1b[2J") {
                 frame.drain(..clear);
                 let shown = emitted_text(&frame);
-                if labels.iter().all(|label| shown.contains(label)) {
+                if labels.iter().all(|label| shown.contains(label)) && absent.iter().all(|label| !shown.contains(label)) {
                     return;
                 }
             }
@@ -332,6 +336,8 @@ async fn seed_paused_history(data: &std::path::Path, source: &str) -> (String, S
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
+    let binary = std::env::var_os("SHELLBOY_TEST_CLI_BINARY")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_shellboy").into());
     let root = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let config = root.path().join("config.toml");
@@ -454,7 +460,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         0
     );
     let mut foreign_output = slave.try_clone().unwrap();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+    let mut child = tokio::process::Command::new(&binary)
         .arg("--config")
         .arg(&config)
         .arg("--data-dir")
@@ -472,6 +478,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     // F1 belongs to the normal footer. Bootstrap already offers Ctrl+Q, but
     // cannot accept conversation input or promise that IPC is ready yet.
     read_until(&mut terminal, &mut output, b"F1").await;
+    read_repaint_text(&mut terminal, &mut output, &["⌕", "索引停止中", "認証・利用枠"]).await;
     // Load an immutable pause observation from disk, then use real management
     // dispatch to clear it after the failed work was discarded.
     terminal
@@ -479,6 +486,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         .unwrap();
     read_until_text(&mut terminal, &mut output, "/index > T").await;
     read_until_text(&mut terminal, &mut output, &paused_at).await;
+    read_repaint_text(&mut terminal, &mut output, &["⌕", "索引停止中", "認証・利用枠"]).await;
     terminal.write_all(b"/index\r").unwrap();
     read_until_text(&mut terminal, &mut output, "P 費用preview").await;
     terminal.write_all(b"p").unwrap();
@@ -510,7 +518,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
                 }
             }
             assert!(output.len() < 4 * 1024 * 1024, "terminal output flood");
-            let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+            let mut command = tokio::process::Command::new(&binary);
             command
                 .arg("--data-dir")
                 .arg(&data)
@@ -539,6 +547,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     terminal.write_all(b"s").unwrap();
     read_repaint_text(&mut terminal, &mut output, &["一時停止: false"]).await;
     terminal.write_all(b"\x1b[27u").unwrap();
+    read_repaint_facts(&mut terminal, &mut output, &["F1"], &["索引停止中"]).await;
     terminal.write_all(b"hello from actual terminal\r").unwrap();
     // #85: this fixture already delivered HTTP headers, so reception is observed.
     read_until_text(&mut terminal, &mut output, "応答受信中").await;
@@ -754,7 +763,7 @@ async fn seed_collapsed_history(data: &std::path::Path, cwd: &std::path::Path) -
 async fn short_history_cli(root: &std::path::Path, args: &[&str]) -> serde_json::Value {
     let output = crate::test_watchdog::watchdog(
         "short history CLI",
-        tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        tokio::process::Command::new(&binary)
             .arg("--config")
             .arg(root.join("config.toml"))
             .arg("--data-dir")

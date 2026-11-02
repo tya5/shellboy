@@ -251,6 +251,32 @@ pub(super) fn footer_lines(
     {
         facts.push(auto.label_localized(view.language));
     }
+    if let Some(reason) = view.activity.snapshot.as_ref().and_then(|s| s.index_pause) {
+        use crate::{config::UiLanguage, index::PauseReason};
+        let reason = match (view.language, reason) {
+            (UiLanguage::Ja, PauseReason::Transport) => "通信失敗",
+            (UiLanguage::Ja, PauseReason::Authentication) => "認証・利用枠",
+            (UiLanguage::Ja, PauseReason::Configuration) => "設定不備",
+            (UiLanguage::Ja, PauseReason::Dimension) => "次元不一致",
+            (UiLanguage::Ja, PauseReason::Capacity) => "容量制限",
+            (UiLanguage::Ja, PauseReason::Other) => "理由不明",
+            (UiLanguage::En, PauseReason::Transport) => "transport failure",
+            (UiLanguage::En, PauseReason::Authentication) => "credentials or credit",
+            (UiLanguage::En, PauseReason::Configuration) => "configuration error",
+            (UiLanguage::En, PauseReason::Dimension) => "dimension mismatch",
+            (UiLanguage::En, PauseReason::Capacity) => "capacity limit",
+            (UiLanguage::En, PauseReason::Other) => "unknown reason",
+        };
+        let paused = match view.language {
+            UiLanguage::Ja => "索引停止中",
+            UiLanguage::En => "Index paused",
+        };
+        facts.push(format!(
+            "{} {paused}{}{reason}",
+            glyphs::INDEX,
+            glyphs::separator()
+        ));
+    }
     if let Some(retry) = view
         .activity
         .snapshot
@@ -542,6 +568,112 @@ fn fit(text: &str, width: usize, tail: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn draft_pause_update_displays_and_clears_saved_fact() {
+        use crate::{
+            index::PauseReason,
+            ui::{UiState, UiUpdate},
+        };
+        let mut ui = UiState::new(
+            &crate::config::Config::default(),
+            std::path::PathBuf::from("/synthetic"),
+        );
+        assert!(ui.view().activity.snapshot.is_none());
+        let _ = ui.apply(UiUpdate::DraftIndexPause {
+            pause: Some(PauseReason::Transport),
+        });
+        assert_eq!(
+            ui.view().activity.snapshot.as_ref().unwrap().index_pause,
+            Some(PauseReason::Transport)
+        );
+        let _ = ui.apply(UiUpdate::DraftIndexPause { pause: None });
+        assert_eq!(
+            ui.view().activity.snapshot.as_ref().unwrap().index_pause,
+            None
+        );
+        let _ = ui.select_thread("selected".into());
+        let _ = ui.apply(UiUpdate::DraftIndexPause {
+            pause: Some(PauseReason::Transport),
+        });
+        assert!(ui.view().activity.snapshot.is_none());
+    }
+
+    #[test]
+    fn index_pause_footer_is_bilingual_bounded_and_clears() {
+        use crate::{
+            config::UiLanguage,
+            index::PauseReason,
+            ui::{UiState, activity::ActivitySnapshot},
+        };
+        use std::path::PathBuf;
+        for (language, expected) in [
+            (UiLanguage::Ja, "索引停止中"),
+            (UiLanguage::En, "Index paused"),
+        ] {
+            for ambiguous in [None, Some(1), Some(2)] {
+                crate::ui::text_width::set_terminal_width(ambiguous);
+            let mut config = crate::config::Config::default();
+            config.ui.language = language;
+            let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+            let palette = super::super::theme::Palette::from_capabilities(
+                crate::config::PaletteMode::Dark,
+                false,
+                true,
+            );
+            let mut epoch = 0;
+            for width in [80, 120] {
+                for (reason, ja, en) in [
+                    (PauseReason::Transport, "通信失敗", "transport failure"),
+                    (
+                        PauseReason::Authentication,
+                        "認証・利用枠",
+                        "credentials or credit",
+                    ),
+                    (
+                        PauseReason::Configuration,
+                        "設定不備",
+                        "configuration error",
+                    ),
+                    (PauseReason::Dimension, "次元不一致", "dimension mismatch"),
+                    (PauseReason::Capacity, "容量制限", "capacity limit"),
+                    (PauseReason::Other, "理由不明", "unknown reason"),
+                ] {
+                    epoch += 1;
+                    ui.view_mut().activity.accept(
+                        epoch,
+                        ActivitySnapshot {
+                            index_pause: Some(reason),
+                            ..Default::default()
+                        },
+                    );
+                    let rows = footer_lines(ui.view(), width, "", palette, vec![], None, None);
+                    let text = rows[0]
+                        .spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>();
+                    assert!(
+                        text.contains("⌕") && text.contains(expected),
+                        "{width}: {text}"
+                    );
+                    assert!(
+                        text.contains(if language == UiLanguage::Ja { ja } else { en }),
+                        "{width}: {text}"
+                    );
+                    assert!(text.width() <= usize::from(width));
+                }
+                epoch += 1;
+                ui.view_mut()
+                    .activity
+                    .accept(epoch, ActivitySnapshot::default());
+                let rows = footer_lines(ui.view(), width, "", palette, vec![], None, None);
+                assert!(!rows[0].spans.iter().any(|s| s.content.contains("⌕")));
+            }
+            }
+            crate::ui::text_width::set_terminal_width(None);
+        }
+    }
+
     use crate::{
         config::Config,
         ui::{

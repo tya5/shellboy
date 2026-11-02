@@ -142,6 +142,7 @@ impl IndexService {
             .await
             .map_err(db_error)?;
         self.publish_saved(changed);
+        self.publish_pause(changed);
         self.wake();
         Ok(())
     }

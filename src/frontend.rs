@@ -437,6 +437,7 @@ enum ThreadPageResult {
     Watch(watch_page::PreparedPage),
 }
 enum BackgroundResult {
+    DraftIndexPause(Result<Option<crate::index::PauseReason>, ApiError>),
     InspectionPhysical {
         ticket: inspection_physical::Ticket,
         result: Result<Value, ApiError>,
@@ -988,6 +989,8 @@ async fn run_with_delivery(
     let mut status_inflight = false;
     let mut status_epoch = 0u64;
     let mut status_selected: Option<String> = None;
+    let mut draft_pause_dirty = true;
+    let mut draft_pause_running = false;
     let mut initialize = Some(UiUpdate::Initialize { cwd });
     let mut draft_failure = None;
     loop {
@@ -1027,6 +1030,24 @@ async fn run_with_delivery(
                     .await;
             }) {
                 management.inspection.presentation_refused(&ticket);
+            }
+        }
+        if selection.active_thread.is_none()
+            && draft_pause_dirty
+            && !draft_pause_running
+            && !updates.backpressured()
+        {
+            let index = control.index.clone();
+            let path = control.store.database.path().to_path_buf();
+            let stop = read_cancel.clone();
+            let sender = background_tx.clone();
+            if spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
+                let result =
+                    snapshot::read(path, stop, move |db| index.read_display_pause(db)).await;
+                let _ = sender.send(BackgroundResult::DraftIndexPause(result)).await;
+            }) {
+                draft_pause_dirty = false;
+                draft_pause_running = true;
             }
         }
         live_output.retain(selection.active_thread.as_deref(), &selection.generations);
@@ -1230,6 +1251,12 @@ async fn run_with_delivery(
             },
             _=control.index.saved_changed(),if management.inspection.watches_index()=>{
                 management.inspection.index_changed();
+            },
+            _=control.index.pause_changed()=>{
+                draft_pause_dirty = true;
+                if let Some(thread) = selection.active_thread.clone() {
+                    dirty_threads.insert(thread);
+                }
             },
             _=output_signal.as_mut()=>{
                 output_signal.set(observed_control.shell_output_notification().notified());
@@ -2295,6 +2322,7 @@ async fn run_with_delivery(
                     }
                     UiAction::ActivateDraft { draft_id } => {
                         selection.activate_draft(draft_id);
+                        draft_pause_dirty = true;
                         streams.clear();
                         stream_retry = None;
                     }
@@ -3131,6 +3159,12 @@ async fn run_with_delivery(
                 }
             },
             result=background_rx.recv(),if !receipt_batch.active() && updates.main_ready()=> match result {
+                Some(BackgroundResult::DraftIndexPause(result)) => {
+                    draft_pause_running = false;
+                    if selection.active_thread.is_none() && !draft_pause_dirty && let Ok(pause) = result {
+                        update(&updates, UiUpdate::DraftIndexPause { pause }).await;
+                    }
+                }
                 Some(BackgroundResult::ProgramStatus { epoch, result }) => {
                     status_inflight = false;
                     if epoch == status_epoch && status_selected == selection.active_thread {
@@ -3166,6 +3200,7 @@ async fn run_with_delivery(
                             if selection.active_thread.as_ref().is_some_and(|thread| ids.contains(thread)) {
                                 ui_subscription.select(None);
                                 selection.activate_draft(uuid::Uuid::new_v4().to_string());
+                                draft_pause_dirty = true;
                                 streams.clear();
                                 stream_retry = None;
                             }

@@ -73,6 +73,7 @@ impl IndexService {
             .map_err(db_error);
         if let Ok(changed) = &outcome {
             self.publish_saved(*changed);
+            self.publish_pause(*changed);
         }
         if let Err(adoption_error) = &outcome {
             let claimed = recovery_claim;
@@ -114,6 +115,7 @@ impl IndexService {
             }).await;
             if let Ok(changed) = diagnostic_saved {
                 self.publish_saved(changed);
+                self.publish_pause(changed);
             }
         }
         outcome.map(|_| ())

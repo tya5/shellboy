@@ -139,6 +139,7 @@ pub struct IndexService {
     config: Arc<Config>,
     notify: Arc<Notify>,
     saved_changed: Arc<Notify>,
+    pause_changed: Arc<Notify>,
     profile_key: Option<String>,
     endpoint_family_key: Option<String>,
     started: AtomicBool,
@@ -161,7 +162,96 @@ impl IndexWorkers {
         }
     }
 }
+/// A fixed classification of the persisted pause, never provider prose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PauseReason {
+    Transport,
+    Authentication,
+    Configuration,
+    Dimension,
+    Capacity,
+    Other,
+}
+
+fn pause_reason(raw: &str) -> PauseReason {
+    if raw.len() > 4096 {
+        return PauseReason::Other;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(raw) else {
+        return PauseReason::Other;
+    };
+    let kind = value.get("kind").and_then(Value::as_str).unwrap_or("");
+    let code = value.get("code").and_then(Value::as_str).unwrap_or("");
+    let mut error = ModelError::new(kind, "");
+    error.provider_code = value
+        .get("provider_code")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    error.status = value
+        .get("status")
+        .and_then(Value::as_u64)
+        .and_then(|n| u16::try_from(n).ok());
+    let failure = error.embedding_failure();
+    if kind == "dimension_mismatch" {
+        PauseReason::Dimension
+    } else if failure.credentials_or_credit {
+        PauseReason::Authentication
+    } else if failure.invalid_configuration {
+        PauseReason::Configuration
+    } else if code == "storage_limit" || failure.rate_limited {
+        PauseReason::Capacity
+    } else if failure.transient
+        && (matches!(kind, "transport" | "timeout") || error.status == Some(408))
+    {
+        PauseReason::Transport
+    } else {
+        PauseReason::Other
+    }
+}
+
+fn read_display_pause_tx(
+    db: &Connection,
+    profile: Option<&str>,
+    family: Option<&str>,
+) -> Result<Option<PauseReason>, StorageError> {
+    let Some(key) = profile.or(family) else {
+        return Ok(None);
+    };
+    for scope in family.into_iter().chain(profile) {
+        let pause_key = IndexKeys::new(scope).pause();
+        let size: Option<i64> = db
+            .query_row(
+                "SELECT length(CAST(value AS BLOB)) FROM app_meta WHERE key=?1",
+                [&pause_key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(size) = size else { continue };
+        // Keep malformed oversized saved values bounded, but do not hide the marker.
+        if size > 4096 {
+            return Ok(Some(PauseReason::Other));
+        }
+        if pause_cleanup::pause_id(db, key, family)?.is_some() {
+            return Ok(meta(db, &pause_key)?.map(|value| pause_reason(&value)));
+        }
+        return Ok(None);
+    }
+    Ok(None)
+}
+
 impl IndexService {
+    /// Read the same saved pause selected by cleanup in the caller's snapshot.
+    pub(crate) fn read_display_pause(
+        &self,
+        db: &Connection,
+    ) -> Result<Option<PauseReason>, StorageError> {
+        read_display_pause_tx(
+            db,
+            self.profile_key.as_deref(),
+            self.endpoint_family_key.as_deref(),
+        )
+    }
+
     pub fn new(database: DbWorker, config: Arc<Config>) -> Arc<Self> {
         Self::with_instance(database, config, format!("index-{}", id()))
     }
@@ -186,6 +276,7 @@ impl IndexService {
             config,
             notify: Arc::new(Notify::new()),
             saved_changed: Arc::new(Notify::new()),
+            pause_changed: Arc::new(Notify::new()),
             profile_key,
             endpoint_family_key,
             started: AtomicBool::new(false),
@@ -339,6 +430,14 @@ impl IndexService {
     /// Saved index changes only; never consume the worker wake permit.
     pub(crate) async fn saved_changed(&self) {
         self.saved_changed.notified().await;
+    }
+    pub(crate) async fn pause_changed(&self) {
+        self.pause_changed.notified().await;
+    }
+    fn publish_pause(&self, changed: bool) {
+        if changed {
+            self.pause_changed.notify_one();
+        }
     }
     fn publish_saved(&self, changed: bool) {
         if changed {
@@ -835,6 +934,7 @@ impl IndexService {
             .await
             .map_err(db_error)?;
         self.publish_saved(changed);
+        self.publish_pause(changed);
         Ok(allowed)
     }
     pub async fn process_one(&self, cancel: CancellationToken) -> Result<bool, ApiError> {
@@ -869,6 +969,7 @@ impl IndexService {
                 .await;
             if let Ok(changed) = &paused {
                 self.publish_saved(*changed);
+                self.publish_pause(*changed);
             }
             if let Err(pause_error) = paused {
                 // Storage cannot preserve even the diagnostic. Stop spending;
@@ -1307,3 +1408,140 @@ mod source_metadata_tests {
 
 #[cfg(test)]
 mod saved_notification_tests;
+
+#[cfg(test)]
+mod display_pause_tests {
+    use super::*;
+
+    #[test]
+    fn absent_configured_scopes_do_not_query_database() {
+        let db = Connection::open_in_memory().unwrap();
+        assert_eq!(read_display_pause_tx(&db, None, None).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn real_retry_clears_persisted_pause_and_notifies() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(temp.path().join("pause.sqlite"))
+            .await
+            .unwrap();
+        let mut config = Config::default();
+        config.connections.insert(
+            "fixture".into(),
+            crate::config::Connection {
+                base_url: "http://127.0.0.1:1/v1".into(),
+                ..Default::default()
+            },
+        );
+        config.embedding.connection = Some("fixture".into());
+        config.embedding.model = Some("synthetic".into());
+        let service = IndexService::new(db.clone(), Arc::new(config));
+        let family = service.endpoint_family_key.clone().unwrap();
+        let profile = service.profile_key.clone().unwrap();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            for key in [family, profile] {
+                set_meta(
+                    &tx,
+                    &IndexKeys::new(&key).pause(),
+                    r#"{"kind":"transport","message":"private"}"#,
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let index = service.clone();
+        assert_eq!(
+            db.call(move |db| index.read_display_pause(db))
+                .await
+                .unwrap(),
+            Some(PauseReason::Transport)
+        );
+        service.retry(IndexArgs::default()).await.unwrap();
+        crate::test_watchdog::watchdog("saved pause retry notification", service.pause_changed())
+            .await
+            .unwrap();
+        let index = service.clone();
+        assert_eq!(
+            db.call(move |db| index.read_display_pause(db))
+                .await
+                .unwrap(),
+            None
+        );
+        db.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn persisted_pause_uses_family_then_profile_and_clears_on_retry() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); INSERT INTO app_meta VALUES('index.pause.other','{}');").unwrap();
+        assert_eq!(read_display_pause_tx(&db, None, None).unwrap(), None);
+        assert_eq!(
+            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
+            None
+        );
+        db.execute(
+            "INSERT INTO app_meta VALUES('index.pause.p',?1)",
+            [r#"{"kind":"transport","message":"private"}"#],
+        )
+        .unwrap();
+        assert_eq!(
+            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
+            Some(PauseReason::Transport)
+        );
+        db.execute(
+            "INSERT INTO app_meta VALUES('index.pause.f',?1)",
+            [r#"{"kind":"provider","status":401}"#],
+        )
+        .unwrap();
+        assert_eq!(
+            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
+            Some(PauseReason::Authentication)
+        );
+        assert_eq!(
+            read_display_pause_tx(&db, None, Some("f")).unwrap(),
+            Some(PauseReason::Authentication)
+        );
+        db.execute(
+            "DELETE FROM app_meta WHERE key IN ('index.pause.p','index.pause.f')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn saved_pause_reason_is_bounded_and_never_displays_raw_text() {
+        for (raw, expected) in [
+            (r#"{"kind":"transport"}"#, PauseReason::Transport),
+            (r#"{"status":403}"#, PauseReason::Authentication),
+            (r#"{"kind":"config_missing"}"#, PauseReason::Configuration),
+            (r#"{"kind":"dimension_mismatch"}"#, PauseReason::Dimension),
+            (r#"{"status":429}"#, PauseReason::Capacity),
+            (r#"{"status":500}"#, PauseReason::Other),
+            (r#"{"code":"storage_limit"}"#, PauseReason::Capacity),
+            (r#"{"message":"private provider text"}"#, PauseReason::Other),
+            ("bad json", PauseReason::Other),
+        ] {
+            assert_eq!(pause_reason(raw), expected);
+        }
+        assert_eq!(pause_reason(&"x".repeat(4097)), PauseReason::Other);
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        db.execute(
+            "INSERT INTO app_meta VALUES('index.pause.f', ?1)",
+            ["x".repeat(1_000_000)],
+        )
+        .unwrap();
+        assert_eq!(
+            read_display_pause_tx(&db, Some("p"), Some("f")).unwrap(),
+            Some(PauseReason::Other)
+        );
+    }
+}

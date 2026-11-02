@@ -25,6 +25,7 @@ struct RawVisible {
     usage: Vec<usage::Observation>,
     received: Option<received::RawSnapshot>,
     activity: activity::RawProjection,
+    index_pause: Option<crate::index::PauseReason>,
     context_usage: crate::ui::ContextUsage,
     tool_scope: Option<ToolObservation>,
     observed_at: std::time::Instant,
@@ -115,6 +116,7 @@ fn read_visible_tx_limited(
         activity,
         context_usage,
         tool_scope,
+        index_pause: None,
         observed_at: std::time::Instant::now(),
     })
 }
@@ -132,6 +134,7 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
         activity,
         context_usage,
         mut tool_scope,
+        index_pause,
         observed_at,
     } = raw;
     let (mut nodes, info, _) = history.project_page(width, None);
@@ -153,6 +156,7 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
         }
     }
     let mut activity = activity::prepare(activity);
+    activity.snapshot.index_pause = index_pause;
     activity.observed_at = observed_at;
     Ok(ProjectedVisible {
         details: details.prepare(),
@@ -253,10 +257,16 @@ pub(super) async fn run(
         let waits=control.pending_wait_sources();
         let limit=control.store.config.ui.live_work_rows;
         let view_scopes=super::view_read::prepare_requests(&views).await;
+        let index=control.index.clone();
         let read=snapshot::read_sequenced(
             control.store.database.path().to_path_buf(),stop.clone(),move |db,sequence| {
             // Keep typed per-surface failures; do not reinterpret WAL contention.
-            read_current_and_views_tx_limited(db,&target,&ids,tool_scope,(waits.as_deref(),limit),sequence,&view_scopes)
+            let (receipts, visible, views) = read_current_and_views_tx_limited(db,&target,&ids,tool_scope,(waits.as_deref(),limit),sequence,&view_scopes)?;
+            let visible = visible.and_then(|mut raw| {
+                raw.index_pause = index.read_display_pause(db)?;
+                Ok(raw)
+            });
+            Ok((receipts, visible, views))
         }).await;
         drop(_progress_permit);
         let (receipts,visible,browser_result,sequence)=match checked_storage(&control,read).await {
@@ -542,6 +552,84 @@ mod tests {
         }
         owner.shutdown().await.unwrap();
     }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn selected_snapshot_reflects_persisted_index_pause_and_clear() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, "[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n[embedding]\nconnection='fixture'\nmodel='synthetic'\n").unwrap();
+        let owner = DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let family = crate::digest::sha256_hex(
+            b"fixture\0http://127.0.0.1:9/v1\0synthetic\0unicode-paragraph-v1",
+        );
+        let key = format!("index.pause.{family}");
+        let saved_key = key.clone();
+        owner.db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','','/','','p','m','now')", [])?;
+            tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2)", rusqlite::params![saved_key, r#"{"kind":"transport","message":"private provider text"}"#])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        for expected in [Some(crate::index::PauseReason::Transport), None] {
+            let (updates, _received) = std::sync::mpsc::sync_channel(16);
+            let (sender, mut results) = mpsc::channel(8);
+            let slots = Arc::new(Semaphore::new(1));
+            let permit = Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap();
+            crate::test_watchdog::watchdog(
+                "selected index pause snapshot",
+                run(
+                    Query {
+                        thread: "t".into(),
+                        ids: vec![],
+                        generation: Some(1),
+                        visible: true,
+                        epoch: 0,
+                        render_width: 80,
+                        tool_scope: None,
+                        views: view_read::Tickets::default(),
+                    },
+                    control.clone(),
+                    updates,
+                    sender,
+                    CancellationToken::new(),
+                    slots,
+                    permit,
+                ),
+            )
+            .await
+            .unwrap();
+            let mut observed = None;
+            while let Ok(result) = results.try_recv() {
+                if let BackgroundResult::Refreshed {
+                    progress: Some(progress),
+                    ..
+                } = result
+                {
+                    observed = Some(progress.unwrap().snapshot.index_pause);
+                }
+            }
+            assert_eq!(observed, Some(expected));
+            let key = key.clone();
+            owner
+                .db
+                .call(move |db| {
+                    db.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        drop(control);
+        owner.shutdown().await.unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn actual_combined_view_and_browser_keep_one_sequence_without_writer_admission() {
         let root = tempfile::tempdir().unwrap();

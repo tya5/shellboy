@@ -8554,3 +8554,14 @@ Stale cleanup, owner/mode/symlink protections and existing cleanup behavior
 remain required. Windows named-pipe behavior is outside the changed path.
 Exact commands, platform and CI results are reported in the task handoff; no
 live-provider or actual sandbox-exec observation is inferred.
+
+### #169 Persisted Index Pause Footer (Pending)
+
+An initial macOS check on main 89dd221d passed `cargo check --tests`, two
+persisted-pause tests, and the 80/120-column bilingual footer test. Subsequent
+draft, real-retry and help changes require a fresh check, queued through the
+shared Rust slot; the earlier results do not validate those later changes. Before handoff, verify saved
+family/profile selection, clear/retry, bounded fixed classifications, 80/120
+columns in both languages, snapshot updates, and the no-selected-thread case.
+Fresh exact-tip task CI is required. No physical terminal, live-provider,
+Windows-local, or post-integration behavior has been verified.
