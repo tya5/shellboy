@@ -771,6 +771,49 @@ mod tests {
         UiState::new(&config, PathBuf::from("/"))
     }
     #[test]
+    fn reviewed_confirmation_footers_follow_language_and_width() {
+        use crate::config::UiLanguage;
+        use crate::ui::text_width;
+        let stale = Confirmation::StaleIndex {
+            detail: "opaque fixture".into(),
+        };
+        let ordinary = Confirmation::EditStop {
+            draft_id: "draft".into(),
+            revision: 1,
+            run_id: "run".into(),
+        };
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            let narrow = policy == Some(1);
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                let (stale_expected, ordinary_expected) = match (language, narrow) {
+                    (UiLanguage::Ja, true) => (
+                        "N / Esc 戻る · 再確認が必要\n↑↓/PgUp/PgDn 閲覧",
+                        "N / Esc 戻る · Y 実行\n↑↓/PgUp/PgDn 閲覧",
+                    ),
+                    (UiLanguage::Ja, false) => (
+                        "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧",
+                        "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧",
+                    ),
+                    (UiLanguage::En, true) => (
+                        "N / Esc Back · Review again\n↑↓/PgUp/PgDn Scroll",
+                        "Y Execute · N / Esc Back\n↑↓/PgUp/PgDn Scroll",
+                    ),
+                    (UiLanguage::En, false) => (
+                        "N / Esc Back | Review again\n^v/PgUp/PgDn Scroll",
+                        "Y Execute | N / Esc Back\n^v/PgUp/PgDn Scroll",
+                    ),
+                };
+                assert_eq!(confirmation_footer(&stale, language), Some(stale_expected));
+                assert_eq!(
+                    confirmation_footer(&ordinary, language),
+                    Some(ordinary_expected)
+                );
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+    #[test]
     fn invalid_watch_confirmation_shows_localized_notice_without_action() {
         use super::super::text_width::UnicodeWidthStr;
         use ratatui::{Terminal, backend::TestBackend};

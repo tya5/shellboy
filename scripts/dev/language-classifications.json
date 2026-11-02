@@ -1,4 +1,94 @@
 {
+  "src/ui/help.rs:79626faddf7155ad:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:9ba1962baead7c85:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:796d0f6853c67586:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:4c2636fa039d6486:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:283ecb5eab41dbea:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:7b32b18d991b73bd:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:f410fc84a8012209:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:7b66650296130d4c:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:9eb734c01e3a838f:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:5c2aa45d30df0ee8:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:ea14a1ce61858964:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:c187b29692a65d7c:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "9533b0c330efc4275fcac852bbb9c01e222b8dc8994e0ace3ded22577c492b43"
+  },
+  "src/ui/help.rs:a1b3bcd146509507:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "886194516dbff4a275ac9655095194bb713d348408563ea81c019a3de50e6b04"
+  },
+  "src/ui/help.rs:2bb4f4e845858947:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "886194516dbff4a275ac9655095194bb713d348408563ea81c019a3de50e6b04"
+  },
+  "src/ui/overlay.rs:6b38e2a091f06e3f:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "76dc1b10209aaa4db8d574c3ab2c972062dd827cd25c8cbbe7b1a42d399ea810"
+  },
+  "src/ui/overlay.rs:d8491324c436031a:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "76dc1b10209aaa4db8d574c3ab2c972062dd827cd25c8cbbe7b1a42d399ea810"
+  },
+  "src/ui/overlay.rs:9f6ae97d75024626:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "76dc1b10209aaa4db8d574c3ab2c972062dd827cd25c8cbbe7b1a42d399ea810"
+  },
+  "src/ui/overlay.rs:6d7c57db70a7279e:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned help/confirmation UI: this is the Japanese narrow/fallback arm of glyphs::localized!, whose English arms are complete independent messages; terminal-width selection does not inspect or modify source, saved, user, or provider text.",
+    "source_tokens_sha256": "76dc1b10209aaa4db8d574c3ab2c972062dd827cd25c8cbbe7b1a42d399ea810"
+  },
   "src/presentation/messages.rs:0bff270c09be9c78:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",

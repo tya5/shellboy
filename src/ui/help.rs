@@ -1166,6 +1166,82 @@ mod tests {
             .join("\n")
     }
     #[test]
+    fn reviewed_help_glyph_messages_follow_language_and_width() {
+        use crate::ui::text_width;
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            let narrow = policy == Some(1);
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                let mut config = Config::default();
+                config.ui.language = language;
+                let page = Page::guide(&config);
+                let text = page
+                    .lines(240)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let expected: &[&str] = match (language, narrow) {
+                    (UiLanguage::Ja, true) => &[
+                        "コマンド候補を表示。↑↓で選び、Tabで補完",
+                        "入力の先頭行で送信履歴を呼び出す。↓で新しい履歴へ",
+                        "送信履歴の最新からさらに↓で、書きかけの下書きに戻ります。",
+                        "入力欄の上にある作業を選ぶ。↑↓で移動",
+                        "詳細画面: ↑↓で選択 → Enterで詳細。Oで原文、Cでコピー。",
+                    ],
+                    (UiLanguage::Ja, false) => &[
+                        "コマンド候補を表示。^vで選び、Tabで補完",
+                        "入力の先頭行で送信履歴を呼び出す。vで新しい履歴へ",
+                        "送信履歴の最新からさらにvで、書きかけの下書きに戻ります。",
+                        "入力欄の上にある作業を選ぶ。^vで移動",
+                        "詳細画面: ^vで選択 > Enterで詳細。Oで原文、Cでコピー。",
+                    ],
+                    (UiLanguage::En, true) => &[
+                        "Show commands; select with ↑↓ and complete with Tab",
+                        "Recall sent history on the first input line; ↓ selects newer history",
+                        "Press ↓ after the newest sent entry to restore the unfinished draft.",
+                        "Select work above the input; use ↑↓ to move",
+                        "Details: select with ↑↓ and open with Enter. O opens the original; C copies.",
+                    ],
+                    (UiLanguage::En, false) => &[
+                        "Show commands; select with ^v and complete with Tab",
+                        "Recall sent history on the first input line; v selects newer history",
+                        "Press v after the newest sent entry to restore the unfinished draft.",
+                        "Select work above the input; use ^v to move",
+                        "Details: select with ^v and open with Enter. O opens the original; C copies.",
+                    ],
+                };
+                for expected in expected {
+                    assert!(
+                        text.contains(expected),
+                        "{policy:?} {language:?}: {expected}"
+                    );
+                }
+                let (context, expected_footer) = match (language, narrow) {
+                    (UiLanguage::Ja, true) => (
+                        "操作するときはEscで会話へ戻る · / でコマンド候補を表示",
+                        "Esc / Enter / F1 戻る · ↑↓ / PgUp / PgDn 閲覧",
+                    ),
+                    (UiLanguage::Ja, false) => (
+                        "操作するときはEscで会話へ戻る | / でコマンド候補を表示",
+                        "Esc / Enter / F1 戻る | ^v / PgUp / PgDn 閲覧",
+                    ),
+                    (UiLanguage::En, true) => (
+                        "Esc returns to the conversation · / shows commands",
+                        "Esc / Enter / F1 Back · ↑↓ / PgUp / PgDn Scroll",
+                    ),
+                    (UiLanguage::En, false) => (
+                        "Esc returns to the conversation | / shows commands",
+                        "Esc / Enter / F1 Back | ^v / PgUp / PgDn Scroll",
+                    ),
+                };
+                assert_eq!(page.context, context);
+                assert_eq!(footer(language), expected_footer);
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+    #[test]
     fn guide_keys_follow_measured_width_in_both_languages() {
         use crate::ui::text_width;
         for policy in [Some(1), Some(2), None] {
