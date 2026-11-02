@@ -5788,12 +5788,22 @@ pub(super) fn recovery_lines(
     essential.push(Line::from(if en {
         format!(
             "{} live shells | {} uncollected | Review side effects in details",
-            recovery.live_shells, recovery.uncollected_shells
+            super::activity::count_label(recovery.live_shells, recovery.counts_capped, language),
+            super::activity::count_label(
+                recovery.uncollected_shells,
+                recovery.counts_capped,
+                language
+            )
         )
     } else {
         format!(
-            "動作中shell {}件 | 回収未完了 {}件 | 副作用は詳細で確認",
-            recovery.live_shells, recovery.uncollected_shells
+            "動作中shell {} | 回収未完了 {} | 副作用は詳細で確認",
+            super::activity::count_label(recovery.live_shells, recovery.counts_capped, language),
+            super::activity::count_label(
+                recovery.uncollected_shells,
+                recovery.counts_capped,
+                language
+            )
         )
     }));
     if let Some(facts) = &recovery.content_filter {
@@ -5837,12 +5847,30 @@ pub(super) fn recovery_lines(
     details.push(Line::from(if en {
         format!(
             "Request saved | {} pending inputs | {} saved tool results",
-            recovery.pending_messages, recovery.saved_tool_results
+            super::activity::count_label(
+                recovery.pending_messages,
+                recovery.counts_capped,
+                language
+            ),
+            super::activity::count_label(
+                recovery.saved_tool_results,
+                recovery.counts_capped,
+                language
+            )
         )
     } else {
         format!(
-            "依頼は保存済み | 未反映指示 {}件 | 保存済みツール結果 {}件",
-            recovery.pending_messages, recovery.saved_tool_results
+            "依頼は保存済み | 未反映指示 {} | 保存済みツール結果 {}",
+            super::activity::count_label(
+                recovery.pending_messages,
+                recovery.counts_capped,
+                language
+            ),
+            super::activity::count_label(
+                recovery.saved_tool_results,
+                recovery.counts_capped,
+                language
+            )
         )
     }));
     if let Some(summary) = &snapshot.context_reduction {

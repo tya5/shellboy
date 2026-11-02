@@ -97,6 +97,17 @@ Use encoding_rs and the existing encoding resolver. Keep separate stream decoder
 
 ## D: owned live work and accurate output activity
 
+Follow-up #172 bounds the physical candidate work before sorting: at most 128
+owned shells and 128 owned child Runs enter the merge, and activity counts use
+capped indexed reads. At the cap, counts and overflow are lower bounds, displayed
+as "at least N" or "N件以上". Rows remain sorted within the sampled candidates,
+but are not promised to be globally oldest and the footer omits its oldest-time
+claim. Below the cap, existing exact counts and oldest-row behavior are retained.
+This is a display-only observation; saved work and lifecycle state are unchanged.
+The indexes preserve exact latest Turn/attempt and running-state checks, but add
+one-time migration work and ongoing write/storage overhead that have not been
+measured on real databases.
+
 Extend frontend/activity.rs with LiveWorkSnapshot captured in the same existing refresh as activity: current Run ID, observed wall/monotonic time, total counts and a configured number of oldest rows. The validated `ui.live_work_rows` range is 1 through 10 (default 3); the same bound applies to each SQL candidate lane, the final merge, displayed rows, and output-marker requests. Values outside the range are errors rather than silently clamped. The section has a blank separator, a dedicated-colour `◉ 抱えている作業` heading and indented `│` rows; every row names its state. Small screens retain the heading and indicate hidden rows. Wait rows replace their own caller-shell rows, but shell counts remain factual. Their target is derived from the first bounded saved condition, with an additional-condition count, and timeout is an approximate saved wall-clock observation (zero means immediate timeout). Unknown or malformed evidence remains unknown. A shared target identity marks visible matching rows; no OS probes or new persistence are introduced. Row enum Shell/ChildRun/Wait carries IDs, sanitized display text, saved start time, state, elapsed base and last_output_at where known. Shell commands come from saved shell_json, child titles/classification from the existing Thread projection. Wait rows reflect saved pending waits and do not count as extra child work. The query orders by saved start and ID, uses existing owner indexes and caps returned rows; counts are scalar queries. Completed work disappears on the next Changed refresh. The fixed region sits immediately above composer and remains after the Turn answer when the Run still owns work. Small screens collapse overflow before suppressing composer/history usability.
 
 Background footer derives oldest-work elapsed and last real output from this same snapshot, never a stopped Turn observation clock. Local Instant advances saved elapsed without DB reads; switching away/back reloads saved timestamps. Unknown saved timing remains unknown. No animation tick performs DB work.

@@ -234,6 +234,7 @@ pub struct LiveWorkSnapshot {
     pub children: u64,
     pub waits: Option<u64>,
     pub overflow: u64,
+    pub counts_capped: bool,
     pub observed_at: Instant,
 }
 impl PartialEq for LiveWorkSnapshot {
@@ -244,9 +245,44 @@ impl PartialEq for LiveWorkSnapshot {
             && self.children == other.children
             && self.waits == other.waits
             && self.overflow == other.overflow
+            && self.counts_capped == other.counts_capped
     }
 }
 impl Eq for LiveWorkSnapshot {}
+
+fn counts_text(snapshot: &LiveWorkSnapshot, language: UiLanguage) -> String {
+    if !snapshot.counts_capped {
+        return WorkMessage::Counts {
+            shells: snapshot.shells,
+            children: snapshot.children,
+            waits: snapshot.waits,
+        }
+        .render(language);
+    }
+    let shells = super::activity::count_label(snapshot.shells, true, language);
+    let children = super::activity::count_label(snapshot.children, true, language);
+    let waits = snapshot.waits.map(|n| n.to_string()).unwrap_or_else(|| {
+        match language {
+            UiLanguage::En => "unknown",
+            UiLanguage::Ja => "未取得",
+        }
+        .into()
+    });
+    match language {
+        UiLanguage::En => format!("Shells: {shells} | Child runs: {children} | Waits: {waits}"),
+        UiLanguage::Ja => format!("shell {shells} | 子 {children} | 待機 {waits}"),
+    }
+}
+
+fn more_text(count: u64, capped: bool, language: UiLanguage) -> String {
+    if !capped {
+        return WorkMessage::More(count).render(language);
+    }
+    match language {
+        UiLanguage::En => format!("at least {count} more items"),
+        UiLanguage::Ja => format!("他{count}件以上"),
+    }
+}
 #[derive(Clone, Debug)]
 pub struct LiveOutputPreview {
     pub stdout: String,
@@ -706,6 +742,7 @@ impl LiveWorkView {
         let timing = self
             .seconds
             .first()
+            .filter(|_| !snapshot.counts_capped)
             .and_then(|(elapsed, _)| *elapsed)
             .map(|s| {
                 format!(
@@ -728,12 +765,7 @@ impl LiveWorkView {
                 folded: self.collapsed
             }
             .render(self.language),
-            WorkMessage::Counts {
-                shells: snapshot.shells,
-                children: snapshot.children,
-                waits: snapshot.waits
-            }
-            .render(self.language),
+            counts_text(snapshot, self.language),
             sep = glyphs::separator(),
         ))
     }
@@ -757,7 +789,11 @@ pub(super) fn draw(
         format!(
             "{}{}",
             glyphs::separator(),
-            WorkMessage::More(hidden).render(view.language)
+            more_text(
+                hidden,
+                view.snapshot.as_ref().is_some_and(|s| s.counts_capped),
+                view.language
+            )
         )
     } else {
         String::new()
@@ -766,18 +802,7 @@ pub(super) fn draw(
         .snapshot
         .as_ref()
         .filter(|_| view.has_work())
-        .map(|s| {
-            format!(
-                "{}{}",
-                glyphs::separator(),
-                WorkMessage::Counts {
-                    shells: s.shells,
-                    children: s.children,
-                    waits: s.waits
-                }
-                .render(view.language)
-            )
-        })
+        .map(|s| format!("{}{}", glyphs::separator(), counts_text(s, view.language)))
         .unwrap_or_default();
     let mark = glyphs::HEADING;
     let name = WorkMessage::Heading {
@@ -891,7 +916,11 @@ pub(super) fn draw(
             format!(
                 "{}{}",
                 glyphs::separator(),
-                WorkMessage::More(extra).render(view.language)
+                more_text(
+                    extra,
+                    view.snapshot.as_ref().is_some_and(|s| s.counts_capped),
+                    view.language
+                )
             )
         } else {
             String::new()
@@ -937,7 +966,11 @@ pub(super) fn draw(
             format!(
                 "{} {}",
                 glyphs::branch(true),
-                WorkMessage::More(hidden).render(view.language)
+                more_text(
+                    hidden,
+                    view.snapshot.as_ref().is_some_and(|s| s.counts_capped),
+                    view.language
+                )
             ),
             palette.live_work(),
         ));
@@ -1127,6 +1160,16 @@ mod tests {
     }
 
     use super::*;
+    #[test]
+    fn capped_counts_and_overflow_are_explicit_lower_bounds() {
+        let mut data = snapshot(Instant::now());
+        data.counts_capped = true;
+        assert!(counts_text(&data, UiLanguage::Ja).contains("2件以上"));
+        assert!(counts_text(&data, UiLanguage::En).contains("at least 2"));
+        assert_eq!(more_text(7, true, UiLanguage::Ja), "他7件以上");
+        assert_eq!(more_text(7, true, UiLanguage::En), "at least 7 more items");
+    }
+
     fn snapshot(at: Instant) -> LiveWorkSnapshot {
         LiveWorkSnapshot {
             run_id: "owner".into(),
@@ -1134,6 +1177,7 @@ mod tests {
             children: 1,
             waits: Some(1),
             overflow: 1,
+            counts_capped: false,
             observed_at: at,
             rows: vec![
                 LiveWorkRow {
@@ -2156,6 +2200,7 @@ mod language_tests {
                 children: 1,
                 waits: Some(1),
                 overflow: 0,
+                counts_capped: false,
                 rows
             }),
             Instant::now()

@@ -8,7 +8,7 @@ pub(crate) fn read(
     run: &str,
 ) -> Result<Option<RunWaitReason>, ApiError> {
     let row: Option<(Option<i64>, Option<String>)> = db.query_row(
-        "SELECT CASE WHEN json_valid(m.value) THEN json_array_length(m.value) END, CASE WHEN json_valid(m.value) THEN CASE WHEN json_type(m.value,'$[0]')='text' THEN json_extract(m.value,'$[0]') END END FROM app_meta m WHERE m.key=?1 AND EXISTS(SELECT 1 FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?2 AND r.thread_id=?3 AND r.state='live' AND u.state IN ('preparing','running'))",
+        "SELECT CASE WHEN json_valid(m.value) THEN json_array_length(m.value) END, CASE WHEN json_valid(m.value) THEN CASE WHEN json_type(m.value,'$[0]')='text' THEN json_extract(m.value,'$[0]') END END FROM app_meta m WHERE m.key=?1 AND EXISTS(SELECT 1 FROM run r JOIN turn u INDEXED BY activity_turn_run_state ON u.run_id=r.id WHERE r.id=?2 AND r.thread_id=?3 AND r.state='live' AND u.state IN ('preparing','running'))",
         params![crate::compaction::CompactionKeys::new(thread).inflight(),run,thread],
         |r|Ok((r.get(0)?,r.get(1)?)),
     ).optional().map_err(super::error)?;

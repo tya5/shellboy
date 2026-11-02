@@ -423,6 +423,7 @@ mod live_child_tests {
                 children: 1,
                 waits: Some(0),
                 overflow: 0,
+                counts_capped: false,
                 observed_at: std::time::Instant::now(),
             }),
             ..Default::default()
@@ -488,6 +489,7 @@ mod live_child_tests {
             observed_at: std::time::Instant::now(),
             tool_calls: 0,
             cancelled_calls: 0,
+            counts_capped: false,
             poll_running: false,
         };
         selection

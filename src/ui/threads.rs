@@ -5491,6 +5491,7 @@ mod watch_integration_tests {
                         children: 0,
                         waits: Some(0),
                         overflow: 0,
+                        counts_capped: false,
                         observed_at: Instant::now(),
                     });
                 }

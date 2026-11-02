@@ -16,6 +16,7 @@ pub struct Projection {
     pub observed_at: std::time::Instant,
     pub tool_calls: u64,
     pub cancelled_calls: u64,
+    pub counts_capped: bool,
     pub poll_running: bool,
 }
 // Read-only rows, kept local to the frontend projection.
@@ -95,6 +96,7 @@ impl Projection {
             thread_id: thread.into(),
             tool_calls: self.tool_calls,
             cancelled_calls: self.cancelled_calls,
+            counts_capped: self.counts_capped,
             state: self.label().into(),
         }
     }
@@ -108,6 +110,7 @@ pub(super) struct RawProjection {
     revisit: Option<String>,
     context_reduction: Option<String>,
     recovery_counts: Option<(u64, u64, u64, u64)>,
+    counts_capped: bool,
     owned: bool,
     tool_running: bool,
     tool_started_at: Option<String>,
@@ -125,6 +128,27 @@ struct AutomaticCompactionWitness {
     input_tokens: u64,
     threshold: u64,
     started_at: String,
+}
+
+// Both the group fanout and the number of result rows are bounded. A partial
+// count stays a lower bound even when the first groups contain no results.
+fn bounded_group_counts(
+    db: &Connection,
+    turn_id: &str,
+) -> Result<(u64, u64, bool), crate::storage::StorageError> {
+    let (saved, cancelled, groups): (i64, i64, i64) = db.query_row(
+        "WITH groups AS MATERIALIZED (SELECT id FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=?1 LIMIT 128),
+         results AS MATERIALIZED (SELECT r.status FROM groups g CROSS JOIN tool_result r ON r.group_id=g.id LIMIT 128)
+         SELECT (SELECT count(*) FROM results),
+                (SELECT count(*) FROM results WHERE status='cancelled'),
+                (SELECT count(*) FROM groups)",
+        [turn_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    Ok((
+        saved as u64,
+        cancelled as u64,
+        groups == 128 || saved == 128 || cancelled == 128,
+    ))
 }
 
 /// Latest Run owns the selected Turn; an older Turn cannot revive a newer Run.
@@ -164,6 +188,7 @@ pub(super) fn read_tx_with_limit(
             revisit: None,
             context_reduction: None,
             recovery_counts: None,
+            counts_capped: false,
             owned: false,
             tool_running: false,
             tool_started_at: None,
@@ -174,7 +199,7 @@ pub(super) fn read_tx_with_limit(
             automatic_compaction: None,
         });
     };
-    let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
+    let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
     let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[run_id],|r|r.get(0))?;
     let revisit = if matches!(run_state.as_str(), "live" | "stopping") {
         db.query_row(
@@ -196,6 +221,7 @@ pub(super) fn read_tx_with_limit(
         revisit,
         context_reduction: None,
         recovery_counts: None,
+        counts_capped: false,
         owned,
         tool_running: false,
         tool_started_at: None,
@@ -236,7 +262,7 @@ pub(super) fn read_tx_with_limit(
         raw.context_reduction = reduction::read_tx(db, turn_id, generation)?;
         let attempt = db
             .query_row(
-                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END,CASE WHEN json_valid(error_json) THEN CASE WHEN json_type(error_json,'$.automatic_retry_exhausted')='object' THEN json_extract(error_json,'$.automatic_retry_exhausted') ELSE NULL END ELSE NULL END,substr(started_at,1,128) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
+                "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END,CASE WHEN json_valid(error_json) THEN CASE WHEN json_type(error_json,'$.automatic_retry_exhausted')='object' THEN json_extract(error_json,'$.automatic_retry_exhausted') ELSE NULL END ELSE NULL END,substr(started_at,1,128) FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
                 rusqlite::params![turn_id,reason.is_some()],
                 |r| Ok(SavedAttempt { started_at:r.get(6)?,id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)?,automatic_retry_exhausted:r.get(5)?,attachment_unavailable:false,attachment_unsupported:false,attachment_check_limited:false }),
             )
@@ -251,25 +277,27 @@ pub(super) fn read_tx_with_limit(
             )?;
         }
         raw.attempt = attempt;
+        let (saved_results, cancelled, groups_capped) = bounded_group_counts(db, turn_id)?;
         if reason.is_some() {
             let counts = db.query_row(
                 "SELECT
-                  (SELECT COUNT(*) FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held')),
-                  (SELECT COUNT(*) FROM tool_result r JOIN tool_group g ON g.id=r.group_id WHERE g.turn_id=?2),
-                  (SELECT COUNT(*) FROM shell_execution WHERE owner_run_id=?3 AND state IN ('starting','running','stopping')),
-                  (SELECT COUNT(*) FROM shell_execution WHERE owner_run_id=?3 AND state IN ('exited','failed','stopped') AND output_complete=0)",
-                rusqlite::params![thread,turn_id,run_id],
-                |row| Ok((row.get::<_,i64>(0)? as u64,row.get::<_,i64>(1)? as u64,row.get::<_,i64>(2)? as u64,row.get::<_,i64>(3)? as u64)),
+                  (SELECT COUNT(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') LIMIT 128)),
+                  (SELECT COUNT(*) FROM (SELECT 1 FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=?2 AND state IN ('starting','running','stopping') LIMIT 128)),
+                  (SELECT COUNT(*) FROM (SELECT 1 FROM shell_execution INDEXED BY activity_shell_uncollected_owner WHERE owner_run_id=?2 AND state IN ('exited','failed','stopped') AND output_complete=0 LIMIT 128))",
+                rusqlite::params![thread,run_id],
+                |row| Ok((row.get::<_,i64>(0)? as u64,saved_results,row.get::<_,i64>(1)? as u64,row.get::<_,i64>(2)? as u64)),
             )?;
+            raw.counts_capped |=
+                groups_capped || [counts.0, counts.1, counts.2, counts.3].contains(&128);
             raw.recovery_counts = Some(counts);
         }
         let tool_started_at: Option<String> = db.query_row(
-            "SELECT substr(created_at,1,128) FROM tool_group WHERE turn_id=?1 AND state='running' ORDER BY rowid LIMIT 1",
+            "SELECT substr(created_at,1,128) FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=?1 AND state='running' ORDER BY rowid LIMIT 1",
             [turn_id],
             |r| r.get(0),
         ).optional()?;
-        let tools=db.query_row("SELECT COUNT(*) FROM shell_execution WHERE turn_id=?1 AND json_extract(shell_json,'$.spawned')=1",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
-        let cancelled=db.query_row("SELECT COUNT(*) FROM tool_result tr JOIN tool_group g ON g.id=tr.group_id WHERE g.turn_id=?1 AND tr.status='cancelled'",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
+        let tools=db.query_row("SELECT COUNT(*) FROM (SELECT 1 FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id=?1 AND json_extract(shell_json,'$.spawned')=1 LIMIT 128)",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
+        raw.counts_capped |= groups_capped || tools == 128 || cancelled == 128;
         raw.tool_running = tool_started_at.is_some();
         raw.tool_started_at = tool_started_at;
         raw.tools = tools;
@@ -288,6 +316,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         revisit,
         context_reduction,
         recovery_counts,
+        counts_capped,
         owned,
         tool_running,
         tool_started_at,
@@ -303,6 +332,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             observed_at: std::time::Instant::now(),
             tool_calls: 0,
             cancelled_calls: 0,
+            counts_capped: false,
             poll_running: false,
         };
     };
@@ -419,6 +449,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                 saved_tool_results,
                 live_shells,
                 uncollected_shells,
+                counts_capped,
                 stop_reason: stop_reason.clone(),
             });
         }
@@ -477,6 +508,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         observed_at: std::time::Instant::now(),
         tool_calls: tools,
         cancelled_calls: cancelled,
+        counts_capped,
         poll_running,
     }
 }
@@ -528,6 +560,68 @@ pub(super) async fn read_cancellable(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn exact_latest_and_running_state_are_index_seeks() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        for (sql, index) in [
+            (
+                "SELECT id FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",
+                "activity_turn_run",
+            ),
+            (
+                "SELECT rowid FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
+                "activity_attempt_turn",
+            ),
+            (
+                "SELECT created_at FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=?1 AND state='running' ORDER BY rowid LIMIT 1",
+                "activity_group_turn_state",
+            ),
+            (
+                "SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running') LIMIT 1",
+                "activity_turn_run_state",
+            ),
+        ] {
+            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let detail: Vec<String> = plan
+                .query_map(["id"], |r| r.get(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert!(detail.iter().any(|line| line.contains(index)), "{detail:?}");
+            assert!(
+                !detail.iter().any(|line| line.contains("TEMP B-TREE")),
+                "{detail:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn result_counts_are_bounded_even_when_groups_or_results_are_sparse() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','now'); INSERT INTO node(id,kind,created_at,payload_json) VALUES('n','user','now','{}');").unwrap();
+        for i in 0..127 {
+            db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES(?1,'a','u','done','now')", [format!("g{i:03}")]).unwrap();
+        }
+        assert_eq!(bounded_group_counts(&db, "u").unwrap(), (0, 0, false));
+        db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('g127','a','u','done','now')", []).unwrap();
+        db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('g128','a','u','done','now')", []).unwrap();
+        assert_eq!(bounded_group_counts(&db, "u").unwrap(), (0, 0, true));
+        for i in 0..129 {
+            db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state) VALUES('g000',?1,?2,'test','{}','completed')", rusqlite::params![format!("c{i:03}"), i]).unwrap();
+            db.execute(
+                "INSERT INTO tool_result(group_id,call_id,node_id,status) VALUES('g000',?1,'n',?2)",
+                rusqlite::params![
+                    format!("c{i:03}"),
+                    if i == 0 { "cancelled" } else { "completed" }
+                ],
+            )
+            .unwrap();
+        }
+        assert_eq!(bounded_group_counts(&db, "u").unwrap(), (128, 1, true));
+    }
 
     #[test]
     fn attachment_warning_reads_only_the_latest_attempt_and_distinguishes_format() {

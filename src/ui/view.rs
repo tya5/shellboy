@@ -56,6 +56,7 @@ pub struct ThreadView {
     pub turn_id: Option<String>,
     pub tool_calls: u64,
     pub cancelled_calls: u64,
+    pub counts_capped: bool,
     pub reasoning_expanded: BTreeSet<String>,
     history_revision: u64,
     body_storage_bytes: std::cell::Cell<Option<usize>>,
@@ -351,6 +352,7 @@ impl ThreadView {
             context_usage: Default::default(),
             tool_calls: 0,
             cancelled_calls: 0,
+            counts_capped: false,
             reasoning_expanded: BTreeSet::new(),
             history_revision: 0,
             body_storage_bytes: std::cell::Cell::new(None),
@@ -1326,9 +1328,16 @@ impl ThreadView {
             true
         }
     }
-    pub(super) fn on_progress(&mut self, tool_calls: u64, cancelled_calls: u64, state: String) {
+    pub(super) fn on_progress(
+        &mut self,
+        tool_calls: u64,
+        cancelled_calls: u64,
+        counts_capped: bool,
+        state: String,
+    ) {
         self.tool_calls = tool_calls;
         self.cancelled_calls = cancelled_calls;
+        self.counts_capped = counts_capped;
         self.state = state;
     }
 }

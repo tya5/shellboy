@@ -1223,6 +1223,7 @@ pub enum UiUpdate {
         thread_id: String,
         tool_calls: u64,
         cancelled_calls: u64,
+        counts_capped: bool,
         state: String,
     },
     EditRequestLoaded {
@@ -2531,6 +2532,7 @@ impl UiState {
             thread_id,
             tool_calls,
             cancelled_calls,
+            counts_capped,
             state,
         } = &update
             && let Some(view) = self
@@ -2539,6 +2541,7 @@ impl UiState {
                 .find(|view| view.thread_id.as_ref() == Some(thread_id))
             && view.tool_calls == *tool_calls
             && view.cancelled_calls == *cancelled_calls
+            && view.counts_capped == *counts_capped
             && view.state == *state
         {
             return;
@@ -3588,6 +3591,7 @@ impl UiState {
                 thread_id,
                 tool_calls,
                 cancelled_calls,
+                counts_capped,
                 state,
             } => {
                 if let Some(view) = self
@@ -3595,7 +3599,7 @@ impl UiState {
                     .values_mut()
                     .find(|view| view.thread_id.as_deref() == Some(&thread_id))
                 {
-                    view.on_progress(tool_calls, cancelled_calls, state);
+                    view.on_progress(tool_calls, cancelled_calls, counts_capped, state);
                 }
             }
             UiUpdate::EditRequestLoaded {
@@ -7679,6 +7683,7 @@ mod layout_cache_tests {
             thread_id: "t".into(),
             tool_calls,
             cancelled_calls: 0,
+            counts_capped: false,
             state: "モデル応答待ち".into(),
         };
         ui.apply(update(2));
@@ -7687,6 +7692,15 @@ mod layout_cache_tests {
         assert!(!ui.dirty);
         ui.apply(update(3));
         assert!(ui.dirty, "a changed visible count still updates");
+        ui.dirty = false;
+        ui.apply(UiUpdate::Progress {
+            thread_id: "t".into(),
+            tool_calls: 3,
+            cancelled_calls: 0,
+            counts_capped: true,
+            state: "モデル応答待ち".into(),
+        });
+        assert!(ui.dirty, "a count becoming a lower bound changes its display");
     }
 
     #[test]

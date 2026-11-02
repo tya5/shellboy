@@ -90,6 +90,15 @@ impl ActivityPhase {
         }
     }
 }
+pub(crate) fn count_label(count: u64, capped: bool, language: UiLanguage) -> String {
+    match (language, capped) {
+        (UiLanguage::En, true) => format!("at least {count}"),
+        (UiLanguage::En, false) => count.to_string(),
+        (UiLanguage::Ja, true) => format!("{count}件以上"),
+        (UiLanguage::Ja, false) => format!("{count}件"),
+    }
+}
+
 /// Existing saved facts for human recovery; never a new lifecycle state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecoverySnapshot {
@@ -102,6 +111,7 @@ pub struct RecoverySnapshot {
     pub saved_tool_results: u64,
     pub live_shells: u64,
     pub uncollected_shells: u64,
+    pub counts_capped: bool,
     pub stop_reason: Option<String>,
 }
 impl RecoverySnapshot {

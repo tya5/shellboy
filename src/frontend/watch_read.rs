@@ -308,6 +308,7 @@ pub(super) fn prepare_with_titles(
                     shells: extra.shells,
                     children: extra.children,
                     waits: None,
+                    counts_capped: false,
                     observed_at,
                 });
             let parent_title = extra.parent.as_ref().map(|id| {

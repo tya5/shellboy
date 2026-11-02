@@ -8,9 +8,8 @@ use rusqlite::{Connection, OptionalExtension};
 use std::time::{Duration, Instant};
 
 const MAX_WAITS: usize = 128;
-// Counts are authoritative saved ownership counts. Only the configured number of rows of each
-// process kind enter the final merge; wait candidates are the bounded exact
-// registry keys, never a scan of all pending app_meta entries.
+// Candidate sets are capped before sorting and counting. Counts at the cap are
+// lower bounds; they cannot establish the globally oldest work.
 const LIVE_SQL: &str = r"
 WITH wait_keys AS MATERIALIZED (
  SELECT DISTINCT json_extract(value,'$[0]') AS operation_id,
@@ -30,10 +29,12 @@ WITH wait_keys AS MATERIALIZED (
  WHERE CASE WHEN proof_valid THEN json_extract(value,'$.operation_id')=operation_id
      AND json_extract(value,'$.caller.run_id')=?1
      AND json_extract(value,'$.caller.execution_id')=execution_id ELSE 0 END
+), shell_candidates AS MATERIALIZED (
+ SELECT id,started_at FROM shell_execution INDEXED BY shell_active_owner
+ WHERE owner_run_id=?1 AND state IN ('starting','running','stopping') LIMIT 128
 ), shell_members AS MATERIALIZED (
- SELECT id,started_at FROM shell_execution
- WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')
- AND NOT EXISTS (SELECT 1 FROM waits WHERE waits.execution_id=shell_execution.id)
+ SELECT id,started_at FROM shell_candidates
+ WHERE NOT EXISTS (SELECT 1 FROM waits WHERE waits.execution_id=shell_candidates.id)
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),id LIMIT ?3
 ), shells AS MATERIALIZED (
  SELECT 'shell' AS kind,s.id AS id,s.turn_id AS related,s.id AS execution,
@@ -42,11 +43,13 @@ WITH wait_keys AS MATERIALIZED (
         (SELECT received_at FROM output_chunk o WHERE o.execution_id=s.id ORDER BY o.sequence DESC LIMIT 1) AS output_at,
         CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END AS description
  FROM shell_members member CROSS JOIN shell_execution s ON s.id=member.id
+), child_candidates AS MATERIALIZED (
+ SELECT id,thread_id,state,created_at FROM run INDEXED BY runs_by_owner
+ WHERE owner_run_id=?1 AND state IN ('live','stopping') LIMIT 128
 ), children AS MATERIALIZED (
  SELECT 'child' AS kind,r.id AS id,r.thread_id AS related,NULL AS execution,
         substr(t.title,1,512) AS label,r.state,r.created_at AS started_at,NULL AS output_at,NULL AS description
- FROM run r JOIN thread t ON t.id=r.thread_id
- WHERE r.owner_run_id=?1 AND r.state IN ('live','stopping')
+ FROM child_candidates r JOIN thread t ON t.id=r.thread_id
  ORDER BY julianday(r.created_at) IS NULL,julianday(r.created_at),r.id LIMIT ?3
 ), wait_rows AS MATERIALIZED (
  SELECT 'wait' AS kind,operation_id AS id,NULL AS related,execution_id AS execution,
@@ -56,8 +59,8 @@ WITH wait_keys AS MATERIALIZED (
  SELECT * FROM (SELECT * FROM shells UNION ALL SELECT * FROM children UNION ALL SELECT * FROM wait_rows)
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),id,kind LIMIT ?3
 ), counts AS MATERIALIZED (
- SELECT (SELECT count(*) FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) AS shells,
-        (SELECT count(*) FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping')) AS children,
+ SELECT (SELECT count(*) FROM shell_candidates) AS shells,
+        (SELECT count(*) FROM child_candidates) AS children,
         (SELECT count(*) FROM waits) AS waits,
         (SELECT count(*) FROM wait_observations WHERE COALESCE(proof_valid,0)=0) AS invalid_waits,
         (SELECT count(DISTINCT s.id) FROM waits w JOIN shell_execution s ON s.id=w.execution_id
@@ -83,8 +86,8 @@ SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked
        CASE WHEN json_extract(w.value,'$.conditions[0].type')='thread_settled' AND json_type(w.value,'$.conditions[0].thread_ids')='array' THEN json_array_length(w.value,'$.conditions[0].thread_ids') END
 FROM counts LEFT JOIN picked ON 1
 LEFT JOIN waits w ON picked.kind='wait' AND w.operation_id=picked.id
-LEFT JOIN turn child_turn ON child_turn.id=(SELECT id FROM turn WHERE picked.kind='child' AND run_id=picked.id ORDER BY created_at DESC,id DESC LIMIT 1)
-LEFT JOIN model_attempt child_attempt ON child_attempt.rowid=(SELECT rowid FROM model_attempt WHERE turn_id=child_turn.id
+LEFT JOIN turn child_turn ON child_turn.id=(SELECT id FROM turn INDEXED BY activity_turn_run WHERE picked.kind='child' AND run_id=picked.id ORDER BY created_at DESC,id DESC LIMIT 1)
+LEFT JOIN model_attempt child_attempt ON child_attempt.rowid=(SELECT rowid FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=child_turn.id
     AND picked.state='live' AND child_turn.state='running' ORDER BY rowid DESC LIMIT 1)
 ORDER BY julianday(picked.started_at) IS NULL,julianday(picked.started_at),picked.id,picked.kind";
 
@@ -401,6 +404,7 @@ pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
         children: raw.children,
         waits: raw.waits,
         overflow,
+        counts_capped: raw.shells == 128 || raw.children == 128,
         observed_at,
     }
 }
@@ -448,6 +452,50 @@ mod tests {
             assert!(read_tx_limited(&db, "r", Some(&[]), invalid).is_err());
         }
     }
+    #[test]
+    fn live_work_plan_seeks_owned_candidates_and_exact_child_state() {
+        let db = fixture();
+        let mut statement = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {LIVE_SQL}"))
+            .unwrap();
+        let details: Vec<String> = statement
+            .query_map(rusqlite::params!["r", "[]", 3], |row| row.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        for index in [
+            "shell_active_owner",
+            "runs_by_owner",
+            "activity_turn_run",
+            "activity_attempt_turn",
+            "activity_group_turn_state",
+        ] {
+            assert!(
+                details.iter().any(|detail| detail.contains(index)),
+                "missing {index}: {details:?}"
+            );
+        }
+        assert!(
+            !details
+                .iter()
+                .any(|detail| detail == "SCAN shell_execution" || detail == "SCAN run"),
+            "{details:?}"
+        );
+    }
+
+    #[test]
+    fn large_owned_scope_reports_a_lower_bound_without_claiming_global_order() {
+        let db = fixture();
+        for i in 0..130 {
+            db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES(?1,'r','u',?1,'running','/','{}','UTF-8','UTF-8','open','2010-01-01T00:00:00Z')", [format!("many-{i:03}")]).unwrap();
+        }
+        let snapshot = prepare(read_tx_limited(&db, "r", Some(&[]), 3).unwrap());
+        assert_eq!(snapshot.shells, 128);
+        assert!(snapshot.counts_capped);
+        assert_eq!(snapshot.rows.len(), 3);
+        assert!(snapshot.overflow <= 131);
+    }
+
     #[test]
     fn selected_wait_describes_first_saved_target_and_avoids_duplicate_caller() {
         let db = fixture();

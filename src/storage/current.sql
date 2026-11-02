@@ -428,6 +428,8 @@ PRAGMA user_version=20;
 CREATE INDEX node_event_retention ON node(CAST(json_extract(payload_json,'$.event_id') AS TEXT)) WHERE kind='event' AND json_valid(payload_json);
 CREATE INDEX delivery_event_state ON delivery(event_id,state);
 INSERT INTO schema_migration(version,name) VALUES(21,'0021_event_retention');
+PRAGMA user_version=21;
+
 -- Logical usage counters and receipt-collection index (#171).
 -- Targeted Run-end event retention (#170/#171): one Run's shell events by seek.
 CREATE INDEX event_run_shell_ended ON event(target_run_id) WHERE kind='shell_ended';
@@ -573,3 +575,13 @@ CREATE TRIGGER logical_index_space_update AFTER UPDATE OF id,dimension ON index_
 END;
 INSERT INTO schema_migration(version,name) VALUES(22,'0022_logical_usage_counters');
 PRAGMA user_version=22;
+
+-- Activity lookups: exact membership and bounded matching counts.
+CREATE INDEX activity_attempt_turn ON model_attempt(turn_id);
+CREATE INDEX activity_turn_run ON turn(run_id,created_at,id);
+CREATE INDEX activity_turn_run_state ON turn(run_id,state);
+CREATE INDEX activity_group_turn_state ON tool_group(turn_id,state);
+CREATE INDEX activity_shell_spawned_turn ON shell_execution(turn_id) WHERE json_extract(shell_json,'$.spawned')=1;
+CREATE INDEX activity_shell_uncollected_owner ON shell_execution(owner_run_id) WHERE state IN ('exited','failed','stopped') AND output_complete=0;
+INSERT INTO schema_migration(version,name) VALUES(23,'0023_activity_bounded');
+PRAGMA user_version=23;

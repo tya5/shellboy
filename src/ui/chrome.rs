@@ -385,15 +385,23 @@ pub(super) fn footer_lines(
             crate::config::UiLanguage::En => format!("Pending {}", view.pending_messages.total),
         });
     }
-    if view.tool_calls > 0 {
-        facts.push(format!("{} tools", view.tool_calls));
+    if view.tool_calls > 0 || view.counts_capped {
+        if view.counts_capped {
+            facts.push(format!(
+                "{} tools",
+                super::activity::count_label(view.tool_calls, true, view.language)
+            ));
+        } else {
+            facts.push(format!("{} tools", view.tool_calls));
+        }
     }
-    if view.cancelled_calls > 0 {
-        facts.push(format!(
-            "{} {}",
-            glyphs::select("×", "x"),
-            view.cancelled_calls
-        ));
+    if view.cancelled_calls > 0 || view.counts_capped {
+        let count = if view.counts_capped {
+            super::activity::count_label(view.cancelled_calls, true, view.language)
+        } else {
+            view.cancelled_calls.to_string()
+        };
+        facts.push(format!("{} {}", glyphs::select("×", "x"), count));
     }
     if let Some(snapshot) = view.activity.snapshot.as_ref() {
         if let Some(revisit) = snapshot.revisit.as_ref() {

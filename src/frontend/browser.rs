@@ -1244,6 +1244,7 @@ mod watch_tests {
                 children: 0,
                 waits: Some(0),
                 overflow: 0,
+                counts_capped: false,
                 observed_at: at,
                 rows: vec![LiveWorkRow {
                     description: None,

@@ -144,6 +144,11 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         ))?;
         tx.commit()?;
     }
+    if version < 23 {
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(include_str!("../../migrations/0023_activity_bounded.sql"))?;
+        tx.commit()?;
+    }
     validate_schema(connection)?;
     Ok(())
 }
@@ -218,4 +223,60 @@ fn migrate_attachment_sources(tx: &rusqlite::Transaction<'_>) -> Result<(), Stor
         tx.execute("UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4,payload_revision=payload_revision+1 WHERE id=?1",params![source,payload,payload.len() as i64,Sha256::digest(payload.as_bytes()).iter().map(|b|format!("{b:02x}")).collect::<String>()])?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod activity_migration_tests {
+    use super::*;
+
+    #[test]
+    fn version_22_upgrade_preserves_rows_and_installs_activity_indexes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("DROP INDEX activity_attempt_turn; DROP INDEX activity_turn_run; DROP INDEX activity_turn_run_state; DROP INDEX activity_group_turn_state; DROP INDEX activity_shell_spawned_turn; DROP INDEX activity_shell_uncollected_owner; DELETE FROM schema_migration WHERE version=23; PRAGMA user_version=22; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');").unwrap();
+        run(&mut db, 22).unwrap();
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            23
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT name FROM schema_migration WHERE version=23",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "0023_activity_bounded"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM thread WHERE id='t'", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        for index in [
+            "activity_attempt_turn",
+            "activity_turn_run",
+            "activity_turn_run_state",
+            "activity_group_turn_state",
+            "activity_shell_spawned_turn",
+            "activity_shell_uncollected_owner",
+            "jobs_source",
+            "nodes_index_gc",
+            "node_event_retention",
+            "delivery_event_state",
+        ] {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?1",
+                    [index],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1,
+                "{index}"
+            );
+        }
+    }
 }
