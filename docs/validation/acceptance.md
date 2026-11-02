@@ -8366,3 +8366,33 @@ mock clipboard1、startup5、management15、owner-session5、integration UI86が
 試験専用importはtest moduleへ移動し、lint・guard・assertionは抑制していません。
 確定SHAのCI結果は別に報告します。Windows・実端末/IME・OS clipboard・実providerは未検証で、
 ユーザーデータ、インストール済みバイナリ、リリース、mainへのpushは操作していません。
+
+### #150 restack after v0.6.1 prep main landing (2026-11-02)
+
+The user approved the five review corrections at 027e455e. After release prep
+45c34c75e266c5bfde3d28e07a303bdea93e137a landed with CI41396397531 success,
+all fourteen #150 commits were rebased onto that main. The two management.rs
+conflicts were resolved by retaining both language plumbing and #159's raw filter
+projection before safe_detail_value, plus both sides' complete regression modules.
+The other twelve patches are range-diff equal; the two changed patches reflect
+existing main plumbing/context and the union of both test modules, not a new
+feature or retry-policy choice. Existing #159 prepare_in/report_in routing stays
+in place. The five reviewed corrections, exact Japanese fixtures, post-TUI
+English-only stderr and raw/provider/copy boundaries remain unchanged.
+
+Record-delta against both the landed main and original 027e455e reports zero
+removed status, acceptance or decision lines. Existing release cutoff/history,
+#159/#160 and #150 records are retained, with fresh evidence appended here.
+Fresh native macOS shared-slot checks used locked dependencies, build/test
+threads2 and refreshed Rust source mtimes: fmt --check, check --tests and
+all-target Clippy -D warnings succeeded. Diagnostics4, raw/mock clipboard1,
+startup5, management18, content-filter unit10 and mock integration2 passed with
+nonzero observed counts. Layout102/watchdog passed. Python146 passed; intentional
+failure-gate fixture diagnostics are expected within that successful suite.
+
+No settings, dependencies, storage/schema/protocol, queue/cancellation ordering,
+retry admission, normalization, byte limits, raw/provider values, glyphs or
+existing assertion/guard were changed by restack. New exact task CI is pending;
+its SHA and outcome will be reported in the formal handoff. New-candidate Windows,
+physical terminal/IME, real providers/Azure and OS clipboard remain unverified.
+No main push, release, installed-binary or user-data operation is performed here.

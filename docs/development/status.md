@@ -3881,3 +3881,14 @@ scoped to the test module, without suppressing any lint.
 State-label/report localization is explicitly deferred by review instruction:
 https://github.com/tya5/shellboy/issues/152#issuecomment-6569021575 .
 No real provider API, clipboard, user data, installed binary or release modified.
+
+### #150 after v0.6.1 prep main landing (2026-11-02)
+
+Restacked user-approved 027e455e onto landed release prep main45c34c75.
+Retained #159 raw filter extraction, locale routing and both regression modules
+when resolving management.rs; twelve other patches remain range-diff equal.
+Both original main and #150 records have zero removed lines. Fresh macOS shared
+slot/locked/two-thread fmt/check/Clippy passed, with diagnostics4, clipboard1,
+startup5, management18, content-filter unit10/integration2, layout102/watchdog
+and Python146 passing. Exact task CI/formal handoff are pending; earlier
+027e455e CI does not validate this restack. No new feature/policy/config change.
