@@ -25,6 +25,7 @@ const SUMMARY_PARTS: usize = 10_000;
 const DELETED_IMAGES: usize = 10_000;
 const READY_IMAGES: usize = 1_000;
 const JOBS: usize = 40_000;
+const EVENTS: usize = 40_000;
 
 fn config(url: &str) -> Config {
     let mut config = Config::default();
@@ -51,7 +52,7 @@ fn seed(db: &mut rusqlite::Connection) {
     let now = chrono::Utc::now();
     let recent = now.to_rfc3339();
     let future = (now + chrono::Duration::days(1)).to_rfc3339();
-    tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','now');INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2000','2001');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');").unwrap();
+    tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','now');INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2000','2001');INSERT INTO run(id,thread_id,state,created_at)VALUES('live','t','live','2000');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');").unwrap();
     tx.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name)VALUES('s','p','m',4,'v','active','vec_s')",[]).unwrap();
     {
         let mut node = tx.prepare("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,deleted_reason)VALUES(?1,'user',?2,?3,?4,?5)").unwrap();
@@ -124,6 +125,28 @@ fn seed(db: &mut rusqlite::Connection) {
                 ])
                 .unwrap();
         }
+        // Shell events of a still-live Run fill the event table; the ended
+        // Run 'r' has a handful. Targeted retention must not visit the rest.
+        let mut event = tx.prepare("INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at)VALUES(?1,'shell_ended','{}','t',?2,'{}',?3)").unwrap();
+        let mut delivery = tx
+            .prepare("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,?3)")
+            .unwrap();
+        for i in 0..EVENTS {
+            event
+                .execute(params![format!("ev{i:06}"), "live", recent])
+                .unwrap();
+            delivery
+                .execute(params![format!("ev{i:06}"), "live", "pending"])
+                .unwrap();
+        }
+        for i in 0..10 {
+            event
+                .execute(params![format!("ended{i}"), "r", recent])
+                .unwrap();
+            delivery
+                .execute(params![format!("ended{i}"), "r", "processed"])
+                .unwrap();
+        }
         let mut job = tx.prepare("INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state,next_attempt_at)VALUES(?1,'s',?2,0,'text','h',?3,?3,'pending',?4)").unwrap();
         for i in 0..JOBS {
             job.execute(params![
@@ -175,6 +198,7 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
             "SELECT count(*) FROM node WHERE payload_json IS NULL OR deleted_reason IS NOT NULL",
             "SELECT count(*) FROM operation_receipt o WHERE NOT EXISTS(SELECT 1 FROM app_meta m WHERE m.key=o.operation_id)",
             "SELECT sum((SELECT count(*) FROM output_chunk c WHERE c.execution_id=s.id)) FROM shell_execution s",
+            "SELECT count(*) FROM event e WHERE NOT EXISTS(SELECT 1 FROM delivery d WHERE d.event_id=e.id AND d.state='processed')",
         ] {
             let steps = scan_steps(&db, sql);
             println!("FIXTURE_SCAN steps={steps} sql={sql}");
@@ -213,6 +237,12 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
     // Paused: one discard_paused unit with the full job backlog present (#173).
     index.pause_for_tests().await;
     index.measure_background_units().await;
+    // Run-end retention for the ended Run only (#170, #171 rule 3).
+    db.signals().run_ended("r");
+    let mut ended = crate::maintenance::WorkSet::default();
+    ended.insert(crate::maintenance::Work::EndedRuns);
+    let report = gc.collect_kinds(ended, chrono::Utc::now()).await.unwrap();
+    assert!(report.deferred_kinds.is_empty(), "{report:?}");
     let elapsed = started.elapsed();
 
     // The worker records each unit after replying; shutdown orders the read.
@@ -239,6 +269,8 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
         "control::db::Store::collect_receipts",
         "gc::GcService::collect_raw",
         "gc::GcService::collect_held",
+        "gc::GcService::collect_ended_runs",
+        "gc::GcService::collect_event_backlog",
         "attachments::AttachmentService::collect_managed_observed",
         "index::identity",
         "index::IndexService::process_key",

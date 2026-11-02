@@ -259,7 +259,13 @@ impl GcService {
         let works: &[Work] = match category {
             StorageCategory::All => &GC_WORK,
             StorageCategory::Raw => &[Work::Raw],
-            StorageCategory::History => &[Work::Drafts, Work::History, Work::SummaryCache],
+            StorageCategory::History => &[
+                Work::EndedRuns,
+                Work::EventBacklog,
+                Work::Drafts,
+                Work::History,
+                Work::SummaryCache,
+            ],
             StorageCategory::Index => &[Work::IndexSources, Work::InactiveSpaces],
             StorageCategory::ManagedImages => &[Work::Managed],
         };
@@ -290,25 +296,6 @@ impl GcService {
             self.collect_raw(requester, at, &mut report).await?;
         }
         if has(Work::Drafts) {
-            // Run-end retention (#170): one full round-robin sweep of bounded
-            // batches per trigger; a wrap ends it until the next Run ends.
-            loop {
-                let cursor = *self.event_cursor.lock().expect("event cursor");
-                let unit = requester
-                    .unit(UNIT, move |db, _| {
-                        event_retention::collect_batch(db, cursor)
-                    })
-                    .await
-                    .map_err(crate::app::storage_error)?;
-                let Background::Done(next) = unit else {
-                    report.defer(Work::Drafts);
-                    break;
-                };
-                *self.event_cursor.lock().expect("event cursor") = next;
-                if next.wrapped() {
-                    break;
-                }
-            }
             loop {
                 let unit = requester
                     .unit(UNIT, |db, _| {
@@ -328,6 +315,12 @@ impl GcService {
                     break;
                 }
             }
+        }
+        if has(Work::EndedRuns) {
+            self.collect_ended_runs(requester, &mut report).await?;
+        }
+        if has(Work::EventBacklog) {
+            self.collect_event_backlog(requester, &mut report).await?;
         }
         if has(Work::History) {
             match self.start_history_held(requester).await? {
@@ -494,6 +487,67 @@ impl GcService {
             report.managed_protected_bytes = managed.protected_bytes;
         }
         Ok(report)
+    }
+    /// Targeted retention (#170) for each ended Run queued by `run_ended`:
+    /// only that Run's pending deliveries and shell events, by index seek.
+    async fn collect_ended_runs(
+        &self,
+        requester: &mut BackgroundRequester,
+        report: &mut CollectionReport,
+    ) -> Result<()> {
+        let signals = self.database.signals().clone();
+        let mut runs = signals.take_ended_runs().into_iter();
+        while let Some(run) = runs.next() {
+            let mut cursor = event_retention::RunCursor::default();
+            while cursor != event_retention::RunCursor::Done {
+                let id = run.clone();
+                let unit = requester
+                    .unit(UNIT, move |db, _| {
+                        event_retention::collect_run(db, &id, cursor)
+                    })
+                    .await
+                    .map_err(crate::app::storage_error)?;
+                let Background::Done(next) = unit else {
+                    // Resume this Run (from its start: units are idempotent).
+                    signals.requeue_ended_runs(std::iter::once(run).chain(runs).collect());
+                    report.defer(Work::EndedRuns);
+                    return Ok(());
+                };
+                cursor = next;
+            }
+        }
+        Ok(())
+    }
+    /// The full round-robin sweep for rows that predate this owner: only on
+    /// startup, explicit `storage collect`, or an ended-Run queue overflow.
+    async fn collect_event_backlog(
+        &self,
+        requester: &mut BackgroundRequester,
+        report: &mut CollectionReport,
+    ) -> Result<()> {
+        // One sweep ends once each scan has wrapped at least once; the two
+        // scans wrap independently, so never wait for both at once.
+        let (mut deliveries_done, mut events_done) = (false, false);
+        loop {
+            let cursor = *self.event_cursor.lock().expect("event cursor");
+            let unit = requester
+                .unit(UNIT, move |db, _| {
+                    event_retention::collect_batch(db, cursor)
+                })
+                .await
+                .map_err(crate::app::storage_error)?;
+            let Background::Done(next) = unit else {
+                report.defer(Work::EventBacklog);
+                return Ok(());
+            };
+            *self.event_cursor.lock().expect("event cursor") = next;
+            let (deliveries, events) = next.wrapped();
+            deliveries_done |= deliveries;
+            events_done |= events;
+            if deliveries_done && events_done {
+                return Ok(());
+            }
+        }
     }
     /// Raw retention in bounded windows over `shell_terminal_time`. The total
     /// comes from the schema22 counter. Without a capacity excess, a due age
@@ -741,8 +795,10 @@ impl GcService {
 pub struct GcHold<'a>(tokio::sync::MutexGuard<'a, BackgroundRequester>);
 
 /// Garbage-collection kinds, in the order one pass runs them.
-const GC_WORK: [Work; 7] = [
+const GC_WORK: [Work; 9] = [
     Work::Raw,
+    Work::EndedRuns,
+    Work::EventBacklog,
     Work::Drafts,
     Work::History,
     Work::SummaryCache,

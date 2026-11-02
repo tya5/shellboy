@@ -1034,6 +1034,7 @@ impl Control {
             if !active {
                 match driver::stop_without_driver(self, run_id).await {
                     Ok(()) => {
+                        self.store.database.signals().run_ended(run_id);
                         if let Some(parent) = parent.filter(|parent| parent != &thread) {
                             self.changed(&parent);
                         }
@@ -1176,10 +1177,12 @@ impl Control {
         self.changed(&thread_id);
         // A finished Run can release receipts (submitted-draft copies) and
         // the raw output of its shells to retention.
-        self.store.database.signals().mark_all(&[
+        let signals = self.store.database.signals();
+        signals.mark_all(&[
             crate::maintenance::Work::Drafts,
             crate::maintenance::Work::Raw,
         ]);
+        signals.run_ended(&slot.run_id);
         self.nudge_owner(&slot.run_id).await;
         // An accepted send/retry can race the previous driver's final
         // observation and map removal. Recheck after releasing its slot.

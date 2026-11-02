@@ -429,6 +429,8 @@ CREATE INDEX node_event_retention ON node(CAST(json_extract(payload_json,'$.even
 CREATE INDEX delivery_event_state ON delivery(event_id,state);
 INSERT INTO schema_migration(version,name) VALUES(21,'0021_event_retention');
 -- Logical usage counters and receipt-collection index (#171).
+-- Targeted Run-end event retention (#170/#171): one Run's shell events by seek.
+CREATE INDEX event_run_shell_ended ON event(target_run_id) WHERE kind='shell_ended';
 CREATE INDEX attachment_delivery_operation ON attachment_delivery(operation_id) WHERE status IN ('accepted','held');
 INSERT INTO quota_counter VALUES('logical.history',0,1);
 INSERT INTO quota_counter VALUES('logical.raw',0,1);

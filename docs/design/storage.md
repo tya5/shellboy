@@ -233,8 +233,9 @@ the `db_job_slow` names.
   | Producer (after commit) | Kinds marked |
   |---|---|
   | Thread deletion (`ThreadDelete`) | History, SummaryCache, IndexSources, Managed, Drafts |
+| Run terminal (driver retirement, driverless stop) and every saved shell completion | EndedRuns, with the Run id (`run_ended`) |
   | Shell completion saved | Raw |
-  | Run retired (`retire_driver`) | Drafts, Raw |
+  | Run retired (`retire_driver`) | Drafts, Raw (and EndedRuns above) |
   | Clipboard image saved ready, or its creation failed | Managed |
   | Runtime pins released (`PinLease` drop) | Managed, Raw |
   | Index space transitions (`select_space`, rebuild start, candidate activation on authorization drain or adoption) | InactiveSpaces |
@@ -256,13 +257,20 @@ the `db_job_slow` names.
   The index worker sleeps until its earliest scheduled retry or a wake; while
   paused or idle it has no timer. The one remaining bounded fallback is the
   existing `next_delay` scan bound (256 rows), which clamps to 1..30 s.
-- **Run-end retention (#170).** The dead-delivery and shell-event retention
-  batches from #170 (64 deliveries, 32 events per unit) run under the Drafts
-  kind, which Run retirement and Thread deletion mark: one full round-robin
-  sweep per trigger, then idle until the next Run ends. This replaces its
-  former one-batch-per-60 s cadence. A sweep visits every delivery and event
-  row in bounded units; a targeted per-Run lookup would avoid that and is left
-  to a follow-up.
+- **Run-end retention (#170), targeted.** A Run's terminal commit (driver
+  retirement or a driverless stop) and every saved shell completion call
+  `Signals::run_ended(run)`, which queues the Run id (bounded at 1,024; beyond
+  that the backlog sweep is marked instead) and marks `EndedRuns`. One
+  `collect_ended_runs` unit deletes up to 64 of that Run's pending deliveries
+  by seek on `delivery_pending(recipient_id,state)`, then visits that Run's
+  shell events 32 at a time by seek on the schema22 partial index
+  `event_run_shell_ended(target_run_id) WHERE kind='shell_ended'`, deleting an
+  eligible event and its remaining dropped/processed deliveries. Work per Run
+  end is proportional to that Run's rows, not the tables. A non-terminal Run is
+  skipped. A deferred Run is re-queued at the front and restarted (units are
+  idempotent). The #170 round-robin sweep over all rows runs only as
+  `EventBacklog`: at startup (rows that predate this owner), on explicit
+  `storage collect`, and on queue overflow.
 - **Raw retention without `raw_stats`.** The raw total is the schema22
   counter. A raw pass touches no execution row unless the total exceeds
   `tool_raw_bytes`, an age deadline is due, a tombstone is pending, or a rescan
@@ -275,7 +283,9 @@ the `db_job_slow` names.
 - **Schema22 (`0022_logical_usage_counters`).** Four `quota_counter` rows
   (`logical.history`, `logical.raw`, `logical.managed`, `logical.index`)
   maintained by AFTER INSERT/UPDATE OF/DELETE triggers on the 12 counted
-  tables, plus `index_space` insert/delete/dimension changes. They reproduce the
+  tables, plus `index_space` insert/delete/dimension changes. Migration 22 also
+  adds the partial `event_run_shell_ended` index for targeted Run-end
+  retention. They reproduce the
   former indexed sums exactly; the old sums remain only as a test oracle that
   is compared after mutation and rollback. `require_capacity_tx` is O(1). The
   partial index `attachment_delivery_operation(operation_id) WHERE status IN

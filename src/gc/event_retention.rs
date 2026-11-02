@@ -17,10 +17,77 @@ pub(super) struct Cursor {
 }
 
 impl Cursor {
-    /// Both scans reached the end and restart from the first row.
-    pub(super) fn wrapped(self) -> bool {
-        self.deliveries == 0 && self.events == 0
+    /// (deliveries, events): which scans just reached the end and restart
+    /// from the first row. The two scans wrap independently.
+    pub(super) fn wrapped(self) -> (bool, bool) {
+        (self.deliveries == 0, self.events == 0)
     }
+}
+
+/// Progress of targeted retention for one ended Run.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub(super) enum RunCursor {
+    /// Delete the Run's pending deliveries (seek on `delivery_pending`).
+    #[default]
+    Deliveries,
+    /// Visit the Run's shell events after this rowid (`event_run_shell_ended`).
+    Events(i64),
+    Done,
+}
+
+/// One bounded unit of targeted retention for an ended Run (#171 rule 3): only
+/// that Run's rows are visited, through indexes, never the whole tables.
+pub(super) fn collect_run(
+    db: &mut Connection,
+    run: &str,
+    cursor: RunCursor,
+) -> Result<RunCursor, StorageError> {
+    let tx = db.transaction()?;
+    let terminal: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed'))",
+        [run],
+        |r| r.get(0),
+    )?;
+    if !terminal {
+        return Ok(RunCursor::Done);
+    }
+    let next = match cursor {
+        RunCursor::Deliveries => {
+            let removed = tx.execute(
+                "DELETE FROM delivery WHERE rowid IN (SELECT rowid FROM delivery INDEXED BY delivery_pending WHERE recipient_id=?1 AND state='pending' LIMIT ?2)",
+                params![run, DELIVERY_BATCH],
+            )?;
+            if removed as i64 == DELIVERY_BATCH {
+                RunCursor::Deliveries
+            } else {
+                RunCursor::Events(0)
+            }
+        }
+        RunCursor::Events(after) => {
+            let events = tx
+                .prepare("SELECT rowid FROM event INDEXED BY event_run_shell_ended WHERE target_run_id=?1 AND kind='shell_ended' AND rowid>?2 ORDER BY rowid LIMIT ?3")?
+                .query_map(params![run, after, EVENT_BATCH], |r| r.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for row in &events {
+                let eligible: bool = tx.query_row(ELIGIBLE_SQL, params![row], |r| r.get(0))?;
+                if eligible {
+                    // Only dropped/processed deliveries remain for an eligible event.
+                    tx.execute(
+                        "DELETE FROM delivery WHERE event_id=(SELECT id FROM event WHERE rowid=?1)",
+                        [row],
+                    )?;
+                    tx.execute("DELETE FROM event WHERE rowid=?1", [row])?;
+                }
+            }
+            match events.last() {
+                Some(last) if events.len() == EVENT_BATCH as usize => RunCursor::Events(*last),
+                _ => RunCursor::Done,
+            }
+        }
+        RunCursor::Done => RunCursor::Done,
+    };
+    tx.commit()?;
+    Ok(next)
 }
 
 pub(super) fn collect_batch(db: &mut Connection, cursor: Cursor) -> Result<Cursor, StorageError> {
@@ -221,6 +288,87 @@ mod tests {
                 .unwrap(),
             300
         );
+    }
+
+    #[test]
+    fn ended_run_retention_touches_only_that_runs_rows_by_index() {
+        let mut db = fixture();
+        db.execute(
+            "INSERT INTO run(id,thread_id,state,created_at) VALUES('other','a','completed','now')",
+            [],
+        )
+        .unwrap();
+        for n in 0..40 {
+            event(&db, &format!("done-{n}"), "shell_ended", "done", "now");
+            delivery(&db, &format!("done-{n}"), "done", "processed");
+            event(&db, &format!("other-{n}"), "shell_ended", "other", "now");
+            delivery(&db, &format!("other-{n}"), "other", "processed");
+            event(&db, &format!("ctx-{n}"), "context_changed", "done", "now");
+            delivery(&db, &format!("ctx-{n}"), "done", "pending");
+            delivery(&db, &format!("ctx-{n}"), "other", "pending");
+        }
+        let count =
+            |db: &Connection, sql: &str| db.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        let mut cursor = RunCursor::default();
+        let mut units = 0;
+        while cursor != RunCursor::Done {
+            cursor = collect_run(&mut db, "done", cursor).unwrap();
+            units += 1;
+        }
+        assert!(
+            units <= 4,
+            "40 events in 32-row batches plus one delivery unit: {units}"
+        );
+        assert_eq!(
+            count(&db, "SELECT count(*) FROM event WHERE id LIKE 'done-%'"),
+            0
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT count(*) FROM delivery WHERE recipient_id='done'"
+            ),
+            0
+        );
+        // The other ended Run and its pending deliveries are untouched.
+        assert_eq!(
+            count(&db, "SELECT count(*) FROM event WHERE id LIKE 'other-%'"),
+            40
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT count(*) FROM delivery WHERE recipient_id='other'"
+            ),
+            80
+        );
+        // A live Run is never collected.
+        event(&db, "live-0", "shell_ended", "live", "now");
+        delivery(&db, "live-0", "live", "pending");
+        assert_eq!(
+            collect_run(&mut db, "live", RunCursor::default()).unwrap(),
+            RunCursor::Done
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT count(*) FROM delivery WHERE recipient_id='live'"
+            ),
+            1
+        );
+        for sql in [
+            "EXPLAIN QUERY PLAN SELECT rowid FROM event INDEXED BY event_run_shell_ended WHERE target_run_id='done' AND kind='shell_ended' AND rowid>0 ORDER BY rowid LIMIT 32",
+            "EXPLAIN QUERY PLAN SELECT rowid FROM delivery INDEXED BY delivery_pending WHERE recipient_id='done' AND state='pending' LIMIT 64",
+        ] {
+            let plan: Vec<String> = db
+                .prepare(sql)
+                .unwrap()
+                .query_map([], |r| r.get(3))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            assert!(plan.iter().all(|d| d.starts_with("SEARCH")), "{plan:?}");
+        }
     }
 
     #[test]

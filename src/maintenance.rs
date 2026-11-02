@@ -29,10 +29,16 @@ pub enum Work {
     InactiveSpaces = 1 << 6,
     /// Managed clipboard images: an image was saved or released.
     Managed = 1 << 7,
+    /// Ended Runs whose own deliveries and shell events are retained (#170):
+    /// processed per Run through indexed lookups, from `Signals::run_ended`.
+    EndedRuns = 1 << 8,
+    /// The full event-retention sweep for rows that predate this owner:
+    /// startup, explicit `storage collect`, or an ended-Run queue overflow.
+    EventBacklog = 1 << 9,
 }
 
 impl Work {
-    pub const ALL: [Work; 8] = [
+    pub const ALL: [Work; 10] = [
         Work::Receipts,
         Work::Raw,
         Work::History,
@@ -41,6 +47,8 @@ impl Work {
         Work::IndexSources,
         Work::InactiveSpaces,
         Work::Managed,
+        Work::EndedRuns,
+        Work::EventBacklog,
     ];
     /// Source deletion makes derived data eligible as well.
     pub const DELETION: [Work; 3] = [Work::History, Work::SummaryCache, Work::IndexSources];
@@ -61,11 +69,17 @@ impl WorkSet {
     }
 }
 
-/// One coalescing bit per kind plus one wake permit. Bounded by `Work`.
+/// Ended Runs remembered for targeted retention. Beyond this, a full
+/// backlog sweep replaces the per-Run work (bounded memory, no loss).
+pub const ENDED_RUNS_CAPACITY: usize = 1024;
+
+/// One coalescing bit per kind plus one wake permit, and the bounded queue of
+/// ended Run ids. Bounded by `Work` and `ENDED_RUNS_CAPACITY`.
 #[derive(Debug)]
 pub struct Signals {
     dirty: AtomicU32,
     notify: Notify,
+    ended_runs: std::sync::Mutex<std::collections::VecDeque<String>>,
     /// Every mark since the last `take_seen`, never consumed by the loop.
     #[cfg(test)]
     seen: AtomicU32,
@@ -77,6 +91,7 @@ impl Default for Signals {
         let signals = Self {
             dirty: AtomicU32::new(0),
             notify: Notify::new(),
+            ended_runs: std::sync::Mutex::default(),
             #[cfg(test)]
             seen: AtomicU32::new(0),
         };
@@ -102,6 +117,55 @@ impl Signals {
     #[cfg(test)]
     pub fn take_seen(&self) -> WorkSet {
         WorkSet(self.seen.swap(0, Ordering::AcqRel))
+    }
+    /// Call after a Run's terminal state committed: its own deliveries and
+    /// shell events become eligible for targeted retention.
+    pub fn run_ended(&self, run: &str) {
+        let overflow = {
+            let mut runs = self.ended_runs.lock().expect("ended runs");
+            if runs.iter().any(|known| known == run) {
+                false
+            } else if runs.len() < ENDED_RUNS_CAPACITY {
+                runs.push_back(run.to_owned());
+                false
+            } else {
+                true
+            }
+        };
+        self.mark(if overflow {
+            Work::EventBacklog
+        } else {
+            Work::EndedRuns
+        });
+    }
+    /// Ended Runs to process now; the caller re-queues the unfinished ones.
+    pub fn take_ended_runs(&self) -> Vec<String> {
+        self.ended_runs
+            .lock()
+            .expect("ended runs")
+            .drain(..)
+            .collect()
+    }
+    /// Re-queue Runs whose retention was deferred, ahead of newer ones.
+    pub fn requeue_ended_runs(&self, runs: Vec<String>) {
+        if runs.is_empty() {
+            return;
+        }
+        let overflow = {
+            let mut queue = self.ended_runs.lock().expect("ended runs");
+            for run in runs.into_iter().rev() {
+                if !queue.contains(&run) {
+                    queue.push_front(run);
+                }
+            }
+            let overflow = queue.len() > ENDED_RUNS_CAPACITY;
+            queue.truncate(ENDED_RUNS_CAPACITY);
+            overflow
+        };
+        self.mark(Work::EndedRuns);
+        if overflow {
+            self.mark(Work::EventBacklog);
+        }
     }
     /// Take every marked kind; later marks are kept for the next pass.
     pub fn take(&self) -> WorkSet {
@@ -160,6 +224,26 @@ mod tests {
         assert!(!set.contains(Work::History));
         signals.restore(set);
         assert_eq!(signals.pending(), set);
+    }
+
+    #[test]
+    fn ended_runs_are_bounded_and_overflow_falls_back_to_the_backlog_sweep() {
+        let signals = Signals::default();
+        signals.take();
+        for n in 0..ENDED_RUNS_CAPACITY {
+            signals.run_ended(&format!("r{n}"));
+        }
+        signals.run_ended("r0");
+        assert_eq!(signals.take(), {
+            let mut set = WorkSet::default();
+            set.insert(Work::EndedRuns);
+            set
+        });
+        signals.run_ended("overflow");
+        assert!(signals.take().contains(Work::EventBacklog));
+        let runs = signals.take_ended_runs();
+        assert_eq!(runs.len(), ENDED_RUNS_CAPACITY);
+        assert!(signals.take_ended_runs().is_empty());
     }
 
     #[test]

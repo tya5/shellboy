@@ -4,6 +4,8 @@
 -- partial index lets receipt collection seek pending attachment deliveries.
 -- IF NOT EXISTS / OR REPLACE keep downgrade fixtures simple; counters are
 -- recomputed exactly from the saved rows.
+-- Targeted Run-end event retention (#170/#171): one Run's shell events by seek.
+CREATE INDEX IF NOT EXISTS event_run_shell_ended ON event(target_run_id) WHERE kind='shell_ended';
 CREATE INDEX IF NOT EXISTS attachment_delivery_operation ON attachment_delivery(operation_id) WHERE status IN ('accepted','held');
 INSERT OR REPLACE INTO quota_counter VALUES('logical.history',
  (SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM node)
