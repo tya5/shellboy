@@ -2989,4 +2989,19 @@ a binding-preserving client path Shellboy can use without a model catalog.
 The same Anthropic binding may also affect existing prefix summary, explicit
 middle summary and #50 omission with thinking enabled; tracked as a separate
 question, not changed here.
+## #181 Mid-Turn summary: drop reasoning by new epoch (2026-11-03)
 
+Status: decided in review with the user; implementation on hold until the
+coordinator confirms after the survey. An adopted B replacement advances the
+Thread's reasoning epoch in the same transaction, so no reasoning or opaque
+block saved before it is sent again; the decision applies to every adapter
+without per-adapter retain/skip branches. Basis: OpenAI documents reasoning
+items as recommended, not required, and the user's GPT route accepted the
+shape (acceptance, 2026-11-03). Anthropic's preserved-thinking rules allow
+removing thinking blocks from the start, the end or all of them. Codex, OpenCode
+and Goose compact mid-Turn without carrying reasoning. Impact: earlier-Turn
+reasoning is dropped too, and the cache effect is unmeasured. Claude is not
+live-validated. Revisit if a provider rejects the shape (fallback: skip
+predicate on Anthropic thinking in the active Turn), if measured cache or
+quality loss warrants a positional drop, or to keep Responses reasoning later.
+#182 tracks the separate risk to the existing edits.

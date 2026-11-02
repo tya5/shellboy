@@ -11,12 +11,13 @@ cached/input ratio of 84.34% excluding the first request, against 49.76% on main
 `c090fa79`; details in acceptance and on #183. Paid cache-hit re-measurement (#151
 conditions) awaits the user's approval.
 ## Mid-Turn summary design (#181, awaiting review)
+## Mid-Turn summary design (#181, implementation on hold)
 
-Design memo [midturn-compaction](../design/midturn-compaction.md) proposes option
-B: replace one old run of whole groups inside the active Turn, keeping the
-request, later user messages and the latest complete tool group onward. No code
-yet. Next: leader review, then implementation; Responses stays skipped until the
-paid validation (user approval required) passes.
+The [midturn-compaction](../design/midturn-compaction.md) memo was reviewed. The
+drop-reasoning default (new epoch at adoption) applies to all adapters; Claude
+is supported by documentation but not live-validated. The paid GPT-route check
+of the B request shape passed (see acceptance). Next: implement only after the
+coordinator confirms; #182 tracks the existing edits on Claude 5.1+ with thinking.
 
 ## Paused index consumption (#173)
 

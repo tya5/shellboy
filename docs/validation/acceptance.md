@@ -27,6 +27,24 @@ off-by-one raw counter. Local full runs share a build directory with other
 worktrees; unrelated failures traced to that sharing (a stale RAG `--cursor`
 binary, a missing `shellboy` binary) passed after a rebuild. Branch CI on three
 OSes is the acceptance gate; Windows and Linux are not verified locally.
+## Mid-Turn B request shape on the GPT subscription route (#181, 2026-11-03)
+
+Paid provider check, approved by the user, limited to the `litellm` connection
+(ChatGPT backend through LiteLLM), model `gpt-5.6-luna`, native macOS, debug
+build of branch `issue-181/midturn-design` (no code change from 777c100d). A
+temp data dir with only the connection's base URL copied was deleted afterwards.
+B is not implemented. The exact wire body exported by `thread request --attempt
+--body` was edited by a harness into the B shape: covered groups replaced by one
+developer summary item from a real `compact --summary` request, and all
+reasoning items removed. Two runs. The B-shaped requests returned HTTP 200
+`completed`, and the model continued to the correct answer, including when the
+retained response's reasoning item was dropped. The baselines also succeeded.
+19 requests (15 conversation, 4 summary): 131,227 input / 22,528 cached /
+4,102 output tokens, $0.013 at the given luna prices. Not measured: cache
+behaviour (the harness omitted Shellboy's routing headers), other
+models/endpoints, long Turns. Not validated: Claude (by instruction), Chat
+Completions, Shellboy's own B adoption code. Details:
+[midturn-compaction](../design/midturn-compaction.md#9-real-provider-validation-2026-11-03-approved-gpt-subscription-only).
 
 ## Index-source GC scan (#164, 2026-11-02)
 
