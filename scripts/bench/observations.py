@@ -11,15 +11,23 @@ class RequestLog:
         self.sessions = sessions
         self.lock = threading.Lock()
         self.workspaces = []
+        self.session_ids = {}
         self.events = []
 
     def set_workspaces(self, paths):
         self.workspaces = [os.fsencode(str(path)) for path in paths]
 
-    def record(self, path, body, conversation=None):
-        # A unique workspace is evidence of association, not merely a guess
-        # based on concurrent request order or an agent's process shape.
-        if conversation is None:
+    def set_session_ids(self, ids):
+        if len(ids) != self.sessions or len(set(ids)) != self.sessions or not all(ids):
+            raise ValueError('Missing or duplicate session IDs')
+        self.session_ids = {sid: i for i, sid in enumerate(ids)}
+
+    def record(self, path, body, conversation=None, session_id=None):
+        # Prefer the OpenCode session ID explicitly supplied by its adapter.
+        # Workspace paths distinguish the other adapters' synthetic sessions.
+        if session_id is not None:
+            conversation = self.session_ids.get(session_id)
+        elif conversation is None:
             matches = [i for i, workspace in enumerate(self.workspaces)
                        if re.search(re.escape(workspace) + rb'(?![A-Za-z0-9_.-])', body)]
             if len(matches) == 1:
@@ -45,7 +53,7 @@ class RequestLog:
                                   'last_bytes': sizes[-1] if complete else None})
         return {'requests': events, 'unattributed_requests': unknown,
                 'conversations': conversations,
-                'attribution': 'unique workspace path or sole session; unknown is not estimated'}
+                'attribution': 'explicit session ID, unique workspace path, or sole session; unknown is not estimated'}
 
 
 def storage(roots):

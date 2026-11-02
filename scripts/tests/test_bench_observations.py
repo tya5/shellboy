@@ -29,6 +29,16 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(log.result()['conversations'][0], {
             'conversation': 0, 'requests': 2, 'total_bytes': 5, 'first_bytes': 2, 'last_bytes': 3})
 
+    def test_explicit_session_id_attributes_request_without_workspace(self):
+        log = RequestLog(2)
+        log.set_session_ids(['first-id', 'second-id'])
+        log.record('/model', b'auxiliary', session_id='second-id')
+        log.record('/model', b'missing', session_id='unknown-id')
+        self.assertEqual(log.result()['requests'][0]['conversation'], 1)
+        self.assertIsNone(log.result()['requests'][1]['conversation'])
+        with self.assertRaises(ValueError):
+            log.set_session_ids(['same', 'same'])
+
     def test_workspace_prefix_collision_and_ambiguity(self):
         log = RequestLog(2)
         log.set_workspaces(['/tmp/workspace-1', '/tmp/workspace-10'])

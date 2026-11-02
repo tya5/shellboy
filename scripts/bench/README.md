@@ -120,8 +120,9 @@ shell-exit checks precede each PSS sample and are identical across N values.
 The cross-agent run records the HTTP body length in bytes for each received POST,
 without retaining request bodies. It reports total, first and last request bytes
 per conversation only when every request can be attributed: the Shellboy fixture
-uses its Thread identity; the shared server uses an unambiguous workspace path
-in the request, or the sole session when N=1. Unattributed requests and incomplete
+uses its Thread identity; opencode uses its session ID header and adapter session
+IDs; the other adapters use an unambiguous workspace path in the request, or the
+sole session when N=1. Unattributed requests and incomplete
 conversation values remain explicit, not estimates or zeroes. Auxiliary requests
 and token-count requests are included when present. The fake usage is not a token
 measurement; no tokenizer estimate is supplied.

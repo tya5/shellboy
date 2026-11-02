@@ -529,6 +529,8 @@ def measure_case(agent, sessions, sampler):
             runtime = []
             try:
                 runtime = agent.start(root, env, workspaces)
+                if isinstance(agent, OpenCode):
+                    model.traffic.set_session_ids([session.sid for session in runtime])
                 roots = [pid for session in runtime for pid in session.pids]
                 # Process-per-session agents give no readiness signal before the
                 # first turn; let every agent settle for the same 3 s (as jcode's script).

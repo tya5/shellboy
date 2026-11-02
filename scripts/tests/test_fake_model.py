@@ -73,6 +73,17 @@ class DecideTests(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
+    def test_session_header_attributes_auxiliary_request(self):
+        with fake.FakeModel(2) as server:
+            server.traffic.set_session_ids(['first-id', 'second-id'])
+            body = json.dumps(request('chat', [('user', 'title')])).encode()
+            req = Request(server.origin + '/v1/chat/completions', data=body,
+                          headers={'content-type': 'application/json',
+                                   'x-opencode-session-id': 'second-id'})
+            with open_url(req, timeout=10) as response:
+                response.read()
+            self.assertEqual(server.traffic.result()['requests'][0]['conversation'], 1)
+
     def test_body_bytes_are_recorded_without_body_content(self):
         with fake.FakeModel(1) as server:
             body = request('responses', [('user', fake.PROMPTS[4])])

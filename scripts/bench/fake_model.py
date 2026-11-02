@@ -318,7 +318,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < size <= MAX_BODY:
                 raise ValueError('missing or oversized body')
             raw = self.rfile.read(size)
-            self.server.traffic.record(path, raw)
+            self.server.traffic.record(path, raw, session_id=self.headers.get('x-opencode-session-id'))
             if len(raw) != size:
                 raise ValueError('incomplete body')
             body = json.loads(raw)
