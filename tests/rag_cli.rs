@@ -123,13 +123,6 @@ fn literal_japanese_search_diff_sync_saved_revision_and_unregister_preserve_orig
             .unwrap()
             .is_empty()
     );
-    call(root, &["index", "--source", "notes"], true);
-    assert!(
-        search(root, "SHELLBOY_KNOWLEDGE_OLD")["result"]["items"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
     let saved = call(root, &["get", "--ref", reference], true);
     assert!(
         saved["result"]["text"]
@@ -137,6 +130,15 @@ fn literal_japanese_search_diff_sync_saved_revision_and_unregister_preserve_orig
             .unwrap()
             .contains("SHELLBOY_KNOWLEDGE_OLD")
     );
+    call(root, &["index", "--source", "notes"], true);
+    assert!(
+        search(root, "SHELLBOY_KNOWLEDGE_OLD")["result"]["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let expired = call(root, &["get", "--ref", reference], false);
+    assert_eq!(expired["error"]["code"], "revision_unavailable");
     std::fs::rename(
         root.join("materials/notes.md"),
         root.join("materials/renamed.md"),
@@ -160,7 +162,10 @@ fn literal_japanese_search_diff_sync_saved_revision_and_unregister_preserve_orig
             .unwrap()
             .is_empty()
     );
-    call(root, &["get", "--ref", reference], true);
+    assert_eq!(
+        call(root, &["get", "--ref", reference], false)["error"]["code"],
+        "revision_unavailable"
+    );
     std::fs::write(
         root.join("materials/notes.md"),
         "変更した再開手順 SHELLBOY_KNOWLEDGE_NEW",
