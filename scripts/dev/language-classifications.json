@@ -123,5 +123,170 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/watch.rs:06000f833535e558:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:18550f290349a89a:1": {
+    "category": "a",
+    "reason": "Reviewed WatchText::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "8c0a3f87c17fefb427727965b866564852cfb217eb46ee5df155b55d6cb6b0cb"
+  },
+  "src/ui/watch.rs:1971b666d87a70a5:1": {
+    "category": "a",
+    "reason": "Reviewed WatchText::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "8c0a3f87c17fefb427727965b866564852cfb217eb46ee5df155b55d6cb6b0cb"
+  },
+  "src/ui/watch.rs:1cd2919dee09a163:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:2b3f59bcf1ccff36:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:2e6048d5c47cd6bd:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:4bc4b9f68946ce69:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:4ca62ab5942a02fb:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:543ab193920f7dc5:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:60642cbc5feb8974:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:60f937a6b5fda906:1": {
+    "category": "a",
+    "reason": "Reviewed WatchText::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "8c0a3f87c17fefb427727965b866564852cfb217eb46ee5df155b55d6cb6b0cb"
+  },
+  "src/ui/watch.rs:6570d98bd30c26e1:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:6b99c45c7c891267:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:7bfd590e0d39df9e:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:88dfe7a8b2e0c515:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:8e31a367e5342382:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:97d0fff75791f114:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:99072feb7ef6b61e:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:9ee5b566af764e4d:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:a11d38283bd0d638:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:a94dc13d471ff1c6:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:b56c4bb2b4ef1175:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:b66643d6dddc1ffd:1": {
+    "category": "a",
+    "reason": "Reviewed WatchText::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "8c0a3f87c17fefb427727965b866564852cfb217eb46ee5df155b55d6cb6b0cb"
+  },
+  "src/ui/watch.rs:c89076c6194f1ec4:1": {
+    "category": "a",
+    "reason": "Reviewed WatchText::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "8c0a3f87c17fefb427727965b866564852cfb217eb46ee5df155b55d6cb6b0cb"
+  },
+  "src/ui/watch.rs:ccd81f40568c8579:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:d5ee3958bdac2ec1:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:d6764437bf657c91:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:e053afa0ad27475e:1": {
+    "category": "a",
+    "reason": "Reviewed WatchText::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "8c0a3f87c17fefb427727965b866564852cfb217eb46ee5df155b55d6cb6b0cb"
+  },
+  "src/ui/watch.rs:e93b3abbec7ee108:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:f711510f0b638849:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:fc06de8f3193d4a1:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:fc87a70c4c84c07a:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
+  },
+  "src/ui/watch.rs:ff4f92738ac49be3:1": {
+    "category": "a",
+    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
   }
 }

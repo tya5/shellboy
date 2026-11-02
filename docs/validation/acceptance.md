@@ -8457,3 +8457,11 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+### #152 stage C: Watch resource classification (2026-11-02)
+
+A scoped manifest containing the 33 reviewed Watch decisions yields Watch
+`a=34, b=32, c=0`; the existing full manifest fails its pre-existing stale
+`src/presentation/messages.rs` fingerprint on main 2607218b, so this is not a
+whole-repository acceptance result. Python `test_language_audit.py` passed 13
+tests and JSON parsing passed on macOS. No product code or symbols changed.
+Exact task CI and three-OS integration validation remain pending.
