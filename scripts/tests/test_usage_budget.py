@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bench'))
-from usage_budget import Budget, StopExperiment, UsageStream, cache_ratios, normalize_usage
+from usage_budget import Budget, StopExperiment, UsageStream, cache_ratios, normalize_usage, validate_request
 
 H = {'session': True, 'trace': False, 'shellboy': False}
 
@@ -108,6 +108,23 @@ class UsageStreamTests(unittest.TestCase):
             stream.event({'error': {'message': 'redacted'}})
         with self.assertRaises(StopExperiment):
             stream.done()
+
+
+class RequestGuardTests(unittest.TestCase):
+    def test_exact_path_model_and_bounded_output(self):
+        body = {'model': 'gpt-6.1-terra', 'max_output_tokens': 2048, 'stream': True}
+        self.assertEqual(validate_request('/v1/responses', body), 'responses')
+        for patch in ({'model': 'other'}, {'max_output_tokens': 2049}, {'stream': False},
+                      {'fallbacks': ['other']}):
+            with self.subTest(patch=patch), self.assertRaises(StopExperiment):
+                validate_request('/v1/responses', {**body, **patch})
+        with self.assertRaises(StopExperiment):
+            validate_request('/v1/unknown', body)
+
+    def test_messages_and_chat_caps(self):
+        body = {'model': 'gpt-6.1-terra', 'max_tokens': 10, 'stream': True}
+        self.assertEqual(validate_request('/v1/messages', body), 'messages')
+        self.assertEqual(validate_request('/v1/chat/completions', body), 'chat')
 
 
 if __name__ == '__main__':

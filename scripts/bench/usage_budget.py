@@ -133,3 +133,23 @@ class UsageStream:
         if self.failed or not self.terminal:
             raise StopExperiment('incomplete provider stream')
         return normalize_usage(self.wire, self.usage)
+
+
+def validate_request(path, body):
+    """Reject unknown routes, alternate models and uncapped output before forwarding."""
+    wires = {'/v1/responses': ('responses', 'max_output_tokens'),
+             '/v1/chat/completions': ('chat', 'max_tokens'),
+             '/v1/messages': ('messages', 'max_tokens')}
+    if path not in wires or not isinstance(body, dict):
+        raise StopExperiment('unknown API path or request')
+    wire, output_key = wires[path]
+    if body.get('model') != 'gpt-6.1-terra':
+        raise StopExperiment('unexpected model')
+    limit = body.get(output_key)
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 2048:
+        raise StopExperiment('missing or excessive output limit')
+    if body.get('stream') is not True:
+        raise StopExperiment('streaming usage is required')
+    if body.get('models') or body.get('fallbacks') or body.get('route'):
+        raise StopExperiment('fallback routing is forbidden')
+    return wire
