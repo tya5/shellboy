@@ -395,7 +395,7 @@ panic/queue messages and other unresolved candidates remain separate; no blanket
 source translation, manifest reclassification, fingerprint refresh or protected
 adoption is made. This product work is after the 0.6.1 cutoff.
 
-Fresh local macOS fmt/check/focused Clippy and10deletion tests passed, plus134
+Fresh local macOS fmt/check/focused Clippy and10deletion tests passed, plus145
 Python tooling tests (including13audit fixtures). New coverage checks exact En/Ja
 wrappers, Unicode/combining source text, code/hint/details and absent hints,
 non-storage pass-through, actual temporary DB cleanup failure after committed

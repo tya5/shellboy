@@ -3920,7 +3920,7 @@ the exact original Ja sentence and the underlying error display. SaveFailed
 classification, irreversible Core deletion, rollback/tombstone observation,
 admission closure, cleanup/shutdown and limits remain unchanged.
 
-Fresh local macOS fmt/check/focused Clippy,10deletion tests and134Python tests
+Fresh local macOS fmt/check/focused Clippy,10deletion tests and145Python tests
 passed. Actual fault injection covers both configured locales and final UI status;
 exact-tip CI is reported separately. No #150/#157 production range changes.
 Watch recovery projection now defers with #157; panic/queue messages requiring

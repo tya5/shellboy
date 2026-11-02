@@ -8433,7 +8433,7 @@ The existing DeletedWithWarning UI status already localizes its outer sentence.
 Only frontend/thread_deletion.rs production changes; #150/#157 remain untouched.
 
 Local fresh-library macOS fmt/check/focused Clippy and10deletion tests passed;
-134Python tooling tests (13audit fixtures) passed. Regressions cover exact both-
+145Python tooling tests (13audit fixtures) passed. Regressions cover exact both-
 language messages, verbatim Unicode source diagnostics, absent/present hints,
 classification-independent source words, real cleanup failure after Core commit,
 both configured UI locales/final status, admission closure and SaveFailed
