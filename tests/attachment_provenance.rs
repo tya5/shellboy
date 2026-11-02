@@ -1530,3 +1530,177 @@ async fn issue_158_unknown_binary_image_is_not_sent() {
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue_160_auto_compaction_detached_attachment_and_retry() {
+    for mode in ["removed", "limit", "active"] {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n[compaction]\nauto_at_tokens=100\n[limits]\nattachment_request_bytes=10\nattachment_file_bytes=10\n")).unwrap();
+        let owner = DataOwner::start(
+            Some(config),
+            Some(root.path().join("data")),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let old = root.path().join("old.txt");
+        std::fs::write(&old, b"123456").unwrap();
+        let accepted = control
+            .send_draft(
+                operation(&control),
+                defaults(),
+                None,
+                "first".into(),
+                vec![AttachmentInput {
+                    path: old,
+                    kind: AttachmentKind::File,
+                }],
+            )
+            .await
+            .unwrap();
+        let thread = accepted["thread_id"].as_str().unwrap().to_owned();
+        let source = accepted["message_id"].as_str().unwrap().to_owned();
+        let first = incoming(&control, &thread, &mut receive).await;
+        let id = attachments(&manifest(&control, &thread).await)[0]["attachment_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let mut reply = answer("first answer");
+        reply["usage"] = json!({"input_tokens":10,"output_tokens":1});
+        first.reply.send((200, reply)).unwrap();
+        settled(&control, &thread).await;
+        if mode == "removed" {
+            request(
+                &control,
+                Command::AttachmentRemove(AttachmentRemoveArgs {
+                    thread_id: Some(thread.clone()),
+                    attachment_id: id.clone(),
+                }),
+            )
+            .await;
+        }
+        if mode == "limit" {
+            let new = root.path().join("new.txt");
+            std::fs::write(&new, b"abcdef").unwrap();
+            control
+                .send_draft(
+                    operation(&control),
+                    defaults(),
+                    Some(thread.clone()),
+                    "second".into(),
+                    vec![AttachmentInput {
+                        path: new,
+                        kind: AttachmentKind::File,
+                    }],
+                )
+                .await
+                .unwrap();
+        } else {
+            send(&control, &thread, "second").await;
+        }
+        let second = incoming(&control, &thread, &mut receive).await;
+        let mut reply = answer("second answer");
+        reply["usage"] = json!({"input_tokens":150,"output_tokens":1});
+        second.reply.send((200, reply)).unwrap();
+        settled(&control, &thread).await;
+        let target = thread.clone();
+        let attachment = id.clone();
+        let before: (String, Option<String>) = control.store.database.call(move |db| db.query_row("SELECT state,reason FROM attachment_selection WHERE thread_id=?1 AND attachment_id=?2", rusqlite::params![target, attachment], |r| Ok((r.get(0)?,r.get(1)?))).map_err(Into::into)).await.unwrap();
+        match mode {
+            "removed" => assert_eq!(
+                before,
+                ("excluded".into(), Some("explicitly removed".into()))
+            ),
+            "limit" => assert_eq!(
+                before,
+                ("excluded".into(), Some("request raw-byte limit".into()))
+            ),
+            _ => assert_eq!(before.0, "active"),
+        }
+        let resumed = request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                sender_label: None,
+                now: false,
+                thread_id: Some(thread.clone()),
+                text: "third".into(),
+            }),
+        )
+        .await;
+        let summary = incoming(&control, &thread, &mut receive).await;
+        assert_eq!(
+            summary.body["tools"],
+            json!([]),
+            "automatic summary: {mode}"
+        );
+        summary
+            .reply
+            .send((200, answer("synthetic summary")))
+            .unwrap();
+        let next = incoming(&control, &thread, &mut receive).await;
+        let target = thread.clone();
+        let attachment = id.clone();
+        let source_id = source.clone();
+        let (in_path, state, reason): (bool,String,Option<String>) = control.store.database.call(move |db| Ok((db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id=?2)", rusqlite::params![target,source_id], |r| r.get(0))?, db.query_row("SELECT state FROM attachment_selection WHERE thread_id=?1 AND attachment_id=?2", rusqlite::params![target,attachment], |r| r.get(0))?,db.query_row("SELECT reason FROM attachment_selection WHERE thread_id=?1 AND attachment_id=?2", rusqlite::params![target,attachment], |r| r.get(0))?))).await.unwrap();
+        assert!(!in_path, "original source was replaced: {mode}");
+        assert_eq!(state, "excluded");
+        assert_eq!(
+            reason.as_deref(),
+            Some(match mode {
+                "removed" => "explicitly removed",
+                "limit" => "request raw-byte limit",
+                _ => "context_replacement",
+            })
+        );
+        if mode == "active" {
+            assert!(next.body.to_string().contains("context_replacement"));
+        } else {
+            assert!(!next.body.to_string().contains(&id));
+        }
+        // Simulate the persisted recovery state of an older version, while keeping
+        // its detached selection and replacement path untouched across retry.
+        next.reply.send((500,json!({"error":{"message":"Attachment synthetic source is outside the selected path"}}))).unwrap();
+        settled(&control, &thread).await;
+        let turn_id = resumed["turn_id"].as_str().unwrap().to_owned();
+        let saved: (String, Option<String>) = control
+            .store
+            .database
+            .call(move |db| {
+                db.query_row(
+                    "SELECT state,recovery_reason_json FROM turn WHERE id=?1",
+                    [turn_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(Into::into)
+            })
+            .await
+            .unwrap();
+        assert_eq!(saved.0, "recovery_wait");
+        assert!(
+            saved
+                .1
+                .unwrap_or_default()
+                .contains("source is outside the selected path")
+        );
+        request(
+            &control,
+            Command::RunRetry(RunTarget {
+                run_id: resumed["run_id"].as_str().unwrap().into(),
+            }),
+        )
+        .await;
+        let retry = incoming(&control, &thread, &mut receive).await;
+        if mode == "active" {
+            assert!(retry.body.to_string().contains("context_replacement"));
+        } else {
+            assert!(!retry.body.to_string().contains(&id));
+        }
+        finish(&control, &thread, retry).await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }
+}

@@ -83,6 +83,11 @@ pub(super) fn snapshot_selection_tx(
             params![thread, source_node_id],
             |r| r.get(0),
         )?;
+        // Preserve pending context-replacement notices, but do not validate or
+        // replay older exclusions whose source is no longer on this path.
+        if !in_path && state != "active" && reason.as_deref() != Some("context_replacement") {
+            continue;
+        }
         let detached = !in_path && reason.as_deref() == Some("context_replacement");
         if detached {
             if detached_count >= DEFAULT_LIST_LIMIT {

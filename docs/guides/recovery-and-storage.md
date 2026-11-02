@@ -151,6 +151,9 @@ shellboy run retry --run RUN_ID
 ```
 
 The TUI equivalents are `/attachments`, `/detach ATTACHMENT_ID`, and `/retry`.
+In 0.6.1, retry also recovers a conversation stuck with `source is outside the
+selected path` after a removed attachment's source was compacted; no migration
+or manual data repair is required.
 Exclusion does not delete the file; the model receives an exclusion notice
 instead of its contents. Confirm the Thread, attachment, and recovery-wait Run
 before acting. If removal is unavailable, an external file can instead be

@@ -1389,3 +1389,40 @@ async fn attachment_list_seeks_existing_indexes_and_does_not_wait_for_writer() {
     .await
     .expect("attachment observation watchdog");
 }
+
+#[tokio::test]
+async fn issue_160_removed_source_off_path_does_not_block_preparation() {
+    let f = Fixture::new(Config::default()).await;
+    let id = f.add("removed.txt", b"synthetic").await;
+    f.remove(id.clone()).await;
+    f.db.call(move |db| {
+        let tx = db.transaction()?;
+        let source: String = tx.query_row(
+            "SELECT source_node_id FROM attachment_ref WHERE id=?1",
+            [&id],
+            |r| r.get(0),
+        )?;
+        exclude_replaced_sources_tx(&tx, "thread", std::slice::from_ref(&source))?;
+        let reason: String = tx.query_row(
+            "SELECT reason FROM attachment_selection WHERE attachment_id=?1",
+            [&id],
+            |r| r.get(0),
+        )?;
+        assert_eq!(reason, "explicitly removed");
+        tx.execute(
+            "DELETE FROM thread_path WHERE thread_id='thread' AND node_id=?1",
+            [&source],
+        )?;
+        tx.commit()?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let prepared = f
+        .service
+        .prepare("thread", CancellationToken::new(), false)
+        .await
+        .unwrap();
+    assert!(prepared.manifest.is_empty());
+    f.db.shutdown().await.unwrap();
+}
