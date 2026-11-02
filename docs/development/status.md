@@ -3998,3 +3998,11 @@ The same private-mode, owner, protected-ancestor, non-symlink, path-length and
 identity/lease checks apply; endpoint publication and cleanup retain their
 ordering. Windows named pipes and configuration are unchanged. Validation
 results and untested environments are reported separately in acceptance.
+
+### #152 Detail Source Language Slice
+
+Detail-source read limits, unavailable-source explanations and generated current
+execution labels follow the startup UI language; source identifiers, shell
+states, output and persisted values are not translated. This is one Stage C
+slice, not completion of the whole language audit. Exact validation is recorded
+separately in the task handoff.

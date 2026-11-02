@@ -455,6 +455,15 @@ impl<'a> HistoryReader<'a> {
         &self,
         node_ids: Vec<String>,
     ) -> Result<DetailSourceSnapshot, ApiError> {
+        self.links_in(node_ids, self.control.store.config.ui.language)
+            .await
+    }
+
+    async fn links_in(
+        &self,
+        node_ids: Vec<String>,
+        language: UiLanguage,
+    ) -> Result<DetailSourceSnapshot, ApiError> {
         if node_ids.is_empty()
             || node_ids.len() > 2
             || node_ids.iter().any(|id| id.is_empty() || id.len() > 256)
@@ -514,11 +523,11 @@ impl<'a> HistoryReader<'a> {
                         unavailable_reason:Some(reason.into()),
                     };
                     let Some(row)=row.filter(|row| row.payload.is_some() && row.reason.is_none()) else {
-                        sources.push(unavailable("出典が削除・回収済み、または取得上限を超えています。O 原文で確認"));
+                        sources.push(unavailable(i18n::local!(language, "出典が削除・回収済み、または取得上限を超えています。O 原文で確認", "Source deleted, collected, or over the read limit. O: original")));
                         continue;
                     };
                     if row.payload.as_deref().is_none_or(|payload|serde_json::from_str::<Value>(payload).is_err()) {
-                        sources.push(unavailable("出典の形式を確認できません。O 原文で確認"));
+                        sources.push(unavailable(i18n::local!(language, "出典の形式を確認できません。O 原文で確認", "Cannot read the source format. O: original")));
                         continue;
                     }
                     let mut node=row.into_ui_node(Some(NodePosition::At(0)),width);
@@ -526,21 +535,21 @@ impl<'a> HistoryReader<'a> {
                     let field=|key:String,label:&str,value:String| crate::presentation::PresentationField {
                         key,label:label.into(),value,display:None,value_omitted:false,
                     };
-                    fields.push(field("/ui/detail_preview_bounds".into(),"詳細の取得範囲",crate::ui::text_width::glyphs::select("最大16呼出し・128項目・128リンク、既存metadata上限内 · O原文で確認", "最大16呼出し・128項目・128リンク、既存metadata上限内 | O原文で確認").into()));
+                    fields.push(field("/ui/detail_preview_bounds".into(),i18n::local!(language, "詳細の取得範囲", "Detail read limits"),crate::ui::text_width::glyphs::select(i18n::local!(language, "最大16呼出し・128項目・128リンク、既存metadata上限内 · O原文で確認", "Up to 16 calls, 128 fields, and 128 links within metadata limits · O: original"), i18n::local!(language, "最大16呼出し・128項目・128リンク、既存metadata上限内 | O原文で確認", "Up to 16 calls, 128 fields, and 128 links within metadata limits | O: original")).into()));
                     if current.len()>16 {
-                        fields.push(field("/current_tools/truncated".into(),"現在の実行情報",crate::ui::text_width::glyphs::select("先頭16呼出しまで · 詳細はCLIで確認", "先頭16呼出しまで | 詳細はCLIで確認").into()));
+                        fields.push(field("/current_tools/truncated".into(),i18n::local!(language, "現在の実行情報", "Current execution"),crate::ui::text_width::glyphs::select(i18n::local!(language, "先頭16呼出しまで · 詳細はCLIで確認", "First 16 calls · see CLI for details"), i18n::local!(language, "先頭16呼出しまで | 詳細はCLIで確認", "First 16 calls | see CLI for details")).into()));
                     }
                     for (index,(call,execution,state,code,complete,retention,has_output)) in current.into_iter().take(16).enumerate() {
                         let prefix=format!("/current_tools/{index}");
-                        let mut call_field=field(format!("{prefix}/call_id"),"呼出しID",call.clone().unwrap_or_default());
-                        if call.is_none() {call_field.display=Some(crate::ui::text_width::glyphs::select("IDが表示上限を超えています · O原文", "IDが表示上限を超えています | O原文").into());call_field.value_omitted=true;}
+                        let mut call_field=field(format!("{prefix}/call_id"),i18n::local!(language, "呼出しID", "Call ID"),call.clone().unwrap_or_default());
+                        if call.is_none() {call_field.display=Some(crate::ui::text_width::glyphs::select(i18n::local!(language, "IDが表示上限を超えています · O原文", "ID exceeds display limit · O: original"), i18n::local!(language, "IDが表示上限を超えています | O原文", "ID exceeds display limit | O: original")).into());call_field.value_omitted=true;}
                         fields.push(call_field);
-                        fields.push(field(format!("{prefix}/execution_id"),"実行ID",execution.unwrap_or_else(||"未取得".into())));
-                        fields.push(field(format!("{prefix}/state"),"現在の実行状態",state.unwrap_or_else(||"利用不可・未実行".into())));
-                        fields.push(field(format!("{prefix}/exit_code"),"現在の終了コード",code.map_or("未確定".into(),|v|v.to_string())));
-                        fields.push(field(format!("{prefix}/output_complete"),"出力回収完了",complete.map_or("未取得".into(),|v|v.to_string())));
-                        fields.push(field(format!("{prefix}/retention_generation"),"出力保持世代",retention.map_or("未取得".into(),|v|v.to_string())));
-                        fields.push(field(format!("{prefix}/output_available"),"保存出力あり",has_output.to_string()));
+                        fields.push(field(format!("{prefix}/execution_id"),i18n::local!(language, "実行ID", "Execution ID"),execution.unwrap_or_else(||i18n::local!(language, "未取得", "Not available").into())));
+                        fields.push(field(format!("{prefix}/state"),i18n::local!(language, "現在の実行状態", "Current execution state"),state.unwrap_or_else(||i18n::local!(language, "利用不可・未実行", "Unavailable or not started").into())));
+                        fields.push(field(format!("{prefix}/exit_code"),i18n::local!(language, "現在の終了コード", "Current exit code"),code.map_or(i18n::local!(language, "未確定", "Not yet known").into(),|v|v.to_string())));
+                        fields.push(field(format!("{prefix}/output_complete"),i18n::local!(language, "出力回収完了", "Output collection complete"),complete.map_or(i18n::local!(language, "未取得", "Not available").into(),|v|v.to_string())));
+                        fields.push(field(format!("{prefix}/retention_generation"),i18n::local!(language, "出力保持世代", "Output retention generation"),retention.map_or(i18n::local!(language, "未取得", "Not available").into(),|v|v.to_string())));
+                        fields.push(field(format!("{prefix}/output_available"),i18n::local!(language, "保存出力あり", "Saved output available"),has_output.to_string()));
                     }
                     fields.extend(node.presentation.fields.into_iter().take(128usize.saturating_sub(fields.len())));
                     node.presentation.blocks=Vec::new();
@@ -907,7 +916,7 @@ mod detail_link_tests {
             .find(|field| field.key == "/current_tools/1/call_id")
             .unwrap();
         assert!(bounded_id.value_omitted && bounded_id.value.is_empty());
-        assert!(bounded_id.display.as_deref().unwrap().contains("上限"));
+        assert!(bounded_id.display.as_deref().unwrap().contains("limit"));
         assert_eq!(
             get(&first.sources[0], "/current_tools/0/state").as_deref(),
             Some("running")
@@ -918,7 +927,25 @@ mod detail_link_tests {
         );
         assert_eq!(
             get(&first.sources[1], "/current_tools/0/execution_id").as_deref(),
+            Some("Not available")
+        );
+        let japanese = reader
+            .links_in(vec!["call-g".into(), "call-other".into()], UiLanguage::Ja)
+            .await
+            .unwrap();
+        let ja_id = japanese.sources[1]
+            .fields
+            .iter()
+            .find(|f| f.key == "/current_tools/1/call_id")
+            .unwrap();
+        assert!(ja_id.display.as_deref().unwrap().contains("上限"));
+        assert_eq!(
+            get(&japanese.sources[1], "/current_tools/0/execution_id").as_deref(),
             Some("未取得")
+        );
+        assert_eq!(
+            get(&japanese.sources[0], "/current_tools/0/state").as_deref(),
+            Some("running")
         );
         owner.db.call(|db| {
             db.execute_batch("UPDATE shell_execution SET state='exited',exit_code=7,output_complete=1,retention_generation=1 WHERE id='exec'; DELETE FROM output_chunk WHERE execution_id='exec'; UPDATE node SET deleted_reason='gc',payload_json=NULL WHERE id='call-other';")?; Ok(())
@@ -944,8 +971,25 @@ mod detail_link_tests {
             get(&second.sources[0], "/current_tools/0/retention_generation").as_deref(),
             Some("1")
         );
-        assert!(second.sources[1].unavailable_reason.is_some());
+        assert!(
+            second.sources[1]
+                .unavailable_reason
+                .as_deref()
+                .unwrap()
+                .starts_with("Source deleted")
+        );
         assert!(second.sources[1].links.is_empty());
+        let japanese_deleted = reader
+            .links_in(vec!["call-other".into()], UiLanguage::Ja)
+            .await
+            .unwrap();
+        assert!(
+            japanese_deleted.sources[0]
+                .unavailable_reason
+                .as_deref()
+                .unwrap()
+                .starts_with("出典が削除")
+        );
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
     }

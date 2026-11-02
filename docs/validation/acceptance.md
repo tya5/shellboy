@@ -8554,3 +8554,10 @@ Stale cleanup, owner/mode/symlink protections and existing cleanup behavior
 remain required. Windows named-pipe behavior is outside the changed path.
 Exact commands, platform and CI results are reported in the task handoff; no
 live-provider or actual sandbox-exec observation is inferred.
+
+### #152 Detail Source Language Slice
+
+Synthetic detail-link tests exercise English and Japanese generated labels,
+missing and oversized identifiers, unavailable sources and unchanged execution
+state values. They do not establish physical-terminal behavior or completion of
+Stage C. Exact commands, results and platforms are reported in the task handoff.
