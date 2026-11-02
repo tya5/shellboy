@@ -8457,3 +8457,20 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+## Codex Shared-Server Comparison (#151)
+
+The optional `codex-shared` adapter sends each Thread to one stdio JSON-RPC
+app-server and demultiplexes replies by request ID and notifications by Thread
+ID. It validates turn IDs and fails on unexpected server requests. The existing
+per-session topology is unchanged. Three isolated unit tests cover interleaved
+routing, unexpected approval requests and mismatched turns. On macOS, Codex
+CLI 0.165.0 passed fake-model protocol smoke for N=2, 5 and 10 with five
+rounds, expected answers and tool/file checks; this is not PSS data. Pinned
+0.166.0 Linux measurements and N=20 remain unverified until comparison CI.
+
+Claude Code CLI 2.1.316 help describes `--session-id` for the conversation and
+`--input-format=stream-json` for a print session. The official Python Agent SDK
+uses a CLI subprocess transport (`src/claude_agent_sdk/_internal/transport/subprocess_cli.py`
+in `anthropics/claude-agent-sdk-python`). These observations establish the
+investigated public adapter shape, not a universal impossibility of hosting
+multiple Claude sessions in one process.

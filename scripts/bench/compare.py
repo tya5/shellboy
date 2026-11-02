@@ -345,6 +345,141 @@ class CodexSession:
         self.io.close()
 
 
+class CodexShared(Codex):
+    name = 'codex-shared'
+    shape = 'one `codex app-server` (JSON-RPC over stdio) hosting N threads'
+
+    def start(self, root, env, workspaces):
+        server = CodexSharedServer(self.binary, root, env)
+        try:
+            sessions = [server.start_thread(path) for path in workspaces]
+            sessions[0].pids = [server.io.proc.pid]
+            sessions[0].owns_server = True
+            return sessions
+        except BaseException:
+            server.close()
+            raise
+
+
+class CodexSharedServer:
+    """Demultiplex one JSON-RPC stream without mixing concurrent threads."""
+
+    def __init__(self, binary, root, env):
+        self.io = LineProc([str(binary), 'app-server'], root, env,
+                           (root / 'codex-shared.stderr').open('w'))
+        self.lock = threading.Lock()
+        self.pending = {}
+        self.threads = {}
+        self.next_id = 1
+        self.failure = None
+        self.dispatcher = threading.Thread(target=self._dispatch, daemon=True)
+        self.dispatcher.start()
+        try:
+            self.request('initialize', {'clientInfo': {'name': 'shellboy-bench', 'version': '1'}})
+            with self.lock:
+                self.io.send({'jsonrpc': '2.0', 'method': 'initialized'})
+        except BaseException:
+            self.close()
+            raise
+
+    def _fail(self, message):
+        with self.lock:
+            self.failure = message
+            for dest in [*self.pending.values(), *self.threads.values()]:
+                dest.put({'_failure': message})
+
+    def _dispatch(self):
+        try:
+            for event in self.io.events(timeout=TURN_TIMEOUT * 10):
+                method = event.get('method')
+                with self.lock:
+                    if method and 'id' in event:
+                        raise RuntimeError(f'unexpected codex server request {method}')
+                    if not method and 'id' in event:
+                        dest = self.pending.get(event['id'])
+                    else:
+                        params = event.get('params') or {}
+                        dest = self.threads.get(params.get('threadId'))
+                        if method == 'error' and dest is None:
+                            raise RuntimeError(f'unattributed codex error: {str(params)[:300]}')
+                    if dest is not None:
+                        dest.put(event)
+        except Exception as error:
+            self._fail(f'{type(error).__name__}: {error}')
+
+    def request(self, method, params):
+        dest = queue.Queue()
+        with self.lock:
+            if self.failure:
+                raise RuntimeError(self.failure)
+            rid = self.next_id
+            self.next_id += 1
+            self.pending[rid] = dest
+            self.io.send({'jsonrpc': '2.0', 'id': rid, 'method': method, 'params': params})
+        try:
+            event = dest.get(timeout=TURN_TIMEOUT)
+        except queue.Empty:
+            raise TimeoutError(f'codex {method} watchdog') from None
+        finally:
+            with self.lock:
+                self.pending.pop(rid, None)
+        if '_failure' in event or 'error' in event:
+            raise RuntimeError(f'codex {method}: {event.get("_failure") or event.get("error")}')
+        return event.get('result') or {}
+
+    def start_thread(self, cwd):
+        result = self.request('thread/start', {'cwd': str(cwd), 'model': MODEL,
+                                               'approvalPolicy': 'never',
+                                               'sandbox': 'danger-full-access'})
+        tid = result['thread']['id']
+        dest = queue.Queue()
+        with self.lock:
+            if tid in self.threads:
+                raise RuntimeError('duplicate codex thread ID')
+            self.threads[tid] = dest
+        return CodexSharedSession(self, tid, dest)
+
+    def close(self):
+        self.io.close()
+        self.dispatcher.join(timeout=10)
+
+
+class CodexSharedSession:
+    def __init__(self, server, tid, events):
+        self.server, self.thread_id, self.events = server, tid, events
+        self.pids = []
+        self.owns_server = False
+
+    def turn(self, prompt):
+        result = self.server.request('turn/start', {'threadId': self.thread_id,
+                                    'input': [{'type': 'text', 'text': prompt}]})
+        turn_id = result['turn']['id']
+        deadline, text = time.monotonic() + TURN_TIMEOUT, ''
+        while True:
+            try:
+                event = self.events.get(timeout=max(0, deadline - time.monotonic()))
+            except queue.Empty:
+                raise TimeoutError('codex turn watchdog') from None
+            if '_failure' in event:
+                raise RuntimeError(event['_failure'])
+            method, params = event.get('method'), event.get('params') or {}
+            if params.get('turnId') not in (None, turn_id):
+                raise RuntimeError('cross-turn codex event')
+            if method == 'error':
+                raise RuntimeError(f'codex error: {str(params)[:300]}')
+            if method == 'item/completed' and (params.get('item') or {}).get('type') == 'agentMessage':
+                text = str(params['item'].get('text'))
+            if method == 'turn/completed':
+                turn = params.get('turn') or {}
+                if turn.get('id') != turn_id or turn.get('status') not in (None, 'completed'):
+                    raise RuntimeError(f'codex turn failed or mismatched: {str(turn)[:300]}')
+                return text
+
+    def close(self):
+        if self.owns_server:
+            self.server.close()
+
+
 class OpenCode(Agent):
     name, wire = 'opencode', 'chat'
     shape = 'one `opencode serve` hosting N sessions over HTTP (directory per session)'
@@ -512,7 +647,7 @@ class JCodeSession:
             kill_group(self.server.proc)
 
 
-ADAPTERS = {cls.name: cls for cls in (ClaudeCode, Codex, OpenCode, JCode)}
+ADAPTERS = {cls.name: cls for cls in (ClaudeCode, Codex, CodexShared, OpenCode, JCode)}
 
 
 # ---------------------------------------------------------------------------

@@ -3938,3 +3938,13 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### Codex shared process benchmark (#151)
+
+The comparison harness can also drive multiple concurrent Codex Threads through
+one app-server, without changing the existing per-session adapter. A local macOS
+protocol smoke with Codex 0.165.0 completed N=2, 5 and 10 for five fake-model
+rounds; it has no PSS observations. Linux comparison results for the pinned
+0.166.0 are pending and must not be inferred from that smoke. Claude's public
+CLI exposes one session ID and stream per invocation; the official Python Agent
+SDK uses a CLI subprocess transport. This does not prove other Claude process
+topologies cannot exist.

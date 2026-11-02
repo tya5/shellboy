@@ -238,7 +238,8 @@ jobs:
       - name: Record observations (no memory or time thresholds)
         run: |
           mapfile -t agents < "$RUNNER_TEMP/agents/agents.args"
-          python3 scripts/bench/compare.py --agent shellboy=target/release/shellboy "${agents[@]}" \
+          codex=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["agents"]["codex"]["executable"])' "$RUNNER_TEMP/agents/provenance.json")
+          python3 scripts/bench/compare.py --agent shellboy=target/release/shellboy --agent "codex-shared=$codex" "${agents[@]}" \
             --provenance "$RUNNER_TEMP/agents/provenance.json" --out .local/compare/result.json
       - uses: actions/upload-artifact@v4
         if: always()
