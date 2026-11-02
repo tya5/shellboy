@@ -182,7 +182,15 @@ pub(super) fn run(
         tx.execute_batch(include_str!("../../migrations/0024_revisit_messages.sql"))?;
         tx.commit()?;
     }
+<<<<<<< HEAD
     validation();
+=======
+    if version < 25 {
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(include_str!("../../migrations/0025_index_recovery.sql"))?;
+        tx.commit()?;
+    }
+>>>>>>> 6772f30602 (Bound startup index recovery into indexed pages)
     validate_schema(connection)?;
     Ok(())
 }
@@ -277,7 +285,7 @@ mod activity_migration_tests {
             &|| {},
         )
         .unwrap();
-        assert_eq!(*observed.borrow(), vec![(1, 2), (2, 2)]);
+        assert_eq!(*observed.borrow(), vec![(1, 3), (2, 3), (3, 3)]);
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(
@@ -319,6 +327,7 @@ mod activity_migration_tests {
             "nodes_index_gc",
             "node_event_retention",
             "delivery_event_state",
+            "jobs_running_recovery",
         ] {
             assert_eq!(
                 db.query_row(

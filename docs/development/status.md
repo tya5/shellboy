@@ -4213,3 +4213,4 @@ projection-generated titles, keeping canonical Japanese values and source
 payloads intact. Scoped classification leaves only the unused
 `NOTICE_SOURCE_OUTSIDE_WINDOW` candidate pending; see acceptance for exact
 counts. Three-OS CI is pending.
+- #172: startup index recovery uses bounded indexed pages before workers start; a single oversized bootstrap record runs alone.
