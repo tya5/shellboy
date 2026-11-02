@@ -8626,3 +8626,18 @@ classifies the bounded saved value directly. Task CI 41510295351 passed Ubuntu
 and macOS on `0fe2f793`; a fresh exact-tip run is required for this revision.
 No physical terminal, live-provider, Windows-local, or post-integration behavior
 has been verified.
+
+### #174 Owned-work Status Deduplication (Validation Pending)
+
+The user chose to move the existing clock text into the visible owned-work
+heading, retain it while folded, and preserve the previous status-bar summary
+only when the section height is zero. A TestBackend regression exercises
+Japanese and English, visible and folded headings, short-screen fallback, and
+resize transitions; a help regression checks both languages. The initial
+pre-change characterization passed locally on macOS 26.3.1 arm64, confirming
+that the short frame hides the section and the old heading omitted both clocks.
+On macOS 26.3.1 arm64 / Rust 1.99.1, `cargo check --tests` and the focused
+heading/fallback, bilingual help, and #169 index-pause/compaction coexistence
+tests each passed (one test per invocation). Integration layout and language
+audit also passed. Exact-tip task CI and 3-OS integration CI remain required.
+No physical terminal or post-integration behavior is claimed.

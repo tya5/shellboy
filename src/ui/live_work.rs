@@ -702,8 +702,7 @@ impl LiveWorkView {
             self.error = None;
         }
     }
-    pub fn footer(&self) -> Option<String> {
-        let snapshot = self.snapshot.as_ref()?;
+    fn clock_suffix(&self) -> String {
         let timing = self
             .seconds
             .first()
@@ -717,8 +716,13 @@ impl LiveWorkView {
             })
             .unwrap_or_default();
         let output = self.output_age_label(0).unwrap_or_default();
+        format!("{timing}{output}")
+    }
+    pub fn footer(&self) -> Option<String> {
+        let snapshot = self.snapshot.as_ref()?;
+        let timing = self.clock_suffix();
         Some(format!(
-            "{}{sep}{}{timing}{output}",
+            "{}{sep}{}{timing}",
             WorkMessage::Heading {
                 empty: false,
                 folded: self.collapsed
@@ -782,7 +786,7 @@ pub(super) fn draw(
     }
     .render(view.language);
     let heading = fit(
-        &format!("{mark} {name}{hidden_label}{counts}"),
+        &format!("{mark} {name}{hidden_label}{counts}{}", view.clock_suffix()),
         usize::from(area.width),
     );
     let separate_overflow = hidden > 0
@@ -1846,7 +1850,11 @@ mod tests {
     }
 
     fn screen(ui: &mut UiState) -> (String, u16) {
-        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        screen_at(ui, 80, 24)
+    }
+    fn screen_at(ui: &mut UiState, width: u16, height: u16) -> (String, u16) {
+        let mut terminal =
+            Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
         terminal
             .draw(|frame| super::super::draw(frame, ui))
             .unwrap();
@@ -1877,6 +1885,43 @@ mod tests {
             observed_at: at,
         });
     }
+    #[test]
+    fn work_heading_shows_clocks_and_footer_falls_back_when_hidden() {
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            let at = Instant::now();
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut ui = UiState::new(&config, PathBuf::from("/"));
+            ui.select_thread("thread".into());
+            set_work(&mut ui, Some(snapshot(at)), 1, at);
+            let (title, oldest, output) = match language {
+                UiLanguage::Ja => ("抱えている作業", "最古", "最後の出力"),
+                UiLanguage::En => ("Owned work", "Oldest work", "Last output"),
+            };
+            for (height, collapsed) in [(24, false), (7, false), (24, true), (7, true), (24, false)]
+            {
+                ui.live_work_collapsed = collapsed;
+                let (text, panel_height) = screen_at(&mut ui, 160, height);
+                let status = text.lines().nth(usize::from(height - 2)).unwrap();
+                if panel_height == 0 {
+                    let expected = ui.view().live_work.footer().unwrap();
+                    assert!(
+                        status.contains(&expected),
+                        "{language:?}: {status} / {expected}"
+                    );
+                } else {
+                    let heading = text.lines().find(|line| line.contains(title)).unwrap();
+                    assert!(heading.contains(oldest), "{language:?}: {heading}");
+                    assert!(heading.contains(output), "{language:?}: {heading}");
+                    assert!(!status.contains(title), "{language:?}: {status}");
+                    if collapsed {
+                        assert!(!text.contains("printf synthetic-output"), "{text}");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn height_is_constant_across_zero_two_zero_works_and_empty_heading_does_not_blink() {
         let at = Instant::now();

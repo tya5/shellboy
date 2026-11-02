@@ -4031,3 +4031,13 @@ test. The pre-#173 task CI 41505082629 passed on Ubuntu and macOS but is
 superseded; its Ubuntu job included the initial-selection and real synthetic PTY
 regressions. Fresh exact-tip task CI, handoff, and post-integration behavior
 remain pending.
+
+### #174 Owned-work heading and status (In Progress)
+
+Based on #169 `87d80574`, the owned-work heading shows the existing oldest and
+last-output age text even when folded. Its status-bar summary is retained only
+when the current frame gives the section zero height. The bilingual help
+explains both locations. The other status facts are not removed; their overlap
+and help coverage are documented in issue #174 for user decisions. Local
+macOS type checking and three focused tests passed; exact-tip task CI,
+integration handoff, and three-OS integration CI remain pending.

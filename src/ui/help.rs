@@ -461,7 +461,7 @@ impl Page {
                 "Toggle shell output, open details, or open a child conversation"
             ),
         );
-        page.note(local!(config.ui.language, "Escで入力へ戻ります。回答後も残る作業は保存時刻から経過を表示します。抜粋を開いても実行・停止しません。", "Esc returns to input. Work that remains after an answer shows elapsed time from the saved timestamp. Opening an excerpt does not execute or stop work."));
+        page.note(local!(config.ui.language, "Escで入力へ戻ります。見出しには最古の作業と最後の出力の経過を表示し、折りたたみ中も残ります。画面が低く区画がない場合は状態欄に表示します。回答後も残る作業は保存時刻が基準です。抜粋を開いても実行・停止しません。", "Esc returns to input. The heading shows the oldest work and last output ages even when folded; when the screen is too short for the section, the status bar shows them instead. Work that remains after an answer uses saved timestamps. Opening an excerpt does not execute or stop work."));
 
         page.section(local!(
             config.ui.language,
@@ -1244,6 +1244,28 @@ mod tests {
             "Backspace",
         ] {
             assert!(shown.contains(expected), "{expected}: {shown}");
+        }
+    }
+
+    #[test]
+    fn owned_work_help_describes_heading_and_short_screen_fallback() {
+        for (language, phrases) in [
+            (UiLanguage::Ja, ["最古の作業", "折りたたみ中", "状態欄"]),
+            (
+                UiLanguage::En,
+                ["oldest work", "even when folded", "status bar"],
+            ),
+        ] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let text = Page::guide(&config)
+                .lines(160)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<String>();
+            for phrase in phrases {
+                assert!(text.contains(phrase), "{language:?}: missing {phrase}");
+            }
         }
     }
 
