@@ -552,61 +552,6 @@ pub(crate) fn prioritized_fields(value: &Value, roots: &[&str]) -> Vec<Presentat
 mod tests {
     use super::*;
     #[test]
-    fn flat_generated_labels_localize_without_changing_source_or_custom_labels() {
-        use crate::config::UiLanguage::{En, Ja};
-        for (key, ja, en) in [
-            ("command", "コマンド", "Command"),
-            ("model_id", "モデル", "Model"),
-            ("profile_id", "接続", "Connection"),
-            ("observed_at", "観測日時", "Observed at"),
-            ("completed_at", "取得完了日時", "Completed at"),
-            ("call_id", "呼出しID", "Call ID"),
-            ("group_id", "呼出し群ID", "Call group ID"),
-            ("elapsed_ms", "実行時間（ms）", "Elapsed time (ms)"),
-            ("stdout", "通常出力", "Standard output"),
-            ("stderr", "エラー出力", "Standard error"),
-            ("role", "発話者", "Role"),
-            ("thread_id", "会話ID", "Conversation ID"),
-            ("node_id", "履歴node ID", "History node ID"),
-            ("run_id", "作業ID", "Run ID"),
-            ("turn_id", "応答処理ID", "Turn ID"),
-            ("execution_id", "実行ID", "Execution ID"),
-            ("message_id", "依頼ID", "Message ID"),
-            ("attachment_id", "添付ID", "Attachment ID"),
-            ("operation_id", "操作ID", "Operation ID"),
-            ("state", "状態", "State"),
-            ("status", "状態", "State"),
-            ("exit_code", "終了コード", "Exit code"),
-        ] {
-            let field = PresentationField {
-                key: format!("/{key}"),
-                label: ja.into(),
-                value: "原文 opaque".into(),
-                ..Default::default()
-            };
-            let before = field.clone();
-            assert_eq!(flat_label_for(&field, Ja), ja);
-            assert_eq!(flat_label_for(&field, En), en);
-            assert_eq!(field, before);
-            let custom = PresentationField {
-                label: "source label".into(),
-                ..field.clone()
-            };
-            assert_eq!(flat_label_for(&custom, En), "source label");
-            let nested = PresentationField {
-                key: format!("/outer/{key}"),
-                ..field.clone()
-            };
-            assert_eq!(flat_label_for(&nested, En), ja);
-        }
-        let unknown = PresentationField {
-            key: "/unknown".into(),
-            label: "未知".into(),
-            ..Default::default()
-        };
-        assert_eq!(flat_label_for(&unknown, En), "未知");
-    }
-    #[test]
     fn human_terms_leave_canonical_identifiers_and_states_unchanged() {
         let raw = serde_json::json!({"thread_id":"thread-full-id", "run_id":"run-full-id", "turn_id":"turn-full-id", "state":"running"});
         let mut fields = fields_of_value(&raw);
@@ -667,6 +612,61 @@ mod tests {
                 .displayed(),
             "opaque-value"
         );
+    }
+    #[test]
+    fn flat_generated_labels_localize_without_changing_source_or_custom_labels() {
+        use crate::config::UiLanguage::{En, Ja};
+        for (key, ja, en) in [
+            ("command", "コマンド", "Command"),
+            ("model_id", "モデル", "Model"),
+            ("profile_id", "接続", "Connection"),
+            ("observed_at", "観測日時", "Observed at"),
+            ("completed_at", "取得完了日時", "Completed at"),
+            ("call_id", "呼出しID", "Call ID"),
+            ("group_id", "呼出し群ID", "Call group ID"),
+            ("elapsed_ms", "実行時間（ms）", "Elapsed time (ms)"),
+            ("stdout", "通常出力", "Standard output"),
+            ("stderr", "エラー出力", "Standard error"),
+            ("role", "発話者", "Role"),
+            ("thread_id", "会話ID", "Conversation ID"),
+            ("node_id", "履歴node ID", "History node ID"),
+            ("run_id", "作業ID", "Run ID"),
+            ("turn_id", "応答処理ID", "Turn ID"),
+            ("execution_id", "実行ID", "Execution ID"),
+            ("message_id", "依頼ID", "Message ID"),
+            ("attachment_id", "添付ID", "Attachment ID"),
+            ("operation_id", "操作ID", "Operation ID"),
+            ("state", "状態", "State"),
+            ("status", "状態", "State"),
+            ("exit_code", "終了コード", "Exit code"),
+        ] {
+            let field = PresentationField {
+                key: format!("/{key}"),
+                label: ja.into(),
+                value: "原文 opaque".into(),
+                ..Default::default()
+            };
+            let before = field.clone();
+            assert_eq!(flat_label_for(&field, Ja), ja);
+            assert_eq!(flat_label_for(&field, En), en);
+            assert_eq!(field, before);
+            let custom = PresentationField {
+                label: "source label".into(),
+                ..field.clone()
+            };
+            assert_eq!(flat_label_for(&custom, En), "source label");
+            let nested = PresentationField {
+                key: format!("/outer/{key}"),
+                ..field.clone()
+            };
+            assert_eq!(flat_label_for(&nested, En), ja);
+        }
+        let unknown = PresentationField {
+            key: "/unknown".into(),
+            label: "未知".into(),
+            ..Default::default()
+        };
+        assert_eq!(flat_label_for(&unknown, En), "未知");
     }
     #[test]
     fn metadata_roots_survive_large_arrays_without_duplicate_pointers_or_larger_budget() {
