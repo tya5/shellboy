@@ -1461,7 +1461,7 @@ async fn scoped_watch_foreign_cli_updates_parent_counts_and_rejects_delayed_retr
     fixture
         .until(
             "delayed confirmation fails without retrying replacement work",
-            |_, screen| screen.contains("未適用"),
+            |_, screen| screen.contains("Watch | Retry not applied |"),
         )
         .await;
     let saved_run = run.clone();
