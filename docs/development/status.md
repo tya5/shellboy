@@ -6,6 +6,12 @@
 family) is paused, walks pending jobs per eligible space through jobs_ready with
 a 256-row bound and 1..30 s conservative fallback, and reads bootstrap rows by
 byte-exact key range. Focused macOS checks passed; see acceptance.
+## DB job timing (#164)
+
+Slow accepted DB jobs now report a bounded call-site identifier, queue wait and
+execution time via best-effort diagnostics. No conversation content is logged.
+Synthetic checks cover fast and slow jobs, privacy and emission limits; CI and
+integration are tracked separately in acceptance.
 
 ## Attachment MIME and recovery (#158, in progress)
 

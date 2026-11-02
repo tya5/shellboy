@@ -27,6 +27,7 @@ pub enum DiagnosticEvent {
     StorageLimit,
     IndexPaused,
     UsageTotalsSlow,
+    DbJobSlow,
     LineageQuerySlow,
     UiHistory,
     UiTerminalWidthOne,
@@ -91,6 +92,13 @@ fn slow_usage_trace(
         scope,
         elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
     })
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DbJobSlowTrace {
+    kind: String,
+    queue_ms: u64,
+    run_ms: u64,
 }
 
 /// Aggregate descendant-query observation, with no descendant or content strings.
@@ -226,6 +234,8 @@ struct Entry {
     ui_history: Option<UiHistoryTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lineage_slow: Option<LineageSlowTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    db_job_slow: Option<DbJobSlowTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -304,6 +314,7 @@ struct Record {
     usage_slow: Option<UsageSlowTrace>,
     ui_history: Option<UiHistoryTrace>,
     lineage_slow: Option<LineageSlowTrace>,
+    db_job_slow: Option<DbJobSlowTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -343,6 +354,7 @@ impl Diagnostics {
                     usage_slow,
                     ui_history,
                     lineage_slow,
+                    db_job_slow,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -359,6 +371,7 @@ impl Diagnostics {
                         usage_slow,
                         ui_history,
                         lineage_slow,
+                        db_job_slow,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -529,6 +542,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: Some(trace),
             lineage_slow: None,
+            db_job_slow: None,
         });
     }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
@@ -548,6 +562,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: None,
             lineage_slow: None,
+            db_job_slow: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -571,6 +586,34 @@ impl Diagnostics {
             usage_slow: Some(usage_slow),
             ui_history: None,
             lineage_slow: None,
+            db_job_slow: None,
+        });
+    }
+    pub(crate) fn record_db_job(
+        &self,
+        kind: &str,
+        queue: std::time::Duration,
+        run: std::time::Duration,
+    ) {
+        if queue < std::time::Duration::from_secs(1) && run < std::time::Duration::from_secs(1) {
+            return;
+        }
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::DbJobSlow,
+            ids: DiagnosticIds::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job_slow: Some(DbJobSlowTrace {
+                kind: kind.chars().take(160).collect(),
+                queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
+                run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
+            }),
         });
     }
     /// One aggregate observation after the query; fast queries emit nothing at any level.
@@ -595,6 +638,7 @@ impl Diagnostics {
             tool_repair: None,
             usage_slow: None,
             ui_history: None,
+            db_job_slow: None,
             lineage_slow: Some(LineageSlowTrace {
                 elapsed_us: u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
                 roots: roots.min(2) as u8,
@@ -679,6 +723,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: None,
             lineage_slow: None,
+            db_job_slow: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -693,6 +738,7 @@ impl Diagnostics {
             usage_slow,
             ui_history,
             lineage_slow,
+            db_job_slow,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -723,6 +769,7 @@ impl Diagnostics {
                     usage_slow,
                     ui_history,
                     lineage_slow,
+                    db_job_slow,
                 })
                 .is_err()
         }) {
@@ -1162,5 +1209,44 @@ mod lineage_slow_tests {
         );
         assert!(!diagnostics.has_failed());
         }).await.expect("lineage diagnostic watchdog");
+    }
+}
+
+#[cfg(test)]
+mod db_job_slow_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn only_slow_jobs_emit_fixed_bounded_fields() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        diagnostics.record_db_job(
+            "test.fast",
+            Duration::from_millis(999),
+            Duration::from_millis(999),
+        );
+        diagnostics.record_db_job(
+            "gc.collect",
+            Duration::from_secs(1),
+            Duration::from_millis(5),
+        );
+        diagnostics.record_db_job("index.next_delay", Duration::ZERO, Duration::from_secs(2));
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let rows: Vec<serde_json::Value> = body
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["event"], "db_job_slow");
+        assert_eq!(
+            rows[0]["db_job_slow"],
+            serde_json::json!({"kind":"gc.collect","queue_ms":1000,"run_ms":5})
+        );
+        assert_eq!(
+            rows[1]["db_job_slow"],
+            serde_json::json!({"kind":"index.next_delay","queue_ms":0,"run_ms":2000})
+        );
     }
 }

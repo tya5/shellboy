@@ -97,12 +97,17 @@ pub(crate) fn save_error(message: impl Into<String>) -> crate::protocol::ApiErro
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send + 'static>;
 enum Command {
-    Run(Job),
+    Run {
+        job: Job,
+        queued_at: Instant,
+        kind: &'static str,
+    },
     Shutdown,
 }
 
 struct Shared {
     path: PathBuf,
+    diagnostics: Arc<Mutex<Option<crate::diagnostics::Diagnostics>>>,
     /// Taking this sender closes admission across every clone before shutdown.
     sender: Mutex<Option<mpsc::Sender<Command>>>,
     join: Mutex<Option<thread::JoinHandle<Result<(), StorageError>>>>,
@@ -169,11 +174,13 @@ impl DbWorker {
         let stored_path = path.clone();
         let (sender, receiver) = mpsc::channel(capacity);
         let (ready_send, ready_receive) = oneshot::channel();
+        let diagnostics = Arc::new(Mutex::new(None));
+        let worker_diagnostics = diagnostics.clone();
         let join = thread::Builder::new()
             .name("shellboy-db".into())
             .spawn(move || {
                 let _owner_guard = owner;
-                run_worker(path, receiver, ready_send)
+                run_worker(path, receiver, ready_send, worker_diagnostics)
             })
             .map_err(|error| StorageError::Worker(error.to_string()))?;
         let ready = ready_receive
@@ -187,6 +194,7 @@ impl DbWorker {
         Ok(Self {
             shared: Arc::new(Shared {
                 path: stored_path,
+                diagnostics,
                 sender: Mutex::new(Some(sender)),
                 join: Mutex::new(Some(join)),
                 shutdown_result: Mutex::new(None),
@@ -198,6 +206,14 @@ impl DbWorker {
     /// The path used to open this worker, including custom database filenames.
     pub(crate) fn path(&self) -> &Path {
         &self.shared.path
+    }
+
+    pub(crate) fn attach_diagnostics(&self, diagnostics: crate::diagnostics::Diagnostics) {
+        *self
+            .shared
+            .diagnostics
+            .lock()
+            .expect("DB diagnostics mutex poisoned") = Some(diagnostics);
     }
 
     /// Wait asynchronously for bounded admission, then await the durable result.
@@ -326,7 +342,43 @@ where
         }
         let _ = sender.send(result);
     });
-    (Command::Run(job), DbReply { receiver })
+    (
+        Command::Run {
+            job,
+            queued_at: Instant::now(),
+            kind: job_kind::<F>(),
+        },
+        DbReply { receiver },
+    )
+}
+
+// Closure type names are compiler-provided source identifiers, not captured values.
+fn job_kind<F>() -> &'static str {
+    let name = std::any::type_name::<F>();
+    let name = name.split("::{{closure}}").next().unwrap_or(name);
+    name.trim_start_matches("shellboy::")
+}
+
+const SLOW_JOB_THRESHOLD: Duration = Duration::from_secs(1);
+const SLOW_JOB_WINDOW: Duration = Duration::from_secs(60);
+const SLOW_JOBS_PER_WINDOW: u8 = 10;
+
+struct SlowJobLimit {
+    window: Instant,
+    emitted: u8,
+}
+impl SlowJobLimit {
+    fn admit(&mut self, now: Instant) -> bool {
+        if now.duration_since(self.window) >= SLOW_JOB_WINDOW {
+            self.window = now;
+            self.emitted = 0;
+        }
+        if self.emitted >= SLOW_JOBS_PER_WINDOW {
+            return false;
+        }
+        self.emitted += 1;
+        true
+    }
 }
 
 // This is an idle opportunity throttle, not a periodic worker or durability timer.
@@ -362,6 +414,7 @@ fn run_worker(
     path: PathBuf,
     mut receiver: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<(), StorageError>>,
+    diagnostics: Arc<Mutex<Option<crate::diagnostics::Diagnostics>>>,
 ) -> Result<(), StorageError> {
     let mut connection = match open_connection(&path) {
         Ok(connection) => connection,
@@ -374,9 +427,30 @@ fn run_worker(
         return Ok(());
     }
     let mut checkpoint = IdleCheckpoint::new(Instant::now(), connection.total_changes());
+    let mut slow_limit = SlowJobLimit {
+        window: Instant::now(),
+        emitted: 0,
+    };
     while let Some(command) = receiver.blocking_recv() {
         match command {
-            Command::Run(job) => job(&mut connection),
+            Command::Run {
+                job,
+                queued_at,
+                kind,
+            } => {
+                let started = Instant::now();
+                let queue = started.duration_since(queued_at);
+                job(&mut connection);
+                let run = started.elapsed();
+                if (queue >= SLOW_JOB_THRESHOLD || run >= SLOW_JOB_THRESHOLD)
+                    && let Ok(guard) = diagnostics.try_lock()
+                    && let Some(diagnostics) = guard.as_ref()
+                    && slow_limit.admit(Instant::now())
+                {
+                    let kind = kind.replace("::", ".");
+                    diagnostics.record_db_job(&kind, queue, run);
+                }
+            }
             Command::Shutdown => break,
         }
         let now = Instant::now();
@@ -634,5 +708,101 @@ mod thread_observation_migration_tests {
                 }).await.unwrap();worker.shutdown().await.unwrap();
             }
         }).await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod slow_job_tests {
+    use super::*;
+
+    #[test]
+    fn emission_limit_is_bounded_and_resets() {
+        let start = Instant::now();
+        let mut limit = SlowJobLimit {
+            window: start,
+            emitted: 0,
+        };
+        for _ in 0..SLOW_JOBS_PER_WINDOW {
+            assert!(limit.admit(start));
+        }
+        assert!(!limit.admit(start));
+        assert!(!limit.admit(start + SLOW_JOB_WINDOW - Duration::from_nanos(1)));
+        assert!(limit.admit(start + SLOW_JOB_WINDOW));
+    }
+
+    async fn index_next_delay(
+        db: &DbWorker,
+        gate: std::sync::mpsc::Receiver<()>,
+        started: oneshot::Sender<()>,
+    ) -> Result<(), StorageError> {
+        let private_text = String::from("private conversation test marker");
+        db.call(move |_| {
+            assert!(!private_text.is_empty());
+            let _ = started.send(());
+            gate.recv().unwrap();
+            Ok(())
+        })
+        .await
+    }
+
+    fn gc_collect(db: &DbWorker) -> Result<DbReply<()>, StorageError> {
+        db.try_call(|_| Ok(()))
+    }
+
+    #[tokio::test]
+    async fn slow_execution_and_queue_are_observed_with_distinct_caller_names() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            root.path().join("logs"),
+            crate::config::Logging::default(),
+        );
+        let db = DbWorker::open(root.path().join("db")).await.unwrap();
+        db.attach_diagnostics(diagnostics.clone());
+        db.call(|_| Ok::<_, StorageError>(())).await.unwrap();
+        let (start_tx, start_rx) = oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let first_db = db.clone();
+        let first =
+            tokio::spawn(async move { index_next_delay(&first_db, release_rx, start_tx).await });
+        start_rx.await.unwrap();
+        let queued: Vec<_> = (0..SLOW_JOBS_PER_WINDOW + 2)
+            .map(|_| gc_collect(&db).unwrap())
+            .collect();
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        release_tx.send(()).unwrap();
+        first.await.unwrap().unwrap();
+        for reply in queued {
+            reply.receive().await.unwrap();
+        }
+        db.shutdown().await.unwrap();
+        diagnostics.shutdown().await;
+        let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        let rows: Vec<serde_json::Value> = log
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), usize::from(SLOW_JOBS_PER_WINDOW), "{log}");
+        assert!(!log.contains("private conversation test marker"));
+        assert_eq!(rows[0]["event"], "db_job_slow");
+        assert!(
+            rows[0]["db_job_slow"]["kind"]
+                .as_str()
+                .unwrap()
+                .contains("index_next_delay"),
+            "{log}"
+        );
+        assert!(rows[0]["db_job_slow"]["run_ms"].as_u64().unwrap() >= 1000);
+        assert!(
+            rows[1]["db_job_slow"]["kind"]
+                .as_str()
+                .unwrap()
+                .contains("gc_collect"),
+            "{log}"
+        );
+        assert!(rows[1]["db_job_slow"]["queue_ms"].as_u64().unwrap() >= 1000);
+        assert!(
+            rows.iter()
+                .all(|r| r["db_job_slow"].as_object().unwrap().len() == 3)
+        );
     }
 }

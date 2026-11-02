@@ -1,5 +1,19 @@
 # SQLite migration と専用worker
 
+## DB job timing (#164)
+
+The DB worker observes each accepted job from queue admission through execution.
+If either queue wait (excluding asynchronous admission wait) or execution takes
+at least one second, it may enqueue a `db_job_slow` diagnostic containing only
+the compiler-provided closure call-site name (at most 160 characters), queue
+milliseconds and execution milliseconds. No job arguments, results, SQL or
+conversation text are recorded. Closure names are diagnostic identifiers and
+may change with the compiler. The worker allows at most ten observations per
+fixed 60-second window, and the existing diagnostic queue and rotating log
+remain bounded and best-effort. Diagnostics attach after DB initialization;
+startup migration and checkpoint work are not jobs. DB shutdown drains jobs
+before diagnostics shutdown; diagnostics may still be dropped under pressure.
+
 ## Current-only contract (Issue #33, 0.2.0)
 
 Current conversation schema on the F preparation branch is v16. Migration 15 adds derived readback indexes;16 adds the parent-Thread covering index. Migration12 accounts for bounded Revisit

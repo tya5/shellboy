@@ -193,6 +193,7 @@ impl DataOwner {
             loaded.data_dir.join("logs"),
             loaded.config.logging.clone(),
         );
+        db.attach_diagnostics(diagnostics.clone());
         diagnostics.record(
             crate::diagnostics::DiagnosticEvent::Startup,
             Default::default(),

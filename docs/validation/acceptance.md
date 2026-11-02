@@ -19,6 +19,14 @@ job MIN walks all of jobs_ready unconstrained and the LIKE read is `SCAN
 app_meta`; new reads use `jobs_ready (space_id=? AND state=? AND
 next_attempt_at>?)` and `sqlite_autoindex_app_meta_1 (key>? AND key<?)`. The
 fix was not run against the real owner or its disk-resident database.
+## DB job timing (#164)
+
+Native macOS synthetic tests exercise a blocked DB job, queued work, distinct
+call-site names, fast-job silence, privacy and the worker's event limit. The
+post-change `cargo check --tests`, `cargo test --lib slow_job_tests` (2 tests),
+and `cargo test --lib db_job_slow_tests` (1 test) passed via rust-slot on macOS.
+Three-OS branch CI is pending; this does not establish latency or log
+completeness under a production workload.
 
 ## Proactive retry gate (#153, 2026-11-02)
 
