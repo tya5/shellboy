@@ -77,6 +77,10 @@ ASCII punctuation; Japanese copy text and punctuation remain unchanged. Tool
 preview notices are complete English sentences joined with spaces, preserving
 the periods (and the Japanese join rule remains unchanged).
 
+Shared UI layout separators are not prose punctuation. Delimiter-bearing labels
+use `glyphs::formatted!` to select `·` or the terminal-safe `|` fallback in every
+UI language.
+
 Terminal, shutdown, runtime-adapter and forced-exit diagnostics printed to stderr
 after restoring the terminal are English-only. They do not consult the configured
 TUI locale or introduce Japanese alternatives. This does not change the language

@@ -439,9 +439,10 @@ The five entries now classify as `(a)` with function-scope fingerprints in `scri
 
 The generated restore hint for saved `Cancelled` and `Failed` receipts now follows
 the loaded UI language. The original Japanese width variants are unchanged; the
-English sentence retains the same `/restore` revision instruction and uses ASCII
-punctuation. `Held` receipts remain tracked without a hint, and `Applied`/
-`Completed` behavior is unchanged. Receipt status, draft/thread IDs, revision,
+English variant uses the shared `glyphs::formatted!` separator (`·`, with `|`
+fallback on unsupported terminals) and the same `/restore` revision instruction.
+`Held` receipts remain tracked without a hint, and `Applied`/`Completed` behavior
+is unchanged. Receipt status, draft/thread IDs, revision,
 saved state, provenance and raw provider diagnostics are not rewritten.
 
 The current lexical audit classifies the two Japanese width variants as `(a)` and

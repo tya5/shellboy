@@ -8509,7 +8509,9 @@ Local macOS validation passed: `cargo fmt --all`, `cargo fmt --all -- --check`, 
 
 The generated restore hint for saved `Cancelled`/`Failed` receipts uses the
 loaded UI language. The Japanese width variants are preserved exactly; the
-English message uses the same `/restore` revision. Regression coverage checks
+English message uses the shared `glyphs::formatted!` separator (`·`, with `|`
+as the unsupported-terminal fallback) and the same `/restore` revision.
+Regression coverage checks
 both statuses in both languages and verifies draft ID, thread ID, revision and
 status are unchanged. Existing held/applied tests retain their no-hint behavior.
 No receipt state, persistence, user input, or provider diagnostic is translated.

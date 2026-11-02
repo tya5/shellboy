@@ -80,9 +80,11 @@ fn restore_hint(language: UiLanguage, revision: u64) -> String {
             "依頼を保持しました | /restore {} で入力欄へ戻す",
             revision
         ),
-        UiLanguage::En => {
-            format!("Input retained; use /restore {revision} to return it to the composer.")
-        }
+        UiLanguage::En => crate::ui::text_width::glyphs::formatted!(
+            "Input retained · /restore {} to return it to the composer",
+            "Input retained | /restore {} to return it to the composer",
+            revision
+        ),
     }
 }
 
@@ -278,9 +280,10 @@ mod tests {
                         message == "依頼を保持しました · /restore 73 で入力欄へ戻す"
                             || message == "依頼を保持しました | /restore 73 で入力欄へ戻す"
                     ),
-                    UiLanguage::En => assert_eq!(
-                        message,
-                        "Input retained; use /restore 73 to return it to the composer."
+                    UiLanguage::En => assert!(
+                        message == "Input retained · /restore 73 to return it to the composer"
+                            || message
+                                == "Input retained | /restore 73 to return it to the composer"
                     ),
                 }
             }
