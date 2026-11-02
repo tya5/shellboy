@@ -296,8 +296,8 @@ pub(super) fn read_tx_with_limit(
             [turn_id],
             |r| r.get(0),
         ).optional()?;
-        let tools=db.query_row("SELECT COUNT(*) FROM (SELECT 1 FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id=?1 AND json_extract(shell_json,'$.spawned')=1 LIMIT 128)",[turn_id],|r|r.get::<_,i64>(0).map(|n|n as u64))?;
-        raw.counts_capped |= groups_capped || tools == 128 || cancelled == 128;
+        let (tools, seen) = db.query_row("SELECT COUNT(*) FILTER (WHERE valid),COUNT(*) FROM (SELECT json_valid(shell_json) AS valid FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id=?1 AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END LIMIT 128)",[turn_id],|r|Ok((r.get::<_,i64>(0)? as u64,r.get::<_,i64>(1)? as u64)))?;
+        raw.counts_capped |= groups_capped || seen == 128 || tools < seen || cancelled == 128;
         raw.tool_running = tool_started_at.is_some();
         raw.tool_started_at = tool_started_at;
         raw.tools = tools;
@@ -621,6 +621,16 @@ mod tests {
             .unwrap();
         }
         assert_eq!(bounded_group_counts(&db, "u").unwrap(), (128, 1, true));
+    }
+
+    #[test]
+    fn malformed_shell_metadata_makes_tool_count_a_lower_bound() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); PRAGMA ignore_check_constraints=ON; INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('bad','r','u','bad','exited','/','broken json','UTF-8','UTF-8','closed','now'),('good','r','u','good','exited','/','{\"spawned\":true}','UTF-8','UTF-8','closed','now'); PRAGMA ignore_check_constraints=OFF;").unwrap();
+        let projection = prepare(read_tx(&db, "t").unwrap());
+        assert_eq!(projection.tool_calls, 1);
+        assert!(projection.counts_capped);
     }
 
     #[test]

@@ -594,7 +594,7 @@ mod tests {
         let db = fixture();
         // Force the historical layout even after a future migration extends it.
         // Only this disposable fixture changes; no migration is adopted here.
-        db.execute_batch("UPDATE turn SET state='completed' WHERE id='u'; DROP INDEX turns_by_run; CREATE INDEX turns_by_run ON turn(run_id,created_at);").unwrap();
+        db.execute_batch("UPDATE turn SET state='completed' WHERE id='u'; DROP INDEX activity_turn_run; DROP INDEX turns_by_run; CREATE INDEX turns_by_run ON turn(run_id,created_at);").unwrap();
         let seed_ties = |from: usize, until: usize| {
             db.execute_batch("BEGIN").unwrap();
             for i in from..until {
