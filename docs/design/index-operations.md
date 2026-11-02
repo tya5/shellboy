@@ -46,6 +46,15 @@ claim decision for an identical snapshot/settings/cutoff is deterministic.
 An individually authorized input not eligible for aggregation stays singleton;
 never silently truncate, resplit or discard it merely to fill a batch.
 
+The idle worker's wake-delay read (#164) scans no queue while the endpoint family
+or the profile is paused; claims are idle then, so it rechecks after the existing
+30 s. Otherwise it walks each eligible space's pending jobs in jobs_ready order,
+evaluates authorization only on the rows it steps, and stops at the first
+eligible row. After 256 ineligible rows in one space it wakes at the last
+examined time clamped to 1..30 s, never later than an unseen eligible job or
+the unscheduled 30 s recheck. Bootstrap rows are read by the byte-exact profile key prefix range
+instead of a case-insensitive LIKE scan. No schema or setting changes.
+
 A malformed/mismatched multi response adopts nothing. Record failure on every
 member, then requeue each with a durable singleton-fallback marker in existing
 error metadata. Preserve singleton mode through existing length splits. The

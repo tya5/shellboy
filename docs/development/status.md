@@ -1,5 +1,12 @@
 # Development status
 
+## Bounded index wake-delay read (#164, branch CI pending)
+
+`read_next_delay` no longer scans queues while the profile (not only the endpoint
+family) is paused, walks pending jobs per eligible space through jobs_ready with
+a 256-row bound and 1..30 s conservative fallback, and reads bootstrap rows by
+byte-exact key range. Focused macOS checks passed; see acceptance.
+
 ## Attachment MIME and recovery (#158, in progress)
 
 The v0.5.0 and v0.6.0 synthetic loopback reproductions both resend historical

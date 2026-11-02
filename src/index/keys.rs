@@ -37,6 +37,13 @@ impl<'a> IndexKeys<'a> {
     pub(super) fn bootstrap_pattern(self) -> String {
         format!("{}{}.%", Self::BOOT_PREFIX, self.0)
     }
+    /// Byte-exact `[start, end)` key range for this profile's bootstrap rows;
+    /// unlike `bootstrap_pattern`, it can use the app_meta key index.
+    pub(super) fn bootstrap_range(self) -> (String, String) {
+        let start = format!("{}{}.", Self::BOOT_PREFIX, self.0);
+        let end = format!("{}{}/", Self::BOOT_PREFIX, self.0);
+        (start, end)
+    }
     pub(super) fn splitter(self) -> String {
         format!("{}:{}", super::SPLITTER, self.0)
     }
@@ -79,6 +86,8 @@ mod tests {
                 "index.bootstrap.profile:日本.hash:1",
             ),
             (keys.bootstrap_pattern(), "index.bootstrap.profile:日本.%"),
+            (keys.bootstrap_range().0, "index.bootstrap.profile:日本."),
+            (keys.bootstrap_range().1, "index.bootstrap.profile:日本/"),
             (keys.splitter(), "unicode-paragraph-v1:profile:日本"),
             (IndexKeys::input("job:1"), "index.input.job:1"),
             (IndexKeys::preview("chunk:1"), "index.preview.chunk:1"),

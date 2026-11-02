@@ -1,5 +1,25 @@
 # Validation record
 
+## Bounded index wake-delay read (#164, 2026-11-02)
+
+macOS, rust-slot: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+and `cargo test --lib index::` (50 passed, 2 ignored) passed. New unit tests cover
+a paused profile with family None/Some returning 30 s without touching queue
+tables, earliest selection across active/candidate/paused/other-splitter spaces
+and bootstrap rows with auto_history true/false, the 256-row bound fallback
+(last examined time clamped to 1..30 s), and byte-exact bootstrap key ranges with
+`_`, `%` and mixed case (the old LIKE also matched other profiles).
+
+Synthetic measurement (ignored test `next_delay_synthetic_measurement`, release,
+in-memory DB, 84,948 pending ineligible jobs, 84,948 ~1.8 KB `index.input.*`
+rows; single run each, recorded facts not bounds): before 19.5 ms (auto_history
+true), 28.3 ms (false), 28.2 ms (paused profile); after 0.19 ms, 0.11 ms and
+0.004 ms. EXPLAIN QUERY PLAN on the user's database (read-only, plans only): old
+job MIN walks all of jobs_ready unconstrained and the LIKE read is `SCAN
+app_meta`; new reads use `jobs_ready (space_id=? AND state=? AND
+next_attempt_at>?)` and `sqlite_autoindex_app_meta_1 (key>? AND key<?)`. The
+fix was not run against the real owner or its disk-resident database.
+
 ## Proactive retry gate (#153, 2026-11-02)
 
 Review follow-up includes a read-only inspection of the user's W3 compaction and

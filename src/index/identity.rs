@@ -538,33 +538,78 @@ fn read_status(
 
     Ok(status)
 }
+/// Pending jobs examined per eligible space before a short conservative delay.
+const NEXT_DELAY_SCAN: i64 = 256;
+const NEXT_DELAY_SPACES: &str =
+    "SELECT id FROM index_space WHERE state IN ('active','candidate') AND splitter_version=?1";
+// jobs_ready order; the authorization test runs only on the rows actually stepped.
+const NEXT_DELAY_JOBS: &str = "SELECT next_attempt_at,?2 OR COALESCE(json_extract(authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%' FROM embedding_job WHERE space_id=?1 AND state='pending' AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at LIMIT ?3";
+const NEXT_DELAY_BOOTSTRAP: &str = "SELECT value FROM app_meta WHERE key>=?1 AND key<?2";
+
 fn read_next_delay(
     db: &Connection,
     keys: Vec<String>,
     family: Option<String>,
     auto_history: bool,
 ) -> Result<Duration, StorageError> {
-    let embedding_job_sql = "SELECT MIN(j.next_attempt_at) FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND j.next_attempt_at IS NOT NULL AND s.state IN ('active','candidate') AND s.splitter_version=?1 AND (?2 OR COALESCE(json_extract(j.authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%')";
     if let Some(family) = family
         && meta(db, &IndexKeys::new(&family).pause())?.is_some()
     {
         return Ok(Duration::from_secs(30));
     }
-    let splitters: Vec<_> = keys
-        .iter()
-        .map(|key| IndexKeys::new(key).splitter())
-        .collect();
-    let next: Option<String> = db.query_row(
-        embedding_job_sql,
-        params![splitters.first(), auto_history],
-        |row| row.get(0),
-    )?;
-    let mut earliest = next.and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok());
+    // claim() is idle for a paused profile, so its queues need no scan.
+    let mut unpaused = Vec::new();
     for key in keys {
-        let mut statement = db.prepare("SELECT value FROM app_meta WHERE key LIKE ?1")?;
-        for value in statement.query_map([IndexKeys::new(&key).bootstrap_pattern()], |row| {
-            row.get::<_, String>(0)
-        })? {
+        if meta(db, &IndexKeys::new(&key).pause())?.is_none() {
+            unpaused.push(key);
+        }
+    }
+    let keys = unpaused;
+    let Some(first) = keys.first() else {
+        return Ok(Duration::from_secs(30));
+    };
+    let spaces = db
+        .prepare(NEXT_DELAY_SPACES)?
+        .query_map([IndexKeys::new(first).splitter()], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    let mut jobs = db.prepare(NEXT_DELAY_JOBS)?;
+    let mut next: Option<String> = None;
+    let mut bounded = None;
+    for space in spaces {
+        let mut rows = jobs.query(params![space, auto_history, NEXT_DELAY_SCAN])?;
+        let (mut seen, mut last) = (0, None);
+        while let Some(row) = rows.next()? {
+            let at: String = row.get(0)?;
+            if row.get(1)? {
+                next = Some(next.map_or(at.clone(), |old: String| old.min(at)));
+                break;
+            }
+            seen += 1;
+            last = Some(at);
+        }
+        if seen == NEXT_DELAY_SCAN {
+            // An unseen match is not earlier than the last examined row; never
+            // wait longer than the unscheduled recheck or spin on due rows.
+            let now = chrono::Utc::now();
+            let at = last
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+                .map_or(now, |at| at.with_timezone(&chrono::Utc))
+                .clamp(
+                    now + chrono::Duration::seconds(1),
+                    now + chrono::Duration::seconds(30),
+                )
+                .fixed_offset();
+            bounded = Some(bounded.map_or(at, |old: chrono::DateTime<_>| old.min(at)));
+        }
+    }
+    let mut earliest = next.and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok());
+    if let Some(at) = bounded {
+        earliest = Some(earliest.map_or(at, |old| old.min(at)));
+    }
+    for key in keys {
+        let mut statement = db.prepare(NEXT_DELAY_BOOTSTRAP)?;
+        let (start, end) = IndexKeys::new(&key).bootstrap_range();
+        for value in statement.query_map([start, end], |row| row.get::<_, String>(0))? {
             let work: Work = decode_json(&value?)?;
             if work.state == "pending"
                 && (auto_history || !work.authorization.starts_with("new-finalized"))
@@ -673,5 +718,285 @@ mod tests {
         );
         config.connections.get_mut("embed").unwrap().base_url = "http://other/v1".into();
         assert!(query_profile_key(&config, "embed", "model", &marker).is_none());
+    }
+
+    fn next_delay_db() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        // Synthetic jobs need no source nodes.
+        db.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        db
+    }
+    fn add_space(db: &Connection, id: &str, state: &str, key: &str) {
+        db.execute(
+            "INSERT INTO index_space VALUES(?1,'p','m',3,?2,?3,?4)",
+            params![
+                id,
+                IndexKeys::new(key).splitter(),
+                state,
+                format!("vec_{id}")
+            ],
+        )
+        .unwrap();
+    }
+    fn add_job(db: &Connection, id: &str, space: &str, at: Option<&str>, authorization: &str) {
+        db.execute(
+            "INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state,next_attempt_at,authorized_watermark)VALUES(?1,?2,?1,0,'body','h',0,1,'pending',?3,json_object('authorization',?4))",
+            params![id, space, at, authorization],
+        )
+        .unwrap();
+    }
+
+    fn at(seconds: i64) -> String {
+        (chrono::Utc::now() + chrono::Duration::seconds(seconds)).to_rfc3339()
+    }
+    fn assert_near(delay: Duration, seconds: u64) {
+        let target = Duration::from_secs(seconds);
+        assert!(
+            delay <= target && delay + Duration::from_secs(60) > target,
+            "{delay:?} is not near {target:?}"
+        );
+    }
+
+    #[test]
+    fn paused_profile_returns_pause_delay_without_scanning_queues() {
+        // No queue tables exist, so any scan would fail instead of returning.
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        assert!(read_next_delay(&db, vec!["p".into()], None, true).is_err());
+        db.execute(
+            "INSERT INTO app_meta VALUES(?1,'paused')",
+            [IndexKeys::new("p").pause()],
+        )
+        .unwrap();
+        for family in [None, Some("family".to_owned())] {
+            let delay = read_next_delay(&db, vec!["p".into()], family, true).unwrap();
+            assert_eq!(delay, Duration::from_secs(30));
+        }
+    }
+
+    #[test]
+    fn next_delay_picks_earliest_eligible_job_or_bootstrap() {
+        let db = next_delay_db();
+        add_space(&db, "active", "active", "p");
+        add_space(&db, "candidate", "candidate", "p");
+        add_space(&db, "paused", "paused", "p");
+        add_space(&db, "other", "active", "q");
+        add_job(&db, "a1", "paused", Some(&at(100)), "explicit");
+        add_job(&db, "a2", "other", Some(&at(200)), "explicit");
+        add_job(&db, "a3", "active", Some(&at(3600)), "new-finalized:x");
+        add_job(&db, "a4", "candidate", Some(&at(7200)), "explicit");
+        add_job(&db, "a5", "active", Some(&at(9000)), "explicit");
+        add_job(&db, "a6", "active", None, "explicit");
+        let keys = || vec!["p".to_owned()];
+        assert_near(read_next_delay(&db, keys(), None, true).unwrap(), 3600);
+        assert_near(read_next_delay(&db, keys(), None, false).unwrap(), 7200);
+        let mut work = Work::pending(
+            Witness {
+                node_id: "n".into(),
+                revision: 0,
+                body_hash: None,
+                raw: None,
+            },
+            "body".into(),
+            Segment {
+                start: 0,
+                end: 1,
+                text: "x".into(),
+            },
+            "g",
+            "new-finalized:x",
+        );
+        work.next_at = Some(at(1800));
+        let put = |digest: &str, work: &Work| {
+            db.execute(
+                "INSERT INTO app_meta VALUES(?1,?2)",
+                params![
+                    IndexKeys::new("p").bootstrap(digest),
+                    encode_json(work).unwrap()
+                ],
+            )
+            .unwrap();
+        };
+        put("b1", &work);
+        work.authorization = "explicit".into();
+        work.next_at = Some(at(5400));
+        put("b2", &work);
+        assert_near(read_next_delay(&db, keys(), None, true).unwrap(), 1800);
+        assert_near(read_next_delay(&db, keys(), None, false).unwrap(), 5400);
+    }
+
+    #[test]
+    fn next_delay_scan_bound_falls_back_conservatively() {
+        let db = next_delay_db();
+        add_space(&db, "space", "active", "p");
+        add_job(&db, "late", "space", Some(&at(20)), "explicit");
+        for n in 0..NEXT_DELAY_SCAN - 1 {
+            add_job(
+                &db,
+                &format!("f{n:04}"),
+                "space",
+                Some(&at(10)),
+                "new-finalized:x",
+            );
+        }
+        let keys = || vec!["p".to_owned()];
+        // Within the bound the exact earliest eligible job is chosen.
+        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        assert!(delay > Duration::from_secs(10) && delay <= Duration::from_secs(20));
+        add_job(&db, "f-last", "space", Some(&at(10)), "new-finalized:x");
+        // At the bound the last examined row is a lower bound for any match.
+        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        assert!(delay > Duration::from_secs(1) && delay <= Duration::from_secs(10));
+        db.execute(
+            "UPDATE embedding_job SET next_attempt_at=?1 WHERE id LIKE 'f%'",
+            [at(3600)],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE embedding_job SET next_attempt_at=?1 WHERE id='late'",
+            [at(7200)],
+        )
+        .unwrap();
+        // Never later than the 30 s recheck used when nothing is scheduled.
+        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        assert!(delay > Duration::from_secs(20) && delay <= Duration::from_secs(30));
+        db.execute(
+            "UPDATE embedding_job SET next_attempt_at=?1 WHERE id LIKE 'f%'",
+            [at(-60)],
+        )
+        .unwrap();
+        // Past ineligible rows never make the worker spin.
+        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        assert!(delay > Duration::ZERO && delay <= Duration::from_secs(1));
+    }
+
+    #[test]
+    fn bootstrap_range_selects_exactly_the_profile_prefix() {
+        let db = next_delay_db();
+        let profile = "Pro_f%il:日本";
+        let keys = [
+            format!("index.bootstrap.{profile}."),
+            format!("index.bootstrap.{profile}.a"),
+            format!("index.bootstrap.{profile}.%_Z"),
+            format!("index.bootstrap.{profile}"),
+            format!("index.bootstrap.{profile}/"),
+            format!("index.bootstrap.{profile}x.a"),
+            "index.bootstrap.pro_f%il:日本.a".to_owned(),
+            "index.bootstrap.ProXfYYil:日本.a".to_owned(),
+            "index.bootstrap.Pro_f%il:日本-.a".to_owned(),
+        ];
+        for key in &keys {
+            db.execute("INSERT INTO app_meta VALUES(?1,'v')", [key])
+                .unwrap();
+        }
+        let (start, end) = IndexKeys::new(profile).bootstrap_range();
+        let mut q = db
+            .prepare("SELECT key FROM app_meta WHERE key>=?1 AND key<?2 ORDER BY key")
+            .unwrap();
+        let ranged: Vec<String> = q
+            .query_map([start, end], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let prefix = format!("index.bootstrap.{profile}.");
+        let mut exact: Vec<String> = keys
+            .iter()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        exact.sort();
+        assert_eq!(ranged, exact);
+        let mut q = db
+            .prepare("SELECT key FROM app_meta WHERE key LIKE ?1")
+            .unwrap();
+        let liked: Vec<String> = q
+            .query_map([IndexKeys::new(profile).bootstrap_pattern()], |row| {
+                row.get(0)
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(ranged.iter().all(|key| liked.contains(key)));
+        assert!(
+            liked.len() > ranged.len(),
+            "LIKE also matched other profiles"
+        );
+        let mut plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {NEXT_DELAY_BOOTSTRAP}"))
+            .unwrap();
+        let detail: String = plan.query_row(["a", "b"], |row| row.get(3)).unwrap();
+        assert!(detail.contains("USING INDEX"), "{detail}");
+    }
+
+    /// Synthetic #164-sized measurement; prints plans and times, asserts no timing.
+    #[test]
+    #[ignore = "manual measurement: cargo test --lib next_delay_synthetic_measurement -- --ignored --nocapture"]
+    fn next_delay_synthetic_measurement() {
+        let db = next_delay_db();
+        add_space(&db, "space", "active", "p");
+        let far = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+        let tx = db.unchecked_transaction().unwrap();
+        let filler = "x".repeat(1800);
+        for n in 0..84_948 {
+            add_job(
+                &tx,
+                &format!("job{n:06}"),
+                "space",
+                Some(&far),
+                "new-finalized:auto",
+            );
+            tx.execute(
+                "INSERT INTO app_meta VALUES(?1,?2)",
+                params![IndexKeys::input(&format!("job{n:06}")), filler],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        db.execute_batch("ANALYZE").unwrap();
+        for sql in [
+            "SELECT MIN(j.next_attempt_at) FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND j.next_attempt_at IS NOT NULL AND s.state IN ('active','candidate') AND s.splitter_version=?1 AND (?2 OR COALESCE(json_extract(j.authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%')",
+            "SELECT value FROM app_meta WHERE key LIKE ?1",
+            NEXT_DELAY_SPACES,
+            NEXT_DELAY_JOBS,
+            NEXT_DELAY_BOOTSTRAP,
+        ] {
+            let mut q = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan: Vec<String> = q
+                .query_map(
+                    rusqlite::params_from_iter(std::iter::repeat_n(
+                        rusqlite::types::Value::Null,
+                        q.parameter_count(),
+                    )),
+                    |row| row.get(3),
+                )
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            println!("{sql}\n  {plan:?}");
+        }
+        let family = Some("family".to_owned());
+        for (label, family, auto) in [
+            ("unpaused auto_history=true", family.clone(), true),
+            ("unpaused auto_history=false", family.clone(), false),
+        ] {
+            let start = std::time::Instant::now();
+            let delay = read_next_delay(&db, vec!["p".into()], family, auto).unwrap();
+            println!("{label}: {:?} -> {delay:?}", start.elapsed());
+        }
+        db.execute(
+            "INSERT INTO app_meta VALUES(?1,'paused')",
+            [IndexKeys::new("p").pause()],
+        )
+        .unwrap();
+        for (label, family) in [
+            ("paused family=None", None),
+            ("paused family unpaused", family),
+        ] {
+            let start = std::time::Instant::now();
+            let delay = read_next_delay(&db, vec!["p".into()], family, false).unwrap();
+            println!("{label}: {:?} -> {delay:?}", start.elapsed());
+        }
     }
 }
