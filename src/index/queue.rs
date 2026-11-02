@@ -130,18 +130,12 @@ impl IndexService {
         work: Vec<Work>,
     ) -> Result<usize, ApiError> {
         let key = key.to_owned();
-        let family = self.failure_key().map(str::to_owned);
         let inserted = self
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 let mut inserted = 0;
-                // #164: a pause saved since source admission blocks automatic work.
-                let paused = pause_cleanup::pause_id(&tx, &key, family.as_deref())?.is_some();
                 for work in work {
-                    if paused && pause_cleanup::automatic(&work.authorization) {
-                        continue;
-                    }
                     if !witness_valid(&tx, &work.witness, &work.body_kind)? {
                         continue;
                     }
@@ -232,25 +226,63 @@ pub(super) fn recover_authorization_progress(
 pub(super) fn claim_authorization(
     db: &mut Connection,
     prefix: &str,
-) -> Result<Option<(String, AutoAdmission)>, StorageError> {
+    profile: &str,
+    family: Option<&str>,
+) -> Result<(bool, Option<(String, AutoAdmission)>), StorageError> {
     let app_meta_sql = "SELECT key,value FROM app_meta WHERE key LIKE ?1 AND json_extract(value,'$.state')='pending' ORDER BY key LIMIT 1";
     let tx = db.transaction()?;
     let row: Option<(String, String)> = tx
         .query_row(app_meta_sql, [prefix], |row| Ok((row.get(0)?, row.get(1)?)))
         .optional()?;
     let Some((key, value)) = row else {
-        return Ok(None);
+        return Ok((false, None));
     };
+    let paused = meta(&tx, &IndexKeys::new(profile).pause())?.is_some()
+        || family
+            .map(|key| meta(&tx, &IndexKeys::new(key).pause()))
+            .transpose()?
+            .flatten()
+            .is_some();
+    if paused {
+        tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
+        tx.commit()?;
+        return Ok((true, None));
+    }
     let mut admission: AutoAdmission = decode_json(&value)?;
     admission.state = "running".into();
     update_json_meta(&tx, &key, &admission)?;
     tx.commit()?;
-    Ok(Some((key, admission)))
+    Ok((false, Some((key, admission))))
 }
 
 #[cfg(test)]
 mod metadata_tests {
     use super::*;
+    #[test]
+    fn claim_discards_admission_if_family_pauses_before_claim() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        let keys = IndexKeys::new("profile");
+        db.execute(
+            "INSERT INTO app_meta VALUES(?1,?2)",
+            params![
+                keys.auto("node"),
+                r#"{"node_id":"node","state":"pending","error":null}"#
+            ],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO app_meta VALUES(?1,'{}')",
+            [IndexKeys::new("family").pause()],
+        )
+        .unwrap();
+        let (discarded, claim) =
+            claim_authorization(&mut db, &keys.auto_pattern(), "profile", Some("family")).unwrap();
+        assert!(discarded);
+        assert!(claim.is_none());
+        assert!(meta(&db, &keys.auto("node")).unwrap().is_none());
+    }
     #[test]
     fn interrupted_auto_recovery_keeps_existing_per_row_commit_and_decode_order() {
         let mut db = Connection::open_in_memory().unwrap();

@@ -22,7 +22,8 @@ There is no new poller or claim of immediate worker-to-UI notification.
 Index management renders preview loading/result/error in its body. P without a
 selected source scope gives explicit guidance. T may retry globally, like the CLI,
 using a read-only default preview of currently failed/retry-eligible authorized
-work and the existing confirmation flow. Backfill/rebuild still need an explicit
+work and the existing confirmation flow. While paused, retry clears only the pause;
+discarded sources require explicitly scoped preview and backfill. Backfill/rebuild still need an explicit
 source selection. New guide text describes actual working keys and prohibits
 models from initiating paid retry/backfill/rebuild without explicit user consent.
 
@@ -47,7 +48,7 @@ An individually authorized input not eligible for aggregation stays singleton;
 never silently truncate, resplit or discard it merely to fill a batch.
 
 The idle worker's wake-delay read (#164) scans no queue while the endpoint family
-or the profile is paused; claims are idle then, so it rechecks after the existing
+or the profile is paused; after consuming paused work it rechecks after the existing
 30 s. Otherwise it walks each eligible space's pending jobs in jobs_ready order,
 evaluates authorization only on the rows it steps, and stops at the first
 eligible row. After 256 ineligible rows in one space it wakes at the last
@@ -141,7 +142,7 @@ the whole batch. No source node, unrelated bootstrap input or active/candidate
 space is deleted. Collection reports `inactive_index_spaces_collected`; freed
 SQLite pages may be reused, but physical database/WAL file shrink is not promised.
 
-The default retry preview mirrors retry's saved target set: selected active,
+Outside a pause, the default retry preview mirrors retry's saved target set: selected active,
 current rebuild and current-profile active-group spaces, not every historical
 failed space. Explicit space restricts known jobs; as in existing retry behavior,
 current-profile failed admissions and current bootstrap groups remain eligible.

@@ -319,7 +319,7 @@ Status/preview/backfill/retry/rebuild support `[--scope threads|all] [--space SP
 | `index status` | Work counts and saved pause reason/time; bounded spaces with connection/model/dimensions/segment count/vector payload bytes, plus recorded probes; no automatic backfill |
 | `index preview` | sources/segments/characters/already_indexed/unavailable; read-only candidates, no embedding requests/jobs/candidate creation |
 | `index backfill` | sources/segments/characters/already_indexed/unavailable; accepts explicit selection into index jobs, with API costs separate from conversation |
-| `index retry` | accepted; explicit retry of failed jobs/pause, not a new all-history backfill |
+| `index retry` | clears an index pause; outside a pause, explicitly retries failed jobs; never authorizes all-history backfill |
 | `index rebuild [--dimensions N]` | Same acceptance-size shape as backfill; first real input validates an explicit dimension, preserving the active space until complete catch-up; refusal stops the candidate |
 | `index probe [--dimensions N]` | One potentially charged fixed-input request; saves outcome/dimension per endpoint/model/request mode; no automatic fallback |
 

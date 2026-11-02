@@ -66,7 +66,16 @@ async fn pause_time_and_identity_survive_reads_service_restart_and_turn_observat
     assert_eq!(preview.sources, 1);
     assert!(preview.characters > 0);
     assert_eq!(f.proxy.count(), 1, "retry preview remains read-only");
+    assert!(
+        restarted
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+    );
     restarted.retry(args()).await.unwrap();
+    let mut selected = args();
+    selected.source_ids.push("paused-source".into());
+    restarted.backfill(selected).await.unwrap();
     assert!(
         restarted
             .process_one(CancellationToken::new())

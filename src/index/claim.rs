@@ -1,6 +1,45 @@
 //! Durable embedding claim lifecycle on the existing DB worker.
 use super::*;
 
+/// Consume one paused item atomically, including delayed and failed work.
+pub(super) fn discard_paused(
+    db: &mut Connection,
+    profile: &str,
+    family: Option<&str>,
+) -> Result<Option<bool>, StorageError> {
+    let tx = db.transaction()?;
+    let keys = IndexKeys::new(profile);
+    let paused = meta(&tx, &keys.pause())?.is_some()
+        || family
+            .map(|key| meta(&tx, &IndexKeys::new(key).pause()))
+            .transpose()?
+            .flatten()
+            .is_some();
+    if !paused {
+        return Ok(None);
+    }
+    for prefix in [keys.auto(""), keys.bootstrap("")] {
+        let upper = format!("{}/", &prefix[..prefix.len() - 1]);
+        let key: Option<String> = tx.query_row("SELECT key FROM app_meta WHERE key>=?1 AND key<?2 AND json_extract(value,'$.state') IN ('pending','failed') ORDER BY key LIMIT 1", params![prefix, upper], |r| r.get(0)).optional()?;
+        if let Some(key) = key {
+            tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+            tx.commit()?;
+            return Ok(Some(true));
+        }
+    }
+    let job: Option<String> = tx.query_row("SELECT j.id FROM index_space s JOIN embedding_job j ON j.space_id=s.id WHERE s.splitter_version=?1 AND j.state IN ('pending','failed') LIMIT 1", [keys.splitter()], |r| r.get(0)).optional()?;
+    if let Some(job) = job {
+        tx.execute(
+            "DELETE FROM app_meta WHERE key=?1",
+            [IndexKeys::input(&job)],
+        )?;
+        tx.execute("DELETE FROM embedding_job WHERE id=?1", [job])?;
+        tx.commit()?;
+        return Ok(Some(true));
+    }
+    Ok(Some(false))
+}
+
 pub(super) fn singleton_fallback(work: &Work) -> bool {
     work.error
         .as_ref()
@@ -13,9 +52,16 @@ pub(super) fn claim(
     max_inputs: usize,
     max_chars: usize,
     auto_history: bool,
+    family: Option<&str>,
 ) -> Result<ClaimResult, StorageError> {
     let tx = db.transaction()?;
-    if meta(&tx, &keys.pause())?.is_some() {
+    if meta(&tx, &keys.pause())?.is_some()
+        || family
+            .map(|key| meta(&tx, &IndexKeys::new(key).pause()))
+            .transpose()?
+            .flatten()
+            .is_some()
+    {
         return Ok(ClaimResult::Idle);
     }
     // One due cutoff for this serialized claim snapshot, never a fill window.
@@ -252,6 +298,52 @@ pub(super) fn defer_claim(
 mod tests {
     use super::*;
     #[test]
+    fn paused_consumer_discards_each_queue_and_keeps_running() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE index_space(id TEXT,splitter_version TEXT); CREATE TABLE embedding_job(id TEXT,space_id TEXT,state TEXT,next_attempt_at TEXT);").unwrap();
+        let keys = IndexKeys::new("p");
+        db.execute("INSERT INTO app_meta VALUES(?1,'{}')", [keys.pause()])
+            .unwrap();
+        for (key, value) in [
+            (keys.auto("a"), r#"{"state":"failed"}"#),
+            (
+                keys.bootstrap("b"),
+                r#"{"state":"pending","next_at":"2999"}"#,
+            ),
+            (keys.auto("running"), r#"{"state":"running"}"#),
+            (IndexKeys::input("job"), "{}"),
+        ] {
+            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, value])
+                .unwrap();
+        }
+        db.execute("INSERT INTO index_space VALUES('s',?1)", [keys.splitter()])
+            .unwrap();
+        db.execute(
+            "INSERT INTO embedding_job VALUES('job','s','pending','2999')",
+            [],
+        )
+        .unwrap();
+        for _ in 0..3 {
+            assert_eq!(discard_paused(&mut db, "p", None).unwrap(), Some(true));
+        }
+        assert_eq!(discard_paused(&mut db, "p", None).unwrap(), Some(false));
+        assert!(meta(&db, &keys.auto("running")).unwrap().is_some());
+        db.execute(
+            "UPDATE app_meta SET value=json_set(value,'$.state','pending') WHERE key=?1",
+            [keys.auto("running")],
+        )
+        .unwrap();
+        assert_eq!(discard_paused(&mut db, "p", None).unwrap(), Some(true));
+        assert!(meta(&db, &keys.auto("running")).unwrap().is_none());
+        assert!(meta(&db, &IndexKeys::input("job")).unwrap().is_none());
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM embedding_job", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+    #[test]
     fn bootstrap_claim_keeps_request_mode_when_a_later_rebuild_replaces_metadata() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -291,7 +383,7 @@ mod tests {
         );
         set_json_meta(&tx, &keys.bootstrap("input"), &work).unwrap();
         tx.commit().unwrap();
-        let ClaimResult::Ready(claims) = claim(&mut db, keys, 4, 64000, true).unwrap() else {
+        let ClaimResult::Ready(claims) = claim(&mut db, keys, 4, 64000, true, None).unwrap() else {
             panic!("expected claim")
         };
         let tx = db.transaction().unwrap();

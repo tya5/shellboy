@@ -66,13 +66,6 @@ impl IndexService {
                     cancelled,
                     &config,
                 )?;
-                // #164: an automatic claim returning to pending under a pause
-                // is rescanned by the paused cleanup.
-                if pause_cleanup::automatic(&claimed.work.authorization)
-                    && pause_cleanup::pause_id(&tx, &key, Some(&failure_key))?.is_some()
-                {
-                    pause_cleanup::rearm(&tx)?;
-                }
                 tx.commit()?;
                 Ok(changed)
             })
@@ -85,7 +78,7 @@ impl IndexService {
             let claimed = recovery_claim;
             let diagnostic = json!({
                 "kind":"index_failure_adoption",
-                "message":"Embedding failed but its normal failure adoption failed; retry explicitly after checking storage",
+                "message":"Embedding failed but its normal failure adoption failed; check storage, clear the pause, and explicitly preview/backfill any unindexed sources",
                 "provider_error":provider_error,
                 "adoption_error":adoption_error,
             });
@@ -93,8 +86,8 @@ impl IndexService {
             if let Some(family) = self.failure_key() {
                 pause_keys.push(family.to_owned());
             }
-            // Keep the fixed input and actual provider failure. A separate
-            // transaction must not rerun the malformed streak update.
+            // Save the provider failure atomically; paused consumption may later
+            // discard the failed work and its fixed input.
             let diagnostic_saved = self.database.call(move |db| {
                 let tx = db.transaction()?;
                 let mut changed = false;

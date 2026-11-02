@@ -116,6 +116,24 @@ impl IndexService {
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
+                let mut pause_keys = compatible_keys
+                    .iter()
+                    .map(|key| IndexKeys::new(key).pause())
+                    .collect::<Vec<_>>();
+                if let Some(family) = &family {
+                    pause_keys.push(IndexKeys::new(family).pause());
+                }
+                let mut paused = false;
+                for key in &pause_keys {
+                    paused |= meta(&tx, key)?.is_some();
+                }
+                if paused {
+                    for key in pause_keys {
+                        tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+                    }
+                    tx.commit()?;
+                    return Ok(true);
+                }
                 let mut changed = dimensions::clear_failure(&tx, IndexKeys::new(&current_key))?;
                 changed |= retry_tx(&tx, args, current_key, compatible_keys, family, filter)?;
                 tx.commit()?;
@@ -412,7 +430,6 @@ fn read_status(
         space_id: selected.clone(),
         auto_history,
         held_auto_history: 0,
-        discarded_auto_pending: pause_cleanup::total(db)?,
         pending: 0,
         running: 0,
         done: 0,

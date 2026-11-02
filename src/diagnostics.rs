@@ -633,23 +633,6 @@ impl Diagnostics {
             index_discard: None,
         });
     }
-    /// One numeric observation per completed paused cleanup pass (#164).
-    pub(crate) fn record_index_auto_discarded(&self, discarded: u64) {
-        self.enqueue_record(Record {
-            event: DiagnosticEvent::IndexAutoDiscarded,
-            ids: DiagnosticIds::default(),
-            failure: None,
-            stream_difference: None,
-            send: None,
-            shutdown: None,
-            tool_repair: None,
-            usage_slow: None,
-            ui_history: None,
-            lineage_slow: None,
-            db_job_slow: None,
-            index_discard: Some(IndexDiscardTrace { discarded }),
-        });
-    }
     /// One aggregate observation after the query; fast queries emit nothing at any level.
     pub(crate) fn record_lineage_query(
         &self,

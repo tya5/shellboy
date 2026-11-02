@@ -1,5 +1,11 @@
 # Development status
 
+## Paused index consumption (#173)
+
+The consumer deletes paused pending/failed work without provider requests,
+replacing #164 admission blocking and persisted cleanup cursors. Scope-all and
+Thread-scoped preview/backfill can recover unindexed sources.
+
 ## Index-source GC scan (#164, branch CI pending)
 
 `GcService::collect` found deleted/payload-less nodes owning index rows with a

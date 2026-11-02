@@ -383,14 +383,12 @@ async fn auth_pauses_immediately_and_manual_retry_resumes_without_auto_replay() 
     let status = f.service.status(args()).await.unwrap();
     assert!(status.paused);
     assert_eq!(status.failed, 1);
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-    );
+    f.drain().await;
     assert_eq!(f.proxy.count(), 1);
     f.service.retry(args()).await.unwrap();
+    let mut selected = args();
+    selected.source_ids.push("source".into());
+    f.service.backfill(selected).await.unwrap();
     f.drain().await;
     assert_eq!(f.service.status(args()).await.unwrap().done, 1);
     assert_eq!(f.proxy.count(), 2);
@@ -547,11 +545,13 @@ async fn three_exhausted_common_failures_pause_other_jobs_and_unknown_errors_do_
     assert!(status.paused);
     assert_eq!(status.failed, 3);
     assert_eq!(status.pending, 1);
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
+    f.drain().await;
+    assert_eq!(
+        (
+            f.service.status(args()).await.unwrap().failed,
+            f.service.status(args()).await.unwrap().pending
+        ),
+        (0, 0)
     );
     assert_eq!(f.proxy.count(), 3);
     f.close().await;
@@ -987,23 +987,16 @@ async fn logical_quota_pauses_index_work_but_preserves_semantic_reads_and_pause_
     f.node("filler", &"filler ".repeat(1000)).await;
     f.node("source", "cat").await;
     f.service.enqueue_new(&["source".into()]).await.unwrap();
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-    );
+    f.drain().await;
     assert_eq!(f.proxy.count(), 0);
     assert!(f.service.status(args()).await.unwrap().paused);
     f.db.call(move|db|{db.execute("UPDATE node SET payload_json=NULL,payload_bytes=0,deleted_reason='test cleanup' WHERE id='filler'",[])?;assert!(shellboy::gc::require_capacity_tx(db,&policy).is_ok());Ok(())}).await.unwrap();
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-    );
+    f.drain().await;
     assert_eq!(f.proxy.count(), 0);
     f.service.retry(args()).await.unwrap();
+    let mut selected = args();
+    selected.source_ids.push("source".into());
+    f.service.backfill(selected).await.unwrap();
     f.drain().await;
     assert_eq!(f.service.status(args()).await.unwrap().done, 1);
     assert_eq!(f.proxy.count(), 1);
@@ -1860,14 +1853,12 @@ async fn billing_failure_pauses_before_next_input_and_explicit_retry_keeps_autho
     let status = f.service.status(args()).await.unwrap();
     assert!(status.paused, "HTTP 402 is a shared billing failure");
     assert_eq!((status.failed, status.pending), (1, 1));
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-    );
+    f.drain().await;
     assert_eq!(f.proxy.count(), 1);
     f.service.retry(args()).await.unwrap();
+    let mut selected = args();
+    selected.source_ids = vec!["first".into(), "second".into()];
+    f.service.backfill(selected).await.unwrap();
     f.drain().await;
     assert_eq!(f.proxy.count(), 3);
     assert_eq!(f.service.status(args()).await.unwrap().done, 2);
@@ -1912,20 +1903,18 @@ async fn repeated_identical_unknown_provider_or_protocol_failures_pause_without_
                 "protocol={protocol}, terminal failure={i}"
             );
         }
-        assert!(
-            !f.service
-                .process_one(CancellationToken::new())
-                .await
-                .unwrap()
-        );
+        f.drain().await;
         let status = f.service.status(args()).await.unwrap();
-        assert_eq!((status.failed, status.pending), (3, 1));
+        assert_eq!((status.failed, status.pending), (0, 0));
         assert_eq!(
             f.proxy.count(),
             3,
             "unknown errors are not automatic retries or splits"
         );
         f.service.retry(args()).await.unwrap();
+        let mut all = args();
+        all.scope = Some(IndexScope::All);
+        f.service.backfill(all).await.unwrap();
         f.drain().await;
         assert_eq!(f.service.status(args()).await.unwrap().done, 4);
         assert_eq!(f.proxy.count(), 7);
@@ -2771,12 +2760,7 @@ async fn changing_uncoded_400_details_do_not_bypass_the_terminal_failure_breaker
         );
         assert_eq!(f.service.status(args()).await.unwrap().paused, i == 2);
     }
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-    );
+    f.drain().await;
     assert_eq!(
         f.proxy.count(),
         3,
@@ -2961,22 +2945,17 @@ async fn stalled_embeddings_retry_then_pause_and_manual_retry_restores_pending_w
     let status = f.service.status(args()).await.unwrap();
     assert!(status.paused);
     assert_eq!(status.failed, 1);
-    assert_eq!(
-        status.pending, 0,
-        "no automatic work is admitted while paused"
-    );
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-    );
+    assert_eq!(status.pending, 1);
+    f.drain().await;
     assert_eq!(
         f.proxy.count(),
         2,
         "pause prevents the next paid HTTP input"
     );
     f.service.retry(args()).await.unwrap();
+    let mut stalled = args();
+    stalled.source_ids.push("stalled".into());
+    f.service.backfill(stalled).await.unwrap();
     f.drain().await;
     assert_eq!(f.service.status(args()).await.unwrap().done, 1);
     assert_eq!(f.proxy.count(), 3);
@@ -3065,9 +3044,9 @@ async fn old_integer_reset_migrates_before_real_workers_and_exhausted_failures_t
     crate::test_watchdog::watchdog("paused cleanup status", async {
         loop {
             let status = f.service.status(args()).await.unwrap();
-            // #164: the remaining automatic job is discarded under the pause.
-            if status.paused && status.discarded_auto_pending == 1 {
-                assert_eq!((status.done, status.failed, status.pending), (1, 3, 0));
+            // All pending and failed work is discarded while paused.
+            if status.paused && status.failed == 0 && status.pending == 0 {
+                assert_eq!((status.done, status.failed, status.pending), (1, 0, 0));
                 assert!(status.reason.unwrap().contains("server_error"));
                 break;
             }
@@ -3124,9 +3103,9 @@ async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_wo
     crate::test_watchdog::watchdog("paused cleanup status", async {
         loop {
             let status = f.service.status(args()).await.unwrap();
-            // #164: the remaining automatic job is discarded under the pause.
-            if status.paused && status.discarded_auto_pending == 1 {
-                assert_eq!((status.done, status.failed, status.pending), (1, 1, 0));
+            // Failed records are also discarded while the pause is active.
+            if status.paused && status.failed == 0 && status.pending == 0 {
+                assert_eq!((status.done, status.failed, status.pending), (1, 0, 0));
                 let reason = status.reason.unwrap();
                 assert!(reason.contains("index_failure_adoption"), "{reason}");
                 assert!(reason.contains("unknown_failure"), "{reason}");
@@ -3153,20 +3132,13 @@ async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_wo
             )?,
             0
         );
-        let error: String = db.query_row(
-            "SELECT error_json FROM embedding_job WHERE state='failed'",
-            [],
-            |r| r.get(0),
-        )?;
-        assert!(error.contains("unknown_failure"));
         assert_eq!(
             db.query_row(
                 "SELECT count(*) FROM app_meta WHERE key GLOB 'index.input.*'",
                 [],
                 |r| r.get::<_, i64>(0)
             )?,
-            1,
-            "retain the failed fixed input for explicit retry; #164 discards the unsent automatic one"
+            0
         );
         Ok(())
     })
@@ -3176,7 +3148,7 @@ async fn malformed_current_counter_preserves_provider_failure_and_pauses_real_wo
     f.drain().await;
     let status = f.service.status(args()).await.unwrap();
     assert!(!status.paused);
-    assert_eq!((status.done, status.failed, status.pending), (2, 0, 0));
+    assert_eq!((status.done, status.failed, status.pending), (1, 0, 0));
     let mut gap = args();
     gap.source_ids = vec!["pending-0".into(), "pending-1".into()];
     f.service.backfill(gap).await.unwrap();
@@ -3435,110 +3407,143 @@ async fn count_rows(db: &DbWorker, sql: &'static str) -> i64 {
 }
 
 #[tokio::test]
-async fn paused_owner_admits_no_automatic_work_and_startup_discards_it_in_batches() {
+async fn paused_discard_is_recovered_by_scope_all_backfill() {
     let f = Fixture::new(Config::default()).await;
     f.node("seed", "seed").await;
     f.service.enqueue_new(&["seed".into()]).await.unwrap();
     f.drain().await;
-    assert_eq!(f.proxy.count(), 1);
-    // More automatic jobs than one cleanup page, one explicit job, one admission.
-    let auto: Vec<String> = (0..300).map(|i| format!("auto-{i:03}")).collect();
-    f.nodes(&auto, "automatic history").await;
-    f.service.enqueue_new(&auto).await.unwrap();
-    f.node("explicit", "explicit backfill").await;
+    f.node("delayed", "delayed").await;
+    f.node("explicit", "explicit").await;
+    f.node("admitted", "admitted").await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('view','/','/a','p','m','now'); INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('view',0,'seed'),('view',1,'delayed'),('view',2,'explicit'),('view',3,'admitted');")?;
+        Ok(())
+    }).await.unwrap();
+    f.service.enqueue_new(&["delayed".into()]).await.unwrap();
     let mut explicit = args();
     explicit.source_ids = vec!["explicit".into()];
     f.service.backfill(explicit).await.unwrap();
-    f.node("admitted", "admitted before pause").await;
-    f.node("skipped", "finalized while paused").await;
     let service = f.service.clone();
     f.db.call(move |db| {
         let tx = db.transaction()?;
-        service.authorize_new_tx(&tx, &["admitted".into()]).unwrap();
-        // A previous owner saved a pause (e.g. embedding transport failure).
         let profile: String = tx.query_row("SELECT substr(splitter_version,length('unicode-paragraph-v1:')+1) FROM index_space WHERE state='active'", [], |r| r.get(0))?;
-        tx.execute("INSERT INTO app_meta(key,value)VALUES('index.pause.'||?1,?2)", params![profile, r#"{"kind":"provider_pause","message":"synthetic"}"#])?;
-        // Admission check: nothing automatic is recorded while paused.
-        service.authorize_new_tx(&tx, &["skipped".into()]).unwrap();
+        tx.execute("INSERT INTO app_meta(key,value) VALUES('index.pause.'||?1,?2)", params![profile, r#"{"kind":"provider_pause"}"#])?;
+        tx.execute("UPDATE embedding_job SET next_attempt_at='2999-01-01T00:00:00Z' WHERE source_node_id='delayed'", [])?;
+        service.authorize_new_tx(&tx, &["admitted".into()]).unwrap();
         tx.commit()?;
         Ok(())
-    })
-    .await
-    .unwrap();
-    f.service.enqueue_new(&["skipped".into()]).await.unwrap();
-    let auto_jobs = "SELECT count(*) FROM embedding_job WHERE state='pending' AND json_extract(authorized_watermark,'$.authorization') LIKE 'new-finalized%'";
-    assert_eq!(count_rows(&f.db, auto_jobs).await, 300);
+    }).await.unwrap();
+    while f
+        .service
+        .process_one(CancellationToken::new())
+        .await
+        .unwrap()
+    {}
+    assert_eq!(f.proxy.count(), 1);
     assert_eq!(
         count_rows(
             &f.db,
-            "SELECT count(*) FROM embedding_job WHERE source_node_id='skipped'"
+            "SELECT count(*) FROM embedding_job WHERE state IN ('pending','failed')"
         )
         .await,
         0
     );
+    assert_eq!(count_rows(&f.db, "SELECT count(*) FROM app_meta WHERE key LIKE 'index.input.%' OR key LIKE 'index.auto.%'").await, 0);
+    f.service.retry(args()).await.unwrap();
+    let mut all = args();
+    all.scope = Some(IndexScope::All);
+    let mut thread = args();
+    thread.thread_ids.push("view".into());
+    let thread_preview = f.service.preview(thread).await.unwrap();
     assert_eq!(
-        count_rows(
-            &f.db,
-            "SELECT count(*) FROM app_meta WHERE key LIKE 'index.auto.%'"
-        )
-        .await,
-        1
+        (
+            thread_preview.sources,
+            thread_preview.segments,
+            thread_preview.already_indexed
+        ),
+        (4, 4, 1)
     );
-    // Owner restart while paused: workers discard the backlog in bounded steps.
-    let restarted = IndexService::new(f.db.clone(), f.config.clone());
-    let workers = restarted.start().await.unwrap();
-    crate::test_watchdog::watchdog("paused cleanup progress", async {
-        while restarted
-            .status(args())
-            .await
-            .unwrap()
-            .discarded_auto_pending
-            < 301
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("paused cleanup finishes");
-    workers.shutdown().await;
-    let status = restarted.status(args()).await.unwrap();
-    assert!(status.paused);
-    assert_eq!(status.discarded_auto_pending, 301);
-    assert_eq!(count_rows(&f.db, auto_jobs).await, 0);
+    let preview = f.service.preview(all.clone()).await.unwrap();
     assert_eq!(
-        count_rows(&f.db, "SELECT count(*) FROM embedding_job j JOIN app_meta m ON m.key='index.input.'||j.id WHERE j.source_node_id='explicit' AND j.state='pending'").await,
-        1,
-        "explicit backfill and its input are kept"
+        (preview.sources, preview.segments, preview.already_indexed),
+        (4, 4, 1)
     );
+    let enqueued = f.service.backfill(all).await.unwrap();
+    assert_eq!((enqueued.segments, enqueued.already_indexed), (3, 1));
+    f.drain().await;
+    assert_eq!(f.service.status(args()).await.unwrap().done, 4);
+
+    f.node("thread-only", "thread only").await;
+    f.service
+        .enqueue_new(&["thread-only".into()])
+        .await
+        .unwrap();
+    f.db.call(|db| {
+        db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('view',4,'thread-only')", [])?;
+        db.execute("INSERT INTO app_meta(key,value) SELECT 'index.pause.'||substr(splitter_version,length('unicode-paragraph-v1:')+1), '{}' FROM index_space WHERE state='active'", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.drain().await;
+    f.service.retry(args()).await.unwrap();
+    let mut thread = args();
+    thread.thread_ids.push("view".into());
+    let preview = f.service.preview(thread.clone()).await.unwrap();
     assert_eq!(
-        count_rows(
-            &f.db,
-            "SELECT count(*) FROM app_meta WHERE key LIKE 'index.input.%'"
-        )
-        .await,
-        1
+        (preview.sources, preview.segments, preview.already_indexed),
+        (5, 5, 4)
     );
-    assert_eq!(
-        count_rows(&f.db, "SELECT count(*) FROM app_meta WHERE key LIKE 'index.auto.%' OR key LIKE 'index.bootstrap.%'").await,
-        0
-    );
-    assert_eq!(f.proxy.count(), 1, "no paid request while paused");
-    // After resume, the paused gap is re-ingested through preview -> backfill.
-    restarted.retry(args()).await.unwrap();
-    let mut gap = args();
-    gap.source_ids = vec!["skipped".into(), "auto-000".into()];
-    let preview = restarted.preview(gap.clone()).await.unwrap();
-    assert_eq!((preview.sources, preview.already_indexed), (2, 0));
-    restarted.backfill(gap).await.unwrap();
-    for _ in 0..100 {
-        if !restarted
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-        {
-            break;
-        }
+    let enqueued = f.service.backfill(thread).await.unwrap();
+    assert_eq!((enqueued.segments, enqueued.already_indexed), (1, 4));
+    f.drain().await;
+    assert_eq!(f.service.status(args()).await.unwrap().done, 5);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn paused_finalizations_are_consumed_without_http_or_accumulation() {
+    let f = Fixture::new(Config::default()).await;
+    f.node("seed-queue", "seed").await;
+    f.service.enqueue_new(&["seed-queue".into()]).await.unwrap();
+    f.drain().await;
+    f.db.call(|db| {
+        db.execute("INSERT INTO app_meta(key,value) SELECT 'index.pause.'||substr(splitter_version,length('unicode-paragraph-v1:')+1), '{}' FROM index_space WHERE state='active'", [])?;
+        Ok(())
+    }).await.unwrap();
+    for n in 0..20 {
+        let id = format!("paused-{n}");
+        f.node(&id, "paused work").await;
+        let service = f.service.clone();
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            service.authorize_new_tx(&tx, &[id]).unwrap();
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        f.drain().await;
+        assert_eq!(
+            count_rows(
+                &f.db,
+                "SELECT count(*) FROM app_meta WHERE key LIKE 'index.auto.%'"
+            )
+            .await,
+            0
+        );
     }
-    assert_eq!(restarted.status(args()).await.unwrap().done, 4);
+    assert_eq!(f.proxy.count(), 1);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn startup_removes_obsolete_paused_cleanup_keys() {
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("INSERT INTO app_meta VALUES('index.pause_cleanup.state','{}'),('index.pause_cleanup.discarded','42')", [])?;
+        Ok(())
+    }).await.unwrap();
+    let workers = f.service.start().await.unwrap();
+    assert_eq!(count_rows(&f.db, "SELECT count(*) FROM app_meta WHERE key IN ('index.pause_cleanup.state','index.pause_cleanup.discarded')").await, 0);
+    workers.shutdown().await;
     f.close().await;
 }

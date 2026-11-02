@@ -29,7 +29,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 mod coverage;
-mod pause_cleanup;
 mod queue;
 pub(crate) mod saved_view;
 mod search;
@@ -260,6 +259,11 @@ impl IndexService {
                 "Index workers have already started",
             ));
         }
+        // Remove the obsolete #164 cursor and counter; neither tracks work now.
+        self.database.call(|db| {
+            db.execute("DELETE FROM app_meta WHERE key IN ('index.pause_cleanup.state','index.pause_cleanup.discarded')", [])?;
+            Ok(())
+        }).await.map_err(db_error)?;
         // Inflight calls from a prior owner may already have incurred billing.
         // Keep them failed for explicit retry rather than silently replaying.
         let changed = self
@@ -288,37 +292,12 @@ impl IndexService {
     pub(crate) fn set_diagnostics(&self, diagnostics: crate::diagnostics::Diagnostics) {
         let _ = self.diagnostics.set(diagnostics);
     }
-    /// One bounded paused-cleanup transaction (#164); true when more remain.
-    async fn pause_cleanup_step(&self) -> bool {
-        let Some(profile) = self.profile_key.clone() else {
-            return false;
-        };
-        let family = self.endpoint_family_key.clone();
-        let Ok(step) = self
-            .database
-            .call(move |db| pause_cleanup::step(db, &profile, family.as_deref()))
-            .await
-        else {
-            return false; // The pause itself keeps processing stopped.
-        };
-        if let Some(discarded) = step.finished {
-            self.publish_saved(true);
-            if let Some(diagnostics) = self.diagnostics.get() {
-                diagnostics.record_index_auto_discarded(discarded);
-            }
-        }
-        step.more
-    }
     async fn run_worker(self: Arc<Self>, token: CancellationToken) {
         while !token.is_cancelled() {
-            if self.pause_cleanup_step().await {
-                tokio::task::yield_now().await;
-                continue;
-            }
             match self.process_one(token.clone()).await {
                 Ok(true) => continue,
                 Ok(false) => {}
-                Err(_) => {} // The recorded pause blocks further claims until explicit retry.
+                Err(_) => {} // The recorded pause makes later consumers discard pending work.
             }
             let delay = self.next_delay().await.unwrap_or(Duration::from_secs(30));
             tokio::select! {
@@ -342,13 +321,6 @@ impl IndexService {
         let Some(key) = &self.profile_key else {
             return Ok(());
         };
-        // #164: no automatic admission while paused; preview/backfill recovers it.
-        if pause_cleanup::pause_id(tx, key, self.failure_key())
-            .map_err(db_error)?
-            .is_some()
-        {
-            return Ok(());
-        }
         for node_id in node_ids {
             let value = serde_json::to_string(&AutoAdmission {
                 node_id: node_id.clone(),
@@ -384,18 +356,14 @@ impl IndexService {
         let prefix = IndexKeys::new(key).auto_pattern();
         let profile = key.to_owned();
         let family = self.failure_key().map(str::to_owned);
-        let admission = self
+        let (discarded, admission) = self
             .database
-            .call(move |db| {
-                if pause_cleanup::pause_id(db, &profile, family.as_deref())?.is_some() {
-                    return Ok(None);
-                }
-                queue::claim_authorization(db, &prefix)
-            })
+            .call(move |db| queue::claim_authorization(db, &prefix, &profile, family.as_deref()))
             .await
             .map_err(db_error)?;
+        self.publish_saved(discarded);
         let Some((record, mut admission)) = admission else {
-            return Ok(false);
+            return Ok(discarded);
         };
         self.publish_saved(true); // claim_authorization committed pending -> running
         match self.enqueue_new(&[admission.node_id.clone()]).await {
@@ -881,7 +849,7 @@ impl IndexService {
             }
             let reason = json!({
                 "kind":"index_worker_error",
-                "message":"Index processing failed; result adoption may be incomplete. Inspect storage and retry explicitly",
+                "message":"Index processing failed; result adoption may be incomplete. Inspect storage, clear the pause, and explicitly preview/backfill unindexed sources",
                 "error":error,
             });
             let paused = self
@@ -918,17 +886,6 @@ impl IndexService {
         if cancel.is_cancelled() {
             return Ok(false);
         }
-        let Some(family) = self.failure_key().map(str::to_owned) else {
-            return Ok(false);
-        };
-        if self
-            .database
-            .call(move |db| Ok(meta(db, &IndexKeys::new(&family).pause())?.is_some()))
-            .await
-            .map_err(db_error)?
-        {
-            return Ok(false);
-        }
         for key in self.identity_keys() {
             if self.process_key(key, cancel.clone()).await? {
                 return Ok(true);
@@ -940,6 +897,17 @@ impl IndexService {
         if cancel.is_cancelled() {
             return Ok(false);
         }
+        let profile = key.clone();
+        let family = self.failure_key().map(str::to_owned);
+        let paused = self
+            .database
+            .call(move |db| claim::discard_paused(db, &profile, family.as_deref()))
+            .await
+            .map_err(db_error)?;
+        if let Some(progress) = paused {
+            self.publish_saved(progress);
+            return Ok(progress);
+        }
         if !self.capacity_allowed(&key).await? {
             return Ok(false);
         }
@@ -950,6 +918,7 @@ impl IndexService {
         let max_inputs = self.config.embedding.batch_max_inputs;
         let max_chars = self.config.embedding.batch_max_chars;
         let auto_history = self.config.indexing.auto_history;
+        let family = self.failure_key().map(str::to_owned);
         let claimed = self
             .database
             .call(move |db| {
@@ -959,6 +928,7 @@ impl IndexService {
                     max_inputs,
                     max_chars,
                     auto_history,
+                    family.as_deref(),
                 )
             })
             .await
