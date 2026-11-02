@@ -68,7 +68,7 @@ fn suggestions_draw_filter_select_and_complete_without_executing() {
     assert!(key(&mut ui, KeyCode::Tab).is_empty());
     assert_eq!(ui.view().draft.text, "/attachments ");
     assert!(ui.management.is_none());
-    assert!(!screen(&mut ui, 100, 30).contains("Tab/Enter 補完"));
+    assert!(!screen(&mut ui, 100, 30).contains("Tab/Enter Fill"));
 }
 
 #[test]
@@ -118,13 +118,13 @@ fn escape_hides_the_menu_until_edit_and_pasted_slashes_are_literal() {
     type_text(&mut ui, "/he");
     key(&mut ui, KeyCode::Esc);
     assert_eq!(ui.view().draft.text, "/he");
-    assert!(!screen(&mut ui, 80, 24).contains("Tab/Enter 補完"));
+    assert!(!screen(&mut ui, 80, 24).contains("Tab/Enter Fill"));
     key(&mut ui, KeyCode::Backspace);
     type_text(&mut ui, "e");
-    assert!(screen(&mut ui, 80, 24).contains("Tab/Enter 補完"));
+    assert!(screen(&mut ui, 80, 24).contains("Tab/Enter Fill"));
     let mut ui = state();
     ui.insert("/help", true);
-    assert!(!screen(&mut ui, 80, 24).contains("Tab/Enter 補完"));
+    assert!(!screen(&mut ui, 80, 24).contains("Tab/Enter Fill"));
     assert!(
         matches!(&key(&mut ui, KeyCode::Enter)[0], UiAction::Send { text, .. } if text=="/help")
     );
