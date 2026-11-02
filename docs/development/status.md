@@ -54,6 +54,9 @@ The grouped action list uses the shared popup list and scrollbar. Section
 headings remain display-only; selection, marker, colors, labels, and input
 routing remain unchanged. Synthetic viewport checks and native CI are recorded
 in the handoff; physical-terminal behavior remains unverified.
+## #177 Tool Row Disclosure and Click Targets
+
+Command and Details previews now follow tool-row disclosure. Mouse toggles are restricted to tool and notice rows; user, assistant, and received-response rows are inert. The running-work section keeps its independent click behavior; link and keyboard handling are unchanged. The task branch is based on current `origin/main`. Source formatting passed, but the post-rebase test run must be repeated with the shared build target refreshed before push. #177 is not yet pushed or validated by three-OS CI.
 
 ## Paused index consumption (#173)
 

@@ -585,6 +585,17 @@ impl UiState {
         else {
             return vec![];
         };
+        let click_target = match &item.key {
+            ItemKey::Tool { .. } | ItemKey::LocalTool { .. } | ItemKey::NoticeGroup(_) => true,
+            ItemKey::Node(node_id) => self.view().nodes().iter().any(|node| {
+                &node.node_id == node_id
+                    && node.presentation.kind == crate::presentation::PresentationKind::Event
+                    && node.role != "received_response"
+            }),
+        };
+        if !item.expandable || !click_target {
+            return vec![];
+        }
         self.select_history_item(y, item, &layout);
         self.toggle_history_item()
     }
@@ -1145,6 +1156,139 @@ mod tests {
         assert!(ui.view().items.active);
         assert_eq!(ui.view().items.focus, Some(ItemKey::Node("source".into())));
     }
+    fn click_item_row(ui: &mut UiState, key: &ItemKey) {
+        let layout = ui.item_layout();
+        let source_row = layout
+            .sources
+            .iter()
+            .position(|source| source.item.as_ref().is_some_and(|item| &item.key == key))
+            .expect("clickable item has a history row");
+        let area = ui.view().navigation.scroll.area.unwrap();
+        let first_visible = ui.view().navigation.scroll.row();
+        assert!(source_row >= first_visible);
+        let row = area.y + 1 + u16::try_from(source_row - first_visible).unwrap();
+        assert!(
+            area.inner(ratatui::layout::Margin::new(1, 1))
+                .contains(ratatui::layout::Position::new(area.x + 1, row))
+        );
+        ui.history_click(area.x + 1, row);
+    }
+
+    #[test]
+    fn clicks_on_user_and_model_message_rows_do_not_select_or_toggle() {
+        for (role, kind) in [
+            ("user", crate::presentation::PresentationKind::User),
+            (
+                "assistant",
+                crate::presentation::PresentationKind::Assistant,
+            ),
+            (
+                "received_response",
+                crate::presentation::PresentationKind::Event,
+            ),
+        ] {
+            let mut ui = fixture();
+            let node = &mut ui.view_mut().nodes_mut_for_test()[0];
+            node.role = role.into();
+            node.presentation.kind = kind;
+            let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+            terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+
+            let key = ItemKey::Node("source".into());
+            let layout = ui.item_layout();
+            assert!(
+                layout
+                    .sources
+                    .iter()
+                    .any(|source| { source.item.as_ref().is_some_and(|item| item.key == key) })
+            );
+            assert!(!ui.view().items.active);
+            click_item_row(&mut ui, &key);
+            assert!(!ui.view().items.active, "{role} row click should be inert");
+            assert_eq!(ui.view().items.focus, None);
+        }
+    }
+
+    #[test]
+    fn clicks_on_tool_and_grouped_notice_rows_still_toggle() {
+        let mut ui = fixture();
+        let tool = crate::presentation::ToolPresentation {
+            group_id: Some("group".into()),
+            call_id: "call".into(),
+            command: "printf synthetic".into(),
+            description: Some("Inspect repository".into()),
+            status: "completed".into(),
+            call_node_id: Some("source".into()),
+            ..Default::default()
+        };
+        let tool_key = ItemKey::tool(&tool, "source", 0);
+        let tool_outcome = super::presentation::tool_outcome(&tool);
+        {
+            let node = &mut ui.view_mut().nodes_mut_for_test()[0];
+            node.presentation.kind = crate::presentation::PresentationKind::Assistant;
+            node.presentation.blocks = vec![crate::presentation::PresentationBlock {
+                kind: crate::presentation::BlockKind::ToolCall,
+                tool: Some(tool),
+                ..Default::default()
+            }];
+        }
+        let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        click_item_row(&mut ui, &tool_key);
+        assert!(ui.view().items.is_open(&tool_key, false, &tool_outcome));
+
+        let local_tool = crate::presentation::ToolPresentation {
+            command: "printf local".into(),
+            status: "completed".into(),
+            ..Default::default()
+        };
+        let local_key = ItemKey::tool(&local_tool, "source", 0);
+        let local_outcome = super::presentation::tool_outcome(&local_tool);
+        ui.view_mut().nodes_mut_for_test()[0].presentation.blocks[0].tool = Some(local_tool);
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        click_item_row(&mut ui, &local_key);
+        assert!(ui.view().items.is_open(&local_key, false, &local_outcome));
+
+        fn event(id: &str, kind: &str) -> UiNode {
+            UiNode {
+                node_id: id.into(),
+                text: format!("raw-{id}"),
+                total_chars: 5,
+                presentation: crate::presentation::NodePresentation {
+                    kind: crate::presentation::PresentationKind::Event,
+                    ui_messages: crate::presentation::messages::PresentationMessages {
+                        title: Some(crate::presentation::messages::Message::EventTitle {
+                            kind: kind.into(),
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        }
+
+        let mut ui = fixture();
+        *ui.view_mut().nodes_mut_for_test() = vec![
+            event("notice-one", "run_started"),
+            event("notice-two", "index_state"),
+        ];
+        ui.view_mut().total_nodes = 2;
+        let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let notice_key = ItemKey::NoticeGroup("notice-one".into());
+        click_item_row(&mut ui, &notice_key);
+        assert!(ui.view().items.is_open(&notice_key, false, ""));
+
+        let mut ui = fixture();
+        *ui.view_mut().nodes_mut_for_test() = vec![event("single-notice", "run_started")];
+        ui.view_mut().total_nodes = 1;
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let notice_key = ItemKey::Node("single-notice".into());
+        click_item_row(&mut ui, &notice_key);
+        assert!(ui.view().items.is_open(&notice_key, false, ""));
+    }
+
     #[test]
     fn click_uses_inner_history_rows_and_never_selection_mode() {
         let mut ui = fixture();

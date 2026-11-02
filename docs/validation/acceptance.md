@@ -8932,3 +8932,16 @@ it does not establish true peaks. The original startup code and evidence were
 inspected to distinguish owner startup and spawn-to-echo from typing latency.
 No new real-provider request or Linux measurement was performed for this doc
 change. Exact-tip CI and post-integration validation remain pending.
+
+## #177 Tool Row Disclosure and Click Targets
+
+The command preview and Details command context follow the tool row's disclosure
+state. Mouse toggles are limited to tool rows and notice rows, including grouped
+and standalone notices; ordinary user, assistant, and received-response rows are
+inert. The running-work section retains its separate click behavior. Link and
+keyboard handling are unchanged; no UI symbols or wording change.
+
+`cargo fmt --all -- --check` passed. The focused Rust test output observed before
+refreshing the shared build target did not include the new regression tests and is
+not accepted as evidence. Re-run the focused presentation, Details, and history
+interaction tests after refreshing the shared build; three-OS CI is pending.
