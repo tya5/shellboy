@@ -11,11 +11,13 @@ pub(super) struct DraftSaver {
     backlog: HashMap<String, PendingSave>,
     sender: mpsc::Sender<Snapshot>,
     worker: tokio::task::JoinHandle<Result<(), ApiError>>,
+    language: UiLanguage,
     // Stop pumping a dead worker; each retained Thread is warned once.
     closed: bool,
 }
 impl DraftSaver {
     pub(super) fn new(control: Arc<Control>, results: mpsc::Sender<BackgroundResult>) -> Self {
+        let language = control.store.config.ui.language;
         let (sender, mut receiver) = mpsc::channel::<Snapshot>(32);
         let worker = tokio::spawn(async move {
             let mut failure = None;
@@ -37,6 +39,7 @@ impl DraftSaver {
             backlog: HashMap::new(),
             sender,
             worker,
+            language,
             closed: false,
         }
     }
@@ -145,7 +148,11 @@ impl DraftSaver {
         {
             let rejected = updates.defer(UiUpdate::DraftSaveFailed {
                 thread_id,
-                message: "下書き保存workerが停止しました。本文を保持しています。終了時に保存失敗として報告します".into(),
+                message: i18n::local!(
+                    self.language,
+                    "下書き保存workerが停止しました。本文を保持しています。終了時に保存失敗として報告します",
+                    "Draft-save worker stopped. Text is retained. Save failure will be reported on exit"
+                ).into(),
             });
             assert!(
                 rejected.is_none(),
@@ -180,6 +187,175 @@ impl DraftSaver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn worker_notice_uses_loaded_language_and_preserves_reserved_delivery_and_raw_drafts() {
+        assert_eq!(UiLanguage::default(), UiLanguage::En);
+        for (language, expected) in [
+            (
+                "default",
+                "Draft-save worker stopped. Text is retained. Save failure will be reported on exit",
+            ),
+            (
+                "en",
+                "Draft-save worker stopped. Text is retained. Save failure will be reported on exit",
+            ),
+            (
+                "ja",
+                "下書き保存workerが停止しました。本文を保持しています。終了時に保存失敗として報告します",
+            ),
+        ] {
+            for count in [0, 1, 2, 10] {
+                let (root, owner, control, server) = if language == "default" {
+                    let root = tempfile::tempdir().unwrap();
+                    let config = root.path().join("config.toml");
+                    std::fs::write(&config, "default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n").unwrap();
+                    let owner = crate::app::DataOwner::start(
+                        Some(config),
+                        Some(root.path().join("data")),
+                        root.path().into(),
+                    )
+                    .await
+                    .unwrap();
+                    let control = crate::control::Control::new(&owner, root.path().into());
+                    let (rpc, receive) = tokio::sync::mpsc::channel(16);
+                    let server = crate::ipc::LocalServer::bind(&owner, rpc).await.unwrap();
+                    tokio::spawn(control.clone().serve(receive));
+                    (root, owner, control, server)
+                } else {
+                    crate::frontend::control_tests::fixture_with_language(language).await
+                };
+                let (results, _incoming) = mpsc::channel(1);
+                let mut saver = DraftSaver::new(control.clone(), results);
+                saver.worker.abort();
+                crate::test_watchdog::watchdog(
+                    "draft worker receiver closes",
+                    saver.sender.closed(),
+                )
+                .await
+                .unwrap();
+                let mut originals = HashMap::new();
+                let mut ui = UiState::new(&control.store.config, root.path().into());
+                ui.select_thread("thread-0".into());
+                ui.insert("UI source 🦀 e\u{301}（保持）", false);
+                let ui_before = serde_json::to_value(&ui.view().draft).unwrap();
+                for index in 0..count {
+                    let thread = format!("thread-{index}");
+                    let draft = DraftSnapshot {
+                        draft_id: format!("draft-{index}"),
+                        revision: 17 + index as u64,
+                        text: format!("draft {index}: 日本語 🦀 e\u{301}（原文）"),
+                        cursor: 5,
+                        typed_prefix: 2,
+                        ..Default::default()
+                    };
+                    originals.insert(
+                        thread.clone(),
+                        (serde_json::to_value(&draft).unwrap(), draft.typed_prefix),
+                    );
+                    assert!(saver.enqueue(
+                        thread,
+                        draft,
+                        ViewAnchor {
+                            node_id: Some("anchor-source".into()),
+                            char_offset: 2
+                        },
+                        false,
+                        false
+                    ));
+                }
+                let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                tx.send(UiUpdate::RecoveryBell).unwrap();
+                let updates = BufferedUpdates::new(tx);
+                for revision in 0..512 {
+                    assert!(
+                        updates
+                            .defer(UiUpdate::Receipt {
+                                draft_id: "outbox-source".into(),
+                                revision,
+                                thread_id: Some("outbox-thread".into()),
+                                status: ReceiptStatus::Accepted,
+                                message: None,
+                            })
+                            .is_none()
+                    );
+                }
+                assert!(!updates.main_ready());
+                let mut failure = None;
+                for _ in 0..4 {
+                    saver.pump_delivery(&mut failure, &updates);
+                }
+                assert_eq!(failure.is_some(), count > 0);
+                assert!(matches!(rx.try_recv().unwrap(), UiUpdate::RecoveryBell));
+                let mut receipts = Vec::new();
+                let mut warned = HashSet::new();
+                for _ in 0..1024 {
+                    saver.pump_delivery(&mut failure, &updates);
+                    updates.flush_pending();
+                    while let Ok(value) = rx.try_recv() {
+                        match value {
+                            UiUpdate::Receipt {
+                                revision,
+                                draft_id,
+                                thread_id,
+                                message,
+                                ..
+                            } => {
+                                assert_eq!(draft_id, "outbox-source");
+                                assert_eq!(thread_id.as_deref(), Some("outbox-thread"));
+                                assert!(message.is_none());
+                                receipts.push(revision);
+                            }
+                            UiUpdate::DraftSaveFailed { thread_id, message } => {
+                                assert_eq!(
+                                    receipts.len(),
+                                    512,
+                                    "notice must not bypass prior critical updates"
+                                );
+                                assert_eq!(message, expected);
+                                assert!(
+                                    warned.insert(thread_id.clone()),
+                                    "exactly once per retained Thread"
+                                );
+                                ui.apply(UiUpdate::DraftSaveFailed { thread_id, message });
+                            }
+                            _ => panic!("unexpected update"),
+                        }
+                    }
+                }
+                assert_eq!(receipts, (0..512).collect::<Vec<_>>());
+                assert_eq!(warned.len(), count);
+                assert!(failure.is_none());
+                assert_eq!(saver.backlog.len(), count);
+                for (thread, (draft, typed_prefix)) in originals {
+                    assert!(warned.contains(&thread));
+                    let saved = &saver.backlog[&thread];
+                    assert_eq!(serde_json::to_value(&saved.draft).unwrap(), draft);
+                    assert_eq!(saved.draft.typed_prefix, typed_prefix);
+                    assert_eq!(saved.anchor.node_id.as_deref(), Some("anchor-source"));
+                    assert_eq!(saved.anchor.char_offset, 2);
+                    assert!(!saved.follow);
+                }
+                assert_eq!(serde_json::to_value(&ui.view().draft).unwrap(), ui_before);
+                if count > 0 {
+                    assert_eq!(ui.view().status, expected);
+                }
+                assert!(saver.finish().await.await.unwrap_err().is_cancelled());
+                let saved: i64 = owner
+                    .db
+                    .call(|db| Ok(db.query_row("SELECT count(*) FROM draft", [], |r| r.get(0))?))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    saved, 0,
+                    "a stopped worker must not claim persistence or add a retry"
+                );
+                server.shutdown().await.unwrap();
+                control.shutdown().await.unwrap();
+                owner.shutdown().await.unwrap();
+            }
+        }
+    }
     #[tokio::test]
     async fn full_backlog_distinguishes_stopped_worker_before_and_after_pump() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;

@@ -3925,3 +3925,16 @@ passed. Actual fault injection covers both configured locales and final UI statu
 exact-tip CI is reported separately. No #150/#157 production range changes.
 Watch recovery projection now defers with #157; panic/queue messages requiring
 root edits remain pending. No manifest adoption or final Stage C gate is claimed.
+### #152 Product Batch6: Draft Worker Notice
+
+Following #150 landing at89c570a1 and exact3OS CI41399417402, review of the
+actual current leaf found one remaining fixed-Ja worker-stopped notice. Localize
+only that generated complete notice using captured startup UI language; preserve
+Ja and unchanged #150 recovery/rejection advice. No #157/shared-presentation
+production file is edited. The old pre150 prototype remains superseded.
+
+Initial macOS fmt/check/focused Clippy and5 draft_saver tests passed; expanded
+coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
+outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
+Final extended-test and exact-tip CI evidence are reported separately. Python
+146/tooling audit passed; no final Stage C acceptance is claimed.

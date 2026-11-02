@@ -403,3 +403,28 @@ Core deletion, both loaded UI languages, final UI status, closed mutation
 admission and SaveFailed shutdown. Unchanged deletion regressions also pass.
 Exact-tip CI is reported separately; no whole-screen, physical-terminal,
 provider/clipboard, Windows-local or final combined Stage C acceptance is claimed.
+
+## Product Review Batch6: Draft Worker Stopped Notice
+
+After #150 actually landed at89c570a1 (exact3OS CI41399417402), inspection of
+its current draft_saver leaf found the stopped-worker notice still fixed Ja
+when delivered via DraftSaveFailed to the TUI. This is independent of #150's
+already-localized rejected_message and uses neither the old deferred prototype
+nor source-string matching. Only this complete generated notice follows the
+loaded UI language; original Ja is byte-identical. #157's actual diff does not
+include the changed production leaf. No shared presentation or operations files
+are part of this batch.
+
+Mac local fmt/check/focused Clippy and5 draft_saver tests passed on the first
+implementation. Added coverage exercises real config default En, explicit En
+and Ja,0/1/2/10 retained drafts, full critical outbox and subsequent ordered
+release, exactly one warning per Thread, unchanged Unicode and combining text,
+IDs/revisions/cursors/anchors/follow/typed-prefix, active UI text/status, no
+unexpected persistence, and failed worker join. Existing tests cover coalescing,
+closure detection, backpressure, new revisions and shutdown. The final test run
+and exact-tip CI are reported separately. Local Python tooling ran146 tests,
+including13 audit fixtures; manifest validation passed. Project hybrid RAG
+returned no items with an incompatible/degraded index; no index was rebuilt.
+No broad classification or fingerprint change is claimed. Exact3OS integration,
+physical terminal, clipboard, live provider and final Stage C acceptance remain
+separate. This work follows the subsequently selected0.6.1 cutoff.

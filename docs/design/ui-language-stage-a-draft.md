@@ -169,3 +169,18 @@ Do not change confirmed deletion, tombstone observation, local rollback, admissi
 closure/resource reclamation, ordering, limits or shutdown results. Panic/queue
 messages requiring deferred root changes are not part of this one-warning batch.
 Neither #150 nor #157 production ranges are edited.
+
+## Draft Worker Stopped Notice Boundary (#152 Batch6)
+
+After confirmed #150 landing at main89c570a1 (exact3OS CI41399417402), review the
+current draft_saver leaf rather than replaying the unpublished pre150 prototype.
+Only pump_delivery's complete worker-stopped notification follows the immutable
+loaded startup UI language. Explicit Ja keeps its exact original sentence; En
+uses complete English. Existing #150 rejected_message(language), recovery advice
+and callers remain intact. No root/composer/Watch/other #157 range changes.
+
+Capture the language in DraftSaver::new without altering pump admission, reserved
+main delivery, pending-failure ownership, coalescing, once-per-Thread warnings,
+raw snapshots/anchors/revisions, shutdown/error results, persistence or limits.
+No source text, user reason or stored draft is translated. Remaining candidates
+and the old prototype are not adopted by this one-notice boundary.

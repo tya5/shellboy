@@ -8441,3 +8441,19 @@ shutdown, plus existing descendant/stale-autosave/bounded-cleanup cases.
 Exact branch CI and later3OS integration are separate qualifications. No physical
 terminal, provider/clipboard, full-screen localization or final Stage C completion
 is inferred. After0.6.1 cutoff; no release tag/binary change is part of this batch.
+### #152 Batch6 Draft Worker Stopped Notice
+
+The generated stopped-worker notice delivered through DraftSaveFailed follows
+startup UI language; explicit Ja is byte-identical. Only frontend/draft_saver.rs
+changes in production. #150's rejection messages and their recovery guidance are
+not changed. Snapshot/user text, cursor/anchor, coalescing, queue capacity,
+reserved update timing/order, once-per-Thread warnings, persistence and shutdown
+outcome remain unchanged. No root/composer/#157 or shared-presentation change.
+
+Fresh first-pass macOS fmt/check/focused Clippy and5 draft_saver tests passed.
+The extended regression adds default/explicit En and Ja config,0/1/2/10 drafts,
+critical-outbox saturation and ordered release, unchanged source bytes, IDs,
+revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
+Final extended-test result and exact-tip CI are separate evidence. Python tooling
+ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
+physical-terminal acceptance is implied.
