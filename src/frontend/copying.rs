@@ -236,12 +236,12 @@ mod tests {
                 .unwrap_err();
             assert_eq!(
                 (rejected.code, rejected.message),
-                (expected.code.clone(), expected.message.clone())
+                (expected.code, expected.message.clone())
             );
             let rejected = choices(&control, "blocks".into()).await.unwrap_err();
             assert_eq!(
                 (rejected.code, rejected.message),
-                (expected.code.clone(), expected.message.clone())
+                (expected.code, expected.message.clone())
             );
             let rejected = source(&control, "plain".into(), 1, language)
                 .await
