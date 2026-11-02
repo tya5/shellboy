@@ -314,7 +314,7 @@ fn recovery_stays_static_when_a_new_send_is_pending() {
 
 #[test]
 fn terminal_admission_is_not_answered_or_cancelled_and_keeps_late_source_binding() {
-    let mut ui = ui();
+    let mut ui = ui_in(crate::config::UiLanguage::Ja);
     let (id, rev, _) = send(&mut ui, "interrupted after admission");
     receipt(&mut ui, &id, rev, ReceiptStatus::Accepted);
     receipt(&mut ui, &id, rev, ReceiptStatus::Applied);

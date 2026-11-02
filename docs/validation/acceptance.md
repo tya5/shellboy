@@ -8470,3 +8470,7 @@ state/message/retained combinations under all three glyph policies, and a real
 English receipt preserving draft and raw text. No physical terminal or OS
 clipboard test was performed. Exact task CI and three-OS integration CI remain
 pending.
+
+Task CI 41423110762 failed on a default-English `send_tests` test that still
+expected Japanese receipt status. That test now explicitly selects Japanese;
+the focused send unit, 14 view units and UI integration suite pass on macOS.
