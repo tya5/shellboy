@@ -3892,3 +3892,12 @@ slot/locked/two-thread fmt/check/Clippy passed, with diagnostics4, clipboard1,
 startup5, management18, content-filter unit10/integration2, layout102/watchdog
 and Python146 passing. Exact task CI/formal handoff are pending; earlier
 027e455e CI does not validate this restack. No new feature/policy/config change.
+### Benchmark startup interpretation (#151, objections 8 and 9)
+
+Inspection of the measured source and original comparison artifact establishes
+that Shellboy's spawn-to-input-echo startup observations include cold owner
+initialization. First visible output can precede it. The approximately 65 ms C
+figure is spawn-to-echo, not input-to-echo latency; every sample used two probes
+and the benchmark's 50 ms retry can contribute to that result. Documentation
+now distinguishes those facts from an unmeasured individual-key latency. Other
+requested #151 measurements remain outstanding.

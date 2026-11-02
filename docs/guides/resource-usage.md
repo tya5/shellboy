@@ -106,11 +106,27 @@ pre-answered. Values are **median [minimum, maximum] milliseconds**.
 | jcode v0.99.1 (`7206efd0c`) | C / 2026-11-01 | 11.454 [11.169, 13.206] | 32.342 [30.644, 35.709] |
 
 A startup message such as jcode's `Starting server...` can satisfy first visible
-before the composer appears. Input discarded during startup is resolved only
-to about 50 ms by the repeated probe. Echo detection uses the output stream or
-the cell decoder recorded in JSON. F's completed-frame/paste method and C's
+before the composer appears. These are both **spawn-to-event** times, not the
+latency from a keystroke to its echo. In Shellboy's five C samples, the first
+visible text was its startup screen, and the harness wrote the probe twice in
+every sample. At the measured SHA the startup screen ignores ordinary input,
+and the harness retries after 50 ms. The retry interval can affect the
+observed time; the saved data does not record the individual write timestamps,
+so it cannot establish a pure typing latency or an exact breakdown of the
+65 ms. Input discarded during startup is resolved only to about 50 ms by the
+repeated probe. Echo detection uses the output stream or the cell decoder
+recorded in JSON. F's completed-frame/paste method and C's
 generic typed-probe method are different: their Shellboy startup figures are
 not interchangeable. Neither establishes physical-terminal or IME behavior.
+
+Both F (`footprint.py`) and C (`compare.py`) launch Shellboy's interactive
+binary with a fresh temporary data directory; neither prestarts a separate
+`serve` process for the startup samples. At the measured SHA, that interactive
+process initializes the owner, control and endpoint before entering the
+conversation UI. Thus the spawn-to-composer-echo values include owner startup;
+the earlier first-visible values can be the startup screen and do not establish
+that owner initialization has completed. This is distinct from the memory
+workload, which explicitly starts `serve` before creating its Threads.
 
 ## Stage 4: Request bytes and storage
 

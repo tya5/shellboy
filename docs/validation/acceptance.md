@@ -8396,3 +8396,17 @@ existing assertion/guard were changed by restack. New exact task CI is pending;
 its SHA and outcome will be reported in the formal handoff. New-candidate Windows,
 physical terminal/IME, real providers/Azure and OS clipboard remain unverified.
 No main push, release, installed-binary or user-data operation is performed here.
+## Benchmark Startup Interpretation (#151)
+
+For the Shellboy 0.5.0 source `5a2e8474a52928eaafd35d64c3eb29dfd6c34626`,
+inspected `scripts/bench/compare.py`, `scripts/bench/footprint.py`, `src/main.rs`,
+`src/owner_session.rs` and `src/ui/startup.rs`. Both startup probes spawn the
+interactive binary with fresh temporary data; the interactive path waits for
+owner, control and local endpoint initialization before entering the composer.
+The startup screen can appear earlier. Comparison artifact 13084610570, run
+41307629104, contains five Shellboy samples: all report two probe writes and
+startup-screen first-visible excerpts. The harness sends its first probe at
+first visible and retries every 50 ms; startup discards ordinary keystrokes.
+The artifact does not contain individual write times, so it cannot prove the
+precise delay components or normal typing latency. This source-and-artifact
+inspection is not a new Linux measurement or physical-terminal test.
