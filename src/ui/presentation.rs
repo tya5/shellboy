@@ -2361,7 +2361,10 @@ fn quiet_section_tails(
                 .iter()
                 .map(|(fact, count, _)| {
                     if *count > 1 {
-                        format!("{fact} x{count}")
+                        crate::ui::text_width::glyphs::formatted!(
+                            "{fact} ×{count}",
+                            "{fact} x{count}"
+                        )
                     } else {
                         fact.clone()
                     }
@@ -2385,7 +2388,8 @@ fn quiet_section_tails(
                 });
             for line in hanging_wrap(
                 vec![Line::from(Span::styled(
-                    format!(
+                    crate::ui::text_width::glyphs::formatted!(
+                        "{} {} · {}",
                         "{} {} | {}",
                         RowKind::Notice.mark(),
                         row_label(RowKind::Notice, language),

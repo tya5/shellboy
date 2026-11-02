@@ -1309,9 +1309,9 @@ pub enum UiExitReason {
 fn details_refresh_failure(language: crate::config::UiLanguage, message: &str) -> String {
     match language {
         crate::config::UiLanguage::En => {
-            format!("Refresh failed | Previous observation: {message}")
+            text_width::glyphs::formatted!("Refresh failed · Previous observation: {message}", "Refresh failed | Previous observation: {message}")
         }
-        crate::config::UiLanguage::Ja => format!("更新失敗 | 前回の観測値: {message}"),
+        crate::config::UiLanguage::Ja => text_width::glyphs::formatted!("更新失敗 · 前回の観測値: {message}", "更新失敗 | 前回の観測値: {message}"),
     }
 }
 
@@ -4650,10 +4650,10 @@ impl UiState {
                 };
                 self.invalidate_management();
                 self.management.open_text(ManagementView {
-                    title: i18n::local!(
+                    title: text_width::glyphs::localized!(
                         self.config.ui.language,
-                        "受信記録 | 読込み中",
-                        "Received records | Loading"
+                        "受信記録 · 読込み中", "受信記録 | 読込み中",
+                        "Received records · Loading", "Received records | Loading"
                     )
                     .into(),
                     text: String::new(),
@@ -4905,15 +4905,15 @@ impl UiState {
                     .attachments
                     .iter()
                     .map(|a| match language {
-                        crate::config::UiLanguage::Ja => format!(
-                            "下書き: {} | {} | {}\n{}",
+                        crate::config::UiLanguage::Ja => text_width::glyphs::formatted!(
+                            "下書き: {} · {} · {}\n{}", "下書き: {} | {} | {}\n{}",
                             a.id,
                             a.kind,
                             a.state,
                             a.path.display()
                         ),
-                        crate::config::UiLanguage::En => format!(
-                            "Draft: {} | {} | {}\n{}",
+                        crate::config::UiLanguage::En => text_width::glyphs::formatted!(
+                            "Draft: {} · {} · {}\n{}", "Draft: {} | {} | {}\n{}",
                             a.id,
                             a.kind,
                             a.state,
@@ -5433,10 +5433,10 @@ impl UiState {
                 self.management.mode = management::ManagementMode::Index;
                 let attempt = self.management.begin_preview(args.clone());
                 self.management.open_text(ManagementView {
-                    title: i18n::local!(
+                    title: text_width::glyphs::localized!(
                         self.config.ui.language,
-                        "索引 | 費用preview",
-                        "Index | Cost preview"
+                        "索引 · 費用preview", "索引 | 費用preview",
+                        "Index · Cost preview", "Index | Cost preview"
                     )
                     .into(),
                     text: i18n::local!(
@@ -5476,10 +5476,10 @@ impl UiState {
             management::ManagementMode::General
         };
         self.management.open_text(ManagementView {
-            title: i18n::local!(
+            title: text_width::glyphs::localized!(
                 self.config.ui.language,
-                "操作 | 受付待ち",
-                "Operation | Awaiting acceptance"
+                "操作 · 受付待ち", "操作 | 受付待ち",
+                "Operation · Awaiting acceptance", "Operation | Awaiting acceptance"
             )
             .into(),
             text: i18n::local!(
@@ -6054,7 +6054,11 @@ pub fn cursor_position(text: &str, byte_cursor: usize, width: u16) -> (u16, u16)
 /// Render a cached source window without changing canonical text or offsets.
 fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize) -> String {
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
-        return "[本文未キャッシュ | スクロールで原文を再取得]".into();
+        return text_width::glyphs::select(
+            "[本文未キャッシュ · スクロールで原文を再取得]",
+            "[本文未キャッシュ | スクロールで原文を再取得]",
+        )
+        .into();
     }
     let start = start.max(node.base_char_offset);
     let mut range = 0;
@@ -6085,7 +6089,8 @@ fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize)
             && begin <= global
             && global < end
         {
-            let label = format!(
+            let label = text_width::glyphs::formatted!(
+                "[推論 {}文字 · 折りたたみ /reasoning]\n",
                 "[推論 {}文字 | 折りたたみ /reasoning]\n",
                 end.saturating_sub(begin)
             );
@@ -6272,7 +6277,10 @@ fn draw_input(
                 .border_style(Style::default().fg(state.palette.muted()))
                 .title_bottom(
                     if state.view().draft.text.is_empty() && input_area.width >= 60 {
-                        "/image 画像を添付 | /attach パス"
+                        text_width::glyphs::select(
+                            "/image 画像を添付 · /attach パス",
+                            "/image 画像を添付 | /attach パス",
+                        )
                     } else {
                         ""
                     },
@@ -6342,7 +6350,10 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         .as_deref()
         .and_then(|root| state.descendants.label_in(root, state.config.ui.language))
     {
-        spans.push(Span::raw(format!(" | {label}")));
+        spans.push(Span::raw(format!(
+            "{}{label}",
+            text_width::glyphs::separator()
+        )));
     }
     let hints = state
         .key_hints
@@ -6388,7 +6399,13 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     state.aux_popup_paint.set(None);
     state.viewport = area;
     if area.width < 8 || area.height < 5 {
-        frame.render_widget(Paragraph::new("Shellboy | enlarge terminal"), area);
+        frame.render_widget(
+            Paragraph::new(text_width::glyphs::select(
+                "Shellboy · enlarge terminal",
+                "Shellboy | enlarge terminal",
+            )),
+            area,
+        );
         state.visible_links.clear();
         state.dirty = false;
         return;
@@ -6836,6 +6853,51 @@ mod layout_cache_tests {
     }
 
     use super::*;
+
+    #[test]
+    fn confirmation_glyphs_do_not_rewrite_details() {
+        let raw = "user | · → │ detail";
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+                let confirmation = Confirmation::StaleIndex { detail: raw.into() };
+                assert!(confirmation.text(language).contains(raw));
+                let footer = confirmation.footer(language);
+                let (separator, arrows) = if policy == Some(1) {
+                    (" · ", "↑↓")
+                } else {
+                    (" | ", "^v")
+                };
+                assert!(
+                    footer.contains(separator) && footer.contains(arrows),
+                    "{policy:?}: {footer}"
+                );
+                assert_eq!(confirmation.text(language).matches(raw).count(), 1);
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn source_window_retains_raw_user_and_model_text_under_each_width() {
+        let raw = "user | · → │ model";
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for role in ["user", "assistant"] {
+                let mut value = node("n", raw);
+                value.role = role.into();
+                value.reasoning_ranges = vec![(0, raw.chars().count())];
+                assert_eq!(rendered_node_text(&value, true, 0, 256), raw);
+                let hidden = rendered_node_text(&value, false, 0, 256);
+                assert!(
+                    hidden.contains(text_width::glyphs::separator()),
+                    "{policy:?}: {hidden}"
+                );
+                assert_eq!(value.text, raw);
+            }
+        }
+        text_width::clear_terminal_width();
+    }
     fn node(id: &str, text: &str) -> UiNode {
         UiNode {
             presentation: Default::default(),

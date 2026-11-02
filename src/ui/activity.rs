@@ -40,7 +40,10 @@ impl FooterText {
             Self::UnknownAge => "Elapsed time unavailable",
             Self::UsageLimit => "Usage limit",
             Self::RateLimit => "Rate limit",
-            Self::RecoveryActions => "Retry is manual after reset | /model to switch connection",
+            Self::RecoveryActions => crate::ui::text_width::glyphs::select(
+                "Retry is manual after reset · /model to switch connection",
+                "Retry is manual after reset | /model to switch connection",
+            ),
             Self::EndedUnknown => "End time unavailable",
         }
     }
@@ -114,11 +117,16 @@ impl RecoverySnapshot {
         }
         .localized(language);
         Some(match limit.limit_window_minutes {
-            Some(n) => format!(
+            Some(n) => crate::ui::text_width::glyphs::formatted!(
+                "{kind} · Resets {} UTC · {n}-minute window",
                 "{kind} | Resets {} UTC | {n}-minute window",
                 at.format("%m-%d %H:%M")
             ),
-            None => format!("{kind} | Resets {} UTC", at.format("%m-%d %H:%M")),
+            None => crate::ui::text_width::glyphs::formatted!(
+                "{kind} · Resets {} UTC",
+                "{kind} | Resets {} UTC",
+                at.format("%m-%d %H:%M")
+            ),
         })
     }
     pub fn limit_summary(&self) -> Option<String> {
@@ -128,13 +136,15 @@ impl RecoverySnapshot {
             crate::model::usage_limit::LimitKind::UsageLimitReached => FooterText::UsageLimit,
             crate::model::usage_limit::LimitKind::RateLimitRetryAfter => FooterText::RateLimit,
         };
-        Some(format!(
+        Some(crate::ui::text_width::glyphs::formatted!(
+            "{} · {} UTC{}",
             "{} | {} UTC{}",
             kind.text(),
             at.format("%m-%d %H:%M"),
-            limit
-                .limit_window_minutes
-                .map_or(String::new(), |n| format!(" | {n}分枠"))
+            limit.limit_window_minutes.map_or(
+                String::new(),
+                |n| crate::ui::text_width::glyphs::formatted!(" · {n}分枠", " | {n}分枠")
+            )
         ))
     }
 }
@@ -155,21 +165,29 @@ impl AutomaticRetrySnapshot {
         .render(language);
         // Consequences precede optional progress counts in constrained footers.
         match (language, self.partial_response_discarded) {
-            (UiLanguage::En, true) => format!(
+            (UiLanguage::En, true) => crate::ui::text_width::glyphs::formatted!(
+                "Re-sending may be billed twice · Retry {}/{} in {wait} · Partial response saved; starting over",
                 "Re-sending may be billed twice | Retry {}/{} in {wait} | Partial response saved; starting over",
-                self.number, self.limit
+                self.number,
+                self.limit
             ),
-            (UiLanguage::En, false) => format!(
+            (UiLanguage::En, false) => crate::ui::text_width::glyphs::formatted!(
+                "Re-sending may be billed twice · Retry {}/{} in {wait}",
                 "Re-sending may be billed twice | Retry {}/{} in {wait}",
-                self.number, self.limit
+                self.number,
+                self.limit
             ),
-            (UiLanguage::Ja, true) => format!(
+            (UiLanguage::Ja, true) => crate::ui::text_width::glyphs::formatted!(
+                "再送は重複課金の可能性 · 再試行（{}/{}） · {wait}待機 · 途中応答を保存して作り直し",
                 "再送は重複課金の可能性 | 再試行（{}/{}） | {wait}待機 | 途中応答を保存して作り直し",
-                self.number, self.limit
+                self.number,
+                self.limit
             ),
-            (UiLanguage::Ja, false) => format!(
+            (UiLanguage::Ja, false) => crate::ui::text_width::glyphs::formatted!(
+                "再送は重複課金の可能性 · 再試行（{}/{}） · {wait}待機",
                 "再送は重複課金の可能性 | 再試行（{}/{}） | {wait}待機",
-                self.number, self.limit
+                self.number,
+                self.limit
             ),
         }
     }
@@ -421,7 +439,8 @@ impl ActivityView {
     }
     pub fn secondary_note_localized(&self, at: Instant, language: UiLanguage) -> Option<String> {
         let phase = self.secondary_phase()?;
-        Some(format!(
+        Some(crate::ui::text_width::glyphs::formatted!(
+            "{} · {}",
             "{} | {}",
             phase_label(phase, language),
             self.request_clock.as_ref().map_or_else(
@@ -721,6 +740,39 @@ impl Animation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activity_markers_and_retry_text_follow_measured_width() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let retry = AutomaticRetrySnapshot {
+            number: 1,
+            limit: 3,
+            delay_ms: 1500,
+            partial_response_discarded: true,
+        };
+        for (policy, stopped, idle, active, separator) in [
+            (Some(1), "■", "·", "●", " · "),
+            (Some(2), "#", "|", "*", " | "),
+            (None, "#", "|", "*", " | "),
+        ] {
+            text_width::set_terminal_width(policy);
+            assert_eq!(ActivityPhase::Stopped.marker(), stopped);
+            assert_eq!(ActivityPhase::Idle.marker(), idle);
+            assert_eq!(ActivityPhase::Running.marker(), active);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let text = retry.label_localized(language);
+                let separators = if language == UiLanguage::Ja { 3 } else { 2 };
+                assert_eq!(
+                    text.matches(separator).count(),
+                    separators,
+                    "{policy:?} {language:?}: {text}"
+                );
+                assert!(text.contains("1/3"), "{text}");
+                assert!(text.width() <= 120, "{text}");
+            }
+        }
+        text_width::clear_terminal_width();
+    }
     fn awaiting(attempt: &str) -> ActivitySnapshot {
         ActivitySnapshot {
             run_id: Some("run".into()),

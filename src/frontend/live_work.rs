@@ -359,14 +359,21 @@ pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
                         let others = row.wait_condition_count.unwrap_or(0).saturating_sub(1);
                         let other_threads = row.wait_thread_count.unwrap_or(0).saturating_sub(1);
                         let thread_summary = if other_threads > 0 {
-                            format!(" | 他{other_threads}会話")
+                            crate::ui::text_width::glyphs::formatted!(
+                                " · 他{other_threads}会話",
+                                " | 他{other_threads}会話"
+                            )
                         } else {
                             String::new()
                         };
-                        format!(
+                        crate::ui::text_width::glyphs::formatted!(
+                            "{kind} · {name}{thread_summary}{}",
                             "{kind} | {name}{thread_summary}{}",
                             if others > 0 {
-                                format!(" | 他{others}件")
+                                crate::ui::text_width::glyphs::formatted!(
+                                    " · 他{others}件",
+                                    " | 他{others}件"
+                                )
                             } else {
                                 String::new()
                             }

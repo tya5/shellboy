@@ -10,15 +10,17 @@ pub(super) fn cli_stopped(language: UiLanguage, error: impl Display) -> String {
     }
 }
 pub(super) fn settings_changed(language: UiLanguage, connection: &str, model: &str) -> String {
+    let separator = crate::ui::text_width::glyphs::separator();
     match language {
-        UiLanguage::Ja => format!("設定を変更しました | {connection} / {model}"),
-        UiLanguage::En => format!("Settings changed | {connection} / {model}"),
+        UiLanguage::Ja => format!("設定を変更しました{separator}{connection} / {model}"),
+        UiLanguage::En => format!("Settings changed{separator}{connection} / {model}"),
     }
 }
 pub(super) fn not_accepted(language: UiLanguage, title: &str, error: impl Display) -> String {
+    let separator = crate::ui::text_width::glyphs::separator();
     match language {
-        UiLanguage::Ja => format!("未受付 | {title} | {error}"),
-        UiLanguage::En => format!("Not accepted | {title} | {error}"),
+        UiLanguage::Ja => format!("未受付{separator}{title}{separator}{error}"),
+        UiLanguage::En => format!("Not accepted{separator}{title}{separator}{error}"),
     }
 }
 pub(super) fn attachments_reloaded(language: UiLanguage, thread_id: &str) -> String {
@@ -36,9 +38,10 @@ pub(super) fn accepted(language: UiLanguage, title: &str) -> String {
     }
 }
 pub(super) fn not_applied(language: UiLanguage, title: &str, error: impl Display) -> String {
+    let separator = crate::ui::text_width::glyphs::separator();
     match language {
-        UiLanguage::Ja => format!("{title}は未適用 | {error}"),
-        UiLanguage::En => format!("{title} not applied | {error}"),
+        UiLanguage::Ja => format!("{title}は未適用{separator}{error}"),
+        UiLanguage::En => format!("{title} not applied{separator}{error}"),
     }
 }
 pub(super) fn save_failed(language: UiLanguage, error: impl Display) -> String {
@@ -198,19 +201,20 @@ pub(super) fn preview_notice(
     observed_at: chrono::DateTime<chrono::Utc>,
     notices: &[&str],
 ) -> String {
+    let separator = crate::ui::text_width::glyphs::separator();
     let time = observed_at.format("%Y-%m-%d %H:%M:%S");
     let extra = if notices.is_empty() {
         String::new()
     } else {
-        let separator = match language {
+        let notice_separator = match language {
             UiLanguage::Ja => "。",
             UiLanguage::En => " ",
         };
-        format!(" | {}", notices.join(separator))
+        format!("{separator}{}", notices.join(notice_separator))
     };
     match language {
-        UiLanguage::Ja => format!("取得 {time} UTC | 閉じて開くと再取得{extra}"),
-        UiLanguage::En => format!("Captured {time} UTC | Close and reopen to refresh.{extra}"),
+        UiLanguage::Ja => format!("取得 {time} UTC{separator}閉じて開くと再取得{extra}"),
+        UiLanguage::En => format!("Captured {time} UTC{separator}Close and reopen to refresh.{extra}"),
     }
 }
 

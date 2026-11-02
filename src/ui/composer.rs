@@ -629,8 +629,11 @@ impl UiState {
             })
             .collect::<Vec<_>>();
         lines.push(
-            Line::from("^v 選択 | Tab/Enter 補完 | Esc 閉じる")
-                .style(Style::default().fg(theme::MUTED)),
+            Line::from(crate::ui::text_width::glyphs::select(
+                "↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる",
+                "^v 選択 | Tab/Enter 補完 | Esc 閉じる",
+            ))
+            .style(Style::default().fg(theme::MUTED)),
         );
         frame.render_widget(Paragraph::new(lines), popup);
     }

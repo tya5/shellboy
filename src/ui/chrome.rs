@@ -470,7 +470,8 @@ pub(super) fn welcome(
             "依頼を入力してください",
             Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from(format!(
+        Line::from(glyphs::formatted!(
+            "送信: {} · 改行: {}",
             "送信: {} | 改行: {}",
             config.ui.send_key,
             config.ui.newline_keys.join(" / ")
@@ -485,9 +486,12 @@ pub(super) fn welcome(
             )
         )),
         Line::from(if width >= 55 {
-            "/ コマンド | /image 画像を添付 | F1 操作ガイド"
+            glyphs::select(
+                "/ コマンド · /image 画像を添付 · F1 操作ガイド",
+                "/ コマンド | /image 画像を添付 | F1 操作ガイド",
+            )
         } else {
-            "/ コマンド | F1 操作ガイド"
+            glyphs::select("/ コマンド · F1 操作ガイド", "/ コマンド | F1 操作ガイド")
         }),
     ]
 }
@@ -570,6 +574,31 @@ mod tests {
         }
         assert!(frozen_header_label(100, None).contains("時刻未記録"));
     }
+    #[test]
+    fn empty_conversation_uses_measured_separators_without_changing_bindings() {
+        use crate::ui::text_width;
+        let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        config.ui.send_key = "Ctrl+Enter".into();
+        config.ui.newline_keys = vec!["Enter".into()];
+        for (policy, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            text_width::set_terminal_width(policy);
+            for width in [80, 120] {
+                let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+                let shown = frame_text(&mut ui, width, 24);
+                assert!(
+                    shown.contains(&format!("送信: Ctrl+Enter{separator}改行: Enter")),
+                    "{policy:?}: {shown}"
+                );
+                assert!(
+                    shown.contains(&format!("/ コマンド{separator}/image")),
+                    "{policy:?}: {shown}"
+                );
+                assert_eq!(config.ui.send_key, "Ctrl+Enter");
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
     #[test]
     fn empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents() {
         let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();

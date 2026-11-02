@@ -38,15 +38,19 @@ pub(super) struct DeletionDialog {
 impl DeletionDialog {
     pub(super) fn footer(&self) -> String {
         crate::ui::text_width::glyphs::decorate(if self.can_execute() {
-            local!(
+            crate::ui::text_width::glyphs::localized!(
                 self.language,
+                "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 削除 · ↑↓/PgUp/PgDn 閲覧",
                 "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧",
+                "D / Space Toggle descendants · N / Esc Back\nY Delete · ↑↓/PgUp/PgDn Scroll",
                 "D / Space Toggle descendants | N / Esc Back\nY Delete | ^v/PgUp/PgDn Scroll"
             )
         } else {
-            local!(
+            crate::ui::text_width::glyphs::localized!(
                 self.language,
+                "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 使用不可 · ↑↓/PgUp/PgDn 閲覧",
                 "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧",
+                "D / Space Toggle descendants · N / Esc Back\nY disabled · ↑↓/PgUp/PgDn Scroll",
                 "D / Space Toggle descendants | N / Esc Back\nY disabled | ^v/PgUp/PgDn Scroll"
             )
         })

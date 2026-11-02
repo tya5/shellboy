@@ -112,7 +112,7 @@ impl Page {
             Action::Code.description(config.ui.language),
         );
         page.entry(
-            "o > c",
+            crate::ui::text_width::glyphs::select("o → c", "o > c"),
             local!(
                 config.ui.language,
                 "詳細から原文を開き、表示中の原文ページをコピーする",
@@ -200,9 +200,11 @@ impl Page {
         );
         page.entry(
             "/",
-            local!(
+            crate::ui::text_width::glyphs::localized!(
                 config.ui.language,
+                "コマンド候補を表示。↑↓で選び、Tabで補完",
                 "コマンド候補を表示。^vで選び、Tabで補完",
+                "Show commands; select with ↑↓ and complete with Tab",
                 "Show commands; select with ^v and complete with Tab"
             ),
         );
@@ -352,16 +354,20 @@ impl Page {
             ),
         );
         page.entry(
-            "^ / v",
-            local!(
+            crate::ui::text_width::glyphs::select("↑ / ↓", "^ / v"),
+            crate::ui::text_width::glyphs::localized!(
                 config.ui.language,
+                "入力の先頭行で送信履歴を呼び出す。↓で新しい履歴へ",
                 "入力の先頭行で送信履歴を呼び出す。vで新しい履歴へ",
+                "Recall sent history on the first input line; ↓ selects newer history",
                 "Recall sent history on the first input line; v selects newer history"
             ),
         );
-        page.note(local!(
+        page.note(crate::ui::text_width::glyphs::localized!(
             config.ui.language,
+            "送信履歴の最新からさらに↓で、書きかけの下書きに戻ります。",
             "送信履歴の最新からさらにvで、書きかけの下書きに戻ります。",
+            "Press ↓ after the newest sent entry to restore the unfinished draft.",
             "Press v after the newest sent entry to restore the unfinished draft."
         ));
 
@@ -381,7 +387,7 @@ impl Page {
             );
         }
         page.entry(
-            "Ctrl+X > Ctrl+S",
+            crate::ui::text_width::glyphs::select("Ctrl+X → Ctrl+S", "Ctrl+X > Ctrl+S"),
             local!(
                 config.ui.language,
                 "すぐ渡す。前景shellの待機だけを解除する",
@@ -423,9 +429,11 @@ impl Page {
                 "Shift+Tab / クリック",
                 "Shift+Tab / click"
             ),
-            local!(
+            crate::ui::text_width::glyphs::localized!(
                 config.ui.language,
+                "入力欄の上にある作業を選ぶ。↑↓で移動",
                 "入力欄の上にある作業を選ぶ。^vで移動",
+                "Select work above the input; use ↑↓ to move",
                 "Select work above the input; use ^v to move"
             ),
         );
@@ -516,9 +524,11 @@ impl Page {
                 "List failed and stream-difference receipts and read their originals"
             ),
         );
-        page.note(local!(
+        page.note(crate::ui::text_width::glyphs::localized!(
             config.ui.language,
+            "詳細画面: ↑↓で選択 → Enterで詳細。Oで原文、Cでコピー。",
             "詳細画面: ^vで選択 > Enterで詳細。Oで原文、Cでコピー。",
+            "Details: select with ↑↓ and open with Enter. O opens the original; C copies.",
             "Details: select with ^v and open with Enter. O opens the original; C copies."
         ));
         page.note(local!(
@@ -870,7 +880,7 @@ impl Page {
             ),
         );
         page.entry(
-            "/index threads ID.",
+            crate::ui::text_width::glyphs::select("/index threads ID…", "/index threads ID."),
             local!(
                 config.ui.language,
                 "指定した会話を索引管理の対象にする",
@@ -987,9 +997,11 @@ impl Page {
         );
         Self {
             title: local!(config.ui.language, "ヘルプ", "Help"),
-            context: local!(
+            context: crate::ui::text_width::glyphs::localized!(
                 config.ui.language,
+                "操作するときはEscで会話へ戻る · / でコマンド候補を表示",
                 "操作するときはEscで会話へ戻る | / でコマンド候補を表示",
+                "Esc returns to the conversation · / shows commands",
                 "Esc returns to the conversation | / shows commands"
             ),
             content: Content::Guide(page.rows),
@@ -1066,9 +1078,11 @@ impl Page {
     }
 }
 pub(super) fn footer(language: UiLanguage) -> &'static str {
-    local!(
+    crate::ui::text_width::glyphs::localized!(
         language,
+        "Esc / Enter / F1 戻る · ↑↓ / PgUp / PgDn 閲覧",
         "Esc / Enter / F1 戻る | ^v / PgUp / PgDn 閲覧",
+        "Esc / Enter / F1 Back · ↑↓ / PgUp / PgDn Scroll",
         "Esc / Enter / F1 Back | ^v / PgUp / PgDn Scroll"
     )
 }
@@ -1151,6 +1165,47 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn guide_keys_follow_measured_width_in_both_languages() {
+        use crate::ui::text_width;
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let mut config = Config::default();
+                config.ui.language = language;
+                for width in [80, 120] {
+                    let page = Page::guide(&config);
+                    let lines = page.lines(width);
+                    let text = lines
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let (chain, arrows) = if policy == Some(1) {
+                        ("o → c", "↑↓")
+                    } else {
+                        ("o > c", "^v")
+                    };
+                    assert!(text.contains(chain), "{policy:?} {language:?}: {text}");
+                    assert!(text.contains(arrows), "{policy:?} {language:?}: {text}");
+                    assert!(footer(language).contains(arrows));
+                    // Guide rows are wrapped by the popup reader, not Page::lines.
+                    let mut ui = UiState::new(&config, std::env::temp_dir());
+                    key(&mut ui, KeyCode::F(1));
+                    let shown = screen(&mut ui, width, 24);
+                    assert!(shown.contains(arrows), "{policy:?} {language:?}: {shown}");
+                    for row in shown.lines() {
+                        assert!(
+                            row.width() <= usize::from(width),
+                            "{policy:?} {language:?} {width}: {row}"
+                        );
+                    }
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
     #[test]
     fn thread_deletion_help_distinguishes_confirmation_from_filter_editing() {
         let shown = Page::guide(&japanese_config())
@@ -1292,7 +1347,9 @@ mod tests {
             // Ignore frame/scrollbar cells between the sentence's wrapped rows.
             let compact = text
                 .chars()
-                .filter(|ch| !ch.is_whitespace() && !matches!(ch, '|' | '-' | '#'))
+                .filter(|ch| {
+                    !ch.is_whitespace() && !matches!(ch, '|' | '-' | '#' | '│' | '─' | '█')
+                })
                 .collect::<String>();
             assert!(
                 compact.contains("アプリ全体の使用量ではありません。"),

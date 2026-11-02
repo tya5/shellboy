@@ -203,10 +203,9 @@ fn call(
     value: &Value,
     base_char_offset: usize,
 ) {
-    let command = value
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("shell呼出し | 詳細");
+    let command = value.get("command").and_then(Value::as_str).unwrap_or(
+        crate::ui::text_width::glyphs::select("shell呼出し · 詳細", "shell呼出し | 詳細"),
+    );
     let (text, omitted) = excerpt(
         &sanitize_plain(command, 0).0,
         b.text.len().max(128),

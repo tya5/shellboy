@@ -1501,8 +1501,9 @@ mod language_tests {
                     let bounds = ui.queue_popup.paint_bounds().unwrap();
                     let buffer = terminal.backend().buffer();
                     for y in bounds.outer.y + 1..bounds.outer.bottom() - 1 {
-                        assert_eq!(buffer[(bounds.outer.x, y)].symbol(), "|");
-                        assert_eq!(buffer[(bounds.outer.right() - 1, y)].symbol(), "|");
+                        let border = crate::ui::text_width::glyphs::vertical();
+                        assert_eq!(buffer[(bounds.outer.x, y)].symbol(), border);
+                        assert_eq!(buffer[(bounds.outer.right() - 1, y)].symbol(), border);
                     }
                     let mut body = String::new();
                     for y in bounds.body.y..bounds.body.bottom() {

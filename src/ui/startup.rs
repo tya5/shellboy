@@ -134,7 +134,7 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
     } else {
         format!(
             "{} {}",
-            ["|", "||", "|||", "||"][tick % 4],
+            [super::text_width::glyphs::select("·", "|"), super::text_width::glyphs::select("··", "||"), super::text_width::glyphs::select("···", "|||"), super::text_width::glyphs::select("··", "||")][tick % 4],
             stage_text(stage, language)
         )
     };
@@ -150,8 +150,8 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
     } else if screen.ignored_input {
         i18n::local!(
             language,
-            "起動完了まで入力できません | Esc / Ctrl+C / Ctrl+Q 終了",
-            "Input disabled during startup | Esc / Ctrl+C / Ctrl+Q Quit"
+            super::text_width::glyphs::select("起動完了まで入力できません · Esc / Ctrl+C / Ctrl+Q 終了", "起動完了まで入力できません | Esc / Ctrl+C / Ctrl+Q 終了"),
+            super::text_width::glyphs::select("Input disabled during startup · Esc / Ctrl+C / Ctrl+Q Quit", "Input disabled during startup | Esc / Ctrl+C / Ctrl+Q Quit")
         )
     } else {
         i18n::local!(
@@ -322,6 +322,50 @@ pub fn forced_exit_notice() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn startup_spinner_and_footer_follow_measured_width() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        use ratatui::{Terminal, backend::TestBackend};
+        for (policy, dots, separator) in [
+            (Some(1), "···", " · "),
+            (Some(2), "|||", " | "),
+            (None, "|||", " | "),
+        ] {
+            text_width::set_terminal_width(policy);
+            for width in [80, 120] {
+                let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
+                let screen = Screen {
+                    ignored_input: true,
+                    ..Default::default()
+                };
+                terminal
+                    .draw(|frame| draw(frame, &screen, StartupStage::Database, 2))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let mut rows = Vec::new();
+                for y in 0..20 {
+                    let mut row = String::new();
+                    let mut x = 0;
+                    while x < width {
+                        let symbol = buffer[(x, y)].symbol();
+                        row.push_str(symbol);
+                        x += symbol.width().max(1) as u16;
+                    }
+                    assert!(
+                        row.width() <= usize::from(width),
+                        "{policy:?} {width}: {row}"
+                    );
+                    rows.push(row);
+                }
+                let shown = rows.join("\n");
+                assert!(shown.contains(dots), "{policy:?}: {shown}");
+                assert!(shown.contains(separator), "{policy:?}: {shown}");
+                assert!(shown.contains(stage_text(StartupStage::Database, screen.language)));
+            }
+        }
+        text_width::clear_terminal_width();
+    }
     use ratatui::{Terminal, backend::TestBackend};
     #[test]
     fn localized_startup_screens_preserve_controls_raw_errors_and_width() {

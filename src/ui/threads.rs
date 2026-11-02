@@ -109,36 +109,52 @@ impl BrowserText {
             (Ja, Self::ListControls) => {
                 "Delete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。"
             }
-            (En, Self::ListFullKeys) => {
-                "Esc Back | ^v Select | <> Fold | Enter Open | Ctrl+D Delete | Tab Watch | F1 Info | Ctrl+R Refresh"
-            }
-            (Ja, Self::ListFullKeys) => {
-                "Esc戻る ^v選択 <>展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得"
-            }
-            (En, Self::ListKeys) => {
-                "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info | Ctrl+R Refresh"
-            }
-            (Ja, Self::ListKeys) => {
-                "Esc戻る Enter切替 Delete/Ctrl+D削除\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得"
-            }
-            (En, Self::ListCompactKeys) => {
-                "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info"
-            }
+            (En, Self::ListFullKeys) => crate::ui::text_width::glyphs::select(
+                "Esc Back · ↑↓ Select · ←→ Fold · Enter Open · Ctrl+D Delete · Tab Watch · F1 Info · Ctrl+R Refresh",
+                "Esc Back | ^v Select | <> Fold | Enter Open | Ctrl+D Delete | Tab Watch | F1 Info | Ctrl+R Refresh",
+            ),
+            (Ja, Self::ListFullKeys) => crate::ui::text_width::glyphs::select(
+                "Esc戻る ↑↓選択 ←→展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得",
+                "Esc戻る ^v選択 <>展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得",
+            ),
+            (En, Self::ListKeys) => crate::ui::text_width::glyphs::select(
+                "Esc Back · Enter Open · Ctrl+D Delete\nUp/Down Select · F1 Info · Ctrl+R Refresh",
+                "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info | Ctrl+R Refresh",
+            ),
+            (Ja, Self::ListKeys) => crate::ui::text_width::glyphs::select(
+                "Esc戻る Enter切替 Delete/Ctrl+D削除\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得",
+                "Esc戻る Enter切替 Delete/Ctrl+D削除\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得",
+            ),
+            (En, Self::ListCompactKeys) => crate::ui::text_width::glyphs::select(
+                "Esc Back · Enter Open · Ctrl+D Delete\nUp/Down Select · F1 Info",
+                "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info",
+            ),
             (Ja, Self::ListCompactKeys) => crate::ui::text_width::glyphs::select(
                 "Esc戻る Enter切替 Ctrl+D削除\n↑↓選択 ←→開閉 F1情報",
                 "Esc戻る Enter切替 Ctrl+D削除\n^v選択 <>開閉 F1情報",
             ),
-            (En, Self::ListSmallKeys) => "Esc Back | Enter Open\nCtrl+D Delete | F1 Info",
+            (En, Self::ListSmallKeys) => crate::ui::text_width::glyphs::select(
+                "Esc Back · Enter Open\nCtrl+D Delete · F1 Info",
+                "Esc Back | Enter Open\nCtrl+D Delete | F1 Info",
+            ),
             (Ja, Self::ListSmallKeys) => "Esc戻る Enter切替\nCtrl+D削除 F1情報",
             (En, Self::Back) => "Esc Back",
             (Ja, Self::Back) => "Esc戻る",
-            (En, Self::MoreKey) => " | PgDn More",
+            (En, Self::MoreKey) => {
+                crate::ui::text_width::glyphs::select(" · PgDn More", " | PgDn More")
+            }
             (Ja, Self::MoreKey) => " PgDn次頁",
-            (En, Self::ReconfirmSelection) => " | Reconfirming selection",
+            (En, Self::ReconfirmSelection) => crate::ui::text_width::glyphs::select(
+                " · Reconfirming selection",
+                " | Reconfirming selection",
+            ),
             (Ja, Self::ReconfirmSelection) => {
                 crate::ui::text_width::glyphs::select(" · 選択先を再確認中", " | 選択先を再確認中")
             }
-            (En, Self::ReconfirmRows) => " | Reconfirming previous rows",
+            (En, Self::ReconfirmRows) => crate::ui::text_width::glyphs::select(
+                " · Reconfirming previous rows",
+                " | Reconfirming previous rows",
+            ),
             (Ja, Self::ReconfirmRows) => crate::ui::text_width::glyphs::select(
                 " · 前回の行を再確認中",
                 " | 前回の行を再確認中",
@@ -161,13 +177,18 @@ impl BrowserText {
             (Ja, Self::UnconfirmedFilter) => "[検索未確認] ",
             (En, Self::Untitled) => "Untitled",
             (Ja, Self::Untitled) => "名称未設定",
-            (En, Self::WatchKeys) => {
-                "Tab List | Enter Open | Ctrl+S Confirm stop | Alt+R Confirm retry\nAlt+O Output | Ctrl+R Refresh | PgDn More | Details: 128 visible rows"
-            }
-            (Ja, Self::WatchKeys) => {
-                "Tab 一覧 | Enter 開く | Ctrl+S 停止確認 | Alt+R 再試行確認\nAlt+O 出力詳細 | Ctrl+R 更新 | PgDn 続き | 詳細は表示128件まで"
-            }
-            (En, Self::MoreCandidates) => "More candidates available | PgDn to inspect",
+            (En, Self::WatchKeys) => crate::ui::text_width::glyphs::select(
+                "Tab List · Enter Open · Ctrl+S Confirm stop · Alt+R Confirm retry\nAlt+O Output · Ctrl+R Refresh · PgDn More · Details: 128 visible rows",
+                "Tab List | Enter Open | Ctrl+S Confirm stop | Alt+R Confirm retry\nAlt+O Output | Ctrl+R Refresh | PgDn More | Details: 128 visible rows",
+            ),
+            (Ja, Self::WatchKeys) => crate::ui::text_width::glyphs::select(
+                "Tab 一覧 · Enter 開く · Ctrl+S 停止確認 · Alt+R 再試行確認\nAlt+O 出力詳細 · Ctrl+R 更新 · PgDn 続き · 詳細は表示128件まで",
+                "Tab 一覧 | Enter 開く | Ctrl+S 停止確認 | Alt+R 再試行確認\nAlt+O 出力詳細 | Ctrl+R 更新 | PgDn 続き | 詳細は表示128件まで",
+            ),
+            (En, Self::MoreCandidates) => crate::ui::text_width::glyphs::select(
+                "More candidates available · PgDn to inspect",
+                "More candidates available | PgDn to inspect",
+            ),
             (Ja, Self::MoreCandidates) => crate::ui::text_width::glyphs::select(
                 "続きの候補があります · PgDnで確認",
                 "続きの候補があります | PgDnで確認",
@@ -246,12 +267,13 @@ impl BrowserMessage<'_> {
                     loading,
                     failed,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "Conversations · {count} shown / {fetched} fetched{}",
                 "Conversations | {count} shown / {fetched} fetched{}",
                 if loading {
-                    " | Loading"
+                    crate::ui::text_width::glyphs::select(" · Loading", " | Loading")
                 } else if failed {
-                    " | Fetch failed"
+                    crate::ui::text_width::glyphs::select(" · Fetch failed", " | Fetch failed")
                 } else {
                     ""
                 }
@@ -264,12 +286,13 @@ impl BrowserMessage<'_> {
                     loading,
                     failed,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "会話一覧 · {count}件 / 取得{fetched}件{}",
                 "会話一覧 | {count}件 / 取得{fetched}件{}",
                 if loading {
-                    " | 読込み中"
+                    crate::ui::text_width::glyphs::select(" · 読込み中", " | 読込み中")
                 } else if failed {
-                    " | 取得失敗"
+                    crate::ui::text_width::glyphs::select(" · 取得失敗", " | 取得失敗")
                 } else {
                     ""
                 }
@@ -282,13 +305,23 @@ impl BrowserMessage<'_> {
                     loading,
                 },
             ) => match count {
-                1 => format!(
+                1 => crate::ui::text_width::glyphs::formatted!(
+                    "Descendant Watch · 1 conversation{}",
                     "Descendant Watch | 1 conversation{}",
-                    if loading { " | Loading" } else { "" }
+                    if loading {
+                        crate::ui::text_width::glyphs::select(" · Loading", " | Loading")
+                    } else {
+                        ""
+                    }
                 ),
-                _ => format!(
+                _ => crate::ui::text_width::glyphs::formatted!(
+                    "Descendant Watch · {count} conversations{}",
                     "Descendant Watch | {count} conversations{}",
-                    if loading { " | Loading" } else { "" }
+                    if loading {
+                        crate::ui::text_width::glyphs::select(" · Loading", " | Loading")
+                    } else {
+                        ""
+                    }
                 ),
             },
             (
@@ -299,13 +332,23 @@ impl BrowserMessage<'_> {
                     loading,
                 },
             ) => match count {
-                1 => format!(
+                1 => crate::ui::text_width::glyphs::formatted!(
+                    "Work Watch · 1 conversation{}",
                     "Work Watch | 1 conversation{}",
-                    if loading { " | Loading" } else { "" }
+                    if loading {
+                        crate::ui::text_width::glyphs::select(" · Loading", " | Loading")
+                    } else {
+                        ""
+                    }
                 ),
-                _ => format!(
+                _ => crate::ui::text_width::glyphs::formatted!(
+                    "Work Watch · {count} conversations{}",
                     "Work Watch | {count} conversations{}",
-                    if loading { " | Loading" } else { "" }
+                    if loading {
+                        crate::ui::text_width::glyphs::select(" · Loading", " | Loading")
+                    } else {
+                        ""
+                    }
                 ),
             },
             (
@@ -315,9 +358,14 @@ impl BrowserMessage<'_> {
                     descendants: true,
                     loading,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "子孫の監視 · {count}件{}",
                 "子孫の監視 | {count}件{}",
-                if loading { " | 読込み中" } else { "" }
+                if loading {
+                    crate::ui::text_width::glyphs::select(" · 読込み中", " | 読込み中")
+                } else {
+                    ""
+                }
             ),
             (
                 Ja,
@@ -326,9 +374,14 @@ impl BrowserMessage<'_> {
                     descendants: false,
                     loading,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "作業の監視 · {count}件{}",
                 "作業の監視 | {count}件{}",
-                if loading { " | 読込み中" } else { "" }
+                if loading {
+                    crate::ui::text_width::glyphs::select(" · 読込み中", " | 読込み中")
+                } else {
+                    ""
+                }
             ),
             (
                 En,
@@ -337,7 +390,10 @@ impl BrowserMessage<'_> {
                     error: Some(error),
                     ..
                 },
-            ) => format!("Fetch failed: {error} | Filter > {query}"),
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "Fetch failed: {error} · Filter > {query}",
+                "Fetch failed: {error} | Filter > {query}"
+            ),
             (
                 Ja,
                 Self::Filter {
@@ -345,7 +401,10 @@ impl BrowserMessage<'_> {
                     error: Some(error),
                     ..
                 },
-            ) => format!("取得失敗 {error} | 検索 > {query}"),
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "取得失敗 {error} · 検索 > {query}",
+                "取得失敗 {error} | 検索 > {query}"
+            ),
             (
                 En,
                 Self::Filter {
@@ -353,7 +412,10 @@ impl BrowserMessage<'_> {
                     notice: Some(notice),
                     ..
                 },
-            ) => format!("{notice} | Filter > {query}"),
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "{notice} · Filter > {query}",
+                "{notice} | Filter > {query}"
+            ),
             (
                 Ja,
                 Self::Filter {
@@ -361,7 +423,10 @@ impl BrowserMessage<'_> {
                     notice: Some(notice),
                     ..
                 },
-            ) => format!("{notice} | 検索 > {query}"),
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "{notice} · 検索 > {query}",
+                "{notice} | 検索 > {query}"
+            ),
             (En, Self::Filter { query, .. }) => format!("Filter > {query}"),
             (Ja, Self::Filter { query, .. }) => format!("検索 > {query}"),
             (En, Self::ExcerptFailure(error)) => format!("Fetch failed: {error}"),
@@ -369,27 +434,47 @@ impl BrowserMessage<'_> {
             (En, Self::FetchFailure(error)) => format!("List refresh failed: {error}"),
             (Ja, Self::FetchFailure(error)) => format!("一覧の更新に失敗: {error}"),
             (En, Self::FailedFooter(error)) => {
-                format!("Fetch failed | Esc Back\nCtrl+R Refresh | {error}")
+                crate::ui::text_width::glyphs::formatted!(
+                    "Fetch failed · Esc Back\nCtrl+R Refresh · {error}",
+                    "Fetch failed | Esc Back\nCtrl+R Refresh | {error}"
+                )
             }
             (Ja, Self::FailedFooter(error)) => {
-                format!("取得失敗 | Esc戻る\nCtrl+R再取得 | {error}")
+                crate::ui::text_width::glyphs::formatted!(
+                    "取得失敗 · Esc戻る\nCtrl+R再取得 · {error}",
+                    "取得失敗 | Esc戻る\nCtrl+R再取得 | {error}"
+                )
             }
-            (En, Self::LimitedFooter(error)) => format!("Esc Back | {error}"),
-            (Ja, Self::LimitedFooter(error)) => format!("Esc戻る | {error}"),
+            (En, Self::LimitedFooter(error)) => crate::ui::text_width::glyphs::formatted!(
+                "Esc Back · {error}",
+                "Esc Back | {error}"
+            ),
+            (Ja, Self::LimitedFooter(error)) => {
+                crate::ui::text_width::glyphs::formatted!("Esc戻る · {error}", "Esc戻る | {error}")
+            }
             (En, Self::PreviousExcerpt(text)) => {
                 format!("Previous display (reconfirming selection)\n{text}")
             }
             (Ja, Self::PreviousExcerpt(text)) => format!("前回の表示（選択先を再確認中）\n{text}"),
-            (En, Self::Excerpt { text: "", reason }) => format!("Excerpt unavailable | {reason}"),
+            (En, Self::Excerpt { text: "", reason }) => crate::ui::text_width::glyphs::formatted!(
+                "Excerpt unavailable · {reason}",
+                "Excerpt unavailable | {reason}"
+            ),
             (Ja, Self::Excerpt { text: "", reason }) => crate::ui::text_width::glyphs::formatted!(
                 "抜粋は未取得 · {reason}",
                 "抜粋は未取得 | {reason}"
             ),
             (En, Self::Excerpt { text, reason }) => {
-                format!("Previous excerpt (not updated) | {reason}\n{text}")
+                crate::ui::text_width::glyphs::formatted!(
+                    "Previous excerpt (not updated) · {reason}\n{text}",
+                    "Previous excerpt (not updated) | {reason}\n{text}"
+                )
             }
             (Ja, Self::Excerpt { text, reason }) => {
-                format!("以前の抜粋（未更新） | {reason}\n{text}")
+                crate::ui::text_width::glyphs::formatted!(
+                    "以前の抜粋（未更新） · {reason}\n{text}",
+                    "以前の抜粋（未更新） | {reason}\n{text}"
+                )
             }
             (En, Self::UnconfirmedTitle(title)) => format!("{title} (filter match unconfirmed)"),
             (Ja, Self::UnconfirmedTitle(title)) => format!("{title}（検索条件との一致は未確認）"),
@@ -455,7 +540,8 @@ impl BrowserMessage<'_> {
                     thread,
                     interrupted,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "{}ID {} · Parent {} · {}{}",
                 "{}ID {} | Parent {} | {}{}",
                 thread
                     .revisit
@@ -474,7 +560,10 @@ impl BrowserMessage<'_> {
                     .unwrap_or_else(|| "none".into()),
                 one_line(activity_label(thread, language)),
                 if interrupted {
-                    " | Interrupted by app exit"
+                    crate::ui::text_width::glyphs::select(
+                        " · Interrupted by app exit",
+                        " | Interrupted by app exit",
+                    )
                 } else {
                     ""
                 }
@@ -505,7 +594,10 @@ impl BrowserMessage<'_> {
                     .unwrap_or_else(|| "なし".into()),
                 one_line(activity_label(thread, language)),
                 if interrupted {
-                    " | アプリ終了による中断"
+                    crate::ui::text_width::glyphs::select(
+                        " · アプリ終了による中断",
+                        " | アプリ終了による中断",
+                    )
                 } else {
                     ""
                 }
@@ -2642,14 +2734,23 @@ fn watch_lines(
     ];
     if !parent.is_empty() {
         first.push(Span::styled(
-            format!("{} | {parent}", " ".repeat(title_padding)),
+            crate::ui::text_width::glyphs::formatted!(
+                "{} · {parent}",
+                "{} | {parent}",
+                " ".repeat(title_padding)
+            ),
             Style::default().fg(theme::MUTED),
         ));
     }
     let clocks = match (row.secondary_age.is_empty(), row.state_age.is_empty()) {
         (true, _) => row.state_age.to_owned(),
         (_, true) => row.secondary_age.to_owned(),
-        _ => format!("{} | {}", row.secondary_age, row.state_age),
+        _ => crate::ui::text_width::glyphs::formatted!(
+            "{} · {}",
+            "{} | {}",
+            row.secondary_age,
+            row.state_age
+        ),
     };
     let available = width.saturating_sub(2);
     let clocks = fit(&clocks, (width / 2).min(available));
@@ -2686,7 +2787,7 @@ fn fit(text: &str, width: usize) -> String {
         out.push_str(grapheme);
         used += cells;
     }
-    out.push('.');
+    out.push_str(crate::ui::text_width::glyphs::ellipsis());
     out
 }
 
@@ -2816,6 +2917,83 @@ fn japanese_config() -> crate::config::Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_glyphs_follow_policy_without_rewriting_filter_values() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let raw = "user | · > → │";
+        for (observed, arrows, separator) in [
+            (Some(1), "↑↓", " · "),
+            (Some(2), "^v", " | "),
+            (None, "^v", " | "),
+        ] {
+            text_width::set_terminal_width(observed);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let keys = BrowserText::ListFullKeys.render(language);
+                assert!(keys.contains(arrows), "{observed:?} {language:?}: {keys}");
+                let filter = BrowserMessage::Filter {
+                    query: raw,
+                    error: Some(raw),
+                    notice: None,
+                }
+                .render(language);
+                assert_eq!(filter.matches(raw).count(), 2, "{filter}");
+                assert!(filter.contains(separator), "{filter}");
+                assert!(filter.width() <= 120);
+                let title = BrowserMessage::UnconfirmedTitle(raw).render(language);
+                assert!(title.contains(raw), "{title}");
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn sibling_tree_glyphs_follow_width_and_preserve_titles() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let title = "user | · → │ title";
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let mut first = thread("first", Some("parent"));
+                first.title = title.into();
+                let mut browser = ThreadBrowser {
+                    items: vec![
+                        thread("parent", None),
+                        first,
+                        thread("last", Some("parent")),
+                    ],
+                    ..japanese_browser()
+                };
+                browser.set_language(language);
+                let rows = browser.rows();
+                let first = rows
+                    .iter()
+                    .find(|row| browser.items[row.index].thread_id == "first")
+                    .unwrap();
+                let last = rows
+                    .iter()
+                    .find(|row| browser.items[row.index].thread_id == "last")
+                    .unwrap();
+                for width in [80, 120] {
+                    let first_label =
+                        browser.label(first, &browser.items[first.index], false, false, width);
+                    let last_label =
+                        browser.label(last, &browser.items[last.index], false, false, width);
+                    let (middle, end) = if policy == Some(1) {
+                        ("├─", "└─")
+                    } else {
+                        ("+-", "\\-")
+                    };
+                    assert!(first_label.contains(middle), "{policy:?} {first_label}");
+                    assert!(last_label.contains(end), "{policy:?} {last_label}");
+                    assert!(first_label.contains(title), "{first_label}");
+                    assert!(first_label.width() <= width && last_label.width() <= width);
+                    assert_eq!(browser.items[first.index].title, title);
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
 
     #[test]
     fn sibling_tree_rows_distinguish_middle_and_last_with_invariant_marks() {

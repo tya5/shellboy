@@ -674,14 +674,18 @@ pub(super) fn confirmation_footer(
 ) -> Option<&'static str> {
     match confirmation {
         Confirmation::ThreadDeletion(_) | Confirmation::ForceQuit => None,
-        Confirmation::StaleIndex { .. } => Some(local!(
+        Confirmation::StaleIndex { .. } => Some(crate::ui::text_width::glyphs::localized!(
             language,
+            "N / Esc 戻る · 再確認が必要\n↑↓/PgUp/PgDn 閲覧",
             "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧",
+            "N / Esc Back · Review again\n↑↓/PgUp/PgDn Scroll",
             "N / Esc Back | Review again\n^v/PgUp/PgDn Scroll"
         )),
-        _ => Some(local!(
+        _ => Some(crate::ui::text_width::glyphs::localized!(
             language,
+            "N / Esc 戻る · Y 実行\n↑↓/PgUp/PgDn 閲覧",
             "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧",
+            "Y Execute · N / Esc Back\n↑↓/PgUp/PgDn Scroll",
             "Y Execute | N / Esc Back\n^v/PgUp/PgDn Scroll"
         )),
     }

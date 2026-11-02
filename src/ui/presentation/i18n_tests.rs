@@ -567,11 +567,19 @@ fn index_pause_with_saved_time(ui: &mut UiState) {
 #[test]
 fn index_pause_keeps_saved_timestamp_reason_and_retry_binding_bilingually() {
     crate::ui::i18n::verify_screen(index_pause_with_saved_time, |_| {
-        &[
-            "/index > T",
-            "2027-01-15T08:00:00.123456789+00:00",
-            "fixture_pause",
-        ]
+        if crate::ui::text_width::glyphs::narrow() {
+            &[
+                "/index → T",
+                "2027-01-15T08:00:00.123456789+00:00",
+                "fixture_pause",
+            ]
+        } else {
+            &[
+                "/index > T",
+                "2027-01-15T08:00:00.123456789+00:00",
+                "fixture_pause",
+            ]
+        }
     });
 }
 fn resumed_saved_failures(ui: &mut UiState) {
