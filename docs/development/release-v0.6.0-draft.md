@@ -114,9 +114,9 @@ Windows x64, macOS Apple Silicon and Linux x64 archives are intended to include
 an executable, LICENSE, configuration example and offline documentation. Verify
 all archives and installer scripts against `SHA256SUMS` when candidates exist.
 
-**Draft snapshot:** main `b12a8291b1950a5f7db58de4dccbb12101a2a074`; update the
-snapshot SHA after #156 lands on main. #149, #150 and the remaining #152 work
-are deferred beyond v0.6.0. CI, candidate archives/installers/checksums and
+**Draft snapshot:** main `17fe6c2a0528ea072e3a22abe1497b649fe31604` after
+#153 and #156 landed. #149, #150 and the remaining #152 work are deferred
+beyond v0.6.0. CI, candidate archives/installers/checksums and
 upgrade verification are separate gates; this preparation does not create a tag,
 publish a release, replace an installed binary or modify user data.
 
