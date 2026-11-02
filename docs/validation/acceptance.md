@@ -8251,6 +8251,7 @@ changed during restack. New exact task CI is pending; its SHA and outcome are
 reported in the formal handoff. Windows for this new candidate, physical terminal,
 IME, real provider and OS clipboard remain unverified. No real user data, provider
 API, installation, release or main push is involved.
+
 ## Resource Benchmark Stage 4 (#116)
 
 Scope: synthetic Linux comparison instrumentation and documentation. Measured
