@@ -367,9 +367,15 @@ After the correction, `ui::chrome::tests` (15), `ui::chrome::context_bar_tests`
 (1), `field_group_headings_are_bilingual` (1), and `cargo check --tests` passed.
 The tests cover both languages, narrow/full welcome hints, width policies 1/2/unknown,
 cache rounding/fallback, attachment identity, opaque failure text, and original F6
-copy text. A second disposable English PTY confirmed that the input-border hint
-is absent while the long welcome hint remains. Python language-audit tests (19)
-passed. Three-OS branch CI, current-main integration,
+copy text. The synthetic submitted/bare image-failure delivery test (1) also
+passed. A second disposable English PTY confirmed that the input-border hint is
+absent while the long welcome hint remains. Python language-audit tests (19)
+passed. An earlier branch CI at `04844bc5` failed on Ubuntu and Windows because
+an English real-owner fixture still expected the Japanese cache text; its
+predicate and companion negative-controls now expect `Cache 65%`; both the
+real-owner test and its matching-snapshot negative-control test passed locally
+on macOS after recompiling this worktree. Three-OS branch CI on the corrected
+head, current-main integration,
 physical PTY and OS clipboard verification are separate checks. See
 `docs/validation/language-audit-stage-c.md` for the conservative UI queue.
 
