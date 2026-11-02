@@ -4,23 +4,19 @@ use super::*;
 
 pub(super) const REASON: &str = "proactive_threshold";
 
-/// Ephemeral per-Run budget. One `drive` call owns one Run, so a local value
-/// suffices. Non-adopted attempts require measured growth before retrying.
-/// Adopted attempts need a newer reported usage before another evaluation
-/// (`next_request_pending` is true until a new attempt completes).
+/// Loaded lazily from durable Thread metadata; unlike token growth, the
+/// witness changes only when eligible saved source facts may have changed.
 #[derive(Default)]
 pub(super) struct ProactiveBudget {
-    last_non_adopted_input: Option<u64>,
+    loaded: bool,
+    guard: Option<super::proactive_guard::Guard>,
+    status_context: Option<(String, String)>,
+    below_context: Option<(String, String)>,
 }
 
-impl ProactiveBudget {
-    fn permits(&self, input_tokens: u64, threshold: u64) -> bool {
-        self.last_non_adopted_input.is_none_or(|previous| {
-            input_tokens
-                .checked_sub(previous)
-                .is_some_and(|growth| growth >= threshold.div_ceil(10).max(1))
-        })
-    }
+enum Measurement {
+    BelowThreshold,
+    Ready(Evidence),
 }
 
 struct Evidence {
@@ -43,7 +39,36 @@ pub(super) async fn maybe_compact(
         .compaction
         .auto_at_tokens_for(config.connections.get(&snapshot.profile));
     if threshold == 0 {
+        if budget.status_context.take().is_some() {
+            super::proactive_guard::hide_status(control, &snapshot.thread).await?;
+        }
         return Ok(false);
+    }
+    use super::proactive_guard::{self as guard, Guard, Reason};
+    if !budget.loaded {
+        let (saved, has_status) = guard::load(control, &snapshot.thread).await?;
+        budget.guard = saved;
+        // The status may belong to a previous Run. A sentinel makes the
+        // below-threshold path clear it, or the active path refresh it.
+        budget.status_context = has_status.then(|| (String::new(), String::new()));
+        budget.loaded = true;
+    }
+    if let Some(mut refreshed) = budget.guard.clone()
+        && refreshed.refresh_after_adoption(snapshot)
+    {
+        let reason = refreshed.reason;
+        if guard::save(
+            control,
+            snapshot,
+            snapshot.selection as u64,
+            &refreshed,
+            reason,
+        )
+        .await?
+        {
+            budget.guard = Some(refreshed);
+            budget.status_context = Some((snapshot.run.clone(), snapshot.turn.clone()));
+        }
     }
     let thread = snapshot.thread.clone();
     let evidence = control
@@ -56,42 +81,187 @@ pub(super) async fn maybe_compact(
             Ok(raw
                 .latest_reported_input()
                 .and_then(|(attempt, tokens, stale)| {
-                    tokens
-                        .filter(|tokens| !stale && *tokens >= threshold)
-                        .map(|input_tokens| Evidence {
-                            attempt: attempt.to_owned(),
-                            input_tokens,
-                        })
+                    tokens.filter(|_| !stale).map(|input_tokens| {
+                        if input_tokens < threshold {
+                            Measurement::BelowThreshold
+                        } else {
+                            Measurement::Ready(Evidence {
+                                attempt: attempt.to_owned(),
+                                input_tokens,
+                            })
+                        }
+                    })
                 }))
         })
         .await
         .map_err(storage_error);
     let evidence = match evidence {
-        Ok(Some(evidence)) => evidence,
-        Ok(None) => return Ok(false),
+        Ok(Some(Measurement::Ready(evidence))) => evidence,
+        Ok(Some(Measurement::BelowThreshold)) => {
+            if budget.status_context.take().is_some() {
+                super::proactive_guard::hide_status(control, &snapshot.thread).await?;
+            }
+            let context = (snapshot.run.clone(), snapshot.turn.clone());
+            if budget.below_context.as_ref() != Some(&context) {
+                control.diagnostics.record(
+                    crate::diagnostics::DiagnosticEvent::AutomaticCompactionBelowThreshold,
+                    crate::diagnostics::DiagnosticIds {
+                        thread_id: Some(snapshot.thread.clone()),
+                        run_id: Some(snapshot.run.clone()),
+                        turn_id: Some(snapshot.turn.clone()),
+                        ..Default::default()
+                    },
+                );
+                budget.below_context = Some(context);
+            }
+            return Ok(false);
+        }
+        Ok(None) => {
+            if budget.status_context.take().is_some() {
+                super::proactive_guard::hide_status(control, &snapshot.thread).await?;
+            }
+            return Ok(false);
+        }
         Err(error) if error.is_storage_failure() => return Err(error),
         // A non-storage read refusal is not evidence; never trigger on it.
-        Err(_) => return Ok(false),
+        Err(_) => {
+            if budget.status_context.take().is_some() {
+                super::proactive_guard::hide_status(control, &snapshot.thread).await?;
+            }
+            return Ok(false);
+        }
     };
-    if !budget.permits(evidence.input_tokens, threshold) {
+    if let Some(reason) = budget
+        .guard
+        .as_ref()
+        .filter(|guard| guard.unchanged(snapshot))
+        .map(|guard| guard.reason)
+    {
+        let context = (snapshot.run.clone(), snapshot.turn.clone());
+        if budget.status_context.as_ref() != Some(&context)
+            && guard::show_status(control, snapshot, reason).await?
+        {
+            budget.status_context = Some(context);
+        }
         return Ok(false);
     }
-    let key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_active();
-    let witness = json!({"run_id": snapshot.run, "turn_id": snapshot.turn,
-        "input_tokens": evidence.input_tokens, "threshold": threshold,
-        "started_at": chrono::Utc::now().to_rfc3339()})
-    .to_string();
-    let (saved_key, saved_witness) = (key.clone(), witness.clone());
-    control.store.database.call(move |db| {
-        db.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
-        Ok(())
-    }).await.map_err(storage_error)?;
+    // Evaluate only after saved source evidence changes. The forecast is
+    // bounded and read-only; a coverage limit is not evidence of no targets.
+    let candidates = guard::candidates(control, &snapshot.thread, snapshot.input.clone()).await?;
+    if candidates
+        .as_ref()
+        .is_some_and(|candidate| candidate.revision != snapshot.selection as u64)
+    {
+        return Ok(false);
+    }
+    let marks = candidates.as_ref().map(|candidate| candidate.marks.clone());
+    let protected = candidates
+        .as_ref()
+        .is_some_and(|candidate| candidate.mutable_protection);
+    let no_target = marks.as_ref().is_some_and(Vec::is_empty);
+    let has_kind = |kind: &str| match &budget.guard {
+        Some(previous) => previous.has_new_kind(marks.as_deref(), kind),
+        None => marks
+            .as_ref()
+            .is_none_or(|marks| marks.iter().any(|mark| mark.starts_with(kind))),
+    };
+    let spill_new = has_kind("spill:");
+    let summary_new = has_kind("summary:")
+        && !(marks.is_none()
+            && budget
+                .guard
+                .as_ref()
+                .is_some_and(|guard| guard.blocks_unknown_summary(snapshot)));
+    let middle_new = has_kind("middle:");
+    let any_summary_new = middle_new || summary_new;
+    let no_growth = !spill_new && !any_summary_new;
     let ids = crate::diagnostics::DiagnosticIds {
         thread_id: Some(snapshot.thread.clone()),
         run_id: Some(snapshot.run.clone()),
         turn_id: Some(snapshot.turn.clone()),
         ..Default::default()
     };
+    if candidates.is_none() {
+        let counts = budget.guard.as_ref().map_or((0, 0), |guard| guard.counts());
+        control.diagnostics.record_automatic_compaction(
+            crate::diagnostics::DiagnosticEvent::AutomaticCompactionForecastLimited,
+            ids.clone(),
+            counts.0,
+            counts.1,
+        );
+    }
+    if no_target || no_growth {
+        let reason = if no_target {
+            Reason::NoTarget
+        } else {
+            Reason::NoNewTarget
+        };
+        let context = (snapshot.run.clone(), snapshot.turn.clone());
+        if budget
+            .guard
+            .as_ref()
+            .is_some_and(|previous| previous.reason == reason && previous.same_witness(snapshot))
+        {
+            if budget.status_context.as_ref() != Some(&context)
+                && guard::show_status(control, snapshot, reason).await?
+            {
+                budget.status_context = Some(context);
+            }
+            return Ok(false);
+        }
+        if let Some(current) = Guard::new(snapshot, marks, protected, reason, budget.guard.as_ref())
+            && guard::save(
+                control,
+                snapshot,
+                snapshot.selection as u64,
+                &current,
+                reason,
+            )
+            .await?
+        {
+            let counts = current.counts();
+            budget.guard = Some(current);
+            budget.status_context = Some(context);
+            control.diagnostics.record_automatic_compaction(
+                if no_target {
+                    crate::diagnostics::DiagnosticEvent::AutomaticCompactionSkippedNoTarget
+                } else {
+                    crate::diagnostics::DiagnosticEvent::AutomaticCompactionSkippedNoNewTarget
+                },
+                ids,
+                counts.0,
+                counts.1,
+            );
+        }
+        return Ok(false);
+    }
+    let latest_tool_anchor = snapshot
+        .input
+        .as_ref()
+        .and_then(|input| input.latest_tool_anchor())
+        .map(str::to_owned);
+    let preserve_guard_after_spill = !any_summary_new && budget.guard.is_some();
+    let mut candidate_guard = Guard::new(
+        snapshot,
+        marks,
+        protected,
+        Reason::CoverageLimited,
+        budget.guard.as_ref(),
+    );
+    let key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_active();
+    let witness = json!({"run_id": snapshot.run, "turn_id": snapshot.turn,
+        "input_tokens": evidence.input_tokens, "threshold": threshold,
+        "started_at": chrono::Utc::now().to_rfc3339()})
+    .to_string();
+    let (saved_key, saved_witness) = (key.clone(), witness.clone());
+    let status_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_status();
+    control.store.database.call(move |db| {
+        let tx = db.transaction()?;
+        tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
+        tx.execute("DELETE FROM app_meta WHERE key=?1", [status_key])?;
+        tx.commit()?;
+        Ok(())
+    }).await.map_err(storage_error)?;
     control.diagnostics.record(
         crate::diagnostics::DiagnosticEvent::AutomaticCompactionStarted,
         ids.clone(),
@@ -101,14 +271,20 @@ pub(super) async fn maybe_compact(
     snapshot.input.take();
     let mut midturn = Value::Null;
     let result: Result<Value, ApiError> = async {
-    let spill = control
-        .compactor
-        .spill_reducing_cancellable(&snapshot.thread, slot.stop.clone())
-        .await;
+    let spill = if spill_new {
+        control.compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone()).await
+    } else {
+        Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
+    };
     let observation = match spill {
         Err(error) if error.is_storage_failure() => return Err(error),
         Err(error) => json!({"outcome":"rejected","error":error}),
-        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, &mut midturn).await
+        Ok(spill) if !any_summary_new => json!({
+            "outcome": if spill.no_target { "no_safe_reduction" } else { "adopted" },
+            "summary": spill,
+            "summary_deferred": true,
+        }),
+        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, &mut midturn, middle_new, summary_new).await
         {
             Ok(mut summary) => {
                 summary.spilled_groups += spill.spilled_groups;
@@ -158,14 +334,98 @@ pub(super) async fn maybe_compact(
         .map_err(storage_error);
     control.diagnostics.record(
         crate::diagnostics::DiagnosticEvent::AutomaticCompactionFinished,
-        ids,
+        ids.clone(),
     );
     control.changed(&snapshot.thread);
     cleanup?;
     let mut observation = result?;
     let adopted = observation["outcome"] == "adopted";
     let summary_rejected = observation.get("summary_error").is_some();
-    budget.last_non_adopted_input = (!adopted || summary_rejected).then_some(evidence.input_tokens);
+    let summary_deferred = observation["summary_deferred"] == true;
+    if !adopted || summary_rejected || (summary_deferred && preserve_guard_after_spill) {
+        let rejection = observation
+            .get("summary_error")
+            .or_else(|| observation.get("error"));
+        let reason = if summary_deferred && adopted {
+            budget
+                .guard
+                .as_ref()
+                .map_or(Reason::NoNewTarget, |guard| guard.reason)
+        } else {
+            match rejection
+                .and_then(|error| error.get("code"))
+                .and_then(Value::as_str)
+            {
+                Some("invalid_state") => Reason::RejectedInvalidState,
+                Some(_) => Reason::RejectedOther,
+                None if observation["outcome"] == "no_target" => Reason::NoTarget,
+                None => Reason::NoNewTarget,
+            }
+        };
+        let mut counts = (0, 0);
+        if let Some(current) = &mut candidate_guard {
+            let mut revision = snapshot.selection as u64;
+            if adopted && (summary_rejected || summary_deferred) {
+                let after = guard::candidates(control, &snapshot.thread, None).await?;
+                revision = match &after {
+                    Some(candidate) => candidate.revision,
+                    None => {
+                        let revision = guard::current_revision(control, &snapshot.thread).await?;
+                        current.mark_refresh(revision);
+                        if summary_rejected {
+                            current.freeze_summary_for_current_turn(
+                                guard::anchor_is_current_turn(
+                                    control,
+                                    latest_tool_anchor.clone(),
+                                    &snapshot.turn,
+                                )
+                                .await?,
+                            );
+                        }
+                        revision as u64
+                    }
+                };
+                current.replace_candidates(
+                    after.as_ref().map(|candidate| candidate.marks.clone()),
+                    after
+                        .as_ref()
+                        .is_some_and(|candidate| candidate.mutable_protection),
+                );
+            }
+            if summary_deferred && adopted {
+                current.set_reason(reason);
+            } else {
+                current.record_reason(reason);
+            }
+            counts = current.counts();
+            if guard::save(control, snapshot, revision, current, reason).await? {
+                budget.guard = candidate_guard;
+                budget.status_context = Some((snapshot.run.clone(), snapshot.turn.clone()));
+            }
+        }
+        match reason {
+            Reason::RejectedInvalidState if !summary_deferred => {
+                control.diagnostics.record_automatic_compaction(
+                    crate::diagnostics::DiagnosticEvent::AutomaticCompactionRejectedInvalidState,
+                    ids.clone(),
+                    counts.0,
+                    counts.1,
+                )
+            }
+            Reason::RejectedOther if !summary_deferred => {
+                control.diagnostics.record_automatic_compaction(
+                    crate::diagnostics::DiagnosticEvent::AutomaticCompactionRejectedOther,
+                    ids.clone(),
+                    counts.0,
+                    counts.1,
+                )
+            }
+            _ => {}
+        }
+    } else {
+        guard::clear(control, &snapshot.thread).await?;
+        budget.guard = None;
+    }
     observation["reason"] = json!(REASON);
     if !midturn.is_null() {
         observation["midturn"] = midturn;
@@ -202,47 +462,22 @@ async fn summarize_once(
     thread: &str,
     slot: &DriverSlot,
     midturn: &mut Value,
+    middle_new: bool,
+    ordinary_new: bool,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
-    let active = control
-        .compactor
-        .summarize_active_turn(thread, slot.stop.clone())
-        .await;
-    if matches!(&active, Ok(result) if result.no_target) {
-        *midturn = json!({"skipped":"no_target"});
-        return control
-            .compactor
-            .summarize(thread, false, slot.stop.clone())
-            .await;
-    }
-    *midturn = json!({"scope":"active_turn"});
-    active
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ProactiveBudget;
-
-    #[test]
-    fn retry_growth_rounds_up_and_cannot_overflow() {
-        let budget = ProactiveBudget {
-            last_non_adopted_input: Some(200),
-        };
-        for count in [0, 199, 200, 210] {
-            assert!(!budget.permits(count, 101));
+    if middle_new {
+        let active = control.compactor.summarize_active_turn(thread, slot.stop.clone()).await;
+        if !matches!(&active, Ok(result) if result.no_target) {
+            *midturn = json!({"scope":"active_turn"});
+            return active;
         }
-        assert!(budget.permits(211, 101));
-        assert!(!budget.permits(200, 1));
-        assert!(budget.permits(201, 1));
-        let near_max = ProactiveBudget {
-            last_non_adopted_input: Some(u64::MAX - 1),
-        };
-        assert!(!near_max.permits(u64::MAX, 100));
-        assert!(near_max.permits(u64::MAX, 1));
-        let max = ProactiveBudget {
-            last_non_adopted_input: Some(u64::MAX),
-        };
-        assert!(!max.permits(u64::MAX, 1));
-        assert!(!budget.permits(u64::MAX / 10, u64::MAX));
-        assert!(ProactiveBudget::default().permits(200, 100));
+        *midturn = json!({"skipped":"no_target"});
+    } else {
+        *midturn = json!({"skipped":"no_new_target"});
+    }
+    if ordinary_new {
+        control.compactor.summarize(thread, false, slot.stop.clone()).await
+    } else {
+        Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
     }
 }

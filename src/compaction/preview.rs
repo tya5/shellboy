@@ -747,6 +747,183 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
     plan
 }
 
+/// A bounded, payload-free witness of the sources that automatic compaction
+/// can currently consider. Source hashes, rather than text, are persisted.
+#[derive(Debug, Clone)]
+pub(crate) struct AutomaticCandidates {
+    pub revision: u64,
+    pub marks: Vec<String>,
+    pub mutable_protection: bool,
+}
+
+/// A metadata-only proof for an oversized protected current Turn. It never
+/// concludes "no target" unless the ordinary summary fence begins at the
+/// first selected source and replay proves that no older tool span can shrink.
+pub(crate) fn automatic_structural_no_target_tx(
+    db: &Connection,
+    thread: &str,
+    no_reducing_older_tools: bool,
+) -> Result<Option<u64>, StorageError> {
+    if !no_reducing_older_tools {
+        return Ok(None);
+    }
+    let revision: i64 = db.query_row(
+        "SELECT selection_revision FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        [thread],
+        |row| row.get(0),
+    )?;
+    // A direct first-node Turn is a complete proof even when the selected path
+    // is too large for ancestry expansion. The connection's VM budget still
+    // bounds the latest-completed lookup.
+    let first_turn: Option<String> = db.query_row(
+        "SELECT n.turn_id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT 1",
+        [thread], |row| row.get(0),
+    ).optional()?.flatten();
+    if let Some(first_turn) = first_turn {
+        let turn: Option<(String, i64)> = db
+            .query_row(
+                "SELECT state,rowid FROM turn WHERE id=?1 AND thread_id=?2",
+                params![first_turn, thread],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if let Some((state, rowid)) = turn {
+            if !matches!(state.as_str(), "completed" | "failed" | "stopped") {
+                return Ok(Some(revision as u64));
+            }
+            if state == "completed" {
+                let newer: bool = db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM turn WHERE thread_id=?1 AND state='completed' AND rowid>?2)",
+                    params![thread, rowid], |row| row.get(0),
+                )?;
+                if !newer {
+                    return Ok(Some(revision as u64));
+                }
+            }
+        }
+    }
+    let mut paths = db.prepare(
+        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal LIMIT 4097",
+    )?;
+    let mut rows = paths.query([thread])?;
+    let mut first = None;
+    let mut count = 0;
+    while let Some(row) = rows.next()? {
+        count += 1;
+        if count > ROWS {
+            return Ok(None);
+        }
+        if first.is_none() {
+            first = Some(row.get::<_, String>(0)?);
+        }
+    }
+    let Some(first) = first else {
+        return Ok(None);
+    };
+    let mut turns =
+        db.prepare("SELECT id,state FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 513")?;
+    let mut rows = turns.query([thread])?;
+    let mut current = None;
+    let mut latest = None;
+    let mut count = 0;
+    while let Some(row) = rows.next()? {
+        count += 1;
+        if count > TURNS {
+            return Ok(None);
+        }
+        let id: String = row.get(0)?;
+        let state: String = row.get(1)?;
+        if state == "completed" && latest.is_none() {
+            latest = Some(id.clone());
+        }
+        if !matches!(state.as_str(), "completed" | "failed" | "stopped") && current.is_none() {
+            current = Some(id);
+        }
+    }
+    for turn in [current.as_deref(), latest.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        match super::resolve_turn_boundary(db, thread, turn, ROWS) {
+            Ok(Some(boundary)) if boundary == first => return Ok(Some(revision as u64)),
+            Ok(_) => {}
+            // The bounded ancestry budget cannot prove the boundary.
+            Err(StorageError::InvalidInput(_)) => return Ok(None),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn automatic_candidates_tx(
+    db: &Connection,
+    thread: &str,
+) -> Result<AutomaticCandidates, StorageError> {
+    if thread.is_empty() || thread.len() > ID {
+        return Err(limit());
+    }
+    let args = CompactPreviewArgs::default();
+    let mut budget = TEXT;
+    let mut sql = 0;
+    let loaded = load(db, thread, &args, &mut budget, &mut sql)?;
+    if sql > SQL_MAX {
+        return Err(limit());
+    }
+    let snapshot = loaded.snapshot;
+    let mut marks = BTreeMap::<String, u64>::new();
+    let mut add = |kind: &str, group: &Group| {
+        for source in &group.sources {
+            let identity = format!("{kind}:{}", crate::digest::sha256_hex(&source.id));
+            let chars = edit::projection_characters(&source.payload, snapshot.epoch);
+            marks
+                .entry(identity)
+                .and_modify(|previous| *previous = (*previous).max(chars))
+                .or_insert(chars);
+        }
+    };
+    for range in policy::spill_ranges(&snapshot, false) {
+        let group = &snapshot.groups[range.start];
+        let before = group
+            .sources
+            .iter()
+            .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
+            .fold(0u64, u64::saturating_add);
+        if spill_payload(group)
+            .is_some_and(|payload| edit::projection_characters(&payload, snapshot.epoch) < before)
+        {
+            add("spill", group);
+        }
+    }
+    if let Some(range) = policy::active_turn_range(&snapshot) {
+        for group in &snapshot.groups[range] {
+            add("middle", group);
+        }
+    }
+    if let Some(range) = policy::summary_range(&snapshot, false) {
+        for group in &snapshot.groups[range] {
+            add("summary", group);
+        }
+    }
+    if marks.len() > ROWS * 2 {
+        return Err(limit());
+    }
+    let marks = marks
+        .into_iter()
+        .map(|(identity, chars)| format!("{identity}:{chars:016x}"))
+        .collect();
+    let mutable_protection = snapshot.groups.iter().any(|group| {
+        group
+            .sources
+            .iter()
+            .any(|source| snapshot.protected.contains(&source.id))
+    });
+    Ok(AutomaticCandidates {
+        revision: snapshot.revision,
+        marks,
+        mutable_protection,
+    })
+}
+
 pub(crate) fn read_tx(
     db: &Connection,
     thread: &str,

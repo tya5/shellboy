@@ -1,7 +1,7 @@
 //! Immutable Responses items with one byte-bounded LRU shared by all Threads.
 use crate::storage::StorageError;
 use rusqlite::Connection;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     collections::{HashMap, VecDeque},
     mem::size_of,
@@ -51,9 +51,13 @@ struct Ledger {
     pinned: AtomicUsize,
 }
 struct Frame {
+    ordinal: usize,
     stamp: Stamp,
     items: Vec<Value>,
     group: Option<String>,
+    spill_result_item: bool,
+    spill_projection_safe: bool,
+    spill_marker: bool,
     bytes: usize,
     pins: AtomicUsize,
     ledger: Arc<Ledger>,
@@ -117,6 +121,223 @@ impl ReplayLease {
     }
     pub fn witness(&self) -> &PathWitness {
         &self.0.witness
+    }
+    /// Recover source order without sorting or copying any model payload.
+    fn source_order(&self) -> Option<Vec<Option<&Frame>>> {
+        let mut ordered = vec![None; self.0.frames.len()];
+        for frame in &self.0.frames {
+            let slot = ordered.get_mut(frame.ordinal)?;
+            if slot.replace(frame.as_ref()).is_some() {
+                return None;
+            }
+        }
+        Some(ordered)
+    }
+    /// Detect changes to an earlier selected path without copying payloads.
+    pub(crate) fn extends(&self, previous: &PathWitness) -> bool {
+        use sha2::{Digest, Sha256};
+        if previous.nodes > self.0.frames.len() {
+            return false;
+        }
+        let Some(ordered) = self.source_order() else {
+            return false;
+        };
+        let mut hash = Sha256::new();
+        for frame in ordered.into_iter().take(previous.nodes) {
+            let Some(frame) = frame else {
+                return false;
+            };
+            let stamp = &frame.stamp;
+            hash.update(stamp.id.as_bytes());
+            hash.update([0x1f]);
+            hash.update(stamp.revision.to_string().as_bytes());
+            hash.update([0x1f, b'0' + stamp.tombstone as u8, 0x1e]);
+        }
+        hash.finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+            == previous.sha256
+    }
+    /// Prove that no older tool span can shrink, using a conservative lower
+    /// bound for each replacement and at most 8 MiB of already-replayed JSON.
+    /// False means "unknown or possibly reducible", never "reducible".
+    pub(crate) fn proves_no_reducing_older_tools(&self) -> bool {
+        const MAX_BYTES: usize = 8 * 1024 * 1024;
+        const MAX_FRAMES: usize = 4096;
+        let mut first = None;
+        let mut multiple = false;
+        for frame in &self.0.frames {
+            if let Some(group) = frame.group.as_deref() {
+                match first {
+                    None => first = Some(group),
+                    Some(previous) if previous != group => {
+                        multiple = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if !multiple {
+            return true;
+        }
+        if self.0.frames.len() > MAX_FRAMES {
+            return false;
+        }
+        let Some(ordered) = self.source_order() else {
+            return false;
+        };
+        let frames = ordered.into_iter().collect::<Option<Vec<_>>>();
+        let Some(frames) = frames else {
+            return false;
+        };
+        let mut last = HashMap::new();
+        for (index, frame) in frames.iter().enumerate() {
+            if let Some(group) = frame.group.as_deref() {
+                last.insert(group, index);
+            }
+        }
+        let mut spans = Vec::new();
+        let mut start = 0;
+        let mut end = 0;
+        let mut has_group = false;
+        for (index, frame) in frames.iter().enumerate() {
+            if let Some(group) = frame.group.as_deref() {
+                end = end.max(last[group]);
+                has_group = true;
+            }
+            if index == end {
+                if has_group {
+                    spans.push(start..index + 1);
+                }
+                start = index + 1;
+                end = index + 1;
+                has_group = false;
+            }
+        }
+        // Considering every older span, even one that is incomplete or
+        // protected, is conservative: it can only make this proof fail.
+        if spans.len() <= 1 {
+            return true;
+        }
+        let mut remaining = MAX_BYTES;
+        for span in &spans[..spans.len() - 1] {
+            let mut before = 0u64;
+            let mut after_lower = 0u64;
+            for frame in &frames[span.clone()] {
+                if !frame.spill_projection_safe {
+                    return false;
+                }
+                for item in &frame.items {
+                    let Some(chars) = bounded_json_characters(item, &mut remaining) else {
+                        return false;
+                    };
+                    before = before.saturating_add(chars.saturating_add(1));
+                    if item.get("type").and_then(Value::as_str) == Some("reasoning")
+                        || crate::model::opaque::is_opaque(item)
+                    {
+                        continue;
+                    }
+                    if frame.spill_result_item
+                        && item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                    {
+                        let call = item.get("call_id").and_then(Value::as_str).unwrap_or("");
+                        let minimum = json!({"omitted":true,"call_id":call,"output_bytes":0,"status":0,"execution_id":0,"exit_code":0,"original_node_id":frame.stamp.id,"retrieve":"shellboy history get --node <original_node_id>"});
+                        let replacement = json!({"type":"function_call_output","call_id":call,"output":minimum.to_string()});
+                        let Some(chars) = bounded_json_characters(&replacement, &mut remaining)
+                        else {
+                            return false;
+                        };
+                        after_lower = after_lower.saturating_add(chars.saturating_add(1));
+                    } else {
+                        after_lower = after_lower.saturating_add(chars.saturating_add(1));
+                    }
+                }
+            }
+            if after_lower < before {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Node anchoring the newest replayable tool group, if one exists.
+    pub(crate) fn latest_tool_anchor(&self) -> Option<&str> {
+        self.0
+            .frames
+            .iter()
+            .filter(|frame| {
+                frame.group.is_some()
+                    && frame.items.iter().any(|item| {
+                        item.get("type").and_then(Value::as_str) == Some("function_call")
+                    })
+            })
+            .max_by_key(|frame| frame.ordinal)
+            .map(|frame| frame.stamp.id.as_str())
+    }
+
+    /// Active-Turn summary can cover an older tool group or spill marker even
+    /// if that group itself is not worth spilling. Return true only when that
+    /// scope is structurally impossible, without inspecting user content.
+    pub(crate) fn proves_no_active_middle(&self) -> bool {
+        let mut first = None;
+        for frame in &self.0.frames {
+            if frame.spill_marker { return false; }
+            if let Some(group) = frame.group.as_deref() {
+                match first {
+                    None => first = Some(group),
+                    Some(previous) if previous != group => return false,
+                    _ => {}
+                }
+            }
+        }
+        true
+    }
+
+    /// Only completed groups before the newest can become ordinary spill
+    /// targets. Ignore growth of the newest, protected group.
+    pub(crate) fn old_tool_frontier(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let Some(ordered) = self.source_order() else {
+            return crate::digest::sha256_hex(format!("invalid:{}", self.0.witness.sha256));
+        };
+        let mut groups = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for frame in ordered.iter().flatten().copied() {
+            if let Some(group) = frame.group.as_deref()
+                && frame
+                    .items
+                    .iter()
+                    .any(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
+                && seen.insert(group)
+            {
+                groups.push(group);
+            }
+        }
+        let Some(latest) = groups.pop() else {
+            return crate::digest::sha256_hex("");
+        };
+        let prior = groups.into_iter().collect::<std::collections::HashSet<_>>();
+        let mut hash = Sha256::new();
+        for frame in ordered.into_iter().flatten() {
+            if let Some(group) = frame.group.as_deref()
+                && group != latest
+                && prior.contains(group)
+            {
+                let stamp = &frame.stamp;
+                hash.update(group.as_bytes());
+                hash.update([0x1f]);
+                hash.update(stamp.id.as_bytes());
+                hash.update([0x1f]);
+                hash.update(stamp.revision.to_string().as_bytes());
+                hash.update([0x1f, b'0' + stamp.tombstone as u8, 0x1e]);
+            }
+        }
+        hash.finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
     }
     pub fn items(&self) -> impl Iterator<Item = &Value> {
         self.0.frames.iter().flat_map(|frame| &frame.items)
@@ -297,6 +518,7 @@ impl ReplayCache {
                     Some(row.get(1)?)
                 };
                 frames.push(Arc::new(decode_frame(
+                    offset,
                     stamp,
                     body,
                     context.epoch,
@@ -381,14 +603,43 @@ fn outbound_item(mut item: Value) -> Value {
     }
     item
 }
+fn bounded_json_characters(item: &Value, remaining: &mut usize) -> Option<u64> {
+    struct Counter<'a> {
+        remaining: &'a mut usize,
+        characters: u64,
+    }
+    impl std::io::Write for Counter<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > *self.remaining {
+                return Err(std::io::ErrorKind::OutOfMemory.into());
+            }
+            *self.remaining -= bytes.len();
+            self.characters = self
+                .characters
+                .saturating_add(bytes.iter().filter(|byte| **byte & 0xc0 != 0x80).count() as u64);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut counter = Counter {
+        remaining,
+        characters: 0,
+    };
+    serde_json::to_writer(&mut counter, item).ok()?;
+    Some(counter.characters)
+}
+
 fn decode_frame(
+    ordinal: usize,
     stamp: Stamp,
     body: Option<String>,
     epoch: i64,
     ledger: &Arc<Ledger>,
 ) -> Result<Frame, StorageError> {
-    let (group, items) = match body {
-        None => (None, Vec::new()),
+    let (group, items, spill_result_item, spill_projection_safe, spill_marker) = match body {
+        None => (None, Vec::new(), false, true, false),
         Some(body) => {
             let value: Value = serde_json::from_str(&body)
                 .map_err(|error| StorageError::Schema(error.to_string()))?;
@@ -397,6 +648,18 @@ fn decode_frame(
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             let spill = value.get("spill_version").is_some();
+            let no_output = value.get("output").and_then(Value::as_array).is_none();
+            // convert() prefers role over item, while spill_payload() prefers
+            // item over role; never prove a lower bound for that ambiguity.
+            let spill_projection_safe =
+                !(no_output && value.get("role").is_some() && value.get("item").is_some());
+            let spill_result_item = spill_projection_safe
+                && no_output
+                && value
+                    .get("item")
+                    .and_then(|item| item.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("function_call_output");
             let items = convert(value, epoch);
             (
                 group,
@@ -405,6 +668,9 @@ fn decode_frame(
                 } else {
                     items
                 },
+                spill_result_item,
+                spill_projection_safe,
+                spill,
             )
         }
     };
@@ -416,9 +682,13 @@ fn decode_frame(
         + items.iter().map(heap_bytes).sum::<usize>();
     ledger.live.fetch_add(bytes, Ordering::AcqRel);
     Ok(Frame {
+        ordinal,
         stamp,
         items,
         group,
+        spill_result_item,
+        spill_projection_safe,
+        spill_marker,
         bytes,
         pins: AtomicUsize::new(0),
         ledger: ledger.clone(),
@@ -446,7 +716,13 @@ pub(crate) fn load_uncached(
             tombstone: row.get(2)?,
         };
         let body: Option<String> = if stamp.tombstone { None } else { row.get(3)? };
-        frames.push(Arc::new(decode_frame(stamp, body, epoch, &ledger)?));
+        frames.push(Arc::new(decode_frame(
+            frames.len(),
+            stamp,
+            body,
+            epoch,
+            &ledger,
+        )?));
     }
     ReplayLease::new(frames)
 }
@@ -473,6 +749,232 @@ fn heap_bytes(value: &Value) -> usize {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn proactive_witness_ignores_current_suffix_and_tracks_older_tool_groups() {
+        fn frame(ordinal: usize, id: &str, group: Option<&str>, item: Value) -> Arc<Frame> {
+            let ledger = Arc::new(Ledger::default());
+            ledger.live.fetch_add(1, Ordering::AcqRel);
+            let spill_result_item =
+                item.get("type").and_then(Value::as_str) == Some("function_call_output");
+            Arc::new(Frame {
+                ordinal,
+                stamp: Stamp {
+                    id: id.into(),
+                    revision: 1,
+                    tombstone: false,
+                },
+                items: vec![item],
+                group: group.map(str::to_owned),
+                spill_result_item,
+                spill_projection_safe: true,
+                spill_marker: false,
+                bytes: 1,
+                pins: AtomicUsize::new(0),
+                ledger,
+            })
+        }
+        let call =
+            |id: &str| json!({"type":"function_call","call_id":id,"name":"shell","arguments":"{}"});
+        let output =
+            |id: &str| json!({"type":"function_call_output","call_id":id,"output":"synthetic"});
+        let first = vec![
+            frame(0, "c1", Some("g1"), call("a")),
+            frame(1, "r1", Some("g1"), output("a")),
+        ];
+        let first_lease = ReplayLease::new(first.clone()).unwrap();
+        let witness = first_lease.witness().clone();
+        let protected = first_lease.old_tool_frontier();
+        let mut appended = first.clone();
+        appended.push(frame(
+            2,
+            "current",
+            None,
+            json!({"type":"message","role":"assistant","content":[]}),
+        ));
+        let appended_lease = ReplayLease::new(appended.clone()).unwrap();
+        assert!(appended_lease.extends(&witness));
+        assert_eq!(
+            appended_lease.old_tool_frontier(),
+            protected,
+            "ordinary current-turn growth is not a new spill target"
+        );
+        appended.push(frame(3, "c2", Some("g2"), call("b")));
+        appended.push(frame(4, "r2", Some("g2"), output("b")));
+        let later = ReplayLease::new(appended.clone()).unwrap();
+        assert!(
+            later.proves_no_reducing_older_tools(),
+            "tiny old groups are not reducible"
+        );
+        assert!(later.extends(&witness));
+        assert_ne!(
+            later.old_tool_frontier(),
+            protected,
+            "the first group becomes older than the protected newest group"
+        );
+        appended[4] = frame(4, "r2-new", Some("g2"), output("b"));
+        let latest_changed = ReplayLease::new(appended).unwrap();
+        assert_eq!(
+            latest_changed.old_tool_frontier(),
+            later.old_tool_frontier(),
+            "changes to the latest protected group alone do not create a new target"
+        );
+        let large = ReplayLease::new(vec![
+            frame(0,"large-c",Some("big"),call("big-call")),
+            frame(1,"large-r",Some("big"),json!({"type":"function_call_output","call_id":"big-call","output":"x".repeat(50_000)})),
+            frame(2,"new-c",Some("new"),call("new-call")),
+            frame(3,"new-r",Some("new"),output("new-call")),
+        ]).unwrap();
+        assert!(
+            !large.proves_no_reducing_older_tools(),
+            "a potentially useful older group is never suppressed"
+        );
+        let mut ambiguous = frame(
+            1,
+            "ambiguous-result",
+            Some("ambiguous"),
+            output("ambiguous-call"),
+        );
+        Arc::get_mut(&mut ambiguous).unwrap().spill_projection_safe = false;
+        let ambiguous = ReplayLease::new(vec![
+            frame(
+                0,
+                "ambiguous-call",
+                Some("ambiguous"),
+                call("ambiguous-call"),
+            ),
+            ambiguous,
+            frame(2, "last-call", Some("last"), call("last-call")),
+            frame(3, "last-result", Some("last"), output("last-call")),
+        ])
+        .unwrap();
+        assert!(
+            !ambiguous.proves_no_reducing_older_tools(),
+            "ambiguous role/item conversion is never used to prove no target"
+        );
+        let mut unicode_budget = 4096;
+        let unicode = json!({"text":"旧\n🦀\u{1f}é"});
+        assert_eq!(
+            bounded_json_characters(&unicode, &mut unicode_budget),
+            Some(unicode.to_string().chars().count() as u64)
+        );
+        assert!(bounded_json_characters(&unicode, &mut 1usize).is_none());
+        let long = (0..4097)
+            .map(|index| {
+                frame(
+                    index,
+                    &format!("long-{index}"),
+                    None,
+                    json!({"role":"user","content":"synthetic"}),
+                )
+            })
+            .collect();
+        assert!(
+            ReplayLease::new(long)
+                .unwrap()
+                .proves_no_reducing_older_tools(),
+            "a long protected Turn with no tools needs no group scan"
+        );
+        let rewritten = ReplayLease::new(vec![frame(
+            0,
+            "changed",
+            None,
+            json!({"role":"user","content":"synthetic"}),
+        )])
+        .unwrap();
+        assert!(!rewritten.extends(&witness));
+    }
+
+    #[test]
+    fn nonreducing_proof_never_hides_a_real_reducing_spill() {
+        let ledger = Arc::new(Ledger::default());
+        for size in [0, 1, 16, 128, 512, 4096, 50_000] {
+            for status in [Value::Null, json!(0), json!(""), json!("completed")] {
+                let call = json!({"group_id":"g1","reasoning_epoch":0,"output":[{"type":"function_call","call_id":"a","name":"shell","arguments":"{}"}]});
+                let output = json!({"group_id":"g1","item":{"type":"function_call_output","call_id":"a","output":json!({"status":status,"stdout":"x".repeat(size)}).to_string()}});
+                let later_call = json!({"group_id":"g2","output":[{"type":"function_call","call_id":"b","name":"shell","arguments":"{}"}]});
+                let later_output = json!({"group_id":"g2","item":{"type":"function_call_output","call_id":"b","output":"{}"}});
+                let sources = vec![
+                    ("call".to_owned(), call),
+                    ("result".to_owned(), output),
+                    ("later-call".to_owned(), later_call),
+                    ("later-result".to_owned(), later_output),
+                ];
+                let actual = crate::compaction::test_spill_reduces(&sources[..2], 0);
+                let frames = sources
+                    .iter()
+                    .enumerate()
+                    .map(|(ordinal, (id, payload))| {
+                        Arc::new(
+                            decode_frame(
+                                ordinal,
+                                Stamp {
+                                    id: id.clone(),
+                                    revision: 0,
+                                    tombstone: false,
+                                },
+                                Some(payload.to_string()),
+                                0,
+                                &ledger,
+                            )
+                            .unwrap(),
+                        )
+                    })
+                    .collect();
+                let replay = ReplayLease::new(frames).unwrap();
+                assert!(
+                    !(actual && replay.proves_no_reducing_older_tools()),
+                    "size={size} actual reducing spill must not be suppressed"
+                );
+            }
+        }
+        let sources = vec![
+            (
+                "combined-call".to_owned(),
+                json!({"group_id":"g1","output":[{"type":"function_call","call_id":"a","name":"shell","arguments":"{}"}]}),
+            ),
+            (
+                "combined-result".to_owned(),
+                json!({"group_id":"g1","output":[{"type":"function_call_output","call_id":"a","output":""}]}),
+            ),
+            (
+                "later-call".to_owned(),
+                json!({"group_id":"g2","output":[{"type":"function_call","call_id":"b","name":"shell","arguments":"{}"}]}),
+            ),
+            (
+                "later-result".to_owned(),
+                json!({"group_id":"g2","item":{"type":"function_call_output","call_id":"b","output":""}}),
+            ),
+        ];
+        assert!(!crate::compaction::test_spill_reduces(&sources[..2], 0));
+        let frames = sources
+            .iter()
+            .enumerate()
+            .map(|(ordinal, (id, payload))| {
+                Arc::new(
+                    decode_frame(
+                        ordinal,
+                        Stamp {
+                            id: id.clone(),
+                            revision: 0,
+                            tombstone: false,
+                        },
+                        Some(payload.to_string()),
+                        0,
+                        &ledger,
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect();
+        let replay = ReplayLease::new(frames).unwrap();
+        assert!(
+            replay.proves_no_reducing_older_tools(),
+            "an unchanged output-array group has a valid proof"
+        );
+        drop(replay);
+        assert_eq!(ledger.live.load(Ordering::Acquire), 0);
+    }
 
     #[test]
     fn opaque_items_replay_byte_exact_only_in_their_epoch() {

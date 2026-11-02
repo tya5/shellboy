@@ -220,6 +220,37 @@ impl AutomaticCompactionSnapshot {
     }
 }
 
+/// Saved reason automatic compaction is deferred; uses the existing footer.
+#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutomaticCompactionSkip {
+    NoTarget,
+    NoNewTarget,
+    RejectedInvalidState,
+    RejectedOther,
+    CoverageLimited,
+}
+impl AutomaticCompactionSkip {
+    pub fn label_localized(self, language: UiLanguage) -> &'static str {
+        match (language, self) {
+            (UiLanguage::Ja, Self::NoTarget) => "自動圧縮を見送り（対象なし）",
+            (UiLanguage::Ja, Self::NoNewTarget) => "自動圧縮を見送り（新たな対象なし）",
+            (UiLanguage::Ja, Self::RejectedInvalidState | Self::RejectedOther) => {
+                "自動圧縮を見送り（前回は拒否）"
+            }
+            (UiLanguage::Ja, Self::CoverageLimited) => "自動圧縮の対象を確認できません",
+            (UiLanguage::En, Self::NoTarget) => "Auto-compaction deferred (no eligible history)",
+            (UiLanguage::En, Self::NoNewTarget) => {
+                "Auto-compaction deferred (no new eligible history)"
+            }
+            (UiLanguage::En, Self::RejectedInvalidState | Self::RejectedOther) => {
+                "Auto-compaction deferred (previous attempt rejected)"
+            }
+            (UiLanguage::En, Self::CoverageLimited) => "Auto-compaction eligibility unavailable",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivitySnapshot {
     pub timing: SavedTiming,
@@ -236,6 +267,7 @@ pub struct ActivitySnapshot {
     pub attachment_check_limited: bool,
     pub automatic_retry: Option<AutomaticRetrySnapshot>,
     pub automatic_compaction: Option<AutomaticCompactionSnapshot>,
+    pub automatic_compaction_skip: Option<AutomaticCompactionSkip>,
     /// Persisted index pause, read on the existing snapshot cadence.
     pub index_pause: Option<crate::index::PauseReason>,
     pub recovery: Option<RecoverySnapshot>,
