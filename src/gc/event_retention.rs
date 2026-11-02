@@ -408,7 +408,7 @@ mod tests {
         {
             let db = Connection::open(&path).unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch("DROP INDEX node_event_retention; DROP INDEX delivery_event_state; DELETE FROM schema_migration WHERE version>=21; PRAGMA user_version=20; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','stopped','now'); INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at) VALUES('e','shell_ended','{}','t','r','{}','now'); INSERT INTO delivery(event_id,recipient_id,state) VALUES('e','r','pending');").unwrap();
+            db.execute_batch("DROP INDEX node_event_retention; DROP INDEX delivery_event_state; DROP INDEX activity_attempt_turn; DROP INDEX activity_turn_run; DROP INDEX activity_turn_run_state; DROP INDEX activity_group_turn_state; DROP INDEX activity_shell_spawned_turn; DROP INDEX activity_shell_uncollected_owner; DELETE FROM schema_migration WHERE version>=21; PRAGMA user_version=20; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','stopped','now'); INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at) VALUES('e','shell_ended','{}','t','r','{}','now'); INSERT INTO delivery(event_id,recipient_id,state) VALUES('e','r','pending');").unwrap();
         }
         for _ in 0..2 {
             let db = crate::storage::DbWorker::open(&path).await.unwrap();
@@ -417,6 +417,9 @@ mod tests {
                 assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('node_event_retention','delivery_event_state','jobs_source','nodes_index_gc')", [], |r|r.get::<_,i64>(0))?,4);
                 assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=20", [], |r|r.get::<_,String>(0))?,"0020_gc_index_source");
                 assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=21", [], |r|r.get::<_,String>(0))?,"0021_event_retention");
+                assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=22", [], |r|r.get::<_,String>(0))?,"0022_logical_usage_counters");
+                assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=23", [], |r|r.get::<_,String>(0))?,"0023_activity_bounded");
+                assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('activity_attempt_turn','activity_turn_run','activity_turn_run_state','activity_group_turn_state','activity_shell_spawned_turn','activity_shell_uncollected_owner')", [], |r|r.get::<_,i64>(0))?,6);
                 assert_eq!(db.query_row("SELECT count(*) FROM delivery WHERE event_id='e' AND state='pending'", [], |r|r.get::<_,i64>(0))?,1);
                 Ok(())
             }).await.unwrap();
