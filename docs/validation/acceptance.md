@@ -18,7 +18,9 @@ On native macOS, `cargo check --tests`, five `gc::event_retention` unit tests,
 the schema-validation test, five `storage_hot_queries` tests, public schema
 convergence, and the History GC integration test passed against synthetic data.
 The integration test initially saw stale shared-target output; it passed after
-`touch src/lib.rs` and rebuild in rust-slot. Three-OS CI is pending. No
+`touch src/lib.rs` and rebuild in rust-slot. The actual correlated eligibility
+query must use indexed range searches for both node and delivery references;
+its plan is checked in the GC unit tests. Three-OS CI is pending. No
 production database mutation or real conversation data was used.
 
 ## Bounded index wake-delay read (#164, 2026-11-02)

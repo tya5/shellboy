@@ -7,6 +7,9 @@ use crate::storage::StorageError;
 const DELIVERY_BATCH: i64 = 64;
 const EVENT_BATCH: i64 = 32;
 
+// Matching TEXT affinity lets the correlated node lookup seek its expression index.
+const ELIGIBLE_SQL: &str = "SELECT EXISTS(SELECT 1 FROM event e JOIN run r ON r.id=e.target_run_id WHERE e.rowid=?1 AND e.kind='shell_ended' AND r.state IN ('completed','stopped','failed') AND NOT EXISTS(SELECT 1 FROM node n INDEXED BY node_event_retention WHERE n.kind='event' AND json_valid(n.payload_json) AND CAST(json_extract(n.payload_json,'$.event_id') AS TEXT)=e.id) AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state<'dropped') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'dropped' AND d.state<'processed') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'processed')) ";
+
 #[derive(Clone, Copy, Default)]
 pub(super) struct Cursor {
     deliveries: i64,
@@ -33,7 +36,7 @@ pub(super) fn collect_batch(db: &mut Connection, cursor: Cursor) -> Result<Curso
     for row in &events {
         // At most one delivery per event per pass; unknown and pending states
         // stay untouched, and any saved history node protects its event.
-        let eligible: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM event e JOIN run r ON r.id=e.target_run_id WHERE e.rowid=?1 AND e.kind='shell_ended' AND r.state IN ('completed','stopped','failed') AND NOT EXISTS(SELECT 1 FROM node n INDEXED BY node_event_retention WHERE n.kind='event' AND json_valid(n.payload_json) AND json_extract(n.payload_json,'$.event_id')=e.id) AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state<'dropped') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'dropped' AND d.state<'processed') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'processed')) ", params![row], |r| r.get(0))?;
+        let eligible: bool = tx.query_row(ELIGIBLE_SQL, params![row], |r| r.get(0))?;
         if eligible {
             tx.execute("DELETE FROM delivery WHERE rowid=(SELECT d.rowid FROM delivery d WHERE d.event_id=(SELECT id FROM event WHERE rowid=?1) LIMIT 1)", [row])?;
             tx.execute("DELETE FROM event WHERE rowid=?1 AND NOT EXISTS(SELECT 1 FROM delivery WHERE event_id=event.id)", [row])?;
@@ -119,7 +122,15 @@ mod tests {
             [r#"{"event_id":"protected"}"#],
         )
         .unwrap();
+        event(&db, "123", "shell_ended", "done", old);
+        delivery(&db, "123", "done", "processed");
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('numeric-ref','event','now',?1)", [r#"{"event_id":123}"#]).unwrap();
         collect_batch(&mut db, Cursor::default()).unwrap();
+        assert!(exists(
+            &db,
+            "SELECT EXISTS(SELECT 1 FROM event WHERE id=?1)",
+            "123"
+        ));
         assert!(!exists(
             &db,
             "SELECT EXISTS(SELECT 1 FROM delivery WHERE event_id=?1)",
@@ -249,10 +260,28 @@ mod tests {
     #[test]
     fn reverse_node_lookup_uses_bounded_index() {
         let db = fixture();
-        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT 1 FROM node n INDEXED BY node_event_retention WHERE n.kind='event' AND json_valid(n.payload_json) AND json_extract(n.payload_json,'$.event_id')=?1", ["e"], |r| r.get(3)).unwrap();
+        let mut stmt = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {ELIGIBLE_SQL}"))
+            .unwrap();
+        let plan: Vec<String> = stmt
+            .query_map([1], |r| r.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
         assert!(
-            plan.contains("SEARCH") && plan.contains("node_event_retention"),
-            "{plan}"
+            plan.iter()
+                .any(|line| line.contains("SEARCH n USING INDEX node_event_retention")),
+            "{plan:?}"
+        );
+        assert_eq!(
+            plan.iter()
+                .filter(
+                    |line| line.contains("SEARCH d USING COVERING INDEX delivery_event_state")
+                        && (line.contains("state>") || line.contains("state<"))
+                )
+                .count(),
+            3,
+            "{plan:?}"
         );
     }
 }
