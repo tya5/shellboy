@@ -3851,7 +3851,11 @@ Stage C coverage, dynamic/source provenance and remaining(c)review are pending.
 ### v0.6.1 release preparation
 
 The 0.6.1 preparation branch updates the package version and keeps a draft
-release note in `docs/development/release-v0.6.1-draft.md`. The selected source
-cutoff is `49d68c63896cbd660740793c07eec88927388cf4`, including #160 and #159;
-#116 Stage 4 is not included. Candidate builds, upgrade verification,
+release note in `docs/development/release-v0.6.1-draft.md`. Its cutoff is not
+selected; only landed changes are described and schema/upgrade guidance must
+be rechecked at the eventual cutoff. Candidate builds, upgrade verification,
 tagging and publication remain separate gates.
+
+The subsequently selected v0.6.1 source cutoff is
+`49d68c63896cbd660740793c07eec88927388cf4`, including #160 and #159. The
+#116 Stage 4 benchmark is not included in this cutoff.

@@ -56,9 +56,7 @@ an executable, LICENSE, configuration example and offline documentation. Verify
 all archives and installer scripts against `SHA256SUMS` when candidates exist.
 
 **Draft snapshot:** the source cutoff is main
-`49d68c63896cbd660740793c07eec88927388cf4` (includes #160 and #159). The
-#116 Stage 4 benchmark and the later #153 placeholder-argument change are not
-in this cutoff and are not release features. CI, candidate
+`49d68c63896cbd660740793c07eec88927388cf4` (includes #160 and #159). CI, candidate
 archives/installers/checksums and upgrade verification are separate gates; this
 preparation does not create a tag, publish a release, replace an installed binary
 or modify user data.
