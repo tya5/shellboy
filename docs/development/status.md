@@ -3938,3 +3938,9 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: Thread browser resource classification (2026-11-02)
+
+Reviewed 79 pending `src/ui/threads.rs` literals on main 2607218b as Japanese
+arms of `BrowserText::render` and `BrowserMessage::render` with separate English
+variants. No product source, symbols or dynamic values changed. Other assigned
+files and cross-boundary source-value provenance remain under review.

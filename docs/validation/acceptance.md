@@ -8457,3 +8457,10 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+### #152 stage C: Thread browser resource classification (2026-11-02)
+
+A scoped manifest of the 79 reviewed thread-browser decisions yields
+`a=79, b=105, c=0`; the existing full manifest already fails its stale
+`src/presentation/messages.rs` fingerprint on main 2607218b. This is not a
+whole-repository acceptance result. Python `test_language_audit.py` passed 13
+tests on macOS; exact task CI and three-OS integration validation remain pending.

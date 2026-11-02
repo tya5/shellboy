@@ -123,5 +123,400 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/threads.rs:0021934db889491e:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:03e76b90ffcad3a0:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:05bcfbb952d25bf6:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:17d1fbe0d5842062:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:18c648c232fcb2d5:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:1b0a8eb466c03340:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:1e9e4e1395f9e40a:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:23f004081e78a3f8:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:2407ea624905a8fe:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:27ab8252051f3bf8:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:28d01c30883506ac:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:296fea21d036ad80:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:2a3d305091ce105f:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:2b02db01fef3e847:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:2cd4fe089c1adeea:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:32c389e5ca5c8354:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:352a772363007f3c:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:35c963d900df98e4:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:3b051502ad184882:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:3d12dc7153ca857e:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:3fe56126c876f53b:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:439c41c44b4f1a7d:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:4a9661b8fc037aec:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:4cdcaf953a44e0bf:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:4d0ff1fa13abebf0:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:4efdcd8b601b5ca2:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:538119a8e8aea24c:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:53ef7ff6d66d861c:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:5c9f8bc9649fc9fe:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:5cf688b1161b693f:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:62daf31a037d9662:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:684da57b5141fec7:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:69f649d0bf711005:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:6b6b6a501140a3a9:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:6b6b6a501140a3a9:2": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:6b6b6a501140a3a9:3": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:6d429bf572bea1fc:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:7179959f576d8823:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:73e4e6adaf4d838d:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:7aaf65c3b1b3f3f6:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:7bda6297def68be8:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:7d6b83c6b7348603:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:7d838451770f915e:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:7ebc34907e90c4c0:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:8087ef176b4c0d1d:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:8fc09b991d5f62f4:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:92fe6fb0be2a86f9:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:9676341e507f1036:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:98317bae50982c52:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:9abc66d964ad2f60:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:9ca7d8cf8c013360:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:a325ebf1700f8a3e:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:a61360828f648330:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:a6c3ef78d56a7a5b:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:ab09ca8577b419a8:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:b367fd0814062db0:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:bb37953c3e148b0b:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:bbbf6c93d9c9b271:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:bbc7c0413b562151:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:c2d24a7982646c3c:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:c5661a5eb0cfca5e:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:c70652bc146c1f3a:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:c7518c08bc44cbf4:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:c9a2f1d38bef31a1:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:cc9b12dc52efe6f1:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:ccbdbf8cf35b10f7:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:ccbdbf8cf35b10f7:2": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:ccbdbf8cf35b10f7:3": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:cd5737cf4caf2d35:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:cdd57fe1031ca261:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:d71b9ec4812fdbda:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:d71c4bafc5bb91e9:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:da88d03c0cd7c307:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:e41f81eb06954ce0:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:e52a5a0b453130a7:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:eef937651c7611c9:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:f8b7c66f9f2ec419:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
+  },
+  "src/ui/threads.rs:ff7dd36ce1b2f0eb:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "28e7434acbc6bb823f692974abea5dc07ad001882a8a2b62dfeee7f7e89bbaa8"
+  },
+  "src/ui/threads.rs:ff8e747ed6480f71:1": {
+    "category": "a",
+    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
+    "source_tokens_sha256": "cc95b02142944e9657cba7177a0a6c288b9b9da9157ce38f065cee07a8131ac4"
   }
 }
