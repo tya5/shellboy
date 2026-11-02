@@ -336,6 +336,24 @@ CI41380530706 success; #150 remains deferred. Watch-page notices are outside
 both current change sets. Dynamic Watch detail/recovery fallback provenance and
 synthetic root-generated draft rows remain separate pending review.
 
+## Watch Renderer Review
+
+On base `87d80574`, the 33 pending `src/ui/watch.rs` literals in
+`WatchText::render` and `WatchMessage::render` occur only in explicit Japanese
+arms of matches on language and variant. English variants are separately
+implemented; this audit makes no runtime or Japanese text change. Existing
+session renderers pass their selected language; the public `DescendantCount::label`
+compatibility method deliberately stays Japanese, and the application UI uses
+`label_in`. Interpolated reason, summary, count labels and first work text remain
+opaque. `glyphs::select`/`formatted` choose width fallbacks, not language;
+changes to these macros, locale propagation or callers require re-review.
+
+The base-specific inventory comparison changes 33 `(c)` to `(a)`, adds only five
+`(b)` test literals and removes none. Existing generated-cache and clock tests
+cover source and target stability; the additional synthetic test checks both
+languages and width policies 1, 2 and unknown with source text that collides
+with generated Japanese. Validation and branch CI are separate handoff evidence.
+
 ## Scoped Review Fingerprints And CI Consistency
 
 On main `7f5f8897`, all 25 existing reviewed decisions concerned

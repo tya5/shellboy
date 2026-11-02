@@ -1986,6 +1986,29 @@ mod tests {
         assert!(row.secondary.contains("2 pending messages"));
     }
     #[test]
+    fn generated_watch_messages_keep_source_text_and_width_fallbacks() {
+        use crate::ui::text_width;
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            let separator = if policy == Some(1) { " · " } else { " | " };
+            let mark = if policy == Some(1) { "●" } else { "*" };
+            for (language, completed, recovery, missing, pending) in [
+                (UiLanguage::Ja, "完了", "詳細で復旧を確認", "回答の抜粋は未取得", "待ち 2"),
+                (UiLanguage::En, "Completed", "Review recovery in details", "Answer excerpt unavailable", "2 pending messages"),
+            ] {
+                assert_eq!(WatchText::Unread.render(language), format!("{completed} {mark}"));
+                assert_eq!(WatchMessage::AnswerUnknown.render(language), missing);
+                let opaque = "詳細で復旧を確認 / 日本語";
+                assert_eq!(WatchMessage::Recovery(opaque).render(language), format!("{opaque}{separator}{recovery}"));
+                assert_eq!(WatchMessage::Pending { summary: opaque, count: 2 }.render(language), format!("{opaque}{separator}{pending}"));
+                assert!(WatchMessage::Counts { shells: 2, children: 3, waits: None, first: opaque }.render(language).ends_with(opaque));
+                assert!(WatchMessage::StaleCount(opaque).render(language).contains(opaque));
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn translated_clocks_preserve_age_origins_and_raw_recovery_reason() {
         let now = Instant::now();
         let age = WatchAge {
