@@ -8449,3 +8449,7 @@ raw diagnostic arguments. Scoped audit reports a=89, b=38, c=24; the full
 manifest remains blocked by a pre-existing stale presentation fingerprint.
 Exact task and three-OS integration CI remain pending. No physical terminal
 or OS clipboard testing was performed.
+
+Task CI 41414270449 failed on a default-English thread browser integration test
+that still expected the Japanese conversation-info title. Its English expectation
+now passes in the focused macOS integration test; conversation IDs are unchanged.
