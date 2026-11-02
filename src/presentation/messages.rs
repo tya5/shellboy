@@ -558,34 +558,34 @@ impl Message {
             } => match (en, live) {
                 (true, true) if *total == 1 => {
                     crate::ui::text_width::glyphs::formatted!(
-                        "Live display window {start}-{end}/1 character · F6 Details",
+                        "Live display window {start}–{end}/1 character · F6 Details",
                         "Live display window {start}-{end}/1 character | F6 Details"
                     )
                 }
                 (true, false) if *total == 1 => {
                     crate::ui::text_width::glyphs::formatted!(
-                        "Original window {start}-{end}/1 character · F6 Details",
+                        "Original window {start}–{end}/1 character · F6 Details",
                         "Original window {start}-{end}/1 character | F6 Details"
                     )
                 }
                 (true, true) => {
                     crate::ui::text_width::glyphs::formatted!(
-                        "Live display window {start}-{end}/{total} characters · F6 Details",
+                        "Live display window {start}–{end}/{total} characters · F6 Details",
                         "Live display window {start}-{end}/{total} characters | F6 Details"
                     )
                 }
                 (true, false) => {
                     crate::ui::text_width::glyphs::formatted!(
-                        "Original window {start}-{end}/{total} characters · F6 Details",
+                        "Original window {start}–{end}/{total} characters · F6 Details",
                         "Original window {start}-{end}/{total} characters | F6 Details"
                     )
                 }
                 (false, true) => crate::ui::text_width::glyphs::formatted!(
-                    "生成中の表示範囲 {start}-{end}/{total}文字 · F6 詳細",
+                    "生成中の表示範囲 {start}–{end}/{total}文字 · F6 詳細",
                     "生成中の表示範囲 {start}-{end}/{total}文字 | F6 詳細"
                 ),
                 (false, false) => crate::ui::text_width::glyphs::formatted!(
-                    "原文の取得範囲 {start}-{end}/{total}文字 · F6 詳細",
+                    "原文の取得範囲 {start}–{end}/{total}文字 · F6 詳細",
                     "原文の取得範囲 {start}-{end}/{total}文字 | F6 詳細"
                 ),
             },
@@ -1368,7 +1368,7 @@ pub fn display_value(text: &str, width: usize) -> String {
         used += cells;
     }
     if width > 0 {
-        result.push('.');
+        result.push_str(crate::ui::text_width::glyphs::ellipsis());
     }
     result
 }
@@ -1405,6 +1405,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn display_clipping_uses_measured_ellipsis_without_changing_source() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let raw = "user | · → │ e\u{301} data";
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            assert_eq!(display_value(raw, 120), raw);
+            for width in 0..16 {
+                let shown = display_value(raw, width);
+                assert!(shown.width() <= width, "{policy:?} {width}: {shown}");
+                if width > 0 && raw.width() > width {
+                    assert!(
+                        shown.ends_with(if policy == Some(1) { "…" } else { "." }),
+                        "{shown}"
+                    );
+                }
+            }
+            assert_eq!(raw, "user | · → │ e\u{301} data");
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn generated_glyphs_follow_policy_without_rewriting_user_values() {
         use crate::ui::text_width::{self, UnicodeWidthStr};
         let raw = "user | · > → │ content";
@@ -1436,6 +1458,22 @@ mod tests {
                 assert_eq!(Message::Raw { text: raw.into() }.render(language), raw);
                 assert!(Text::Collapsed.render(language).starts_with(ellipsis));
                 assert!(Text::OutputRetry.render(language).contains(separator));
+                let range = Message::SourceWindow {
+                    start: 5,
+                    end: 7,
+                    total: 9,
+                    live: false,
+                }
+                .render(language);
+                let range_mark = if observed == Some(1) {
+                    "5–7/9"
+                } else {
+                    "5-7/9"
+                };
+                assert!(
+                    range.contains(range_mark),
+                    "{observed:?} {language:?}: {range}"
+                );
                 assert!(command.width() <= 120);
             }
         }

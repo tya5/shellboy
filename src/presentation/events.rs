@@ -31,7 +31,7 @@ pub(super) fn revisit_preview(event: &serde_json::Value) -> Option<String> {
     let text = event.pointer("/payload/instruction")?.as_str()?;
     let mut preview: String = text.chars().take(240).collect();
     if preview.len() < text.len() {
-        preview.push('.');
+        preview.push_str(crate::ui::text_width::glyphs::ellipsis());
     }
     Some(super::sanitize_plain(&preview, 0).0)
 }
@@ -514,6 +514,21 @@ fn section_label(section: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn revisit_preview_uses_measured_ellipsis_without_changing_payload() {
+        let raw = format!("user | · → {}", "a".repeat(260));
+        let event = serde_json::json!({"payload": {"instruction": raw}});
+        let original = event.clone();
+        for (policy, suffix) in [(Some(1), "…"), (Some(2), "."), (None, ".")] {
+            crate::ui::text_width::set_terminal_width(policy);
+            let shown = revisit_preview(&event).unwrap();
+            assert!(shown.starts_with("user | · → "), "{shown}");
+            assert!(shown.ends_with(suffix), "{shown}");
+            assert_eq!(event, original);
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn continuation_has_saved_identity_outcome_and_duration_without_inventing_name() {
         let event = serde_json::json!({"event_id":"saved", "payload":{"execution_id":"execution-complete-id", "exit_code":7, "elapsed_ms":316000}});

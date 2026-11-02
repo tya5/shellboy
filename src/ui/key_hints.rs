@@ -84,9 +84,11 @@ impl Action {
     pub fn description(self, language: crate::config::UiLanguage) -> &'static str {
         match self {
             Self::Help => local!(language, "操作ガイド", "Open the operation guide"),
-            Self::Commands => local!(
+            Self::Commands => crate::ui::text_width::glyphs::localized!(
                 language,
+                "コマンド候補を表示。↑↓で選び、Tabで補完",
                 "コマンド候補を表示。^vで選び、Tabで補完",
+                "Show commands; select with ↑↓ and complete with Tab",
                 "Show commands; select with ^v and complete with Tab"
             ),
             Self::History => local!(language, "履歴", "History"),
@@ -179,11 +181,12 @@ impl Action {
         if self == Self::Help {
             "F1".into()
         } else {
-            format!(
-                "{} {}",
-                self.binding(config),
-                self.short_label(config.ui.language)
-            )
+            let binding = if self == Self::Move {
+                crate::ui::text_width::glyphs::select("↑↓", "^v").to_owned()
+            } else {
+                self.binding(config)
+            };
+            format!("{} {}", binding, self.short_label(config.ui.language))
         }
     }
 }
@@ -243,7 +246,7 @@ impl Context {
 
 pub(super) fn detail_footer(context: Context) -> &'static str {
     use std::sync::LazyLock;
-    static FOOTERS: LazyLock<[String; 5]> = LazyLock::new(|| {
+    fn build(narrow: bool) -> [String; 5] {
         use Action::*;
         let mut config = Config::default();
         config.ui.language = crate::config::UiLanguage::Ja;
@@ -255,18 +258,29 @@ pub(super) fn detail_footer(context: Context) -> &'static str {
             vec![FirstPage, Original],
         ]
         .map(|actions| {
-            crate::ui::text_width::glyphs::formatted!(
-                "Esc 戻る · ↑↓/PgUp/PgDn 移動\n{}",
-                "Esc 戻る | ^v/PgUp/PgDn 移動\n{}",
+            let (header, separator) = if narrow {
+                ("Esc 戻る · ↑↓/PgUp/PgDn 移動", " · ")
+            } else {
+                ("Esc 戻る | ^v/PgUp/PgDn 移動", " | ")
+            };
+            format!(
+                "{header}\n{}",
                 actions
                     .iter()
                     .map(|a| a.label(&config))
                     .collect::<Vec<_>>()
-                    .join(crate::ui::text_width::glyphs::separator())
+                    .join(separator)
             )
         })
-    });
-    &FOOTERS[match context {
+    }
+    static NARROW: LazyLock<[String; 5]> = LazyLock::new(|| build(true));
+    static FALLBACK: LazyLock<[String; 5]> = LazyLock::new(|| build(false));
+    let footers = if crate::ui::text_width::glyphs::narrow() {
+        &*NARROW
+    } else {
+        &*FALLBACK
+    };
+    &footers[match context {
         Context::Fields => 1,
         Context::Original { next: true } => 2,
         Context::Original { next: false } => 3,
@@ -284,17 +298,26 @@ pub(super) fn detail_footer_for(
         return detail_footer(context);
     }
     match context {
-        Context::Fields => {
-            "Esc Back | ^v/PgUp/PgDn Move\nr Refresh | o Original | c Copy | v Fields | a Actions"
-        }
-        Context::Original { next: true } => {
-            "Esc Back | ^v/PgUp/PgDn Move\nc Copy | n Next page | p First page | o Original"
-        }
-        Context::Original { next: false } => {
-            "Esc Back | ^v/PgUp/PgDn Move\nc Copy | p First page | o Original"
-        }
-        Context::OriginalPending => "Esc Back | ^v/PgUp/PgDn Move\np First page | o Original",
-        _ => "Esc Back | ^v/PgUp/PgDn Move\nr Refresh | o Original | c Copy | a Actions",
+        Context::Fields => crate::ui::text_width::glyphs::select(
+            "Esc Back · ↑↓/PgUp/PgDn Move\nr Refresh · o Original · c Copy · v Fields · a Actions",
+            "Esc Back | ^v/PgUp/PgDn Move\nr Refresh | o Original | c Copy | v Fields | a Actions",
+        ),
+        Context::Original { next: true } => crate::ui::text_width::glyphs::select(
+            "Esc Back · ↑↓/PgUp/PgDn Move\nc Copy · n Next page · p First page · o Original",
+            "Esc Back | ^v/PgUp/PgDn Move\nc Copy | n Next page | p First page | o Original",
+        ),
+        Context::Original { next: false } => crate::ui::text_width::glyphs::select(
+            "Esc Back · ↑↓/PgUp/PgDn Move\nc Copy · p First page · o Original",
+            "Esc Back | ^v/PgUp/PgDn Move\nc Copy | p First page | o Original",
+        ),
+        Context::OriginalPending => crate::ui::text_width::glyphs::select(
+            "Esc Back · ↑↓/PgUp/PgDn Move\np First page · o Original",
+            "Esc Back | ^v/PgUp/PgDn Move\np First page | o Original",
+        ),
+        _ => crate::ui::text_width::glyphs::select(
+            "Esc Back · ↑↓/PgUp/PgDn Move\nr Refresh · o Original · c Copy · a Actions",
+            "Esc Back | ^v/PgUp/PgDn Move\nr Refresh | o Original | c Copy | a Actions",
+        ),
     }
 }
 
@@ -306,6 +329,7 @@ struct Entry {
     send: String,
     newline: Vec<String>,
     language: crate::config::UiLanguage,
+    ambiguous_width: Option<u8>,
     text: String,
 }
 impl Cache {
@@ -317,6 +341,7 @@ impl Cache {
                 && e.send == config.ui.send_key
                 && e.newline == config.ui.newline_keys
                 && e.language == config.ui.language
+                && e.ambiguous_width == crate::ui::text_width::terminal_width_observation()
         }) {
             let mut labels = context
                 .actions()
@@ -347,6 +372,7 @@ impl Cache {
                 send: config.ui.send_key.clone(),
                 newline: config.ui.newline_keys.clone(),
                 language: config.ui.language,
+                ambiguous_width: crate::ui::text_width::terminal_width_observation(),
                 text,
             });
         }
@@ -387,6 +413,44 @@ impl UiState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hint_glyphs_follow_width_without_changing_bindings() {
+        use crate::config::UiLanguage;
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let cache = Cache::default();
+        let mut config = Config::default();
+        let raw = "custom | · →";
+        config.ui.send_key = raw.into();
+        for (policy, arrows, separator) in [
+            (Some(1), "↑↓", " · "),
+            (Some(2), "^v", " | "),
+            (None, "^v", " | "),
+        ] {
+            text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                config.ui.language = language;
+                assert_eq!(Action::Move.binding(&config), "^v");
+                assert_eq!(Action::Move.spec().0, "^v");
+                let hint = cache.text(Context::Completion, 120, &config).to_string();
+                assert!(
+                    hint.contains(arrows) && hint.contains(separator),
+                    "{policy:?} {language:?}: {hint}"
+                );
+                assert!(hint.width() <= 120);
+                let typing = cache.text(Context::Typing, 120, &config).to_string();
+                assert!(typing.contains(raw), "{typing}");
+                for footer_language in [UiLanguage::En, UiLanguage::Ja] {
+                    let footer = detail_footer_for(Context::Fields, footer_language);
+                    assert!(
+                        footer.contains(arrows) && footer.contains(separator),
+                        "{policy:?}: {footer}"
+                    );
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
     #[test]
     fn paired_text_keeps_every_original_binding_and_japanese_short_label() {
         let cases = [

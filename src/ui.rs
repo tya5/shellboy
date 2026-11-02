@@ -1309,9 +1309,15 @@ pub enum UiExitReason {
 fn details_refresh_failure(language: crate::config::UiLanguage, message: &str) -> String {
     match language {
         crate::config::UiLanguage::En => {
-            text_width::glyphs::formatted!("Refresh failed · Previous observation: {message}", "Refresh failed | Previous observation: {message}")
+            text_width::glyphs::formatted!(
+                "Refresh failed · Previous observation: {message}",
+                "Refresh failed | Previous observation: {message}"
+            )
         }
-        crate::config::UiLanguage::Ja => text_width::glyphs::formatted!("更新失敗 · 前回の観測値: {message}", "更新失敗 | 前回の観測値: {message}"),
+        crate::config::UiLanguage::Ja => text_width::glyphs::formatted!(
+            "更新失敗 · 前回の観測値: {message}",
+            "更新失敗 | 前回の観測値: {message}"
+        ),
     }
 }
 
@@ -4652,8 +4658,10 @@ impl UiState {
                 self.management.open_text(ManagementView {
                     title: text_width::glyphs::localized!(
                         self.config.ui.language,
-                        "受信記録 · 読込み中", "受信記録 | 読込み中",
-                        "Received records · Loading", "Received records | Loading"
+                        "受信記録 · 読込み中",
+                        "受信記録 | 読込み中",
+                        "Received records · Loading",
+                        "Received records | Loading"
                     )
                     .into(),
                     text: String::new(),
@@ -4906,14 +4914,16 @@ impl UiState {
                     .iter()
                     .map(|a| match language {
                         crate::config::UiLanguage::Ja => text_width::glyphs::formatted!(
-                            "下書き: {} · {} · {}\n{}", "下書き: {} | {} | {}\n{}",
+                            "下書き: {} · {} · {}\n{}",
+                            "下書き: {} | {} | {}\n{}",
                             a.id,
                             a.kind,
                             a.state,
                             a.path.display()
                         ),
                         crate::config::UiLanguage::En => text_width::glyphs::formatted!(
-                            "Draft: {} · {} · {}\n{}", "Draft: {} | {} | {}\n{}",
+                            "Draft: {} · {} · {}\n{}",
+                            "Draft: {} | {} | {}\n{}",
                             a.id,
                             a.kind,
                             a.state,
@@ -5435,8 +5445,10 @@ impl UiState {
                 self.management.open_text(ManagementView {
                     title: text_width::glyphs::localized!(
                         self.config.ui.language,
-                        "索引 · 費用preview", "索引 | 費用preview",
-                        "Index · Cost preview", "Index | Cost preview"
+                        "索引 · 費用preview",
+                        "索引 | 費用preview",
+                        "Index · Cost preview",
+                        "Index | Cost preview"
                     )
                     .into(),
                     text: i18n::local!(
@@ -5478,8 +5490,10 @@ impl UiState {
         self.management.open_text(ManagementView {
             title: text_width::glyphs::localized!(
                 self.config.ui.language,
-                "操作 · 受付待ち", "操作 | 受付待ち",
-                "Operation · Awaiting acceptance", "Operation | Awaiting acceptance"
+                "操作 · 受付待ち",
+                "操作 | 受付待ち",
+                "Operation · Awaiting acceptance",
+                "Operation | Awaiting acceptance"
             )
             .into(),
             text: i18n::local!(

@@ -221,6 +221,16 @@ pub(crate) mod glyphs {
             fallback
         }
     }
+    /// Decorate only fixed, app-owned keyboard help, never interpolated values.
+    pub(crate) fn controls(text: &'static str) -> String {
+        if narrow() {
+            text.replace(" | ", " · ")
+                .replace("^v", "↑↓")
+                .replace("<>", "←→")
+        } else {
+            text.to_owned()
+        }
+    }
     pub(crate) fn separator() -> &'static str {
         if terminal_width_observation() == Some(1) {
             " · "
@@ -297,6 +307,19 @@ pub(crate) mod glyphs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fixed_keyboard_hints_follow_the_observed_width() {
+        for (policy, expected) in [
+            (Some(1), "Esc · ↑↓ · ←→"),
+            (Some(2), "Esc | ^v | <>"),
+            (None, "Esc | ^v | <>"),
+        ] {
+            set_terminal_width(policy);
+            assert_eq!(glyphs::controls("Esc | ^v | <>"), expected);
+        }
+        clear_terminal_width();
+    }
+
     #[test]
     fn generated_formatting_keeps_user_data_unmodified() {
         let value = "user | · → !";

@@ -170,6 +170,17 @@ impl OpKind {
             self.shortcut()
         }
     }
+    fn display_shortcut_for(self, language: UiLanguage) -> Option<String> {
+        self.shortcut_for(language).map(|shortcut| {
+            let shortcut = match shortcut {
+                "/index > B" => crate::ui::text_width::glyphs::select("/index → B", shortcut),
+                "/index > T" => crate::ui::text_width::glyphs::select("/index → T", shortcut),
+                "/index > R" => crate::ui::text_width::glyphs::select("/index → R", shortcut),
+                _ => shortcut,
+            };
+            crate::ui::text_width::glyphs::decorate(shortcut)
+        })
+    }
     fn cli(self) -> String {
         format!("shellboy {}", self.catalogue().primary_cli().path.join(" "))
     }
@@ -660,7 +671,7 @@ impl Operations {
                     UiLanguage::En => format!("{label}{sep}Confirm"),
                     UiLanguage::Ja => format!("{label}{sep}確認"),
                 };
-                let footer = crate::ui::text_width::glyphs::decorate(local!(
+                let footer = crate::ui::text_width::glyphs::controls(local!(
                     form.language,
                     "Y 実行 | N/Esc 入力欄へ | ^v/PgUp/PgDn 説明を読む",
                     "Y Run | N/Esc Back to form | ^v/PgUp/PgDn Scroll"
@@ -689,7 +700,7 @@ impl Operations {
                     UiLanguage::En => format!("{label}{sep}Guide"),
                     UiLanguage::Ja => format!("{label}{sep}使い方"),
                 };
-                let footer = crate::ui::text_width::glyphs::decorate(local!(
+                let footer = crate::ui::text_width::glyphs::controls(local!(
                     form.language,
                     "Esc/F1 入力欄へ | ^v/PgUp/PgDn 説明を読む",
                     "Esc/F1 Back to form | ^v/PgUp/PgDn Scroll"
@@ -741,16 +752,20 @@ impl Operations {
                 form.language,
             );
             let footer = match (form.language, form.operation == OpKind::Wait) {
-                (UiLanguage::En, true) => format!(
+                (UiLanguage::En, true) => crate::ui::text_width::glyphs::formatted!(
+                    "Esc List{sep}Enter {verb}{sep}F1 Guide and IDs\nTab/↑↓/PgUp/PgDn Select{sep}F9 Add condition{sep}F10 Remove",
                     "Esc List{sep}Enter {verb}{sep}F1 Guide and IDs\nTab/^v/PgUp/PgDn Select{sep}F9 Add condition{sep}F10 Remove"
                 ),
-                (UiLanguage::En, false) => format!(
+                (UiLanguage::En, false) => crate::ui::text_width::glyphs::formatted!(
+                    "Esc List{sep}Enter {verb}{sep}F1 Guide and IDs\nTab/↑↓/PgUp/PgDn Select{sep}←→ Change choice{sep}Ctrl+U Clear",
                     "Esc List{sep}Enter {verb}{sep}F1 Guide and IDs\nTab/^v/PgUp/PgDn Select{sep}<> Change choice{sep}Ctrl+U Clear"
                 ),
-                (UiLanguage::Ja, true) => format!(
+                (UiLanguage::Ja, true) => crate::ui::text_width::glyphs::formatted!(
+                    "Esc 一覧{sep}Enter {verb}{sep}F1 説明とIDの探し方\nTab/↑↓/PgUp/PgDn 選択{sep}F9条件追加{sep}F10削除",
                     "Esc 一覧{sep}Enter {verb}{sep}F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択{sep}F9条件追加{sep}F10削除"
                 ),
-                (UiLanguage::Ja, false) => format!(
+                (UiLanguage::Ja, false) => crate::ui::text_width::glyphs::formatted!(
+                    "Esc 一覧{sep}Enter {verb}{sep}F1 説明とIDの探し方\nTab/↑↓/PgUp/PgDn 選択{sep}←→選択値{sep}Ctrl+U消去",
                     "Esc 一覧{sep}Enter {verb}{sep}F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択{sep}<>選択値{sep}Ctrl+U消去"
                 ),
             };
@@ -866,7 +881,7 @@ impl Operations {
                 ),
             };
             let title = local!(self.language, "操作", "Actions");
-            let footer = crate::ui::text_width::glyphs::decorate(local!(
+            let footer = crate::ui::text_width::glyphs::controls(local!(
                 self.language,
                 "絞込み | ^v/PgUp/PgDn | Ctrl+U解除 | Esc戻る/F8閉\nEnter 入力フォーム | [変更]保存 [制御]処理",
                 "Filter | ^v/PgUp/PgDn | Ctrl+U Clear | Esc Back/F8 Close\nEnter Form | [Change] Saved data [Control] Work"
@@ -910,11 +925,8 @@ impl Operations {
                             self.language
                         ),
                         kind.label_for(self.language),
-                        kind.shortcut_for(self.language)
-                            .map(|shortcut| format!(
-                                "  {}",
-                                crate::ui::text_width::glyphs::decorate(shortcut)
-                            ))
+                        kind.display_shortcut_for(self.language)
+                            .map(|shortcut| format!("  {shortcut}"))
                             .unwrap_or_default()
                     );
                     items.push(ListItem::new(label));
@@ -2071,6 +2083,31 @@ impl Form {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn displayed_shortcuts_follow_width_without_changing_canonical_values() {
+        for (policy, arrow, separator) in [
+            (Some(1), "→", " · "),
+            (Some(2), ">", " | "),
+            (None, ">", " | "),
+        ] {
+            crate::ui::text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let kind = OpKind::IndexRetry;
+                assert_eq!(kind.shortcut(), Some("/index > T"));
+                assert_eq!(
+                    kind.display_shortcut_for(language).as_deref(),
+                    Some(format!("/index {arrow} T").as_str())
+                );
+                assert_eq!(OpKind::ThreadSet.shortcut(), Some("/model | /effort"));
+                assert_eq!(
+                    OpKind::ThreadSet.display_shortcut_for(language),
+                    Some(format!("/model{separator}/effort"))
+                );
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
     #[test]
     fn all_operation_ui_labels_use_width_invariant_symbols_without_changing_cli_labels() {
         use crate::ui::text_width::UnicodeWidthStr;

@@ -33,7 +33,7 @@ fn notice_height(body_height: u16) -> u16 {
 }
 impl ModelPicker {
     fn footer(&self) -> String {
-        crate::ui::text_width::glyphs::decorate(local!(
+        crate::ui::text_width::glyphs::controls(local!(
             self.language,
             "Esc 戻る | Enter 変更\n^v 選択 | Ctrl+R 再取得 | Ctrl+Y コピー",
             "Esc Back | Enter Change\n^v Select | Ctrl+R Refresh | Ctrl+Y Copy"
@@ -338,9 +338,11 @@ impl ModelPicker {
         );
         if self.loading && self.captured_at.is_none() {
             frame.render_widget(
-                Paragraph::new(local!(
+                Paragraph::new(crate::ui::text_width::glyphs::localized!(
                     self.language,
+                    "モデル一覧を取得中…",
                     "モデル一覧を取得中.",
+                    "Loading models…",
                     "Loading models."
                 ))
                 .style(Style::default().fg(theme::ACCENT)),
@@ -380,8 +382,14 @@ impl ModelPicker {
                 .iter()
                 .map(|model| {
                     let label = match (self.language, self.current.as_ref() == Some(*model)) {
-                        (UiLanguage::En, true) => format!("{model}  * Current"),
-                        (UiLanguage::Ja, true) => format!("{model}  * 現在"),
+                        (UiLanguage::En, true) => crate::ui::text_width::glyphs::formatted!(
+                            "{model}  ● Current",
+                            "{model}  * Current"
+                        ),
+                        (UiLanguage::Ja, true) => crate::ui::text_width::glyphs::formatted!(
+                            "{model}  ● 現在",
+                            "{model}  * 現在"
+                        ),
                         (_, false) => (*model).clone(),
                     };
                     popup::item(&label, body.width)
@@ -598,6 +606,55 @@ mod wheel_tests {
 mod language_rendering_tests {
     use super::*;
     use crate::config::UiLanguage;
+
+    #[test]
+    fn current_marker_follows_width_without_rewriting_model_id() {
+        use ratatui::{Terminal, backend::TestBackend};
+        let raw = "provider/raw | · → id";
+        for (policy, marker) in [(Some(1), "●"), (Some(2), "*"), (None, "*")] {
+            crate::ui::text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                for width in [80, 120] {
+                    let picker = ModelPicker {
+                        language,
+                        paint: Default::default(),
+                        filtered_indices: vec![0],
+                        request: 1,
+                        connection: "mock".into(),
+                        current: Some(raw.into()),
+                        models: vec![raw.into()],
+                        query: String::new(),
+                        selected: 0,
+                        loading: false,
+                        error: None,
+                        captured_at: Some(
+                            chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+                        ),
+                        last_attempt_at: None,
+                        notice_scroll: None,
+                    };
+                    let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
+                    terminal
+                        .draw(|frame| picker.draw(frame, frame.area()))
+                        .unwrap();
+                    let buffer = terminal.backend().buffer();
+                    let shown = (0..20)
+                        .map(|y| {
+                            (0..width)
+                                .map(|x| buffer[(x, y)].symbol())
+                                .collect::<String>()
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    assert!(shown.contains(raw), "{policy:?} {language:?}: {shown}");
+                    assert!(shown.contains(marker), "{policy:?} {language:?}: {shown}");
+                    assert_eq!(picker.current.as_deref(), Some(raw));
+                    assert_eq!(picker.models[0], raw);
+                }
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
 
     #[test]
     fn japanese_notices_keep_original_wording_for_all_states() {

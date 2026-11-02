@@ -190,7 +190,7 @@ impl Choices {
             "保存された原文から取得 | 表示の折返しはコピーしません",
             "From saved source | Display wrapping is not copied"
         ));
-        let footer = crate::ui::text_width::glyphs::decorate(match self.hint_context() {
+        let footer = crate::ui::text_width::glyphs::controls(match self.hint_context() {
             key_hints::Context::CodePending => i18n::local!(language, "Esc 戻る", "Esc Back"),
             key_hints::Context::CodeBody => i18n::local!(
                 language,

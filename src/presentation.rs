@@ -359,7 +359,7 @@ impl ToolPresentation {
 fn compact_tool_label(text: &str, limit: usize) -> String {
     let mut value: String = text.chars().take(limit).collect();
     if text.chars().count() > limit {
-        value.push('.');
+        value.push_str(crate::ui::text_width::glyphs::ellipsis());
     }
     value
 }
@@ -1393,6 +1393,35 @@ pub(crate) fn project_stream_window(
 #[cfg(test)]
 mod stream_projection_tests {
     use super::*;
+
+    #[test]
+    fn tool_heading_keeps_command_and_raw_id_across_width_policies() {
+        let raw = "printf 'user | · → │ data'";
+        let value = ToolPresentation {
+            call_id: "id | · →".into(),
+            ordinal: Some(7),
+            command: raw.into(),
+            status: "failed".into(),
+            exit_code: Some(7),
+            background: true,
+            ..ToolPresentation::default()
+        };
+        let original = serde_json::to_value(&value).unwrap();
+        for (policy, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            crate::ui::text_width::set_terminal_width(policy);
+            let shown = value.heading();
+            assert!(
+                shown.contains(&format!("#8 {raw}{separator}")),
+                "{policy:?}: {shown}"
+            );
+            let suffix = if policy == Some(1) { "…" } else { "." };
+            assert_eq!(compact_tool_label("abcdef", 4), format!("abcd{suffix}"));
+            assert_eq!(value.call_id, "id | · →");
+            assert_eq!(value.command, raw);
+            assert_eq!(serde_json::to_value(&value).unwrap(), original);
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
 
     #[test]
     fn markdown_alert_icons_use_measured_policy_without_touching_body() {

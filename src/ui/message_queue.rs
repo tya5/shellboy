@@ -177,11 +177,11 @@ impl QueuePopup {
                 area,
                 i18n::local!(language, "保存した下書き", "Saved drafts"),
                 &archive_count(language, archives.len()),
-                i18n::local!(
+                &crate::ui::text_width::glyphs::controls(i18n::local!(
                     language,
                     "Esc 戻る | ^v 選択 | Enter 入力欄へ復元 | R 再取得",
                     "Esc Back | ^v Select | Enter Restore draft | R Retry"
-                ),
+                )),
                 &self.paint,
             );
             let items = if archives.is_empty() {
@@ -223,11 +223,11 @@ impl QueuePopup {
             area,
             i18n::local!(language, "反映待ち", "Pending input"),
             &context,
-            i18n::local!(
+            &crate::ui::text_width::glyphs::controls(i18n::local!(
                 language,
                 "Esc 戻る | ^v 選択 | Enter 状態 | O 原文\nD 選択を取消 | A 表示中のIDを取消",
                 "Esc Back | ^v Select | Enter Status | O Source\nD Cancel selected | A Cancel displayed IDs"
-            ),
+            )),
             &self.paint,
         );
         let items = if pending.items.is_empty() {
@@ -1207,6 +1207,29 @@ mod tests {
 #[cfg(test)]
 mod language_tests {
     use super::*;
+
+    #[test]
+    fn compact_queue_labels_preserve_source_and_use_measured_ellipsis() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let raw = "user | · → │ source";
+        for (policy, suffix) in [(Some(1), "…"), (Some(2), "."), (None, ".")] {
+            text_width::set_terminal_width(policy);
+            assert_eq!(compact_label(raw, 120), raw);
+            for width in 0..16 {
+                let shown = compact_label(raw, width);
+                assert!(shown.width() <= width, "{policy:?} {width}: {shown}");
+                if width > 0 && raw.width() > width {
+                    assert!(shown.ends_with(suffix), "{shown}");
+                }
+            }
+            let long = format!("{raw}{}", "a".repeat(520));
+            let excerpt = accepting_excerpt(&long);
+            assert!(excerpt.starts_with(raw));
+            assert!(excerpt.ends_with(suffix));
+            assert_eq!(raw, "user | · → │ source");
+        }
+        text_width::clear_terminal_width();
+    }
     fn item(id: &str) -> PendingMessage {
         PendingMessage {
             message_id: id.into(),

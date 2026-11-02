@@ -116,7 +116,7 @@ impl ManagementPopup {
         }
     }
     fn detail_footer(&self) -> String {
-        crate::ui::text_width::glyphs::decorate(local!(
+        crate::ui::text_width::glyphs::controls(local!(
             self.language,
             "Esc 戻る | ^v/PgUp/PgDn 閲覧\nN 次page | P 先頭 | C このpageをコピー",
             "Esc Back | ^v/PgUp/PgDn Scroll\nN Next page | P First page | C Copy this page"
@@ -963,7 +963,7 @@ impl ManagementPopup {
         let list_mode = self
             .structured()
             .is_some_and(|value| value.detail.is_none());
-        crate::ui::text_width::glyphs::decorate(match self.mode {
+        crate::ui::text_width::glyphs::controls(match self.mode {
             ManagementMode::Index if self.has_next_inspection_window() => local!(
                 self.language,
                 "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新 | N 次window\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
@@ -1645,9 +1645,11 @@ fn mark_truncated_preview(lines: &mut Vec<Line<'static>>, height: u16, language:
     if lines.len() > usize::from(height) {
         lines.truncate(usize::from(height));
         if let Some(last) = lines.last_mut() {
-            *last = Line::from(local!(
+            *last = Line::from(crate::ui::text_width::glyphs::localized!(
                 language,
+                "… 省略（取得時刻を含む場合あり）",
                 ". 省略（取得時刻を含む場合あり）",
+                "… Omitted (may include capture time)",
                 ". Omitted (may include capture time)"
             ));
         }

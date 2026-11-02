@@ -14,7 +14,7 @@ Baseline: `ee731ad^..ee731ad`; compared with 0.6.0 base `358ed63`. Counts below 
 | `←` | A | `<` | 4 | 0 | 0 |
 | `─` | A | `-` | 14 | 13 | 0 |
 | `│` | A | `\|` | 8 | 12 | 0 |
-| `└` | A | `\\-` | 3 | 6 | 0 |
+| `└` | A | `+-` | 3 | 6 | 0 |
 | `├` | A | `+-` | 2 | 6 | 0 |
 | `║` | A | `- (test fixture)` | 0 | 1 | 0 |
 | `┊` | A | `\|` | 1 | 0 | 0 |
@@ -88,7 +88,9 @@ Baseline: `ee731ad^..ee731ad`; compared with 0.6.0 base `358ed63`. Counts below 
 
 - #156 already restored the work heading and selected work markers, branch connectors, vertical guide, right arrow, metadata separator, and work/tool truncation ellipsis behind the measured-width policy.
 - `║` occurs only in a removed test fixture. `█` also is Ratatui's prior default scrollbar thumb, implicitly replaced by `#` in #139. Popup border sets likewise changed through an added ASCII override; their old glyphs are Ratatui's `PLAIN` set. Do not treat fixtures as permission to invent symbols.
-- `TABLE_BORDER_MARKER` marks library-generated table-border spans; only those spans may be translated, never the user/model table contents.
+- `TABLE_BORDER_MARKER` marks library-generated table-border spans; only those spans may be translated, never the user/model table contents. The current ASCII fallback for a final tree branch is `\-`, as established after #139.
+- The public compatibility constants `ui::HELP` and `NOTICE_SOURCE_OUTSIDE_WINDOW` are not used to render the current TUI. Their ASCII bytes remain stable; the actual help context and typed notification have width-selected display equivalents.
+- Operation shortcut constants remain ASCII input/search identities; `display_shortcut_for` selects the old glyphs only at the drawing boundary. Fixed code-copy and management preview labels are passed to `glyphs::decorate` separately from raw values.
 - This is a diff inventory, not a completion claim. Current-code mapping and 1/2/unknown rendering tests are required before each listed operation is considered restored.
 
 

@@ -1573,8 +1573,12 @@ impl Details {
                     let group = crate::presentation::fields::group(&field.key);
                     if previous != Some(group.0) {
                         rows.push(popup::Item::new(
-                            Line::from(format!("-- {} --", group.1))
-                                .style(Style::default().fg(theme::GROUP_HEADING)),
+                            Line::from(crate::ui::text_width::glyphs::formatted!(
+                                "── {} ──",
+                                "-- {} --",
+                                group.1
+                            ))
+                            .style(Style::default().fg(theme::GROUP_HEADING)),
                         ));
                         previous = Some(group.0);
                     }

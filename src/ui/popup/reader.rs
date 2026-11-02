@@ -1,7 +1,6 @@
 //! A single popup's finite, styled Ratatui-wrap result. Raw sources stay with owners.
 use super::*;
 use crate::config::UiLanguage;
-use crate::ui::i18n::local;
 use std::mem::size_of;
 const MAX_ROWS: usize = 65_536;
 const MAX_BYTES: usize = 8 * 1024 * 1024;
