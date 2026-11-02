@@ -239,3 +239,56 @@ launchd hotkey agent outside temporary HOME. See the source checkout's
 snapshot retries and workload provenance. Inspect `status`, `smoke`, source
 SHA, versions, `machine`, `config`, `processes` and request/answer counts before
 using a JSON result; do not replace errors with zero or compare partial cases.
+
+## Repeated in-flight observations and process topology
+
+A separate Linux run repeated each case three times with the deterministic
+loopback model and the same five-instruction workload. These are not real-model
+measurements, product rankings, or confidence intervals. The [raw results and
+workflow run](https://github.com/tya5/shellboy/actions/runs/41405053536) identify
+the binaries, configurations, environment and every sample. Ubuntu 24.04.5,
+x86-64, four vCPUs and approximately 16 GiB RAM were reported by this runner.
+The process-tree PSS sampler ran at approximately 100 ms intervals during the
+workload. The following values are minimum / median / maximum of the three
+**observed in-flight maxima**, in KiB. Short peaks may be missed: these are not
+estimates of the actual peak. Sampling process trees is not an atomic snapshot.
+
+| Configuration | N | Min | Median | Max |
+| --- | ---: | ---: | ---: | ---: |
+| Shellboy serve | 1 | 26,399 | 26,519 | 26,944 |
+| Shellboy serve | 5 | 28,221 | 28,512 | 28,900 |
+| Shellboy serve | 10 | 28,219 | 30,039 | 30,159 |
+| Shellboy serve | 20 | 33,226 | 33,523 | 35,054 |
+| Codex shared app-server | 1 | 165,860 | 167,012 | 167,148 |
+| Codex shared app-server | 5 | 193,056 | 194,448 | 195,476 |
+| Codex shared app-server | 10 | 213,112 | 214,656 | 215,372 |
+| Codex shared app-server | 20 | 244,960 | 246,248 | 262,262 |
+| Claude Code per-session process | 1 | 196,437 | 196,618 | 196,624 |
+| Claude Code per-session process | 5 | 630,980 | 633,328 | 640,023 |
+| Claude Code per-session process | 10 | 1,116,269 | 1,118,952 | 1,123,489 |
+| Claude Code per-session process | 20 | 2,100,471 | 2,113,556 | 2,120,364 |
+| Codex per-session app-server | 1 | 165,460 | 167,280 | 167,600 |
+| Codex per-session app-server | 5 | 316,069 | 317,004 | 317,161 |
+| Codex per-session app-server | 10 | 467,407 | 468,459 | 481,157 |
+| Codex per-session app-server | 20 | 804,845 | 805,362 | 807,729 |
+| OpenCode serve | 1 | 834,220 | 879,671 | 899,910 |
+| OpenCode serve | 5 | 1,088,791 | 1,190,083 | 1,208,550 |
+| OpenCode serve | 10 | 1,464,859 | 1,528,562 | 1,612,290 |
+| OpenCode serve | 20 | 1,800,306 | 1,866,010 | 2,001,567 |
+| jcode serve | 1 | 23,465 | 24,158 | 24,477 |
+| jcode serve | 5 | 32,732 | 32,834 | 33,258 |
+| jcode serve | 10 | 41,392 | 41,678 | 41,840 |
+| jcode serve | 20 | 60,490 | 61,504 | 61,614 |
+
+Codex's shared app-server actually hosted N independent threads in this test;
+the original per-session adapter is not the only possible Codex topology.
+At N=20 their median observed in-flight maxima were 246,248 KiB shared versus
+805,362 KiB per session. Claude Code was measured as one CLI process per
+session; whether a comparable shared-process topology is available remains
+unverified. Feature and configuration differences still apply.
+
+A separate TUI-hosted Shellboy owner was also sampled before any workload with
+N prepared threads. For N=1/5/10/20, its median baseline PSS was
+16,622/16,637/16,514/17,078 KiB (three repetitions). This is a different owner
+and an idle baseline, not the incremental cost of adding a TUI to `serve`, and
+not a TUI-colocated in-flight peak. Workload-time TUI PSS remains unmeasured.

@@ -275,13 +275,23 @@ def sample_with_one_tui(binary, sessions):
     with tempfile.TemporaryDirectory(prefix='shellboy-tui-pss-') as scratch:
         root = Path(scratch)
         env = isolated_env(root)
-        config = configure(root, 'http://127.0.0.1:9/v1')
+        model = FakeModel(sessions)
+        worker = threading.Thread(target=model.serve_forever, daemon=True)
+        worker.start()
+        config = configure(root, model.url)
+        initial_cwd = root / 'workspace-0'
+        (initial_cwd / 'src').mkdir(parents=True)
+        (initial_cwd / 'README.md').write_text('# Synthetic repository\nBenchmark fixture.\n')
+        (initial_cwd / 'Cargo.toml').write_text('[package]\nname="synthetic"\n')
+        (initial_cwd / 'src/main.rs').write_text('fn main() {}\n')
         master, slave = pty.openpty()
         process = None
+        drain_stop = threading.Event()
+        drain = None
         try:
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 100, 0, 0))
             process = subprocess.Popen([str(binary), '--config', str(config), '--data-dir', str(root / 'data')],
-                                       cwd=root, env=env, stdin=slave, stdout=slave, stderr=slave,
+                                       cwd=initial_cwd, env=env, stdin=slave, stdout=slave, stderr=slave,
                                        start_new_session=True)
             os.close(slave)
             slave = None
@@ -301,7 +311,7 @@ def sample_with_one_tui(binary, sessions):
             initial = len(listed['items'])
             for index in range(initial, sessions):
                 cwd = root / f'workspace-{index}'
-                (cwd / 'src').mkdir(parents=True)
+                (cwd / 'src').mkdir(parents=True, exist_ok=True)
                 (cwd / 'README.md').write_text('# Synthetic repository\nBenchmark fixture.\n')
                 (cwd / 'Cargo.toml').write_text('[package]\nname="synthetic"\n')
                 (cwd / 'src/main.rs').write_text('fn main() {}\n')
@@ -309,9 +319,47 @@ def sample_with_one_tui(binary, sessions):
             listed = cli(binary, root, env, 'thread', 'list', '--limit', '200')
             if listed.get('next_cursor') or len(listed['items']) != sessions:
                 raise RuntimeError('Unexpected TUI thread count after setup')
-            return {**sample_pss(process.pid), 'initial_tui_threads': initial,
-                    'thread_count': sessions, 'coverage': 'tui_hosted_owner_and_descendants'}
+            baseline = {**sample_pss(process.pid), 'initial_tui_threads': initial,
+                        'thread_count': sessions, 'coverage': 'tui_hosted_owner_and_descendants'}
+            threads = [item['thread_id'] for item in listed['items']]
+            model.allowed_threads.update(threads)
+
+            def drain_pty():
+                while not drain_stop.is_set():
+                    if select.select([master], [], [], .05)[0]:
+                        try:
+                            os.read(master, 65536)
+                        except OSError:
+                            return
+
+            drain = threading.Thread(target=drain_pty, daemon=True)
+            drain.start()
+            rounds = []
+            with PeakSampler(lambda: sample_pss(process.pid)) as peak, ThreadPoolExecutor(max_workers=sessions) as pool:
+                for index, prompt in enumerate(PROMPTS):
+                    barrier = threading.Barrier(sessions)
+
+                    def send(thread):
+                        barrier.wait(timeout=TIMEOUT)
+                        return cli(binary, root, env, 'message', 'send', '--thread', thread, '--text', prompt)
+
+                    sent = list(pool.map(send, threads))
+                    completed = [finish_round(binary, root, env, thread, message, prompt, ANSWERS[index])
+                                 for thread, message in zip(threads, sent)]
+                    rounds.append({'round': index + 1, **sample_pss(process.pid), 'completed': completed})
+            if (model.errors or model.requests != sessions * 9 or
+                    model.tools != [sessions] * 4 + [0] or model.answers != [sessions] * 5):
+                raise RuntimeError(f'Unexpected TUI fake model work: {model.errors}, {model.tools}, {model.answers}')
+            baseline['workload'] = {'rounds': rounds, 'in_flight_pss': peak.result(),
+                                    'model_requests': model.requests, 'tool_calls': sum(model.tools)}
+            return baseline
         finally:
+            drain_stop.set()
+            if drain is not None:
+                drain.join(timeout=1)
+            model.shutdown()
+            model.server_close()
+            worker.join(timeout=5)
             if slave is not None:
                 os.close(slave)
             if process is not None and process.poll() is None:

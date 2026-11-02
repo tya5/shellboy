@@ -61,6 +61,19 @@ class RepeatSummaryTests(unittest.TestCase):
         self.assertEqual(result[0]['repeats'], 3)
         self.assertIsNone(result[1]['observed_in_flight_max_pss_kib'])
 
+    def test_tui_summary_and_unavailable_peak(self):
+        from compare import summarize_repeats
+        def case(value):
+            return {'n': 1, 'baseline': {'pss_kib': 10},
+                    'in_flight_pss': {'observed_max_pss_kib': 20},
+                    'baseline_one_tui': {'pss_kib': 15, 'workload': {
+                        'in_flight_pss': {'observed_max_pss_kib': value}}}}
+        result = summarize_repeats([case(8), case(4), case(6)])[0]
+        self.assertEqual(result['one_tui_observed_in_flight_max_pss_kib'],
+                         {'min': 4, 'median': 6, 'max': 8})
+        self.assertIsNone(summarize_repeats([case(8), case(None)])[0]
+                          ['one_tui_observed_in_flight_max_pss_kib'])
+
 
 if __name__ == '__main__':
     unittest.main()

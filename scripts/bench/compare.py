@@ -864,6 +864,12 @@ def summarize_repeats(cases):
             values = [case['baseline_one_tui']['pss_kib'] for case in group]
             metrics['baseline_one_tui_pss_kib'] = {
                 'min': min(values), 'median': statistics.median(values), 'max': max(values)}
+            if all('workload' in case['baseline_one_tui'] for case in group):
+                values = [case['baseline_one_tui']['workload']['in_flight_pss']['observed_max_pss_kib']
+                          for case in group]
+                metrics['one_tui_observed_in_flight_max_pss_kib'] = (
+                    None if any(value is None for value in values) else
+                    {'min': min(values), 'median': statistics.median(values), 'max': max(values)})
         summaries.append({'n': n, 'repeats': len(group), **metrics})
     return summaries
 
