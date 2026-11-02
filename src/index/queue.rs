@@ -167,31 +167,58 @@ impl IndexService {
     }
 }
 
-pub(super) fn recover_inflight(db: &mut Connection) -> Result<bool, StorageError> {
+const RECOVERY_ROWS: i64 = 128;
+const RECOVERY_BYTES: i64 = 1024 * 1024;
+
+/// One transaction per page. The in-memory cursor may be discarded on restart:
+/// already converted jobs and bootstrap records are safe to visit again.
+pub(super) fn recover_inflight_page(
+    db: &mut Connection,
+    cursor: Option<String>,
+) -> Result<(bool, Option<String>, bool), StorageError> {
     let tx = db.transaction()?;
     let interrupted = json!({"kind":"interrupted","message":"Previous embedding request interrupted; retry explicitly and consider duplicate billing"});
-    let mut changed = tx.execute(
-        "UPDATE embedding_job SET state='failed',error_json=?1 WHERE state='running'",
-        [interrupted.to_string()],
-    )? > 0;
-    let mut statement =
-        tx.prepare("SELECT key,value FROM app_meta WHERE key LIKE 'index.bootstrap.%'")?;
-    let rows = statement
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(statement);
-    for (key, value) in rows {
+    let changed = tx.execute(
+        "UPDATE embedding_job SET state='failed',error_json=?1 WHERE id IN (SELECT id FROM embedding_job INDEXED BY jobs_running_recovery WHERE state='running' ORDER BY id LIMIT ?2)",
+        params![interrupted.to_string(), RECOVERY_ROWS],
+    )?;
+    if changed > 0 {
+        tx.commit()?;
+        return Ok((true, cursor, false));
+    }
+    let mut last = cursor.unwrap_or_default();
+    let mut count = 0;
+    let mut bytes = 0;
+    let mut modified = false;
+    loop {
+        let row: Option<(String, i64)> = tx.query_row(
+            "SELECT key,octet_length(value) FROM app_meta WHERE key>='index.bootstrap.' AND key>?1 AND key<'index.bootstrap/' ORDER BY key LIMIT 1",
+            [&last], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional()?;
+        let Some((key, size)) = row else {
+            tx.commit()?;
+            return Ok((modified, None, true));
+        };
+        if count == RECOVERY_ROWS || (count > 0 && size > RECOVERY_BYTES.saturating_sub(bytes)) {
+            tx.commit()?;
+            return Ok((modified, Some(last), false));
+        }
+        let value: String =
+            tx.query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
+                r.get(0)
+            })?;
         let mut work: Work = decode_json(&value)?;
         if work.state == "running" {
             work.state = "failed".into();
             work.error = Some(
-                json!({ "kind":"interrupted","message":"Previous bootstrap request interrupted; retry explicitly"} ),
+                json!({"kind":"interrupted","message":"Previous bootstrap request interrupted; retry explicitly"}),
             );
-            changed |= update_json_meta(&tx, &key, &work)? > 0;
+            modified |= update_json_meta(&tx, &key, &work)? > 0;
         }
+        last = key;
+        count += 1;
+        bytes += size;
     }
-    tx.commit()?;
-    Ok(changed)
 }
 #[cfg(test)]
 pub(super) fn recover_authorization(db: &mut Connection) -> Result<(), StorageError> {
@@ -262,6 +289,220 @@ pub(super) fn claim_authorization(
 #[cfg(test)]
 mod metadata_tests {
     use super::*;
+    fn recovery_db() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE embedding_job(id TEXT PRIMARY KEY,state TEXT NOT NULL,error_json TEXT); CREATE INDEX jobs_running_recovery ON embedding_job(id) WHERE state='running';").unwrap();
+        db
+    }
+
+    #[test]
+    fn recovery_pages_resume_and_use_indexes() {
+        let mut db = recovery_db();
+        for i in 0..300 {
+            db.execute(
+                "INSERT INTO embedding_job VALUES(?1,'running',NULL)",
+                [format!("{i:04}")],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO embedding_job VALUES('pending','pending',NULL)",
+            [],
+        )
+        .unwrap();
+        let work = Work::pending(
+            Witness {
+                node_id: "n".into(),
+                revision: 1,
+                body_hash: None,
+                raw: None,
+            },
+            "text".into(),
+            Segment {
+                start: 0,
+                end: 1,
+                text: "a".into(),
+            },
+            "g",
+            "test",
+        );
+        let mut running = work.clone();
+        running.state = "running".into();
+        for i in 0..300 {
+            db.execute(
+                "INSERT INTO app_meta VALUES(?1,?2)",
+                params![
+                    format!("index.bootstrap.{i:04}"),
+                    encode_json(&running).unwrap()
+                ],
+            )
+            .unwrap();
+        }
+        let (changed, cursor, done) = recover_inflight_page(&mut db, None).unwrap();
+        assert!(changed && !done && cursor.is_none());
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM embedding_job WHERE state='running'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            172
+        );
+        // Simulate an owner restart after the first committed page.
+        let mut cursor = None;
+        let mut pages = 1;
+        loop {
+            let (_, next, done) = recover_inflight_page(&mut db, cursor).unwrap();
+            pages += 1;
+            if done {
+                break;
+            }
+            cursor = next;
+        }
+        assert!(pages >= 6);
+        // Restarting with no cursor after successful bootstrap pages is idempotent.
+        let mut cursor = None;
+        loop {
+            let (changed, next, done) = recover_inflight_page(&mut db, cursor).unwrap();
+            assert!(!changed);
+            if done {
+                break;
+            }
+            cursor = next;
+        }
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM embedding_job WHERE state='failed'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            300
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE json_extract(value,'$.state')='failed'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            300
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT state FROM embedding_job WHERE id='pending'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "pending"
+        );
+        let jobs: String = db.query_row("EXPLAIN QUERY PLAN SELECT id FROM embedding_job INDEXED BY jobs_running_recovery WHERE state='running' ORDER BY id LIMIT 128", [], |r| r.get(3)).unwrap();
+        assert!(jobs.contains("jobs_running_recovery"), "{jobs}");
+        let meta: String = db.query_row("EXPLAIN QUERY PLAN SELECT key,octet_length(value) FROM app_meta WHERE key>='index.bootstrap.' AND key>?1 AND key<'index.bootstrap/' ORDER BY key LIMIT 1", [""], |r| r.get(3)).unwrap();
+        assert!(meta.contains("SEARCH") && meta.contains("INDEX"), "{meta}");
+    }
+
+    #[test]
+    fn bootstrap_page_caps_bytes_and_does_not_enter_adjacent_prefix() {
+        let mut db = recovery_db();
+        let mut work = Work::pending(
+            Witness {
+                node_id: "n".into(),
+                revision: 1,
+                body_hash: None,
+                raw: None,
+            },
+            "text".into(),
+            Segment {
+                start: 0,
+                end: 1,
+                text: "x".repeat(600_000),
+            },
+            "g",
+            "test",
+        );
+        work.state = "running".into();
+        let value = encode_json(&work).unwrap();
+        for key in ["index.bootstrap.a", "index.bootstrap.b"] {
+            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, value])
+                .unwrap();
+        }
+        db.execute(
+            "INSERT INTO app_meta VALUES('index.bootstrap/z','not json')",
+            [],
+        )
+        .unwrap();
+        let (changed, cursor, done) = recover_inflight_page(&mut db, None).unwrap();
+        assert!(changed && !done);
+        assert_eq!(cursor.as_deref(), Some("index.bootstrap.a"));
+        let (_, _, done) = recover_inflight_page(&mut db, cursor).unwrap();
+        assert!(done);
+        assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key<'index.bootstrap/' AND json_extract(value,'$.state')='failed'", [], |r| r.get::<_,i64>(0)).unwrap(), 2);
+    }
+
+    #[test]
+    fn recovery_processes_oversized_bootstrap_alone() {
+        let mut db = recovery_db();
+        let mut work = Work::pending(
+            Witness {
+                node_id: "n".into(),
+                revision: 1,
+                body_hash: None,
+                raw: None,
+            },
+            "text".into(),
+            Segment {
+                start: 0,
+                end: 1,
+                text: "x".repeat(RECOVERY_BYTES as usize + 1),
+            },
+            "g",
+            "test",
+        );
+        work.state = "running".into();
+        let value = encode_json(&work).unwrap();
+        for key in ["index.bootstrap.a", "index.bootstrap.b"] {
+            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, value])
+                .unwrap();
+        }
+        let (changed, cursor, done) = recover_inflight_page(&mut db, None).unwrap();
+        assert!(changed && !done);
+        assert_eq!(cursor.as_deref(), Some("index.bootstrap.a"));
+        assert_eq!(
+            json_meta::<Work>(&db, "index.bootstrap.a")
+                .unwrap()
+                .unwrap()
+                .state,
+            "failed"
+        );
+        assert_eq!(
+            json_meta::<Work>(&db, "index.bootstrap.b")
+                .unwrap()
+                .unwrap()
+                .state,
+            "running"
+        );
+        // A new owner starts over without a cursor; the oversized failed row
+        // remains intact and the other row is eventually recovered.
+        let mut cursor = None;
+        loop {
+            let (_, next, done) = recover_inflight_page(&mut db, cursor).unwrap();
+            if done {
+                break;
+            }
+            cursor = next;
+        }
+        assert_eq!(
+            json_meta::<Work>(&db, "index.bootstrap.b")
+                .unwrap()
+                .unwrap()
+                .state,
+            "failed"
+        );
+    }
+
     #[test]
     fn claim_discards_admission_if_family_pauses_before_claim() {
         let mut db = Connection::open_in_memory().unwrap();

@@ -119,6 +119,13 @@ def check_migration(db, before, start, target):
         expected_index = expected_index.replace(' IF NOT EXISTS', '')
         assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
             'receipt_run_completion differs from migration 24'
+    if target >= 27:
+        row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='jobs_running_recovery'").fetchone()
+        expected_index = next(line for line in DERIVED[27].read_text(encoding='utf-8').splitlines()
+                              if line.startswith('CREATE INDEX IF NOT EXISTS jobs_running_recovery '))
+        expected_index = expected_index.replace(' IF NOT EXISTS', '')
+        assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
+            'jobs_running_recovery differs from migration 27'
 
     if target >= 25:
         row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'").fetchone()
@@ -149,7 +156,7 @@ def parse_args(argv=None):
     parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default='0.7.1')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26), default=26,
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27), default=27,
                         help='26 for the reply candidate; 14/15/17/18/19/20/21/22/23/24/25 retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]

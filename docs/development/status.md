@@ -4384,3 +4384,4 @@ owner restart. Full final-tree local checks were restarted after interruption;
 no interrupted execution is claimed successful. W8 second review and exact-tip
 three-OS CI remain gates before W4 integration. #194/#197 closing comments wait
 until the reviewed chain is on main.
+- #172: startup index recovery uses bounded indexed pages before workers start; a single oversized bootstrap record runs alone.

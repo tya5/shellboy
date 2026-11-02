@@ -456,7 +456,7 @@ a few milliseconds on the development Mac; this is not a guarantee.
 
 ## Current-only contract (Issue #33, 0.2.0)
 
-Current conversation schema is v26. Migration 26 adds the pending reply partial index; Migration 25 adds the tool-group attempt lookup index for history execution links. Migration 15 adds derived readback indexes; 16 adds Thread observation indexes; 17 adds the parent-Thread covering index; 18 accounts for summary usage; 19 adds the completed-attempt scope index; 20 adds index-source GC lookup indexes; 21 adds event-retention lookup indexes; 22 adds the logical usage counters (#171); 23 adds bounded activity lookup indexes (#172); 24 drops the #36 Revisit metadata rows and adds the `receipt_run_completion` partial index (#187). Migration12 accounts for bounded Revisit
+Current conversation schema is v27. Migration 27 adds the interrupted-index-job recovery index. Migration 26 adds the pending reply partial index; Migration 25 adds the tool-group attempt lookup index for history execution links. Migration 15 adds derived readback indexes; 16 adds Thread observation indexes; 17 adds the parent-Thread covering index; 18 accounts for summary usage; 19 adds the completed-attempt scope index; 20 adds index-source GC lookup indexes; 21 adds event-retention lookup indexes; 22 adds the logical usage counters (#171); 23 adds bounded activity lookup indexes (#172); 24 drops the #36 Revisit metadata rows and adds the `receipt_run_completion` partial index (#187). Migration12 accounts for bounded Revisit
 metadata;13 records selected-path admission;14 records Turn interruption and
 indexes drafts. The existing `tool_result_node(node_id)` index from migration2
 also covers retained result-source lookup after payload GC; the earlier #41
