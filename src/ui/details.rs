@@ -1644,7 +1644,7 @@ impl Details {
                         popup::item(
                             &format!(
                                 "{}{}{}",
-                                safe(&field.label),
+                                safe(crate::presentation::fields::flat_label_for(field, language)),
                                 if field.key == "sender.label" && language == UiLanguage::Ja {
                                     "："
                                 } else {
@@ -1866,6 +1866,39 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn flat_detail_label_is_bilingual_and_copy_keeps_the_value() {
+        fn configure(ui: &mut UiState) {
+            ui.select_thread("thread-fixture".into());
+            let payload = serde_json::json!({"command":"RAW-COMMAND"});
+            let raw = crate::history::text_of_payload(&payload);
+            let presentation = crate::presentation::project("tool_result", &payload, &raw, 0);
+            *ui.view_mut().nodes_mut_for_test() = vec![UiNode {
+                node_id: "node-fixture".into(),
+                role: "tool".into(),
+                text: raw,
+                presentation,
+                ..Default::default()
+            }];
+            let mut details = Details::new(ui.view(), false);
+            details.mode = Mode::Fields;
+            details.selected = details
+                .fields(ui.view())
+                .iter()
+                .position(|field| field.key == "/command")
+                .expect("command field");
+            let mut next = 0;
+            assert!(
+                matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { ref text, .. } if text == "RAW-COMMAND"))
+            );
+            ui.details = Some(details);
+        }
+        super::super::i18n::verify_screen(configure, |language| match language {
+            UiLanguage::En => &["Command", "RAW-COMMAND"],
+            UiLanguage::Ja => &["コマンド", "RAW-COMMAND"],
+        });
+    }
+
     #[test]
     fn numbered_answer_fields_are_bilingual_and_copy_original_values() {
         fn configure(ui: &mut UiState) {
