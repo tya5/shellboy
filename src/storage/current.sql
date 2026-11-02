@@ -590,3 +590,8 @@ PRAGMA user_version=23;
 CREATE INDEX receipt_run_completion ON receipt(run_id) WHERE json_extract(result_json,'$.deliver')='complete';
 INSERT INTO schema_migration(version,name) VALUES(24,'0024_revisit_messages');
 PRAGMA user_version=24;
+
+-- Seek interrupted jobs during bounded startup recovery (#172).
+CREATE INDEX jobs_running_recovery ON embedding_job(id) WHERE state='running';
+INSERT INTO schema_migration(version,name) VALUES(25,'0025_index_recovery');
+PRAGMA user_version=25;

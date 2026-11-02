@@ -301,3 +301,14 @@ way. Retry clears the pause; it does not recreate discarded work. Explicit
 `index preview --scope all` (or selected Threads) followed by `index backfill`
 can recover unindexed sources. Existing indexed segments are counted as
 `already_indexed`. No new cursor or persistent tracking key is added.
+
+Startup embedding recovery runs before index consumers. It marks interrupted
+embedding jobs failed in transactions of at most 128 jobs using a partial
+running-state index. Bootstrap records are visited in key order using the
+`index.bootstrap.` prefix range, at most 128 records and 1 MiB of values per
+transaction, except that a single larger record is processed alone; records
+cannot be split. The byte limit is a batching target, not a per-row limit.
+The cursor is ephemeral: restart scans the prefix again and the already failed
+records remain failed. Each committed page is published before the next one;
+workers start only after recovery completes. Interrupted requests require an
+explicit retry and may already have incurred billing.

@@ -4295,3 +4295,4 @@ Annotated tag `v0.7.0` was published at main `abe16a34` at 2026-11-03T09:03:20Z
 from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
 `rag init`. Anonymous download and `SHA256SUMS` verification covered all six
 public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
+- #172: startup index recovery uses bounded indexed pages before workers start; a single oversized bootstrap record runs alone.
