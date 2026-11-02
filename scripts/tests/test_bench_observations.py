@@ -7,6 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'bench'))
 from observations import RequestLog, storage
+from report_stage4 import render
 
 
 class RequestTests(unittest.TestCase):
@@ -33,6 +34,20 @@ class RequestTests(unittest.TestCase):
         log.set_workspaces(['/tmp/workspace-1', '/tmp/workspace-10'])
         log.record('/model', b'/tmp/workspace-10')
         self.assertIsNone(log.result()['requests'][0]['conversation'])
+
+
+class ReportTests(unittest.TestCase):
+    def test_report_never_substitutes_zero_for_unknown(self):
+        case = {'n': 1, 'traffic': {'conversations': [
+            {'total_bytes': None, 'first_bytes': None, 'last_bytes': None}]},
+            'storage': {'bytes': 7, 'files': 1}}
+        report = {'status': 'complete', 'smoke': False, 'agents': [
+            {'agent': 'fixture', 'status': 'complete', 'cases': [case]}]}
+        table = render(report)
+        self.assertIn('| fixture | 1 | unknown | unknown | unknown | 7 | 1 |', table)
+        report['status'] = 'error'
+        with self.assertRaises(ValueError):
+            render(report)
 
 
 class StorageTests(unittest.TestCase):
