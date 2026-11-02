@@ -19,6 +19,14 @@ and source facts are unchanged. Local results are recorded in acceptance; the
 exact-tip task CI result is reported in the integration handoff. Three-OS
 integration and overall Stage C acceptance remain open.
 
+## #152 Batch 10: Received response display labels
+
+The saved-response and stream-observation titles plus the saved-source field
+label now follow `UiLanguage`. Display separators continue to use the shared
+`glyphs::formatted!` `·`/`|` variants. Source IDs, status classes, saved payloads,
+partial response text/reasoning, and replay/path semantics are unchanged. Build-free
+checks pass; the local Rust command is queued behind the shared slot. See acceptance.
+
 ## Index-source GC scan (#164, branch CI pending)
 
 `GcService::collect` found deleted/payload-less nodes owning index rows with a

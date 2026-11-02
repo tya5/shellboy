@@ -8558,3 +8558,23 @@ change was needed.
 
 Exact-tip task CI and three-OS integration validation are reported separately;
 overall Stage C acceptance remains open.
+
+## #152 Batch 10: Received Response Display Labels
+
+The read-only `incomplete_response` and `model_stream_observation` projections
+now use the configured UI language for their generated titles and saved-source
+field label. Both locales use `glyphs::formatted!` for the shared `·`/`|` layout
+separator, including the observation title. The `/received` command token,
+source node ID, event kind/class, saved payload, partial response text and
+reasoning, preview omission state, and canonical replay/path behavior are
+unchanged. Regression coverage exercises both message kinds in Japanese and
+English and checks that source facts remain intact.
+
+Build-free validation passed: `python3 -m unittest discover -s scripts/tests` (168
+tests), `python3 scripts/check-test-layout.py` (102 suites), language audit
+(`received.rs`: a=6, b=31, c=0), and `git diff --check`. The local Rust
+format/check/focused-test/Clippy command remains queued behind the shared slot; a
+first compile attempt found and corrected a missing UI-language argument.
+
+Exact-tip task CI and three-OS integration validation are reported separately;
+overall Stage C acceptance remains open.

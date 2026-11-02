@@ -464,3 +464,14 @@ The current audit classifies the two source literals as `(a)` and the two
 test expectations as `(b)`; no `(c)` remains in this file. No manual
 `language-classifications.json` entry or source-token fingerprint update was
 needed. The overall Stage C gate remains open.
+
+## Product Review Batch10: Received Response Display Labels
+
+`src/frontend/received.rs` now scopes all saved-response and stream-observation
+titles plus the saved-source field label to `UiLanguage`. Delimiter-bearing
+titles use the common `glyphs::formatted!` `·`/`|` variants. The live audit
+moves the five source literals from `(c)` into language arms; test expectations
+remain `(b)`. No manual `language-classifications.json` entry or token
+fingerprint update is needed. The saved node ID/payload, event kind/class,
+body omission state, and replay/path semantics are unchanged. Overall Stage C
+acceptance remains open.

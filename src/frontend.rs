@@ -4209,7 +4209,12 @@ impl NodePosition {
     }
 }
 impl RawNode {
-    fn into_ui_node(self, position: Option<NodePosition>, render_width: u16) -> UiNode {
+    fn into_ui_node(
+        self,
+        position: Option<NodePosition>,
+        render_width: u16,
+        language: UiLanguage,
+    ) -> UiNode {
         let (payload, text, mut reasoning_ranges) = self.decode();
         let offset = position.map(|position| match position {
             NodePosition::At(offset) => offset,
@@ -4240,6 +4245,7 @@ impl RawNode {
                 render_width,
                 false,
                 self.received_recovery_wait,
+                language,
             );
         }
         let mut presentation =

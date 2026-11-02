@@ -150,7 +150,7 @@ fn project(
             node.presentation.read_revision = info.read_revision;
         }
     }
-    let mut received = received.map(|snapshot| received::prepare(snapshot, width));
+    let mut received = received.map(|snapshot| received::prepare(snapshot, width, language));
     if let Some(prepared) = &mut received {
         for (_, node) in &mut prepared.nodes {
             node.presentation.read_revision = info.read_revision;
