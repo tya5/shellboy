@@ -859,6 +859,7 @@ pub enum UiUpdate {
     BrowserResync {
         generation: u64,
         reason: String,
+        reason_en: Option<String>,
     },
     LiveWorkObserved {
         thread_id: String,
@@ -3067,8 +3068,14 @@ impl UiState {
                 self.thread_browser.patch_failed(generation, error);
                 self.dirty |= self.thread_browser.visible();
             }
-            UiUpdate::BrowserResync { generation, reason } => {
-                self.dirty |= self.thread_browser.resync(generation, reason);
+            UiUpdate::BrowserResync {
+                generation,
+                reason,
+                reason_en,
+            } => {
+                self.dirty |= self
+                    .thread_browser
+                    .resync_with_translation(generation, reason, reason_en);
             }
             UiUpdate::ThreadListFailed { generation, error } => {
                 self.thread_browser.failed(generation, error)

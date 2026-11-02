@@ -633,6 +633,7 @@ pub(super) struct ThreadBrowser {
     error: Option<String>,
     patch_error: Option<String>,
     notice: Option<String>,
+    notice_en: Option<String>,
     notice_seen: std::cell::Cell<bool>,
     preferred: Option<String>,
     preferred_screen: Option<usize>,
@@ -756,6 +757,7 @@ impl ThreadBrowser {
         self.loading = true;
         self.error = None;
         self.notice = None;
+        self.notice_en = None;
     }
     fn begin(&mut self, cursor: Option<String>) -> UiAction {
         self.filter_deadline = None;
@@ -765,6 +767,7 @@ impl ThreadBrowser {
             self.loading = true;
             self.error = None;
             self.notice = None;
+            self.notice_en = None;
         }
         self.request(cursor)
     }
@@ -862,9 +865,11 @@ impl ThreadBrowser {
         // Reopening must retain a deletion outcome that arrived while closed.
         // Filtering/paging still clears it through normal invalidation.
         let notice = self.notice.take().filter(|_| !self.notice_seen.get());
+        let notice_en = self.notice_en.take().filter(|_| notice.is_some());
         let action = self.begin(None);
         self.watch.get_mut().begin_generation(self.generation, true);
         self.notice = notice;
+        self.notice_en = notice_en;
         action
     }
     pub fn failed(&mut self, generation: u64, error: String) {
@@ -876,7 +881,16 @@ impl ThreadBrowser {
     }
     pub fn notice(&mut self, message: String) {
         self.notice = Some(message);
+        self.notice_en = None;
         self.notice_seen.set(false);
+    }
+
+    fn notice_for_language(&self) -> Option<&str> {
+        if self.language == crate::config::UiLanguage::En {
+            self.notice_en.as_deref().or(self.notice.as_deref())
+        } else {
+            self.notice.as_deref()
+        }
     }
     /// Apply confirmed deletion facts without accepting an older list response
     /// that could put a removed row back. Preserve filtering and pagination.
@@ -899,6 +913,7 @@ impl ThreadBrowser {
         self.loading = refresh_filter;
         self.error = None;
         self.notice = None;
+        self.notice_en = None;
         if self
             .preferred
             .as_ref()
@@ -1243,12 +1258,22 @@ impl ThreadBrowser {
         })
     }
     pub fn resync(&mut self, generation: u64, reason: String) -> bool {
+        self.resync_with_translation(generation, reason, None)
+    }
+    pub fn resync_with_translation(
+        &mut self,
+        generation: u64,
+        reason: String,
+        reason_en: Option<String>,
+    ) -> bool {
         if generation != self.generation {
             return false;
         }
         self.remember_selection();
         self.invalidate(None);
         self.notice = Some(one_line(&reason.chars().take(512).collect::<String>()));
+        self.notice_en =
+            reason_en.map(|english| one_line(&english.chars().take(512).collect::<String>()));
         self.notice_seen.set(false);
         self.filter_deadline = Some(Instant::now());
         true
@@ -2248,7 +2273,7 @@ impl ThreadBrowser {
         let mut context = BrowserMessage::Filter {
             query: &one_line(filter),
             error: error.map(one_line).as_deref(),
-            notice: self.notice.as_deref().map(one_line).as_deref(),
+            notice: self.notice_for_language().map(one_line).as_deref(),
         }
         .render(self.language);
         if self
@@ -2484,7 +2509,7 @@ impl ThreadBrowser {
                 .or(self.patch_error.as_deref())
                 .map(one_line)
                 .as_deref(),
-            notice: self.notice.as_deref().map(one_line).as_deref(),
+            notice: self.notice_for_language().map(one_line).as_deref(),
         }
         .render(self.language);
         if let Some(label) = self.descendant_status.clone().or_else(|| {
@@ -4707,6 +4732,26 @@ mod patch_tests {
             .map(|n| row(&format!("t{n:03}"), "matching topic", "2026-10-01"))
             .collect()
     }
+    #[test]
+    fn resync_notice_selects_complete_copy_by_language_and_keeps_raw_notices() {
+        let japanese = "会話一覧の変更対象を保持できませんでした。最新のページから再取得します";
+        let english = "The change to the conversation list could not be retained. The latest page will be reloaded.";
+        let mut browser = ThreadBrowser::default();
+        let generation = browser.generation;
+        assert!(browser.resync_with_translation(generation, japanese.into(), Some(english.into())));
+        browser.language = crate::config::UiLanguage::En;
+        assert_eq!(browser.notice_for_language(), Some(english));
+        assert!(browser.notice_for_language().unwrap().is_ascii());
+        browser.language = crate::config::UiLanguage::Ja;
+        assert_eq!(browser.notice_for_language(), Some(japanese));
+        browser.notice("Provider response: 原文維持".into());
+        browser.language = crate::config::UiLanguage::En;
+        assert_eq!(
+            browser.notice_for_language(),
+            Some("Provider response: 原文維持")
+        );
+    }
+
     #[test]
     fn resync_and_ctrl_r_keep_one_counted_offpage_selected_row_until_exact_confirmation() {
         for refresh in [false, true] {
