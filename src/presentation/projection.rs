@@ -351,6 +351,42 @@ mod language_audit_tests {
         assert_eq!(title.render(En), "Original reclaimed | saved raw");
     }
     #[test]
+    fn remaining_generated_titles_keep_japanese_and_localize_english() {
+        for (kind, japanese, english) in [
+            ("tool_result", "shell結果", "Execution result"),
+            ("event", "状態変更", "State change"),
+            (
+                "interrupted_run",
+                "前回処理の中断情報",
+                "Previous work was interrupted",
+            ),
+            (
+                "future-kind",
+                "未対応の項目: future-kind",
+                "Unsupported item: future-kind",
+            ),
+        ] {
+            let (projected, _) = initial(kind, &serde_json::json!({}));
+            assert_eq!(projected.title, japanese);
+            assert_eq!(projected.ui_messages.title.unwrap().render(En), english);
+        }
+        let body = "### Part 1\nkept text\n\nShellboy source nodes: node-a";
+        let payload = serde_json::json!({
+            "summary_format":"shellboy-summary-v1",
+            "summary_part_keys":["part-a"],
+            "source_node_ids":["node-a"],
+            "item":{"content":[{"type":"input_text", "text":body}]}
+        });
+        let (mut projected, _) = initial("summary", &payload);
+        assert!(summary_projection(&mut projected, &payload).is_some());
+        assert_eq!(projected.title, "要約 | 置換1件 | 出典1件 | F6>O 原文");
+        assert_eq!(
+            projected.ui_messages.title.unwrap().render(En),
+            "Summary | 1 replaced | 1 source | F6>O Original"
+        );
+        assert_eq!(payload["item"]["content"][0]["text"], body);
+    }
+    #[test]
     fn generated_summary_count_title_has_bilingual_projection() {
         let payload = serde_json::json!({"source_node_ids":["node-a", "node-b"]});
         let (mut projected, _) = initial("summary", &payload);
