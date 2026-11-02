@@ -2804,7 +2804,7 @@ async fn run_with_delivery(
                                 let pixels = clipboard.capture(timeout, cancel.clone()).await?;
                                 attachments.save_clipboard_pixels(pixels, cancel).await
                             }
-                            .await.map_err(image_acquisition_error);
+                            .await.map_err(|error| image_acquisition_error(error, language));
                             command_outcome(&outcomes, submission, &result).await;
                             {
                                 let _ = sender
@@ -4301,10 +4301,15 @@ impl RawNode {
         }
     }
 }
-fn image_acquisition_error(mut error: ApiError) -> ApiError {
-    error
-        .message
-        .push_str("。画像ファイルがあれば /attach パス で下書きに添付できます");
+fn image_acquisition_error(mut error: ApiError, language: crate::config::UiLanguage) -> ApiError {
+    error.message.push_str(match language {
+        crate::config::UiLanguage::Ja => {
+            "。画像ファイルがあれば /attach パス で下書きに添付できます"
+        }
+        crate::config::UiLanguage::En => {
+            ". If you have an image file, use /attach PATH to attach it to the draft"
+        }
+    });
     error
 }
 pub async fn copy_source(

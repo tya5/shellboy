@@ -862,19 +862,9 @@ mod tests {
     fn localized_status_surfaces_preserve_width_policies_and_attachment_data() {
         use crate::config::UiLanguage;
         use crate::ui::{UiAttachment, text_width};
-        for (language, image, footer, cache) in [
-            (
-                UiLanguage::Ja,
-                "画像を添付しました",
-                "/image 画像を添付",
-                "キャッシュ86%",
-            ),
-            (
-                UiLanguage::En,
-                "Image attached",
-                "/image Attach image",
-                "Cache 86%",
-            ),
+        for (language, image, cache) in [
+            (UiLanguage::Ja, "画像を添付しました", "キャッシュ86%"),
+            (UiLanguage::En, "Image attached", "Cache 86%"),
         ] {
             for policy in [Some(1), Some(2), None] {
                 text_width::set_terminal_width(policy);
@@ -882,7 +872,14 @@ mod tests {
                 config.ui.language = language;
                 let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
                 let shown = frame_text(&mut ui, 120, 24);
-                assert!(shown.contains(footer), "{language:?} {policy:?}: {shown}");
+                assert!(
+                    !shown.contains("/attach パス"),
+                    "{language:?} {policy:?}: {shown}"
+                );
+                assert!(
+                    !shown.contains("/attach PATH"),
+                    "{language:?} {policy:?}: {shown}"
+                );
                 if language == UiLanguage::En {
                     assert!(shown.contains("Enter a request"));
                     assert!(shown.contains("Send: Enter"));
@@ -892,15 +889,6 @@ mod tests {
                     assert!(shown.contains("送信: Enter"));
                     assert!(shown.contains("作業場所: "));
                 }
-                let separator = if policy == Some(1) { " · " } else { " | " };
-                let expected = match language {
-                    UiLanguage::Ja => format!("/image 画像を添付{separator}/attach パス"),
-                    UiLanguage::En => format!("/image Attach image{separator}/attach PATH"),
-                };
-                assert!(
-                    shown.contains(&expected),
-                    "{language:?} {policy:?}: {shown}"
-                );
                 let bar = ContextBar {
                     usage: crate::ui::ContextUsage {
                         input_tokens: Some(140_000),

@@ -6327,23 +6327,7 @@ fn draw_input(
             Block::default()
                 .borders(Borders::ALL)
                 .border_set(text_width::glyphs::border(popup::ASCII_BORDER))
-                .border_style(Style::default().fg(state.palette.muted()))
-                .title_bottom(
-                    if state.view().draft.text.is_empty() && input_area.width >= 60 {
-                        match state.config.ui.language {
-                            crate::config::UiLanguage::Ja => text_width::glyphs::select(
-                                "/image 画像を添付 · /attach パス",
-                                "/image 画像を添付 | /attach パス",
-                            ),
-                            crate::config::UiLanguage::En => text_width::glyphs::select(
-                                "/image Attach image · /attach PATH",
-                                "/image Attach image | /attach PATH",
-                            ),
-                        }
-                    } else {
-                        ""
-                    },
-                ),
+                .border_style(Style::default().fg(state.palette.muted())),
         ),
         input_area,
     );

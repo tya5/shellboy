@@ -62,9 +62,9 @@ a defect count or permission to rewrite values. The flag makes pending UI work
 visible without silently turning the separate Stage C zero gate on.
 
 Against main `87d80574297dcde5e3c95db58a430f103a1e1c7a`, an inventory
-comparison found 18 existing `(c)` to `(a)` changes, 22 test-only `(b)`
-additions, and two removed `(c)` format literals (`キャッシュ{}%` and
-`作業場所: {cwd}`). The cache literal was replaced by an explicit Japanese
+comparison found 17 existing `(c)` to `(a)` changes, 23 test-only `(b)`
+additions, and four removed `(c)` literals: the two input-border hints removed
+by user decision, and `キャッシュ{}%` and `作業場所: {cwd}`. The cache literal was replaced by an explicit Japanese
 language arm, `キャッシュ{percent}%` (new `(a)`); the unchanged Japanese working
 directory prefix is now selected independently of the opaque path. The six
 field-group records are caller-dependent: the renderer must continue to use

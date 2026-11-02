@@ -119,10 +119,11 @@ See acceptance for evidence and untested cases.
 
 ## #152 Status Surfaces And Detail Headings
 
-Application-owned cache percentages, attachment hints/status, empty-conversation
-prompts and F6 field-group headings follow UI language. User/provider labels and
-values, attachment identifiers/paths, copied values, Japanese messages and glyph
-width fallbacks remain unchanged. The UI audit queue is separately enumerable;
+Application-owned cache percentages, attachment status/failure guidance,
+empty-conversation prompts and F6 field-group headings follow UI language. As
+requested, the empty input border no longer has an attachment hint; the welcome
+hint is retained. User/provider labels and values, attachment identifiers/paths,
+copied values and glyph width fallbacks remain unchanged. The UI audit queue is separately enumerable;
 its pending count is not a Stage C zero gate. See validation for evidence and
 remaining checks.
 

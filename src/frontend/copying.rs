@@ -293,16 +293,28 @@ mod image_guidance_tests {
     use super::*;
     #[test]
     fn image_failure_preserves_facts_and_offers_file_attachment_without_claiming_acquisition() {
-        let mut error = ApiError::new(ErrorCode::InvalidState, "fixture image unavailable");
+        use crate::config::UiLanguage;
+        let mut error = ApiError::new(
+            ErrorCode::InvalidState,
+            "画像ファイルがあれば /attach パス で下書きに添付できます",
+        );
         error.hint = Some("original hint".into());
         error.details = Some(serde_json::json!({"fixture":true}));
-        let result = super::super::image_acquisition_error(error.clone());
-        assert_eq!(result.code, error.code);
-        assert_eq!(result.details, error.details);
-        assert_eq!(result.hint, error.hint);
-        assert!(
-            result.message.contains("fixture image unavailable")
-                && result.message.contains("/attach")
-        );
+        for (language, suffix) in [
+            (
+                UiLanguage::Ja,
+                "。画像ファイルがあれば /attach パス で下書きに添付できます",
+            ),
+            (
+                UiLanguage::En,
+                ". If you have an image file, use /attach PATH to attach it to the draft",
+            ),
+        ] {
+            let result = super::super::image_acquisition_error(error.clone(), language);
+            assert_eq!(result.code, error.code);
+            assert_eq!(result.details, error.details);
+            assert_eq!(result.hint, error.hint);
+            assert_eq!(result.message, format!("{}{suffix}", error.message));
+        }
     }
 }
