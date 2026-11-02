@@ -8910,3 +8910,6 @@ tests were rerun locally; the rebased tip's 3-OS CI is reported with the branch.
 The Run-end rule (a waiting message never outlives its Run) replaced the stop
 and Esc tests with release at stop, Esc, shutdown-then-restart and recovery
 wait; see the rebased run below.
+## #175 Shift+Enter Keyboard Enhancement
+
+Physical terminal verification is UNVERIFIED. No real terminal emulator or physical TTY was exercised for this change; synthetic PTY tests and 3-OS CI are not counted as physical-terminal success. No configuration setting was added.

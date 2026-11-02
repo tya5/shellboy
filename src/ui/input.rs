@@ -9,6 +9,40 @@ use ratatui::{
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(super) fn available_newline_keys(
+    keys: &[String],
+    keyboard_enhancement_enabled: bool,
+) -> Vec<String> {
+    keys.iter()
+        .filter(|key| keyboard_enhancement_enabled || !is_shift_enter_binding(key.as_str()))
+        .cloned()
+        .collect()
+}
+
+fn is_shift_enter_binding(binding: &str) -> bool {
+    let mut parts = binding.split('+').map(str::trim);
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(modifier), Some(key), None)
+            if modifier.eq_ignore_ascii_case("shift") && key.eq_ignore_ascii_case("enter")
+    )
+}
+
+#[cfg(test)]
+mod keyboard_enhancement_tests {
+    use super::available_newline_keys;
+
+    #[test]
+    fn unsupported_terminal_hides_shift_enter_but_keeps_ctrl_j() {
+        let configured = vec!["Ctrl+J".to_owned(), "Shift+Enter".to_owned()];
+        assert_eq!(
+            available_newline_keys(&configured, false),
+            vec!["Ctrl+J".to_owned()]
+        );
+        assert_eq!(available_newline_keys(&configured, true), configured);
+    }
+}
+
 /// Display representation and byte cursor; folded text remains intact in DraftSnapshot.
 pub(super) struct Display {
     pub text: String,
