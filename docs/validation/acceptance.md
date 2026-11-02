@@ -8470,3 +8470,10 @@ Task CI 41410168417 failed on default-English integration tests that expected
 Japanese composer output. Those tests now explicitly select Japanese, and an
 English screen test checks the same `/restore` completion and binding. The
 15 focused composer integration tests pass on macOS after this correction.
+
+After W1 landed on main 74d27461 (three-OS CI 41415178623), re-reviewed the
+45 Japanese help and glyph resources against their English variants. The
+implementation and tests match prior task commit 611ecae8; each decision and
+literal matches. Only those scope fingerprints changed, and all main decisions
+remain. The complete classification manifest validates. The protected status
+control dependency remains unresolved; rebased task CI is pending.
