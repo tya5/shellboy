@@ -618,5 +618,55 @@
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
     "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+  },
+  "src/frontend/ui_diagnostics.rs:d5273a032141dc5e:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja copy-status branch; the corresponding English branch remains distinct.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:14bb084e27c58d57:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja OSC52 request branch; completion is explicitly unconfirmed and the English send-progress notice remains separate.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:6e8bc73337c9cb36:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja copy-status branch; the corresponding English branch remains distinct.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:83068adbaa17f71f:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja OSC52 request branch; completion is explicitly unconfirmed and the English send-progress notice remains separate.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:5f57c71ec5b407fa:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja copy-status branch; the corresponding English branch remains distinct.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:28f9d58bb040532d:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja OSC52 request branch; completion is explicitly unconfirmed and the English send-progress notice remains separate.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:69d727cbd4d9f33c:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja copy-status branch; the corresponding English branch remains distinct.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:0ae07f23e3cbad90:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja OSC52 request branch; completion is explicitly unconfirmed and the English send-progress notice remains separate.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:413ca830b1d2c154:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja code-block copy branch; the matching English branch preserves the same visible block index.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
+  },
+  "src/frontend/ui_diagnostics.rs:a37d5890c3ad34f6:1": {
+    "category": "a",
+    "reason": "Explicit UiLanguage::Ja code-block OSC52 request branch; completion is explicitly unconfirmed and the English send-progress notice remains separate.",
+    "source_tokens_sha256": "3062d55c59b65e8102aa68b2cf4792dcf0c30701ee07744199fdab9b818cc5a5"
   }
 }
