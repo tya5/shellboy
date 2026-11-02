@@ -29,6 +29,14 @@ shellboy turn get --turn "$SHELLBOY_TURN_ID"
 shellboy --help
 ```
 
+A `Shellboy context v1:` line in your conversation names your Thread, Run,
+Turn, cwd, connection, model, effort and AGENTS reference. It is saved in the
+conversation history: once at each Turn start, and again right after any of
+those values changes or after a compaction removed it. The latest such line is
+the current one; earlier lines describe earlier Turns or earlier settings. A
+`thread_settings` event before a new line states what changed. Your next shell
+call runs in the cwd of the latest line.
+
 Model shells inherit `SHELLBOY_THREAD_ID`, `SHELLBOY_RUN_ID`, `SHELLBOY_TURN_ID`, `SHELLBOY_EXECUTION_ID`, and connection context. Optional `--thread` arguments on commands such as `thread get` and `message send` default to your own Thread. Supply IDs explicitly where required. Keep returned Thread/Run/Turn/message/node/execution IDs separate to avoid confusing targets.
 
 To run a command yourself, call the shell tool directly. `message send` accepts a request for a recipient; it does not execute the command described in that request. Reading the `execution_id` of the shell that ran the sending CLI returns the acceptance JSON. Reading a shell executed by the recipient requires the different ID returned by that recipient's shell tool. Receiving a background launch ID and using a subsequent shell tool call for `shell get/read` is normal two-step usage. `message send` itself is a CLI command inside the shell tool, not a separate route mutually exclusive with “shell execution.” Sending to your own Thread adds input to your own conversation; it does not start another agent.

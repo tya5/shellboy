@@ -48,10 +48,11 @@ pub fn encode_hinted(
 ///   With the tools they form the stable prefix.
 /// - `input[prefix_items..conversation_items]` is the growing conversation,
 ///   whose end is the conversation tail.
-/// - `input[conversation_items..]` is per-request context Shellboy appends
-///   after the conversation (the `Shellboy context v1` line, attachment
-///   notices, a summary prompt). It changes on every request, so a cache entry
-///   ending there could never be read again.
+/// - `input[conversation_items..]` is the trailing run of system/developer
+///   items: per-request attachment notices or a summary prompt, or saved
+///   notices that happen to be last (an event, or the `Shellboy context v1`
+///   line saved at a Turn start or after a change, #183). The breakpoint stays
+///   before them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CacheHint {
     pub prefix_items: usize,

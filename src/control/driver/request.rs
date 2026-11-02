@@ -174,7 +174,7 @@ fn instruction_message(source: &std::path::Path, body: &str) -> Result<String, A
     ))
 }
 
-/// The fields of the per-request `Shellboy context v1` line.
+/// The fields of the `Shellboy context v1` line.
 pub(crate) struct ContextLine<'a> {
     pub thread: &'a str,
     pub run: &'a str,
@@ -198,10 +198,62 @@ pub(crate) fn leading_items(
     }
     Ok(input)
 }
-/// The per-request context item Shellboy appends after the conversation.
+/// The context item, saved as a `context` history node (#183).
 pub(crate) fn context_item(line: &ContextLine<'_>) -> Value {
     let effort = line.effort.map(str::to_owned);
     json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy context v1: thread={} run={} turn={} cwd={} connection={} model={} effort={:?}; AGENTS reference={}",line.thread,line.run,line.turn,line.cwd.display(),line.profile,line.model,effort,line.agents.display())}]})
+}
+
+/// Node kind of a saved context line.
+const CONTEXT_NODE_KIND: &str = "context";
+
+/// The context line last saved on the selected path, if any.
+pub(crate) fn last_saved_context(
+    db: &rusqlite::Connection,
+    thread: &str,
+) -> rusqlite::Result<Option<Value>> {
+    let saved: Option<String> = db.query_row("SELECT n.payload_json FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind=?2 AND n.deleted_reason IS NULL AND n.payload_json IS NOT NULL ORDER BY p.ordinal DESC LIMIT 1",params![thread,CONTEXT_NODE_KIND],|r|r.get(0)).optional()?;
+    Ok(saved.and_then(|payload| serde_json::from_str(&payload).ok()))
+}
+
+impl Snapshot {
+    fn context(&self) -> Value {
+        context_item(&ContextLine {
+            thread: &self.thread,
+            run: &self.run,
+            turn: &self.turn,
+            cwd: &self.cwd,
+            profile: &self.profile,
+            model: &self.model,
+            effort: self.effort.as_deref(),
+            agents: &self.agents,
+        })
+    }
+    /// Keep the current context in the saved history (#183). It is appended
+    /// once at the Turn start, again when a field changes (cwd, connection,
+    /// model, effort), and again when a replacement (summary, spill, omission)
+    /// removed it from the selected path. Each append is at the tail, so the
+    /// requests of a Turn stay strict continuations of each other, and the
+    /// latest saved context line is always the current one.
+    pub(super) fn ensure_context_tx(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        now: &str,
+    ) -> Result<(), crate::storage::StorageError> {
+        let item = self.context();
+        if last_saved_context(tx, &self.thread)?.as_ref() == Some(&item) {
+            return Ok(());
+        }
+        history::append_node(
+            tx,
+            &self.thread,
+            &format!("context-{}", id()),
+            Some(&self.turn),
+            CONTEXT_NODE_KIND,
+            &item,
+            now,
+        )
+    }
 }
 
 pub(super) fn prepare_request(
@@ -210,19 +262,10 @@ pub(super) fn prepare_request(
     prepared: &mut crate::attachments::PreparedAttachments,
 ) -> Result<Value, ApiError> {
     let mut input = leading_items(&snapshot.agents, instruction_body.map(|body| &**body))?;
+    // The context line is saved history (#183), so the replay already holds it.
     if let Some(replay) = &snapshot.input {
         crate::control::attachment_input::bind(replay, prepared, &mut input)?;
     }
-    input.push(context_item(&ContextLine {
-        thread: &snapshot.thread,
-        run: &snapshot.run,
-        turn: &snapshot.turn,
-        cwd: &snapshot.cwd,
-        profile: &snapshot.profile,
-        model: &snapshot.model,
-        effort: snapshot.effort.as_deref(),
-        agents: &snapshot.agents,
-    }));
     let mut request =
         model::response_request(&snapshot.model, input, snapshot.effort.as_deref(), true);
     model::cache_diagnostics::apply_request(

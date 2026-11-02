@@ -339,11 +339,12 @@ canonical request before `context_role` mapping:
 - `prefix_items`: the leading system/developer items. With the tools they are
   the stable prefix.
 - `conversation_items`: the end of the growing conversation. Trailing
-  system/developer items after it are per-request context Shellboy appends (the
-  `Shellboy context v1` line, attachment notices, a summary prompt). They change
-  on every request, so a cache entry ending on them is never read again. A saved
-  event notice that happens to be last is indistinguishable and is also left
-  after the breakpoint; the next request's lookback still finds the entry.
+  system/developer items after it are left after the breakpoint: attachment
+  notices and a summary prompt, which change per request, and saved notices
+  that happen to be last (event notices, and the `Shellboy context v1` line,
+  which is saved history since #183, appended at a Turn start or after a
+  change; see [replay cache](replay-cache.md)). The next request's lookback
+  still finds the entry.
 
 Connection `prompt_caching` (bool, default true, opt-out) decides whether the
 hint is passed to the encoder at all. `false` sends nothing cache-related.
@@ -355,8 +356,9 @@ hint is passed to the encoder at all. `false` sends nothing cache-related.
   all use the default 5-minute TTL, so the non-increasing TTL rule holds. Too
   short a prefix is simply not cached (no error). Each request adds only a few
   blocks, well within the 20-block lookback. Top-level automatic caching is not
-  used: it would mark the last block, which is the per-request context line, so
-  its entry could never be read (see the #127 decision). `cache_control` is a reserved
+  used: it would mark the last block, which was the per-request context line
+  when #127 was decided (see the #127 decision). Since #183 that line is saved
+  history; the explicit breakpoints are unchanged. `cache_control` is a reserved
   `extra_body` key.
 - Responses: nothing new. Providers cache prefixes automatically; the existing
   opt-in `prompt_cache_key` (Thread UUID) and session header stay the routing

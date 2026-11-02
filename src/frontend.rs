@@ -4287,6 +4287,8 @@ impl RawNode {
                 "user" | "user_message" | "message" => "user",
                 "tool_result" => "tool",
                 "event" => "shellboy",
+                // The model's saved context line (#183); not a transcript row.
+                "context" => "context",
                 "summary" | "compact_summary" => "summary",
                 "spill" => "spill",
                 _ => "assistant",

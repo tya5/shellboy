@@ -10,7 +10,7 @@ mod trim;
 use adoption::adopt_response;
 use overflow::OverflowBudget;
 use request::{AdmittedRequest, Instructions, prepare_attempt, stream_response};
-pub(crate) use request::{ContextLine, context_item, leading_items};
+pub(crate) use request::{ContextLine, context_item, last_saved_context, leading_items};
 use tools::run_tool_group;
 
 use super::state::{now, recover_turn_tx};
@@ -441,6 +441,11 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
             let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node WHERE id=?1)",[&node],|r|r.get(0))?;
             if !exists{history::append_node(&tx,&thread,&node,Some(&turn),"event",&json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {payload}")}],"event_id":event}),&now())?;}
         }
+        // #183: after the delivered events, so a change notice and the new
+        // context line arrive together. Only once the Turn's AGENTS reference
+        // is fixed by its instruction snapshot; requests always follow that.
+        let instructions_fixed:bool=tx.query_row("SELECT instruction_snapshot_id IS NOT NULL FROM turn WHERE id=?1",[&turn],|r|r.get(0))?;
+        if instructions_fixed { snapshot.ensure_context_tx(&tx,&now())?; }
         snapshot.selection=history::selection_revision(&tx, &thread, history::ThreadScope::Any)?;
         snapshot.input=Some(replay.load(&tx,&thread)?);
         tx.commit()?;Ok(Next::Ready(Box::new(snapshot)))

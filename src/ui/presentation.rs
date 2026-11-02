@@ -673,6 +673,10 @@ fn node_lines_with_header(
     links: &mut Vec<Arc<str>>,
     show_header: bool,
 ) -> Vec<Line<'static>> {
+    // A saved context line (#183) is model input only; it renders no rows.
+    if node.role == "context" {
+        return Vec::new();
+    }
     let conversational = conversational(node);
     let tool_only = !node.presentation.blocks.is_empty()
         && node
@@ -2183,6 +2187,12 @@ fn typed_history(
             continue;
         }
         let node = &view.nodes()[index];
+        if node.role == "context" {
+            if let Some(last) = sources.last_mut() {
+                last.covered_end = index + 1;
+            }
+            continue;
+        }
         let before = lines.len();
         if node.presentation.blocks.is_empty()
             && (node.role == "tool" || node.presentation.kind == PresentationKind::ToolResult)
@@ -5366,6 +5376,30 @@ mod conversation_item_tests {
         assert!(!shown.contains("CANONICAL_OUTPUT"));
         assert_eq!(shown.matches("printf synthetic").count(), 1);
         assert!(view.items.is_open(&key, false, &outcome));
+    }
+    #[test]
+    fn saved_context_lines_render_no_rows_in_plain_or_typed_history() {
+        for typed in [false, true] {
+            let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
+            let mut first = node("first", "FIRST USER", vec![]);
+            first.role = "user".into();
+            first.presentation.kind = PresentationKind::User;
+            let mut nodes = vec![first];
+            if typed {
+                let mut event = node("event", "saved observation", vec![]);
+                event.role = "event".into();
+                event.presentation.kind = PresentationKind::Event;
+                nodes.push(event);
+            }
+            let mut context = node("context", "Shellboy context v1: thread=t", vec![]);
+            context.role = "context".into();
+            nodes.push(context);
+            nodes.push(node("answer", "FINAL ANSWER", vec![]));
+            *view.nodes_mut_for_test() = nodes;
+            let shown = plain(&history(&view, 100).0);
+            assert!(shown.contains("FIRST USER") && shown.contains("FINAL ANSWER"));
+            assert!(!shown.contains("Shellboy context"), "{typed}: {shown}");
+        }
     }
     #[test]
     fn repeated_quiet_facts_coalesce_with_counts_and_latest_references_without_losing_answers() {

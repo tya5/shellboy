@@ -709,6 +709,8 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         .send((400, overflow.clone()))
         .unwrap();
     let retry_one = next(&mut receive, &control, "first overflow: spill retry").await;
+    let context = current_context(&control, &thread).await;
+    assert_current_context_once(&retry_one.body, &context, "after automatic spill");
     let outputs: Vec<Value> = retry_one.body["input"]
         .as_array()
         .unwrap()
@@ -740,6 +742,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         "second overflow: adopted summary retry",
     )
     .await;
+    assert_current_context_once(&retry_two.body, &context, "after automatic summary");
     let outputs: Vec<Value> = retry_two.body["input"]
         .as_array()
         .unwrap()
@@ -3495,6 +3498,8 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
         summary.reply.send((200, rejected)).unwrap();
         let after = incoming(&control, &mut receive).await;
         assert_ne!(after.body["tools"], json!([]), "the measured request must be an ordinary conversation request, not a summary reduce request");
+        let context = current_context(&control, &target).await;
+        assert_current_context_once(&after.body, &context, "after proactive spill");
         let after_size = after.body["input"].to_string().len();
         assert!(after_size < before_size / 3, "actual replay input must shrink: {before_size} -> {after_size}");
         let omitted = after.body["input"].as_array().unwrap().iter()
@@ -3560,6 +3565,8 @@ async fn proactive_third_turn(
             next.reply.send(summary_reply.clone()).unwrap();
             continue;
         }
+        let context = current_context(control, thread).await;
+        assert_current_context_once(&next.body, &context, "after proactive summary");
         next.reply
             .send((200, answer_with_usage("last answer", 10)))
             .unwrap();
@@ -4087,4 +4094,237 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
             server.abort();
         }
     }
+}
+
+// #183: the per-Turn `Shellboy context v1` item is part of the saved history,
+// so each request of a Turn is a strict append of the previous request.
+fn context_lines(body: &Value) -> Vec<String> {
+    body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|item| item["content"].as_array().into_iter().flatten())
+        .filter_map(|part| part["text"].as_str())
+        .filter(|text| text.starts_with("Shellboy context v1:"))
+        .map(str::to_owned)
+        .collect()
+}
+/// The context line for the Thread's current settings and latest Turn.
+async fn current_context(control: &Control, thread: &str) -> String {
+    let thread = thread.to_owned();
+    control.store.database.call(move |db| Ok(db.query_row(
+        "SELECT t.id,u.run_id,u.id,t.cwd,t.profile_id,t.model_id,t.effort,COALESCE(s.source_path,t.agents_path) FROM thread t JOIN turn u ON u.thread_id=t.id LEFT JOIN instruction_snapshot s ON s.id=u.instruction_snapshot_id WHERE t.id=?1 ORDER BY u.rowid DESC LIMIT 1",
+        [thread],
+        |r| Ok(format!(
+            "Shellboy context v1: thread={} run={} turn={} cwd={} connection={} model={} effort={:?}; AGENTS reference={}",
+            r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?, r.get::<_, String>(5)?, r.get::<_, Option<String>>(6)?, r.get::<_, String>(7)?,
+        )),
+    )?)).await.unwrap()
+}
+/// The current context is present exactly once and is the latest context line.
+#[track_caller]
+fn assert_current_context_once(body: &Value, expected: &str, label: &str) {
+    let lines = context_lines(body);
+    assert_eq!(
+        lines.iter().filter(|line| *line == expected).count(),
+        1,
+        "{label}: current context must appear exactly once; expected {expected:?}; got {lines:#?}"
+    );
+    assert_eq!(lines.last().map(String::as_str), Some(expected), "{label}");
+}
+#[track_caller]
+fn assert_strict_append(previous: &Value, next: &Value, label: &str) {
+    let before = previous["input"].as_array().unwrap();
+    let after = next["input"].as_array().unwrap();
+    let common = before.iter().zip(after).take_while(|(a, b)| a == b).count();
+    let show = |items: &[Value], index: usize| {
+        items.get(index).map_or_else(
+            || "<none>".to_owned(),
+            |item| item.to_string().chars().take(160).collect(),
+        )
+    };
+    assert!(
+        common == before.len() && after.len() > before.len(),
+        "{label}: request input is not a strict append: previous {} items, next {} items, first difference at index {common}; previous[{common}]={}; next[{common}]={}",
+        before.len(),
+        after.len(),
+        show(before, common),
+        show(after, common),
+    );
+    assert_eq!(previous["tools"], next["tools"], "{label}: tools");
+}
+fn tool_call(id: &str, command: &str) -> Value {
+    json!({"id":format!("response-{id}"),"status":"completed","output":[{"type":"function_call","call_id":id,"name":"shell","arguments":json!({"command":command}).to_string()}]})
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
+    let root = tempfile::tempdir().unwrap();
+    let moved = root.path().join("moved");
+    std::fs::create_dir(&moved).unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner_with_retries(root.path(), &url, 1).await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    send(&control, &thread, "append task").await;
+    let first = incoming(&control, &mut receive).await;
+    let context = current_context(&control, &thread).await;
+    assert_current_context_once(&first.body, &context, "first request");
+    first
+        .reply
+        .send((200, tool_call("one", "echo one")))
+        .unwrap();
+    let second = incoming(&control, &mut receive).await;
+    assert_strict_append(&first.body, &second.body, "same-Turn tool loop");
+    assert_current_context_once(&second.body, &context, "same-Turn tool loop");
+    // cwd and effort change while the second request is in flight.
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            cwd: Some(moved.to_str().unwrap().into()),
+            effort: Some("high".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    second
+        .reply
+        .send((200, tool_call("two", "echo two")))
+        .unwrap();
+    let third = incoming(&control, &mut receive).await;
+    assert_strict_append(&second.body, &third.body, "mid-Turn cwd/effort change");
+    let changed = current_context(&control, &thread).await;
+    assert!(
+        changed.contains(&format!("cwd={} ", moved.display())),
+        "{changed}"
+    );
+    assert!(changed.contains("effort=Some(\"high\")"), "{changed}");
+    assert_current_context_once(&third.body, &changed, "mid-Turn cwd/effort change");
+    assert_eq!(third.body["reasoning"]["effort"], "high");
+    let suffix =
+        &third.body["input"].as_array().unwrap()[second.body["input"].as_array().unwrap().len()..];
+    assert!(
+        suffix
+            .iter()
+            .any(|item| item.to_string().contains("thread_settings")),
+        "the change event is appended with the new context: {suffix:#?}"
+    );
+    // A model change within the same Turn is also announced by appending.
+    request(
+        &control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            model: Some("fixture-next".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    third
+        .reply
+        .send((200, tool_call("three", "echo three")))
+        .unwrap();
+    let fourth = incoming(&control, &mut receive).await;
+    assert_eq!(fourth.body["model"], "fixture-next");
+    assert_strict_append(&third.body, &fourth.body, "mid-Turn model change");
+    let model_changed = current_context(&control, &thread).await;
+    assert!(
+        model_changed.contains("model=fixture-next "),
+        "{model_changed}"
+    );
+    assert_current_context_once(&fourth.body, &model_changed, "mid-Turn model change");
+    fourth.reply.send((200, answer("done"))).unwrap();
+    settled(&control, &thread).await;
+    // The next Turn appends after the completed one, with its own context.
+    send(&control, &thread, "next turn").await;
+    let fifth = incoming(&control, &mut receive).await;
+    assert_strict_append(&fourth.body, &fifth.body, "next Turn");
+    let next_turn = current_context(&control, &thread).await;
+    assert_ne!(next_turn, model_changed);
+    assert_current_context_once(&fifth.body, &next_turn, "next Turn");
+    // An automatic retry resends exactly the same input.
+    fifth
+        .reply
+        .send((
+            500,
+            json!({"error":{"code":"server_error","message":"fixture"}}),
+        ))
+        .unwrap();
+    let retried = incoming(&control, &mut receive).await;
+    assert_eq!(
+        retried.body["input"], fifth.body["input"],
+        "same-Turn retry"
+    );
+    retried.reply.send((200, answer("finished"))).unwrap();
+    settled(&control, &thread).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mid_turn_omission_reemits_the_current_context_once() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    send(&control, &thread, "omission task").await;
+    let mut current = incoming(&control, &mut receive).await;
+    for call in ["one", "two"] {
+        current
+            .reply
+            .send((200, tool_call(call, &format!("echo {call}"))))
+            .unwrap();
+        current = incoming(&control, &mut receive).await;
+    }
+    let context = current_context(&control, &thread).await;
+    assert_current_context_once(&current.body, &context, "before omission");
+    // Queued while the request is in flight; applied at the next boundary,
+    // before the following request. It omits the Turn's saved context node.
+    let queued = request(
+        &control,
+        Command::ContextEdit(ContextEditArgs {
+            thread_id: Some(thread.clone()),
+            action: ContextEditAction::Maximal,
+            from_node_id: None,
+            to_node_id: None,
+            max_chars: None,
+            max_percent: None,
+        }),
+    )
+    .await;
+    assert_eq!(queued["status"], "queued", "{queued}");
+    current
+        .reply
+        .send((200, tool_call("three", "echo three")))
+        .unwrap();
+    let after = incoming(&control, &mut receive).await;
+    assert!(
+        after.body["input"]
+            .to_string()
+            .contains("was omitted after"),
+        "the omission is adopted before this request: {}",
+        after.body["input"]
+    );
+    assert_current_context_once(&after.body, &context, "after omission");
+    // The re-emitted line is at the tail, after the protected latest group.
+    let input = after.body["input"].as_array().unwrap();
+    assert_eq!(
+        input.last().unwrap()["content"][0]["text"],
+        context.as_str()
+    );
+    after
+        .reply
+        .send((200, tool_call("four", "echo four")))
+        .unwrap();
+    let next = incoming(&control, &mut receive).await;
+    assert_strict_append(&after.body, &next.body, "after omission");
+    assert_current_context_once(&next.body, &context, "request after the re-emission");
+    next.reply.send((200, answer("done"))).unwrap();
+    settled(&control, &thread).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
 }

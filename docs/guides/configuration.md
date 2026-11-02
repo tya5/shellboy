@@ -229,8 +229,9 @@ several times more. Shellboy knows where the unchanging start of a request ends
 and where the growing conversation ends, so it places the markers itself: one
 `cache_control: {type: "ephemeral"}` (the default 5-minute cache) on the last
 tool, one on the system prompt, and one on the last block of the conversation,
-before the short per-request context line Shellboy appends (which changes every
-request and would never be read back). That is three of the four markers the API
+before any trailing Shellboy notices (event notices and the saved context line).
+Within a Turn each request only appends to the previous one, so the earlier
+entries stay readable. That is three of the four markers the API
 allows. `prompt_caching = false` on the connection sends no marker at all.
 `cache_control` is reserved: setting it in `extra_body` is a configuration error.
 Cache-read behavior still needs the approved live verification described below;
@@ -298,7 +299,7 @@ issue; this change adds no storage column and does not claim that check passed.
 
 ### Context role: `context_role`
 
-Shellboy inserts context into a conversation: event notices (`Shellboy event v1: ...`, for example a finished background shell or a changed context) and the per-request context line. By default these are sent as `developer` messages, the meaning OpenAI-style APIs expect, and the saved history is never changed.
+Shellboy inserts context into a conversation: event notices (`Shellboy event v1: ...`, for example a finished background shell or a changed context) and the context line saved at each Turn start and after a setting change. By default these are sent as `developer` messages, the meaning OpenAI-style APIs expect, and the saved history is never changed.
 
 Some gateways (for example LiteLLM in front of Claude) move every `developer` message into the system prompt. A conversation whose last message is then an assistant message is rejected as "assistant message prefill" (HTTP 400, `The conversation must end with a user message`), which happens when a notice is the only thing after the model's last answer. For such a connection set:
 

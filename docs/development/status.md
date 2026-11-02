@@ -1,5 +1,13 @@
 # Development status
 
+## Saved Turn context line (#183, branch `issue-183/append-context`)
+
+The per-request `Shellboy context v1` tail item is now a saved `context` node,
+appended at the Turn start, after a mid-Turn setting change and after a
+replacement removed it; requests within a Turn are strict appends. Loopback
+evidence and checks are in acceptance. Paid cache-hit re-measurement (#151
+conditions) awaits the user's approval.
+
 ## Paused index consumption (#173)
 
 The consumer deletes paused pending/failed work without provider requests,

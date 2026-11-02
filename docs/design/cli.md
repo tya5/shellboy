@@ -323,7 +323,7 @@ Owner replacement/reload does not transfer running work in this feature. Keep
 - 既定：Threadの最新Turnが現在の保存済みpathから次に送る要求。未配送のevent/messageは含めない。
 - `--attempt A`：attemptのinput manifestから組み立て直す。manifestは送信時のreplay path witness（先頭ノード数とID・payload revision・tombstoneのSHA-256）とcontext行のcwdを記録する。現在のpathの先頭が一致しない、witnessの無い旧attempt、添付内容（送信時にファイルから束ねる）、instruction snapshotの無いTurnは `unknown` として列挙し、推測で埋めない。wire形式は現在の設定のconnectionで、送信と同じ `HttpModelClient::wire_request` を通すため、全項目が既知ならbodyはbyte単位で送信時と一致する。保存済み `request_body_bytes` との一致を `saved.request_body_bytes_match` に示す。
 - 出力：項目ごとの index/type/role/文字数/SHA-256先頭12桁と、全体のSHA-256・byte数・文字数。`--body` のときだけbody JSONを含め、`extra_body` の値はSHA-256だけにする。ヘッダーと資格情報は出さない。
-- `--compare-attempt B`：Bの項目hash列と比べ、共通の先頭項目数と最初に異なる項目indexを返す。同じtool loopの連続要求では、前の要求の末尾にある要求ごとのcontext行だけが異なるのが正常。
+- `--compare-attempt B`：Bの項目hash列と比べ、共通の先頭項目数と最初に異なる項目indexを返す。#183以降、context行は保存済み履歴の項目なので、同じTurnの連続要求では共通の先頭項目数が前の要求の項目数と等しい（厳密な追記）のが正常。attemptの再構成は保存済みprefixだけを使い、次要求の再構成は最後の保存context行が現在値と違うときだけ同じ行を足す。
 
 
 ## Single-attempt cache observations (#142 part 1)

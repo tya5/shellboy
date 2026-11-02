@@ -2956,3 +2956,19 @@ continuity provided the user can tell that the model did not receive the data;
 it must never imply that the file was successfully analyzed. This proposal was
 approved on 2026-11-02. File signatures take precedence over text detection;
 image-kind and control-byte handling require explicit acceptance tests and must not mislabel arbitrary binary as text.
+
+## D-143: Turn context line is saved history (#183, 2026-11-03)
+
+The `Shellboy context v1` line moved from a per-request tail item to a `context`
+history node, appended by `next()` only when the latest one on the selected path
+differs from the current values. One rule covers the Turn start, a mid-Turn
+cwd/connection/model/effort change (after its `thread_settings` event) and a
+replacement that removed the line. Chosen over protecting the line from
+compaction ranges: protection would add a third protected class to every range
+policy, while re-emission adds no rule to compaction and costs no extra cache
+(the replacement already changes the prefix). Correctness over cache: a change is
+always announced at the next request, which is also the first request whose
+shell calls use the new cwd. The node is hidden from TUI transcript rows (model
+input, like the system/instruction items) and excluded from search. Revisit if a
+mid-request setting must reach an already-running request, or if the UI should
+show settings per Turn.

@@ -8692,3 +8692,33 @@ collection tests remain relevant. On macOS arm64 / Rust 1.99.1, `cargo check
 language audit's 18 Python tests and test layout check also passed. Exact-tip
 3-OS CI is pending; terminal and integration behavior are untested. This is one
 Stage C slice, not final #152 acceptance.
+### #183 Saved Turn Context Line (Local Checks; CI Pending)
+
+Baseline on origin/main `777c100d` (macOS 26.3.1 arm64, loopback proxy, no paid
+API): the new `turn_requests_strictly_append_and_mid_turn_changes_are_appended`
+failed at the first tool-loop step. Request 1 had 7 input items with the
+`Shellboy context v1` line at index 6; request 2 had 9 items, `function_call` at
+index 6 and the context line moved to the tail, so request 2 was not a
+continuation of request 1.
+
+On the branch the same test passes: each request of a Turn is a strict append
+of the previous one through a tool loop, a mid-Turn cwd+effort change and a
+mid-Turn model change (each appended as the `thread_settings` event plus a new
+context line, and the request uses the new values), the next Turn, and an
+automatic retry (identical input). The latest context line equals the line
+built from the current Thread/Run/Turn/cwd/connection/model/effort/AGENTS
+reference and occurs exactly once. `mid_turn_omission_reemits_the_current_context_once`
+covers a queued mid-Turn `compact --maximal`: the next request carries the
+omission marker and the current context exactly once at the tail, and the
+following request is a strict append again. Exactly-once assertions were added
+to the automatic overflow spill and summary retries and to proactive spill and
+summary requests. `thread request` attempt comparisons now show full-prefix
+equality. A UI unit test checks that saved context lines render no rows.
+
+Local: `cargo fmt`, `cargo clippy --all-targets -D warnings`, and the
+integration runtime_features/request_inspect/runtime_hierarchy/anthropic_messages/
+model_http/replay_cache/performance_lifecycle subsets and lib control/ui
+presentation/compaction subsets passed except three timing-sensitive shell
+tests that failed under the shared build host's load; see the isolated rerun
+note below. Not verified: a real provider's cache hit rate (#151 conditions; needs the user's
+approval), Windows/Linux locally (3-OS CI pending), physical terminal.

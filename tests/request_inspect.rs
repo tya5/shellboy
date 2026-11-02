@@ -243,8 +243,8 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
         assert!(result.get("body").is_none(), "body only on request");
         rebuilt.push(result);
     }
-    // In one tool loop, each request repeats the previous one's items, except
-    // the per-request context line that Shellboy appends at the end.
+    // In one tool loop, each request is a strict append of the previous one:
+    // the context line is saved history, not a per-request tail (#183).
     for pair in attempts.windows(2) {
         let result = inspect(
             &loaded,
@@ -252,20 +252,19 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
         )
         .unwrap();
         let items = result["items"].as_array().unwrap().len();
-        let last = &result["body"]["input"][items - 1];
-        assert_eq!(last["role"], "developer");
-        assert!(
-            last["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .starts_with("Shellboy context v1: ")
-        );
-        assert_eq!(
-            result["compare"]["common_prefix_items"],
-            items - 1,
-            "{result}"
-        );
-        assert_eq!(result["compare"]["first_difference"], items - 1);
+        let contexts = result["body"]["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| {
+                item["content"][0]["text"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("Shellboy context v1: "))
+            })
+            .count();
+        assert_eq!(contexts, 1, "{result}");
+        assert_eq!(result["compare"]["common_prefix_items"], items, "{result}");
+        assert_eq!(result["compare"]["first_difference"], items);
         assert!(result["compare"]["items"].as_u64().unwrap() > items as u64);
         // Opaque configuration stays opaque in the printed body.
         assert!(result["body"]["service_tier"]["sha256"].is_string());
@@ -276,10 +275,8 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
     assert_eq!(next["source"], "next");
     assert_eq!(next["unknown"], json!([]));
     let last_attempt_items = rebuilt[2]["items"].as_array().unwrap().len();
-    assert_eq!(
-        next["compare"]["common_prefix_items"],
-        last_attempt_items - 1
-    );
+    assert_eq!(next["compare"]["common_prefix_items"], last_attempt_items);
+    assert!(next["items"].as_array().unwrap().len() > last_attempt_items);
 
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();

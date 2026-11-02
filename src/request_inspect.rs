@@ -7,7 +7,8 @@ use crate::{
     config::{Config, LoadedConfig, PathEnvironment},
     control::replay::{PathWitness, load_uncached},
     control::request_parts::{
-        ContextLine, context_item, has_attachment_ref, leading_items, strip_local,
+        ContextLine, context_item, has_attachment_ref, last_saved_context, leading_items,
+        strip_local,
     },
     model::http::HttpModelClient,
 };
@@ -140,6 +141,7 @@ struct Plan {
     model: String,
     effort: Option<String>,
     epoch: i64,
+    /// The next request's cwd; None for an attempt, whose context line is saved.
     cwd: Option<String>,
     agents: PathBuf,
     /// Outer None: unknown. Inner None: no instructions were present.
@@ -234,7 +236,8 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
         model,
         effort,
         epoch,
-        cwd: manifest["cwd"].as_str().map(str::to_owned),
+        // The attempt's context line is a saved node inside its replayed prefix (#183).
+        cwd: None,
         agents,
         instructions,
         history,
@@ -383,8 +386,10 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             "attachment notices: depend on attachment state at send time".into(),
         );
     }
-    match &plan.cwd {
-        Some(cwd) => parts.push(Part::Known(context_item(&ContextLine {
+    // The context line is saved history (#183). The next request appends a new
+    // one only when the latest saved line is not the current context.
+    if let Some(cwd) = &plan.cwd {
+        let item = context_item(&ContextLine {
             thread: &plan.thread,
             run: &plan.run,
             turn: &plan.turn,
@@ -393,11 +398,10 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             model: &plan.model,
             effort: plan.effort.as_deref(),
             agents: &plan.agents,
-        }))),
-        None => note(
-            &mut parts,
-            "context line: this attempt's manifest does not record its cwd".into(),
-        ),
+        });
+        if last_saved_context(tx, &plan.thread)?.as_ref() != Some(&item) {
+            parts.push(Part::Known(item));
+        }
     }
     let configured = config
         .connections

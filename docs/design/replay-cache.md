@@ -16,6 +16,16 @@ API itemは immutable な変換結果として保持する。reasoning itemは�
 
 DB transactionが失敗したcacheの一時entryに依存してHTTPを開始しない。次回利用時にも元経路metadataを照合するため、rollback前の新経路をcacheが権威として復活させることはない。cacheは再起動へ永続化しない。
 
+## Turnの文脈行（#183）
+
+`Shellboy context v1`（thread・run・turn・cwd・connection・model・effort・AGENTS参照）は、要求ごとに作り直して末尾へ付けない。driverの `next()` が、配送eventの追記の後、同じtransactionで kind=`context` のnodeとして選択経路の末尾に保存する（`Snapshot::ensure_context_tx`）。条件は「選択経路上で最後のcontext nodeが現在の値と一致しない」ことだけで、次の三つを一つの規則で扱う。
+
+- Turnの開始：turn IDが変わるので追記する。TurnのAGENTS参照はinstruction snapshotで固定されるため、snapshotの保存後（最初のHTTP要求の前）に限って追記する。
+- Turn途中の変更：cwd・connection・model・effortは `thread set`（TUIの `/cwd`・`/model`・effortを含む）だけが変える。driverは要求ごとにThreadの値を読み直すので、変更は次の要求から効く。その要求の準備で、既存の `thread_settings` event（変更前後）と新しい文脈行を末尾に足す。shellは要求に使ったsnapshotのcwdで実行されるため、モデルが知らないcwdでcommandが走ることはない。thread・run・turnとAGENTS参照はTurn内で変わらない（参照の変更は次のTurnから、既存の決まり）。自動のmodel切替えはない。
+- 置換の後：summary・spill・omission・proactive・将来のTurn途中要約など、採用された置換が文脈行を選択経路から外したときは、次の要求の準備で現在の文脈行を末尾に一回だけ足し直す。置換はもともとprefixを変えるので、cacheの損失は増えない。経路に残っていれば何も足さないので重複しない。
+
+この結果、同じTurnの連続要求は、前の要求のinputに項目を足しただけの形になる（再試行は同じinput）。最後の文脈行が常に現在の値で、モデルが受け取る情報は従来と同じ。保存した文脈行はUIの会話行には表示しない（`history get` では見える）。検索本文の対象外。`thread request` の次要求は、最後の保存文脈行が現在値と違うときだけ同じ行を足し、attemptの再構成は保存済みprefixだけを使う。Claudeの制約（#121）は変わらない：会話がdeveloperの項目で終わる形は従来の末尾文脈行と同じで、`context_role="user"` は送信用copyでuserへ写す。
+
 ## 境界の検証
 
 `tests/replay_cache.rs` は9件で、通常appendの変換件数、共有LRUとpin clone、0/過大entry、経路置換/巻戻し/版変更、effort-only再利用、model epoch、rollback後の再照合を確認する。実driverのA→B→Aと原文保持は `tests/runtime_features.rs` が別に担当する。
