@@ -72,10 +72,10 @@ SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked
        CASE WHEN child_attempt.state='failed' AND child_attempt.generation=child_turn.generation AND json_valid(child_attempt.error_json)
          THEN json_extract(child_attempt.error_json,'$.automatic_retry') END,
        CASE WHEN picked.kind='child' THEN
-         EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=picked.id AND state IN ('starting','running','stopping'))
-         OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=picked.id AND state IN ('live','stopping')) ELSE 0 END,
+         EXISTS(SELECT 1 FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=picked.id AND state IN ('starting','running','stopping'))
+         OR EXISTS(SELECT 1 FROM run INDEXED BY runs_by_owner WHERE owner_run_id=picked.id AND state IN ('live','stopping')) ELSE 0 END,
        CASE WHEN picked.kind='child' AND picked.state='live' AND child_turn.state='running' AND COALESCE(child_attempt.state,'')<>'inflight'
-         THEN EXISTS(SELECT 1 FROM tool_group WHERE turn_id=child_turn.id AND state='running') ELSE 0 END,picked.description,counts.duplicate_shells,
+         THEN EXISTS(SELECT 1 FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=child_turn.id AND state='running') ELSE 0 END,picked.description,counts.duplicate_shells,
        CASE WHEN json_type(w.value,'$.conditions')='array' THEN json_array_length(w.value,'$.conditions') END,
        CASE WHEN json_type(w.value,'$.conditions[0].type')='text' THEN substr(json_extract(w.value,'$.conditions[0].type'),1,64) END,
        CASE WHEN json_type(w.value,'$.timeout_ms')='integer' AND typeof(json_extract(w.value,'$.timeout_ms'))='integer' AND json_extract(w.value,'$.timeout_ms')>=0 THEN json_extract(w.value,'$.timeout_ms') END,
