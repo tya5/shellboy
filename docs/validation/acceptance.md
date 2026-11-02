@@ -15,7 +15,13 @@ completion clears; diagnostics carry only fixed fields. Per-kind enforcement
 (`maintenance::step_tests`, numbers in the storage design) passed with
 `BACKGROUND_STEP_BUDGET = 2^17`. Producer signal tests: Thread deletion
 (integration `control_db`), shell completion, clipboard save and pin release
-(lib). Schema22 counters equal the former indexed sums after mutation and
+(lib). Targeted Run-end retention (`gc::event_retention` tests) deletes only the
+ended Run's pending deliveries and eligible shell events, leaves another
+ended Run and a live Run untouched, and uses SEARCH plans on
+`event_run_shell_ended` and `delivery_pending`; the bounded ended-Run queue
+falls back to the backlog sweep on overflow. The backlog sweep now ends once
+each scan has wrapped (the earlier both-at-once condition never ended when
+the tables needed different numbers of batches). Schema22 counters equal the former indexed sums after mutation and
 rollback (`gc::usage` tests); release-upgrade script tests cover 21->22 and an
 off-by-one raw counter. Local full runs share a build directory with other
 worktrees; unrelated failures traced to that sharing (a stale RAG `--cursor`

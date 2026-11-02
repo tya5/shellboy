@@ -125,7 +125,7 @@ Contract rule 4 below says where those jobs should run instead.
 | Managed images (`collect_managed_observed`) | keyset on `managed_retention(state,created_at)`, 128 rows; total from the existing `gc_bytes_managed_file` sum | (a) clipboard image saved past `clipboard_bytes`; (b) deadline: oldest ready `created_at + clipboard_days`; (c) draft/attachment release (unpin) | Images may remain until their trigger | Unlink stays outside the DB (existing file workers) |
 | Restart cleanup | one bounded startup transaction (stale pins) | Startup only | — | — |
 | Index scheduler (`next_delay`) | one indexed `MIN(next_attempt_at)` over `jobs_ready` per unpaused space (no queue walk) | `wake()` on enqueue/authorization/adoption (existing); resume (`retry`, `select_space`); deadline = that minimum | **Paused: no timer at all** (today it polls every 30 s); resume is a signal | Existing wake sites already cover new work |
-| Index authorization drain (`drain_authorization`) | `claim_authorization` batch (existing bound) | New authorization (turn adoption `wake`); **not drained while paused** (issue-164 drain-while-paused) | Authorizations wait during a pause | Durable authorization rows keep the request; resume drains |
+| Index authorization drain (`drain_authorization`) | `claim_authorization`, one row by key-range seek | New authorization (turn adoption `wake`); while paused the consumer discards one item per unit (`discard_paused`, #173) | Authorizations wait during a pause | Durable authorization rows keep the request; resume drains |
 | Index claim and process (`process_key`, `capacity_allowed`) | `embedding.batch_max_inputs` claims via `jobs_ready` | Same as the scheduler | Catch-up after a burst is paced by one outstanding unit per worker | Back-to-back units while `Advanced`; HTTP dominates anyway |
 | Capacity checks (`require_capacity` foreground, index `capacity_allowed` background) | O(1) read of incrementally maintained logical-byte counters (today: O(rows) covering-index sums on every model/shell start) | Not periodic: per request | Counters must stay exact | Counters maintained in the same transaction as each write (triggers, as `quota_counter` already does for receipts); see open question 1 |
 | Storage status (`gc.GcService.details`) | Reader connection; logical totals from the same counters; raw protected/eligible split as a bounded lower bound | On request | Status is a snapshot at its read, not the writer's latest uncommitted state | Already labelled `reclaimable_is_lower_bound` |
@@ -307,7 +307,9 @@ SQLite, file-backed WAL database in a temporary directory, 2026-11-03. Command:
 40,000 completed operation receipts (half from an old instance), 20,000
 applied attachment deliveries, 20,000 terminal executions with distinct end
 instants and one chunk each, 10,000 summary parts, 10,000 deleted and 1,000
-ready managed images, 40,000 pending jobs scheduled in the future. Nothing is
+ready managed images, 40,000 pending jobs scheduled in the future, 40,000
+shell events of a live Run and 10 of an ended Run. The index profile is then
+paused for one more scheduling round (`discard_paused`, #173). Nothing is
 past a cap or an age, so every unit is a normal pass, not a bulk deletion.
 
 Counted steps are multiples of `PROGRESS_GRANULARITY` (1,024), so kinds under
@@ -319,9 +321,13 @@ one interval read as 0. Largest unit per kind (one run; facts, not bounds):
 | `control::db::Store::collect_receipts` | 53,248 | 40 |
 | `gc::GcService::collect_held` (drafts, history, summary, index sources, spaces) | 4,096 | 550 |
 | `gc::GcService::collect_raw` | 1,024 | 627 |
-| index `process_key` (claim), `next_delay`, `drain_authorization`, `capacity_allowed_background`, `pause_cleanup_step`, `process_one_inner`; `start_history_held` | < 1,024 | 1 each |
+| `gc::GcService::collect_ended_runs` (one ended Run, 10 events, with 40,000 events of a live Run present) | < 1,024 | 2 |
+| `gc::GcService::collect_event_backlog` (40,000 events and deliveries) | < 1,024 | 1,251 |
+| index `process_key` (`discard_paused` while paused, capacity, claim), `next_delay`, `drain_authorization`, `capacity_allowed_background`; `start_history_held` | < 1,024 | 1–3 each |
 
-All 1,243 units took 381 ms in total (a fact, not a bound).
+All 2,497 units took 3,832 ms in total (a fact, not a bound). The fixture
+also holds 40,000 shell events with pending deliveries of a live Run; a full
+event scan takes 439,296 steps.
 
 `BACKGROUND_STEP_BUDGET = 2^17 = 131,072`: the smallest power of two at or
 above the largest healthy unit (87,040). The same test proves the fixture is
