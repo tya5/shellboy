@@ -28,6 +28,10 @@ class ActivityIndexVmHelperTests(unittest.TestCase):
                                text=True, capture_output=True, check=False)
         if probe.returncode:
             self.skipTest('SQLite CLI lacks octet_length')
+        stats = subprocess.run(['sqlite3', '-batch', ':memory:', '.stats vmstep', 'SELECT 1;'],
+                               text=True, capture_output=True, check=False)
+        if stats.returncode or 'VM-steps:' not in stats.stdout:
+            self.skipTest('SQLite CLI lacks .stats vmstep')
         commit = subprocess.run(['git', 'cat-file', '-e', f'{LANDED_171}:src/storage/current.sql'],
                                 cwd=ROOT, capture_output=True, check=False)
         if commit.returncode:
