@@ -5,6 +5,7 @@ use history_items::{ItemRegion, Preview};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum NoticeKind {
     Info,
+    Attachment,
     Failure,
 }
 #[derive(Clone, Debug)]
@@ -51,7 +52,7 @@ impl ThreadView {
     }
     pub(super) fn promote_status_notice(&mut self, kind: NoticeKind) {
         // Send/receipt progress already has typed, reactive footer ownership.
-        if kind == NoticeKind::Info
+        if kind != NoticeKind::Failure
             && self.sending().is_some()
             && matches!(
                 self.status.as_str(),
@@ -75,7 +76,7 @@ impl ThreadView {
             return;
         }
         // An unrelated background status cannot erase a failed operation.
-        if kind == NoticeKind::Info
+        if kind != NoticeKind::Failure
             && self
                 .operation_notice
                 .as_ref()

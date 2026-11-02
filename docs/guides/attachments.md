@@ -99,8 +99,12 @@ valid UTF-8 text from its bytes rather than its extension. A file that is
 neither recognized nor readable text is treated like an unavailable attachment:
 the model receives an English notice at its original position instead of file
 bytes. The original file and reference remain; the notice does not establish a
-successful file-send baseline. Converting the file can make it sendable on a
-later request. The notice and manifest indicate the file was not sent.
+successful file-send baseline. The TUI shows an unavailable-attachment warning
+for the latest observed attempt, using the configured UI language. Use
+`/reload-attachments` to inspect current contents; this rereads the file and is
+not proof of its bytes in the earlier request. Converting the file can make it
+sendable on a later request. The saved attempt manifest records the unavailable
+state instead of a successful file send.
 
 Accepting paths with arbitrary extensions does not mean the model understands their content. Image, PDF, and other file support depend on the proxy/model. Shellboy does not automatically add Office conversion, OCR, or audio/video conversion. For rejection of an unsupported format, convert it yourself into a supported input, exclude the attachment, or choose a suitable connection. There is no automatic model or format fallback.
 

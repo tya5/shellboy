@@ -2575,12 +2575,49 @@ impl UiState {
         } = update
         {
             let live_limit = self.config.ui.live_work_rows;
+            let language = self.config.ui.language;
             let view = self.active_view_mut();
             if view.thread_id.as_deref() != Some(&thread_id) || view.generation != generation {
                 return;
             }
             let previous_phase = view.activity.phase();
+            let previous = view.activity.snapshot.as_ref();
+            let has_attachment_notice =
+                snapshot.attachment_unavailable || snapshot.attachment_check_limited;
+            let new_attachment_notice = has_attachment_notice
+                && previous.is_none_or(|old| {
+                    old.attempt_id != snapshot.attempt_id
+                        || !(old.attachment_unavailable || old.attachment_check_limited)
+                });
+            let unsupported = snapshot.attachment_unsupported;
+            let unavailable = snapshot.attachment_unavailable;
+            let clear_attachment_notice = !has_attachment_notice
+                && previous.is_some_and(|old| old.attempt_id != snapshot.attempt_id);
             let changed = view.activity.accept_at(epoch, snapshot, observed_at);
+            if changed
+                && clear_attachment_notice
+                && view.operation_notice.as_ref().is_some_and(|notice| {
+                    notice.kind == history_interaction::NoticeKind::Attachment
+                })
+            {
+                view.clear_operation_notice();
+            }
+            if changed && new_attachment_notice {
+                view.status = if unsupported {
+                    i18n::local!(language,
+                        "形式未対応の添付は送信しませんでした。/reload-attachments で現在の内容を確認できます。",
+                        "An attachment was not sent because its format is unsupported. Use /reload-attachments to inspect current contents.")
+                } else if unavailable {
+                    i18n::local!(language,
+                        "読み取れない添付は送信しませんでした。/reload-attachments で現在の内容を確認できます。",
+                        "An unavailable attachment was not sent. Use /reload-attachments to inspect current contents.")
+                } else {
+                    i18n::local!(language,
+                        "添付の送信状態をすべて確認できません。/reload-attachments で現在の内容を確認できます。",
+                        "Attachment states could not be fully verified. Use /reload-attachments to inspect current contents.")
+                }.into();
+                view.promote_status_notice(history_interaction::NoticeKind::Attachment);
+            }
             let mut live = view
                 .activity
                 .snapshot
@@ -7045,6 +7082,97 @@ mod layout_cache_tests {
     }
 
     #[test]
+    fn attachment_unavailable_notice_is_localized_and_not_repeated_for_same_attempt() {
+        for (language, expected) in [
+            (crate::config::UiLanguage::Ja, "形式未対応"),
+            (crate::config::UiLanguage::En, "format is unsupported"),
+        ] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut ui = UiState::new(&config, std::env::temp_dir());
+            ui.select_thread("t".into());
+            let generation = ui.view().generation;
+            let update = |epoch| UiUpdate::Activity {
+                thread_id: "t".into(),
+                generation,
+                epoch,
+                observed_at: Instant::now(),
+                snapshot: activity::ActivitySnapshot {
+                    attempt_id: Some("a".into()),
+                    attachment_unavailable: true,
+                    attachment_unsupported: true,
+                    ..Default::default()
+                },
+            };
+            ui.apply(update(1));
+            assert!(ui.view().status.contains(expected));
+            assert!(
+                ui.view()
+                    .operation_notice
+                    .as_ref()
+                    .unwrap()
+                    .text
+                    .contains(expected)
+            );
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(180, 2)).unwrap();
+            terminal
+                .draw(|frame| draw_status(frame, frame.area(), &ui))
+                .unwrap();
+            let screen = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            let visible = if language == crate::config::UiLanguage::Ja {
+                screen.replace(' ', "")
+            } else {
+                screen.clone()
+            };
+            assert!(
+                visible.contains(expected),
+                "warning must be visible in the footer: {screen:?}"
+            );
+            ui.view_mut().clear_operation_notice();
+            ui.apply(update(2));
+            assert!(
+                ui.view().operation_notice.is_none(),
+                "same attempt must not repeatedly replace another notice"
+            );
+            let mut next = activity::ActivitySnapshot {
+                attempt_id: Some("b".into()),
+                attachment_unavailable: true,
+                attachment_unsupported: true,
+                ..Default::default()
+            };
+            ui.apply(UiUpdate::Activity {
+                thread_id: "t".into(),
+                generation,
+                epoch: 3,
+                observed_at: Instant::now(),
+                snapshot: next.clone(),
+            });
+            assert!(ui.view().operation_notice.is_some());
+            next.attempt_id = Some("c".into());
+            next.attachment_unavailable = false;
+            next.attachment_unsupported = false;
+            ui.apply(UiUpdate::Activity {
+                thread_id: "t".into(),
+                generation,
+                epoch: 4,
+                observed_at: Instant::now(),
+                snapshot: next,
+            });
+            assert!(
+                ui.view().operation_notice.is_none(),
+                "a later sendable attempt clears only the old attachment warning"
+            );
+        }
+    }
+
+    #[test]
     fn revisit_footer_shows_saved_continuation_and_clears_with_new_snapshot() {
         use ratatui::{Terminal, backend::TestBackend};
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
@@ -7218,6 +7346,9 @@ mod layout_cache_tests {
             live_work: None,
             revisit: None,
             context_reduction: None,
+            attachment_unavailable: false,
+            attachment_unsupported: false,
+            attachment_check_limited: false,
             automatic_retry: None,
             recovery: None,
             run_id: Some("run".into()),

@@ -871,7 +871,7 @@ fn read_encoded(
     if mime == "application/octet-stream" {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
-            "Unsupported attachment format; the file was not sent. Convert it to a supported text, image, or PDF format",
+            UNSUPPORTED_FORMAT_ERROR,
         ));
     }
     let encoded = Arc::new(Encoded {
@@ -915,6 +915,8 @@ fn read_encoded(
     }
     Ok(encoded)
 }
+pub(crate) const UNSUPPORTED_FORMAT_ERROR: &str = "Unsupported attachment format; the file was not sent. Convert it to a supported text, image, or PDF format";
+
 fn mime_type(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         "image/png"

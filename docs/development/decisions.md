@@ -2934,22 +2934,25 @@ grows substantially.
 ## #158 Unsupported attachment handling (approved)
 
 Status: approved by the user for #158. For a file whose current bytes match
-neither a supported signature nor valid UTF-8 text, do not send an octet-stream input.
+neither a supported signature nor valid UTF-8 text, do not send an octet-stream
+input.
 At request preparation, expand the attachment at its original source position
 into an explicit text notice saying the format was not sent and must be
 converted or removed. Record the existing unavailable state and reason in the
 attempt manifest; do not record a successful binary send or update its sent-hash
 baseline. Make the same outcome discoverable to the user, not just the model,
-through the existing attachment/request inspection surfaces and a clear guide.
+through a localized TUI activity warning and a guide to explicit reload. Reload
+inspects current bytes, not a historical snapshot.
 Retain the original reference, per-Thread selection and fork semantics; do not
 delete or modify the file. As for other unavailable content, a successful notice
 consumes initial protection without establishing a sent hash baseline. Re-read
-current bytes on retry, so conversion or replacement can make the file sendable later. No new configuration
-or automatic provider fallback.
+current bytes on retry, so conversion or replacement can make the file sendable
+later. No new configuration or automatic provider fallback.
 
 Alternative: reject before sending. That avoids a model proceeding without
 bytes, but a previously saved attachment can block every subsequent request,
 including recovery, until explicitly excluded. A text notice better preserves
 continuity provided the user can tell that the model did not receive the data;
-it must never imply that the file was successfully analyzed. This proposal was approved on 2026-11-02. File signatures take precedence over text detection; image-kind and control-byte handling require
-explicit acceptance tests and must not mislabel arbitrary binary as text.
+it must never imply that the file was successfully analyzed. This proposal was
+approved on 2026-11-02. File signatures take precedence over text detection;
+image-kind and control-byte handling require explicit acceptance tests and must not mislabel arbitrary binary as text.

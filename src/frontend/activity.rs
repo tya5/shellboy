@@ -33,6 +33,9 @@ struct SavedAttempt {
     error: Option<String>,
     automatic_retry: Option<String>,
     automatic_retry_exhausted: Option<String>,
+    attachment_unavailable: bool,
+    attachment_unsupported: bool,
+    attachment_check_limited: bool,
 }
 /// Match only complete diagnostics constructed from the typed saved facts.
 /// Provider text and the durable attempt remain unchanged.
@@ -201,9 +204,18 @@ pub(super) fn read_tx_with_limit(
             .query_row(
                 "SELECT id,state,generation,CASE WHEN ?2 AND json_valid(error_json) THEN json_extract(error_json,'$.error') ELSE NULL END,CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_retry') ELSE NULL END,CASE WHEN json_valid(error_json) THEN CASE WHEN json_type(error_json,'$.automatic_retry_exhausted')='object' THEN json_extract(error_json,'$.automatic_retry_exhausted') ELSE NULL END ELSE NULL END,substr(started_at,1,128) FROM model_attempt WHERE turn_id=?1 ORDER BY rowid DESC LIMIT 1",
                 rusqlite::params![turn_id,reason.is_some()],
-                |r| Ok(SavedAttempt { started_at:r.get(6)?,id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)?,automatic_retry_exhausted:r.get(5)? }),
+                |r| Ok(SavedAttempt { started_at:r.get(6)?,id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,error:r.get(3)?,automatic_retry:r.get(4)?,automatic_retry_exhausted:r.get(5)?,attachment_unavailable:false,attachment_unsupported:false,attachment_check_limited:false }),
             )
             .optional()?;
+        let mut attempt = attempt;
+        if let Some(saved) = &mut attempt {
+            // Bound the physical attempt prefix and retained error bodies before decoding.
+            (saved.attachment_unavailable, saved.attachment_unsupported, saved.attachment_check_limited) = db.query_row(
+                "WITH cohort AS MATERIALIZED (SELECT state,CASE WHEN octet_length(error_json)<=1024 THEN error_json END AS error FROM attachment_send WHERE attempt_id=?1 ORDER BY ordinal LIMIT 129) SELECT EXISTS(SELECT 1 FROM cohort WHERE state='unavailable'), EXISTS(SELECT 1 FROM cohort WHERE state='unavailable' AND CASE WHEN json_valid(error) THEN json_extract(error,'$.message')=?2 ELSE 0 END), (SELECT COUNT(*)=129 FROM cohort)",
+                rusqlite::params![saved.id, crate::attachments::UNSUPPORTED_FORMAT_ERROR],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+        }
         raw.attempt = attempt;
         if reason.is_some() {
             let counts = db.query_row(
@@ -374,6 +386,9 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             state: saved_state,
             generation: attempt_generation,
             automatic_retry,
+            attachment_unavailable,
+            attachment_unsupported,
+            attachment_check_limited,
             ..
         }) = attempt
         {
@@ -386,6 +401,12 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                     .and_then(|body| serde_json::from_str::<AutomaticRetrySnapshot>(&body).ok())
                     .filter(|retry| retry.number > 0 && retry.number <= retry.limit);
             }
+            snapshot.attachment_unavailable =
+                attachment_unavailable && attempt_generation == generation;
+            snapshot.attachment_unsupported =
+                attachment_unsupported && attempt_generation == generation;
+            snapshot.attachment_check_limited =
+                attachment_check_limited && attempt_generation == generation;
             snapshot.timing.attempt_started_at = started_at;
             snapshot.attempt_id = Some(id);
             attempt_state = Some(saved_state);
@@ -440,6 +461,43 @@ pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiErro
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn attachment_warning_reads_only_the_latest_attempt_and_distinguishes_format() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('n','user','now','{}'); INSERT INTO attachment_ref(id,source_node_id,absolute_path,input_kind,ownership,created_at)VALUES('file','n','/synthetic','file','external','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','now');").unwrap();
+        db.execute("INSERT INTO attachment_send(attempt_id,ordinal,attachment_id,state,error_json)VALUES('a',0,'file','unavailable',?1)", [json!({"message":crate::attachments::UNSUPPORTED_FORMAT_ERROR}).to_string()]).unwrap();
+        let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
+        assert!(snapshot.attachment_unavailable);
+        assert!(snapshot.attachment_unsupported);
+        db.execute(
+            "UPDATE attachment_send SET error_json=?1",
+            [json!({"message":"file missing"}).to_string()],
+        )
+        .unwrap();
+        let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
+        assert!(snapshot.attachment_unavailable);
+        assert!(!snapshot.attachment_unsupported);
+        db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('b','u',0,0,'p','m',0,'completed','{}','later')", []).unwrap();
+        let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
+        assert!(!snapshot.attachment_unavailable);
+        assert!(!snapshot.attachment_unsupported);
+        assert!(!snapshot.attachment_check_limited);
+        for ordinal in 0..129 {
+            db.execute("INSERT INTO attachment_send(attempt_id,ordinal,attachment_id,state) VALUES('b',?1,'file','ready')", [ordinal]).unwrap();
+        }
+        let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
+        assert!(snapshot.attachment_check_limited);
+        assert!(!snapshot.attachment_unavailable);
+        db.execute("UPDATE turn SET generation=1 WHERE id='u'", [])
+            .unwrap();
+        let snapshot = prepare(read_tx(&db, "t").unwrap()).snapshot;
+        assert!(
+            !snapshot.attachment_check_limited,
+            "stale attempts cannot create current warnings"
+        );
+    }
 
     #[test]
     fn owned_raw_snapshot_projects_saved_failure_and_revisit_after_connection_closes() {

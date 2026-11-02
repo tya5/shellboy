@@ -181,6 +181,12 @@ pub struct ActivitySnapshot {
     pub revisit: Option<String>,
     /// Saved automatic-trim facts for this Turn/generation, if observed.
     pub context_reduction: Option<String>,
+    /// Last admitted request contained at least one unavailable attachment.
+    pub attachment_unavailable: bool,
+    /// At least one unavailable attachment had an unrecognized binary format.
+    pub attachment_unsupported: bool,
+    /// The bounded attempt prefix did not prove all attachment states were read.
+    pub attachment_check_limited: bool,
     pub automatic_retry: Option<AutomaticRetrySnapshot>,
     pub recovery: Option<RecoverySnapshot>,
     pub run_id: Option<String>,

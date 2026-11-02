@@ -110,8 +110,10 @@ sent, its original source slot expands to an English unavailable notice saying
 the format was not sent, and the attempt manifest records `unavailable` with
 the reason. The original file and reference remain intact, and success does
 not mark that content sent or establish a hash baseline. A later request reads
-the current bytes again. User-facing inspection uses the existing unavailable
-contract and localization rules. No new setting or fallback is introduced.
+the current bytes again. The TUI projects a localized warning for unavailable attachments from the
+latest observed attempt, and explicit reload inspects current bytes, not a
+historical snapshot. The existing unavailable contract and localization rules
+apply to both unsupported and unreadable attachments. No new setting or fallback is introduced.
 
 Explicit removal from a saved Thread excludes the selected attachment by ID,
 including while a Turn waits for recovery, without deleting the file or source
