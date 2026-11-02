@@ -427,7 +427,7 @@ pub(super) fn keyword(
                 0
             };
             let remaining = node_hits.len() - skip;
-            let mut take = 0usize;
+            let before = hits.len();
             for hit in node_hits.into_iter().skip(skip) {
                 if hits.len() == limit {
                     break;
@@ -447,8 +447,8 @@ pub(super) fn keyword(
                 }
                 hit_bytes += size;
                 hits.push(hit);
-                take += 1;
             }
+            let take = hits.len() - before;
             let next = if take < remaining && skip + take == 0 {
                 Some(make_cursor(rowid, true, 0, None, None))
             } else if take < remaining {
