@@ -19,6 +19,13 @@ History maintenance incrementally removes terminal-Run pending deliveries and
 only unreferenced shell completion events. Rebased after #163 onto 72f163d5:
 #164 retains schema20 and event retention uses schema21. Fresh-tip checks and
 CI are tracked in the handoff; prior CI did not test the restack.
+## DB worker lanes and background step budget (#171, design review)
+
+Design memo only, in [storage](../design/storage.md#db-worker-lanes-and-background-step-budget-171-proposed):
+two admission lanes, a progress-handler step budget for background jobs with a
+typed `Deferred` outcome, `db_job_budget` diagnostic, call-site classification
+and the jobs to split. Not implemented or tested. Resume point: review answers
+to the open questions, then phase 2 (measurement, implementation, tests).
 
 ## Bounded index wake-delay read (#164, branch CI pending)
 
