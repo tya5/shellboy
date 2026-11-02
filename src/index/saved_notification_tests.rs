@@ -169,11 +169,19 @@ async fn saved_signal_is_distinct_from_wake_and_observes_claim_then_finished_or_
             !take_signal(&service.saved_changed),
             "coalesced, not an event queue"
         );
+        if !success {
+            assert!(service.process_one(CancellationToken::new()).await.unwrap());
+            assert!(
+                take_signal(&service.saved_changed),
+                "paused discard is saved progress"
+            );
+            assert_eq!(
+                service.status(IndexArgs::default()).await.unwrap().failed,
+                0
+            );
+        }
         assert!(!service.process_one(CancellationToken::new()).await.unwrap());
-        assert!(
-            !take_signal(&service.saved_changed),
-            "idle/paused work is quiet"
-        );
+        assert!(!take_signal(&service.saved_changed), "idle work is quiet");
         if success {
             let space = service
                 .status(IndexArgs::default())

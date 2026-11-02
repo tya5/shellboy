@@ -405,12 +405,9 @@ async fn common_auth_failure_pauses_and_transaction_failure_never_leaves_partial
     let status = f.service.status(IndexArgs::default()).await.unwrap();
     assert!(status.paused);
     assert_eq!(status.failed, 3);
-    assert!(
-        !f.service
-            .process_one(CancellationToken::new())
-            .await
-            .unwrap()
-    );
+    f.drain().await;
+    let status = f.service.status(IndexArgs::default()).await.unwrap();
+    assert_eq!((status.failed, status.pending), (0, 0));
     assert_eq!(f.proxy.requests().len(), 2);
     f.close().await;
     let f = Fixture::new(8, 64, 16).await;

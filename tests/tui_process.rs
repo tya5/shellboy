@@ -298,6 +298,15 @@ async fn seed_paused_history(data: &std::path::Path, source: &str) -> (String, S
     let status = service.status(IndexArgs::default()).await.unwrap();
     assert!(status.paused);
     let paused_at = status.paused_at.unwrap();
+    while service
+        .process_one(tokio_util::sync::CancellationToken::new())
+        .await
+        .unwrap()
+    {}
+    assert_eq!(
+        service.status(IndexArgs::default()).await.unwrap().failed,
+        0
+    );
     let thread = uuid::Uuid::new_v4().to_string();
     let target = thread.clone();
     let saved_at = paused_at.clone();
@@ -464,7 +473,7 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     // cannot accept conversation input or promise that IPC is ready yet.
     read_until(&mut terminal, &mut output, b"F1").await;
     // Load an immutable pause observation from disk, then use real management
-    // dispatch to explicitly resume only its previously authorized failed work.
+    // dispatch to clear it after the failed work was discarded.
     terminal
         .write_all(format!("/switch {paused_thread}\r").as_bytes())
         .unwrap();
@@ -481,8 +490,8 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         &[
             "索引処理の実行確認",
             "失敗した許可済み索引作業",
-            "資料数: 1",
-            "対象文字数: 29",
+            "資料数: 0",
+            "対象文字数: 0",
             "Yで実行",
         ],
     )
