@@ -8457,3 +8457,10 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+### #152 stage C: Live work resource classification (2026-11-02)
+
+A scoped manifest of 17 reviewed live-work decisions yields `a=17, b=26, c=0`.
+The existing full manifest fails a stale `src/presentation/messages.rs`
+fingerprint on main 2607218b, so this is not whole-repository acceptance.
+Python `test_language_audit.py` passed 13 tests on macOS. Exact task CI and
+three-OS integration validation remain pending.

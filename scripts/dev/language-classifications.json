@@ -123,5 +123,90 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/live_work.rs:19eda47916c86294:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:24045d82d497f473:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:286d3cba4dbcd899:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:2d113574dbaa3be1:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:3ac9fdb09ad59792:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:49af1c8aa9e2afc5:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:57e77fa3db80c0e8:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:595e41d3b4382651:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:687250a362b62e27:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:78fe09625c6a09ed:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:810aa84d14201ae7:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:94a2c9128f6aeab3:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:9f2ae12d98ce0484:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:a56c6f6851535bdd:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:c5b2dd5f77ae2db9:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:d69995dbd619bf04:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
+  },
+  "src/ui/live_work.rs:f7c2296eea26b99d:1": {
+    "category": "a",
+    "reason": "Reviewed WorkMessage::render: this literal is in the UiLanguage::Ja branch of a typed state or message variant with a separate UiLanguage::En branch. Interpolated source values and glyph policy remain unchanged.",
+    "source_tokens_sha256": "abfbc2236b6670a241575c8bdc73a1782512384bf5c945339a45e57ee7cec0fa"
   }
 }

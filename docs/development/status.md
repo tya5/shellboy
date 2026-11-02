@@ -3938,3 +3938,9 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: Live work resource classification (2026-11-02)
+
+Reviewed 17 pending `src/ui/live_work.rs` literals on main 2607218b as Japanese
+arms of `WorkMessage::render`, with corresponding English variants. Elapsed
+seconds and child-state projection remain unchanged. No product source, symbols
+or dynamic values changed; cross-boundary provenance remains separate.
