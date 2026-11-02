@@ -1492,6 +1492,20 @@ mod tests {
         }
     }
     #[test]
+    fn elapsed_render_preserves_existing_minute_and_hour_boundaries() {
+        for (ms, decimal, japanese, english) in [
+            (59_999, true, "59.9秒", "59.9s"),
+            (60_000, true, "1分0秒", "60.0s"),
+            (60_000, false, "1分0秒", "1m0s"),
+            (3_600_000, false, "1時間0分", "60m0s"),
+        ] {
+            let message = Message::Elapsed { ms, decimal };
+            assert_eq!(message.render(UiLanguage::Ja), japanese);
+            assert_eq!(message.render(UiLanguage::En), english);
+        }
+    }
+
+    #[test]
     fn dynamic_sentences_use_singular_only_for_one() {
         for count in [0, 1, 2] {
             let singular = count == 1;
