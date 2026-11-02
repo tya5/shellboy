@@ -11,9 +11,15 @@ Attachment handling and staged display-language fixes.
   not guaranteed; keep the backup for rollback.
 - **Update the owner and CLI together, then restart the owner.** Replacing an
   executable does not update a running owner. The local protocol remains 2.
+- **Retry a conversation stuck after detaching an attachment and compaction.**
+  Once upgraded to 0.6.1, use retry for a conversation blocked by
+  `source is outside the selected path`; the fix handles the existing stored
+  selection without a data migration (#160).
 
 ## Attachments
 
+- Excluded attachments no longer block recovery when compaction has replaced
+  their source message. Existing affected conversations can be retried (#160).
 - Attachment MIME types are determined from file bytes, not filename extensions.
   Supported text, PDF and image data use their recognized types. Unsupported
   binary content is not sent as `application/octet-stream`; an unavailable
