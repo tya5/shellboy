@@ -8466,3 +8466,8 @@ an existing stale `src/presentation/messages.rs` fingerprint on main 2607218b.
 The config-incomplete path and dynamic notice origins require follow-up; no
 physical terminal or OS clipboard test was done. Exact task CI and integration
 CI remain pending.
+
+Task CI 41408965799 failed on Linux and macOS: default-English redraw and
+history-footer tests still expected Japanese, and the context-usage integration
+fixture expected the old Japanese cache label. After updating those expectations,
+the two focused unit tests and both real-owner context tests pass on macOS.

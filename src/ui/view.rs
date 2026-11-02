@@ -1911,7 +1911,7 @@ mod completion_notice_tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("履歴読込中"), "{text}");
+        assert!(text.contains("Loading history"), "{text}");
     }
     #[test]
     fn cached_rows_remain_navigable_during_a_pending_read() {
