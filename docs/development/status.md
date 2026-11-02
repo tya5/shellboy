@@ -3859,3 +3859,7 @@ tagging and publication remain separate gates.
 The subsequently selected v0.6.1 source cutoff is
 `49d68c63896cbd660740793c07eec88927388cf4`, including #160 and #159. The
 #116 Stage 4 benchmark is not included in this cutoff.
+
+The user subsequently moved the v0.6.1 source cutoff to
+`2b366e32ce70ceb76984a0e53cab2f26451107d5`, including #116 Stage 4 and #152
+batch 4. The draft records both additions.

@@ -41,6 +41,13 @@ Attachment handling and staged display-language fixes.
   not translated (#149).
 - Some generated diagnostic messages use English instead of Japanese in the
   English-default interface (#152). The language transition is not complete.
+- Two Watch list notices now follow the configured display language (#152).
+
+## Resource observations
+
+- `docs/guides/resource-usage.md` adds a comparison of HTTP request bytes sent
+  and storage use (#116). These are synthetic fake-model observations, not
+  token counts or real-provider usage.
 
 ## Known issues
 
@@ -56,7 +63,7 @@ an executable, LICENSE, configuration example and offline documentation. Verify
 all archives and installer scripts against `SHA256SUMS` when candidates exist.
 
 **Draft snapshot:** the source cutoff is main
-`49d68c63896cbd660740793c07eec88927388cf4` (includes #160 and #159). CI, candidate
+`2b366e32ce70ceb76984a0e53cab2f26451107d5` (includes #160 and #159). CI, candidate
 archives/installers/checksums and upgrade verification are separate gates; this
 preparation does not create a tag, publish a release, replace an installed binary
 or modify user data.

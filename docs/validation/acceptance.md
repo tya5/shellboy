@@ -8302,3 +8302,7 @@ claimed by this preparation.
 The subsequently selected cutoff `49d68c63896cbd660740793c07eec88927388cf4`
 has no differences from `v0.6.0` in the current schema, migration and RAG
 schema sources. Candidate upgrade verification remains outstanding.
+
+The revised v0.6.1 cutoff `2b366e32ce70ceb76984a0e53cab2f26451107d5`
+includes #116 Stage 4 and #152 batch 4. Schema, migration and RAG schema sources
+remain unchanged from `v0.6.0`; candidate upgrade verification is still pending.
