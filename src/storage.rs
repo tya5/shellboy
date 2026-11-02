@@ -1359,7 +1359,7 @@ mod lane_budget_tests {
     async fn background_over_budget_runs_to_completion_without_foreground_demand() {
         let root = tempfile::tempdir().unwrap();
         let db = open(&root).await;
-        let rows = (BACKGROUND_STEP_BUDGET * 4) as i64;
+        let rows = (BACKGROUND_STEP_BUDGET * 8) as i64;
         let outcome = db
             .call_background(move |db| {
                 Ok(db.query_row(

@@ -1,5 +1,27 @@
 # Validation record
 
+## DB writer occupancy (#171, 2026-11-03)
+
+macOS (development Mac), rust-slot, debug builds, temporary databases only; the
+user's database was not opened. Structural tests (`storage::lane_budget_tests`):
+a foreground job admitted while a synthetic endless background unit runs makes
+that unit stop at exactly budget+1 progress ticks (131,072 + 1,024 counted
+steps) and return `Deferred`; a transactional write and an autocommit write
+attempted after the interrupt (error swallowed) are both absent; without
+foreground demand an over-budget unit completes; lanes alternate
+(b1, f1, b2, f2, b3) and shutdown drains both; two consecutive deferrals of one
+kind produce `db_job_no_progress` once and the no-progress state, which a later
+completion clears; diagnostics carry only fixed fields. Per-kind enforcement
+(`maintenance::step_tests`, numbers in the storage design) passed with
+`BACKGROUND_STEP_BUDGET = 2^17`. Producer signal tests: Thread deletion
+(integration `control_db`), shell completion, clipboard save and pin release
+(lib). Schema22 counters equal the former indexed sums after mutation and
+rollback (`gc::usage` tests); release-upgrade script tests cover 21->22 and an
+off-by-one raw counter. Local full runs share a build directory with other
+worktrees; unrelated failures traced to that sharing (a stale RAG `--cursor`
+binary, a missing `shellboy` binary) passed after a rebuild. Branch CI on three
+OSes is the acceptance gate; Windows and Linux are not verified locally.
+
 ## Index-source GC scan (#164, 2026-11-02)
 
 macOS, rust-slot: unit test `gc::tests::index_source_scan_seeks_deleted_nodes_and_owned_rows`
