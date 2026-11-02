@@ -22,6 +22,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from footprint import ANSWERS, COMMANDS, PROMPTS  # noqa: E402
+from observations import RequestLog  # noqa: E402
 
 MODEL = 'bench-fake'
 AUX_TEXT = 'ok'
@@ -208,6 +209,7 @@ class FakeModel(ThreadingHTTPServer):
     def __init__(self, sessions, max_requests=None):
         super().__init__(('127.0.0.1', 0), Handler)
         self.sessions = sessions
+        self.traffic = RequestLog(sessions)
         self.max_requests = max_requests or 40 * sessions + 200
         self.lock = threading.Lock()
         self.requests = 0
@@ -315,7 +317,11 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get('Content-Length', '0'))
             if not 0 < size <= MAX_BODY:
                 raise ValueError('missing or oversized body')
-            body = json.loads(self.rfile.read(size))
+            raw = self.rfile.read(size)
+            self.server.traffic.record(path, raw)
+            if len(raw) != size:
+                raise ValueError('incomplete body')
+            body = json.loads(raw)
             if path == '/v1/messages/count_tokens':
                 self.reply(200, 'application/json', b'{"input_tokens":1}')
                 return

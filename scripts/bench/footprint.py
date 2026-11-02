@@ -92,14 +92,16 @@ class FakeModel(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 64
 
-    def __init__(self, sessions):
+    def __init__(self, sessions, traffic=None):
         super().__init__(('127.0.0.1', 0), Handler)
+        self.traffic = traffic
         self.sessions = sessions
         self.requests = 0
         self.tools = [0] * 5
         self.answers = [0] * 5
         self.errors = []
         self.allowed_threads = set()
+        self.traffic_threads = {}
         self.seen = set()
         self.lock = threading.Lock()
 
@@ -115,7 +117,10 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get('Content-Length', '0'))
             if not 0 < size <= 4 * 1024 * 1024 or self.path != '/v1/responses':
                 raise ValueError('Unexpected request path or size')
-            body = json.loads(self.rfile.read(size))
+            raw = self.rfile.read(size)
+            if len(raw) != size:
+                raise ValueError('Incomplete synthetic request')
+            body = json.loads(raw)
             index, tool, output = plan(body)
             contexts = [part.get('text', '') for item in body['input']
                         if item.get('role') == 'developer' for part in item.get('content', [])]
@@ -124,6 +129,9 @@ class Handler(BaseHTTPRequestHandler):
             if not identities:
                 raise ValueError('Missing synthetic Thread identity')
             thread = identities[-1]
+            if self.server.traffic is not None:
+                conversation = self.server.traffic_threads.get(thread)
+                self.server.traffic.record(self.path, raw, conversation)
             with self.server.lock:
                 key = (thread, index, tool)
                 if thread not in self.server.allowed_threads or key in self.server.seen:
@@ -257,11 +265,14 @@ def finish_round(binary, root, env, thread, sent, prompt, expected):
     return {'run_id': sent['run_id'], 'turn_id': sent['turn_id'], 'state': turn['state']}
 
 
-def measure_case(binary, sessions):
+def measure_case(binary, sessions, observe_io=False):
+    if observe_io:
+        from observations import RequestLog, storage
     with tempfile.TemporaryDirectory(prefix='shellboy-bench-') as scratch:
         root = Path(scratch)
         env = isolated_env(root)
-        model = FakeModel(sessions)
+        traffic = RequestLog(sessions) if observe_io else None
+        model = FakeModel(sessions, traffic=traffic)
         worker = threading.Thread(target=model.serve_forever, daemon=True)
         worker.start()
         owner = None
@@ -283,6 +294,7 @@ def measure_case(binary, sessions):
                 thread = cli(binary, root, env, 'thread', 'create', '--cwd', str(cwd))
                 threads.append(thread['thread_id'])
                 model.allowed_threads.add(thread['thread_id'])
+                model.traffic_threads[thread['thread_id']] = index
             result = {'n': sessions, 'baseline': sample_pss(owner.pid), 'rounds': []}
             with ThreadPoolExecutor(max_workers=sessions) as pool:
                 for index, prompt in enumerate(PROMPTS):
@@ -303,6 +315,9 @@ def measure_case(binary, sessions):
                 raise RuntimeError(f'Unexpected fake model work: {model.errors}, {model.tools}')
             result['model_requests'] = model.requests
             result['tool_calls'] = sum(model.tools)
+            if observe_io:
+                result['traffic'] = traffic.result()
+                result['storage'] = storage([Path(env['HOME']), root / 'data'])
             cli(binary, root, env, 'shutdown')
             stopped = read_json_line(owner)
             owner.wait(timeout=TIMEOUT)

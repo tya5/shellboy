@@ -39,6 +39,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import footprint  # noqa: E402
+from observations import storage  # noqa: E402
 from fake_model import MODEL, FakeModel  # noqa: E402
 from dev.vt_screen import Screen  # noqa: E402  (footprint put scripts/ on sys.path)
 
@@ -523,6 +524,7 @@ def measure_case(agent, sessions, sampler):
         root = Path(scratch).resolve()
         with FakeModel(sessions) as model:
             workspaces = [make_workspace(root / f'workspace-{i}') for i in range(sessions)]
+            model.traffic.set_workspaces(workspaces)
             env = agent.prepare(root, model.origin, workspaces)
             runtime = []
             try:
@@ -550,6 +552,12 @@ def measure_case(agent, sessions, sampler):
                 files = [(path / 'hello.txt').read_text() if (path / 'hello.txt').exists() else None
                          for path in workspaces]
                 result['model'] = model.stats()
+                result['traffic'] = model.traffic.result()
+                roots_for_storage = [Path(env['HOME'])]
+                for name in ('CODEX_HOME', 'JCODE_HOME', 'JCODE_RUNTIME_DIR'):
+                    if name in env:
+                        roots_for_storage.append(Path(env[name]))
+                result['storage'] = storage(roots_for_storage)
                 if files != ['hello world'] * sessions:
                     raise RuntimeError(f'hello.txt not created in every workspace: {files[:3]}')
                 if not model.workload_complete():
@@ -682,12 +690,13 @@ class Shellboy(Agent):
 def shellboy_case(agent, sessions, sampler):
     if sampler is no_pss:
         raise RuntimeError('Shellboy smoke runs need Linux /proc (use footprint.py tests instead)')
-    case = footprint.measure_case(agent.binary, sessions)
+    case = footprint.measure_case(agent.binary, sessions, observe_io=True)
     rounds = [{'round': row['round'], 'pss_kib': row['pss_kib'], 'process_count': len(row['processes']),
                'processes': row['processes']} for row in case['rounds']]
     return {'n': sessions, 'baseline': case['baseline'], 'rounds': rounds,
             'model': {'requests': case['model_requests'], 'tool_calls': case['tool_calls'],
-                      'requests_by_wire': {'responses': case['model_requests']}, 'auxiliary_requests': 0}}
+                      'requests_by_wire': {'responses': case['model_requests']}, 'auxiliary_requests': 0},
+            'traffic': case['traffic'], 'storage': case['storage']}
 
 
 def sha256(path):

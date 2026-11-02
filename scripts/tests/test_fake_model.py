@@ -73,6 +73,20 @@ class DecideTests(unittest.TestCase):
 
 
 class ServerTests(unittest.TestCase):
+    def test_body_bytes_are_recorded_without_body_content(self):
+        with fake.FakeModel(1) as server:
+            body = request('responses', [('user', fake.PROMPTS[4])])
+            body['metadata'] = {'fixture': '\u00e5'}
+            raw = json.dumps(body, ensure_ascii=False).encode('utf-8')
+            with open_url(Request(server.origin + '/v1/responses', data=raw,
+                                  headers={'content-type': 'application/json'}), timeout=10) as response:
+                response.read()
+            result = server.traffic.result()
+            self.assertEqual(result['requests'], [{'path': '/v1/responses',
+                                                   'bytes': len(raw), 'conversation': 0}])
+            self.assertEqual(result['conversations'][0]['first_bytes'], len(raw))
+            self.assertNotIn('fixture', json.dumps(result))
+
     def test_streams_are_wire_shaped_and_tool_budget_is_enforced(self):
         with fake.FakeModel(1, max_requests=6) as server:
             first = post(server.origin, '/v1/messages', request('messages', [('user', fake.PROMPTS[0])]))

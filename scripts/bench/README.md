@@ -115,6 +115,26 @@ operation ID, only when the owner explicitly says it was not accepted/applied.
 Uncertain transport/mutation failures are not reissued. Observation/answer and
 shell-exit checks precede each PSS sample and are identical across N values.
 
+## Request bytes and storage (Stage 4)
+
+The cross-agent run records the HTTP body length in bytes for each received POST,
+without retaining request bodies. It reports total, first and last request bytes
+per conversation only when every request can be attributed: the Shellboy fixture
+uses its Thread identity; the shared server uses an unambiguous workspace path
+in the request, or the sole session when N=1. Unattributed requests and incomplete
+conversation values remain explicit, not estimates or zeroes. Auxiliary requests
+and token-count requests are included when present. The fake usage is not a token
+measurement; no tokenizer estimate is supplied.
+
+Immediately after round five, before process shutdown, the run walks temporary
+HOME and agent-specific data/runtime roots (Shellboy's data directory includes its
+DB and WAL). It reports logical file bytes and file count; hard links are counted
+once and symlinks are counted without following their targets. Workspace files and
+installed executables are outside these roots. An unreadable or missing root is a
+measurement error. Live background writes mean this is not an atomic snapshot.
+These observations add no new PSS or startup method and do not establish real-API
+usage or run-to-run variance. Results from separate workflow runs cannot be paired.
+
 ## Cross-Agent Comparison (Stage 2)
 
 Decided on #116 (2026-11-01): compare Shellboy with jcode, Codex CLI, Claude
