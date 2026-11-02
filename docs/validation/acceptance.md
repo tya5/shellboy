@@ -27,6 +27,23 @@ off-by-one raw counter. Local full runs share a build directory with other
 worktrees; unrelated failures traced to that sharing (a stale RAG `--cursor`
 binary, a missing `shellboy` binary) passed after a rebuild. Branch CI on three
 OSes is the acceptance gate; Windows and Linux are not verified locally.
+## Active-Turn middle summary implementation (#181, 2026-11-03)
+
+Commit d8a45ca9. Native macOS through rust-slot with a forced rebuild (the
+shared target dir otherwise reused another worktree's binary): `cargo test
+--lib -- compaction::` 109 passed, including the new policy table, adoption
+with epoch drop/replay/fork/no re-fire, and rejected-candidate tests;
+`cargo test --test integration -- proactive` 8 passed, including the new
+end-to-end Driver test (summary request covers only the old groups, next
+request has no pre-adoption reasoning, request -> summary -> retained group
+order, a post-adoption reasoning item is replayed, epoch 1, 4 shell executions
+for 4 calls). Local `cargo fmt --all -- --check` and `cargo clippy --locked
+--all-targets -- -D warnings` passed; the full local all-targets suite was not
+run (covered by CI below). GitHub Actions run 41535174896 (`all_oses=true`): check on
+ubuntu-latest, macos-latest and windows-latest succeeded (fmt check, clippy
+`-D warnings`, full tests). Mocks only; the real-provider evidence is the
+separate GPT-route record below. Claude remains unvalidated.
+
 ## Mid-Turn B request shape on the GPT subscription route (#181, 2026-11-03)
 
 Paid provider check, approved by the user, limited to the `litellm` connection

@@ -13,13 +13,14 @@ conditions) awaits the user's approval.
 ## Mid-Turn summary design (#181, awaiting review)
 ## Mid-Turn summary design (#181, implementation on hold)
 ## Mid-Turn active-Turn summary (#181, branch CI pending)
+## Mid-Turn active-Turn summary (#181, branch CI passed)
 
 Proactive compaction now replaces the oldest eligible run of whole groups inside
 a long active Turn with one developer summary instead of the ordinary summary,
 keeping the request, later user messages and the latest complete tool group
 onward. Adoption starts a new reasoning epoch. See
 [compaction](../design/compaction.md#active-turn-middle-summary-181). No
-migration or setting. Next: 3-OS CI, then merge sequencing with
+migration or setting. 3-OS CI run 41535174896 passed. Next: merge sequencing with
 issue-183/append-context and #180 (coordinator). #182 is separate.
 
 ## Paused index consumption (#173)
