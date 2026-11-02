@@ -13,6 +13,12 @@ impl<'a> CompactionKeys<'a> {
     pub(crate) fn automatic_active(self) -> String {
         format!("compact.automatic_active.{}", self.0)
     }
+    pub(crate) fn automatic_guard(self) -> String {
+        format!("compact.automatic_guard.{}", self.0)
+    }
+    pub(crate) fn automatic_status(self) -> String {
+        format!("compact.automatic_status.{}", self.0)
+    }
     pub(crate) fn result(operation: &str) -> String {
         format!("compact.result.{operation}")
     }

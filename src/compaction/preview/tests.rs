@@ -636,3 +636,218 @@ async fn hidden_marker_after_multi_source_tool_groups_uses_group_not_node_ordina
     );
     f.close().await;
 }
+
+#[tokio::test]
+async fn structural_no_target_proof_is_bounded_and_never_reads_protected_payload() {
+    let f = Fixture::new().await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('old-r','t','completed','now'),('current-r','t','live','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('old','t','old-r','completed','now'),('current','t','current-r','running','now');")?;
+        Ok(())
+    }).await.unwrap();
+    f.append(
+        "old-node",
+        Some("old"),
+        json!({"role":"user","content":"old protected"}),
+    )
+    .await;
+    f.append(
+        "current-node",
+        Some("current"),
+        json!({"role":"user","content":"x".repeat(1_100_000)}),
+    )
+    .await;
+    let before = counts(&f).await;
+    let path = f.db.path().to_owned();
+    let mut db =
+        Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    db.pragma_update(None, "query_only", true).unwrap();
+    let tx = db.transaction().unwrap();
+    assert!(
+        matches!(automatic_candidates_tx(&tx, "t"), Err(StorageError::Operation(error)) if error.code == crate::protocol::ErrorCode::InputLimit)
+    );
+    let steps = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = steps.clone();
+    tx.progress_handler(
+        1000,
+        Some(move || {
+            counted.fetch_add(1000, std::sync::atomic::Ordering::SeqCst);
+            false
+        }),
+    )
+    .unwrap();
+    assert!(
+        automatic_structural_no_target_tx(&tx, "t", true)
+            .unwrap()
+            .is_some()
+    );
+    tx.progress_handler(0, None::<fn() -> bool>).unwrap();
+    assert!(steps.load(std::sync::atomic::Ordering::SeqCst) < 131_000);
+    assert!(
+        automatic_structural_no_target_tx(&tx, "t", false)
+            .unwrap()
+            .is_none(),
+        "multiple groups require a real forecast"
+    );
+    tx.commit().unwrap();
+    let interrupted = db.transaction().unwrap();
+    interrupted.progress_handler(1, Some(|| true)).unwrap();
+    assert!(automatic_structural_no_target_tx(&interrupted, "t", true).is_err());
+    interrupted
+        .progress_handler(0, None::<fn() -> bool>)
+        .unwrap();
+    drop(interrupted);
+    let recovered = db.transaction().unwrap();
+    assert!(
+        automatic_structural_no_target_tx(&recovered, "t", true)
+            .unwrap()
+            .is_some()
+    );
+    recovered.commit().unwrap();
+    drop(db);
+    assert_eq!(
+        counts(&f).await,
+        before,
+        "an interrupted read-only proof leaves no state"
+    );
+    f.close().await;
+
+    let f = Fixture::new().await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('a-r','t','completed','now'),('b-r','t','completed','now'),('current-r','t','live','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('a','t','a-r','completed','now'),('b','t','b-r','completed','now'),('current','t','current-r','running','now');")?;
+        Ok(())
+    }).await.unwrap();
+    f.append(
+        "eligible",
+        Some("a"),
+        json!({"role":"user","content":"old candidate"}),
+    )
+    .await;
+    f.append(
+        "latest",
+        Some("b"),
+        json!({"role":"user","content":"latest protected"}),
+    )
+    .await;
+    f.append(
+        "current-node",
+        Some("current"),
+        json!({"role":"user","content":"current"}),
+    )
+    .await;
+    let path = f.db.path().to_owned();
+    let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    assert!(
+        automatic_structural_no_target_tx(&db, "t", true)
+            .unwrap()
+            .is_none(),
+        "an older eligible Turn must never be suppressed"
+    );
+    drop(db);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn structural_no_target_proof_handles_long_paths_and_foreign_first_turns() {
+    let f = Fixture::new().await;
+    f.db.call(|db| {
+        let tx = db.transaction()?;
+        tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('current','t','r','running','now');")?;
+        {
+            let mut node = tx.prepare("INSERT INTO node(id,turn_id,kind,created_at,payload_json) VALUES(?1,'current','message','now','{}')")?;
+            let mut path = tx.prepare("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t',?1,?2)")?;
+            for ordinal in 0..4097 {
+                let id = format!("n{ordinal:05}");
+                node.execute([&id])?;
+                path.execute(params![ordinal, id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let path = f.db.path().to_owned();
+    let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    assert!(
+        automatic_structural_no_target_tx(&db, "t", true)
+            .unwrap()
+            .is_some(),
+        "a directly protected first source remains a proof beyond the preview row cap"
+    );
+    drop(db);
+    f.close().await;
+
+    let f = Fixture::new().await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('other','/','','p','m','now');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('other-r','other','completed','now'),('current-r','t','live','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('foreign','other','other-r','completed','now'),('current','t','current-r','running','now');")?;
+        Ok(())
+    }).await.unwrap();
+    // A fork may select an existing node from another Thread. append_node
+    // intentionally rejects creating such a node in the receiving Thread.
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO node(id,turn_id,kind,created_at,payload_json) VALUES('foreign-first','foreign','message','now','{}'),('current-node','current','message','now','{}'); INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t',0,'foreign-first'),('t',1,'current-node');")?;
+        Ok(())
+    }).await.unwrap();
+    let path = f.db.path().to_owned();
+    let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    assert!(
+        automatic_structural_no_target_tx(&db, "t", true)
+            .unwrap()
+            .is_none(),
+        "foreign older history is not the selected Thread's protected Turn"
+    );
+    drop(db);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn automatic_candidates_notice_protection_release_without_path_revision_change() {
+    let f = Fixture::new().await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('a-r','t','completed','now'),('b-r','t','completed','now'),('current-r','t','live','now');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('a','t','a-r','completed','now'),('b','t','b-r','completed','now'),('current','t','current-r','running','now');")?;
+        Ok(())
+    }).await.unwrap();
+    f.append(
+        "old-candidate",
+        Some("a"),
+        json!({"role":"user","content":"eligible older content"}),
+    )
+    .await;
+    f.append(
+        "latest-protected",
+        Some("b"),
+        json!({"role":"user","content":"latest"}),
+    )
+    .await;
+    f.append(
+        "current-protected",
+        Some("current"),
+        json!({"role":"user","content":"current"}),
+    )
+    .await;
+    let (before, after) = f.db.call(|db| {
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at) VALUES('r','op','null','t','old-candidate','accepted','now')", [])?;
+        let before = automatic_candidates_tx(db, "t")?;
+        db.execute("UPDATE receipt SET state='applied' WHERE id='r'", [])?;
+        let after = automatic_candidates_tx(db, "t")?;
+        Ok((before, after))
+    }).await.unwrap();
+    assert_eq!(
+        before.revision, after.revision,
+        "receipt state can change without a selected path edit"
+    );
+    assert!(before.mutable_protection);
+    assert!(
+        before.marks.is_empty(),
+        "the older source is protected before admission"
+    );
+    assert!(!after.mutable_protection);
+    assert!(
+        after.marks.iter().any(|mark| mark.starts_with("summary:")),
+        "a released older source becomes a genuinely new summary candidate"
+    );
+    f.close().await;
+}
