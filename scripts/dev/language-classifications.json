@@ -123,5 +123,75 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui.rs:208959bf2a6a486f:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "dc7c9fa45cee21647f27f8a4ca0c200304285e2b35851f6b1ce33e4744bec5f3"
+  },
+  "src/ui.rs:39806f7c5359711a:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "34dd6d3fc63a3c29ce3ecfd41fbf89fd63645fd9f41aa205c366fcdbceb6dacb"
+  },
+  "src/ui.rs:5cf648abfb09008d:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "dc7c9fa45cee21647f27f8a4ca0c200304285e2b35851f6b1ce33e4744bec5f3"
+  },
+  "src/ui.rs:6f1616ac3e9e3e7a:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "e55de8050f5afda0504c5cfed37dfc89889816120cf8886b20759d4478ec01ba"
+  },
+  "src/ui.rs:880ef28114593db5:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "34dd6d3fc63a3c29ce3ecfd41fbf89fd63645fd9f41aa205c366fcdbceb6dacb"
+  },
+  "src/ui.rs:8dd9571cba57911a:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "c3642d13bce26ea78a1d56a7447ac1bdcc325e4c653a79c316bba09b38cdd848"
+  },
+  "src/ui.rs:9ad3ba16bd22a8c1:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "ef3de9e3040ff9e04b7eecb6269d5109c32b9bcc1f62b04f55625fc9dee1f42c"
+  },
+  "src/ui.rs:a510f03ce2c64904:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "ecfb79c785729a19c72e723e985735589c0f61744388b1103720452f54673dce"
+  },
+  "src/ui.rs:af4e034c7de8fcf3:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "f95d1388fd659db7dd457027379e3cb81970002bf43ad10d4bdc67f62f1369cb"
+  },
+  "src/ui.rs:bda223f98b6175a6:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "f95d1388fd659db7dd457027379e3cb81970002bf43ad10d4bdc67f62f1369cb"
+  },
+  "src/ui.rs:cc8b6a8c07c68dba:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "ecfb79c785729a19c72e723e985735589c0f61744388b1103720452f54673dce"
+  },
+  "src/ui.rs:eab9ff53870c0eb2:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "c3642d13bce26ea78a1d56a7447ac1bdcc325e4c653a79c316bba09b38cdd848"
+  },
+  "src/ui.rs:f0a47e1ca5eb1de2:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "a97183d87100efb388747458a14870454128fbab7c3e264a76054e23e4c6c372"
+  },
+  "src/ui.rs:f2f96ac94ebc864e:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese display text and its English locale branch; command spelling, dynamic arguments and width-specific glyph alternatives remain unchanged.",
+    "source_tokens_sha256": "f95d1388fd659db7dd457027379e3cb81970002bf43ad10d4bdc67f62f1369cb"
   }
 }

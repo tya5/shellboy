@@ -3925,3 +3925,9 @@ passed. Actual fault injection covers both configured locales and final UI statu
 exact-tip CI is reported separately. No #150/#157 production range changes.
 Watch recovery projection now defers with #157; panic/queue messages requiring
 root edits remain pending. No manifest adoption or final Stage C gate is claimed.
+### #152 stage C: UI command diagnostics (2026-11-02)
+
+Localized a first batch of command diagnostics, conversation-info labels and
+input attachment hints. Original Japanese wording, commands and raw error
+arguments are retained. This file remains incomplete: receipt labels, retained
+raw-preview metadata, cached-node display and shared status origins need review.

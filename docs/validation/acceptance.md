@@ -8441,3 +8441,11 @@ shutdown, plus existing descendant/stale-autosave/bounded-cleanup cases.
 Exact branch CI and later3OS integration are separate qualifications. No physical
 terminal, provider/clipboard, full-screen localization or final Stage C completion
 is inferred. After0.6.1 cutoff; no release tag/binary change is part of this batch.
+### #152 stage C: UI command diagnostics (2026-11-02)
+
+macOS rust-slot `cargo check --tests`, 3 command-diagnostic screen tests and
+11 model-picker integration tests passed; coverage includes both languages and
+raw diagnostic arguments. Scoped audit reports a=89, b=38, c=24; the full
+manifest remains blocked by a pre-existing stale presentation fingerprint.
+Exact task and three-OS integration CI remain pending. No physical terminal
+or OS clipboard testing was performed.
