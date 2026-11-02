@@ -1,4 +1,5 @@
 use serde_json::Value;
+use shellboy::config::UiLanguage;
 use shellboy::config_setup::{MINIMAL, TEMPLATE, report};
 use std::{path::Path, process::Command};
 
@@ -347,7 +348,11 @@ fn setup_report_is_pure_and_minimal_template_matches_bundled_defaults() {
     );
     assert_eq!(missing.credential_env.as_deref(), Some("SHELLBOY_API_KEY"));
     assert_eq!(missing.credential_set, Some(false));
-    assert!(missing.japanese(true).contains("SHELLBOY_API_KEY"));
+    assert!(
+        missing
+            .render(UiLanguage::Ja, true)
+            .contains("SHELLBOY_API_KEY")
+    );
     assert!(
         missing
             .missing
@@ -394,7 +399,7 @@ fn init_never_follows_existing_or_dangling_symlinks() {
 #[tokio::test]
 async fn first_send_failure_has_source_and_missing_details_and_localized_next_actions() {
     use shellboy::{
-        config::{Config, ConfigSource},
+        config::{Config, ConfigSource, UiLanguage},
         control::db::Store,
         protocol::ThreadCreateArgs,
         storage::DbWorker,
@@ -402,13 +407,14 @@ async fn first_send_failure_has_source_and_missing_details_and_localized_next_ac
     use std::sync::Arc;
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("selected/config.toml");
-    let config = Config {
+    let mut config = Config {
         source: Some(ConfigSource {
             path: path.clone(),
             present: false,
         }),
         ..Config::default()
     };
+    config.ui.language = UiLanguage::Ja;
     let db = DbWorker::open(root.path().join("fixture.db"))
         .await
         .unwrap();
@@ -454,12 +460,15 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let key_name = format!("SHELLBOY_SETUP_ABSENT_{}", uuid::Uuid::new_v4().simple());
-    std::fs::write(
-        &path,
-        configuration(&format!("http://{address}/v1"), true)
-            .replace("SHELLBOY_SETUP_TEST_KEY", &key_name),
-    )
-    .unwrap();
+    let mut config_text = configuration(&format!("http://{address}/v1"), true)
+        .replace("SHELLBOY_SETUP_TEST_KEY", &key_name);
+    config_text.push_str(
+        r#"
+[ui]
+language = 'ja'
+"#,
+    );
+    std::fs::write(&path, config_text).unwrap();
     let owner = DataOwner::start(
         Some(path.clone()),
         Some(root.path().join("data")),
