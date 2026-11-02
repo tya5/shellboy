@@ -1868,7 +1868,7 @@ async fn f8_history_repeat_hint_uses_service_language_and_renders_at_80_columns(
             let (root, owner, control, server) =
                 super::control_tests::fixture_with_language(language).await;
             owner.db.call(|db| {
-                db.execute_batch("INSERT INTO node(id,kind,created_at,payload_revision,payload_json) VALUES('hint-node','user','now',7,'{\"role\":\"user\",\"content\":\"retained original\"}'); INSERT INTO thread_path VALUES('independent',0,'hint-node');")?;
+                db.execute_batch("INSERT INTO node(id,kind,created_at,payload_revision,payload_json) VALUES('hint-node','user','now',7,'{\"role\":\"user\",\"content\":\"retained original\"}'); INSERT INTO thread_path VALUES('independent',0,'hint-node'); UPDATE thread SET cursor_node_id='hint-node' WHERE id='independent';")?;
                 Ok(())
             }).await.unwrap();
             let mut ui = UiState::new(&owner.loaded.config, root.path().into());
