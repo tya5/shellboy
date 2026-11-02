@@ -1,6 +1,6 @@
 # SQLite migration と専用worker
 
-Schema20 adds derived event-retention indexes; it does not rewrite event or
+Schema21 adds derived event-retention indexes; it does not rewrite event or
 delivery data. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
 
 ## DB job timing (#164)
