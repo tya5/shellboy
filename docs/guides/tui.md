@@ -167,14 +167,15 @@ with very many conversations; a separate read-only connection keeps these reads 
 
 ## Input and basic keys
 
-These are defaults. Change send/newline combinations with `ui.send_key` and `ui.newline_keys`. Combinations producing the same terminal key code cannot be distinguished. While processing, the composer explains that additional instructions apply at the next boundary; during recovery wait, a new instruction resumes work.
+These are defaults. Change send/newline combinations with `ui.send_key` and `ui.newline_keys`. Shellboy requests terminal keyboard enhancement only when the terminal reports support. Shift+Enter is available only with that enhancement; on unsupported terminals, help omits it and Ctrl+J remains the fallback. Combinations producing the same terminal key code cannot be distinguished. While processing, the composer explains that additional instructions apply at the next boundary; during recovery wait, a new instruction resumes work.
 
 | Key | Action |
 | --- | --- |
 | Enter | Queue draft at the next boundary, or execute a manually typed slash action |
 | Ctrl+Enter / Ctrl+X then Ctrl+S | Immediate delivery; configured ordinary Ctrl+Enter keeps its normal role |
 | Esc | Close the current popup/completion/selection first; otherwise interrupt the active Turn |
-| Ctrl+J / Shift+Enter | Newline |
+| Ctrl+J | Newline; available without keyboard enhancement |
+| Shift+Enter | Newline when terminal keyboard enhancement is supported |
 | Ctrl+U | Clear current draft text, pastes, and attachment references; preserve sent requests and external files (configured send/newline bindings take precedence) |
 | Ctrl+L | Clear and redraw the whole screen; preserve draft, scroll, selection, and popup (configured send/newline bindings take precedence) |
 | Left/Right / Backspace / Delete | Move/delete by character, accounting for combining characters and emoji |

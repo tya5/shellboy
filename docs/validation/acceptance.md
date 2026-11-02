@@ -8692,3 +8692,6 @@ collection tests remain relevant. On macOS arm64 / Rust 1.99.1, `cargo check
 language audit's 18 Python tests and test layout check also passed. Exact-tip
 3-OS CI is pending; terminal and integration behavior are untested. This is one
 Stage C slice, not final #152 acceptance.
+## #175 Shift+Enter Keyboard Enhancement
+
+Physical terminal verification is UNVERIFIED. No real terminal emulator or physical TTY was exercised for this change; synthetic PTY tests and 3-OS CI are not counted as physical-terminal success. No configuration setting was added.

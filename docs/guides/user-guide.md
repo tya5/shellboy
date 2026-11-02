@@ -134,7 +134,7 @@ suitable native-API proxy rather than assume it supports long cached sessions.
 
 ## 2. Send your first request
 
-Type into the composer and press Enter to send by default. Ctrl+J or Shift+Enter inserts a newline. For example: “Read this folder's README and explain its structure and possible next tasks.” The model has a shell tool, so a request to modify files may run in that working directory.
+Type into the composer and press Enter to send by default. Ctrl+J always inserts a newline. Shift+Enter also inserts a newline only when the terminal supports keyboard enhancement; on unsupported terminals, use Ctrl+J. For example: “Read this folder's README and explain its structure and possible next tasks.” The model has a shell tool, so a request to modify files may run in that working directory.
 
 The first send persists the Thread and request. “Accepted” means DB persistence, separately from completion of an answer, shell, or Run. A saved request remains even if preparation or communication fails after acceptance. Address the reported failure and explicitly retry; see [Recovery and storage](recovery-and-storage.md).
 

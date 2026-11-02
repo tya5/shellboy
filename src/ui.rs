@@ -6692,6 +6692,7 @@ pub struct TerminalSession {
     terminal: Terminal<crate::terminal_links::HyperlinkBackend<io::Stdout>>,
     link_snapshot: std::rc::Rc<std::cell::RefCell<crate::terminal_links::LinkSnapshot>>,
     _guard: TerminalGuard,
+    keyboard_enhancement_enabled: bool,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     width_observation: Option<u8>,
 }
@@ -6702,6 +6703,12 @@ impl TerminalSession {
     }
 
     pub fn enter() -> io::Result<Self> {
+        Self::enter_with_keyboard_enhancement(None)
+    }
+
+    pub(crate) fn enter_with_keyboard_enhancement(
+        support_override: Option<bool>,
+    ) -> io::Result<Self> {
         let guard = TerminalGuard::new();
         terminal::enable_raw_mode()?;
         execute!(
@@ -6710,6 +6717,17 @@ impl TerminalSession {
             EnableBracketedPaste,
             EnableMouseCapture
         )?;
+        let supported = support_override
+            .unwrap_or_else(|| terminal::supports_keyboard_enhancement().unwrap_or(false));
+        let keyboard_enhancement_enabled = if supported {
+            match guard.push_keyboard_enhancement() {
+                Ok(()) => true,
+                Err(error) if error.kind() == io::ErrorKind::Unsupported => false,
+                Err(error) => return Err(error),
+            }
+        } else {
+            false
+        };
         let link_snapshot = std::rc::Rc::new(std::cell::RefCell::new(
             crate::terminal_links::LinkSnapshot::default(),
         ));
@@ -6723,6 +6741,7 @@ impl TerminalSession {
             terminal,
             link_snapshot,
             _guard: guard,
+            keyboard_enhancement_enabled,
             diagnostics: None,
             width_observation,
         })
@@ -6769,6 +6788,12 @@ fn run_session(
     updates: Receiver<UiUpdate>,
     termination: Option<&termination::Termination>,
 ) -> io::Result<UiExitReason> {
+    let mut runtime_config = config.clone();
+    runtime_config.ui.newline_keys = input::available_newline_keys(
+        &config.ui.newline_keys,
+        session.keyboard_enhancement_enabled,
+    );
+    let config = &runtime_config;
     let terminal = &mut session.terminal;
     let link_snapshot = &session.link_snapshot;
     let mut state = UiState::new(config, PathBuf::new());
