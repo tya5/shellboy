@@ -3881,9 +3881,9 @@ variance and physical-terminal behavior remain unverified.
 
 English display now translates a bounded set of known flat field labels when
 the label matches the generated Japanese label. Nested, unknown and custom
-labels, field keys and stored/copyable values remain unchanged. This candidate
-overlaps the pending field-values candidate and requires integration ordering
-and conflict resolution before both can land.
+labels, field keys and stored/copyable values remain unchanged. The pending
+field-values candidate overlaps these files; relocating independent tests removed
+the textual conflicts in the current merge forecast.
 
 ### #152 Product Batch4: Watch Page Notices
 
