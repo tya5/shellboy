@@ -124,7 +124,7 @@ async fn denied_temporary_bases_use_data_directory_and_cli_locator() {
             );
         }
     });
-    let request = tokio::time::timeout(std::time::Duration::from_secs(20), receive.recv())
+    let request = crate::test_watchdog::watchdog("fallback CLI request", receive.recv())
         .await
         .expect("CLI did not deliver a request")
         .expect("listener closed");
@@ -135,7 +135,7 @@ async fn denied_temporary_bases_use_data_directory_and_cli_locator() {
             serde_json::json!({"items":[]}),
         ))
         .unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(20), client)
+    crate::test_watchdog::watchdog("fallback CLI completion", client)
         .await
         .expect("CLI did not finish")
         .unwrap();
