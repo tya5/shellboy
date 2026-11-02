@@ -121,7 +121,7 @@ def main():
     # pywinpty 2.0.15 treats the numeric ConPTY value (0) as false.
     os.environ['PYWINPTY_BACKEND'] = '0'
     binary = args.binary.resolve(strict=True)
-    for shell in ('powershell', 'git-bash'):
+    for shell in ('git-bash', 'powershell'):
         for mode in ('typed-noop-delete', 'typed', 'paste', 'typed-burst', 'paste-burst'):
             for index in range(args.repeat):
                 run_case(binary, shell, mode, index)
