@@ -32,15 +32,14 @@ Slow accepted DB jobs now report a bounded call-site identifier, queue wait and
 execution time via best-effort diagnostics. No conversation content is logged.
 Synthetic checks cover fast and slow jobs, privacy and emission limits; CI and
 integration are tracked separately in acceptance.
-## Drain while paused (#164, hotfix)
+## Drain while paused (#164, superseded by #173)
 
-Branch issue-164/drain-while-paused: no automatic history admission while the
-index is paused or auto_history is false; on pause entry or owner start under a
-pause, workers discard pending automatic jobs, their `index.input.*`, automatic
-`index.bootstrap.*` and pending `index.auto.*` in 128-row/key transactions.
-`index status` shows `discarded_auto_pending`. The `read_next_delay` fix is on
-the separate issue-164/next-delay-bounded branch. Synthetic temp-DB tests only;
-not yet run against a real large backlog. CI pending.
+The #164 hotfix blocked automatic history admission and used persisted cleanup
+state to discard pending automatic work. #173 replaces that behavior with
+paused-consumer discarding and removes the `discarded_auto_pending` status field.
+The separate #164 `read_next_delay` fix remains in place. Validation used
+synthetic temp-DB tests; real large-backlog behavior was not measured.
+
 ## Automatic compaction activity (#165, in progress)
 
 The selected footer uses the existing activity snapshot to distinguish active
