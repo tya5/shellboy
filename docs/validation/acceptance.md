@@ -8471,3 +8471,9 @@ Task CI 41408965799 failed on Linux and macOS: default-English redraw and
 history-footer tests still expected Japanese, and the context-usage integration
 fixture expected the old Japanese cache label. After updating those expectations,
 the two focused unit tests and both real-owner context tests pass on macOS.
+
+After W1 landed on main 74d27461 (three-OS CI 41415178623), re-reviewed the
+27 chrome Japanese resources against their English arms. The implementation
+and tests match prior task commit 059e22d1; each original decision and literal
+matches. Updated only those scope fingerprints while retaining main decisions;
+the complete classification manifest validates. Rebased task CI is pending.
