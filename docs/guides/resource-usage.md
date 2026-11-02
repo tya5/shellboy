@@ -353,7 +353,7 @@ the first request already reported 1,408 cached input tokens: an earlier
 cross-client or provider cache is possible, but its source is not established.
 A fresh conversation does not guarantee a cold provider cache.
 
-jcode was not measured. Colima started successfully on Linux arm64 and a
+In the initial preflight, jcode was not measured. Colima started successfully on Linux arm64 and a
 disposable container reached the host LiteLLM TCP port, but that default
 network also allowed direct access bypassing the accounting relay. A separate
 internal Docker network blocked the normal host name and its host-published
