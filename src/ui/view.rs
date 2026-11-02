@@ -1324,7 +1324,10 @@ impl ThreadView {
         } else {
             self.draft.insert_attachment(attachment, position);
             self.draft.revision += 1;
-            self.status = "画像を添付しました".into();
+            self.status = match self.language {
+                crate::config::UiLanguage::Ja => "画像を添付しました",
+                crate::config::UiLanguage::En => "Image attached",
+            }.into();
             true
         }
     }

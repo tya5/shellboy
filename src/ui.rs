@@ -6330,10 +6330,16 @@ fn draw_input(
                 .border_style(Style::default().fg(state.palette.muted()))
                 .title_bottom(
                     if state.view().draft.text.is_empty() && input_area.width >= 60 {
-                        text_width::glyphs::select(
-                            "/image 画像を添付 · /attach パス",
-                            "/image 画像を添付 | /attach パス",
-                        )
+                        match state.config.ui.language {
+                            crate::config::UiLanguage::Ja => text_width::glyphs::select(
+                                "/image 画像を添付 · /attach パス",
+                                "/image 画像を添付 | /attach パス",
+                            ),
+                            crate::config::UiLanguage::En => text_width::glyphs::select(
+                                "/image Attach image · /attach PATH",
+                                "/image Attach image | /attach PATH",
+                            ),
+                        }
                     } else {
                         ""
                     },

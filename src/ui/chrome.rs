@@ -184,7 +184,7 @@ impl ContextBar {
                 .input_tokens
                 .is_some_and(|input| u128::from(input) * 100 >= u128::from(self.auto_at) * 80)
     }
-    fn variants(&self, plain: bool) -> Vec<String> {
+    fn variants(&self, plain: bool, language: crate::config::UiLanguage) -> Vec<String> {
         let u = &self.usage;
         let mark = if plain && self.warn() { "!" } else { "" };
         if u.input_tokens.is_none() && u.output_tokens.is_none() && u.cached_tokens.is_none() {
@@ -203,10 +203,13 @@ impl ContextBar {
         };
         let down = format!("{}{}", glyphs::select("↓", "v"), show(u.output_tokens));
         let cache = match (u.cached_tokens, u.input_tokens) {
-            (Some(cached), Some(input)) if input > 0 => Some(format!(
-                "キャッシュ{}%",
-                ((u128::from(cached) * 100 + u128::from(input) / 2) / u128::from(input)).min(100)
-            )),
+            (Some(cached), Some(input)) if input > 0 => {
+                let percent = ((u128::from(cached) * 100 + u128::from(input) / 2) / u128::from(input)).min(100);
+                Some(match language {
+                    crate::config::UiLanguage::Ja => format!("キャッシュ{percent}%"),
+                    crate::config::UiLanguage::En => format!("Cache {percent}%"),
+                })
+            }
             _ => None,
         };
         let mut out = Vec::new();
@@ -220,8 +223,12 @@ impl ContextBar {
         out
     }
     /// Drop order on narrow widths: cache, output, denominator, then input.
+    #[cfg(test)]
     pub(super) fn text(&self, width: usize, plain: bool) -> Option<String> {
-        self.variants(plain)
+        self.text_for(width, plain, crate::config::UiLanguage::Ja)
+    }
+    fn text_for(&self, width: usize, plain: bool, language: crate::config::UiLanguage) -> Option<String> {
+        self.variants(plain, language)
             .into_iter()
             .find(|text| text.width() <= width)
     }
@@ -442,7 +449,7 @@ pub(super) fn footer_lines(
     if let Some(bar) = context {
         let used: usize = activity_spans.iter().map(|s| s.content.width()).sum();
         let room = usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 });
-        if let Some(text) = bar.text(room, palette.plain()) {
+        if let Some(text) = bar.text_for(room, palette.plain(), view.language) {
             if used > 0 {
                 activity_spans.push(Span::raw(glyphs::separator()));
             }
@@ -528,13 +535,17 @@ pub(super) fn welcome(
                 true
             )
         )),
-        Line::from(if width >= 55 {
-            glyphs::select(
+        Line::from(match (config.ui.language, width >= 55) {
+            (crate::config::UiLanguage::Ja, true) => glyphs::select(
                 "/ コマンド · /image 画像を添付 · F1 操作ガイド",
                 "/ コマンド | /image 画像を添付 | F1 操作ガイド",
-            )
-        } else {
-            glyphs::select("/ コマンド · F1 操作ガイド", "/ コマンド | F1 操作ガイド")
+            ),
+            (crate::config::UiLanguage::Ja, false) => glyphs::select("/ コマンド · F1 操作ガイド", "/ コマンド | F1 操作ガイド"),
+            (crate::config::UiLanguage::En, true) => glyphs::select(
+                "/ Commands · /image Attach image · F1 Guide",
+                "/ Commands | /image Attach image | F1 Guide",
+            ),
+            (crate::config::UiLanguage::En, false) => glyphs::select("/ Commands · F1 Guide", "/ Commands | F1 Guide"),
         }),
     ]
 }
