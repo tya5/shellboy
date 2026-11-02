@@ -22,7 +22,7 @@ import time
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17, 18, 19, 20, 21, 22)}
+           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23)}
 PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19}
 
 
@@ -96,6 +96,15 @@ def check_migration(db, before, start, target):
         assert counters['logical.raw'] == raw, 'raw counter differs from saved output after migration 22'
         row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='attachment_delivery_operation'").fetchone()
         assert row, 'attachment_delivery_operation index missing after migration 22'
+    if target >= 23:
+        for name in ('activity_attempt_turn', 'activity_turn_run', 'activity_turn_run_state',
+                     'activity_group_turn_state', 'activity_shell_spawned_turn', 'activity_shell_uncollected_owner'):
+            row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+            expected_index = next(line.replace(' IF NOT EXISTS', '')
+                                  for line in DERIVED[23].read_text(encoding='utf-8').splitlines()
+                                  if line.startswith(f'CREATE INDEX IF NOT EXISTS {name} '))
+            assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
+                f'{name} differs from migration 23'
 
 
 def prepare_schema(db, target):
@@ -117,8 +126,8 @@ def parse_args(argv=None):
     parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default='0.5.0')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22), default=22,
-                        help='22 for the current candidate; 14/15/17/18/19/20/21 retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23), default=23,
+                        help='23 for the current candidate; 14/15/17/18/19/20/21/22 retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

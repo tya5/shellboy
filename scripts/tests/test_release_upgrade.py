@@ -172,6 +172,21 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'raw counter'):
             checks.check_migration(db, before, 21, 22)
 
+    def test_schema22_to23_preserves_rows_and_prior_indexes(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 22)
+        before, records = self.upgrade(db, 22, 23)
+        self.assertEqual(checks.ledger(db), before + [(23, '0023_activity_bounded')])
+        self.assertEqual(checks.snapshot(db), records)
+        indexes = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        self.assertTrue({'jobs_source', 'nodes_index_gc', 'node_event_retention', 'delivery_event_state',
+                         'activity_attempt_turn', 'activity_turn_run', 'activity_turn_run_state',
+                         'activity_group_turn_state', 'activity_shell_spawned_turn',
+                         'activity_shell_uncollected_owner'} <= indexes)
+        db.executescript('DROP INDEX activity_attempt_turn; CREATE INDEX activity_attempt_turn ON model_attempt(id);')
+        with self.assertRaisesRegex(AssertionError, 'activity_attempt_turn'):
+            checks.check_migration(db, before, 22, 23)
+
     def test_schema18_rejects_old_history_index_and_parent_index(self):
         db = self.fixture(17)
         before, _ = self.upgrade(db, 17, 18)
@@ -183,14 +198,14 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             checks.check_migration(db, before, 17, 18)
 
-    def test_arguments_default_to_public_v050_schema17_and_target22(self):
+    def test_arguments_default_to_public_v050_schema17_and_target23(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
-        self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema), ('0.5.0', 17, 22))
+        self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema), ('0.5.0', 17, 23))
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
-        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 22))
+        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 23))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         staged = checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '16'])
