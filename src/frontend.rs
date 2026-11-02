@@ -503,6 +503,7 @@ enum BackgroundResult {
         thread_id: String,
         epoch: u64,
         generation: u64,
+        pause_notification_epoch: u64,
         result: Result<activity::Projection, ApiError>,
     },
     Sent {
@@ -1254,6 +1255,7 @@ async fn run_with_delivery(
             },
             _=control.index.pause_changed()=>{
                 draft_pause_dirty = true;
+                selection.note_pause_notification();
                 if let Some(thread) = selection.active_thread.clone() {
                     dirty_threads.insert(thread);
                 }
@@ -2344,6 +2346,8 @@ async fn run_with_delivery(
                         let results = background_tx.clone();
                         let progress_slots = progress_slots.clone();
                         let epoch = selection.progress_epoch;
+                        let pause_notification_epoch = selection.pause_notification_epoch;
+                        let stop = selection.cancel.clone();
                         if !spawn_read(
                             &mut read_workers,
                             &read_slots,
@@ -2363,12 +2367,13 @@ async fn run_with_delivery(
                                     Err(error) => load_failed(&sender, target, generation, error).await,
                                     Ok(()) => {
                                         if let Ok(_permit) = progress_slots.acquire_owned().await {
-                                            let result = activity::read(&control, &target).await;
+                                            let result = activity::read_cancellable(&control, &target, stop).await;
                                             let _ = results
                                                 .send(BackgroundResult::Progress {
                                                     thread_id: target,
                                                     epoch,
                                                     generation,
+                                                    pause_notification_epoch,
                                                     result,
                                                 })
                                                 .await;
@@ -3330,10 +3335,15 @@ async fn run_with_delivery(
                     result,
                     epoch,
                     generation,
+                    pause_notification_epoch,
                 }) => {
-                    selection
-                        .publish_activity(&updates, thread_id, generation, epoch, result)
-                        .await
+                    if selection.accepts_initial_activity(&thread_id, generation, epoch, pause_notification_epoch) {
+                        selection
+                            .publish_activity(&updates, thread_id, generation, epoch, result)
+                            .await
+                    } else if selection.accepts(&thread_id, generation, epoch) {
+                        dirty_threads.insert(thread_id);
+                    }
                 }
                 Some(BackgroundResult::Sent {
                     generation, projection,

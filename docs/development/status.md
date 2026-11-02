@@ -4014,6 +4014,12 @@ Focused macOS checks, including an isolated synthetic PTY, passed on main
 author rebased while preserving automatic-compaction and index-pause facts; ten
 focused library tests and an isolated PTY passed, including coexistence with
 actual phase and context spans. The superseded task CI failed Linux and macOS
-clippy on three unit-valued test bindings, now corrected.
+clippy on three unit-valued test bindings, now corrected. A second task CI passed
+macOS but failed the Ubuntu synthetic PTY after switching conversations; the
+initial activity read now includes the saved pause fact; pause notifications
+invalidate only stale initial reads, leaving ordinary progress epochs stable.
+An active stale initial read also requeues a fresh refresh. Fresh macOS checks
+passed: `cargo check --tests`, thirteen focused library tests, one headless
+integration test, and one isolated CLI PTY test. Exact-tip task CI remains pending.
 Display reads `pause::facts` directly rather than depending on the #173-removed
 drain helper. Task CI, handoff, and post-integration behavior remain pending.

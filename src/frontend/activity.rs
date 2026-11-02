@@ -499,6 +499,31 @@ pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiErro
     super::presentation_work(move || prepare(raw)).await
 }
 
+pub(super) async fn read_cancellable(
+    control: &Control,
+    thread: &str,
+    stop: tokio_util::sync::CancellationToken,
+) -> Result<Projection, ApiError> {
+    let target = thread.to_owned();
+    let waits = control.pending_wait_sources();
+    let limit = control.store.config.ui.live_work_rows;
+    let path = control.store.database.path().to_path_buf();
+    let index = control.index.clone();
+    let result = super::snapshot::read(path, stop, move |db| {
+        let raw = read_tx_with_limit(db, &target, waits.as_deref(), limit)?;
+        let pause = index.read_display_pause(db)?;
+        Ok((raw, pause))
+    })
+    .await;
+    let (raw, pause) = super::checked_storage(control, result).await?;
+    super::presentation_work(move || {
+        let mut projection = prepare(raw);
+        projection.snapshot.index_pause = pause;
+        projection
+    })
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -8592,9 +8592,22 @@ could cut off the index-pause label, so the saved pause is now placed first usin
 the existing fit rule. A subsequent fresh macOS check passed
 `cargo check --tests`, ten focused library tests, and one isolated CLI PTY.
 The stronger coexistence test verified both labels and the fixed reason at
-80/120 columns, in
-both languages, with default, one-column, and two-column ambiguous-width
+80/120 columns, in both languages, with default, one-column, and two-column
+ambiguous-width
 policies, actual phase and context spans, and either fact clearing independently.
-Exact-tip task CI and the requested 3 OS integration CI remain required.
+Task CI 41494268360 passed macOS but failed the Ubuntu synthetic PTY after a
+conversation switch: the expected pause badge was not observed. Code review
+found that the initial selection activity read omitted the pause fact and could
+overwrite a fresh badge. It now reads the activity and pause in one read-only
+snapshot, and pause notifications invalidate only in-flight initial reads, not
+ordinary progress epochs. If the stale initial read still belongs to the active
+selection, a fresh refresh is queued. A writer-held initial-read regression,
+selection-cancellation regression, and notification-burst / stale-initial-read
+regression were added. On macOS 26.3.1 arm64 / Rust 1.99.1, a fresh
+`cargo check --tests`, thirteen focused library tests, one headless integration
+test, and one isolated CLI PTY test passed. The configured `auto_history=false`
+/ no-pause-marker assertion also passed. Exact-tip task CI and the requested
+3 OS integration CI remain required; the Ubuntu PTY failure is not yet claimed
+as resolved on Linux.
 No physical terminal, live-provider, Windows-local, or post-integration behavior
 has been verified.

@@ -1440,6 +1440,17 @@ mod display_pause_tests {
         );
         config.embedding.connection = Some("fixture".into());
         config.embedding.model = Some("synthetic".into());
+        let mut disabled_config = config.clone();
+        disabled_config.indexing.auto_history = false;
+        let disabled = IndexService::new(db.clone(), Arc::new(disabled_config));
+        assert!(disabled.profile_key.is_some());
+        assert!(disabled.endpoint_family_key.is_some());
+        assert_eq!(
+            db.call(move |db| disabled.read_display_pause(db))
+                .await
+                .unwrap(),
+            None
+        );
         let service = IndexService::new(db.clone(), Arc::new(config));
         let family = service.endpoint_family_key.clone().unwrap();
         let profile = service.profile_key.clone().unwrap();

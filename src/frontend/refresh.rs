@@ -577,7 +577,36 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let control = Control::new(&owner, root.path().into());
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let error = activity::read_cancellable(&control, "t", cancelled)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.code, crate::protocol::ErrorCode::InvalidState);
         for expected in [Some(crate::index::PauseReason::Transport), None] {
+            let (entered, ready) = tokio::sync::oneshot::channel();
+            let (release, blocked) = std::sync::mpsc::channel::<()>();
+            let pending = owner
+                .db
+                .try_call(move |_| {
+                    let _ = entered.send(());
+                    let _ = blocked.recv();
+                    Ok(())
+                })
+                .unwrap();
+            crate::test_watchdog::watchdog("initial activity writer held", ready)
+                .await
+                .unwrap()
+                .unwrap();
+            let initial = crate::test_watchdog::watchdog(
+                "initial activity saved pause",
+                activity::read_cancellable(&control, "t", CancellationToken::new()),
+            )
+            .await;
+            drop(release);
+            pending.receive().await.unwrap();
+            assert_eq!(initial.unwrap().unwrap().snapshot.index_pause, expected);
             let (updates, _received) = std::sync::mpsc::sync_channel(16);
             let (sender, mut results) = mpsc::channel(8);
             let slots = Arc::new(Semaphore::new(1));

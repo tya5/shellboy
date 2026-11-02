@@ -10,6 +10,7 @@ pub(super) struct Selection {
     pub(super) active_draft: Option<String>,
     pub(super) progress_running: bool,
     pub(super) progress_epoch: u64,
+    pub(super) pause_notification_epoch: u64,
     pub(super) cancel: CancellationToken,
     pub(super) tool_scope: Option<ToolObservation>,
     refresh_not_before: Option<tokio::time::Instant>,
@@ -178,7 +179,20 @@ impl Selection {
             self.refresh();
         }
     }
-    fn accepts(&self, thread: &str, generation: u64, epoch: u64) -> bool {
+    pub(super) fn note_pause_notification(&mut self) {
+        self.pause_notification_epoch = self.pause_notification_epoch.wrapping_add(1);
+    }
+    pub(super) fn accepts_initial_activity(
+        &self,
+        thread: &str,
+        generation: u64,
+        epoch: u64,
+        pause_notification_epoch: u64,
+    ) -> bool {
+        self.pause_notification_epoch == pause_notification_epoch
+            && self.accepts(thread, generation, epoch)
+    }
+    pub(super) fn accepts(&self, thread: &str, generation: u64, epoch: u64) -> bool {
         self.active_thread.as_deref() == Some(thread)
             && epoch == self.progress_epoch
             && self.generations.get(thread) == Some(&generation)
@@ -414,6 +428,55 @@ mod live_child_tests {
             ..Default::default()
         }
     }
+    #[tokio::test]
+    async fn pause_change_invalidates_inflight_initial_activity() {
+        use crate::index::PauseReason;
+        let (updates, receiver) = std::sync::mpsc::sync_channel(16);
+        let mut selection = Selection::default();
+        selection.select_thread("t".into(), 1);
+        let epoch = selection.progress_epoch;
+        let old_pause_epoch = selection.pause_notification_epoch;
+        for _ in 0..128 {
+            selection.note_pause_notification();
+        }
+        assert_eq!(selection.progress_epoch, epoch);
+        assert!(!selection.accepts_initial_activity("t", 1, epoch, old_pause_epoch));
+        assert!(selection.accepts("t", 1, epoch));
+        assert!(selection.accepts_initial_activity(
+            "t",
+            1,
+            epoch,
+            selection.pause_notification_epoch
+        ));
+        let project = |index_pause| activity::Projection {
+            snapshot: crate::ui::activity::ActivitySnapshot {
+                index_pause,
+                ..Default::default()
+            },
+            observed_at: std::time::Instant::now(),
+            tool_calls: 0,
+            cancelled_calls: 0,
+            poll_running: false,
+        };
+        selection
+            .publish_activity(
+                &updates,
+                "t".into(),
+                1,
+                epoch,
+                Ok(project(Some(PauseReason::Transport))),
+            )
+            .await;
+        let pauses: Vec<_> = receiver
+            .try_iter()
+            .filter_map(|update| match update {
+                UiUpdate::Activity { snapshot, .. } => Some(snapshot.index_pause),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(pauses, [Some(PauseReason::Transport)]);
+    }
+
     #[tokio::test]
     async fn stale_activity_cannot_restore_child_dependencies_after_parent_or_selection_change() {
         let (updates, _receiver) = std::sync::mpsc::sync_channel(16);
