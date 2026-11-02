@@ -7700,7 +7700,10 @@ mod layout_cache_tests {
             counts_capped: true,
             state: "モデル応答待ち".into(),
         });
-        assert!(ui.dirty, "a count becoming a lower bound changes its display");
+        assert!(
+            ui.dirty,
+            "a count becoming a lower bound changes its display"
+        );
     }
 
     #[test]
