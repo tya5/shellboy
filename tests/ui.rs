@@ -3648,7 +3648,9 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
             "保存された復旧理由を詳細で確認してください",
         ),
     ] {
-        let mut ui = state();
+        let mut config = Config::default();
+        config.ui.language = shellboy::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, cwd());
         ui.select_thread("recovery-thread".into());
         let details = serde_json::from_value(serde_json::json!({
             "agents_path":"/tmp/AGENTS.md", "thread_id":"recovery-thread", "title":"復旧確認", "cwd":"/tmp",

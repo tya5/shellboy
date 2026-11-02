@@ -3938,3 +3938,9 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: Recovery feedback and attachment notices (2026-11-02)
+
+Localized the saved-recovery prefix and malformed-reason fallback, clipboard
+attachment feedback, the unsaved conversation title, and retained stream titles.
+The provider error text remains source-provided and unchanged; the canonical
+recovery state remains a stable internal value. Other view/UI C records remain.

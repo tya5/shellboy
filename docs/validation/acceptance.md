@@ -8457,3 +8457,15 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+
+### #152 stage C: Recovery feedback and attachment notices (2026-11-02)
+
+On main 6ad5faee, re-reviewed the three activity-state compatibility values and
+updated their scoped fingerprints after changing `ThreadView::on_thread`; state
+comparisons and localized display projections are unchanged. The complete
+manifest validates and Python audit tests pass 18/18. Scoped view audit reports
+`a=10, b=24, protected=3, c=9`; most pending view C records remain. On macOS,
+`cargo check --tests` and the recovery/attachment unit tests passed. An existing
+recovery integration fixture expected Japanese in the English-default UI; it now
+explicitly selects Japanese and passes. Exact task CI and three-OS integration
+CI remain pending; physical-terminal and OS-clipboard tests were not performed.

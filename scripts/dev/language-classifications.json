@@ -123,5 +123,66 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/view.rs:0d3262a04bcee535:1": {
+    "category": "a",
+    "reason": "Re-reviewed the changed ThreadView methods: each Japanese resource is retained in the Ja branch and now has a complete English counterpart; raw content, attachment fields, source IDs, /received command and persisted records are unchanged.",
+    "source_tokens_sha256": "af34e2266b4b61588d20c279c9de72fadd8aeaa820798843bb15c71407556261"
+  },
+  "src/ui/view.rs:4f468deea837992d:1": {
+    "category": "a",
+    "reason": "Re-reviewed the changed ThreadView methods: each Japanese resource is retained in the Ja branch and now has a complete English counterpart; raw content, attachment fields, source IDs, /received command and persisted records are unchanged.",
+    "source_tokens_sha256": "25f6d5a927d0b73bde205aa9de31868cd4e2ac55ca9823d42b4e772ab25e41e5"
+  },
+  "src/ui/view.rs:60af710535490150:1": {
+    "category": "a",
+    "reason": "Re-reviewed the changed ThreadView methods: each Japanese resource is retained in the Ja branch and now has a complete English counterpart; raw content, attachment fields, source IDs, /received command and persisted records are unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
+  },
+  "src/ui/view.rs:64227836bb301302:1": {
+    "category": "a",
+    "reason": "Re-reviewed the changed ThreadView methods: each Japanese resource is retained in the Ja branch and now has a complete English counterpart; raw content, attachment fields, source IDs, /received command and persisted records are unchanged.",
+    "source_tokens_sha256": "af34e2266b4b61588d20c279c9de72fadd8aeaa820798843bb15c71407556261"
+  },
+  "src/ui/view.rs:7a9b969e46ce5bac:1": {
+    "category": "protected",
+    "reason": "Re-reviewed the changed on_thread function scope: canonical state comparisons and locale-aware header/footer projections are unchanged; this internal compatibility value is not display copy.",
+    "canonical_evidence": "UiUpdate::Progress carries ActivityPhase::label() as the stable comparison value; ui.rs compares the canonical state and migration logic uses the stored stable labels.",
+    "projection_evidence": "src/ui/chrome.rs header_line calls FooterPhase::label_localized; src/ui.rs status_display_entry and quiet footer use localized phase labels; src/ui/view.rs operation restoration can retain the canonical state.",
+    "source_tokens_sha256": "b44e0bbd475536a919c486795e1eadae204576556cc3c180e5d7791e1ac0c92d"
+  },
+  "src/ui/view.rs:810aa84d14201ae7:1": {
+    "category": "protected",
+    "reason": "Re-reviewed the changed on_thread function scope: canonical state comparisons and locale-aware header/footer projections are unchanged; this internal compatibility value is not display copy.",
+    "canonical_evidence": "UiUpdate::Progress carries ActivityPhase::label() as the stable comparison value; ui.rs compares the canonical state and migration logic uses the stored stable labels.",
+    "projection_evidence": "src/ui/chrome.rs header_line calls FooterPhase::label_localized; src/ui.rs status_display_entry and quiet footer use localized phase labels; src/ui/view.rs operation restoration can retain the canonical state.",
+    "source_tokens_sha256": "b44e0bbd475536a919c486795e1eadae204576556cc3c180e5d7791e1ac0c92d"
+  },
+  "src/ui/view.rs:8e576edeef0007f7:1": {
+    "category": "a",
+    "reason": "Re-reviewed the changed ThreadView methods: each Japanese resource is retained in the Ja branch and now has a complete English counterpart; raw content, attachment fields, source IDs, /received command and persisted records are unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
+  },
+  "src/ui/view.rs:b0e5347b4b659922:1": {
+    "category": "protected",
+    "reason": "Re-reviewed the changed on_thread function scope: canonical state comparisons and locale-aware header/footer projections are unchanged; this internal compatibility value is not display copy.",
+    "canonical_evidence": "UiUpdate::Progress carries ActivityPhase::label() as the stable comparison value; ui.rs compares the canonical state and migration logic uses the stored stable labels.",
+    "projection_evidence": "src/ui/chrome.rs header_line calls FooterPhase::label_localized; src/ui.rs status_display_entry and quiet footer use localized phase labels; src/ui/view.rs operation restoration can retain the canonical state.",
+    "source_tokens_sha256": "b44e0bbd475536a919c486795e1eadae204576556cc3c180e5d7791e1ac0c92d"
+  },
+  "src/ui/view.rs:d6ef98bf224a5d78:1": {
+    "category": "a",
+    "reason": "Reviewed display resource and its English counterpart in the same locale-aware projection. User content, source IDs, persisted metadata and command values are unchanged.",
+    "source_tokens_sha256": "017965d3d55050258ff5a600aa7d90672015abc24ca491793173142000e72ac5"
+  },
+  "src/ui/view.rs:ed7a81dfa0b66587:1": {
+    "category": "a",
+    "reason": "Re-reviewed the changed ThreadView methods: each Japanese resource is retained in the Ja branch and now has a complete English counterpart; raw content, attachment fields, source IDs, /received command and persisted records are unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
+  },
+  "src/ui/view.rs:fe262706c7063e66:1": {
+    "category": "a",
+    "reason": "Re-reviewed the changed ThreadView methods: each Japanese resource is retained in the Ja branch and now has a complete English counterpart; raw content, attachment fields, source IDs, /received command and persisted records are unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
   }
 }
