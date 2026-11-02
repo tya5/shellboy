@@ -108,6 +108,19 @@ class ConfigAndCliTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     capture.check_config(root)
 
+class LanguageConfigSafetyTests(unittest.TestCase):
+    def test_only_supported_languages_are_allowed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            for language in ('en', 'ja'):
+                (root / 'config.toml').write_text(f'[ui]\ncopy_backend="osc52"\nlanguage="{language}"\n')
+                capture.check_config(root)
+            for value in ('"fr"', 'true', '3'):
+                (root / 'config.toml').write_text('[ui]\ncopy_backend="osc52"\nlanguage=' + value + '\n')
+                with self.assertRaises(ValueError):
+                    capture.check_config(root)
+
 class DescriptionConfigSafetyTests(unittest.TestCase):
     def test_only_bounded_boolean_description_setting_is_added_to_fixture_allowlist(self):
         import tempfile

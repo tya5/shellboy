@@ -251,14 +251,26 @@ impl UiNode {
             .iter()
             .filter(|f| f.key.starts_with("/ui_notice/"))
             .collect::<Vec<_>>();
+        let has_notice = !old.is_empty() || !incoming.is_empty();
         let mut changed = old != incoming;
-        if changed {
+        if has_notice {
+            let current = &mut self.presentation.ui_messages;
+            let next = &source.presentation.ui_messages;
+            if current.notice != next.notice || current.source_error != next.source_error {
+                current.notice.clone_from(&next.notice);
+                current.source_error.clone_from(&next.source_error);
+                changed = true;
+            }
+        }
+        if old != incoming {
             self.presentation
                 .fields
                 .retain(|f| !f.key.starts_with("/ui_notice/"));
             self.presentation
                 .fields
                 .extend(incoming.into_iter().cloned());
+        }
+        if changed {
             self.presentation.bound_metadata();
         }
         for block in &mut self.presentation.blocks {
@@ -8997,6 +9009,39 @@ mod conversation_perf_observation {
 mod paused_tool_preview_tests {
     use super::*;
     use crate::presentation::{BlockKind, OutputStream, PresentationBlock, ToolPresentation};
+    #[test]
+    fn notice_refresh_updates_typed_title_and_keeps_canonical_text() {
+        use crate::presentation::messages::Message;
+        let mut node = UiNode {
+            node_id: "n".into(),
+            text: "canonical".into(),
+            presentation: NodePresentation {
+                fields: vec![PresentationField {
+                    key: "/ui_notice/title".into(),
+                    value: "old".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        node.presentation.ui_messages.notice = Some(Message::ThreadNotice {
+            title: Some("old".into()),
+        });
+        let mut incoming = node.tool_stub().unwrap();
+        incoming.presentation.fields[0].value = "new".into();
+        incoming.presentation.ui_messages.notice = Some(Message::ThreadNotice {
+            title: Some("new".into()),
+        });
+        assert!(node.refresh_tools(&incoming));
+        assert_eq!(
+            node.presentation.ui_messages.notice,
+            incoming.presentation.ui_messages.notice
+        );
+        assert_eq!(node.text, "canonical");
+        assert!(!node.refresh_tools(&incoming));
+    }
+
     #[test]
     fn paused_tool_refresh_adopts_tail_without_replacing_prose_or_source_offsets() {
         let tool = ToolPresentation {

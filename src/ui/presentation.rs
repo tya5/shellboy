@@ -927,10 +927,12 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
         (None, Some(code)) => Message::Exit { code }.render(language),
         _ => String::new(),
     };
-    if outcome.is_empty() && kind == "child_turn_completed" {
+    if kind == "child_turn_completed" && matches!(status, None | Some("completed")) {
         outcome = crate::ui::i18n::local!(language, "回答", "Answer").into();
-    } else if outcome.is_empty() && kind == "child_report" {
+    } else if kind == "child_report" && matches!(status, None | Some("completed")) {
         outcome = crate::ui::i18n::local!(language, "報告", "Report").into();
+    } else if kind == "child_run_ended" && status == Some("completed") {
+        outcome = crate::ui::i18n::local!(language, "完了", "Completed").into();
     }
     let signal = node
         .presentation
@@ -988,7 +990,9 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
 }
 
 fn is_notice(node: &UiNode) -> bool {
-    node.presentation.kind == PresentationKind::Event && node.role != "received_response"
+    node.presentation.kind == PresentationKind::Event
+        && node.role != "received_response"
+        && notice_kind(node).and_then(notice_symbol).is_some()
 }
 
 fn quiet_event(node: &UiNode) -> bool {
@@ -2086,7 +2090,9 @@ fn append_notice_run(
     let nodes = &view.nodes()[begin..end];
     let first = &nodes[0];
     if nodes.len() == 1 {
-        let symbol = notice_kind(first).and_then(notice_symbol).unwrap_or("");
+        let symbol = notice_kind(first)
+            .and_then(notice_symbol)
+            .expect("notice kind has an approved symbol");
         let prefix = format!("{} {symbol} ", RowKind::Notice.mark());
         append_item_rows(
             lines,
@@ -2148,7 +2154,9 @@ fn append_notice_run(
             } else {
                 " "
             };
-            let symbol = notice_kind(node).and_then(notice_symbol).unwrap_or("");
+            let symbol = notice_kind(node)
+                .and_then(notice_symbol)
+                .expect("notice kind has an approved symbol");
             let prefix = format!(
                 "{}[{}]{marker}{symbol} ",
                 glyphs::branch(i + 1 == nodes.len()),
@@ -5534,6 +5542,9 @@ mod conversation_item_tests {
                 if index < 269 {
                     value.presentation.kind = PresentationKind::Event;
                     value.presentation.title = "AGENTS.md none".into();
+                    value.presentation.ui_messages.title = Some(Message::EventTitle {
+                        kind: "index_state".into(),
+                    });
                     value.role = "event".into();
                 }
                 value

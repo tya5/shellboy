@@ -27,15 +27,15 @@ def main():
         for mode, palette, term, plain in (("dark", "dark", "xterm-256color", False),
                 ("light", "light", "xterm-256color", False), ("plain", "dark", "xterm-256color", True),
                 ("vt100", "dark", "vt100", False)):
-            for target in ("shell", "child"):
-                name = f"{cols}-{mode}-{target}"
+            for target, language in (("shell", "ja"), ("child", "ja"), ("shell", "en"), ("child", "en")):
+                name = f"{cols}-{mode}-{target}-{language}"
                 out = args.out / name
                 out.mkdir()
                 with tempfile.TemporaryDirectory(prefix="shellboy-notice-reference-") as scratch:
                     root = Path(scratch) / "fixture"
                     subprocess.run([str(fixture), str(root)], check=True, capture_output=True, env=env, timeout=WATCHDOG_SECONDS)
                     with (root / "config.toml").open("a") as config:
-                        config.write(f'palette="{palette}"\nbell=false\n')
+                        config.write(f'palette="{palette}"\nbell=false\nlanguage="{language}"\n')
                     terminal = Terminal(binary, root, cols, palette, term, plain)
 
                     def scene(label, predicate):
@@ -54,19 +54,19 @@ def main():
                         return any("⁂" in line and symbol in line and content in line for line in text.splitlines())
 
                     try:
-                        scene("ready", lambda s: "Ctrl+T 会話" in s)
+                        scene("ready", lambda s: "Ctrl+T" in s and ("会話" in s if language == "ja" else "Threads" in s))
                         if target == "shell":
                             terminal.send("/switch visual-notice-shell\r")
-                            text = scene("saved-command", lambda s: notice_line(s, "$", "NOTICE_SOURCE_COMMAND") and "背景指定あり" in s)
+                            text = scene("saved-command", lambda s: notice_line(s, "$", "NOTICE_SOURCE_COMMAND") and ("背景指定あり" in s if language == "ja" else "Background requested" in s))
                             assert "EXACT_NOTICE_SOURCE_MARKER" not in text
                             terminal.send("\t\r")
-                            scene("exact-original", lambda s: "EXACT_NOTICE_SOURCE_MARKER" in s and "原文" in s)
+                            scene("exact-original", lambda s: "EXACT_NOTICE_SOURCE_MARKER" in s and ("原文" in s if language == "ja" else "Original" in s))
                         else:
                             terminal.send("/switch visual-notice-parent\r")
                             scene("current-name", lambda s: notice_line(s, "↳", "Twin"))
                             terminal.send("\t")
                             # Tab pauses follow and selects history, not F2 display freeze.
-                            scene("paused-child", lambda s: "o 原文" in s and "v" in s and notice_line(s, "↳", "Twin"))
+                            scene("paused-child", lambda s: ("o 原文" in s if language == "ja" else "o Original" in s) and "v" in s and notice_line(s, "↳", "Twin"))
                             cli("thread", "set", "--thread", "visual-notice-child", "--title", "RenamedChild")
                             scene("renamed-without-input", lambda s: notice_line(s, "↳", "RenamedChild"))
                             terminal.send("\r")
@@ -75,7 +75,7 @@ def main():
                             terminal.send("/switch visual-notice-parent\r")
                             scene("parent-again", lambda s: notice_line(s, "↳", "RenamedChild"))
                             cli("thread", "delete", "--thread", "visual-notice-child")
-                            scene("deleted-without-input", lambda s: "削除済み" in s or "参照先の会話を取得できません" in s)
+                            scene("deleted-without-input", lambda s: ("削除済み" in s or "参照先の会話を取得できません" in s) if language == "ja" else ("deleted" in s.lower() or "unavailable" in s.lower()))
                         assert b"\x1b]52;" not in terminal.raw
                         manifest["cases"].append({"name": name, "no_host_clipboard": True})
                     except BaseException:
