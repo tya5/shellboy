@@ -4,6 +4,20 @@ Status: initial inventory, not completion or permission to translate source data
 Baseline: main `b12a8291b1950a5f7db58de4dccbb12101a2a074` (W6 task 1 landed).
 B-5/B-6 are not yet included. No third-party production source was edited.
 
+## Stream Anchor Notice Follow-Up (#152)
+
+`src/frontend/streaming.rs` contained six application-authored failure reasons
+and a success/fallback notice in the stream-to-saved anchor handoff. The English
+UI previously received Japanese for both outcomes. This slice selects complete
+En/Ja notices using the configured startup UI language and preserves the original
+Japanese text. Mapping reasons are typed internally, and successful offsets,
+fallback to offset zero, ownership/revision guards and source content are
+unchanged. The inventory on this branch reports seven explicit Japanese `local!`
+arguments as (a), 32 test-only literals as (b), and no (c) in this file. The
+audit's initial inventory below remains historical; other files' (c) entries are
+not reclassified or claimed complete. Runtime and 3-OS acceptance are tracked
+separately in `acceptance.md`.
+
 ## Post-0.6.0 Follow-Up Review
 
 The first two product batches were rebased onto main

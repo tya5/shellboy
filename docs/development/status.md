@@ -3998,3 +3998,11 @@ The same private-mode, owner, protected-ancestor, non-symlink, path-length and
 identity/lease checks apply; endpoint publication and cleanup retain their
 ordering. Windows named pipes and configuration are unchanged. Validation
 results and untested environments are reported separately in acceptance.
+
+### #152 Stream Anchor Notice Follow-Up
+
+Localize the generated stream-to-saved anchor success and six failure notices
+without changing offset mapping, accepted-update guards, or source bytes. The
+slice is limited to `src/frontend/streaming.rs`; it does not claim Stage C is
+complete. Validation and remaining platform/terminal limits are recorded in
+[acceptance](../validation/acceptance.md#152-stream-anchor-notice-follow-up).

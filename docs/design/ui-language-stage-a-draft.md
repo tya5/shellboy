@@ -42,6 +42,17 @@ If a CLI/wire copy route is added, give it an explicit English non-TUI diagnosti
 boundary instead of reusing localized key guidance. Underlying History/API
 errors continue to propagate unchanged; do not translate their source text.
 
+## Stream-to-saved anchor notice (#152)
+
+A paused stream's anchor is mapped to a saved node only when the existing
+finite-window correspondence is proven. Represent the bounded set of mapping
+failures as typed presentation reasons and resolve each complete notification
+using the immutable startup UI language. Japanese retains the prior wording;
+English uses ASCII punctuation. A failed mapping still selects offset zero;
+accepted owner, generation, view revision and anchor guards remain unchanged.
+Source bodies, reasoning ranges, persisted nodes and arbitrary provider or user
+text are never translated or embedded in the generated notice.
+
 ## Terminal width
 
 After raw mode and the alternate screen are active, an isolated helper process

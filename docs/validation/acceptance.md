@@ -8554,3 +8554,14 @@ Stale cleanup, owner/mode/symlink protections and existing cleanup behavior
 remain required. Windows named-pipe behavior is outside the changed path.
 Exact commands, platform and CI results are reported in the task handoff; no
 live-provider or actual sandbox-exec observation is inferred.
+
+### #152 Stream Anchor Notice Follow-Up
+
+The focused suite covers complete En/Ja messages for success and all six
+failures, unchanged Japanese wording and offsets, and existing Unicode/source
+correspondence and stale-notice guards. On macOS arm64, the layout and watchdog
+checks and all 18 language-audit Python tests passed; Rust and exact-tip three-OS
+CI results are reported in the handoff. The audit still reports pending (c)
+items elsewhere. This synthetic coverage does not establish physical-terminal,
+IME, provider, or real-conversation behavior; the broader Stage C audit remains
+incomplete.
