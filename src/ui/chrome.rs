@@ -17,7 +17,7 @@ pub(super) fn header_line(
     };
     if selection {
         return Line::styled(
-            frozen_header_label(width, frozen_at),
+            frozen_header_label(width, frozen_at, view.language),
             palette.header().add_modifier(Modifier::BOLD),
         );
     }
@@ -31,7 +31,10 @@ pub(super) fn header_line(
     } else {
         match phase {
             super::activity::ActivityPhase::Recovery | super::activity::ActivityPhase::Failed => {
-                format!("! {}", phase.column_label())
+                format!(
+                    "! {}",
+                    super::watch::phase_label(phase, view.language, false)
+                )
             }
             super::activity::ActivityPhase::Stopped => glyphs::select("■", "#").into(),
             super::activity::ActivityPhase::Completed => "✓".into(),
@@ -90,44 +93,86 @@ pub(super) fn header_line(
     Line::from(spans).style(palette.header())
 }
 
-fn frozen_header_label(width: u16, frozen_at: Option<&str>) -> String {
+fn frozen_header_label(
+    width: u16,
+    frozen_at: Option<&str>,
+    language: crate::config::UiLanguage,
+) -> String {
     let time = frozen_at
         .and_then(|stamp| stamp.get(11..19))
         .filter(|time| time.is_ascii())
         .map(|time| format!("{time}Z"));
     let mut choices = Vec::new();
     if let Some(stamp) = frozen_at {
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定開始 {stamp} · F2/Esc解除 · Ctrl+L更新",
-            "表示固定開始 {stamp} | F2/Esc解除 | Ctrl+L更新"
-        ));
+        choices.push(match language {
+            crate::config::UiLanguage::Ja => glyphs::formatted!(
+                "表示固定開始 {stamp} · F2/Esc解除 · Ctrl+L更新",
+                "表示固定開始 {stamp} | F2/Esc解除 | Ctrl+L更新"
+            ),
+            crate::config::UiLanguage::En => glyphs::formatted!(
+                "Display frozen at {stamp} · F2/Esc resume · Ctrl+L refresh",
+                "Display frozen at {stamp} | F2/Esc resume | Ctrl+L refresh"
+            ),
+        });
     }
     if let Some(time) = time {
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定開始 {time} · F2/Esc解除 · Ctrl+L更新",
-            "表示固定開始 {time} | F2/Esc解除 | Ctrl+L更新"
-        ));
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定 {time} · F2/Esc解除",
-            "表示固定 {time} | F2/Esc解除"
-        ));
-        choices.push(format!("表示固定 {time} F2"));
-        choices.push(format!("表示固定 {time}"));
+        choices.push(match language {
+            crate::config::UiLanguage::Ja => glyphs::formatted!(
+                "表示固定開始 {time} · F2/Esc解除 · Ctrl+L更新",
+                "表示固定開始 {time} | F2/Esc解除 | Ctrl+L更新"
+            ),
+            crate::config::UiLanguage::En => glyphs::formatted!(
+                "Display frozen at {time} · F2/Esc resume · Ctrl+L refresh",
+                "Display frozen at {time} | F2/Esc resume | Ctrl+L refresh"
+            ),
+        });
+        choices.push(match language {
+            crate::config::UiLanguage::Ja => glyphs::formatted!(
+                "表示固定 {time} · F2/Esc解除",
+                "表示固定 {time} | F2/Esc解除"
+            ),
+            crate::config::UiLanguage::En => glyphs::formatted!(
+                "Frozen {time} · F2/Esc resume",
+                "Frozen {time} | F2/Esc resume"
+            ),
+        });
+        choices.push(match language {
+            crate::config::UiLanguage::Ja => format!("表示固定 {time} F2"),
+            crate::config::UiLanguage::En => format!("Frozen {time} F2"),
+        });
+        choices.push(match language {
+            crate::config::UiLanguage::Ja => format!("表示固定 {time}"),
+            crate::config::UiLanguage::En => format!("Frozen {time}"),
+        });
     } else {
         choices.push(
-            crate::ui::text_width::glyphs::select(
-                "表示固定 · 時刻未記録 · F2/Esc解除 · Ctrl+L更新",
-                "表示固定 | 時刻未記録 | F2/Esc解除 | Ctrl+L更新",
-            )
+            match language {
+                crate::config::UiLanguage::Ja => glyphs::select(
+                    "表示固定 · 時刻未記録 · F2/Esc解除 · Ctrl+L更新",
+                    "表示固定 | 時刻未記録 | F2/Esc解除 | Ctrl+L更新",
+                ),
+                crate::config::UiLanguage::En => glyphs::select(
+                    "Display frozen · Time not recorded · F2/Esc resume · Ctrl+L refresh",
+                    "Display frozen | Time not recorded | F2/Esc resume | Ctrl+L refresh",
+                ),
+            }
             .into(),
         );
         choices.push(
-            crate::ui::text_width::glyphs::select("表示固定 · F2/Esc解除", "表示固定 | F2/Esc解除")
-                .into(),
+            match language {
+                crate::config::UiLanguage::Ja => {
+                    glyphs::select("表示固定 · F2/Esc解除", "表示固定 | F2/Esc解除")
+                }
+                crate::config::UiLanguage::En => glyphs::select(
+                    "Display frozen · F2/Esc resume",
+                    "Display frozen | F2/Esc resume",
+                ),
+            }
+            .into(),
         );
     }
-    choices.push("表示固定".into());
-    choices.push("固定".into());
+    choices.push(super::i18n::local!(language, "表示固定", "Frozen").into());
+    choices.push(super::i18n::local!(language, "固定", "Hold").into());
     let label = choices
         .into_iter()
         .find(|label| label.width() <= usize::from(width))
@@ -184,7 +229,7 @@ impl ContextBar {
                 .input_tokens
                 .is_some_and(|input| u128::from(input) * 100 >= u128::from(self.auto_at) * 80)
     }
-    fn variants(&self, plain: bool) -> Vec<String> {
+    fn variants(&self, plain: bool, language: crate::config::UiLanguage) -> Vec<String> {
         let u = &self.usage;
         let mark = if plain && self.warn() { "!" } else { "" };
         if u.input_tokens.is_none() && u.output_tokens.is_none() && u.cached_tokens.is_none() {
@@ -203,10 +248,18 @@ impl ContextBar {
         };
         let down = format!("{}{}", glyphs::select("↓", "v"), show(u.output_tokens));
         let cache = match (u.cached_tokens, u.input_tokens) {
-            (Some(cached), Some(input)) if input > 0 => Some(format!(
-                "キャッシュ{}%",
-                ((u128::from(cached) * 100 + u128::from(input) / 2) / u128::from(input)).min(100)
-            )),
+            (Some(cached), Some(input)) if input > 0 => Some(match language {
+                crate::config::UiLanguage::Ja => format!(
+                    "キャッシュ{}%",
+                    ((u128::from(cached) * 100 + u128::from(input) / 2) / u128::from(input))
+                        .min(100)
+                ),
+                crate::config::UiLanguage::En => format!(
+                    "Cache {}%",
+                    ((u128::from(cached) * 100 + u128::from(input) / 2) / u128::from(input))
+                        .min(100)
+                ),
+            }),
             _ => None,
         };
         let mut out = Vec::new();
@@ -220,8 +273,13 @@ impl ContextBar {
         out
     }
     /// Drop order on narrow widths: cache, output, denominator, then input.
-    pub(super) fn text(&self, width: usize, plain: bool) -> Option<String> {
-        self.variants(plain)
+    pub(super) fn text(
+        &self,
+        width: usize,
+        plain: bool,
+        language: crate::config::UiLanguage,
+    ) -> Option<String> {
+        self.variants(plain, language)
             .into_iter()
             .find(|text| text.width() <= width)
     }
@@ -399,7 +457,7 @@ pub(super) fn footer_lines(
     if let Some(bar) = context {
         let used: usize = activity_spans.iter().map(|s| s.content.width()).sum();
         let room = usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 });
-        if let Some(text) = bar.text(room, palette.plain()) {
+        if let Some(text) = bar.text(room, palette.plain(), view.language) {
             if used > 0 {
                 activity_spans.push(Span::raw(glyphs::separator()));
             }
@@ -412,9 +470,15 @@ pub(super) fn footer_lines(
         }
     }
     let (hint, error) = notice.unwrap_or((hints, false));
-    let navigation_hint =
-        (view.navigation.is_loading() && view.navigation.request().is_some() && !error)
-            .then(|| format!("履歴読込中{}{hint}", glyphs::separator()));
+    let navigation_hint = (view.navigation.is_loading()
+        && view.navigation.request().is_some()
+        && !error)
+        .then(|| match view.language {
+            crate::config::UiLanguage::Ja => format!("履歴読込中{}{hint}", glyphs::separator()),
+            crate::config::UiLanguage::En => {
+                format!("Loading history{}{hint}", glyphs::separator())
+            }
+        });
     let hint = navigation_hint.as_deref().unwrap_or(hint);
     let notice_style = if error && !palette.plain() {
         Style::default().fg(super::theme::ATTENTION)
@@ -456,27 +520,57 @@ pub(super) fn welcome(
             .map(|line| Line::from(crate::presentation::sanitize_plain(line, 0).0))
             .collect();
     }
+    let language = view.language;
+    let cwd_label = super::i18n::local!(language, "作業場所: ", "Working folder: ");
     let cwd = if view.cwd.as_os_str().is_empty() {
-        "取得待ち".to_owned()
+        super::i18n::local!(language, "取得待ち", "Pending").to_owned()
     } else {
         fit(
             &view.cwd.to_string_lossy(),
-            usize::from(width).saturating_sub("作業場所: ".width()),
+            usize::from(width).saturating_sub(cwd_label.width()),
             true,
         )
     };
-    vec![
-        Line::from(Span::styled(
-            "依頼を入力してください",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(glyphs::formatted!(
+    let keys = match language {
+        crate::config::UiLanguage::Ja => glyphs::formatted!(
             "送信: {} · 改行: {}",
             "送信: {} | 改行: {}",
             config.ui.send_key,
             config.ui.newline_keys.join(" / ")
+        ),
+        crate::config::UiLanguage::En => glyphs::formatted!(
+            "Send: {} · Newline: {}",
+            "Send: {} | Newline: {}",
+            config.ui.send_key,
+            config.ui.newline_keys.join(" / ")
+        ),
+    };
+    let commands = match (language, width >= 55) {
+        (crate::config::UiLanguage::Ja, true) => glyphs::select(
+            "/ コマンド · /image 画像を添付 · F1 操作ガイド",
+            "/ コマンド | /image 画像を添付 | F1 操作ガイド",
+        ),
+        (crate::config::UiLanguage::Ja, false) => {
+            glyphs::select("/ コマンド · F1 操作ガイド", "/ コマンド | F1 操作ガイド")
+        }
+        (crate::config::UiLanguage::En, true) => glyphs::select(
+            "/ Commands · /image Attach image · F1 Guide",
+            "/ Commands | /image Attach image | F1 Guide",
+        ),
+        (crate::config::UiLanguage::En, false) => {
+            glyphs::select("/ Commands · F1 Guide", "/ Commands | F1 Guide")
+        }
+    };
+    vec![
+        Line::from(Span::styled(
+            super::i18n::local!(language, "依頼を入力してください", "Enter a request"),
+            Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from(format!("作業場所: {cwd}")),
+        Line::from(keys),
+        Line::from(match language {
+            crate::config::UiLanguage::Ja => format!("作業場所: {cwd}"),
+            crate::config::UiLanguage::En => format!("Working folder: {cwd}"),
+        }),
         Line::from(format!(
             "AGENTS: {}",
             fit(
@@ -485,14 +579,7 @@ pub(super) fn welcome(
                 true
             )
         )),
-        Line::from(if width >= 55 {
-            glyphs::select(
-                "/ コマンド · /image 画像を添付 · F1 操作ガイド",
-                "/ コマンド | /image 画像を添付 | F1 操作ガイド",
-            )
-        } else {
-            glyphs::select("/ コマンド · F1 操作ガイド", "/ コマンド | F1 操作ガイド")
-        }),
+        Line::from(commands),
     ]
 }
 
@@ -561,23 +648,64 @@ mod tests {
         text
     }
     #[test]
+    fn localized_frozen_banner_and_cache_keep_width_and_symbols() {
+        use crate::config::UiLanguage::{En, Ja};
+        use crate::ui::text_width;
+        let at = "2026-10-30T12:34:56Z";
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for language in [En, Ja] {
+                let wide = frozen_header_label(120, Some(at), language);
+                assert!(wide.contains(at));
+                assert!(wide.contains("F2/Esc"));
+                assert!(wide.contains("Ctrl+L"));
+                for width in [8, 16, 24, 40, 80, 120] {
+                    assert!(
+                        frozen_header_label(width, Some(at), language).width()
+                            <= usize::from(width)
+                    );
+                }
+                let cache = ContextBar {
+                    usage: crate::ui::ContextUsage {
+                        input_tokens: Some(5),
+                        output_tokens: None,
+                        cached_tokens: Some(1),
+                    },
+                    auto_at: 100,
+                }
+                .text(80, false, language)
+                .unwrap();
+                assert!(cache.contains(if language == Ja {
+                    "キャッシュ20%"
+                } else {
+                    "Cache 20%"
+                }));
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn frozen_banner_identifies_entry_and_resume_without_inventing_a_time() {
         let at = "2026-10-30T12:34:56Z";
-        let wide = frozen_header_label(100, Some(at));
+        let wide = frozen_header_label(100, Some(at), crate::config::UiLanguage::Ja);
         assert!(wide.contains(at) && wide.contains("F2/Esc解除") && wide.contains("Ctrl+L更新"));
-        let compact = frozen_header_label(40, Some(at));
+        let compact = frozen_header_label(40, Some(at), crate::config::UiLanguage::Ja);
         assert!(compact.contains("12:34:56Z") && compact.contains("F2/Esc解除"));
         for width in [8, 16, 24, 40, 80, 120] {
-            let label = frozen_header_label(width, Some(at));
+            let label = frozen_header_label(width, Some(at), crate::config::UiLanguage::Ja);
             assert!(label.width() <= usize::from(width));
             assert!(label.contains("表示固定"));
         }
-        assert!(frozen_header_label(100, None).contains("時刻未記録"));
+        assert!(
+            frozen_header_label(100, None, crate::config::UiLanguage::Ja).contains("時刻未記録")
+        );
     }
     #[test]
     fn empty_conversation_uses_measured_separators_without_changing_bindings() {
         use crate::ui::text_width;
         let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        config.ui.language = crate::config::UiLanguage::Ja;
         config.ui.send_key = "Ctrl+Enter".into();
         config.ui.newline_keys = vec!["Enter".into()];
         for (policy, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
@@ -600,8 +728,23 @@ mod tests {
     }
 
     #[test]
+    fn english_welcome_keeps_paths_and_key_bindings() {
+        let config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic/日本語"));
+        let shown = frame_text(&mut ui, 120, 24);
+        assert!(shown.contains("Enter a request"), "{shown}");
+        assert!(shown.contains("Send:"), "{shown}");
+        assert!(
+            shown.contains("Working folder: /synthetic/日本語"),
+            "{shown}"
+        );
+        assert!(shown.contains("/image Attach image"), "{shown}");
+    }
+
+    #[test]
     fn empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents() {
         let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        config.ui.language = crate::config::UiLanguage::Ja;
         config.ui.send_key = "Ctrl+Enter".into();
         config.ui.newline_keys = vec!["Enter".into()];
         let cwd = PathBuf::from("/synthetic/missing-workspace");
@@ -670,7 +813,9 @@ mod tests {
     #[test]
     fn selection_fixed_header_is_visible_and_exit_preserves_the_source_anchor() {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
         let before = ui.view().navigation.anchor.clone();
         ui.event(Event::Key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
         let shown = frame_text(&mut ui, 60, 20);
@@ -696,7 +841,9 @@ mod tests {
     fn minimum_selection_banner_remains_visible_above_a_readonly_popup() {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
         for (width, height) in [(8, 5), (80, 5), (24, 10), (60, 20)] {
-            let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
+            let mut config = Config::default();
+            config.ui.language = crate::config::UiLanguage::Ja;
+            let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
             for code in [KeyCode::F(1), KeyCode::F(2)] {
                 ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
             }
@@ -715,7 +862,9 @@ mod tests {
     #[test]
     fn narrow_main_screen_keeps_phase_and_minimum_input_history_areas() {
         for (width, height) in [(35, 12), (60, 20), (120, 40)] {
-            let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
+            let mut config = Config::default();
+            config.ui.language = crate::config::UiLanguage::Ja;
+            let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
             ui.select_thread("t".into());
             ui.apply(UiUpdate::Activity {
                 thread_id: "t".into(),
@@ -740,7 +889,9 @@ mod tests {
     }
     #[test]
     fn long_titles_preserve_state_and_model_and_short_titles_leave_a_path_suffix() {
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/workspace/project"));
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, PathBuf::from("/workspace/project"));
         ui.select_thread("thread".into());
         ui.view_mut().title = "長い題名とe\u{301}を含む依頼".repeat(16);
         ui.view_mut().model = Some("mock-model".into());
@@ -938,29 +1089,52 @@ mod context_bar_tests {
     fn known_unknown_disabled_and_narrow() {
         let known = bar(Some(140_000), Some(20_000), Some(120_400), 200_000);
         assert_eq!(
-            known.text(80, false).unwrap(),
+            known
+                .text(80, false, crate::config::UiLanguage::Ja)
+                .unwrap(),
             "^140K/200K v20K キャッシュ86%"
         );
         // Drop order: cache, output, denominator, input.
-        assert_eq!(known.text(18, false).unwrap(), "^140K/200K v20K");
-        assert_eq!(known.text(14, false).unwrap(), "^140K/200K");
-        assert_eq!(known.text(9, false).unwrap(), "^140K");
-        assert_eq!(known.text(4, false), None);
+        assert_eq!(
+            known
+                .text(18, false, crate::config::UiLanguage::Ja)
+                .unwrap(),
+            "^140K/200K v20K"
+        );
+        assert_eq!(
+            known
+                .text(14, false, crate::config::UiLanguage::Ja)
+                .unwrap(),
+            "^140K/200K"
+        );
+        assert_eq!(
+            known.text(9, false, crate::config::UiLanguage::Ja).unwrap(),
+            "^140K"
+        );
+        assert_eq!(known.text(4, false, crate::config::UiLanguage::Ja), None);
         // Disabled threshold hides the denominator; unknown cache hides the percentage.
         assert_eq!(
-            bar(Some(5), Some(7), None, 0).text(80, false).unwrap(),
+            bar(Some(5), Some(7), None, 0)
+                .text(80, false, crate::config::UiLanguage::Ja)
+                .unwrap(),
             "^5 v7"
         );
         assert_eq!(
-            bar(Some(5), None, Some(1), 100).text(80, false).unwrap(),
+            bar(Some(5), None, Some(1), 100)
+                .text(80, false, crate::config::UiLanguage::Ja)
+                .unwrap(),
             "^5/100 v- キャッシュ20%"
         );
         assert_eq!(
-            bar(None, None, None, 200_000).text(80, false).unwrap(),
+            bar(None, None, None, 200_000)
+                .text(80, false, crate::config::UiLanguage::Ja)
+                .unwrap(),
             "^-"
         );
         assert_eq!(
-            bar(None, Some(3), None, 0).text(80, false).unwrap(),
+            bar(None, Some(3), None, 0)
+                .text(80, false, crate::config::UiLanguage::Ja)
+                .unwrap(),
             "^- v3"
         );
     }
@@ -970,8 +1144,14 @@ mod context_bar_tests {
         let hot = bar(Some(160_000), None, None, 200_000);
         assert!(!ok.warn() && hot.warn());
         assert!(!bar(Some(999_999), None, None, 0).warn());
-        assert_eq!(hot.text(80, true).unwrap(), "!^160K/200K v-");
-        assert_eq!(ok.text(80, true).unwrap(), "^159K/200K v-");
+        assert_eq!(
+            hot.text(80, true, crate::config::UiLanguage::Ja).unwrap(),
+            "!^160K/200K v-"
+        );
+        assert_eq!(
+            ok.text(80, true, crate::config::UiLanguage::Ja).unwrap(),
+            "^159K/200K v-"
+        );
         use ratatui::style::Color;
         let view = crate::ui::ThreadView::new(&crate::config::Config::default(), "/".into());
         let rich = crate::ui::theme::Palette::from_capabilities(

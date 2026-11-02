@@ -123,5 +123,140 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/chrome.rs:0ca360031fc5eecd:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:12fe515f657521e9:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:13f07d9301968b6d:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:14e68474299f5d86:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:287a622782b745b7:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:2c39cf469ed04965:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:3aef4b7c4d688e8e:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:47bce6efc8943e0b:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:4a18f29c1a60eeed:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:6100bdbec8d39b3a:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:673ec841e67bf5d6:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:684ab1f53ae2a2b2:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:78f5a3a72c491de8:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:82cb320704fc74e6:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:8bb6463a8491168c:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:8f73cbd20211198b:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "774a9318157b8aac13888751c51ffc351b73b141f333f1f7b6ba3b4a764089a5"
+  },
+  "src/ui/chrome.rs:907d9b9b287b7f1f:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "0c8d50fb0c2b6db7e49aa4460022a457d351b160d621abd42f7f93ca5ceeffe8"
+  },
+  "src/ui/chrome.rs:9c227bca083fa28a:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:9ed1fd44b9846311:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:a762bed2d0773827:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "0c8d50fb0c2b6db7e49aa4460022a457d351b160d621abd42f7f93ca5ceeffe8"
+  },
+  "src/ui/chrome.rs:b377582da1390010:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:b4f7f20867d09b77:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:bac0f42cf8b68763:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "d68c754345f9ae606b62c8ba8dc3c8112e81e805053d338db2324a019f608a4b"
+  },
+  "src/ui/chrome.rs:c92352ba91e76858:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:d434831c42f551f5:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:da6dab05ad65234b:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
+  },
+  "src/ui/chrome.rs:df02e4484f6f0ff2:1": {
+    "category": "a",
+    "reason": "Reviewed chrome display resource: the matching English arm or localized macro is present; dynamic values, bindings and glyph alternatives are retained.",
+    "source_tokens_sha256": "b6052d8bae6f94f822981b509e9f16f9fce33aa7750bb2ca77ddac83fb8099ee"
   }
 }

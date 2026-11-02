@@ -3938,3 +3938,10 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: Chrome display localization (2026-11-02)
+
+Localized the frozen header, attention phase, cache label, history loading and
+normal welcome screen; Japanese strings and glyph alternatives remain intact.
+Config-incomplete welcome still calls the shared Japanese setup projection and
+needs the separately coordinated setup work. The audit's lexical c=0 does not
+establish completeness for dynamic strings or cross-boundary values.

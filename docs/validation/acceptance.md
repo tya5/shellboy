@@ -8457,3 +8457,12 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+### #152 stage C: Chrome display localization (2026-11-02)
+
+On macOS, rust-slot `cargo check --tests`, 8 chrome and 4 context-bar focused
+unit tests passed, including both languages and terminal width policies. The
+scoped manifest yields a=27, b=38, c=0; the full manifest remains blocked by
+an existing stale `src/presentation/messages.rs` fingerprint on main 2607218b.
+The config-incomplete path and dynamic notice origins require follow-up; no
+physical terminal or OS clipboard test was done. Exact task CI and integration
+CI remain pending.
