@@ -428,3 +428,14 @@ returned no items with an incompatible/degraded index; no index was rebuilt.
 No broad classification or fingerprint change is claimed. Exact3OS integration,
 physical terminal, clipboard, live provider and final Stage C acceptance remain
 separate. This work follows the subsequently selected0.6.1 cutoff.
+
+### #152 Help And Confirmation Glyph Audit
+
+On base 4b9c665e, 14 help and four confirmation-footer Japanese literals are
+individually classified as the Japanese arms of `glyphs::localized!`; each has
+complete English arms selected independently of saved, source, or user text.
+No production UI behavior, API, or data representation changes. The focused
+help and confirmation tests exercise Ja/En under observed widths 1, 2, and
+unknown. The classification audit validates fingerprints but is not a zero gate:
+1,391 category (c) records remain on this base. Physical PTY and Windows
+integration remain separate checks.
