@@ -1515,7 +1515,11 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
         }),
     )
     .await;
-    assert_eq!(collected["raw_bytes_collected"], 2097152);
+    // The capacity refusal marked every storage kind (#171 backstop), so the
+    // maintenance requester may reclaim the released output before this
+    // explicit collect does; either way none of it remains (status below).
+    let reclaimed = collected["raw_bytes_collected"].as_u64().unwrap();
+    assert!(reclaimed == 2097152 || reclaimed == 0, "{collected}");
     let status = request(
         &control,
         Command::StorageStatus(StorageArgs { category: None }),
