@@ -457,6 +457,7 @@ mod live_child_tests {
             observed_at: std::time::Instant::now(),
             tool_calls: 0,
             cancelled_calls: 0,
+            counts_capped: false,
             poll_running: false,
         };
         selection

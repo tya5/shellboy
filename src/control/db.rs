@@ -232,10 +232,16 @@ impl Store {
         }
     }
 
-    async fn receipt_attempt<T, F>(&self, kind: Option<execute_kind::Kind>, attempt: F) -> Result<(Result<T>, bool, u64)>
+    async fn receipt_attempt<T, F>(
+        &self,
+        kind: Option<execute_kind::Kind>,
+        attempt: F,
+    ) -> Result<(Result<T>, bool, u64)>
     where
         T: Send + 'static,
-        F: FnOnce(&mut Connection, &mut bool) -> std::result::Result<Result<T>, StorageError> + Send + 'static,
+        F: FnOnce(&mut Connection, &mut bool) -> std::result::Result<Result<T>, StorageError>
+            + Send
+            + 'static,
     {
         let job = move |db: &mut Connection| {
             let mut pressure = false;
@@ -245,7 +251,8 @@ impl Store {
         match kind {
             Some(kind) => execute_kind::call(&self.database, kind, job).await,
             None => self.database.call(job).await,
-        }.map_err(storage_error)
+        }
+        .map_err(storage_error)
     }
 
     /// Retry admission outside the writer between bounded background windows.

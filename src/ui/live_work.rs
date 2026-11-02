@@ -742,7 +742,7 @@ impl LiveWorkView {
         let timing = self
             .seconds
             .first()
-            .filter(|_| !snapshot.counts_capped)
+            .filter(|_| self.snapshot.as_ref().is_none_or(|snapshot| !snapshot.counts_capped))
             .and_then(|(elapsed, _)| *elapsed)
             .map(|s| {
                 format!(
