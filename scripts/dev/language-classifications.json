@@ -99,6 +99,86 @@
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
+  "src/ui/i18n.rs:9df93e539f2397ab:1": {
+    "category": "a",
+    "reason": "Reviewed explicit UiLanguage::Ja match arm of typed UI Message::render; complete English branches preserve the numeric argument and English singular/plural distinction.",
+    "source_tokens_sha256": "fd168f72b155a270dde041281442c79ee1f380cf6132275a22920d803c331829"
+  },
+  "src/ui/i18n.rs:b63c0516cc19f4a5:1": {
+    "category": "a",
+    "reason": "Reviewed explicit UiLanguage::Ja match arm of typed UI Message::render; complete English branches preserve the numeric argument and English singular/plural distinction.",
+    "source_tokens_sha256": "fd168f72b155a270dde041281442c79ee1f380cf6132275a22920d803c331829"
+  },
+  "src/ui/i18n.rs:835c3601d2f72151:1": {
+    "category": "a",
+    "reason": "Reviewed explicit UiLanguage::Ja match arm of typed UI Message::render; complete English branches preserve the numeric argument and English singular/plural distinction.",
+    "source_tokens_sha256": "fd168f72b155a270dde041281442c79ee1f380cf6132275a22920d803c331829"
+  },
+  "src/ui/i18n.rs:64c17158746e5f3d:1": {
+    "category": "a",
+    "reason": "Reviewed explicit UiLanguage::Ja match arm of typed UI Message::render; complete English branches preserve the numeric argument and English singular/plural distinction.",
+    "source_tokens_sha256": "fd168f72b155a270dde041281442c79ee1f380cf6132275a22920d803c331829"
+  },
+  "src/ui/key_hints.rs:79626faddf7155ad:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese width arm of Action::Commands glyphs::localized!, paired with complete English arms; key bindings and user values are unchanged.",
+    "source_tokens_sha256": "6c3cbfc89b2f3183973062b0fc47ff0d19871d6940f78189e6477513399ad84b"
+  },
+  "src/ui/key_hints.rs:9ba1962baead7c85:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese width arm of Action::Commands glyphs::localized!, paired with complete English arms; key bindings and user values are unchanged.",
+    "source_tokens_sha256": "6c3cbfc89b2f3183973062b0fc47ff0d19871d6940f78189e6477513399ad84b"
+  },
+  "src/ui/key_hints.rs:0b7b38d702d326b9:1": {
+    "category": "a",
+    "reason": "Reviewed private legacy Japanese footer builder: its sole production caller detail_footer_for selects it only for UiLanguage::Ja; English uses separate complete messages. Re-review if the caller changes.",
+    "source_tokens_sha256": "4efb58ac27a560d36f89e9781222871a8054b6b69d2a92ae42ed447037a88b18"
+  },
+  "src/ui/key_hints.rs:2d925b8ca86fa693:1": {
+    "category": "a",
+    "reason": "Reviewed private legacy Japanese footer builder: its sole production caller detail_footer_for selects it only for UiLanguage::Ja; English uses separate complete messages. Re-review if the caller changes.",
+    "source_tokens_sha256": "4efb58ac27a560d36f89e9781222871a8054b6b69d2a92ae42ed447037a88b18"
+  },
+  "src/ui/thread_deletion.rs:a706923428209ba1:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "b66c65240c1482f6696e16ce02b41b52fa2e9e182705650c0c189407ecdcbd52"
+  },
+  "src/ui/thread_deletion.rs:512bc835e7cdfea6:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "b66c65240c1482f6696e16ce02b41b52fa2e9e182705650c0c189407ecdcbd52"
+  },
+  "src/ui/thread_deletion.rs:f4ec677c9f1bb592:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "b66c65240c1482f6696e16ce02b41b52fa2e9e182705650c0c189407ecdcbd52"
+  },
+  "src/ui/thread_deletion.rs:fc97484e18f57064:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "b66c65240c1482f6696e16ce02b41b52fa2e9e182705650c0c189407ecdcbd52"
+  },
+  "src/ui/thread_deletion.rs:331aeb42cd4b0291:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "869a25cf8e6b6571ce4ca54c7c8c98c7110e28b351319c9120c7581be041704d"
+  },
+  "src/ui/thread_deletion.rs:4d7790a6bdb48713:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "869a25cf8e6b6571ce4ca54c7c8c98c7110e28b351319c9120c7581be041704d"
+  },
+  "src/ui/thread_deletion.rs:753b8d768ea619bb:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "869a25cf8e6b6571ce4ca54c7c8c98c7110e28b351319c9120c7581be041704d"
+  },
+  "src/ui/thread_deletion.rs:47b42d046f1109f9:1": {
+    "category": "a",
+    "reason": "Reviewed app-owned Japanese arm of a glyphs::localized! deletion-review footer or phase notice, paired with complete English arms; dynamic title, thread ID and source values are separate and unchanged.",
+    "source_tokens_sha256": "869a25cf8e6b6571ce4ca54c7c8c98c7110e28b351319c9120c7581be041704d"
+  },
   "src/presentation/messages.rs:d1df57e28c5bfa57:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",

@@ -704,6 +704,46 @@ mod language_rendering_tests {
     }
 
     #[test]
+    fn reviewed_deletion_messages_preserve_title_id_and_execution_state() {
+        use crate::ui::text_width;
+        let title = "利用者の題名 | opaque";
+        let thread = "thread-fixture";
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            let narrow = policy == Some(1);
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                let mut config = crate::config::Config::default();
+                config.ui.language = language;
+                let mut ui = UiState::new(&config, std::env::temp_dir());
+                let _ = ui.begin_thread_deletion(thread.into());
+                let Some(Confirmation::ThreadDeletion(dialog)) = &mut ui.confirmation else { panic!("expected deletion dialog") };
+                dialog.title = title.into();
+                let (loading, executing, disabled, enabled) = match (language, narrow) {
+                    (UiLanguage::Ja, true) => ("削除影響を確認中… Y はまだ使えません。", "削除を実行中… 閉じても受理済みの処理は継続します。", "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 使用不可 · ↑↓/PgUp/PgDn 閲覧", "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 削除 · ↑↓/PgUp/PgDn 閲覧"),
+                    (UiLanguage::Ja, false) => ("削除影響を確認中. Y はまだ使えません。", "削除を実行中. 閉じても受理済みの処理は継続します。", "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧", "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧"),
+                    (UiLanguage::En, true) => ("Checking deletion impact… Y is not available yet.", "Deleting… Closing this screen does not cancel accepted work.", "D / Space Toggle descendants · N / Esc Back\nY disabled · ↑↓/PgUp/PgDn Scroll", "D / Space Toggle descendants · N / Esc Back\nY Delete · ↑↓/PgUp/PgDn Scroll"),
+                    (UiLanguage::En, false) => ("Checking deletion impact. Y is not available yet.", "Deleting. Closing this screen does not cancel accepted work.", "D / Space Toggle descendants | N / Esc Back\nY disabled | ^v/PgUp/PgDn Scroll", "D / Space Toggle descendants | N / Esc Back\nY Delete | ^v/PgUp/PgDn Scroll"),
+                };
+                assert!(dialog.text().contains(loading));
+                assert!(dialog.text().contains(title));
+                assert!(dialog.text().contains(thread));
+                assert_eq!(dialog.footer(), disabled);
+                assert!(!dialog.can_execute());
+                dialog.phase = Phase::Executing;
+                assert!(dialog.text().contains(executing));
+                assert_eq!(dialog.footer(), disabled);
+                assert!(!dialog.can_execute());
+                assert_eq!(dialog.title, title);
+                assert_eq!(dialog.args.thread_id, thread);
+                show_ready(&mut ui);
+                let Some(Confirmation::ThreadDeletion(dialog)) = &ui.confirmation else { panic!("expected ready dialog") };
+                assert!(dialog.can_execute());
+                assert_eq!(dialog.footer(), enabled);
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+    #[test]
     fn ready_deletion_review_keeps_destructive_action_explicit() {
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {

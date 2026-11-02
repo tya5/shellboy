@@ -124,6 +124,23 @@ mod tests {
     }
 
     #[test]
+    fn reviewed_width_and_count_messages_preserve_arguments() {
+        for (observed, ja, en) in [
+            (Some(1), "曖昧な文字の幅: 1列（測定済み）", "Ambiguous character width: 1 column (measured)."),
+            (Some(2), "曖昧な文字の幅: 2列（測定済み、Ratatui既定値1列と不一致）", "Ambiguous character width: 2 columns (measured); differs from Ratatui default (1)."),
+            (None, "曖昧な文字の幅: 不明（2列を確保）", "Ambiguous character width: unknown; reserving 2 columns."),
+            (Some(0), "曖昧な文字の幅: 不明（2列を確保）", "Ambiguous character width: unknown; reserving 2 columns."),
+        ] {
+            assert_eq!(Message::TerminalWidth { observed }.render(UiLanguage::Ja), ja);
+            assert_eq!(Message::TerminalWidth { observed }.render(UiLanguage::En), en);
+        }
+        for count in [0, 1, 2, 1000] {
+            let en = if count == 1 { format!("Deleted {count} conversation") } else { format!("Deleted {count} conversations") };
+            assert_eq!(Message::DeletedConversations { count }.render(UiLanguage::En), en);
+            assert_eq!(Message::DeletedConversations { count }.render(UiLanguage::Ja), format!("{count} 件の会話を削除しました"));
+        }
+    }
+    #[test]
     fn complete_messages_handle_zero_one_and_many() {
         assert_eq!(
             Message::DeletedConversations { count: 0 }.render(UiLanguage::En),

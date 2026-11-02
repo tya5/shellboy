@@ -444,6 +444,30 @@ impl UiState {
 mod tests {
     use super::*;
     #[test]
+    fn reviewed_command_hint_and_legacy_footer_follow_language_and_width() {
+        use crate::config::UiLanguage;
+        use crate::ui::text_width;
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            let narrow = policy == Some(1);
+            let (ja, en) = if narrow {
+                ("コマンド候補を表示。↑↓で選び、Tabで補完", "Show commands; select with ↑↓ and complete with Tab")
+            } else {
+                ("コマンド候補を表示。^vで選び、Tabで補完", "Show commands; select with ^v and complete with Tab")
+            };
+            assert_eq!(Action::Commands.description(UiLanguage::Ja), ja);
+            assert_eq!(Action::Commands.description(UiLanguage::En), en);
+            assert_eq!(Action::Commands.spec().0, "/");
+            for context in [Context::Details, Context::Fields, Context::Original { next: true }, Context::Original { next: false }, Context::OriginalPending] {
+                assert_eq!(detail_footer_for(context, UiLanguage::Ja), detail_footer(context));
+                let english = detail_footer_for(context, UiLanguage::En);
+                assert!(english.starts_with("Esc Back"));
+                assert!(!english.contains("戻る"));
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+    #[test]
     fn hint_glyphs_follow_width_without_changing_bindings() {
         use crate::config::UiLanguage;
         use crate::ui::text_width::{self, UnicodeWidthStr};
