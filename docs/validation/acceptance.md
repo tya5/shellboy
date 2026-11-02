@@ -8464,3 +8464,7 @@ passed; both languages preserve attachment paths and draft contents. Scoped scan
 reports a=7, b=19, c=15; the full manifest remains blocked by the pre-existing
 stale presentation fingerprint. Exact task and three-OS integration CI remain
 pending; no physical terminal or OS clipboard test was performed.
+
+Task CI 41413856794 failed on two default-English history rebase integration
+tests that still expected Japanese status. Their expectations now match the
+English display; both focused tests pass on macOS. Source anchors are unchanged.
