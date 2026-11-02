@@ -153,12 +153,15 @@ fn started(update: &UiUpdate) -> Option<InspectionTarget> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_retargeting() {
-    for route in ["status", "thread", "shell", "compact"] {
+    for (route, language) in ["status", "thread", "shell", "compact"]
+        .into_iter()
+        .flat_map(|route| [(route, "ja"), (route, "en")])
+    {
         crate::test_watchdog::watchdog("registered list observation IPC route", async {
             let root = tempfile::tempdir().unwrap();
             let config = root.path().join("config.toml");
             let data = root.path().join("data");
-            std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+            std::fs::write(&config,format!("default_connection='fixture'\ndefault_model='fixture'\n[ui]\nlanguage='{language}'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n")).unwrap();
             let owner = DataOwner::start(Some(config),Some(data.clone()),root.path().into()).await.unwrap();
             let control = Control::new(&owner,root.path().into());
             control.start().await.unwrap();
@@ -242,7 +245,12 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                     _ => expected,
                 };
                 assert_eq!(fact.displayed(),displayed,"unexpected display mapping at {pointer}");
-                paint_changed(&mut ui,&actions,displayed).await;
+                let painted = match (route, state, language) {
+                    ("status" | "shell", "failed", "en") => "Failed",
+                    ("status" | "shell", "stopped", "en") => "Stopped",
+                    _ => displayed,
+                };
+                paint_changed(&mut ui,&actions,painted).await;
                 let before = control.store.database.call(|db| Ok(db.query_row("SELECT revision,title FROM thread WHERE id='scope'",[],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?)))?)).await.unwrap();
                 let replay = shellboy::ipc::call(&data,mutation,Some(response.operation_id.clone()),None).await.unwrap();
                 assert!(replay.ok);
