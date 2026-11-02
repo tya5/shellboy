@@ -12,6 +12,14 @@ single run each, recorded facts not bounds): before 60.66 s (`SCAN embedding_job
 per candidate), `jobs_source` only 20.5 ms (full node scan), both indexes 5.5 ms.
 The user's DB was not opened; the 2m33s figure came from a copy measured earlier.
 Schema upgrade/fresh-equality tests are listed in the commit's check run.
+## Dead delivery retention (#170)
+
+On native macOS, `cargo check --tests`, five `gc::event_retention` unit tests,
+the schema-validation test, five `storage_hot_queries` tests, public schema
+convergence, and the History GC integration test passed against synthetic data.
+The integration test initially saw stale shared-target output; it passed after
+`touch src/lib.rs` and rebuild in rust-slot. Three-OS CI is pending. No
+production database mutation or real conversation data was used.
 
 ## Bounded index wake-delay read (#164, 2026-11-02)
 

@@ -13,6 +13,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
+mod event_retention;
 mod history;
 pub(crate) mod observation;
 mod usage;
@@ -31,7 +32,7 @@ pub struct GcService {
     data_dir: PathBuf,
     attachments: Arc<AttachmentService>,
     files: BlockingFiles,
-    lane: Arc<Mutex<()>>,
+    lane: Arc<Mutex<event_retention::Cursor>>,
     // One coalesced permit for the existing frontend; never raw data or a task.
     availability_changed: Arc<Notify>,
 }
@@ -124,7 +125,7 @@ impl GcService {
             config,
             data_dir,
             attachments,
-            lane: Arc::new(Mutex::new(())),
+            lane: Arc::new(Mutex::new(event_retention::Cursor::default())),
             availability_changed: Arc::new(Notify::new()),
         }
     }
@@ -193,10 +194,18 @@ impl GcService {
         category: StorageCategory,
         at: DateTime<Utc>,
     ) -> Result<CollectionReport> {
-        let _lane = self.lane.lock().await;
+        let mut lane = self.lane.lock().await;
         let mut report = CollectionReport::default();
         if matches!(category, StorageCategory::All | StorageCategory::Raw) {
             self.collect_raw(at, &mut report).await?;
+        }
+        if matches!(category, StorageCategory::All | StorageCategory::History) {
+            let cursor = *lane;
+            *lane = self
+                .database
+                .call(move |db| event_retention::collect_batch(db, cursor))
+                .await
+                .map_err(crate::app::storage_error)?;
         }
         if matches!(category, StorageCategory::All | StorageCategory::History) {
             report.submitted_drafts_collected = self

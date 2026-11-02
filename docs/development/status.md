@@ -7,6 +7,10 @@ correlated embedding_job scan per node (measured 64-210 s DB jobs on the user's
 owner, every other DB job queued behind). Migration 0020 adds `jobs_source` and
 the partial `nodes_index_gc`; the query is unchanged and now seeks only
 deleted/payload-less nodes. Plan asserted in `gc::tests`; see acceptance.
+## Dead delivery retention (#170, in progress)
+
+History maintenance incrementally removes terminal-Run pending deliveries and
+only unreferenced shell completion events. See acceptance for verification.
 
 ## Bounded index wake-delay read (#164, branch CI pending)
 

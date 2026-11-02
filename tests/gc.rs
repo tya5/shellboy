@@ -958,3 +958,69 @@ async fn malformed_cursor_rebuilds_marks_before_resuming() {
     .unwrap();
     f.db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn history_maintenance_collects_dead_deliveries_without_losing_history_or_raw() {
+    let f = Fixture::new(Config::default()).await;
+    f.raw(
+        "raw-preserved",
+        "exited",
+        "2020-01-01T00:00:00Z",
+        vec![7; 8],
+        false,
+    )
+    .await;
+    f.db.call(|db| {
+        db.execute_batch(r#"
+            INSERT INTO run(id,thread_id,state,created_at)VALUES('live-run','live','live','now');
+            INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at)VALUES
+                ('context','context_changed','{}','live',NULL,'{}','now'),
+                ('disposable','shell_ended','{}','live','run','{}','now'),
+                ('referenced','shell_ended','{}','live','run','{}','now'),
+                ('active','shell_ended','{}','live','live-run','{}','now');
+            INSERT INTO delivery(event_id,recipient_id,state)VALUES
+                ('context','run','pending'),('disposable','run','processed'),
+                ('referenced','run','processed'),('active','live-run','pending');
+            INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES
+                ('notification','turn','event','now','{"event_id":"referenced"}');
+        "#)?;
+        Ok(())
+    }).await.unwrap();
+    f.gc.collect(StorageCategory::History, now()).await.unwrap();
+    f.db.call(|db| {
+        assert_eq!(
+            scalar(db, "SELECT count(*) FROM delivery WHERE event_id='context'")?,
+            0
+        );
+        assert_eq!(
+            scalar(db, "SELECT count(*) FROM event WHERE id='context'")?,
+            1
+        );
+        assert_eq!(
+            scalar(db, "SELECT count(*) FROM event WHERE id='disposable'")?,
+            0
+        );
+        assert_eq!(
+            scalar(db, "SELECT count(*) FROM event WHERE id='referenced'")?,
+            1
+        );
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT count(*) FROM delivery WHERE event_id='active' AND state='pending'"
+            )?,
+            1
+        );
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT count(*) FROM output_chunk WHERE execution_id='raw-preserved'"
+            )?,
+            1
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}

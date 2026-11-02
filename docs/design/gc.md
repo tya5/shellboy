@@ -94,3 +94,23 @@ and remove the matching submitted row atomically. Only admitted or known-admissi
 cancelled input qualifies; never submitting, unknown, editing or archived rows.
 No receipt, original node, cancellation archive or attachment is removed by this
 step. Report submitted_drafts_collected, not physical SQLite shrink.
+
+## Dead delivery and shell-event retention (#170)
+
+History/All maintenance scans at most 64 delivery and 32 event rowids per
+transaction, changing at most 128 rows in total, then yields to other DB jobs.
+An in-memory cursor advances on a
+successful commit and wraps at the end; restart can repeat scans. A pending
+delivery is removed only when its recipient Run is completed, stopped or failed.
+The event remains, including undelivered `context_changed` for a later Run.
+Late arrivals to a terminal Run are handled by a later pass; live, stopping and
+recovery-waiting Runs retain their deliveries. `shell_ended` events are removed
+only for terminal Runs, with no pending/unknown delivery and
+no retained event-node reference. At most one of their processed deliveries is
+removed per candidate per pass; events disappear only after their last delivery.
+The derived node-reference and event/delivery-state indexes keep the existence
+checks independent of unrelated history. This is structural best-effort cleanup,
+not a hard row-count bound: retained references, maintenance backlog and
+throughput greater than the scan rate can retain rows indefinitely.
+No conversation text, raw shell output or other event kind is removed by this
+policy. Existing SQLite pages are reusable but not automatically returned to OS.

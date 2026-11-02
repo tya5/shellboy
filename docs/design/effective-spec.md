@@ -37,12 +37,16 @@ watchdogs remain unchanged.
 
 ## Current conversation storage
 
-Conversation schema20 records selected-path admission (13), Turn interruption
+Issue #170 adds schema21 derived event-retention lookup indexes and bounded
+maintenance of terminal-Run pending deliveries and unreferenced shell
+completion events. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
+
+Conversation schema21 records selected-path admission (13), Turn interruption
 and draft indexes (14), derived readback indexes (15), bounded Thread
-observation lookup indexes (16), the F parent lookup index (17), and summary
-usage metadata accounting (18), exact completed-attempt scope index (19), and
-index-source GC lookup indexes (20, #164); schema19 is
-reused without schema changes for
+observation lookup indexes (16), the F parent lookup index (17), summary usage
+metadata accounting (18), the completed-attempt scope index (19), index-source
+GC lookup indexes (20, #164), and event-retention lookup indexes (21). Version
+19 was reused without schema changes for
 [opt-in Responses cache diagnostics](cache-diagnostics.md); standalone
 RAG remains schema3. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;

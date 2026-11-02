@@ -1,5 +1,8 @@
 # SQLite migration と専用worker
 
+Schema20 adds derived event-retention indexes; it does not rewrite event or
+delivery data. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
+
 ## DB job timing (#164)
 
 The DB worker observes each accepted job from queue admission through execution.
@@ -16,7 +19,7 @@ before diagnostics shutdown; diagnostics may still be dropped under pressure.
 
 ## Current-only contract (Issue #33, 0.2.0)
 
-Current conversation schema on the F preparation branch is v16. Migration 15 adds derived readback indexes;16 adds the parent-Thread covering index. Migration12 accounts for bounded Revisit
+Current conversation schema is v20. Migration 15 adds derived readback indexes; 16 adds Thread observation indexes; 17 adds the parent-Thread covering index; 18 accounts for summary usage; 19 adds the completed-attempt scope index; 20 adds event-retention lookup indexes. Migration12 accounts for bounded Revisit
 metadata;13 records selected-path admission;14 records Turn interruption and
 indexes drafts. The existing `tool_result_node(node_id)` index from migration2
 also covers retained result-source lookup after payload GC; the earlier #41
