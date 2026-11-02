@@ -140,12 +140,12 @@ fn project(
     } = raw;
     let (mut nodes, info, _) = history.project_page(width, None);
     message_metadata::apply(&mut nodes, &sources);
-    tools::apply(&mut nodes, &tools);
+    tools::apply(&mut nodes, &tools, language);
     recovery::apply(&mut nodes, recovery);
     usage::apply(&mut nodes, usage, language);
     if let Some(scope) = &mut tool_scope {
         message_metadata::apply(&mut scope.nodes, &sources);
-        tools::apply(&mut scope.nodes, &tools);
+        tools::apply(&mut scope.nodes, &tools, language);
         for node in &mut scope.nodes {
             node.presentation.read_revision = info.read_revision;
         }

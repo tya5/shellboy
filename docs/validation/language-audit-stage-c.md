@@ -451,3 +451,16 @@ has no `(c)` entries. No manual `language-classifications.json` entry or
 source-token fingerprint update was needed; the test-watchdog fingerprint is
 maintained separately. The broader Stage C audit and three-OS integration
 acceptance remain incomplete.
+
+## Product Review Batch9: Tool Interruption Reason Labels
+
+`src/frontend/tools.rs` now scopes its two reason-specific Japanese display
+strings to `UiLanguage::Ja`. English remains rendered by the existing
+`PriorCallInterrupted` typed label in `presentation::messages::tool_reason`.
+Saved reason values, reason kinds, receipt/tool status, IDs, provider data,
+and canonical payloads are unchanged.
+
+The current audit classifies the two source literals as `(a)` and the two
+test expectations as `(b)`; no `(c)` remains in this file. No manual
+`language-classifications.json` entry or source-token fingerprint update was
+needed. The overall Stage C gate remains open.

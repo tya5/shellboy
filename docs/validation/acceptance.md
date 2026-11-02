@@ -8534,3 +8534,27 @@ Exact-tip task CI is reported in the integration handoff; three-OS integration
 validation remains with the integrator. Live providers, physical terminal
 rendering, clipboard behavior and full Stage C acceptance are not covered by
 this batch.
+
+## #152 Batch 9: Tool Interruption Reason Labels
+
+The frontend projects the two reason-specific Japanese messages only when
+`UiLanguage::Ja` is selected. English remains the existing typed
+`PriorCallInterrupted` message from `presentation::messages::tool_reason`;
+this batch does not alter its wording. The saved `prior_reason`,
+`reason_kind`, status, tool IDs, provider text, and canonical payloads are
+unchanged. The regression covers both Japanese mappings, English selection,
+and the existing English typed label.
+
+Local macOS validation passed: `cargo fmt --all -- --check`; `cargo check --tests`;
+`cargo test --locked --lib frontend::tools::tests -- --nocapture` (8 passed);
+`cargo test --locked --lib frontend::refresh::tests -- --nocapture` (6 passed);
+`cargo clippy --locked --all-targets -- -D warnings`;
+`python3 scripts/check-test-layout.py` (102 suites; watchdog policy passed);
+`python3 -m unittest discover -s scripts/tests` (168 tests, exit 0);
+`python3 scripts/dev/language-audit.py --classifications
+scripts/dev/language-classifications.json --summary` (`tools.rs`: a=2, b=2, c=0);
+and `git diff --check`. No manual language-classification entry or fingerprint
+change was needed.
+
+Exact-tip task CI and three-OS integration validation are reported separately;
+overall Stage C acceptance remains open.
