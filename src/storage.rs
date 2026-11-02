@@ -1371,10 +1371,11 @@ mod lane_budget_tests {
             .await
             .unwrap();
         assert!(matches!(outcome, Background::Done(n) if n == rows / 8));
+        // The worker records a unit after replying; shutdown orders the read.
+        db.shutdown().await.unwrap();
         let steps = db.take_background_steps();
         assert!(steps[0].1 > BACKGROUND_STEP_BUDGET, "{steps:?}");
         assert!(!steps[0].2);
-        db.shutdown().await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1410,30 +1411,32 @@ mod lane_budget_tests {
                     .receive(),
                 ));
             }
-            for name in ["b2", "b3"] {
-                let (db, order) = (db.clone(), order.clone());
+            let queued_background = |db: &DbWorker| {
+                DEFAULT_QUEUE_CAPACITY
+                    - db.shared
+                        .sender
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .background
+                        .capacity()
+            };
+            // Admit b2 strictly before b3 (background admission is async).
+            for (n, name) in ["b2", "b3"].into_iter().enumerate() {
+                let (task_db, order) = (db.clone(), order.clone());
                 waits.push(tokio::spawn(async move {
-                    db.call_background(move |_| {
-                        order.lock().unwrap().push(name);
-                        Ok(())
-                    })
-                    .await
-                    .map(|_| ())
+                    task_db
+                        .call_background(move |_| {
+                            order.lock().unwrap().push(name);
+                            Ok(())
+                        })
+                        .await
+                        .map(|_| ())
                 }));
-            }
-            // Admission is asynchronous for background callers; wait for both.
-            while db
-                .shared
-                .sender
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .background
-                .capacity()
-                > DEFAULT_QUEUE_CAPACITY - 2
-            {
-                tokio::task::yield_now().await;
+                while queued_background(&db) < n + 1 {
+                    tokio::task::yield_now().await;
+                }
             }
             go_tx.send(()).unwrap();
             // Shutdown is requested while jobs are queued; every one still runs.

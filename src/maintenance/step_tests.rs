@@ -215,6 +215,8 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
     index.measure_background_units().await;
     let elapsed = started.elapsed();
 
+    // The worker records each unit after replying; shutdown orders the read.
+    db.shutdown().await.unwrap();
     let mut per_kind: BTreeMap<&str, (u64, usize)> = BTreeMap::new();
     for (kind, steps, deferred) in db.take_background_steps() {
         assert!(
@@ -253,5 +255,4 @@ async fn every_background_kind_fits_the_step_budget_on_a_large_database() {
             "{kind} uses {max} steps per unit, over BACKGROUND_STEP_BUDGET={BACKGROUND_STEP_BUDGET}: split it into bounded units"
         );
     }
-    db.shutdown().await.unwrap();
 }
