@@ -8453,3 +8453,10 @@ or OS clipboard testing was performed.
 Task CI 41414270449 failed on a default-English thread browser integration test
 that still expected the Japanese conversation-info title. Its English expectation
 now passes in the focused macOS integration test; conversation IDs are unchanged.
+
+After W1 landed on main 74d27461 (three-OS CI 41415178623), re-reviewed the
+14 localized UI diagnostics and hints against their English variants. The source
+and tests match prior task commit 7dfca8a9; each decision and literal matches.
+Only those scope fingerprints changed, preserving all main decisions. The full
+classification manifest validates. This remains a partial UI batch; rebased task
+CI is pending.
