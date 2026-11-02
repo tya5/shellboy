@@ -1,5 +1,12 @@
 # Development status
 
+## F8 action list scrollbar (#176)
+
+The grouped action list uses the shared popup list and scrollbar. Section
+headings remain display-only; selection, marker, colors, labels, and input
+routing remain unchanged. Synthetic viewport checks and native CI are recorded
+in the handoff; physical-terminal behavior remains unverified.
+
 ## Paused index consumption (#173)
 
 The consumer deletes paused pending/failed work without provider requests,

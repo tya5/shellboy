@@ -10,13 +10,7 @@ use crate::client_operation::ClientOperation;
 #[cfg(test)]
 mod owner_tests;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::{
-    Frame,
-    layout::Rect,
-    style::Style,
-    text::Line,
-    widgets::{List, ListItem, ListState, Paragraph},
-};
+use ratatui::{Frame, layout::Rect, style::Style, text::Line, widgets::Paragraph};
 use std::path::{Path, PathBuf};
 
 pub(super) fn catalogue_label(id: OperationId, language: UiLanguage) -> String {
@@ -910,7 +904,7 @@ impl Operations {
                             1 => local!(self.language, "よく使う", "Common actions"),
                             _ => local!(self.language, "その他の操作", "Other actions"),
                         };
-                        items.push(ListItem::new(
+                        items.push(popup::Item::new(
                             Line::from(header).style(Style::default().fg(theme::MUTED)),
                         ));
                         previous = Some(section);
@@ -929,17 +923,9 @@ impl Operations {
                             .map(|shortcut| format!("  {shortcut}"))
                             .unwrap_or_default()
                     );
-                    items.push(ListItem::new(label));
+                    items.push(popup::Item::new(label));
                 }
-                let mut state = ListState::default().with_selected(Some(selected_row));
-                frame.render_stateful_widget(
-                    List::new(items)
-                        .style(popup::normal_style())
-                        .highlight_style(popup::selected_style())
-                        .highlight_symbol(format!("{} ", crate::ui::text_width::glyphs::SELECTED)),
-                    body,
-                    &mut state,
-                );
+                popup::list(frame, body, items, selected_row);
             }
         }
     }
@@ -3109,6 +3095,98 @@ mod entry_tests {
             reference.form.as_ref().unwrap().value("run").unwrap(),
             "new-current"
         );
+    }
+    #[test]
+    fn grouped_action_list_keeps_selection_and_scrollbar_at_both_ends() {
+        crate::ui::text_width::set_terminal_width(None);
+        for (width, height) in [(60, 18), (120, 45)] {
+            let mut operations = Operations::new(recovery());
+            operations.set_language(UiLanguage::En);
+            let actions = operations.rows().to_vec();
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| operations.draw(frame, frame.area()))
+                .unwrap();
+            let body = operations.paint_bounds().unwrap().body;
+            assert!(actions.len() > usize::from(body.height));
+            let buffer = terminal.backend().buffer();
+            assert_eq!(buffer[(body.x + 2, body.y)].symbol(), "F");
+            assert_eq!(buffer[(body.x + 2, body.y)].fg, theme::MUTED);
+            assert_eq!(
+                buffer[(body.x, body.y + 1)].symbol(),
+                crate::ui::text_width::glyphs::SELECTED
+            );
+            assert_eq!(buffer[(body.x, body.y + 1)].fg, theme::SELECTION_FOREGROUND);
+            assert_eq!(buffer[(body.x, body.y + 1)].bg, theme::SELECTION_BACKGROUND);
+            assert_eq!(buffer[(body.right() - 1, body.y)].fg, theme::ACCENT);
+
+            let mut previous_section = None;
+            for expected in &actions {
+                assert_eq!(OpKind::ALL[operations.selected], *expected);
+                let section = operations.section(*expected);
+                if previous_section != Some(section) {
+                    terminal
+                        .draw(|frame| operations.draw(frame, frame.area()))
+                        .unwrap();
+                    let buffer = terminal.backend().buffer();
+                    let selected_y = (body.y..body.bottom())
+                        .find(|&y| {
+                            buffer[(body.x, y)].symbol() == crate::ui::text_width::glyphs::SELECTED
+                        })
+                        .expect("a selected action row");
+                    let selected_row = (body.x..body.right() - 1)
+                        .map(|x| buffer[(x, selected_y)].symbol())
+                        .collect::<String>();
+                    let prefix = expected
+                        .label_for(UiLanguage::En)
+                        .chars()
+                        .take(6)
+                        .collect::<String>();
+                    assert!(
+                        selected_row.contains(&prefix),
+                        "section {section}: {selected_row:?}"
+                    );
+                    assert_eq!(buffer[(body.x, selected_y)].bg, theme::SELECTION_BACKGROUND);
+                    previous_section = Some(section);
+                }
+                operations.key(key(KeyCode::Down));
+            }
+            assert_eq!(
+                previous_section,
+                Some(2),
+                "all three sections were traversed"
+            );
+            assert_eq!(OpKind::ALL[operations.selected], *actions.last().unwrap());
+            terminal
+                .draw(|frame| operations.draw(frame, frame.area()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let last_y = body.bottom() - 1;
+            assert_eq!(
+                buffer[(body.x, last_y)].symbol(),
+                crate::ui::text_width::glyphs::SELECTED
+            );
+            assert_eq!(buffer[(body.x, last_y)].fg, theme::SELECTION_FOREGROUND);
+            assert_eq!(buffer[(body.x, last_y)].bg, theme::SELECTION_BACKGROUND);
+            assert_eq!(buffer[(body.right() - 1, last_y)].fg, theme::ACCENT);
+            let last_row = (body.x..body.right() - 1)
+                .map(|x| buffer[(x, last_y)].symbol())
+                .collect::<String>();
+            let label = actions.last().unwrap().label_for(UiLanguage::En);
+            let prefix = label.chars().take(6).collect::<String>();
+            assert!(last_row.contains(&prefix), "{width}x{height}: {last_row:?}");
+
+            operations.paste(&actions.last().unwrap().cli());
+            assert!(!operations.rows().is_empty());
+            assert!(operations.rows().len() <= usize::from(body.height));
+            terminal
+                .draw(|frame| operations.draw(frame, frame.area()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert!((body.y..body.bottom()).all(|y| buffer[(body.right() - 1, y)].symbol() == " "));
+        }
+        crate::ui::text_width::clear_terminal_width();
     }
     #[test]
     fn shared_compact_forms_and_grouped_lists_keep_controls_visible_at_small_and_large_sizes() {
