@@ -1,4 +1,5 @@
 //! A bounded display-only projection from the existing automatic-trim evidence.
+use crate::ui::activity::ContextReductionSummary;
 use rusqlite::{Connection, OptionalExtension};
 
 // Search only the latest 256 attempts in this Turn. The indexed reverse walk
@@ -42,13 +43,22 @@ pub(super) fn read_tx(
     .optional()
 }
 
-pub(super) fn prepare(facts: Option<String>) -> Option<String> {
+pub(super) fn prepare(facts: Option<String>) -> Option<ContextReductionSummary> {
     facts
         .and_then(|body| serde_json::from_str::<[u64; 4]>(&body).ok())
-        .map(|[before, after, spilled, omitted]| {
-            crate::ui::text_width::glyphs::formatted!(
-                "自動縮小済み · spill {spilled}組 · 省略 {omitted}件 · {before}→{after} chars",
-                "自動縮小済み | spill {spilled}組 | 省略 {omitted}件 | {before}>{after} chars"
-            )
-        })
+        .map(
+            |[
+                before_characters,
+                after_characters,
+                spilled_groups,
+                omitted_items,
+            ]| {
+                ContextReductionSummary {
+                    before_characters,
+                    after_characters,
+                    spilled_groups,
+                    omitted_items,
+                }
+            },
+        )
 }

@@ -182,6 +182,30 @@ fn observed_age_and_unknown_saved_age_remain_distinct_in_both_languages() {
 }
 
 #[test]
+fn context_reduction_summary_is_complete_and_bilingual() {
+    let summary = ContextReductionSummary {
+        before_characters: 90_000,
+        after_characters: 40_000,
+        spilled_groups: 3,
+        omitted_items: 7,
+    };
+    let english = summary.localized(UiLanguage::En);
+    assert_eq!(
+        english,
+        "Context was auto-compacted from 90000 to 40000 characters after spilling 3 groups and omitting 7 items."
+    );
+    assert!(english.is_ascii());
+    let separator = crate::ui::text_width::glyphs::separator();
+    let transition = if separator == " · " { "→" } else { ">" };
+    assert_eq!(
+        summary.localized(UiLanguage::Ja),
+        format!(
+            "自動縮小済み{separator}spill 3組{separator}省略 7件{separator}90000{transition}40000 chars"
+        )
+    );
+}
+
+#[test]
 fn recovery_diagnostics_have_complete_localized_text_and_keep_raw_messages() {
     let stage = RecoverySnapshot {
         stage: RecoveryStage::ModelContextLimit,

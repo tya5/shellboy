@@ -548,9 +548,14 @@ mod tests {
         assert_eq!(projection.snapshot.run_id.as_deref(), Some("r"));
         assert_eq!(projection.snapshot.attempt_id.as_deref(), Some("a"));
         assert_eq!(projection.snapshot.revisit.as_deref(), Some("Revisit 3"));
+        let reduction = projection.snapshot.context_reduction.unwrap();
+        let separator = crate::ui::text_width::glyphs::separator();
+        let transition = if separator == " · " { "→" } else { ">" };
         assert_eq!(
-            projection.snapshot.context_reduction.as_deref(),
-            Some("自動縮小済み | spill 3組 | 省略 7件 | 90000>40000 chars")
+            reduction.localized(crate::config::UiLanguage::Ja),
+            format!(
+                "自動縮小済み{separator}spill 3組{separator}省略 7件{separator}90000{transition}40000 chars"
+            )
         );
         let recovery = projection.snapshot.recovery.unwrap();
         assert_eq!(recovery.message, "saved reason");

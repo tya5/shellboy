@@ -5408,8 +5408,8 @@ pub(super) fn recovery_lines(
             recovery.pending_messages, recovery.saved_tool_results
         )
     }));
-    if let Some(summary) = &snapshot.context_reduction {
-        details.push(Line::from(summary.clone()));
+    if let Some(summary) = snapshot.context_reduction {
+        details.push(Line::from(summary.localized(language)));
     }
     let mut lines = hanging_wrap(essential, width.max(1));
     lines.extend(
