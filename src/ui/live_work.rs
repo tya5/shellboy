@@ -1050,6 +1050,7 @@ impl UiState {
                 };
                 self.invalidate_management();
                 let mut popup = operations::Operations::new(context);
+                popup.set_language(self.config.ui.language);
                 popup.select(operation);
                 self.operations = Some(popup);
             }
@@ -1184,6 +1185,40 @@ mod tests {
         });
         ui
     }
+    #[test]
+    fn f6_operations_form_uses_configured_language() {
+        use ratatui::backend::TestBackend;
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let at = Instant::now();
+            let mut ui = ui(at);
+            ui.config.ui.language = language;
+            ui.view_mut().live_work.set_area(Rect::new(0, 0, 100, 10));
+            ui.view_mut().live_work.active = true;
+            ui.view_mut().live_work.selected = Some(LiveWorkTarget::Shell {
+                execution_id: "execution".into(),
+                turn_id: Some("answered-turn".into()),
+            });
+            ui.live_work_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
+            let popup = ui.operations.as_ref().expect("F6 opens operations");
+            let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+            terminal
+                .draw(|frame| popup.draw(frame, frame.area()))
+                .unwrap();
+            let screen: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            let expected = match language {
+                UiLanguage::En => "Esc List",
+                UiLanguage::Ja => "Esc 一 覧",
+            };
+            assert!(screen.contains(expected), "{language:?}: {screen}");
+        }
+    }
+
     #[test]
     fn configured_cap_applies_to_ui_and_counts_hidden_rows() {
         let at = Instant::now();

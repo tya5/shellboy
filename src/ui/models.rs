@@ -41,87 +41,45 @@ impl ModelPicker {
     }
     fn notice_text(&self, notice: &super::observation_notice::ObservationNotice) -> String {
         use super::observation_notice::{Freshness, NextAction, ObservationKind};
-        let language = self.language;
-        let sep = crate::ui::text_width::glyphs::separator();
+        if self.language == UiLanguage::Ja {
+            return crate::ui::text_width::glyphs::decorate(&notice.text());
+        }
         let state = match (notice.kind, notice.freshness) {
-            (ObservationKind::Models, Freshness::Captured) => local!(
-                language,
-                "モデル一覧は取得時点の情報です。",
+            (ObservationKind::Models, Freshness::Captured) => {
                 "The saved model list reflects its capture time."
-            ),
-            (ObservationKind::Models, Freshness::Stale) => local!(
-                language,
-                "以前のモデル一覧を表示しながら再取得しています。",
+            }
+            (ObservationKind::Models, Freshness::Stale) => {
                 "The model list may be stale while refresh is running."
-            ),
-            (ObservationKind::Models, Freshness::FailedRefresh) => local!(
-                language,
-                "再取得に失敗しました。以前のモデル一覧を表示しています。",
+            }
+            (ObservationKind::Models, Freshness::FailedRefresh) => {
                 "Refresh failed; the previous model list is shown."
-            ),
-            (ObservationKind::Models, Freshness::Unavailable) => local!(
-                language,
-                "モデル一覧はまだ取得できていません。",
+            }
+            (ObservationKind::Models, Freshness::Unavailable) => {
                 "The model list has not been captured."
-            ),
-            (_, Freshness::Captured) => local!(
-                language,
-                "取得時点の情報です。",
-                "The saved result reflects its capture time."
-            ),
-            (_, Freshness::Stale) => local!(
-                language,
-                "取得結果が古くなりました。",
-                "The saved result may be stale."
-            ),
-            (_, Freshness::FailedRefresh) => local!(
-                language,
-                "再取得に失敗しました。以前の結果を表示しています。",
-                "Refresh failed; the previous result is shown."
-            ),
-            (_, Freshness::Unavailable) => local!(
-                language,
-                "確認範囲を取得できません。",
-                "The observed scope is unavailable."
-            ),
+            }
+            (_, Freshness::Captured) => "The saved result reflects its capture time.",
+            (_, Freshness::Stale) => "The saved result may be stale.",
+            (_, Freshness::FailedRefresh) => "Refresh failed; the previous result is shown.",
+            (_, Freshness::Unavailable) => "The observed scope is unavailable.",
         };
         let time = |value: chrono::DateTime<chrono::Utc>| {
             value.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
-        let timing = match (language, notice.captured_at, notice.last_attempt_at) {
-            (UiLanguage::Ja, Some(captured), Some(attempted)) => format!(
-                "取得 UTC {}{sep}最終要求 UTC {}。",
-                time(captured),
-                time(attempted)
-            ),
-            (UiLanguage::En, Some(captured), Some(attempted)) => format!(
+        let timing = match (notice.captured_at, notice.last_attempt_at) {
+            (Some(captured), Some(attempted)) => format!(
                 "Captured at {}; last requested at {}.",
                 time(captured),
                 time(attempted)
             ),
-            (UiLanguage::Ja, Some(captured), None) => format!("取得 UTC {}。", time(captured)),
-            (UiLanguage::En, Some(captured), None) => format!("Captured at {}.", time(captured)),
-            (UiLanguage::Ja, None, Some(attempted)) => {
-                format!("取得時刻なし{sep}最終要求 UTC {}。", time(attempted))
-            }
-            (UiLanguage::En, None, Some(attempted)) => format!(
+            (Some(captured), None) => format!("Captured at {}.", time(captured)),
+            (None, Some(attempted)) => format!(
                 "Capture time unavailable; last requested at {}.",
                 time(attempted)
             ),
-            (_, None, None) => local!(
-                language,
-                "取得時刻と要求時刻はありません。",
-                "Capture and request times are unavailable."
-            )
-            .into(),
+            (None, None) => "Capture and request times are unavailable.".into(),
         };
         if notice.next_action == NextAction::RefreshModels {
-            let action = local!(
-                language,
-                "Ctrl+R で再取得できます。",
-                "Press Ctrl+R to refresh."
-            );
-            format!("{state}\n{timing}\n{action}")
+            format!("{state}\n{timing}\nPress Ctrl+R to refresh.")
         } else {
             format!("{state}\n{timing}")
         }
@@ -640,6 +598,54 @@ mod wheel_tests {
 mod language_rendering_tests {
     use super::*;
     use crate::config::UiLanguage;
+
+    #[test]
+    fn japanese_notices_keep_original_wording_for_all_states() {
+        use super::super::observation_notice::{
+            Freshness, NextAction, ObservationKind, ObservationNotice,
+        };
+        let picker = ModelPicker {
+            language: UiLanguage::Ja,
+            paint: Default::default(),
+            filtered_indices: vec![],
+            request: 1,
+            connection: "mock".into(),
+            current: None,
+            models: vec![],
+            query: String::new(),
+            selected: 0,
+            loading: false,
+            error: None,
+            captured_at: None,
+            last_attempt_at: None,
+            notice_scroll: None,
+        };
+        for width in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(width);
+            for freshness in [
+                Freshness::Captured,
+                Freshness::Stale,
+                Freshness::FailedRefresh,
+                Freshness::Unavailable,
+            ] {
+                let notice = ObservationNotice {
+                    kind: ObservationKind::Models,
+                    captured_at: Some(chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap()),
+                    last_attempt_at: Some(
+                        chrono::DateTime::from_timestamp(1_700_000_001, 0).unwrap(),
+                    ),
+                    freshness,
+                    next_action: NextAction::RefreshModels,
+                    confirmation_enabled: false,
+                };
+                assert_eq!(
+                    picker.notice_text(&notice),
+                    crate::ui::text_width::glyphs::decorate(&notice.text())
+                );
+            }
+        }
+        crate::ui::text_width::set_terminal_width(None);
+    }
 
     #[test]
     fn model_error_is_bilingual_without_rewriting_provider_text() {

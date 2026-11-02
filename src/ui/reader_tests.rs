@@ -93,10 +93,11 @@ fn confirmation_measures_the_actual_wide_popup_and_keeps_footer_fixed_when_small
             .unwrap()
             .layout(area, ui.config.ui.language);
         assert_eq!(text, source);
+        let confirmation = ui.confirmation.as_ref().unwrap();
         let body = popup::body_area(
             area,
-            CONFIRMATION_CONTEXT,
-            CONFIRMATION_FOOTER,
+            &confirmation.context(crate::config::UiLanguage::Ja),
+            &confirmation.footer(crate::config::UiLanguage::Ja),
             Some(requested_height),
         );
         assert!(body.right() <= width && body.bottom() <= height);
@@ -146,8 +147,8 @@ fn confirmation_line_measurement_includes_the_reserved_scrollbar_column() {
     );
     let body = popup::body_area(
         area,
-        CONFIRMATION_CONTEXT,
-        CONFIRMATION_FOOTER,
+        &confirmation.context(crate::config::UiLanguage::Ja),
+        &confirmation.footer(crate::config::UiLanguage::Ja),
         Some(height),
     );
     assert_eq!(body.width, 108);

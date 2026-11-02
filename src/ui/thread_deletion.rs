@@ -101,15 +101,11 @@ impl DeletionDialog {
                 "\n削除を実行中. 閉じても受理済みの処理は継続します。",
                 "\nDeleting. Closing this screen does not cancel accepted work.")),
             Phase::Failed(error) => {
-                let uncertain = error.details.as_ref().and_then(|details| details.get("deletion_outcome_uncertain"))
-                    .and_then(Value::as_bool) == Some(true);
-                let message = &error.message;
-                text.push_str(&match (language, uncertain) {
-                    (UiLanguage::Ja, true) => format!("\n削除結果は未確認です: {message}\n閉じてから再度選んでください。"),
-                    (UiLanguage::Ja, false) => format!("\n削除できません: {message}\n閉じてから再度選んでください。"),
-                    (UiLanguage::En, true) => format!("\nDeletion outcome is unknown: {message}\nClose this screen and select the target again."),
-                    (UiLanguage::En, false) => format!("\nCould not delete: {message}\nClose this screen and select the target again."),
-                });
+                text.push_str(&format!("\n{}\n{}", failure_text(error, language), local!(
+                    language,
+                    "閉じてから再度選んでください。",
+                    "Close this screen and select the target again."
+                )));
             }
             Phase::InvalidPreview => text.push_str(local!(language,
                 "\n削除できません: 削除影響の対象が一致しません。もう一度開いてください\n閉じてから再度選んでください。",

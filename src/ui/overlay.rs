@@ -604,6 +604,151 @@ impl UiState {
     }
 }
 
+pub(super) fn shutdown_title(language: crate::config::UiLanguage) -> &'static str {
+    local!(language, "終了処理", "Shutdown")
+}
+pub(super) fn shutdown_context(language: crate::config::UiLanguage) -> &'static str {
+    local!(language, "保存と実行停止の状態", "Save and stop status")
+}
+pub(super) fn shutdown_footer(language: crate::config::UiLanguage) -> &'static str {
+    local!(
+        language,
+        "W / Enter 待機継続 | F 強制終了を選択",
+        "W / Enter Keep waiting | F Choose force quit"
+    )
+}
+pub(super) fn shutdown_starting(language: crate::config::UiLanguage) -> &'static str {
+    local!(
+        language,
+        "終了処理を開始しています。保存・停止を待っています",
+        "Starting shutdown. Waiting for saves and work to stop."
+    )
+}
+pub(super) fn shutdown_progress(
+    language: crate::config::UiLanguage,
+    elapsed_ms: u64,
+    detail: &str,
+    force: bool,
+) -> String {
+    use crate::config::UiLanguage;
+    match (language, force) {
+        (UiLanguage::Ja, true) => format!(
+            "終了処理中 {elapsed_ms}ms\n{detail}\nW/Enter: 待機継続  F: 強制終了を選択（保存/回収未完了の可能性）"
+        ),
+        (UiLanguage::Ja, false) => {
+            format!("終了処理中 {elapsed_ms}ms\n{detail}\n正常終了の保存・停止を待っています")
+        }
+        (UiLanguage::En, true) => format!(
+            "Shutting down {elapsed_ms}ms\n{detail}\nW/Enter: Keep waiting  F: Choose force quit (saving/cleanup may be incomplete)"
+        ),
+        (UiLanguage::En, false) => format!(
+            "Shutting down {elapsed_ms}ms\n{detail}\nWaiting for saves and work to stop normally"
+        ),
+    }
+}
+
+// The shared confirmation dispatcher falls back for force quit and other owners.
+pub(super) fn confirmation_title(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<&'static str> {
+    (!matches!(confirmation, Confirmation::ForceQuit)).then_some(local!(
+        language,
+        "実行の確認",
+        "Confirm action"
+    ))
+}
+pub(super) fn confirmation_context(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<&'static str> {
+    (!matches!(confirmation, Confirmation::ForceQuit)).then_some(local!(
+        language,
+        "内容を確認してください",
+        "Review the details"
+    ))
+}
+pub(super) fn confirmation_footer(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<&'static str> {
+    match confirmation {
+        Confirmation::ThreadDeletion(_) | Confirmation::ForceQuit => None,
+        Confirmation::StaleIndex { .. } => Some(local!(
+            language,
+            "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧",
+            "N / Esc Back | Review again\n^v/PgUp/PgDn Scroll"
+        )),
+        _ => Some(local!(
+            language,
+            "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧",
+            "Y Execute | N / Esc Back\n^v/PgUp/PgDn Scroll"
+        )),
+    }
+}
+pub(super) fn confirmation_text(
+    confirmation: &Confirmation,
+    language: crate::config::UiLanguage,
+) -> Option<String> {
+    use crate::config::UiLanguage;
+    match confirmation {
+        Confirmation::Watch(target) if target.kind == watch::WatchActionKind::Stop => {
+            Some(match language {
+                UiLanguage::Ja => format!(
+                    "表示中の保存済み対象を停止しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
+                    target.thread_id, target.run_id
+                ),
+                UiLanguage::En => format!(
+                    "Stop the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
+                    target.thread_id, target.run_id
+                ),
+            })
+        }
+        Confirmation::Watch(target) => Some(match language {
+            UiLanguage::Ja => format!(
+                "表示中の保存済み対象を再試行しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
+                target.thread_id, target.run_id
+            ),
+            UiLanguage::En => format!(
+                "Retry the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
+                target.thread_id, target.run_id
+            ),
+        }),
+        Confirmation::EditStop { run_id, .. } => Some(match language {
+            UiLanguage::Ja => format!(
+                "旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"
+            ),
+            UiLanguage::En => format!(
+                "Stop prior work {run_id}?\nAfter its final state is confirmed, a new conversation is forked just before the original request and the edited text is sent as a new request. The original request and old history are unchanged."
+            ),
+        }),
+        Confirmation::Index {
+            command, detail, ..
+        } => {
+            let action = match command {
+                Command::IndexBackfill(_) => "backfill",
+                Command::IndexRetry(_) => "retry",
+                Command::IndexRebuild(_) => "rebuild",
+                _ => local!(language, "索引操作", "index"),
+            };
+            let sep = crate::ui::text_width::glyphs::separator();
+            Some(match language {
+                UiLanguage::Ja => format!("索引処理の実行確認{sep}{action}\n{detail}"),
+                UiLanguage::En => format!("Confirm index operation{sep}{action}\n{detail}"),
+            })
+        }
+        Confirmation::StaleIndex { detail } => Some(match language {
+            UiLanguage::Ja => format!(
+                "確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"
+            ),
+            UiLanguage::En => format!(
+                "This confirmation is stale and cannot execute. Close it and preview again.\n{detail}"
+            ),
+        }),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1410,151 +1555,6 @@ mod tests {
         assert!(!ui.dirty, "blocked wheel must not redraw the popup");
     }
 }
-pub(super) fn shutdown_title(language: crate::config::UiLanguage) -> &'static str {
-    local!(language, "終了処理", "Shutdown")
-}
-pub(super) fn shutdown_context(language: crate::config::UiLanguage) -> &'static str {
-    local!(language, "保存と実行停止の状態", "Save and stop status")
-}
-pub(super) fn shutdown_footer(language: crate::config::UiLanguage) -> &'static str {
-    local!(
-        language,
-        "W / Enter 待機継続 | F 強制終了を選択",
-        "W / Enter Keep waiting | F Choose force quit"
-    )
-}
-pub(super) fn shutdown_starting(language: crate::config::UiLanguage) -> &'static str {
-    local!(
-        language,
-        "終了処理を開始しています。保存・停止を待っています",
-        "Starting shutdown. Waiting for saves and work to stop."
-    )
-}
-pub(super) fn shutdown_progress(
-    language: crate::config::UiLanguage,
-    elapsed_ms: u64,
-    detail: &str,
-    force: bool,
-) -> String {
-    use crate::config::UiLanguage;
-    match (language, force) {
-        (UiLanguage::Ja, true) => format!(
-            "終了処理中 {elapsed_ms}ms\n{detail}\nW/Enter: 待機継続  F: 強制終了を選択（保存/回収未完了の可能性）"
-        ),
-        (UiLanguage::Ja, false) => {
-            format!("終了処理中 {elapsed_ms}ms\n{detail}\n正常終了の保存・停止を待っています")
-        }
-        (UiLanguage::En, true) => format!(
-            "Shutting down {elapsed_ms}ms\n{detail}\nW/Enter: Keep waiting  F: Choose force quit (saving/cleanup may be incomplete)"
-        ),
-        (UiLanguage::En, false) => format!(
-            "Shutting down {elapsed_ms}ms\n{detail}\nWaiting for saves and work to stop normally"
-        ),
-    }
-}
-
-// The shared confirmation dispatcher falls back for force quit and other owners.
-pub(super) fn confirmation_title(
-    confirmation: &Confirmation,
-    language: crate::config::UiLanguage,
-) -> Option<&'static str> {
-    (!matches!(confirmation, Confirmation::ForceQuit)).then_some(local!(
-        language,
-        "実行の確認",
-        "Confirm action"
-    ))
-}
-pub(super) fn confirmation_context(
-    confirmation: &Confirmation,
-    language: crate::config::UiLanguage,
-) -> Option<&'static str> {
-    (!matches!(confirmation, Confirmation::ForceQuit)).then_some(local!(
-        language,
-        "内容を確認してください",
-        "Review the details"
-    ))
-}
-pub(super) fn confirmation_footer(
-    confirmation: &Confirmation,
-    language: crate::config::UiLanguage,
-) -> Option<&'static str> {
-    match confirmation {
-        Confirmation::ThreadDeletion(_) | Confirmation::ForceQuit => None,
-        Confirmation::StaleIndex { .. } => Some(local!(
-            language,
-            "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧",
-            "N / Esc Back | Review again\n^v/PgUp/PgDn Scroll"
-        )),
-        _ => Some(local!(
-            language,
-            "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧",
-            "Y Execute | N / Esc Back\n^v/PgUp/PgDn Scroll"
-        )),
-    }
-}
-pub(super) fn confirmation_text(
-    confirmation: &Confirmation,
-    language: crate::config::UiLanguage,
-) -> Option<String> {
-    use crate::config::UiLanguage;
-    match confirmation {
-        Confirmation::Watch(target) if target.kind == watch::WatchActionKind::Stop => {
-            Some(match language {
-                UiLanguage::Ja => format!(
-                    "表示中の保存済み対象を停止しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
-                    target.thread_id, target.run_id
-                ),
-                UiLanguage::En => format!(
-                    "Stop the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
-                    target.thread_id, target.run_id
-                ),
-            })
-        }
-        Confirmation::Watch(target) => Some(match language {
-            UiLanguage::Ja => format!(
-                "表示中の保存済み対象を再試行しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
-                target.thread_id, target.run_id
-            ),
-            UiLanguage::En => format!(
-                "Retry the displayed saved target?\nThread {}\nRun {}\nThe target Run and recovery generation are checked again; another Run is never affected.",
-                target.thread_id, target.run_id
-            ),
-        }),
-        Confirmation::EditStop { run_id, .. } => Some(match language {
-            UiLanguage::Ja => format!(
-                "旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"
-            ),
-            UiLanguage::En => format!(
-                "Stop prior work {run_id}?\nAfter its final state is confirmed, a new conversation is forked just before the original request and the edited text is sent as a new request. The original request and old history are unchanged."
-            ),
-        }),
-        Confirmation::Index {
-            command, detail, ..
-        } => {
-            let action = match command {
-                Command::IndexBackfill(_) => "backfill",
-                Command::IndexRetry(_) => "retry",
-                Command::IndexRebuild(_) => "rebuild",
-                _ => local!(language, "索引操作", "index"),
-            };
-            let sep = crate::ui::text_width::glyphs::separator();
-            Some(match language {
-                UiLanguage::Ja => format!("索引処理の実行確認{sep}{action}\n{detail}"),
-                UiLanguage::En => format!("Confirm index operation{sep}{action}\n{detail}"),
-            })
-        }
-        Confirmation::StaleIndex { detail } => Some(match language {
-            UiLanguage::Ja => format!(
-                "確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"
-            ),
-            UiLanguage::En => format!(
-                "This confirmation is stale and cannot execute. Close it and preview again.\n{detail}"
-            ),
-        }),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod confirmation_language_tests {
     use super::*;

@@ -48,7 +48,7 @@ impl Message {
             (UiLanguage::Ja, Self::TerminalWidth { .. }) => "曖昧な文字の幅: 不明（2列を確保）".into(),
             (UiLanguage::En, Self::DeletedConversations { count: 1 }) => "Deleted 1 conversation".into(),
             (UiLanguage::En, Self::DeletedConversations { count }) => format!("Deleted {count} conversations"),
-            (UiLanguage::Ja, Self::DeletedConversations { count }) => format!("会話を{count}件削除しました"),
+            (UiLanguage::Ja, Self::DeletedConversations { count }) => format!("{count} 件の会話を削除しました"),
         }
     }
 }
@@ -106,7 +106,7 @@ mod tests {
         );
         assert_eq!(
             Message::DeletedConversations { count: 1 }.render(UiLanguage::Ja),
-            "会話を1件削除しました"
+            "1 件の会話を削除しました"
         );
     }
 }

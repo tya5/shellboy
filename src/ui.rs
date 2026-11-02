@@ -1663,8 +1663,6 @@ pub enum ManagementFollow {
     Next,
     Refresh,
 }
-const CONFIRMATION_FOOTER: &str = "N / Esc 戻る | Y 実行\n^v/PgUp/PgDn 閲覧";
-const CONFIRMATION_CONTEXT: &str = "内容を確認してください";
 impl Confirmation {
     fn sized_area(&self, area: Rect, language: crate::config::UiLanguage) -> Rect {
         if matches!(self, Self::ForceQuit) {
@@ -1685,35 +1683,23 @@ impl Confirmation {
         if let Some(footer) = overlay::confirmation_footer(self, language) {
             return text_width::glyphs::decorate(footer);
         }
-        if matches!(self, Self::ForceQuit) {
-            text_width::glyphs::decorate(&i18n::Message::ForceQuitFooter.render(language))
-        } else if let Self::ThreadDeletion(dialog) = self {
-            dialog.footer()
-        } else if matches!(self, Self::StaleIndex { .. }) {
-            text_width::glyphs::decorate("N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧")
-        } else {
-            text_width::glyphs::decorate(CONFIRMATION_FOOTER)
+        match self {
+            Self::ForceQuit => {
+                text_width::glyphs::decorate(&i18n::Message::ForceQuitFooter.render(language))
+            }
+            Self::ThreadDeletion(dialog) => dialog.footer(),
+            _ => unreachable!("confirmation footer is localized by overlay"),
         }
     }
     fn context(&self, language: crate::config::UiLanguage) -> String {
-        if let Some(context) = overlay::confirmation_context(self, language) {
-            return context.into();
-        }
-        if matches!(self, Self::ForceQuit) {
-            i18n::Message::ForceQuitContext.render(language)
-        } else {
-            CONFIRMATION_CONTEXT.into()
-        }
+        overlay::confirmation_context(self, language)
+            .map(str::to_owned)
+            .unwrap_or_else(|| i18n::Message::ForceQuitContext.render(language))
     }
     fn title(&self, language: crate::config::UiLanguage) -> String {
-        if let Some(title) = overlay::confirmation_title(self, language) {
-            return title.into();
-        }
-        if matches!(self, Self::ForceQuit) {
-            i18n::Message::ForceQuitTitle.render(language)
-        } else {
-            "実行の確認".into()
-        }
+        overlay::confirmation_title(self, language)
+            .map(str::to_owned)
+            .unwrap_or_else(|| i18n::Message::ForceQuitTitle.render(language))
     }
     fn lines(&self, language: crate::config::UiLanguage) -> Vec<Line<'static>> {
         self.text(language)
@@ -1726,37 +1712,12 @@ impl Confirmation {
             return text;
         }
         match self {
-            Confirmation::Watch(target) => format!(
-                "表示中の保存済み対象を{}しますか？\nThread {}\nRun {}\n対象Runと復旧世代を再確認し、別のRunには適用しません。",
-                if target.kind == watch::WatchActionKind::Stop {
-                    "停止"
-                } else {
-                    "再試行"
-                },
-                target.thread_id,
-                target.run_id
-            ),
-            Confirmation::MessageQueue { detail, .. } => detail.clone(),
+            Confirmation::MessageQueue { detail, .. } | Confirmation::Operation { detail, .. } => {
+                detail.clone()
+            }
             Confirmation::ThreadDeletion(dialog) => dialog.text(),
-            Confirmation::EditStop { run_id, .. } => format!(
-                "旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"
-            ),
-            Confirmation::Index {
-                command, detail, ..
-            } => format!(
-                "索引処理の実行確認 | {}\n{detail}",
-                match command {
-                    Command::IndexBackfill(_) => "backfill",
-                    Command::IndexRetry(_) => "retry",
-                    Command::IndexRebuild(_) => "rebuild",
-                    _ => "索引操作",
-                }
-            ),
-            Confirmation::StaleIndex { detail } => format!(
-                "確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"
-            ),
-            Confirmation::Operation { detail, .. } => detail.clone(),
             Confirmation::ForceQuit => i18n::Message::ForceQuitBody.render(language),
+            _ => unreachable!("confirmation text is localized by overlay"),
         }
     }
     fn layout(&self, area: Rect, language: crate::config::UiLanguage) -> (String, u16) {
