@@ -2336,8 +2336,7 @@ fn typed_history(
                         label.description = None;
                     }
                     let mut chunk = vec![compact_tool_line(language, &label, width, view.palette)];
-                    let focused = view.items.active && view.items.focus.as_ref() == Some(&key);
-                    if label.description.is_some() && (focused || open) {
+                    if label.description.is_some() && open {
                         chunk.extend(tool_note(
                             Text::CommandPreview.render(language),
                             width,
@@ -4894,12 +4893,22 @@ mod conversation_item_tests {
         assert!(!collapsed.contains(&command), "{collapsed}");
         view.items.active = true;
         view.items.focus = Some(key.clone());
-        let selected = plain(&history(&view, 80).0);
-        assert!(selected.contains(&command), "{selected}");
-        view.items.active = false;
-        assert!(!plain(&history(&view, 80).0).contains(&command));
+        let focused_collapsed = plain(&history(&view, 80).0);
+        assert!(focused_collapsed.contains("Inspect repository"));
+        assert!(
+            !focused_collapsed.contains(&command),
+            "focus must not keep a collapsed command preview open: {focused_collapsed}"
+        );
+        view.items.toggle(key.clone(), false, &outcome);
+        let expanded = plain(&history(&view, 80).0);
+        assert!(expanded.contains(&command), "{expanded}");
+        view.items.toggle(key.clone(), false, &outcome);
+        let collapsed_focused = plain(&history(&view, 80).0);
+        assert!(
+            !collapsed_focused.contains(&command),
+            "closing the row must close its command preview: {collapsed_focused}"
+        );
         view.items.toggle(key, false, &outcome);
-        assert!(plain(&history(&view, 80).0).contains(&command));
         view.describe_calls = false;
         let opted_out = plain(&history(&view, 80).0);
         assert!(opted_out.contains(&command));

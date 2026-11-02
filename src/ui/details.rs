@@ -1107,7 +1107,12 @@ impl Details {
                     })
             })
             .filter(|(node, index, _, tool)| {
-                super::ItemKey::tool(tool, &node.node_id, *index) == *key
+                let tool_key = super::ItemKey::tool(tool, &node.node_id, *index);
+                let outcome = super::presentation::tool_outcome(tool);
+                tool_key == *key
+                    && view
+                        .items
+                        .is_open(&tool_key, tool.requires_attention(), &outcome)
                     && crate::tool_description::label(tool.description.as_deref()).is_some()
             })
             .max_by_key(|(_, _, block, _)| super::presentation::tool_observation_rank(block))
@@ -3625,6 +3630,55 @@ mod tests {
 #[cfg(test)]
 mod description_context_tests {
     use super::*;
+    #[test]
+    fn described_command_context_follows_tool_row_disclosure() {
+        use crate::presentation::{
+            BlockKind, NodePresentation, PresentationBlock, PresentationKind, ToolPresentation,
+        };
+
+        let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+        view.describe_calls = true;
+        let tool = ToolPresentation {
+            group_id: Some("group".into()),
+            call_id: "call".into(),
+            command: "EXACT_COMMAND".into(),
+            description: Some("Inspect repository".into()),
+            status: "completed".into(),
+            call_node_id: Some("source".into()),
+            ..Default::default()
+        };
+        let key = super::super::ItemKey::tool(&tool, "source", 0);
+        let outcome = super::super::presentation::tool_outcome(&tool);
+        *view.nodes_mut_for_test() = vec![super::super::UiNode {
+            node_id: "source".into(),
+            role: "assistant".into(),
+            presentation: NodePresentation {
+                kind: PresentationKind::Assistant,
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(tool),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        }];
+        let details = Details::for_node(&view, "source".into(), false).with_item_key(key.clone());
+
+        assert!(
+            details.described_command_context(&view).is_none(),
+            "a collapsed tool row must not show a command preview"
+        );
+        view.items.toggle(key.clone(), false, &outcome);
+        assert!(
+            details
+                .described_command_context(&view)
+                .is_some_and(|context| context.contains("EXACT_COMMAND"))
+        );
+        view.items.toggle(key, false, &outcome);
+        assert!(details.described_command_context(&view).is_none());
+    }
+
     #[test]
     fn shared_original_node_keeps_selected_adjacent_call_identity_in_details_and_original() {
         use crate::presentation::{
