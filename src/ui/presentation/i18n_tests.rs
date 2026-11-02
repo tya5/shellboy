@@ -178,7 +178,7 @@ fn recovery_banner_preserves_actions_before_long_provider_reason_at_both_widths(
         phase: crate::activity::ActivityPhase::Recovery,
         recovery: Some(super::super::activity::RecoverySnapshot {
             message: "RAW provider explanation ".repeat(100),
-            stage: "request".into(),
+            stage: super::super::activity::RecoveryStage::ModelRequest,
             live_shells: 1,
             uncollected_shells: 1,
             ..Default::default()
@@ -219,6 +219,42 @@ fn quiet_event_title_retains_changed_values_and_failure_facts_in_both_languages(
     }
 }
 
+#[test]
+fn saved_recovery_fallback_is_rendered_as_complete_bilingual_copy() {
+    let recovery = super::super::activity::RecoverySnapshot {
+        stage: super::super::activity::RecoveryStage::ModelContextLimit,
+        stage_details: Some(super::super::activity::RecoveryStageDetails {
+            retries: json!(2),
+            retry_limit: json!(3),
+            request_bytes: json!(400),
+            tool_bytes: json!(75),
+        }),
+        message: super::super::activity::saved_recovery_reason_unavailable(UiLanguage::Ja).into(),
+        message_is_fallback: true,
+        ..Default::default()
+    };
+    let snapshot = super::super::activity::ActivitySnapshot {
+        phase: crate::activity::ActivityPhase::Recovery,
+        recovery: Some(recovery.clone()),
+        ..Default::default()
+    };
+
+    let english = plain(&recovery_lines(&snapshot, UiLanguage::En, 200, 12));
+    assert!(english.contains("Model request (input capacity exceeded)"));
+    assert!(english.contains("Retry 2/3; request: 400 B; tool: 75 B"));
+    assert!(english.contains("Review the saved recovery reason in Details."));
+
+    let japanese = plain(&recovery_lines(&snapshot, UiLanguage::Ja, 200, 12));
+    assert!(japanese.contains("モデル要求（入力容量超過）"));
+    assert!(japanese.contains("retry 2/3"));
+    assert!(japanese.contains("request 400B"));
+    assert!(japanese.contains("保存された復旧理由を詳細で確認してください"));
+    assert_eq!(
+        recovery.message,
+        "保存された復旧理由を詳細で確認してください"
+    );
+}
+
 fn recovery_banner(ui: &mut UiState) {
     history(ui, Vec::new());
     ui.apply(UiUpdate::Activity {
@@ -229,7 +265,7 @@ fn recovery_banner(ui: &mut UiState) {
         snapshot: super::super::activity::ActivitySnapshot {
             phase: crate::activity::ActivityPhase::Recovery,
             recovery: Some(super::super::activity::RecoverySnapshot {
-                stage: "request".into(),
+                stage: super::super::activity::RecoveryStage::ModelRequest,
                 message: "Synthetic provider failure".into(),
                 pending_messages: 1,
                 saved_tool_results: 2,
@@ -246,6 +282,7 @@ fn actual_recovery_banner_screen_bilingual() {
     crate::ui::i18n::verify_screen(recovery_banner, |lang| match lang {
         UiLanguage::En => &[
             "Awaiting recovery",
+            "Model request",
             "Synthetic provider failure",
             "/retry",
             "Ctrl+C",
@@ -253,6 +290,7 @@ fn actual_recovery_banner_screen_bilingual() {
         ],
         UiLanguage::Ja => &[
             "復旧待ち",
+            "モデル要求",
             "Synthetic provider failure",
             "/retry",
             "Ctrl+C",
@@ -440,7 +478,7 @@ fn activity_fixture(
     }
     if quota {
         snapshot.recovery = Some(super::super::activity::RecoverySnapshot {
-            stage: "request".into(),
+            stage: super::super::activity::RecoveryStage::ModelRequest,
             message: "Synthetic limit".into(),
             usage_limit: Some(crate::model::usage_limit::UsageLimit {
                 kind: crate::model::usage_limit::LimitKind::UsageLimitReached,
