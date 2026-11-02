@@ -112,8 +112,10 @@ the format was not sent, and the attempt manifest records `unavailable` with
 the reason. The original file and reference remain intact, and success does
 not mark that content sent or establish a hash baseline. A later request reads
 the current bytes again. The TUI projects a localized warning for unavailable attachments from the
-latest observed attempt, and explicit reload inspects current bytes, not a
-historical snapshot. The existing unavailable contract and localization rules
+latest observed attempt. This activity lookup scans only a bounded attempt
+prefix; if that prefix is full, it warns that the status is not fully verified.
+Explicit reload inspects current bytes, not a historical snapshot. The
+existing unavailable contract and localization rules
 apply to both unsupported and unreadable attachments. No new setting or fallback is introduced.
 
 Explicit removal from a saved Thread excludes the selected attachment by ID,

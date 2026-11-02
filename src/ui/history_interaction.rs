@@ -75,13 +75,11 @@ impl ThreadView {
         {
             return;
         }
-        // An unrelated background status cannot erase a failed operation.
-        if kind != NoticeKind::Failure
-            && self
-                .operation_notice
-                .as_ref()
-                .is_some_and(|notice| notice.kind == NoticeKind::Failure)
-        {
+        // Preserve failures and attachment warnings over unrelated background status.
+        if self.operation_notice.as_ref().is_some_and(|notice| {
+            (notice.kind == NoticeKind::Failure && kind != NoticeKind::Failure)
+                || (notice.kind == NoticeKind::Attachment && kind == NoticeKind::Info)
+        }) {
             return;
         }
         // Saved recovery has its own footer; independent operation failures

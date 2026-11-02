@@ -7135,6 +7135,19 @@ mod layout_cache_tests {
                 visible.contains(expected),
                 "warning must be visible in the footer: {screen:?}"
             );
+            ui.apply(UiUpdate::Status {
+                thread_id: Some("t".into()),
+                text: "background update".into(),
+            });
+            assert!(
+                ui.view()
+                    .operation_notice
+                    .as_ref()
+                    .unwrap()
+                    .text
+                    .contains(expected),
+                "background information must not erase an attachment warning"
+            );
             ui.view_mut().clear_operation_notice();
             ui.apply(update(2));
             assert!(
