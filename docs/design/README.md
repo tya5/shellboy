@@ -42,6 +42,9 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
 - [External shell error catalogue (#72)](error-catalog.md): optional read-only,
   deterministic failure statistics and observed recovery associations.
 
+- [Mid-Turn middle-segment summary](midturn-compaction.md) (#181, proposed;
+  options in [midturn-compaction-options](midturn-compaction-options.md)).
+
 - [Responses cache diagnostic facts](cache-diagnostics.md) (#142 part 1):
   opt-in comparison identity, bounded attempt observations, and read-only
   single-attempt inspection. Sticky headers are explicitly deferred.

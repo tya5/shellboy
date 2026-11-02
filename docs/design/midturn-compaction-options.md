@@ -1,7 +1,9 @@
 # Mid-Turn Summarization: Options for Decision
 
-Status: **A adopted; B deferred pending real-world evidence.** C and D are not
-adopted. No new mid-Turn summarization or configuration is authorized. The
+Status: **A adopted; B's real-data condition was met on 2026-11-03 and the user
+approved pursuing it (#181).** The concrete B design is proposed in
+[midturn-compaction.md](midturn-compaction.md) and awaits leader review; until it
+is adopted, A remains the behaviour. C and D are not adopted. No new mid-Turn summarization or configuration is authorized. The
 existing spill placeholder is simplified separately: it no longer duplicates
 call arguments, which remain on the call item; it retains the original result
 reference and reports the UTF-8 byte length of the original serialized tool-result output.

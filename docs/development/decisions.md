@@ -2972,3 +2972,21 @@ shell calls use the new cwd. The node is hidden from TUI transcript rows (model
 input, like the system/instruction items) and excluded from search. Revisit if a
 mid-request setting must reach an already-running request, or if the UI should
 show settings per Turn.
+## #181 Mid-Turn summary: adapter gating (2026-11-03, Proposed)
+
+Status: proposed with the [mid-Turn design](../design/midturn-compaction.md),
+pending leader review. B proceeds only when no current-epoch reasoning is
+replayed after the replacement point, or the adapter's contract is established.
+Chat never replays reasoning and is supported. Anthropic documents a prefix
+binding of thinking signatures on Claude 5.1+ (keep-tail client compaction
+fails it), so B skips there whenever retained thinking exists. OpenAI documents
+passing items since the last user message untouched when truncating, but not
+whether retained reasoning is rejected after a removed segment; Responses skips
+until a bounded paid validation passes. Impact: until validated, the measured
+long-Turn growth on Responses connections is not reduced. Revisit when the
+validation is recorded, when OpenAI documents the case, or if Anthropic exposes
+a binding-preserving client path Shellboy can use without a model catalog.
+The same Anthropic binding may also affect existing prefix summary, explicit
+middle summary and #50 omission with thinking enabled; tracked as a separate
+question, not changed here.
+
