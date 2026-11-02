@@ -123,5 +123,225 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/operations/client_forms.rs:58fd544407463cfa:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:3d842a69813afdbe:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:3ff87e519d11d515:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:ea016b74bb87e72a:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:3fc7219c4fb6297c:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:e7cad39b98070e61:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:8f3a08c67d77ec33:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:256b55ca71e73beb:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:256b55ca71e73beb:2": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:99fcb0b96b6acd1a:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:3fc7219c4fb6297c:2": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:fcceb0337245f983:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:703e6617434d3a0f:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:70fdb70690edc2b8:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:679ff4f04c0fe240:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:4b6ee25d2b0a9250:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:2c314d32aa831d9a:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:54cf8bc88f390dc4:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:aedfcd16218d6b3a:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:914bf3fd37c16dae:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:184936194ec29745:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:c1d3a65a87404711:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:4b1bf6fd83b8a252:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:c31770e21ac337b2:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:ce49e4b2a52226f6:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:c2894c16a763f2f7:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:df6a8e9eb24354f3:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:cc4f39ea17489f19:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:c42c12812ac044fb:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:935078df9b0896d0:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:fca5a98d618904db:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:c5ceef9d882ab5c5:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:0a1a2082297e9e8c:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:5ff86809d35618b4:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:b0087fe81176f34a:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:9ec94d71e50d99bf:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:eac60607419ad6b5:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:1e6dc9b7a8435fae:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:e7cad39b98070e61:2": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:99fcb0b96b6acd1a:2": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:16c08280262f41d0:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:66bc43dad90f641f:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:db67d9786b18b0fc:1": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
+  },
+  "src/ui/operations/client_forms.rs:256b55ca71e73beb:3": {
+    "category": "a",
+    "reason": "Japanese field-label resource for a client operation. The shared Form::field_label_for has an explicit English label for db; every other candidate maps via metadata_id to the operation FieldSpec and metadata::field_label_for English arm. language_rendering_tests::every_english_form_field_has_an_english_label iterates OpKind::ALL, including each client_forms builder, asserting ASCII for every displayed field; the client builder identity/selected_metadata test also checks all fields (db is the only metadata exception). CLI spellings, choice values, request text and persisted data remain unchanged.",
+    "source_tokens_sha256": "55b9ed29adf0f333122646d7651c0cbc40e42a6b2df2afe01e4d568cc3cca121"
   }
 }
