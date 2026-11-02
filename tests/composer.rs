@@ -4,7 +4,9 @@ use shellboy::{config::Config, ui::*};
 use unicode_width::UnicodeWidthStr;
 
 fn state() -> UiState {
-    let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, std::env::temp_dir());
     ui.select_thread("composer-thread".into());
     ui
 }
@@ -83,8 +85,21 @@ fn restore_completion_explains_the_context_and_draft_argument_distinction() {
     assert_eq!(ui.view().draft.text, "/restore ");
 }
 #[test]
+fn english_completion_shows_help_and_keeps_command_binding() {
+    let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+    type_text(&mut ui, "/rest");
+    let shown = screen(&mut ui, 120, 30);
+    assert!(shown.contains("/restore"), "{shown}");
+    assert!(shown.contains("Restore input"), "{shown}");
+    assert!(shown.contains("Tab/Enter Complete"), "{shown}");
+    assert!(key(&mut ui, KeyCode::Tab).is_empty());
+    assert_eq!(ui.view().draft.text, "/restore ");
+}
+
+#[test]
 fn completion_and_recalled_text_respect_the_current_draft_byte_limit() {
     let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
     config.limits.draft_bytes = 4;
     let mut ui = UiState::new(&config, std::env::temp_dir());
     ui.select_thread("composer-thread".into());
@@ -326,7 +341,7 @@ fn recalled_slash_is_sent_as_message_and_read_errors_leave_the_draft_intact() {
     let action = key(&mut ui, KeyCode::Up).remove(0);
     ui.action_rejected(&action);
     assert_eq!(ui.view().draft.text, "unfinished");
-    assert!(ui.view().status.contains("queue"));
+    assert!(ui.view().status.contains("キュー"));
     assert!(matches!(
         &key(&mut ui, KeyCode::Up)[0],
         UiAction::RecallInput { .. }

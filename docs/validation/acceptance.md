@@ -8465,3 +8465,8 @@ reports a=54, b=1, c=1; the remaining status has a cross-file control dependency
 The full manifest is blocked by a pre-existing stale presentation fingerprint on
 main 2607218b. Physical terminal and clipboard testing were not performed;
 exact task CI and three-OS integration validation remain pending.
+
+Task CI 41410168417 failed on default-English integration tests that expected
+Japanese composer output. Those tests now explicitly select Japanese, and an
+English screen test checks the same `/restore` completion and binding. The
+15 focused composer integration tests pass on macOS after this correction.
