@@ -58,7 +58,8 @@ SELECT refs.node_id,refs.kind,refs.execution_id,
  substr(CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.command')='text' THEN json_extract(c.arguments_json,'$.command') END END,1,120),
  CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.background') IN ('true','false') THEN json_extract(c.arguments_json,'$.background') END END,
  c.group_id,c.call_id,r.node_id,
- COALESCE(refs.saved_thread,child.thread_id),substr(t.title,1,80),t.deleted_at,t.id,s.id,original.deleted_reason
+ COALESCE(refs.saved_thread,child.thread_id),substr(t.title,1,80),t.deleted_at,t.id,s.id,original.deleted_reason,
+ substr(CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.description')='text' THEN json_extract(c.arguments_json,'$.description') END END,1,80)
 FROM refs
 LEFT JOIN shell_execution s ON s.id=refs.execution_id
 LEFT JOIN tool_call c ON c.operation_id=s.id AND EXISTS(SELECT 1 FROM tool_group g WHERE g.id=c.group_id AND g.turn_id=s.turn_id)
@@ -83,6 +84,7 @@ pub(super) struct Fact {
     available_thread: Option<String>,
     available_execution: Option<String>,
     source_deleted: Option<String>,
+    description: Option<String>,
 }
 
 pub(super) fn read_tx(db: &Connection, ids: &[String]) -> Result<Vec<Fact>, StorageError> {
@@ -114,6 +116,7 @@ pub(super) fn read_tx(db: &Connection, ids: &[String]) -> Result<Vec<Fact>, Stor
                 available_thread: r.get(11)?,
                 available_execution: r.get(12)?,
                 source_deleted: r.get(13)?,
+                description: r.get(14)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -151,6 +154,9 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
         };
         let mut fields = Vec::new();
         let caption = if fact.kind == "shell_ended" {
+            if let Some(description) = crate::tool_description::label(fact.description.as_deref()) {
+                fields.push(field("description", description));
+            }
             if let Some(execution) = &fact.execution {
                 fields.push(field("execution_id", execution.clone()));
             }
@@ -370,6 +376,31 @@ mod tests {
             assert_eq!(node.presentation.ui_messages.source_error, None);
             assert_eq!(value(node, "title"), None);
         }
+    }
+
+    #[test]
+    fn notice_description_is_bounded_sanitized_and_does_not_replace_original_command() {
+        let db = fixture();
+        let raw = format!("  inspect\n{}  ", "x".repeat(100));
+        let args = json!({"command": "printf CORRECT", "description": raw});
+        db.execute(
+            "UPDATE tool_call SET arguments_json=?1 WHERE group_id='g' AND call_id='same'",
+            [args.to_string()],
+        )
+        .unwrap();
+        let facts = read_tx(&db, &["node-shell".into()]).unwrap();
+        let mut nodes = vec![node("shell")];
+        apply(&mut nodes, &facts);
+        let description = value(&nodes[0], "description").unwrap();
+        assert!(description.starts_with("inspect "));
+        assert!(description.chars().count() <= 80);
+        assert!(!description.contains('\n'));
+        assert_eq!(nodes[0].text, "CANONICAL_SENTINEL");
+        assert!(
+            value(&nodes[0], "title")
+                .unwrap()
+                .contains("printf CORRECT")
+        );
     }
 
     #[test]

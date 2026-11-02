@@ -313,6 +313,29 @@ fn fit(text: &str, width: usize) -> String {
     result
 }
 
+/// Share the live-work right-side budget and truncation policy with notice rows.
+pub(super) fn row_columns(
+    width: usize,
+    prefix: &str,
+    label: &str,
+    metadata: &str,
+    overflow: &str,
+) -> (String, usize, String) {
+    use crate::ui::text_width::UnicodeWidthStr;
+    let right_budget = width / 2;
+    let overflow = fit(overflow, right_budget);
+    let right = format!(
+        "{}{overflow}",
+        fit(metadata, right_budget.saturating_sub(overflow.width()))
+    );
+    let label = fit(
+        label,
+        width.saturating_sub(prefix.width() + right.width() + 3),
+    );
+    let gap = width.saturating_sub(prefix.width() + label.width() + right.width());
+    (label, gap, right)
+}
+
 impl LiveWorkView {
     pub fn set_language(&mut self, language: UiLanguage) {
         self.language = language;
@@ -873,7 +896,6 @@ pub(super) fn draw(
         } else {
             String::new()
         };
-        use crate::ui::text_width::UnicodeWidthStr;
         let prefix = format!(
             "{connector}[{}]{marker}{kind} {}",
             index + 1,
@@ -881,28 +903,21 @@ pub(super) fn draw(
                 .map(|i| format!("{} [{}] ", glyphs::arrow(), i + 1))
                 .unwrap_or_default()
         );
-        let right_budget = usize::from(area.width) / 2;
-        let overflow = fit(&overflow, right_budget);
-        let right = format!(
-            "{}{overflow}",
-            fit(
-                &format!(
-                    "{}{elapsed}{deadline}{age}",
-                    WorkMessage::state(row).render(view.language)
-                ),
-                right_budget.saturating_sub(overflow.width()),
-            )
+        let metadata = format!(
+            "{}{elapsed}{deadline}{age}",
+            WorkMessage::state(row).render(view.language)
         );
-        let label = fit(
+        let (label, gap, right) = row_columns(
+            usize::from(area.width),
+            &prefix,
             if describe_calls && !(view.active && view.selected.as_ref() == Some(&row.target)) {
                 row.description.as_deref().unwrap_or(&row.label)
             } else {
                 &row.label
             },
-            usize::from(area.width).saturating_sub(prefix.width() + right.width() + 3),
+            &metadata,
+            &overflow,
         );
-        let gap =
-            usize::from(area.width).saturating_sub(prefix.width() + label.width() + right.width());
         lines.push(Line::from(vec![
             Span::styled(prefix, palette.live_work()),
             Span::styled(label, palette.live_work_content()),
