@@ -37,10 +37,11 @@ watchdogs remain unchanged.
 
 ## Current conversation storage
 
-Conversation schema19 records selected-path admission (13), Turn interruption
+Conversation schema20 records selected-path admission (13), Turn interruption
 and draft indexes (14), derived readback indexes (15), bounded Thread
 observation lookup indexes (16), the F parent lookup index (17), and summary
-usage metadata accounting (18), and exact completed-attempt scope index (19),
+usage metadata accounting (18), exact completed-attempt scope index (19), and
+index-source GC lookup indexes (20, #164); schema19 is
 reused without schema changes for
 [opt-in Responses cache diagnostics](cache-diagnostics.md); standalone
 RAG remains schema3. The existing migration2
