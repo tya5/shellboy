@@ -851,7 +851,7 @@ fn rebase_notice(
             local!(
                 language,
                 "確定本文の可用性を確認できない。確定本文の先頭を表示しました",
-                "Final text unavailable; showing its start."
+                "Final text unconfirmed; showing its start."
             ),
         ),
         Err(AnchorFailure::CanonicalWindow) => (
@@ -1033,7 +1033,7 @@ mod anchor_tests {
             (
                 AnchorFailure::Unavailable,
                 "確定本文の可用性を確認できない",
-                "Final text unavailable",
+                "Final text unconfirmed",
             ),
             (
                 AnchorFailure::CanonicalWindow,
