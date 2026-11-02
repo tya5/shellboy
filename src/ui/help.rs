@@ -906,8 +906,8 @@ impl Page {
         ));
         page.note(local!(
             config.ui.language,
-            "⌕ 索引停止中は /index を開き T で停止理由と再試行を確認します。",
-            "When ⌕ shows indexing paused, open /index and press T to inspect and retry."
+            "⌕ 索引停止中は /index を開き T で再試行します。取りこぼしは preview / backfill で復旧します。",
+            "When ⌕ shows an index pause, open /index and press T to retry. Use preview / backfill to recover missed conversations."
         ));
 
         page.section(local!(
@@ -1191,6 +1191,8 @@ mod tests {
                     } else {
                         ("o > c", "^v")
                     };
+                    assert!(text.contains("preview"), "{policy:?} {language:?}: {text}");
+                    assert!(text.contains("backfill"), "{policy:?} {language:?}: {text}");
                     assert!(text.contains(chain), "{policy:?} {language:?}: {text}");
                     assert!(text.contains(arrows), "{policy:?} {language:?}: {text}");
                     assert!(footer(language).contains(arrows));

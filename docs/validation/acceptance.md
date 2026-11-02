@@ -8564,8 +8564,8 @@ test. The later width-policy and PTY changes, plus the rebase onto 72f163d5,
 require a fresh check. The first post-rebase `cargo check --tests` failed on an
 out-of-scope PTY binary variable introduced by the test change; the helper was
 corrected. The subsequent fresh run was interrupted by signal 15 while waiting
-for the shared Rust slot; it did not execute and must be restarted. Work remains
-uncommitted on top of the task branch while #165 takes priority. Before handoff, verify saved
+for the shared Rust slot; it did not execute and must be restarted. The work is
+preserved on the task branch, rebased onto 99d10a78, while #165 takes priority. Before handoff, verify saved
 family/profile selection, clear/retry, bounded fixed classifications, 80/120
 columns in both languages, snapshot updates, and the no-selected-thread case.
 Fresh exact-tip task CI is required. No physical terminal, live-provider,
