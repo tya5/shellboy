@@ -74,7 +74,7 @@ def run_case(binary, shell, mode, index):
                 process.write(marker)
             if not mode.endswith('-burst'):
                 until(lambda frame: marker in frame, 'draft typed')
-            process.write('\r')
+            process.write('\r\x1b[3~' if mode == 'typed-noop-delete' else '\r')
             frame = until(lambda frame: ('Pending' in frame or 'Submitting' in frame)
                           and marker in frame, 'queue')
             time.sleep(1)
@@ -91,7 +91,6 @@ def run_case(binary, shell, mode, index):
             print('=== after second Enter ===', flush=True)
             final = '\n'.join(screen.display)
             print(final, flush=True)
-            assert frame.count(marker) == 1 and final.count(marker) == 1, (shell, mode, index)
             db_path = root / 'data' / 'shellboy.db'
             with closing(sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True)) as db:
                 count = db.execute(
@@ -102,7 +101,7 @@ def run_case(binary, shell, mode, index):
                     "instr(COALESCE(json_extract(body_json, '$.text'), ''), ?) > 0",
                     (marker,)).fetchone()[0]
             print(f'db_receipts={count} editing_drafts_with_marker={drafts}', flush=True)
-            assert count == 1 and drafts == 0, (shell, mode, index, count, drafts)
+            assert frame.count(marker) == 1 and final.count(marker) == 1 and count == 1 and drafts == 0, (shell, mode, index, frame.count(marker), final.count(marker), count, drafts)
         finally:
             if process.isalive():
                 process.write('\x11')
@@ -123,7 +122,7 @@ def main():
     os.environ['PYWINPTY_BACKEND'] = '0'
     binary = args.binary.resolve(strict=True)
     for shell in ('powershell', 'git-bash'):
-        for mode in ('typed', 'paste', 'typed-burst', 'paste-burst'):
+        for mode in ('typed-noop-delete', 'typed', 'paste', 'typed-burst', 'paste-burst'):
             for index in range(args.repeat):
                 run_case(binary, shell, mode, index)
 
