@@ -791,12 +791,12 @@ fn notice_kind(node: &UiNode) -> Option<&str> {
     }
 }
 
-fn notice_symbol(kind: &str) -> Option<&'static str> {
-    match kind {
-        "shell_ended" => Some("$"),
-        "child_turn_completed" | "child_run_ended" | "child_report" => Some("↳"),
-        "recovery_wait" | "child_recovery_wait" => Some("⋯"),
-        "revisit" => Some("↻"),
+fn notice_symbol(kind: Option<&str>) -> &'static str {
+    match kind.unwrap_or("") {
+        "shell_ended" => "$",
+        "child_turn_completed" | "child_run_ended" | "child_report" => "↳",
+        "recovery_wait" | "child_recovery_wait" => "⋯",
+        "revisit" => "↻",
         "thread_settings"
         | "connection_changed"
         | "model_changed"
@@ -804,14 +804,14 @@ fn notice_symbol(kind: &str) -> Option<&'static str> {
         | "instructions_observed"
         | "instruction_changed"
         | "agents_changed"
-        | "agents_reference" => Some("⌘"),
+        | "agents_reference" => "⌘",
         "previous_instance_interrupted"
         | "app_shutdown"
         | "recovery_resumed"
-        | "interrupted_messages_recovered" => Some("⏻"),
-        "index_state" => Some("⌕"),
-        "turn_started" | "run_started" => Some("⟡"),
-        _ => None,
+        | "interrupted_messages_recovered" => "⏻",
+        "index_state" => "⌕",
+        "turn_started" | "run_started" => "⟡",
+        _ => RowKind::Unknown.mark(),
     }
 }
 
@@ -990,9 +990,7 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
 }
 
 fn is_notice(node: &UiNode) -> bool {
-    node.presentation.kind == PresentationKind::Event
-        && node.role != "received_response"
-        && notice_kind(node).and_then(notice_symbol).is_some()
+    node.presentation.kind == PresentationKind::Event && node.role != "received_response"
 }
 
 fn quiet_event(node: &UiNode) -> bool {
@@ -2090,9 +2088,7 @@ fn append_notice_run(
     let nodes = &view.nodes()[begin..end];
     let first = &nodes[0];
     if nodes.len() == 1 {
-        let symbol = notice_kind(first)
-            .and_then(notice_symbol)
-            .expect("notice kind has an approved symbol");
+        let symbol = notice_symbol(notice_kind(first));
         let prefix = format!("{} {symbol} ", RowKind::Notice.mark());
         append_item_rows(
             lines,
@@ -2109,9 +2105,7 @@ fn append_notice_run(
     let open = view.items.is_open(&key, false, "");
     let mut counts = BTreeMap::<&str, usize>::new();
     for node in nodes {
-        if let Some(symbol) = notice_kind(node).and_then(notice_symbol) {
-            *counts.entry(symbol).or_default() += 1;
-        }
+        *counts.entry(notice_symbol(notice_kind(node))).or_default() += 1;
     }
     let count_text = counts
         .into_iter()
@@ -2154,9 +2148,7 @@ fn append_notice_run(
             } else {
                 " "
             };
-            let symbol = notice_kind(node)
-                .and_then(notice_symbol)
-                .expect("notice kind has an approved symbol");
+            let symbol = notice_symbol(notice_kind(node));
             let prefix = format!(
                 "{}[{}]{marker}{symbol} ",
                 glyphs::branch(i + 1 == nodes.len()),
@@ -2998,6 +2990,63 @@ fn japanese_config() -> crate::config::Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unknown_and_missing_notice_kinds_use_the_approved_unknown_mark() {
+        crate::ui::text_width::set_terminal_width(Some(1));
+        assert_eq!(notice_symbol(None), RowKind::Unknown.mark());
+        assert_eq!(notice_symbol(Some("future_notice")), "◌");
+        assert_eq!(notice_symbol(Some("shell_ended")), "$");
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            let mut view = ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+            view.language = language;
+            let event = |id: &str, kind: Option<&str>| UiNode {
+                node_id: id.into(),
+                role: "event".into(),
+                text: format!("raw-{id}"),
+                presentation: crate::presentation::NodePresentation {
+                    kind: PresentationKind::Event,
+                    ui_messages: crate::presentation::messages::PresentationMessages {
+                        title: kind.map(|kind| Message::EventTitle { kind: kind.into() }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            *view.nodes_mut_for_test() = vec![
+                event("missing", None),
+                event("future", Some("future_notice")),
+            ];
+            view.total_nodes = 2;
+            for width in [80, 120] {
+                let (lines, _, sources) = history(&view, width);
+                assert!(plain(&lines).contains("◌"));
+                assert!(matches!(
+                    sources[0].item.as_ref().unwrap().key,
+                    ItemKey::NoticeGroup(_)
+                ));
+                view.items
+                    .toggle(ItemKey::NoticeGroup("missing".into()), false, "");
+                let (lines, _, sources) = history(&view, width);
+                let text = plain(&lines);
+                assert!(
+                    text.contains("├─[1] ◌") && text.contains("└─[2] ◌"),
+                    "{text}"
+                );
+                assert!(sources.iter().any(|s| {
+                    s.item
+                        .as_ref()
+                        .is_some_and(|i| i.key == ItemKey::Node("future".into()))
+                }));
+                view.items
+                    .toggle(ItemKey::NoticeGroup("missing".into()), false, "");
+            }
+            assert_eq!(view.nodes()[0].text, "raw-missing");
+            assert_eq!(view.nodes()[1].text, "raw-future");
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn shell_notice_uses_description_setting_signal_and_localized_elapsed() {
         let node = UiNode {
