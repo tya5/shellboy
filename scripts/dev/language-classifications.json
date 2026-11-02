@@ -123,5 +123,40 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/view.rs:0d3262a04bcee535:1": {
+    "category": "a",
+    "reason": "Reviewed view display feedback: the locale branch has an English counterpart and retains source values and width-specific glyph policy.",
+    "source_tokens_sha256": "966e3fe6c013572621072517ba167e7e14466bff777d171ed891328d0ea482a6"
+  },
+  "src/ui/view.rs:41baec270e06790b:1": {
+    "category": "a",
+    "reason": "Reviewed view display feedback: the locale branch has an English counterpart and retains source values and width-specific glyph policy.",
+    "source_tokens_sha256": "107677d6651fd1f6b91120f579e6bbbab89bc7d0d0c67d7598defb5cc7f5dbff"
+  },
+  "src/ui/view.rs:4ef689c1c48cf37b:1": {
+    "category": "a",
+    "reason": "Reviewed view display feedback: the locale branch has an English counterpart and retains source values and width-specific glyph policy.",
+    "source_tokens_sha256": "f487c6f2771f37ea321e3c9d4fdffee3f16a90d3f71497475131f4f16e0eed76"
+  },
+  "src/ui/view.rs:4f468deea837992d:1": {
+    "category": "a",
+    "reason": "Reviewed view display feedback: the locale branch has an English counterpart and retains source values and width-specific glyph policy.",
+    "source_tokens_sha256": "25f6d5a927d0b73bde205aa9de31868cd4e2ac55ca9823d42b4e772ab25e41e5"
+  },
+  "src/ui/view.rs:64227836bb301302:1": {
+    "category": "a",
+    "reason": "Reviewed view display feedback: the locale branch has an English counterpart and retains source values and width-specific glyph policy.",
+    "source_tokens_sha256": "966e3fe6c013572621072517ba167e7e14466bff777d171ed891328d0ea482a6"
+  },
+  "src/ui/view.rs:af90d9124ec06320:1": {
+    "category": "a",
+    "reason": "Reviewed view display feedback: the locale branch has an English counterpart and retains source values and width-specific glyph policy.",
+    "source_tokens_sha256": "107677d6651fd1f6b91120f579e6bbbab89bc7d0d0c67d7598defb5cc7f5dbff"
+  },
+  "src/ui/view.rs:e2db9679dcec993d:1": {
+    "category": "a",
+    "reason": "Reviewed view display feedback: the locale branch has an English counterpart and retains source values and width-specific glyph policy.",
+    "source_tokens_sha256": "f487c6f2771f37ea321e3c9d4fdffee3f16a90d3f71497475131f4f16e0eed76"
   }
 }

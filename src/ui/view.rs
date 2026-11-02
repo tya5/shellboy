@@ -1118,9 +1118,17 @@ impl ThreadView {
             self.navigation
                 .on_event(NavEvent::Read(ReadEvent::RebaseResolved));
             self.status = if relocated {
-                "表示元が選択経路から外れたため、最新ページを表示しました"
+                super::i18n::local!(
+                    self.language,
+                    "表示元が選択経路から外れたため、最新ページを表示しました",
+                    "The display source is no longer on the selected path. Showing the latest page"
+                )
             } else {
-                "履歴の表示位置を再取得しました"
+                super::i18n::local!(
+                    self.language,
+                    "履歴の表示位置を再取得しました",
+                    "Restored the history display position"
+                )
             }
             .into();
         }
@@ -1141,9 +1149,12 @@ impl ThreadView {
             return None;
         }
         self.start_rebase_navigation();
-        self.status = crate::ui::text_width::glyphs::select(
+        self.status = crate::ui::text_width::glyphs::localized!(
+            self.language,
             "履歴の表示位置を再取得中…",
             "履歴の表示位置を再取得中.",
+            "Restoring history position…",
+            "Restoring history position."
         )
         .into();
         let action = UiAction::RebaseHistory {
@@ -1306,7 +1317,12 @@ impl ThreadView {
         draft.literal_paste = true;
         draft.typed_prefix = 0;
         self.draft = draft;
-        self.status = "保存済みの依頼を入力欄へ戻しました".into();
+        self.status = super::i18n::local!(
+            self.language,
+            "保存済みの依頼を入力欄へ戻しました",
+            "Restored the saved request to the input field"
+        )
+        .into();
     }
     pub(super) fn on_clipboard_attachment(
         &mut self,
@@ -1317,12 +1333,18 @@ impl ThreadView {
         if !self.draft.text.is_char_boundary(position)
             || self.draft.text.len().saturating_add(draft::MARKER.len()) > limit
         {
-            self.status = "画像位置または下書きのbyte上限が変わったため採用していません".into();
+            self.status = super::i18n::local!(
+                self.language,
+                "画像位置または下書きのbyte上限が変わったため採用していません",
+                "The image was not attached because the image position or draft byte limit changed"
+            )
+            .into();
             false
         } else {
             self.draft.insert_attachment(attachment, position);
             self.draft.revision += 1;
-            self.status = "画像を添付しました".into();
+            self.status =
+                super::i18n::local!(self.language, "画像を添付しました", "Image attached").into();
             true
         }
     }
@@ -1829,6 +1851,44 @@ mod completion_notice_tests {
             message: message.into(),
         }
     }
+    #[test]
+    fn attachment_feedback_is_localized_without_changing_the_draft_values() {
+        for language in [crate::config::UiLanguage::Ja, crate::config::UiLanguage::En] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut view = ThreadView::new(&config, std::env::temp_dir());
+            let attachment = UiAttachment {
+                id: "id".into(),
+                path: "/synthetic/画像.png".into(),
+                kind: "image".into(),
+                state: "ready".into(),
+                position: None,
+            };
+            assert!(view.on_clipboard_attachment(attachment.clone(), 100));
+            assert_eq!(view.draft.attachments[0].path, attachment.path);
+            assert_eq!(view.draft.attachments[0].kind, attachment.kind);
+            assert_eq!(
+                view.status,
+                if language == crate::config::UiLanguage::Ja {
+                    "画像を添付しました"
+                } else {
+                    "Image attached"
+                }
+            );
+            let draft = view.draft.clone();
+            assert!(!view.on_clipboard_attachment(attachment, 0));
+            assert_eq!(view.draft, draft);
+            assert!(
+                view.status
+                    .contains(if language == crate::config::UiLanguage::Ja {
+                        "採用していません"
+                    } else {
+                        "not attached"
+                    })
+            );
+        }
+    }
+
     #[test]
     fn completion_notice_requires_the_accepted_owner_revision_anchor_and_paused_view() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());

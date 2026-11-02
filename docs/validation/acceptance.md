@@ -8457,3 +8457,10 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+### #152 stage C: View display feedback (2026-11-02)
+
+macOS rust-slot `cargo check --tests` and 14 view completion/attachment tests
+passed; both languages preserve attachment paths and draft contents. Scoped scan
+reports a=7, b=19, c=15; the full manifest remains blocked by the pre-existing
+stale presentation fingerprint. Exact task and three-OS integration CI remain
+pending; no physical terminal or OS clipboard test was performed.

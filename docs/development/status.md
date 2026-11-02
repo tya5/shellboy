@@ -3938,3 +3938,9 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: View display feedback (2026-11-02)
+
+Localized history-position, saved-draft restore and clipboard attachment feedback
+without changing attachment metadata, markers, or source anchors. This is a
+partial file batch: receipt, recovery, initial state and stream preview origins
+remain for review, including shared typed status and setup projection work.
