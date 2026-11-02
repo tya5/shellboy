@@ -72,7 +72,18 @@ one bounded start/finish event pair with matching Thread/Run/Turn IDs. Focused
 macOS check, Clippy, timing/recovery unit tests, activity witness/PTY tests and
 seven proactive tests passed; Python tooling 168 and test layout also passed.
 Physical terminal, real provider, Windows-local and post-integration coverage
-remain unverified. Branch CI and fresh checks after rebase remain pending.
+remain unverified. Fresh task-branch CI is pending.
+
+After rebasing onto 99d10a78, the first shared-build attempt returned zero
+matching tests and is not validation; it was stopped. On macOS 26.3.1 arm64,
+Rust 1.99.1, source tip 4c821816, a fresh source and integration-harness build
+passed `cargo check --tests`, the automatic-compaction separator unit test (1),
+and the bounded run/turn witness integration test (1). The runner rejected
+zero-test results. A binary copied from the same locked build passed isolated,
+literal-loopback synthetic PTY scenarios for English success, Japanese success,
+summary rejection, and cancellation. Python PTY helper tests (9) and integration
+layout (102 suites) passed. Local synthetic logs are retained in the task
+worktree; no physical terminal or live provider was exercised.
 
 ## Proactive retry gate (#153, 2026-11-02)
 
