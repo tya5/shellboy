@@ -145,7 +145,10 @@ samples the process-tree PSS approximately every 100 ms during the five rounds.
 Each cell is **minimum / median / maximum** across the three case-level observed
 maxima, in KiB. These are sampled maxima, not estimates of true peak memory:
 short peaks can be missed; sampling adds overhead, and machine load can vary.
-They are not comparable to the after-round snapshots in the earlier tables.
+Across the 12 cases per configuration, the observer recorded three churn
+failures for Shellboy and two for opencode; the other configurations recorded
+none. Failed snapshots are not zeros, and each listed case has valid samples.
+These observations are not comparable to the earlier after-round snapshots.
 
 | Agent / topology | N=1 | N=5 | N=10 | N=20 |
 | --- | ---: | ---: | ---: | ---: |
