@@ -3848,3 +3848,10 @@ Focused local checks and exact-tip CI are reported separately.
 remains deferred, including draft_saver omitted from the old ownership table;
 the unpublished overlapping prototype is not an integration candidate. Final
 Stage C coverage, dynamic/source provenance and remaining(c)review are pending.
+### v0.6.1 release preparation
+
+The 0.6.1 preparation branch updates the package version and keeps a draft
+release note in `docs/development/release-v0.6.1-draft.md`. Its cutoff is not
+selected; only landed changes are described and schema/upgrade guidance must
+be rechecked at the eventual cutoff. Candidate builds, upgrade verification,
+tagging and publication remain separate gates.

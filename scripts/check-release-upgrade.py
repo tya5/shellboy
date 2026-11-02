@@ -23,7 +23,7 @@ import time
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
            for version in (15, 16, 17, 18, 19)}
-PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17}
+PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19}
 
 
 def read_only_uri(path, stopped=False):
@@ -84,7 +84,7 @@ def check_migration(db, before, start, target):
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
-    assert start in (14, 17) and target in (14, 16, 17) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19) and target in (14, 16, 17, 19) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
@@ -98,7 +98,7 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.5.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default='0.5.0')
     parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19), default=19,

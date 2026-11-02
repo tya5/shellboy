@@ -8288,3 +8288,13 @@ witness-cap notice and an En-created cursor consumed under Ja. Exact source
 pages/cursors match across locales. Local checks and exact-tip CI results are
 reported separately, not inferred as physical-terminal, Windows-local,
 OS-clipboard, live-provider or complete Stage C acceptance.
+## v0.6.1 Release Preparation
+
+At preparation base `3fe829a965d7511069f93ab28c0cda09e5265689`, the current
+schema and migration sources match tag `v0.6.0`: conversation schema 19 and
+standalone RAG schema 3. The upgrade-check parser and synthetic fixture accept
+0.6.0/schema 19; focused Python tests cover argument defaults. This is a source
+comparison, not an executed upgrade test. Recheck the final cutoff and run the
+disposable synthetic upgrade test on
+the candidate; no candidate, tag, publication or installed-binary change is
+claimed by this preparation.
