@@ -3789,4 +3789,4 @@ Local fmt/check, four copy unit tests and the injected original-body integration
 passed. Corrected-tip CI/review, not the withdrawn candidate's CI, qualifies it.
 B5/B6 files remain deferred until landing; W8's separator work is untouched.
 Focused tests and exact branch CI evidence are recorded in acceptance; the rest
-of c1888 is not a confirmed-defect count or a StageC completion claim.
+of the unresolved inventory is not a confirmed-defect count or a StageC completion claim.

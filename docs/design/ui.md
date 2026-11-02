@@ -169,10 +169,14 @@ The 16 measured shared-snapshot/count/no-reload checks remain unchanged.
 
 ## Copy Worker Diagnostic Language (#152, Next Release)
 
-Copy acquisition errors are application-generated diagnostics and default to
-complete English sentences. This is separate from locale-owned picker labels:
-the copy picker retains an error's supplied text rather than translating raw
-source/provider details. Preserve each error code, source reason, key action,
+Copy acquisition errors contain TUI key guidance and are locale-owned complete
+UI messages, not Core/CLI diagnostics: default En uses English, explicit Ja
+retains the pre-batch Japanese sentences. The worker resolves the loaded UI
+language before supplying the message to the picker; the picker does not
+translate raw source/provider details. The caller/language boundary is recorded
+in [the UI language design](ui-language-stage-a-draft.md#copy-worker-ui-boundary-152-review-correction).
+Use ASCII parentheses in English and preserve full-width parentheses in Ja.
+Preserve each error code, source reason, key action,
 limit, pagination/hash guard and copied bytes. An untranslated generated prefix
 must not be used as a comparison token or bundled with source bytes. Stage C
 product changes are excluded from0.6.0; this applies to the next release only.
