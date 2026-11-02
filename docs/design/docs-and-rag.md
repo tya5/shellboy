@@ -38,7 +38,8 @@ documentsにsource/key/active_revision/status、revisionsにcontent/extractor ha
 endpoint/profile/model/dimension/splitter fingerprint、vectorsと処理状態を保存する。
 索引の単位はdocument revision。解析済みchunk集合とembeddingの採用はtransactionで
 行い、公開版の差替え前に失敗したら旧版を保持する。短いwrite transactionと
-プロセス間exclusive writer lock、有限busy timeoutを使う。旧版getは保存本文を読む。
+プロセス間exclusive writer lock、有限busy timeoutを使う。新版公開時に旧版を回収し、
+旧版getは `revision_unavailable` を返す。
 keywordはliteral substringを正確な基準とし、日本語短語にも対応する。
 SQLite FTSは候補高速化に使えてもliteral意味を変えない。
 UUID付きref/cursorはURL-safe base64のversioned JSON。secretではなく条件と版を検証する。

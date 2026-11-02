@@ -62,7 +62,8 @@ semantic/hybrid は既存embedding接続設定を共用する。未設定・接�
 履歴ノードの存在と採用経路所属を混同しない。
 
 get は検索時の保存版を返し、現在ファイルへのすり替えをしない。
-過去版を保持し、解除/GC等で取得不能なら `revision_unavailable`。
+新しい版の公開成功時にその文書の旧版を回収する。公開失敗時は旧版を保持し、
+回収や解除等で取得不能なら `revision_unavailable`。
 参照は保存先識別子/種類/ID/版/hashを持つopaque値で、任意pathは開かない。
 文書storeは永続UUID、UUIDのない既存会話storeはpath hash・filesystem identity・node witnessで識別する。
 history は明示read-only SQLite adapterでlive/offline共通。owner起動、復旧、migration、
@@ -80,7 +81,7 @@ ownerのoperation receiptへ登録せず、`--operation-id`併用は拒否する
 1. repo外cwd、owner/API/設定無しで英語catalogueの階層閲覧とkeyword検索。Unicode本文は引き続きliteral検索・UTF-8境界を検証。
 2. 新規モデルが短い入口からガイドを自ら読み、shell/子への依頼を正しいIDで実行。
 3. text/PDF/DOCX/PPTX/XLSXおよび第三者adapterから検索→同版get。
-4. 差分同期、消失、読取失敗、版保持、派生ingest、dry-runとAPI呼出し省略。
+4. 差分同期、消失、読取失敗時の版保持、公開後の旧版回収、派生ingest、dry-runとAPI呼出し省略。
 5. 実LiteLLM embeddingで索引とsemantic/hybrid、明示scopeと部分失敗。
 6. live/offline履歴参照、schema不一致、space変更、GC/更新後の参照失効、
    owner正常終了との並行動作。秘密・実会話は検証記録へ含めない。

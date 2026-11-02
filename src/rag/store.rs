@@ -409,10 +409,28 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
 }
 pub(super) fn publish(s: &mut Store, document: &str, revision: &str) -> Result<()> {
     let tx = s.db.transaction()?;
+    let previous: Option<String> = tx.query_row(
+        "SELECT active_revision FROM documents WHERE id=?1",
+        [document],
+        |row| row.get(0),
+    )?;
     tx.execute(
         "UPDATE documents SET active_revision=?2,status='ready',error=NULL WHERE id=?1",
         params![document, revision],
     )?;
+    if previous.as_deref() != Some(revision) {
+        // Publication and retirement share a transaction: failed indexing keeps
+        // the previous version, and readers see either complete snapshot.
+        let removed_chunks = tx.execute("DELETE FROM chunks WHERE revision_id IN (SELECT id FROM revisions WHERE document_id=?1 AND id!=?2)", params![document, revision])?;
+        tx.execute("DELETE FROM blocks WHERE revision_id IN (SELECT id FROM revisions WHERE document_id=?1 AND id!=?2)", params![document, revision])?;
+        tx.execute(
+            "DELETE FROM revisions WHERE document_id=?1 AND id!=?2",
+            params![document, revision],
+        )?;
+        if removed_chunks > 0 {
+            prune_embeddings(&tx)?;
+        }
+    }
     tx.execute(
         "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='generation'",
         [],

@@ -265,6 +265,66 @@ async fn semantic_cache_reuses_successful_content_and_unregister_prunes_vectors(
 }
 
 #[tokio::test]
+async fn publishing_retires_old_revision_without_deleting_shared_embeddings() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    let (_, _, server) = proxy(root).await;
+    init(root).await;
+    std::fs::write(root.join("one.md"), "OLD shared 日本語").unwrap();
+    std::fs::write(root.join("two.md"), "OLD shared 日本語").unwrap();
+    add(root, "one", "one.md").await;
+    add(root, "two", "two.md").await;
+    assert_eq!(index(root, None, IndexMode::Semantic).await["ok"], true);
+    let found = search(root, "source:one", "OLD", SearchMode::Keyword).await;
+    let reference = found["result"]["items"][0]["reference"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    std::fs::write(root.join("one.md"), "NEW 日本語").unwrap();
+    assert_eq!(
+        index(root, Some("one"), IndexMode::Semantic).await["ok"],
+        true
+    );
+    let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
+    let revisions: i64 = db.query_row("SELECT COUNT(*) FROM revisions r JOIN documents d ON d.id=r.document_id JOIN sources s ON s.id=d.source_id WHERE s.name='one'", [], |r| r.get(0)).unwrap();
+    assert_eq!(revisions, 1);
+    let embeddings: i64 = db
+        .query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        embeddings, 2,
+        "shared old embedding and new embedding remain"
+    );
+    let got = call(
+        root,
+        RagCommand::Get {
+            reference,
+            limit_bytes: 65536,
+            cursor: None,
+        },
+    )
+    .await;
+    assert_eq!(got["error"]["code"], "revision_unavailable");
+    assert_eq!(
+        search(root, "source:two", "OLD", SearchMode::Semantic).await["result"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    std::fs::write(root.join("two.md"), "NEW 日本語").unwrap();
+    assert_eq!(
+        index(root, Some("two"), IndexMode::Semantic).await["ok"],
+        true
+    );
+    let remaining: i64 = db
+        .query_row("SELECT COUNT(*) FROM embeddings", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(remaining, 1, "unreferenced old embedding is retired");
+    server.abort();
+}
+
+#[tokio::test]
 async fn failed_embedding_keeps_previous_version_and_retry_reuses_successful_batches() {
     let root = tempfile::tempdir().unwrap();
     let root = root.path();
