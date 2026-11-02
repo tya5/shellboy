@@ -648,5 +648,115 @@
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
     "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+  },
+  "src/presentation/fields.rs:bb218f39139f8fc9:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:7e4802eaf749ff64:2": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:c16e443a48ab7b88:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:9d0518dbe7e7b83c:2": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:286d3cba4dbcd899:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:24045d82d497f473:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:3df307e35a79103d:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:90495f51a96625db:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:810aa84d14201ae7:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:b0e5347b4b659922:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:5c955b13c40ed016:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:f7ff35663f888fcb:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:24b2118a11b0a649:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:2ca40f747ef85ef4:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:86b86ee263bb3e7c:2": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:fbae174c67f04b00:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:608fe041d34bd512:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:fafc8de292c10311:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:545f79b623bede84:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:b13cd63d1f62d84a:1": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:810aa84d14201ae7:2": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
+  },
+  "src/presentation/fields.rs:8b6d3d98447a59cd:2": {
+    "category": "a",
+    "reason": "Japanese state label has a typed English state_label_for counterpart; UI displays it only for generated values and retains opaque source values.",
+    "source_tokens_sha256": "70690273b49257df44cec25970afd43099a414e30ecaa0ac50f008db13369b7e"
   }
 }

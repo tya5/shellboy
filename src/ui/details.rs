@@ -1892,9 +1892,15 @@ mod tests {
             }];
             let mut details = Details::new(ui.view(), false);
             details.mode = Mode::Fields;
-            details.selected = details.fields(ui.view()).iter().position(|field| field.key == "/state").unwrap();
+            details.selected = details
+                .fields(ui.view())
+                .iter()
+                .position(|field| field.key == "/state")
+                .unwrap();
             let mut next = 0;
-            assert!(matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { ref text, .. } if text == "running")));
+            assert!(
+                matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { ref text, .. } if text == "running"))
+            );
             ui.details = Some(details);
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {

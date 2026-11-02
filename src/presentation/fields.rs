@@ -388,13 +388,16 @@ pub(crate) fn displayed_for(
 ) -> &str {
     let key = field.key.rsplit('/').next().unwrap_or(&field.key);
     if language == crate::config::UiLanguage::En {
-        if matches!(key, "state" | "status" | "previous_state" | "startup_state" | "planned_state")
-            && field.display.as_deref() == Some(state_label(&field.value))
+        if matches!(
+            key,
+            "state" | "status" | "previous_state" | "startup_state" | "planned_state"
+        ) && field.display.as_deref() == Some(state_label(&field.value))
             && state_label(&field.value) != field.value
         {
             return state_label_for(&field.value, language);
         }
-        if key == "exit_code" && field.value == "null" && field.display.as_deref() == Some("未確定") {
+        if key == "exit_code" && field.value == "null" && field.display.as_deref() == Some("未確定")
+        {
             return "Undetermined";
         }
     }
@@ -618,8 +621,34 @@ mod tests {
         assert_eq!(displayed_for(&opaque, En), "opaque display");
         assert_eq!(state_label_for("future-state", En), "future-state");
         assert_eq!(state_label_for("保留中", En), "保留中");
-        assert_eq!(displayed_for(fields.iter().find(|f| f.key == "/future").unwrap(), En), "running");
-        for value in ["accepted", "held", "applied", "completed", "running", "starting", "preparing", "inflight", "waiting", "recovery_wait", "pending", "live", "stopping", "stopped", "failed", "incomplete", "cancelled", "not_started", "interrupted", "exited", "idle", "paused"] {
+        assert_eq!(
+            displayed_for(fields.iter().find(|f| f.key == "/future").unwrap(), En),
+            "running"
+        );
+        for value in [
+            "accepted",
+            "held",
+            "applied",
+            "completed",
+            "running",
+            "starting",
+            "preparing",
+            "inflight",
+            "waiting",
+            "recovery_wait",
+            "pending",
+            "live",
+            "stopping",
+            "stopped",
+            "failed",
+            "incomplete",
+            "cancelled",
+            "not_started",
+            "interrupted",
+            "exited",
+            "idle",
+            "paused",
+        ] {
             assert_eq!(state_label_for(value, Ja), state_label(value));
             assert!(state_label_for(value, En).is_ascii());
             assert_ne!(state_label_for(value, En), value);
