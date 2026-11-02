@@ -206,7 +206,7 @@ impl Drop for PinLease {
         let ids = self.ids.clone();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn(async move {
-                let _ = database
+                let released = database
                     .call(move |db| {
                         let tx = db.transaction()?;
                         for id in ids {
@@ -216,6 +216,13 @@ impl Drop for PinLease {
                         Ok(())
                     })
                     .await;
+                if released.is_ok() {
+                    // Released pins can make managed images and raw output collectable.
+                    database.signals().mark_all(&[
+                        crate::maintenance::Work::Managed,
+                        crate::maintenance::Work::Raw,
+                    ]);
+                }
             });
         }
         // If runtime is gone, startup cleanup removes old-instance pins.
@@ -267,6 +274,8 @@ pub struct AttachmentService {
     pub workers: BlockingFiles,
     control_workers: BlockingFiles,
     cache: Arc<Mutex<Cache>>,
+    /// The managed-retention background requester (one outstanding unit).
+    requester: Arc<tokio::sync::Mutex<crate::storage::BackgroundRequester>>,
 }
 impl AttachmentService {
     pub fn new(
@@ -276,6 +285,9 @@ impl AttachmentService {
         instance_id: String,
     ) -> Self {
         Self {
+            requester: Arc::new(tokio::sync::Mutex::new(
+                crate::storage::BackgroundRequester::new(database.clone()),
+            )),
             database,
             config: config.clone(),
             data_dir,
@@ -987,7 +999,12 @@ pub struct ManagedGcReport {
     pub deleted: Vec<String>,
     pub failed: Vec<(String, String)>,
     pub protected_bytes: u64,
+    /// Ready (retained) bytes after this pass's marking.
     pub remaining_bytes: u64,
+    /// A background unit was deferred at its DB step budget; the next pass resumes.
+    pub deferred: bool,
+    /// When the oldest retained ready image becomes collectable by age.
+    pub next_due: Option<chrono::DateTime<chrono::Utc>>,
 }
 impl AttachmentService {
     /// Keep ManagedImage alive until the draft is attached transactionally or
@@ -1080,7 +1097,9 @@ impl AttachmentService {
                 let reason = other.err().unwrap_or_else(cancelled);
                 let row = managed.clone();
                 let description = reason.message.clone();
-                let _=self.database.call(move|db|{db.execute("UPDATE managed_file SET state='failed',deleted_reason=?2 WHERE id=?1 AND state='creating'",params![row,description])?;Ok(())}).await;
+                if self.database.call(move|db|{db.execute("UPDATE managed_file SET state='failed',deleted_reason=?2 WHERE id=?1 AND state='creating'",params![row,description])?;Ok(())}).await.is_ok() {
+                    self.database.signals().mark(crate::maintenance::Work::Managed);
+                }
                 return Err(reason);
             }
         };
@@ -1089,6 +1108,8 @@ impl AttachmentService {
         if changed != 1 {
             return Err(stale());
         }
+        // A new ready image can push retained bytes past clipboard_bytes.
+        self.database.signals().mark(crate::maintenance::Work::Managed);
         Ok(ManagedImage {
             id: managed,
             path,
@@ -1121,6 +1142,11 @@ impl AttachmentService {
     }
     /// GC passes its existing availability signal. Publish each committed
     /// availability transition even if a later unlink/save fails.
+    ///
+    /// Bounded background units (storage design #171): every DB unit visits at
+    /// most `MANAGED_UNIT` rows through `managed_retention(state,created_at)`.
+    /// The ready total is accumulated by a first keyset sweep, then each state
+    /// is swept again oldest-first with the same per-row decision as before.
     pub(crate) async fn collect_managed_observed(
         &self,
         at: chrono::DateTime<chrono::Utc>,
@@ -1132,22 +1158,133 @@ impl AttachmentService {
             .and_then(|duration| at.checked_sub_signed(duration))
             .map(|date| date.to_rfc3339());
         let budget = self.config.retention.clipboard_bytes;
-        let first_signal = availability_changed.clone();
-        let (candidates,protected,total)=self.database.call(move|db|{
-            let tx=db.transaction()?;let mut statement=tx.prepare("SELECT m.id,m.absolute_path,m.state,COALESCE(m.raw_size,0),m.created_at,EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='managed_file' AND p.resource_id=m.id) OR EXISTS(SELECT 1 FROM attachment_ref a JOIN attachment_selection s ON s.attachment_id=a.id JOIN thread t ON t.id=s.thread_id WHERE a.absolute_path=m.absolute_path AND s.state='active' AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM draft d,json_each(d.body_json,'$.attachments') a WHERE d.state IN ('editing','accepting','submitting','submitted') AND (d.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=d.thread_id AND t.deleted_at IS NULL)) AND (json_extract(a.value,'$.id')=m.id OR json_extract(a.value,'$.path')=m.absolute_path)) OR EXISTS(SELECT 1 FROM draft d JOIN thread t ON t.id=d.thread_id JOIN attachment_ref a ON a.source_node_id=json_extract(d.body_json,'$.source_message_id') WHERE d.state='archived' AND json_extract(d.body_json,'$.kind')='cancelled_message' AND t.deleted_at IS NULL AND a.absolute_path=m.absolute_path) FROM managed_file m WHERE m.state IN ('ready','failed','deleting') ORDER BY m.created_at,m.id")?;
-            let rows=statement.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,bool>(5)?)))?.collect::<Result<Vec<_>,_>>()?;drop(statement);
-            let mut total=rows.iter().filter(|r|r.2=="ready").map(|r|r.3 as u64).sum::<u64>();let protected=rows.iter().filter(|r|r.5).map(|r|r.3 as u64).sum();let mut candidates=Vec::new();let mut availability_transition=false;
-            for (id,path,state,size,created,pinned) in rows {
-                if pinned { continue; }
-                if state=="deleting"||state=="failed"||cutoff.as_ref().is_some_and(|cutoff|created<=*cutoff)||total>budget{if state=="ready"{total=total.saturating_sub(size as u64);}availability_transition |= tx.execute("UPDATE managed_file SET state='deleting',deleted_reason=COALESCE(deleted_reason,'clipboard retention') WHERE id=?1 AND (state IN ('ready','failed') OR (state='deleting' AND deleted_reason IS NULL))",[&id])? > 0; candidates.push((id,PathBuf::from(path)));}
+        let mut requester = self.requester.lock().await;
+        let mut report = ManagedGcReport::default();
+        // Sweep 1: ready total.
+        let mut total = 0u64;
+        let mut after = (String::new(), String::new());
+        loop {
+            let cursor = after.clone();
+            let unit = requester
+                .unit(MANAGED_UNIT, move |db, limit| {
+                    let rows = db
+                        .prepare(MANAGED_PAGE)?
+                        .query_map(params!["ready", cursor.0, cursor.1, limit.get()], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(4)?, r.get::<_, i64>(3)?))
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                })
+                .await
+                .map_err(storage_error)?;
+            let crate::storage::Background::Done(rows) = unit else {
+                report.deferred = true;
+                return Ok(report);
+            };
+            total += rows.iter().map(|r| r.2 as u64).sum::<u64>();
+            match rows.last() {
+                Some(last) if rows.len() == MANAGED_UNIT.get() as usize => {
+                    after = (last.1.clone(), last.0.clone())
+                }
+                _ => break,
             }
-            tx.commit()?;if availability_transition && let Some(signal)=first_signal { signal.notify_one(); }Ok((candidates,protected,total))
-        }).await.map_err(storage_error)?;
-        let mut report = ManagedGcReport {
-            protected_bytes: protected,
-            remaining_bytes: total,
-            ..ManagedGcReport::default()
-        };
+        }
+        // Sweep 2: mark candidates per state, oldest first.
+        let mut candidates = Vec::new();
+        for state in ["deleting", "failed", "ready"] {
+            let mut after = (String::new(), String::new());
+            loop {
+                let (cursor, cutoff, signal) =
+                    (after.clone(), cutoff.clone(), availability_changed.clone());
+                let unit = requester
+                    .unit(MANAGED_UNIT, move |db, limit| {
+                        let tx = db.transaction()?;
+                        let rows = tx
+                            .prepare(MANAGED_PAGE)?
+                            .query_map(params![state, cursor.0, cursor.1, limit.get()], |r| {
+                                Ok((
+                                    r.get::<_, String>(0)?,
+                                    r.get::<_, String>(1)?,
+                                    r.get::<_, String>(2)?,
+                                    r.get::<_, i64>(3)?,
+                                    r.get::<_, String>(4)?,
+                                    r.get::<_, bool>(5)?,
+                                ))
+                            })?
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let (mut total, mut protected, mut marked) = (total, 0u64, Vec::new());
+                        let mut availability_transition = false;
+                        for (id, path, state, size, created, pinned) in &rows {
+                            if *pinned {
+                                protected += *size as u64;
+                                continue;
+                            }
+                            if state == "deleting"
+                                || state == "failed"
+                                || cutoff.as_ref().is_some_and(|cutoff| created <= cutoff)
+                                || total > budget
+                            {
+                                if state == "ready" {
+                                    total = total.saturating_sub(*size as u64);
+                                }
+                                availability_transition |= tx.execute("UPDATE managed_file SET state='deleting',deleted_reason=COALESCE(deleted_reason,'clipboard retention') WHERE id=?1 AND (state IN ('ready','failed') OR (state='deleting' AND deleted_reason IS NULL))",[id])? > 0;
+                                marked.push((id.clone(), PathBuf::from(path)));
+                            }
+                        }
+                        tx.commit()?;
+                        if availability_transition && let Some(signal) = signal {
+                            signal.notify_one();
+                        }
+                        let last = (rows.len() == limit.rows())
+                            .then(|| rows.last().map(|r| (r.4.clone(), r.0.clone())))
+                            .flatten();
+                        Ok((marked, protected, total, last))
+                    })
+                    .await
+                    .map_err(storage_error)?;
+                let crate::storage::Background::Done((marked, protected, remaining, last)) = unit
+                else {
+                    report.deferred = true;
+                    break;
+                };
+                candidates.extend(marked);
+                report.protected_bytes += protected;
+                total = remaining;
+                match last {
+                    Some(last) => after = last,
+                    None => break,
+                }
+            }
+            if report.deferred {
+                break;
+            }
+        }
+        report.remaining_bytes = total;
+        if !report.deferred
+            && let (Some(cutoff), Some(days)) = (
+                cutoff.clone(),
+                i64::try_from(self.config.retention.clipboard_days)
+                    .ok()
+                    .and_then(chrono::Duration::try_days),
+            )
+        {
+            // One index seek on managed_retention: the next age deadline.
+            let oldest = requester
+                .unit(ONE_ROW, move |db, _| {
+                    Ok(db.query_row(
+                        "SELECT MIN(created_at) FROM managed_file INDEXED BY managed_retention WHERE state='ready' AND created_at>?1",
+                        [cutoff],
+                        |r| r.get::<_, Option<String>>(0),
+                    )?)
+                })
+                .await
+                .map_err(storage_error)?;
+            if let crate::storage::Background::Done(Some(oldest)) = oldest {
+                report.next_due = chrono::DateTime::parse_from_rfc3339(&oldest)
+                    .ok()
+                    .and_then(|at| at.with_timezone(&chrono::Utc).checked_add_signed(days));
+            }
+        }
         for (id, path) in candidates {
             let owned = self.data_dir.join("managed").join("clipboard");
             let expected = format!("{id}.png");
@@ -1178,34 +1315,32 @@ impl AttachmentService {
                 Ok(()) => {
                     let row = id.clone();
                     let signal = availability_changed.clone();
-                    self.database.call(move|db|{
+                    // Unlink already tolerates NotFound, so a deferred mark is
+                    // retried by the next pass from the saved `deleting` row.
+                    let marked = requester.unit(ONE_ROW, move|db, _|{
                         let tx = db.transaction()?;
                         let changed = tx.execute("UPDATE managed_file SET state='deleted' WHERE id=?1 AND state='deleting'",[row])?;
                         tx.commit()?;
                         if changed > 0 && let Some(signal) = signal { signal.notify_one(); }
                         Ok(())
                     }).await.map_err(storage_error)?;
+                    if matches!(marked, crate::storage::Background::Deferred) {
+                        report.deferred = true;
+                        break;
+                    }
                     report.deleted.push(id);
                 }
                 Err(error) => report.failed.push((id, error.message)),
             }
         }
-        report.remaining_bytes = self
-            .database
-            .call(|db| {
-                db.query_row(
-                    "SELECT COALESCE(SUM(raw_size),0) FROM managed_file WHERE state<>'deleted'",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .map(|value| value as u64)
-                .map_err(StorageError::from)
-            })
-            .await
-            .map_err(storage_error)?;
         Ok(report)
     }
 }
+
+const MANAGED_UNIT: std::num::NonZeroU32 = std::num::NonZeroU32::new(128).unwrap();
+const ONE_ROW: std::num::NonZeroU32 = std::num::NonZeroU32::new(1).unwrap();
+/// One keyset page of one state through `managed_retention(state,created_at)`.
+const MANAGED_PAGE: &str = "SELECT m.id,m.absolute_path,m.state,COALESCE(m.raw_size,0),m.created_at,EXISTS(SELECT 1 FROM runtime_pin p WHERE p.resource_kind='managed_file' AND p.resource_id=m.id) OR EXISTS(SELECT 1 FROM attachment_ref a JOIN attachment_selection s ON s.attachment_id=a.id JOIN thread t ON t.id=s.thread_id WHERE a.absolute_path=m.absolute_path AND s.state='active' AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM draft d,json_each(d.body_json,'$.attachments') a WHERE d.state IN ('editing','accepting','submitting','submitted') AND (d.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=d.thread_id AND t.deleted_at IS NULL)) AND (json_extract(a.value,'$.id')=m.id OR json_extract(a.value,'$.path')=m.absolute_path)) OR EXISTS(SELECT 1 FROM draft d JOIN thread t ON t.id=d.thread_id JOIN attachment_ref a ON a.source_node_id=json_extract(d.body_json,'$.source_message_id') WHERE d.state='archived' AND json_extract(d.body_json,'$.kind')='cancelled_message' AND t.deleted_at IS NULL AND a.absolute_path=m.absolute_path) FROM managed_file m INDEXED BY managed_retention WHERE m.state=?1 AND m.created_at>=?2 AND (m.created_at>?2 OR m.id>?3) ORDER BY m.created_at,m.id LIMIT ?4";
 
 #[cfg(test)]
 mod mime_tests {

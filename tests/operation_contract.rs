@@ -124,7 +124,7 @@ async fn explicit_context_edit_keeps_each_intent_in_the_protected_original_recei
         })
         .await
         .unwrap();
-    store.collect_receipts().await.unwrap();
+    store.collect_receipts().await.unwrap().collected;
     assert_eq!(
         store.execute(first, None).await.unwrap().result,
         accepted.result,
@@ -452,7 +452,7 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
         .collect(StorageCategory::All, chrono::Utc::now())
         .await
         .unwrap();
-    control.store.collect_receipts().await.unwrap();
+    control.store.collect_receipts().await.unwrap().collected;
     owner
         .db
         .call(move |db| {
@@ -712,7 +712,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         .collect(StorageCategory::All, chrono::Utc::now())
         .await
         .unwrap();
-    assert_eq!(control.store.collect_receipts().await.unwrap(), 0);
+    assert_eq!(control.store.collect_receipts().await.unwrap().collected, 0);
     owner
         .db
         .call(|db| {
@@ -739,7 +739,7 @@ async fn full_receipt_budget_keeps_replay_status_gc_and_explicit_owner_restart_a
         .unwrap();
     let control = Control::new(&owner, root.path().into());
     assert_ne!(control.store.instance_id, old_instance);
-    assert_eq!(control.store.collect_receipts().await.unwrap(), 1);
+    assert_eq!(control.store.collect_receipts().await.unwrap().collected, 1);
     let status = control
         .request(request(
             &control.store.instance_id,
@@ -825,7 +825,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
         .await
         .unwrap();
     store.database.call(|db| {db.execute("UPDATE operation_receipt SET created_at='2000-01-01' WHERE state IN ('completed','failed')",[])?;Ok(())}).await.unwrap();
-    assert_eq!(store.collect_receipts().await.unwrap(), 2);
+    assert_eq!(store.collect_receipts().await.unwrap().collected, 2);
     assert_eq!(
         store.execute(create.clone(), None).await.unwrap_err().code,
         ErrorCode::OperationExpired
@@ -889,7 +889,7 @@ async fn current_instance_result_expiry_preserves_identity_conflicts_and_runtime
             .result["receipt_budget"]["result_retention_seconds"],
         86_400
     );
-    assert_eq!(store.collect_receipts().await.unwrap(), 0);
+    assert_eq!(store.collect_receipts().await.unwrap().collected, 0);
     store
         .database
         .call(move |db| {

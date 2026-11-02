@@ -304,6 +304,8 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
         })
         .await
         .unwrap();
+    // Producer contract (#171): a committed deletion marks its maintenance kinds.
+    store.database.signals().take();
     execute(
         &store,
         Command::ThreadDelete(ThreadDeleteArgs {
@@ -313,6 +315,13 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
         }),
     )
     .await;
+    let marked = store.database.signals().take();
+    for work in shellboy::maintenance::Work::DELETION
+        .into_iter()
+        .chain([shellboy::maintenance::Work::Managed, shellboy::maintenance::Work::Drafts])
+    {
+        assert!(marked.contains(work), "{work:?} not signalled by deletion");
+    }
     let detail: MessageDetails = serde_json::from_value(
         execute(
             &store,
@@ -1167,7 +1176,7 @@ async fn receipt_saturation_rejects_before_effects_but_keeps_replay_observation_
             .result["receipt_budget"]["at_limit"],
         true
     );
-    assert_eq!(store.collect_receipts().await.unwrap(), 0);
+    assert_eq!(store.collect_receipts().await.unwrap().collected, 0);
     store
         .database
         .call(|db| {
@@ -1220,7 +1229,7 @@ async fn old_terminal_receipt_collection_preserves_pending_and_expires_old_execu
         store.startup_cwd.clone(),
         "next".into(),
     );
-    assert_eq!(store.collect_receipts().await.unwrap(), 1);
+    assert_eq!(store.collect_receipts().await.unwrap().collected, 1);
     assert_eq!(
         store.execute(create_request, None).await.unwrap_err().code,
         ErrorCode::OperationExpired
@@ -1289,7 +1298,7 @@ async fn old_receipt_and_compaction_companion_collection_roll_back_together_on_f
         })
         .await
         .unwrap();
-    assert_eq!(store.collect_receipts().await.unwrap(), 1);
+    assert_eq!(store.collect_receipts().await.unwrap().collected, 1);
     store.database.shutdown().await.unwrap();
 }
 

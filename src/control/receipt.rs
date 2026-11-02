@@ -109,22 +109,98 @@ pub(super) fn usage(db: &Connection, instance: &str) -> Result<u64> {
 /// marker; only old-instance identities may be deleted. All call sites own a
 /// transaction, and one pass touches at most CLEANUP_BATCH rows.
 pub(super) fn collect(db: &Connection, instance: &str, pressure: bool) -> Result<u64> {
-    let rows=db.prepare("SELECT operation_id,(instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':'),COALESCE(octet_length(result_ref_json),0) FROM operation_receipt o
-        WHERE state IN ('completed','failed')
+    collect_range(db, instance, pressure, None).map(|(collected, _)| collected)
+}
+
+/// Rows of operation_receipt one background collection unit examines, so the
+/// unit's SQLite steps do not grow with the table (storage design #171).
+pub(crate) const COLLECT_WINDOW: std::num::NonZeroU32 = std::num::NonZeroU32::new(1024).unwrap();
+
+/// One bounded window: rows collected, the cursor for the next unit (`None`
+/// at the end of the table), and the earliest future age-eligibility instant
+/// (Julian day) among this window's terminal results, used as a deadline.
+pub(super) struct Window {
+    pub collected: u64,
+    pub next: Option<i64>,
+    pub due: Option<f64>,
+}
+
+/// One bounded background unit over the next rowid window after `after`.
+pub(super) fn collect_window(
+    db: &Connection,
+    instance: &str,
+    pressure: bool,
+    after: i64,
+    window: crate::storage::Limit,
+) -> Result<Window> {
+    let (end, rows): (Option<i64>, i64) = db
+        .query_row(
+            "SELECT max(rowid),count(*) FROM (SELECT rowid FROM operation_receipt WHERE rowid>?1 ORDER BY rowid LIMIT ?2)",
+            params![after, window.get()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(sql)?;
+    let Some(end) = end else {
+        return Ok(Window {
+            collected: 0,
+            next: None,
+            due: None,
+        });
+    };
+    let (collected, last) = collect_range(db, instance, pressure, Some((after, end)))?;
+    let next = match last {
+        // The row bound stopped this pass inside the window: continue after it.
+        Some(last) => Some(last),
+        None if rows == window.get() => Some(end),
+        None => None,
+    };
+    let due: Option<f64> = db
+        .query_row(
+            &format!("SELECT MIN(julianday(created_at)+CASE WHEN (instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':') THEN {RESULT_RETENTION_SECONDS}/86400.0 ELSE 7 END) FROM operation_receipt WHERE rowid>?2 AND rowid<=?3 AND state IN ('completed','failed') AND (instance_id<>?1 OR (result_ref_json IS NOT NULL AND result_ref_json<>?4 AND octet_length(result_ref_json)>1))"),
+            params![instance, after, end, EXPIRED_OUTCOME],
+            |r| r.get(0),
+        )
+        .map_err(sql)?;
+    let now: f64 = db
+        .query_row("SELECT julianday('now')", [], |r| r.get(0))
+        .map_err(sql)?;
+    Ok(Window {
+        collected,
+        next,
+        due: due.filter(|due| *due > now),
+    })
+}
+
+/// With a rowid range, candidates are visited in rowid order and the last
+/// visited rowid is returned when the CLEANUP_BATCH bound was reached.
+fn collect_range(
+    db: &Connection,
+    instance: &str,
+    pressure: bool,
+    range: Option<(i64, i64)>,
+) -> Result<(u64, Option<i64>)> {
+    let (bounds, order) = match range {
+        Some(_) => ("AND o.rowid>?6 AND o.rowid<=?7", "o.rowid"),
+        None => ("AND ?6 IS NULL AND ?7 IS NULL", "created_at,operation_id"),
+    };
+    let (low, high) = range.map_or((None, None), |(low, high)| (Some(low), Some(high)));
+    let rows=db.prepare(&format!("SELECT operation_id,(instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':'),COALESCE(octet_length(result_ref_json),0),o.rowid FROM operation_receipt o
+        WHERE state IN ('completed','failed') {bounds}
         AND NOT EXISTS(SELECT 1 FROM receipt r WHERE r.client_operation_id=o.operation_id AND r.state IN ('accepted','held'))
         AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.operation_id=o.operation_id AND d.status IN ('accepted','held'))
-        AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '[]' END) x WHERE (m.key LIKE 'compact.pending.%' OR m.key LIKE 'compact.inflight.%') AND x.value=o.operation_id)
+        AND NOT EXISTS(SELECT 1 FROM app_meta m,json_each(CASE WHEN json_valid(m.value) THEN m.value ELSE '[]' END) x WHERE ((m.key>='compact.pending.' AND m.key<'compact.pending/') OR (m.key>='compact.inflight.' AND m.key<'compact.inflight/')) AND x.value=o.operation_id)
         AND (((instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':')
             AND result_ref_json IS NOT NULL AND result_ref_json<>?4 AND octet_length(result_ref_json)>1
             AND (?2 OR julianday(created_at)<=julianday('now',?5)))
           OR (instance_id<>?1 AND substr(operation_id,1,length(?1)+1)<>?1||':'
             AND (?2 OR julianday(created_at)<=julianday('now','-7 days'))))
-        ORDER BY created_at,operation_id LIMIT ?3").map_err(sql)?.query_map(params![instance, pressure, CLEANUP_BATCH as i64, EXPIRED_OUTCOME, format!("-{RESULT_RETENTION_SECONDS} seconds")], |r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,i64>(2)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
+        ORDER BY {order} LIMIT ?3")).map_err(sql)?.query_map(params![instance, pressure, CLEANUP_BATCH as i64, EXPIRED_OUTCOME, format!("-{RESULT_RETENTION_SECONDS} seconds"), low, high], |r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
+    let last = (rows.len() == CLEANUP_BATCH).then(|| rows.last().map(|row| row.3)).flatten();
     let mut collected = 0;
     // Preserve malformed durable envelopes. Parse one body at a time and cap
     // aggregate validation bytes as well as row count on this DB-worker pass.
     let mut examined_bytes = 0u64;
-    for (id, current, body_bytes) in &rows {
+    for (id, current, body_bytes, _) in &rows {
         if *current {
             let bytes = u64::try_from(*body_bytes).unwrap_or(u64::MAX);
             if bytes > MAX_OUTCOME_BYTES || examined_bytes.saturating_add(bytes) > MAX_OUTCOME_BYTES
@@ -156,7 +232,7 @@ pub(super) fn collect(db: &Connection, instance: &str, pressure: bool) -> Result
         }
         collected += 1;
     }
-    Ok(collected)
+    Ok((collected, last))
 }
 
 pub(super) fn reserve(

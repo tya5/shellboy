@@ -135,6 +135,8 @@ mod tests {
     #[tokio::test]
     async fn forgetting_a_deleted_thread_releases_its_managed_image_pin() {
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let signals = control.store.database.signals().clone();
+        signals.take_seen();
         let image = control
             .attachments
             .save_clipboard_pixels(
@@ -148,6 +150,8 @@ mod tests {
             .await
             .unwrap();
         let id = image.id.clone();
+        // Producer contract (#171): a saved image marks managed retention.
+        assert!(signals.take_seen().contains(crate::maintenance::Work::Managed));
         let mut images = DraftImages::default();
         let ticket = images.begin_image("draft", Some("thread"));
         assert!(images.accept_image(ticket));
@@ -163,6 +167,12 @@ mod tests {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
         }).await.expect("discarded draft must release its managed image lease");
+        // A released pin marks managed and raw retention after its commit.
+        crate::test_watchdog::watchdog("pin release signal", async {
+            while !signals.take_seen().contains(crate::maintenance::Work::Raw) {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        }).await.expect("released pin must signal retention");
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();

@@ -108,6 +108,16 @@ pub enum RuntimeReservation {
     Saved(std::result::Result<Value, ApiError>),
 }
 
+/// Result of one receipt-collection pass (storage design #171).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ReceiptPass {
+    pub collected: u64,
+    /// The pass stopped at a deferred unit; resume on the next trigger.
+    pub deferred: bool,
+    /// Earliest future age eligibility seen, as a SQLite Julian day.
+    pub due_julian: Option<f64>,
+}
+
 #[derive(Clone)]
 pub struct Store {
     pub(crate) clients: Arc<crate::model::http::HttpClients>,
@@ -119,6 +129,8 @@ pub struct Store {
     pub instance_id: String,
     pub(crate) usage_diagnostics: Option<crate::diagnostics::Diagnostics>,
     usage_context: crate::usage_totals::ReadContext,
+    /// Receipt-collection background requester, shared by clones of this Store.
+    background: Arc<tokio::sync::Mutex<crate::storage::BackgroundRequester>>,
 }
 
 struct AgentsPlan {
@@ -161,6 +173,9 @@ impl Store {
             ),
             clients,
             instructions: crate::instructions::InstructionLoader::new(&config),
+            background: Arc::new(tokio::sync::Mutex::new(
+                crate::storage::BackgroundRequester::new(database.clone()),
+            )),
             database,
             config,
             startup_cwd,
@@ -170,20 +185,47 @@ impl Store {
         }
     }
 
-    pub async fn collect_receipts(&self) -> Result<u64> {
-        let instance = self.instance_id.clone();
-        self.database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let result = super::receipt::under_pressure(&tx, &instance)
-                    .and_then(|pressure| super::receipt::collect(&tx, &instance, pressure));
-                if result.is_ok() {
-                    tx.commit()?;
-                }
-                Ok(result)
-            })
-            .await
-            .map_err(storage_error)?
+    /// Background maintenance pass over every operation receipt in bounded
+    /// rowid windows. A deferred window ends this pass early (`deferred`);
+    /// committed windows stay collected. `due` is the earliest future instant
+    /// at which a seen terminal result becomes collectable by age: the
+    /// requester waits for it instead of repeating on a timer.
+    pub async fn collect_receipts(&self) -> Result<ReceiptPass> {
+        let mut requester = self.background.lock().await;
+        let mut pass = ReceiptPass::default();
+        let mut after = 0;
+        loop {
+            let instance = self.instance_id.clone();
+            let window = requester
+                .unit(super::receipt::COLLECT_WINDOW, move |db, window| {
+                    let tx = db.transaction()?;
+                    let result = super::receipt::under_pressure(&tx, &instance).and_then(
+                        |pressure| {
+                            super::receipt::collect_window(&tx, &instance, pressure, after, window)
+                        },
+                    );
+                    if result.is_ok() {
+                        tx.commit()?;
+                    }
+                    Ok(result)
+                })
+                .await
+                .map_err(storage_error)?;
+            let crate::storage::Background::Done(window) = window else {
+                pass.deferred = true;
+                return Ok(pass);
+            };
+            let window = window?;
+            pass.collected += window.collected;
+            if let Some(due) = window.due {
+                pass.due_julian = Some(pass.due_julian.map_or(due, |old: f64| old.min(due)));
+            }
+            match window.next {
+                Some(next) => after = next,
+                None => return Ok(pass),
+            }
+            tokio::task::yield_now().await;
+        }
     }
 
     /// `caller` has already been authenticated against the server's origin map.
@@ -1128,7 +1170,21 @@ impl Store {
             }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
             Command::ThreadSet(args) => self.set_thread(tx, args, caller, now),
-            Command::ThreadDelete(args) => delete_thread(tx, args, now),
+            Command::ThreadDelete(args) => {
+                let result = delete_thread(tx, args, now);
+                if result.is_ok() {
+                    // The single writer runs no maintenance unit before this job
+                    // commits or rolls back, so marking here cannot be missed;
+                    // a rollback only costs one idle pass.
+                    let signals = self.database.signals();
+                    signals.mark_all(&crate::maintenance::Work::DELETION);
+                    signals.mark_all(&[
+                        crate::maintenance::Work::Managed,
+                        crate::maintenance::Work::Drafts,
+                    ]);
+                }
+                result
+            }
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }

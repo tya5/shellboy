@@ -152,6 +152,64 @@ impl Drop for RequestGuard {
         self.control.changed.notify_waiters();
     }
 }
+/// Trigger- and deadline-driven maintenance requester (storage design #171).
+/// It runs only the kinds producers marked, and repeats a kind only after a
+/// new mark or a data-derived deadline, never on a periodic timer.
+async fn maintenance_loop(
+    control: std::sync::Weak<Control>,
+    gc: Arc<crate::gc::GcService>,
+    signals: Arc<crate::maintenance::Signals>,
+    stop: CancellationToken,
+) {
+    use crate::maintenance::Work;
+    let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
+    loop {
+        let now = tokio::time::Instant::now();
+        let due: Vec<u32> = deadlines.iter().filter(|(_, at)| **at <= now).map(|(k, _)| *k).collect();
+        for kind in due {
+            deadlines.remove(&kind);
+            if let Some(work) = Work::ALL.iter().find(|w| **w as u32 == kind) {
+                signals.mark(*work);
+            }
+        }
+        let set = signals.take();
+        if !set.is_empty() {
+            let Some(strong) = control.upgrade() else { return };
+            if set.contains(Work::Receipts) {
+                match strong.store.collect_receipts().await {
+                    Ok(pass) => {
+                        if pass.deferred {
+                            signals.mark(Work::Receipts);
+                        } else if let Some(due) = pass.due_julian {
+                            deadlines.insert(Work::Receipts as u32, tokio::time::Instant::now() + crate::maintenance::until_julian(due));
+                        }
+                    }
+                    Err(error) if error.is_storage_failure() => {strong.fail_storage().await;return;}
+                    Err(_) => {}
+                }
+            }
+            drop(strong);
+            if Work::ALL.iter().any(|w| *w != Work::Receipts && set.contains(*w)) {
+                tokio::select!{biased;_=stop.cancelled()=>return,result=gc.collect(StorageCategory::All,chrono::Utc::now())=>{
+                    match result {
+                        Err(error) if error.is_storage_failure() => {if let Some(control)=control.upgrade(){control.fail_storage().await;}return;}
+                        Ok(report) if report.deferred => signals.restore(set),
+                        _ => {}
+                    }
+                }}
+            }
+            continue;
+        }
+        let next = deadlines.values().min().copied();
+        tokio::select!{
+            biased;
+            _=stop.cancelled()=>return,
+            _=signals.changed()=>{},
+            _=async{match next{Some(at)=>tokio::time::sleep_until(at).await,None=>std::future::pending().await}}=>{},
+        }
+    }
+}
+
 impl Control {
     pub fn new(owner: &DataOwner, startup_cwd: PathBuf) -> Arc<Self> {
         let config = Arc::new(owner.loaded.config.clone());
@@ -260,15 +318,10 @@ impl Control {
             .await?;
         self.maintenance.get_or_init(||async{
             let gc=self.gc.clone();let attachments=self.attachments.clone();let stop=self.stop.clone();let control=Arc::downgrade(self);
+            let signals=self.store.database.signals().clone();
             Mutex::new(Some(tokio::spawn(async move{
                 if let Err(error)=attachments.restart_cleanup().await && error.is_storage_failure(){if let Some(control)=control.upgrade(){control.fail_storage().await;}return;}
-                loop{
-                    if let Some(control)=control.upgrade()
-                        && let Err(error)=control.store.collect_receipts().await
-                        && error.is_storage_failure() {control.fail_storage().await;break;}
-                    tokio::select!{biased;_=stop.cancelled()=>break,result=gc.collect(StorageCategory::All,chrono::Utc::now())=>{if let Err(error)=result && error.is_storage_failure(){if let Some(control)=control.upgrade(){control.fail_storage().await;}break;}}}
-                    tokio::select!{biased;_=stop.cancelled()=>break,_=tokio::time::sleep(std::time::Duration::from_secs(60))=>{}}
-                }
+                maintenance_loop(control,gc,signals,stop).await;
             })))
         }).await;
         Ok(())
@@ -1081,6 +1134,12 @@ impl Control {
             });
         }
         self.changed(&thread_id);
+        // A finished Run can release receipts (submitted-draft copies) and
+        // the raw output of its shells to retention.
+        self.store.database.signals().mark_all(&[
+            crate::maintenance::Work::Drafts,
+            crate::maintenance::Work::Raw,
+        ]);
         self.nudge_owner(&slot.run_id).await;
         // An accepted send/retry can race the previous driver's final
         // observation and map removal. Recheck after releasing its slot.

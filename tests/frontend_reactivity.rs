@@ -979,13 +979,13 @@ async fn real_history_gc_preserves_live_fork_sources_then_invalidates_deleted_ch
     fixture
         .cli_only(&["thread", "delete", "--thread", &child])
         .await;
+    // The deletion signal starts the maintenance pass at once (#171), so it
+    // may tombstone the sources before this explicit collect does. Either
+    // way the committed tombstones must refresh the open popup.
     let (collected, started) = fixture
         .cli_only(&["storage", "collect", "--category", "history"])
         .await;
-    assert!(
-        collected["result"]["nodes_tombstoned"].as_u64().unwrap() >= 3,
-        "{collected}"
-    );
+    assert_eq!(collected["ok"], true, "{collected}");
     fixture
         .until(
             "history GC clears unavailable F7 targets without input",

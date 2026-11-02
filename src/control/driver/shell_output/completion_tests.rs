@@ -168,9 +168,19 @@ async fn unknown_legacy_facts_stay_unknown_and_mock_unconfirmed_cleanup_stays_fa
         group_cleanup_confirmed: false,
         elapsed_ms: None,
     };
+    control.store.database.signals().take_seen();
     save_completion(&control, &snapshot, "mock-unconfirmed", &completion)
         .await
         .unwrap();
+    // Producer contract (#171): terminal output is offered to raw retention.
+    assert!(
+        control
+            .store
+            .database
+            .signals()
+            .take_seen()
+            .contains(crate::maintenance::Work::Raw)
+    );
     let observed = serde_json::to_value(reader.get("mock-unconfirmed").await.unwrap()).unwrap();
     assert_facts(&observed, true, None, false);
     let (body, event) = control
