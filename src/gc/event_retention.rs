@@ -16,6 +16,13 @@ pub(super) struct Cursor {
     events: i64,
 }
 
+impl Cursor {
+    /// Both scans reached the end and restart from the first row.
+    pub(super) fn wrapped(self) -> bool {
+        self.deliveries == 0 && self.events == 0
+    }
+}
+
 pub(super) fn collect_batch(db: &mut Connection, cursor: Cursor) -> Result<Cursor, StorageError> {
     let tx = db.transaction()?;
     // Scan by rowid, including non-candidates, so the work is bounded even

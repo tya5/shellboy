@@ -149,7 +149,15 @@ pub struct IndexService {
     source_slots: Arc<Semaphore>,
     search_slots: Arc<Semaphore>,
     stop: CancellationToken,
+    /// The index worker's background requester: one outstanding scheduling
+    /// unit across workers (storage design #171). Settling claims whose HTTP
+    /// request already ran stays on the foreground lane.
+    background: tokio::sync::Mutex<crate::storage::BackgroundRequester>,
 }
+/// Declared bound of one index scheduling unit (single-row or batch claims).
+const SCHEDULE_UNIT: std::num::NonZeroU32 = std::num::NonZeroU32::new(128).unwrap();
+/// `discard_paused` consumes one paused item per transaction.
+const DISCARD_UNIT: std::num::NonZeroU32 = std::num::NonZeroU32::new(1).unwrap();
 pub struct IndexWorkers {
     cancel: CancellationToken,
     joins: Vec<JoinHandle<()>>,
@@ -273,6 +281,9 @@ impl IndexService {
         Arc::new(Self {
             clients,
             reader: ShellOutputReader::new(database.clone(), instance),
+            background: tokio::sync::Mutex::new(crate::storage::BackgroundRequester::new(
+                database.clone(),
+            )),
             source_slots: Arc::new(Semaphore::new(config.indexing.concurrency.max(1))),
             search_slots: Arc::new(Semaphore::new(1)),
             database,
@@ -393,11 +404,22 @@ impl IndexService {
                 Ok(false) => {}
                 Err(_) => {} // The recorded pause makes later consumers discard pending work.
             }
-            let delay = self.next_delay().await.unwrap_or(Duration::from_secs(30));
+            // No work without progress (#171): sleep only until a scheduled
+            // retry; with nothing scheduled or while paused, wait for a wake
+            // (enqueue, authorization, retry, select_space) instead of a timer.
+            let delay = self
+                .next_delay()
+                .await
+                .unwrap_or(Some(Duration::from_secs(30)));
             tokio::select! {
                 _ = token.cancelled() => break,
                 _ = self.notify.notified() => {},
-                _ = tokio::time::sleep(delay) => {},
+                _ = async {
+                    match delay {
+                        Some(delay) => tokio::time::sleep(delay).await,
+                        None => std::future::pending().await,
+                    }
+                } => {},
             }
         }
     }
@@ -451,18 +473,73 @@ impl IndexService {
         self.notify.notify_waiters();
         self.notify.notify_one();
     }
+    /// Runs each worker scheduling unit once (per-kind step test, #171).
+    #[cfg(test)]
+    pub(crate) async fn measure_background_units(&self) {
+        let _ = self.process_one(CancellationToken::new()).await;
+        let _ = self.next_delay().await;
+    }
+    /// Records a profile pause directly (per-kind step test, #171).
+    #[cfg(test)]
+    pub(crate) async fn pause_for_tests(&self) {
+        let key = IndexKeys::new(self.profile_key.as_deref().expect("profile")).pause();
+        self.database
+            .call(move |db| {
+                db.execute(
+                    "INSERT INTO app_meta(key,value)VALUES(?1,'{\"reason\":\"step test\"}')",
+                    [key],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    /// Space-state transitions make inactive spaces collectable (#171).
+    pub(super) fn spaces_changed(&self) {
+        self.database
+            .signals()
+            .mark(crate::maintenance::Work::InactiveSpaces);
+    }
+    /// One declared bounded background unit; `None` when it was deferred at
+    /// the DB step budget (rolled back; the worker retries it next round).
+    async fn background_unit<T, F>(
+        &self,
+        limit: std::num::NonZeroU32,
+        operation: F,
+    ) -> Result<Option<T>, ApiError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut rusqlite::Connection, crate::storage::Limit) -> Result<T, StorageError>
+            + Send
+            + 'static,
+    {
+        match self
+            .background
+            .lock()
+            .await
+            .unit(limit, operation)
+            .await
+            .map_err(db_error)?
+        {
+            crate::storage::Background::Done(value) => Ok(Some(value)),
+            crate::storage::Background::Deferred => Ok(None),
+        }
+    }
     async fn drain_authorization(&self, key: &str) -> Result<bool, ApiError> {
         if !self.config.indexing.auto_history {
             return Ok(false);
         }
-        let prefix = IndexKeys::new(key).auto_pattern();
+        let range = IndexKeys::new(key).auto_range();
         let profile = key.to_owned();
         let family = self.failure_key().map(str::to_owned);
-        let (discarded, admission) = self
-            .database
-            .call(move |db| queue::claim_authorization(db, &prefix, &profile, family.as_deref()))
-            .await
-            .map_err(db_error)?;
+        let Some((discarded, admission)) = self
+            .background_unit(SCHEDULE_UNIT, move |db, _| {
+                queue::claim_authorization(db, &range, &profile, family.as_deref())
+            })
+            .await?
+        else {
+            return Ok(true); // Deferred: nothing committed; retry next round.
+        };
         self.publish_saved(discarded);
         let Some((record, mut admission)) = admission else {
             return Ok(discarded);
@@ -512,6 +589,9 @@ impl IndexService {
                     .await
                     .map_err(db_error)?;
                 self.publish_saved(changed);
+                if changed {
+                    self.spaces_changed(); // a candidate activation retires the old space
+                }
             }
             Err(error) => {
                 admission.state = "failed".into();
@@ -780,6 +860,7 @@ impl IndexService {
             .await
             .map_err(db_error)?;
         self.publish_saved(true);
+        self.spaces_changed(); // the previous rebuild candidate may be inactive now
         self.enqueue(&ids, &group, "explicit-rebuild").await
     }
     async fn enqueue(
@@ -940,6 +1021,37 @@ impl IndexService {
         self.publish_pause(changed);
         Ok(allowed)
     }
+    /// Worker scheduling check on the background lane; `None` when deferred.
+    async fn capacity_allowed_background(&self, key: &str) -> Result<Option<bool>, ApiError> {
+        let key = key.to_owned();
+        let config = self.config.clone();
+        let Some((allowed, changed)) = self
+            .background_unit(SCHEDULE_UNIT, move |db, _| {
+                let tx = db.transaction()?;
+                match crate::gc::require_capacity_tx(&tx, &config) {
+                    Ok(()) => {
+                        tx.commit()?;
+                        Ok((true, false))
+                    }
+                    Err(error) if error.code == ErrorCode::StorageLimit => {
+                        let changed = pause::save(
+                            &tx,
+                            &IndexKeys::new(&key).pause(),
+                            &serde_json::to_value(&error).map_err(|_| serde_error())?,
+                        )?;
+                        tx.commit()?;
+                        Ok((false, changed))
+                    }
+                    Err(error) => Err(StorageError::from(error)),
+                }
+            })
+            .await?
+        else {
+            return Ok(None);
+        };
+        self.publish_saved(changed);
+        Ok(Some(allowed))
+    }
     pub async fn process_one(&self, cancel: CancellationToken) -> Result<bool, ApiError> {
         let outcome = self.process_one_inner(cancel).await;
         if let Err(error) = &outcome {
@@ -1003,17 +1115,23 @@ impl IndexService {
         }
         let profile = key.clone();
         let family = self.failure_key().map(str::to_owned);
-        let paused = self
-            .database
-            .call(move |db| claim::discard_paused(db, &profile, family.as_deref()))
-            .await
-            .map_err(db_error)?;
+        // One paused item per bounded background unit (#173, #171).
+        let Some(paused) = self
+            .background_unit(DISCARD_UNIT, move |db, _| {
+                claim::discard_paused(db, &profile, family.as_deref())
+            })
+            .await?
+        else {
+            return Ok(true); // Deferred: retry next round.
+        };
         if let Some(progress) = paused {
             self.publish_saved(progress);
             return Ok(progress);
         }
-        if !self.capacity_allowed(&key).await? {
-            return Ok(false);
+        match self.capacity_allowed_background(&key).await? {
+            Some(true) => {}
+            Some(false) => return Ok(false),
+            None => return Ok(true), // Deferred: retry next round.
         }
         if self.drain_authorization(&key).await? {
             return Ok(true);
@@ -1023,9 +1141,12 @@ impl IndexService {
         let max_chars = self.config.embedding.batch_max_chars;
         let auto_history = self.config.indexing.auto_history;
         let family = self.failure_key().map(str::to_owned);
-        let claimed = self
-            .database
-            .call(move |db| {
+        let limit = u32::try_from(max_inputs)
+            .ok()
+            .and_then(std::num::NonZeroU32::new)
+            .unwrap_or(SCHEDULE_UNIT);
+        let Some(claimed) = self
+            .background_unit(limit, move |db, _| {
                 claim(
                     db,
                     IndexKeys::new(&key_copy),
@@ -1035,8 +1156,10 @@ impl IndexService {
                     family.as_deref(),
                 )
             })
-            .await
-            .map_err(db_error)?;
+            .await?
+        else {
+            return Ok(true); // Deferred: nothing was claimed; retry next round.
+        };
         let claims = match claimed {
             ClaimResult::Idle => return Ok(false),
             ClaimResult::Progress => {

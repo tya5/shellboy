@@ -21,15 +21,17 @@ only unreferenced shell completion events. Rebased after #163 onto 72f163d5:
 CI are tracked in the handoff; prior CI did not test the restack.
 ## DB worker lanes and background step budget (#171, design review)
 ## DB writer occupancy (#171, design revision 2 in review)
+## DB writer occupancy (#171, implemented; branch CI pending)
 
-[Storage design](../design/storage.md#db-writer-occupancy-requester-contract-and-backend-safety-net-171)
-now makes the requester contract primary: a declared bounded unit, at most one
-outstanding request per requester, trigger- or deadline-driven repetition, and
-reader connections for foreground views. Two lanes and a conditional step budget
-remain as the backend safety net. A backend prototype (two lanes, conditional
-budget, typed `Deferred`, diagnostics, no-progress state, receipt windows) passed
-its 10 focused storage unit tests on macOS. It is kept in a local stash in this
-worktree, not pushed, until review. Resume: review answers, then implement.
+Requester contract and backend safety net per the [storage design](../design/storage.md#db-writer-occupancy-requester-contract-and-backend-safety-net-171):
+background DB work only through `BackgroundRequester` units with a declared
+bound, one outstanding unit per requester, signal- or deadline-driven
+maintenance (no 60 s GC timer, no 30 s paused-index poll), schema22 logical
+usage counters (O(1) capacity gate) and the pending-delivery operation index,
+`storage status` on a reader connection, foreground/background lanes with
+strict alternation, and the conditional step budget with `db_job_budget` /
+`db_job_no_progress` diagnostics and no-progress state. Occupancy visibility
+(#171 part 2) and heavy foreground jobs (#172) are not done. See acceptance.
 
 ## Bounded index wake-delay read (#164, branch CI pending)
 

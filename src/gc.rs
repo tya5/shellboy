@@ -1,4 +1,6 @@
 //! Bounded raw retention and revision-checked history reachability collection.
+use crate::maintenance::{Work, WorkSet};
+use crate::storage::{Background, BackgroundRequester, StorageError};
 use crate::{
     attachments::{AttachmentService, BlockingFiles},
     config::Config,
@@ -9,7 +11,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
@@ -32,7 +34,11 @@ pub struct GcService {
     data_dir: PathBuf,
     attachments: Arc<AttachmentService>,
     files: BlockingFiles,
-    lane: Arc<Mutex<event_retention::Cursor>>,
+    /// The GC background requester: one outstanding unit (storage design #171).
+    requester: Arc<Mutex<BackgroundRequester>>,
+    raw_cursor: Arc<std::sync::Mutex<RawCursor>>,
+    /// Round-robin position of dead-delivery/shell-event retention (#170).
+    event_cursor: Arc<std::sync::Mutex<event_retention::Cursor>>,
     // One coalesced permit for the existing frontend; never raw data or a task.
     availability_changed: Arc<Notify>,
 }
@@ -54,6 +60,29 @@ pub struct CollectionReport {
     pub summary_cache_parts_collected: u64,
     pub summary_cache_bytes_collected: u64,
     pub deferred: bool,
+    /// Kinds whose bounded unit was deferred at the DB step budget; the
+    /// maintenance requester re-marks them (storage design #171).
+    #[serde(skip)]
+    pub(crate) deferred_kinds: WorkSet,
+    /// Next age deadlines observed by this pass.
+    #[serde(skip)]
+    pub(crate) raw_due: Option<DateTime<Utc>>,
+    #[serde(skip)]
+    pub(crate) managed_due: Option<DateTime<Utc>>,
+}
+impl CollectionReport {
+    fn defer(&mut self, work: Work) {
+        self.deferred = true;
+        self.deferred_kinds.insert(work);
+    }
+}
+/// Where an age-only raw pass resumes, when its next deadline is due, and
+/// whether the next pass must start from the oldest execution again.
+#[derive(Default)]
+struct RawCursor {
+    after: Option<(String, i64)>,
+    due: Option<DateTime<Utc>>,
+    rescan: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct StorageDetails {
@@ -77,6 +106,9 @@ pub struct HistoryStep {
     pub bytes_collected: u64,
     pub restarted: bool,
     pub complete: bool,
+    /// The step was deferred at the DB step budget and rolled back.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub deferred: bool,
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct Progress {
@@ -110,6 +142,8 @@ struct RawExecution {
     rowid: i64,
     order_key: String,
     marked: bool,
+    pinned: bool,
+    bytes: u64,
 }
 
 impl GcService {
@@ -120,12 +154,14 @@ impl GcService {
         attachments: Arc<AttachmentService>,
     ) -> Self {
         Self {
+            requester: Arc::new(Mutex::new(BackgroundRequester::new(database.clone()))),
+            raw_cursor: Arc::default(),
+            event_cursor: Arc::default(),
             database,
             files: BlockingFiles::new(config.workers.control_file),
             config,
             data_dir,
             attachments,
-            lane: Arc::new(Mutex::new(event_retention::Cursor::default())),
             availability_changed: Arc::new(Notify::new()),
         }
     }
@@ -138,13 +174,26 @@ impl GcService {
     pub async fn status(&self) -> Result<StorageStatus> {
         Ok(self.details().await?.status)
     }
+    /// `storage status`: read on a reader WAL connection, not the writer
+    /// (storage design #171). Logical totals come from the schema22 counters;
+    /// the raw split is an on-request scan off the writer worker.
     pub async fn details(&self) -> Result<StorageDetails> {
-        let logical = self
-            .database
-            .call(|db| Ok(logical_usage(db)))
-            .await
-            .map_err(crate::app::storage_error)??;
-        let raw = self.raw_stats(Utc::now()).await?;
+        let path = self.database.path().to_path_buf();
+        let raw_cutoff =
+            cutoff(Utc::now(), self.config.retention.tool_raw_days).map(|v| v.to_rfc3339());
+        let (logical, raw) = crate::presentation::work(move || -> Result<_> {
+            let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(sql_error)?;
+            db.busy_timeout(std::time::Duration::from_millis(250))
+                .map_err(sql_error)?;
+            db.pragma_update(None, "query_only", true)
+                .map_err(sql_error)?;
+            let tx = db.unchecked_transaction().map_err(sql_error)?;
+            let logical = logical_usage(&tx)?;
+            let raw = raw_stats_tx(&tx, raw_cutoff)?;
+            Ok((logical, raw))
+        })
+        .await??;
         let reclaimable = raw
             .3
             .max(raw.0.saturating_sub(self.config.retention.tool_raw_bytes))
@@ -184,131 +233,247 @@ impl GcService {
     /// terminal records, observation, or collection itself.
     pub async fn require_capacity(&self) -> Result<()> {
         let config = self.config.clone();
-        self.database
+        let result = self
+            .database
             .call(move |db| Ok(require_capacity_tx(db, &config)))
             .await
-            .map_err(crate::app::storage_error)?
+            .map_err(crate::app::storage_error)?;
+        if matches!(&result, Err(error) if error.code == ErrorCode::StorageLimit) {
+            // Backstop for a missed producer signal: the cap itself marks
+            // every storage kind, so storage cannot grow past it unnoticed.
+            self.database.signals().mark_all(&GC_WORK);
+        }
+        result
     }
+    /// Exclusive use of the GC background requester: tests and callers that
+    /// step history GC by hand hold it so maintenance cannot interleave.
+    pub async fn hold(&self) -> GcHold<'_> {
+        GcHold(self.requester.lock().await)
+    }
+    /// Explicit `storage collect`: run the category's kinds from the start.
     pub async fn collect(
         &self,
         category: StorageCategory,
         at: DateTime<Utc>,
     ) -> Result<CollectionReport> {
-        let mut lane = self.lane.lock().await;
+        let works: &[Work] = match category {
+            StorageCategory::All => &GC_WORK,
+            StorageCategory::Raw => &[Work::Raw],
+            StorageCategory::History => &[Work::Drafts, Work::History, Work::SummaryCache],
+            StorageCategory::Index => &[Work::IndexSources, Work::InactiveSpaces],
+            StorageCategory::ManagedImages => &[Work::Managed],
+        };
+        self.raw_cursor.lock().expect("raw cursor").rescan = true;
+        let mut hold = self.hold().await;
+        self.collect_held(&mut hold, works, at).await
+    }
+    /// Maintenance requester: only the signalled kinds (storage design #171).
+    pub(crate) async fn collect_kinds(
+        &self,
+        set: WorkSet,
+        at: DateTime<Utc>,
+    ) -> Result<CollectionReport> {
+        let works: Vec<Work> = GC_WORK.into_iter().filter(|w| set.contains(*w)).collect();
+        let mut hold = self.hold().await;
+        self.collect_held(&mut hold, &works, at).await
+    }
+    async fn collect_held(
+        &self,
+        hold: &mut GcHold<'_>,
+        works: &[Work],
+        at: DateTime<Utc>,
+    ) -> Result<CollectionReport> {
+        let requester = &mut *hold.0;
         let mut report = CollectionReport::default();
-        if matches!(category, StorageCategory::All | StorageCategory::Raw) {
-            self.collect_raw(at, &mut report).await?;
+        let has = |work| works.contains(&work);
+        if has(Work::Raw) {
+            self.collect_raw(requester, at, &mut report).await?;
         }
-        if matches!(category, StorageCategory::All | StorageCategory::History) {
-            let cursor = *lane;
-            *lane = self
-                .database
-                .call(move |db| event_retention::collect_batch(db, cursor))
-                .await
-                .map_err(crate::app::storage_error)?;
-        }
-        if matches!(category, StorageCategory::All | StorageCategory::History) {
-            report.submitted_drafts_collected = self
-                .database
-                .call(|db| {
-                    let tx = db.transaction()?;
-                    let removed = crate::control::submission_retention::collect_batch(&tx)?;
-                    tx.commit()?;
-                    Ok(removed as u64)
-                })
-                .await
-                .map_err(crate::app::storage_error)?;
-        }
-        if matches!(category, StorageCategory::All | StorageCategory::History)
-            && let Some(job) = self.start_history().await?
-        {
-            let mut restarts = 0;
+        if has(Work::Drafts) {
+            // Run-end retention (#170): one full round-robin sweep of bounded
+            // batches per trigger; a wrap ends it until the next Run ends.
             loop {
-                let step = self.history_step(&job).await?;
-                report.nodes_tombstoned += step.nodes_tombstoned;
-                report.history_bytes_collected += step.bytes_collected;
-                if step.complete {
-                    break;
-                }
-                if step.restarted {
-                    restarts += 1;
-                    if restarts >= 3 {
-                        report.deferred = true;
-                        break;
-                    }
-                }
-                tokio::task::yield_now().await;
-            }
-        }
-        if matches!(category, StorageCategory::All | StorageCategory::History) {
-            loop {
-                let (count,bytes)=self.database.call(|db| {
-                    let tx=db.transaction()?;
-                    // A successful part is reusable only for exact source revisions.
-                    // Once any source was explicitly deletion-GC'd it cannot match.
-                    let rows=tx.prepare("SELECT cache.key,length(CAST(cache.value AS BLOB)) FROM app_meta cache WHERE cache.key LIKE 'summary.part.%' AND EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(cache.value) THEN cache.value ELSE '{}' END,'$.sources') s LEFT JOIN node n ON n.id=s.value WHERE n.id IS NULL OR (n.payload_json IS NULL AND n.deleted_reason IS NOT NULL)) ORDER BY key LIMIT 128")?.query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)? as u64)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-                    let bytes=rows.iter().map(|r|r.1).sum::<u64>();
-                    for (key,_) in &rows {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
-                    tx.commit()?;Ok((rows.len()as u64,bytes))
-                }).await.map_err(crate::app::storage_error)?;
-                report.summary_cache_parts_collected += count;
-                report.summary_cache_bytes_collected += bytes;
-                if count < BATCH as u64 {
-                    break;
-                }
-                tokio::task::yield_now().await;
-            }
-        }
-        if matches!(category, StorageCategory::All | StorageCategory::Index) {
-            loop {
-                let removed = self
-                    .database
-                    .call(|db| {
-                        let tx = db.transaction()?;
-                        let nodes = tx
-                            .prepare(INDEX_SOURCES_SQL)?
-                            .query_map([], |row| row.get::<_, String>(0))?
-                            .collect::<rusqlite::Result<Vec<_>>>()?;
-                        for node in &nodes {
-                            if let Err(error) = crate::index::delete_source_vectors_tx(&tx, node) {
-                                return Ok(Err(error));
-                            }
-                        }
-                        let count = nodes.len() as u64;
-                        tx.commit()?;
-                        Ok(Ok(count))
+                let cursor = *self.event_cursor.lock().expect("event cursor");
+                let unit = requester
+                    .unit(UNIT, move |db, _| {
+                        event_retention::collect_batch(db, cursor)
                     })
                     .await
-                    .map_err(crate::app::storage_error)??;
-                report.index_sources_collected += removed;
+                    .map_err(crate::app::storage_error)?;
+                let Background::Done(next) = unit else {
+                    report.defer(Work::Drafts);
+                    break;
+                };
+                *self.event_cursor.lock().expect("event cursor") = next;
+                if next.wrapped() {
+                    break;
+                }
+            }
+            loop {
+                let unit = requester
+                    .unit(UNIT, |db, _| {
+                        let tx = db.transaction()?;
+                        let removed = crate::control::submission_retention::collect_batch(&tx)?;
+                        tx.commit()?;
+                        Ok(removed as u64)
+                    })
+                    .await
+                    .map_err(crate::app::storage_error)?;
+                let Background::Done(removed) = unit else {
+                    report.defer(Work::Drafts);
+                    break;
+                };
+                report.submitted_drafts_collected += removed;
                 if removed < BATCH as u64 {
                     break;
                 }
-                tokio::task::yield_now().await;
             }
         }
-        if matches!(category, StorageCategory::All | StorageCategory::Index) {
+        if has(Work::History) {
+            match self.start_history_held(requester).await? {
+                Background::Deferred => report.defer(Work::History),
+                Background::Done(None) => {}
+                Background::Done(Some(job)) => {
+                    let mut restarts = 0;
+                    loop {
+                        let step = self.history_step_held(requester, &job).await?;
+                        if step.deferred {
+                            report.defer(Work::History);
+                            break;
+                        }
+                        report.nodes_tombstoned += step.nodes_tombstoned;
+                        report.history_bytes_collected += step.bytes_collected;
+                        if step.complete {
+                            break;
+                        }
+                        if step.restarted {
+                            restarts += 1;
+                            if restarts >= 3 {
+                                report.deferred = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if has(Work::SummaryCache) {
+            let mut after = String::from("summary.part.");
             loop {
-                let removed = self
-                    .database
-                    .call(crate::index::collect_inactive_spaces)
+                let cursor = after.clone();
+                let unit = requester
+                    .unit(UNIT, move |db, limit| {
+                        let tx = db.transaction()?;
+                        // A successful part is reusable only for exact source revisions.
+                        // Once any source was explicitly deletion-GC'd it cannot match.
+                        let rows = tx
+                            .prepare(SUMMARY_PAGE)?
+                            .query_map(params![cursor, limit.get()], |r| {
+                                Ok((
+                                    r.get::<_, String>(0)?,
+                                    r.get::<_, i64>(1)? as u64,
+                                    r.get::<_, bool>(2)?,
+                                ))
+                            })?
+                            .collect::<rusqlite::Result<Vec<_>>>()?;
+                        let mut collected = (0u64, 0u64);
+                        for (key, bytes, stale) in &rows {
+                            if *stale {
+                                tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+                                collected.0 += 1;
+                                collected.1 += bytes;
+                            }
+                        }
+                        tx.commit()?;
+                        let last = (rows.len() == limit.rows())
+                            .then(|| rows.last().map(|r| r.0.clone()))
+                            .flatten();
+                        Ok((collected, last))
+                    })
                     .await
                     .map_err(crate::app::storage_error)?;
+                let Background::Done(((count, bytes), last)) = unit else {
+                    report.defer(Work::SummaryCache);
+                    break;
+                };
+                report.summary_cache_parts_collected += count;
+                report.summary_cache_bytes_collected += bytes;
+                match last {
+                    Some(last) => after = last,
+                    None => break,
+                }
+            }
+        }
+        if has(Work::IndexSources) {
+            let mut after = String::new();
+            loop {
+                let cursor = after.clone();
+                let unit = requester
+                    .unit(UNIT, move |db, limit| {
+                        let tx = db.transaction()?;
+                        let rows = tx
+                            .prepare(INDEX_SOURCES_PAGE)?
+                            .query_map(params![cursor, limit.get()], |row| {
+                                Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                            })?
+                            .collect::<rusqlite::Result<Vec<_>>>()?;
+                        let mut removed = 0u64;
+                        for (node, owns) in &rows {
+                            if !owns {
+                                continue;
+                            }
+                            if let Err(error) = crate::index::delete_source_vectors_tx(&tx, node) {
+                                return Ok(Err(error));
+                            }
+                            removed += 1;
+                        }
+                        tx.commit()?;
+                        let last = (rows.len() == limit.rows())
+                            .then(|| rows.last().map(|r| r.0.clone()))
+                            .flatten();
+                        Ok(Ok((removed, last)))
+                    })
+                    .await
+                    .map_err(crate::app::storage_error)?;
+                let Background::Done(outcome) = unit else {
+                    report.defer(Work::IndexSources);
+                    break;
+                };
+                let (removed, last) = outcome?;
+                report.index_sources_collected += removed;
+                match last {
+                    Some(last) => after = last,
+                    None => break,
+                }
+            }
+        }
+        if has(Work::InactiveSpaces) {
+            loop {
+                let unit = requester
+                    .unit(SPACE_UNIT, |db, _| {
+                        crate::index::collect_inactive_spaces(db)
+                    })
+                    .await
+                    .map_err(crate::app::storage_error)?;
+                let Background::Done(removed) = unit else {
+                    report.defer(Work::InactiveSpaces);
+                    break;
+                };
                 report.inactive_index_spaces_collected += removed;
                 if removed < 32 {
                     break;
                 }
-                tokio::task::yield_now().await;
             }
         }
-        if matches!(
-            category,
-            StorageCategory::All | StorageCategory::ManagedImages
-        ) {
+        if has(Work::Managed) {
             let managed = self
                 .attachments
                 .collect_managed_observed(at, Some(self.availability_changed.clone()))
                 .await?;
+            if managed.deferred {
+                report.defer(Work::Managed);
+            }
+            report.managed_due = managed.next_due;
             report.managed_deleted_count = managed.deleted.len() as u64;
             report.managed_failure_count = managed.failed.len() as u64;
             report.managed_details_truncated =
@@ -330,40 +495,102 @@ impl GcService {
         }
         Ok(report)
     }
-    async fn raw_stats(&self, at: DateTime<Utc>) -> Result<(u64, u64, u64, u64)> {
-        let cutoff = cutoff(at, self.config.retention.tool_raw_days).map(|v| v.to_rfc3339());
-        self.database.call(move|db| {
-            let row=db.query_row("WITH sizes AS (SELECT s.*,COALESCE((SELECT SUM(length(bytes)) FROM output_chunk WHERE execution_id=s.id),0) AS size,EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=s.id) AS pinned,EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id) AS marked FROM shell_execution s), eligible AS(SELECT *,state IN ('exited','failed','stopped') AND NOT pinned AS eligible FROM sizes) SELECT COALESCE(SUM(size),0),COALESCE(SUM(CASE WHEN NOT eligible THEN size ELSE 0 END),0),COALESCE(SUM(CASE WHEN eligible THEN size ELSE 0 END),0),COALESCE(SUM(CASE WHEN eligible AND (marked OR julianday(COALESCE(ended_at,started_at))<=julianday(?1)) THEN size ELSE 0 END),0) FROM eligible",[cutoff],|r|Ok((r.get::<_,i64>(0)? as u64,r.get::<_,i64>(1)? as u64,r.get::<_,i64>(2)? as u64,r.get::<_,i64>(3)? as u64)))?;
-            Ok(row)
-        }).await.map_err(crate::app::storage_error)
-    }
-    async fn raw_batch(&self, after: Option<(String, i64)>) -> Result<Vec<RawExecution>> {
-        let (key, rowid) = after.unwrap_or_default();
-        self.database.call(move|db| {
-            let mut statement=db.prepare("SELECT s.id,s.state,s.ended_at,s.started_at,s.rowid,COALESCE(s.ended_at,s.started_at),EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id) FROM shell_execution s WHERE (COALESCE(s.ended_at,s.started_at)>?1 OR (COALESCE(s.ended_at,s.started_at)=?1 AND s.rowid>?2)) AND s.state IN ('exited','failed','stopped') AND NOT EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=s.id) AND (EXISTS(SELECT 1 FROM output_chunk WHERE execution_id=s.id) OR EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id AND json_extract(value,'$.state')='deleting')) ORDER BY COALESCE(s.ended_at,s.started_at),s.rowid LIMIT 128")?;
-            Ok(statement.query_map(params![key,rowid],|row|Ok(RawExecution{id:row.get(0)?,ended:row.get(2)?,started:row.get(3)?,rowid:row.get(4)?,order_key:row.get(5)?,marked:row.get(6)?}))?.collect::<rusqlite::Result<Vec<_>>>()?)
-        }).await.map_err(crate::app::storage_error)
-    }
-    async fn collect_raw(&self, at: DateTime<Utc>, report: &mut CollectionReport) -> Result<()> {
-        let stats = self.raw_stats(at).await?;
-        let mut total = stats.0;
-        report.protected_raw_bytes = stats.1;
-        let mut after = None;
+    /// Raw retention in bounded windows over `shell_terminal_time`. The total
+    /// comes from the schema22 counter. Without a capacity excess, a due age
+    /// deadline, pending tombstones or an explicit rescan, the pass is idle
+    /// without touching any execution row.
+    async fn collect_raw(
+        &self,
+        requester: &mut BackgroundRequester,
+        at: DateTime<Utc>,
+        report: &mut CollectionReport,
+    ) -> Result<()> {
+        let cap = self.config.retention.tool_raw_bytes;
         let cutoff = cutoff(at, self.config.retention.tool_raw_days);
-        loop {
-            let candidates = self.raw_batch(after.clone()).await?;
-            if candidates.is_empty() {
-                break;
+        let unit = requester
+            .unit(ONE_ROW, |db, _| {
+                let total = usage::raw_total(db).map_err(StorageError::from)?;
+                let marked: bool = db.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key>='raw_tombstone.' AND key<'raw_tombstone/' AND json_extract(value,'$.state')='deleting')",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((total, marked))
+            })
+            .await
+            .map_err(crate::app::storage_error)?;
+        let Background::Done((mut total, marked)) = unit else {
+            report.defer(Work::Raw);
+            return Ok(());
+        };
+        let (mut after, rescan) = {
+            let mut cursor = self.raw_cursor.lock().expect("raw cursor");
+            let due = cursor.due.is_some_and(|due| due <= at);
+            let rescan = std::mem::take(&mut cursor.rescan) || marked;
+            if !rescan && !due && total <= cap {
+                report.raw_due = cursor.due;
+                return Ok(());
             }
-            for candidate in candidates {
-                after = Some((candidate.order_key.clone(), candidate.rowid));
-                let expired = cutoff.is_some_and(|cutoff| {
-                    DateTime::parse_from_rfc3339(
-                        candidate.ended.as_deref().unwrap_or(&candidate.started),
-                    )
-                    .is_ok_and(|ended| ended.with_timezone(&Utc) <= cutoff)
-                });
-                if !candidate.marked && !expired && total <= self.config.retention.tool_raw_bytes {
+            if rescan || total > cap {
+                cursor.after = None;
+            }
+            (cursor.after.clone().unwrap_or_default(), rescan)
+        };
+        let full = after == (String::new(), 0);
+        let mut eligible_bytes = 0u64;
+        let mut next_due: Option<DateTime<Utc>> = None;
+        let mut resume: Option<(String, i64)> = None;
+        loop {
+            let cursor = after.clone();
+            let unit = requester
+                .unit(RAW_UNIT, move |db, limit| {
+                    Ok(db
+                        .prepare(RAW_PAGE)?
+                        .query_map(params![cursor.0, cursor.1, limit.get()], |row| {
+                            Ok(RawExecution {
+                                id: row.get(0)?,
+                                ended: row.get(2)?,
+                                started: row.get(3)?,
+                                rowid: row.get(4)?,
+                                order_key: row.get(5)?,
+                                marked: row.get(6)?,
+                                pinned: row.get(7)?,
+                                bytes: row.get::<_, i64>(8)? as u64,
+                            })
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?)
+                })
+                .await
+                .map_err(crate::app::storage_error)?;
+            let Background::Done(window) = unit else {
+                report.defer(Work::Raw);
+                break;
+            };
+            let more = window.len() == RAW_UNIT.get() as usize;
+            for candidate in window {
+                after = (candidate.order_key.clone(), candidate.rowid);
+                if candidate.pinned || candidate.bytes == 0 && !candidate.marked {
+                    continue;
+                }
+                eligible_bytes += candidate.bytes;
+                let ended = DateTime::parse_from_rfc3339(
+                    candidate.ended.as_deref().unwrap_or(&candidate.started),
+                )
+                .ok()
+                .map(|ended| ended.with_timezone(&Utc));
+                let expired = cutoff.is_some_and(|cutoff| ended.is_some_and(|e| e <= cutoff));
+                if !candidate.marked && !expired && total <= cap {
+                    // Oldest retained output: its age deadline, and where an
+                    // age-only pass resumes next time.
+                    if next_due.is_none() {
+                        next_due = ended.and_then(|e| {
+                            i64::try_from(self.config.retention.tool_raw_days)
+                                .ok()
+                                .and_then(chrono::Duration::try_days)
+                                .and_then(|days| e.checked_add_signed(days))
+                        });
+                        resume = Some((candidate.order_key.clone(), candidate.rowid - 1));
+                    }
                     continue;
                 }
                 let reason = if expired {
@@ -371,14 +598,21 @@ impl GcService {
                 } else {
                     "raw_retention_capacity"
                 };
-                let execution = candidate.id.clone();
-                let at = at.to_rfc3339();
-                let reason = reason.to_owned();
-                let started = self
-                    .database
-                    .call(move |db| Ok(begin_raw(db, &execution, &reason, &at)))
+                let (execution, at, reason) =
+                    (candidate.id.clone(), at.to_rfc3339(), reason.to_owned());
+                let started = requester
+                    .unit(ONE_ROW, move |db, _| {
+                        Ok(begin_raw(db, &execution, &reason, &at))
+                    })
                     .await
-                    .map_err(crate::app::storage_error)??;
+                    .map_err(crate::app::storage_error)?;
+                let started = match started {
+                    Background::Done(started) => started?,
+                    Background::Deferred => {
+                        report.defer(Work::Raw);
+                        return Ok(());
+                    }
+                };
                 if !started {
                     report.deferred = true;
                     continue;
@@ -389,11 +623,17 @@ impl GcService {
                 }
                 loop {
                     let execution = candidate.id.clone();
-                    let step = self
-                        .database
-                        .call(move |db| Ok(raw_step(db, &execution)))
+                    let step = requester
+                        .unit(UNIT, move |db, _| Ok(raw_step(db, &execution)))
                         .await
-                        .map_err(crate::app::storage_error)??;
+                        .map_err(crate::app::storage_error)?;
+                    let step = match step {
+                        Background::Done(step) => step?,
+                        Background::Deferred => {
+                            report.defer(Work::Raw);
+                            return Ok(());
+                        }
+                    };
                     if step.0 > 0 || (step.1 && !step.2) {
                         self.availability_changed.notify_one();
                     }
@@ -406,30 +646,90 @@ impl GcService {
                         report.deferred = true;
                         break;
                     }
-                    tokio::task::yield_now().await;
                 }
             }
+            if !more {
+                break;
+            }
         }
-        if total > self.config.retention.tool_raw_bytes {
+        if full && !report.deferred_kinds.contains(Work::Raw) {
+            // Only a complete pass from the start sees every eligible byte.
+            report.protected_raw_bytes =
+                (total + report.raw_bytes_collected).saturating_sub(eligible_bytes);
+        }
+        if total > cap {
             report.deferred = true;
         }
+        let mut cursor = self.raw_cursor.lock().expect("raw cursor");
+        cursor.due = next_due;
+        cursor.after = resume;
+        cursor.rescan |= rescan && report.deferred_kinds.contains(Work::Raw);
+        report.raw_due = next_due;
         Ok(())
     }
     /// Start/restart marking for an explicit Thread-deletion GC job. The TEMP
     /// marks are disposable; durable progress is never trusted without them.
     pub async fn start_history(&self) -> Result<Option<String>> {
-        self.database
-            .call(|db| Ok(start_history(db)))
-            .await
-            .map_err(crate::app::storage_error)?
+        let mut hold = self.hold().await;
+        match self.start_history_held(&mut hold.0).await? {
+            Background::Done(job) => Ok(job),
+            Background::Deferred => Ok(None),
+        }
     }
     pub async fn history_step(&self, job_id: &str) -> Result<HistoryStep> {
-        let job = job_id.to_owned();
-        let step = self
-            .database
-            .call(move |db| Ok(history_step(db, &job)))
+        let mut hold = self.hold().await;
+        self.history_step_held(&mut hold.0, job_id).await
+    }
+    /// The held variants let a caller step a job without maintenance interleaving.
+    pub async fn start_history_with(&self, hold: &mut GcHold<'_>) -> Result<Option<String>> {
+        match self.start_history_held(&mut hold.0).await? {
+            Background::Done(job) => Ok(job),
+            Background::Deferred => Ok(None),
+        }
+    }
+    pub async fn history_step_with(
+        &self,
+        hold: &mut GcHold<'_>,
+        job_id: &str,
+    ) -> Result<HistoryStep> {
+        self.history_step_held(&mut hold.0, job_id).await
+    }
+    async fn start_history_held(
+        &self,
+        requester: &mut BackgroundRequester,
+    ) -> Result<Background<Option<String>>> {
+        match requester
+            .unit(UNIT, |db, _| Ok(start_history(db)))
             .await
-            .map_err(crate::app::storage_error)??;
+            .map_err(crate::app::storage_error)?
+        {
+            Background::Done(job) => Ok(Background::Done(job?)),
+            Background::Deferred => Ok(Background::Deferred),
+        }
+    }
+    async fn history_step_held(
+        &self,
+        requester: &mut BackgroundRequester,
+        job_id: &str,
+    ) -> Result<HistoryStep> {
+        let job = job_id.to_owned();
+        let step = match requester
+            .unit(UNIT, move |db, _| Ok(history_step(db, &job)))
+            .await
+            .map_err(crate::app::storage_error)?
+        {
+            Background::Done(step) => step?,
+            Background::Deferred => HistoryStep {
+                stage: "deferred".into(),
+                root_revision: 0,
+                scanned: 0,
+                nodes_tombstoned: 0,
+                bytes_collected: 0,
+                restarted: false,
+                complete: false,
+                deferred: true,
+            },
+        };
         if step.nodes_tombstoned > 0 {
             self.availability_changed.notify_one();
         }
@@ -437,10 +737,38 @@ impl GcService {
     }
 }
 
-/// Payload-less/deleted nodes that still own index rows. `nodes_index_gc`
-/// bounds the scan to such nodes and `jobs_source`/`chunks_source` make each
-/// ownership probe a seek, so an empty result stays cheap (#164).
-const INDEX_SOURCES_SQL: &str = "SELECT n.id FROM node n WHERE (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL) AND (EXISTS(SELECT 1 FROM embedding_job WHERE source_node_id=n.id) OR EXISTS(SELECT 1 FROM embedding_chunk WHERE source_node_id=n.id)) ORDER BY n.id LIMIT 128";
+/// Exclusive hold of the GC background requester.
+pub struct GcHold<'a>(tokio::sync::MutexGuard<'a, BackgroundRequester>);
+
+/// Garbage-collection kinds, in the order one pass runs them.
+const GC_WORK: [Work; 7] = [
+    Work::Raw,
+    Work::Drafts,
+    Work::History,
+    Work::SummaryCache,
+    Work::IndexSources,
+    Work::InactiveSpaces,
+    Work::Managed,
+];
+const UNIT: NonZeroU32 = NonZeroU32::new(BATCH as u32).unwrap();
+const ONE_ROW: NonZeroU32 = NonZeroU32::new(1).unwrap();
+const SPACE_UNIT: NonZeroU32 = NonZeroU32::new(32).unwrap();
+/// Executions examined per raw window; each also sums its own chunks.
+const RAW_UNIT: NonZeroU32 = NonZeroU32::new(32).unwrap();
+
+/// One window of terminal executions in retention order (`shell_terminal_time`).
+const RAW_PAGE: &str = "SELECT s.id,s.state,s.ended_at,s.started_at,s.rowid,COALESCE(s.ended_at,s.started_at),EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id AND json_extract(value,'$.state')='deleting'),EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=s.id),COALESCE((SELECT SUM(length(bytes)) FROM output_chunk WHERE execution_id=s.id),0) FROM shell_execution s INDEXED BY shell_terminal_time WHERE s.state IN ('exited','failed','stopped') AND COALESCE(s.ended_at,s.started_at)>=?1 AND (COALESCE(s.ended_at,s.started_at)>?1 OR s.rowid>?2) ORDER BY COALESCE(s.ended_at,s.started_at),s.rowid LIMIT ?3";
+/// One key-range page of summary parts with their staleness.
+const SUMMARY_PAGE: &str = "SELECT cache.key,length(CAST(cache.value AS BLOB)),EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(cache.value) THEN cache.value ELSE '{}' END,'$.sources') s LEFT JOIN node n ON n.id=s.value WHERE n.id IS NULL OR (n.payload_json IS NULL AND n.deleted_reason IS NOT NULL)) FROM app_meta cache WHERE cache.key>?1 AND cache.key<'summary.part/' ORDER BY cache.key LIMIT ?2";
+/// One keyset page of payload-less/deleted nodes (`nodes_index_gc`) with
+/// whether each still owns index rows; ownership probes are seeks (#164).
+const INDEX_SOURCES_PAGE: &str = "SELECT n.id,EXISTS(SELECT 1 FROM embedding_job WHERE source_node_id=n.id) OR EXISTS(SELECT 1 FROM embedding_chunk WHERE source_node_id=n.id) FROM node n INDEXED BY nodes_index_gc WHERE (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL) AND n.id>?1 ORDER BY n.id LIMIT ?2";
+
+/// Full raw split (total, protected, eligible, reclaimable by age/marker).
+/// Runs only on a reader connection for `storage status`.
+fn raw_stats_tx(db: &Connection, cutoff: Option<String>) -> Result<(u64, u64, u64, u64)> {
+    db.query_row("WITH sizes AS (SELECT s.*,COALESCE((SELECT SUM(length(bytes)) FROM output_chunk WHERE execution_id=s.id),0) AS size,EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=s.id) AS pinned,EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id) AS marked FROM shell_execution s), eligible AS(SELECT *,state IN ('exited','failed','stopped') AND NOT pinned AS eligible FROM sizes) SELECT COALESCE(SUM(size),0),COALESCE(SUM(CASE WHEN NOT eligible THEN size ELSE 0 END),0),COALESCE(SUM(CASE WHEN eligible THEN size ELSE 0 END),0),COALESCE(SUM(CASE WHEN eligible AND (marked OR julianday(COALESCE(ended_at,started_at))<=julianday(?1)) THEN size ELSE 0 END),0) FROM eligible",[cutoff],|r|Ok((r.get::<_,i64>(0)? as u64,r.get::<_,i64>(1)? as u64,r.get::<_,i64>(2)? as u64,r.get::<_,i64>(3)? as u64))).map_err(sql_error)
+}
 
 /// Shared DB-lane gate for model, shell, child, summary and index workers.
 /// Stop, terminal-record, observation and GC operations must remain available.
@@ -617,7 +945,7 @@ fn sql_error(error: rusqlite::Error) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::INDEX_SOURCES_SQL;
+    use super::INDEX_SOURCES_PAGE;
     use rusqlite::{Connection, params};
     use std::time::Instant;
 
@@ -650,21 +978,31 @@ mod tests {
     }
 
     fn plan(db: &Connection) -> Vec<String> {
-        db.prepare(&format!("EXPLAIN QUERY PLAN {INDEX_SOURCES_SQL}"))
+        db.prepare(&format!("EXPLAIN QUERY PLAN {INDEX_SOURCES_PAGE}"))
             .unwrap()
-            .query_map([], |r| r.get::<_, String>(3))
+            .query_map(params!["", 128], |r| r.get::<_, String>(3))
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap()
     }
 
+    /// Every owning source across bounded keyset pages.
     fn sources(db: &Connection) -> Vec<String> {
-        db.prepare(INDEX_SOURCES_SQL)
-            .unwrap()
-            .query_map([], |r| r.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap()
+        let (mut owned, mut after) = (Vec::new(), String::new());
+        loop {
+            let page: Vec<(String, bool)> = db
+                .prepare(INDEX_SOURCES_PAGE)
+                .unwrap()
+                .query_map(params![after, 128], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap();
+            owned.extend(page.iter().filter(|r| r.1).map(|r| r.0.clone()));
+            match page.last() {
+                Some(last) if page.len() == 128 => after = last.0.clone(),
+                _ => return owned,
+            }
+        }
     }
 
     #[test]
@@ -674,8 +1012,10 @@ mod tests {
         assert_eq!(sources(&db), ["d000001", "d000002", "m"]);
         let plan = plan(&db);
         assert!(
-            plan.iter()
-                .any(|d| d.starts_with("SCAN n USING") && d.ends_with("INDEX nodes_index_gc")),
+            plan.iter().any(
+                |d| (d.starts_with("SCAN n USING") || d.starts_with("SEARCH n USING"))
+                    && d.contains("INDEX nodes_index_gc")
+            ),
             "{plan:?}"
         );
         assert!(

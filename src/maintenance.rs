@@ -56,6 +56,9 @@ impl WorkSet {
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }
+    pub fn insert(&mut self, work: Work) {
+        self.0 |= work as u32;
+    }
 }
 
 /// One coalescing bit per kind plus one wake permit. Bounded by `Work`.
@@ -126,13 +129,17 @@ pub fn until_julian(due: f64) -> std::time::Duration {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0);
-    std::time::Duration::try_from_secs_f64((unix - now).max(0.0)).unwrap_or(std::time::Duration::MAX)
+    std::time::Duration::try_from_secs_f64((unix - now).max(0.0))
+        .unwrap_or(std::time::Duration::MAX)
 }
 
 /// Time from now until a UTC instant; zero when already due.
 pub fn until(due: chrono::DateTime<chrono::Utc>) -> std::time::Duration {
     (due - chrono::Utc::now()).to_std().unwrap_or_default()
 }
+
+#[cfg(test)]
+mod step_tests;
 
 #[cfg(test)]
 mod tests {

@@ -165,7 +165,11 @@ async fn maintenance_loop(
     let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
     loop {
         let now = tokio::time::Instant::now();
-        let due: Vec<u32> = deadlines.iter().filter(|(_, at)| **at <= now).map(|(k, _)| *k).collect();
+        let due: Vec<u32> = deadlines
+            .iter()
+            .filter(|(_, at)| **at <= now)
+            .map(|(k, _)| *k)
+            .collect();
         for kind in due {
             deadlines.remove(&kind);
             if let Some(work) = Work::ALL.iter().find(|w| **w as u32 == kind) {
@@ -174,34 +178,58 @@ async fn maintenance_loop(
         }
         let set = signals.take();
         if !set.is_empty() {
-            let Some(strong) = control.upgrade() else { return };
+            let Some(strong) = control.upgrade() else {
+                return;
+            };
             if set.contains(Work::Receipts) {
                 match strong.store.collect_receipts().await {
                     Ok(pass) => {
                         if pass.deferred {
                             signals.mark(Work::Receipts);
                         } else if let Some(due) = pass.due_julian {
-                            deadlines.insert(Work::Receipts as u32, tokio::time::Instant::now() + crate::maintenance::until_julian(due));
+                            deadlines.insert(
+                                Work::Receipts as u32,
+                                tokio::time::Instant::now() + crate::maintenance::until_julian(due),
+                            );
                         }
                     }
-                    Err(error) if error.is_storage_failure() => {strong.fail_storage().await;return;}
+                    Err(error) if error.is_storage_failure() => {
+                        strong.fail_storage().await;
+                        return;
+                    }
                     Err(_) => {}
                 }
             }
             drop(strong);
-            if Work::ALL.iter().any(|w| *w != Work::Receipts && set.contains(*w)) {
-                tokio::select!{biased;_=stop.cancelled()=>return,result=gc.collect(StorageCategory::All,chrono::Utc::now())=>{
+            if Work::ALL
+                .iter()
+                .any(|w| *w != Work::Receipts && set.contains(*w))
+            {
+                tokio::select! {biased;_=stop.cancelled()=>return,result=gc.collect_kinds(set,chrono::Utc::now())=>{
                     match result {
                         Err(error) if error.is_storage_failure() => {if let Some(control)=control.upgrade(){control.fail_storage().await;}return;}
-                        Ok(report) if report.deferred => signals.restore(set),
-                        _ => {}
+                        Ok(report) => {
+                            // Deferred units resume on the next pass; nothing
+                            // else repeats until a new mark or deadline.
+                            signals.restore(report.deferred_kinds);
+                            for (work, due) in [(Work::Raw, report.raw_due), (Work::Managed, report.managed_due)] {
+                                if !set.contains(work) {
+                                    continue;
+                                }
+                                match due {
+                                    Some(due) => {deadlines.insert(work as u32, tokio::time::Instant::now() + crate::maintenance::until(due));}
+                                    None => {deadlines.remove(&(work as u32));}
+                                }
+                            }
+                        }
+                        Err(_) => {}
                     }
                 }}
             }
             continue;
         }
         let next = deadlines.values().min().copied();
-        tokio::select!{
+        tokio::select! {
             biased;
             _=stop.cancelled()=>return,
             _=signals.changed()=>{},
@@ -316,14 +344,26 @@ impl Control {
                 Ok::<_, ApiError>(Mutex::new(Some(self.index.start().await?)))
             })
             .await?;
-        self.maintenance.get_or_init(||async{
-            let gc=self.gc.clone();let attachments=self.attachments.clone();let stop=self.stop.clone();let control=Arc::downgrade(self);
-            let signals=self.store.database.signals().clone();
-            Mutex::new(Some(tokio::spawn(async move{
-                if let Err(error)=attachments.restart_cleanup().await && error.is_storage_failure(){if let Some(control)=control.upgrade(){control.fail_storage().await;}return;}
-                maintenance_loop(control,gc,signals,stop).await;
-            })))
-        }).await;
+        self.maintenance
+            .get_or_init(|| async {
+                let gc = self.gc.clone();
+                let attachments = self.attachments.clone();
+                let stop = self.stop.clone();
+                let control = Arc::downgrade(self);
+                let signals = self.store.database.signals().clone();
+                Mutex::new(Some(tokio::spawn(async move {
+                    if let Err(error) = attachments.restart_cleanup().await
+                        && error.is_storage_failure()
+                    {
+                        if let Some(control) = control.upgrade() {
+                            control.fail_storage().await;
+                        }
+                        return;
+                    }
+                    maintenance_loop(control, gc, signals, stop).await;
+                })))
+            })
+            .await;
         Ok(())
     }
     /// Read-only accounting of retained conversion buffers and in-flight pins.

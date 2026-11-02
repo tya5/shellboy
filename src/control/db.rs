@@ -199,11 +199,10 @@ impl Store {
             let window = requester
                 .unit(super::receipt::COLLECT_WINDOW, move |db, window| {
                     let tx = db.transaction()?;
-                    let result = super::receipt::under_pressure(&tx, &instance).and_then(
-                        |pressure| {
+                    let result =
+                        super::receipt::under_pressure(&tx, &instance).and_then(|pressure| {
                             super::receipt::collect_window(&tx, &instance, pressure, after, window)
-                        },
-                    );
+                        });
                     if result.is_ok() {
                         tx.commit()?;
                     }

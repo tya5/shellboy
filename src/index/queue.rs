@@ -223,16 +223,20 @@ pub(super) fn recover_authorization_progress(
 }
 
 /// Select and mark one authorized source before any parsing/HTTP work.
+/// Seeks this profile's byte-exact authorization key range (#171) instead of
+/// a LIKE scan of all app_meta.
 pub(super) fn claim_authorization(
     db: &mut Connection,
-    prefix: &str,
+    range: &(String, String),
     profile: &str,
     family: Option<&str>,
 ) -> Result<(bool, Option<(String, AutoAdmission)>), StorageError> {
-    let app_meta_sql = "SELECT key,value FROM app_meta WHERE key LIKE ?1 AND json_extract(value,'$.state')='pending' ORDER BY key LIMIT 1";
+    let app_meta_sql = "SELECT key,value FROM app_meta WHERE key>=?1 AND key<?2 AND json_extract(value,'$.state')='pending' ORDER BY key LIMIT 1";
     let tx = db.transaction()?;
     let row: Option<(String, String)> = tx
-        .query_row(app_meta_sql, [prefix], |row| Ok((row.get(0)?, row.get(1)?)))
+        .query_row(app_meta_sql, [&range.0, &range.1], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
         .optional()?;
     let Some((key, value)) = row else {
         return Ok((false, None));
@@ -278,7 +282,7 @@ mod metadata_tests {
         )
         .unwrap();
         let (discarded, claim) =
-            claim_authorization(&mut db, &keys.auto_pattern(), "profile", Some("family")).unwrap();
+            claim_authorization(&mut db, &keys.auto_range(), "profile", Some("family")).unwrap();
         assert!(discarded);
         assert!(claim.is_none());
         assert!(meta(&db, &keys.auto("node")).unwrap().is_none());

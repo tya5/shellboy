@@ -124,7 +124,7 @@ async fn explicit_context_edit_keeps_each_intent_in_the_protected_original_recei
         })
         .await
         .unwrap();
-    store.collect_receipts().await.unwrap().collected;
+    store.collect_receipts().await.unwrap();
     assert_eq!(
         store.execute(first, None).await.unwrap().result,
         accepted.result,
@@ -452,7 +452,7 @@ async fn receipt_capacity_rejection_does_not_stop_owner_or_block_internal_gc_and
         .collect(StorageCategory::All, chrono::Utc::now())
         .await
         .unwrap();
-    control.store.collect_receipts().await.unwrap().collected;
+    control.store.collect_receipts().await.unwrap();
     owner
         .db
         .call(move |db| {

@@ -122,6 +122,9 @@ impl IndexService {
             .await;
         if let Ok(changed) = &adopted {
             self.publish_saved(*changed);
+            if *changed {
+                self.spaces_changed(); // adoption may activate a rebuild candidate
+            }
         }
         if let Err(error) = adopted {
             let error = error.into_api_error();

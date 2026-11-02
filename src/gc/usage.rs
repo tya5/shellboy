@@ -27,7 +27,7 @@ fn sum(db: &Connection, sql: &str) -> Result<u64> {
         .map(|value| value as u64)
         .map_err(sql_error)
 }
-// Test oracle only: the O(rows) indexed sums that the schema21 counters
+// Test oracle only: the O(rows) indexed sums that the schema22 counters
 // replace (#171). Runtime reads the trigger-maintained counters.
 #[cfg(test)]
 const HISTORY_QUERIES: [&str; 10] = [
@@ -50,7 +50,7 @@ const MANAGED_QUERY: &str = "SELECT COALESCE(SUM(raw_size),0) FROM managed_file 
 #[cfg(test)]
 const INDEX_META_QUERY: &str = "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_index WHERE key LIKE 'index.%'";
 
-/// O(1): exact byte counters maintained by schema21 triggers in the same
+/// O(1): exact byte counters maintained by schema22 triggers in the same
 /// transaction as every counted write (storage design #171).
 pub(super) fn logical_usage(db: &Connection) -> Result<Logical> {
     let mut counters = db
@@ -77,7 +77,7 @@ pub(super) fn logical_usage(db: &Connection) -> Result<Logical> {
     if seen != 4 {
         return Err(ApiError::new(
             ErrorCode::SaveFailed,
-            "Logical usage counters are missing; the schema21 migration did not complete",
+            "Logical usage counters are missing; the schema22 migration did not complete",
         ));
     }
     let free: u64 = db

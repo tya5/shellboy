@@ -21,6 +21,7 @@ pub(super) fn history_step(db: &mut Connection, job: &str) -> Result<HistoryStep
         bytes_collected: 0,
         restarted: false,
         complete: state == "done",
+        deferred: false,
     };
     if report.complete {
         return Ok(report);

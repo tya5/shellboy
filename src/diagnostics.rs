@@ -126,11 +126,13 @@ struct DbJobNoProgressTrace {
 
 /// Fixed DB-worker observations; the variant name is the JSON field name.
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "snake_case")]
 enum DbJobTrace {
-    DbJobSlow(DbJobSlowTrace),
-    DbJobBudget(DbJobBudgetTrace),
-    DbJobNoProgress(DbJobNoProgressTrace),
+    #[serde(rename = "db_job_slow")]
+    Slow(DbJobSlowTrace),
+    #[serde(rename = "db_job_budget")]
+    Budget(DbJobBudgetTrace),
+    #[serde(rename = "db_job_no_progress")]
+    NoProgress(DbJobNoProgressTrace),
 }
 
 /// Aggregate descendant-query observation, with no descendant or content strings.
@@ -654,7 +656,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: None,
             lineage_slow: None,
-            db_job: Some(DbJobTrace::DbJobSlow(DbJobSlowTrace {
+            db_job: Some(DbJobTrace::Slow(DbJobSlowTrace {
                 kind: kind.chars().take(160).collect(),
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
@@ -673,7 +675,7 @@ impl Diagnostics {
     ) {
         self.record_db_trace(
             DiagnosticEvent::DbJobBudget,
-            DbJobTrace::DbJobBudget(DbJobBudgetTrace {
+            DbJobTrace::Budget(DbJobBudgetTrace {
                 kind: kind.chars().take(160).collect(),
                 steps,
                 queue_ms: millis(queue),
@@ -685,7 +687,7 @@ impl Diagnostics {
     pub(crate) fn record_db_no_progress(&self, kind: &str, deferrals: u32) {
         self.record_db_trace(
             DiagnosticEvent::DbJobNoProgress,
-            DbJobTrace::DbJobNoProgress(DbJobNoProgressTrace {
+            DbJobTrace::NoProgress(DbJobNoProgressTrace {
                 kind: kind.chars().take(160).collect(),
                 deferrals,
             }),

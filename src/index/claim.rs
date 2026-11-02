@@ -46,6 +46,52 @@ pub(super) fn singleton_fallback(work: &Work) -> bool {
         .is_some_and(|error| error.get("batch_fallback").is_some())
 }
 
+/// Ready pending jobs of one space in claim order, each a `jobs_ready` seek
+/// (storage design #171): unscheduled (NULL) first in insertion order, then
+/// due ones by `next_attempt_at`. ?3 admits automatic-history work.
+const READY_UNSCHEDULED: &str = "SELECT id,attempts FROM embedding_job INDEXED BY jobs_ready WHERE space_id=?1 AND state='pending' AND next_attempt_at IS NULL AND ?2 IS NOT NULL AND (?3 OR COALESCE(json_extract(authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%') ORDER BY rowid LIMIT ?4";
+const READY_DUE: &str = "SELECT id,attempts FROM embedding_job INDEXED BY jobs_ready WHERE space_id=?1 AND state='pending' AND next_attempt_at<=?2 AND (?3 OR COALESCE(json_extract(authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%') ORDER BY next_attempt_at,rowid LIMIT ?4";
+
+/// The first ready job across this splitter's active/candidate spaces.
+fn next_ready(
+    tx: &Transaction<'_>,
+    splitter: &str,
+    cutoff: &str,
+    auto_history: bool,
+) -> Result<Option<(String, String, i64)>, StorageError> {
+    let spaces = tx
+        .prepare("SELECT id FROM index_space WHERE state IN ('active','candidate') AND splitter_version=?1 ORDER BY id")?
+        .query_map([splitter], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for sql in [READY_UNSCHEDULED, READY_DUE] {
+        let mut best: Option<(String, String, i64, Option<String>)> = None;
+        for space in &spaces {
+            let row = tx
+                .query_row(
+                    &sql.replace("SELECT id,attempts", "SELECT id,attempts,next_attempt_at"),
+                    params![space, cutoff, auto_history, 1],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            if let Some((job, attempts, at)) = row
+                && best.as_ref().is_none_or(|b| at < b.3)
+            {
+                best = Some((job, space.clone(), attempts, at));
+            }
+        }
+        if let Some((job, space, attempts, _)) = best {
+            return Ok(Some((job, space, attempts)));
+        }
+    }
+    Ok(None)
+}
+
 pub(super) fn claim(
     db: &mut Connection,
     keys: IndexKeys<'_>,
@@ -66,10 +112,7 @@ pub(super) fn claim(
     }
     // One due cutoff for this serialized claim snapshot, never a fill window.
     let cutoff = now();
-    let candidate: Option<(String, String, i64)> = tx.query_row(
-        "SELECT j.id,j.space_id,j.attempts FROM embedding_job j JOIN index_space s ON s.id=j.space_id WHERE j.state='pending' AND s.state IN ('active','candidate') AND s.splitter_version=?1 AND (?3 OR COALESCE(json_extract(j.authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%') AND (j.next_attempt_at IS NULL OR j.next_attempt_at<=?2) ORDER BY j.next_attempt_at,j.id LIMIT 1",
-        params![keys.splitter(),cutoff,auto_history], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-    ).optional()?;
+    let candidate = next_ready(&tx, &keys.splitter(), &cutoff, auto_history)?;
     if let Some((job, space_id, attempts)) = candidate {
         let mut work: Work = json_meta(&tx, &IndexKeys::input(&job))?.ok_or_else(serde_error)?;
         let space = load_space(&tx, &space_id)?.ok_or_else(serde_error)?;
@@ -105,9 +148,20 @@ pub(super) fn claim(
         if max_inputs > 1 && !individual && characters <= max_chars {
             // Bounded read of one space. Invalid rows may make a smaller batch;
             // no provider heuristics or unbounded scan tries to fill the cap.
-            let rows = tx.prepare("SELECT id,attempts FROM embedding_job WHERE space_id=?1 AND state='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=?2) ORDER BY next_attempt_at,id LIMIT 128")?
-                .query_map(params![space_id,cutoff], |row| Ok((row.get::<_,String>(0)?, row.get::<_,i64>(1)?)))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let mut rows = Vec::new();
+            for sql in [READY_UNSCHEDULED, READY_DUE] {
+                let remaining = 128 - rows.len() as i64;
+                if remaining <= 0 {
+                    break;
+                }
+                rows.extend(
+                    tx.prepare(sql)?
+                        .query_map(params![space_id, cutoff, true, remaining], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?,
+                );
+            }
             for (job, attempts) in rows {
                 if claims.len() >= max_inputs {
                     break;
@@ -150,9 +204,11 @@ pub(super) fn claim(
         tx.commit()?;
         return Ok(ClaimResult::Ready(claims));
     }
-    let mut statement = tx.prepare("SELECT key,value FROM app_meta WHERE key LIKE ?1 AND json_extract(value,'$.state')='pending' AND (?2 OR json_extract(value,'$.authorization') NOT LIKE 'new-finalized%') ORDER BY key LIMIT 128")?;
+    // Byte-exact key range seek of this profile's bootstrap rows (#171).
+    let (start, end) = keys.bootstrap_range();
+    let mut statement = tx.prepare("SELECT key,value FROM app_meta WHERE key>=?1 AND key<?3 AND json_extract(value,'$.state')='pending' AND (?2 OR json_extract(value,'$.authorization') NOT LIKE 'new-finalized%') ORDER BY key LIMIT 128")?;
     let rows = statement
-        .query_map(params![keys.bootstrap_pattern(), auto_history], |row| {
+        .query_map(params![start, auto_history, end], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -191,8 +247,8 @@ pub(super) fn claim(
         // A first vector is real work. Until it settles, never spend another
         // unknown-space request in this group, even with multiple workers.
         let discovering: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key LIKE ?1 AND json_extract(value,'$.state')='running' AND json_extract(value,'$.group')=?2)",
-            params![keys.bootstrap_pattern(),work.group], |row| row.get(0),
+            "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key>=?1 AND key<?3 AND json_extract(value,'$.state')='running' AND json_extract(value,'$.group')=?2)",
+            params![start,work.group,end], |row| row.get(0),
         )?;
         if discovering {
             continue;

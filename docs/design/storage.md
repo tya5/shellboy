@@ -19,9 +19,9 @@ before diagnostics shutdown; diagnostics may still be dropped under pressure.
 
 ## DB writer occupancy: requester contract and backend safety net (#171)
 
-Status: design memo, revision 2, awaiting review. Not implemented. Revision 1
-protected the writer only on the backend: two lanes plus a step budget. Review
-rejected that approach. In the incidents behind #164, the root cause was always
+Status: adopted (revision 2, approved 2026-11-02) and implemented on
+`issue-171/db-step-budget`. Revision 1 protected the writer only on the
+backend: two lanes plus a step budget. Review rejected that approach. In the incidents behind #164, the root cause was always
 the *requester*:
 
 - The index kept enqueuing while it was paused.
@@ -215,7 +215,125 @@ the `db_job_slow` names.
     `compaction.*` site; index user commands and search; and attachment request
     paths.
 
-### Validation plan
+### Implementation notes
+
+- **Requester API.** `storage::BackgroundRequester::unit(limit, op)` is the only
+  background entry; `DbWorker::call`/`try_call` stay foreground. Requesters:
+  receipts (`Store`), GC (`GcService`, also held by tests that step history GC
+  by hand via `GcService::hold`), managed images (`AttachmentService`), and the
+  index worker (`IndexService`, one requester shared by its workers, so at most
+  one scheduling unit is outstanding; settling claims whose HTTP request ran
+  stays foreground). The DB job kind is the requester closure's call site.
+- **Signals.** `maintenance::Signals` (one coalescing bit per kind plus one
+  `Notify`) lives with the `DbWorker`, so every committing producer can mark
+  it. A mark inside a writer job before its commit is safe: the single writer
+  runs no maintenance unit until that job commits or rolls back, and a rollback
+  costs one idle pass. Producers and their kinds:
+
+  | Producer (after commit) | Kinds marked |
+  |---|---|
+  | Thread deletion (`ThreadDelete`) | History, SummaryCache, IndexSources, Managed, Drafts |
+  | Shell completion saved | Raw |
+  | Run retired (`retire_driver`) | Drafts, Raw |
+  | Clipboard image saved ready, or its creation failed | Managed |
+  | Runtime pins released (`PinLease` drop) | Managed, Raw |
+  | Index space transitions (`select_space`, rebuild start, candidate activation on authorization drain or adoption) | InactiveSpaces |
+  | `require_capacity` observing the logical cap | every GC kind (backstop) |
+  | Startup (default `Signals`) and explicit `storage collect` | every kind / the category's kinds |
+
+- **No timer safety sweep (review decision).** Startup recomputation and an
+  explicit `storage collect` cover a forgotten signal. Storage growth itself is
+  the backstop: `require_capacity` gates every model, shell, child, summary and
+  index start, and when it observes the logical cap it marks every storage kind;
+  receipt reservations collect inline under pressure. A forgotten signal can
+  therefore delay reclaim, but cannot let storage grow past the cap unnoticed.
+  Each producer has a test that it emits its signal.
+- **Deadlines.** Receipt windows return the earliest future age eligibility of
+  their rows; managed retention reads one `MIN(created_at)` seek on
+  `managed_retention`; raw retention keeps the oldest retained execution's
+  `ended + tool_raw_days` and the resume cursor for an age-only pass. The
+  maintenance loop sleeps only until the earliest deadline or the next mark.
+  The index worker sleeps until its earliest scheduled retry or a wake; while
+  paused or idle it has no timer. The one remaining bounded fallback is the
+  existing `next_delay` scan bound (256 rows), which clamps to 1..30 s.
+- **Run-end retention (#170).** The dead-delivery and shell-event retention
+  batches from #170 (64 deliveries, 32 events per unit) run under the Drafts
+  kind, which Run retirement and Thread deletion mark: one full round-robin
+  sweep per trigger, then idle until the next Run ends. This replaces its
+  former one-batch-per-60 s cadence. A sweep visits every delivery and event
+  row in bounded units; a targeted per-Run lookup would avoid that and is left
+  to a follow-up.
+- **Raw retention without `raw_stats`.** The raw total is the schema22
+  counter. A raw pass touches no execution row unless the total exceeds
+  `tool_raw_bytes`, an age deadline is due, a tombstone is pending, or a rescan
+  was requested (release signal or explicit collect). Windows are 32
+  executions on `shell_terminal_time` with a row-value keyset
+  `(COALESCE(ended_at,started_at), rowid)`. `protected_raw_bytes` is exact for
+  a full pass from the start (explicit collect) and 0 otherwise.
+  `gc.GcService.details` (`storage status`) runs the full split on a reader
+  connection through `presentation::work`, not on the writer.
+- **Schema22 (`0022_logical_usage_counters`).** Four `quota_counter` rows
+  (`logical.history`, `logical.raw`, `logical.managed`, `logical.index`)
+  maintained by AFTER INSERT/UPDATE OF/DELETE triggers on the 12 counted
+  tables, plus `index_space` insert/delete/dimension changes. They reproduce the
+  former indexed sums exactly; the old sums remain only as a test oracle that
+  is compared after mutation and rollback. `require_capacity_tx` is O(1). The
+  partial index `attachment_delivery_operation(operation_id) WHERE status IN
+  ('accepted','held')` makes the receipt-collection delivery probe a seek. The
+  upgrade computes the counters once from saved rows in the migration
+  transaction; IF NOT EXISTS / OR REPLACE keep downgrade fixtures simple.
+  Writes to counted tables pay one counter UPDATE per trigger.
+- **Index scheduling queries.** The authorization claim seeks the profile's
+  byte-exact `index.auto.<profile>.` key range instead of `LIKE`. The job claim
+  and batch fill read `jobs_ready` in `(next_attempt_at, rowid)` order instead of
+  sorting every pending job by id.
+
+### Measurement and the budget constant
+
+Environment: macOS (Apple silicon development Mac), debug test build, bundled
+SQLite, file-backed WAL database in a temporary directory, 2026-11-03. Command:
+`cargo test --lib maintenance::step_tests -- --nocapture`. Fixture
+(`src/maintenance/step_tests.rs`): 20,000 live and 60,000 tombstoned nodes,
+40,000 completed operation receipts (half from an old instance), 20,000
+applied attachment deliveries, 20,000 terminal executions with distinct end
+instants and one chunk each, 10,000 summary parts, 10,000 deleted and 1,000
+ready managed images, 40,000 pending jobs scheduled in the future. Nothing is
+past a cap or an age, so every unit is a normal pass, not a bulk deletion.
+
+Counted steps are multiples of `PROGRESS_GRANULARITY` (1,024), so kinds under
+one interval read as 0. Largest unit per kind (one run; facts, not bounds):
+
+| Kind | Max steps per unit | Units |
+|---|---|---|
+| `attachments::AttachmentService::collect_managed_observed` | 87,040 | 19 |
+| `control::db::Store::collect_receipts` | 53,248 | 40 |
+| `gc::GcService::collect_held` (drafts, history, summary, index sources, spaces) | 4,096 | 550 |
+| `gc::GcService::collect_raw` | 1,024 | 627 |
+| index `process_key` (claim), `next_delay`, `drain_authorization`, `capacity_allowed_background`, `pause_cleanup_step`, `process_one_inner`; `start_history_held` | < 1,024 | 1 each |
+
+All 1,243 units took 381 ms in total (a fact, not a bound).
+
+`BACKGROUND_STEP_BUDGET = 2^17 = 131,072`: the smallest power of two at or
+above the largest healthy unit (87,040). The same test proves the fixture is
+large enough to expose unbounded work: full scans of the tables the kinds visit
+take 179,200 steps (tombstoned nodes), 399,360 (receipts) and 359,424
+(executions with chunks), all above the budget. The test asserts both facts.
+
+Before the requester fixes in this change, the same fixture measured
+368,640 steps for the index claim (sort of every pending job), then 49,152 for
+its bootstrap `LIKE` over all `app_meta`, 49,152 for the authorization drain
+(`LIKE` over all `app_meta`) and 120,832 (equal end
+instants) to 200,704 for raw windows; each would have failed the assertion.
+Remaining known limits: a run of executions with identical end instants
+degrades the raw window to a filter within that run, and the
+`next_delay` bootstrap read and submitted-draft batch are bounded only by
+their live row counts. These are visible to the per-kind test if they grow.
+
+The preliminary rate from the design phase (72,500–106,700 steps per ms,
+system SQLite 3.51.0 in memory) suggests one budget slot is on the order of
+a few milliseconds on the development Mac; this is not a guarantee.
+
+### Validation
 
 - Storage-level structural tests cover the backend:
   - A foreground job admitted while a synthetic endless background unit runs
@@ -230,27 +348,19 @@ the `db_job_slow` names.
   until its trigger fires or its deadline passes. Each producer commit fires its
   trigger. A paused index issues no DB unit until resume.
 
-### Open questions
+### Review decisions (2026-11-02)
 
-1. Incremental counters for capacity and raw totals need a schema migration that
-   adds triggers. The `quota_counter` pattern already exists for receipts.
-   hotfix/164-b already adds migration 20, so this would become 21. Should they
-   be in #171, or is a reader-connection cache with explicit invalidation
-   acceptable for now?
-2. Receipt collection checks
-   `attachment_delivery.operation_id`, which has no index, once per candidate
-   row. Bounding it needs a partial index (`WHERE status IN
-   ('accepted','held')`), which also needs a migration. Should it go in the same
-   migration as question 1?
-3. A missed producer trigger leaves eligible work until the next restart or
-   explicit `storage collect`. Should there be a coarse safety sweep, for
-   example once per owner start (already the case), or nothing more?
-4. Which foreground reads move to reader connections in #171 itself (only
-   `gc.details` is proposed), versus the separate foreground issue?
-5. The requester-side API (`BackgroundRequester`, the `limit` argument, the
-   `Progress` result) makes violations obvious, but it cannot prove a closure
-   uses `limit` in its SQL. The per-kind CI step test is the enforcement. Is that
-   enough?
+1. Running counters with triggers ship in #171 as migration 22 (renumbered after #170 took 21). Exact counters,
+   not a cache with invalidation, make capacity checks constant-time.
+2. The partial index on `attachment_delivery.operation_id` is in the same
+   migration 22.
+3. There is no timer safety sweep; see "No timer safety sweep" above. Each
+   producer has a test that it emits its signal.
+4. Only `gc.GcService.details` moves to a reader connection in #171. Other
+   foreground reads move under #172.
+5. The per-kind CI step test plus the runtime safety net is the enforcement of
+   rule 1.
+6. Selection between the lanes is strict alternation (no fairness constant).
 
 ## Current-only contract (Issue #33, 0.2.0)
 

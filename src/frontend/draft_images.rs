@@ -151,7 +151,11 @@ mod tests {
             .unwrap();
         let id = image.id.clone();
         // Producer contract (#171): a saved image marks managed retention.
-        assert!(signals.take_seen().contains(crate::maintenance::Work::Managed));
+        assert!(
+            signals
+                .take_seen()
+                .contains(crate::maintenance::Work::Managed)
+        );
         let mut images = DraftImages::default();
         let ticket = images.begin_image("draft", Some("thread"));
         assert!(images.accept_image(ticket));
@@ -172,7 +176,9 @@ mod tests {
             while !signals.take_seen().contains(crate::maintenance::Work::Raw) {
                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             }
-        }).await.expect("released pin must signal retention");
+        })
+        .await
+        .expect("released pin must signal retention");
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();

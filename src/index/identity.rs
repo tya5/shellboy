@@ -167,6 +167,7 @@ impl IndexService {
             .await
             .map_err(db_error)?;
         self.publish_saved(changed);
+        self.spaces_changed();
         self.wake();
         Ok(())
     }
@@ -197,14 +198,17 @@ impl IndexService {
             .await
             .map_err(db_error)
     }
-    pub(super) async fn next_delay(&self) -> Result<Duration, ApiError> {
+    pub(super) async fn next_delay(&self) -> Result<Option<Duration>, ApiError> {
         let keys = self.identity_keys();
         let family = self.failure_key().map(str::to_owned);
         let auto_history = self.config.indexing.auto_history;
-        self.database
-            .call(move |db| read_next_delay(db, keys, family, auto_history))
-            .await
-            .map_err(db_error)
+        // Deferred at the step budget: look again on the next round.
+        Ok(self
+            .background_unit(NEXT_DELAY_UNIT, move |db, _| {
+                read_next_delay(db, keys, family, auto_history)
+            })
+            .await?
+            .unwrap_or(Some(Duration::ZERO)))
     }
 }
 
@@ -565,16 +569,21 @@ const NEXT_DELAY_SPACES: &str =
 const NEXT_DELAY_JOBS: &str = "SELECT next_attempt_at,?2 OR COALESCE(json_extract(authorized_watermark,'$.authorization'),'') NOT LIKE 'new-finalized%' FROM embedding_job WHERE space_id=?1 AND state='pending' AND next_attempt_at IS NOT NULL ORDER BY next_attempt_at LIMIT ?3";
 const NEXT_DELAY_BOOTSTRAP: &str = "SELECT value FROM app_meta WHERE key>=?1 AND key<?2";
 
+const NEXT_DELAY_UNIT: std::num::NonZeroU32 =
+    std::num::NonZeroU32::new(NEXT_DELAY_SCAN as u32).unwrap();
+
 fn read_next_delay(
     db: &Connection,
     keys: Vec<String>,
     family: Option<String>,
     auto_history: bool,
-) -> Result<Duration, StorageError> {
+) -> Result<Option<Duration>, StorageError> {
+    // `None`: nothing is scheduled (or the profile is paused); the worker waits
+    // only for a wake (enqueue, authorization, retry, select_space) (#171).
     if let Some(family) = family
         && meta(db, &IndexKeys::new(&family).pause())?.is_some()
     {
-        return Ok(Duration::from_secs(30));
+        return Ok(None);
     }
     // claim() is idle for a paused profile, so its queues need no scan.
     let mut unpaused = Vec::new();
@@ -585,7 +594,7 @@ fn read_next_delay(
     }
     let keys = unpaused;
     let Some(first) = keys.first() else {
-        return Ok(Duration::from_secs(30));
+        return Ok(None);
     };
     let spaces = db
         .prepare(NEXT_DELAY_SPACES)?
@@ -640,13 +649,11 @@ fn read_next_delay(
             }
         }
     }
-    Ok(earliest
-        .map(|next| {
-            (next.with_timezone(&chrono::Utc) - chrono::Utc::now())
-                .to_std()
-                .unwrap_or(Duration::from_millis(1))
-        })
-        .unwrap_or(Duration::from_secs(30)))
+    Ok(earliest.map(|next| {
+        (next.with_timezone(&chrono::Utc) - chrono::Utc::now())
+            .to_std()
+            .unwrap_or(Duration::from_millis(1))
+    }))
 }
 #[cfg(test)]
 mod tests {
@@ -791,7 +798,10 @@ mod tests {
         .unwrap();
         for family in [None, Some("family".to_owned())] {
             let delay = read_next_delay(&db, vec!["p".into()], family, true).unwrap();
-            assert_eq!(delay, Duration::from_secs(30));
+            assert_eq!(
+                delay, None,
+                "a paused profile waits for resume, not a timer"
+            );
         }
     }
 
@@ -809,8 +819,14 @@ mod tests {
         add_job(&db, "a5", "active", Some(&at(9000)), "explicit");
         add_job(&db, "a6", "active", None, "explicit");
         let keys = || vec!["p".to_owned()];
-        assert_near(read_next_delay(&db, keys(), None, true).unwrap(), 3600);
-        assert_near(read_next_delay(&db, keys(), None, false).unwrap(), 7200);
+        assert_near(
+            read_next_delay(&db, keys(), None, true).unwrap().unwrap(),
+            3600,
+        );
+        assert_near(
+            read_next_delay(&db, keys(), None, false).unwrap().unwrap(),
+            7200,
+        );
         let mut work = Work::pending(
             Witness {
                 node_id: "n".into(),
@@ -842,8 +858,14 @@ mod tests {
         work.authorization = "explicit".into();
         work.next_at = Some(at(5400));
         put("b2", &work);
-        assert_near(read_next_delay(&db, keys(), None, true).unwrap(), 1800);
-        assert_near(read_next_delay(&db, keys(), None, false).unwrap(), 5400);
+        assert_near(
+            read_next_delay(&db, keys(), None, true).unwrap().unwrap(),
+            1800,
+        );
+        assert_near(
+            read_next_delay(&db, keys(), None, false).unwrap().unwrap(),
+            5400,
+        );
     }
 
     #[test]
@@ -862,11 +884,11 @@ mod tests {
         }
         let keys = || vec!["p".to_owned()];
         // Within the bound the exact earliest eligible job is chosen.
-        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        let delay = read_next_delay(&db, keys(), None, false).unwrap().unwrap();
         assert!(delay > Duration::from_secs(10) && delay <= Duration::from_secs(20));
         add_job(&db, "f-last", "space", Some(&at(10)), "new-finalized:x");
         // At the bound the last examined row is a lower bound for any match.
-        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        let delay = read_next_delay(&db, keys(), None, false).unwrap().unwrap();
         assert!(delay > Duration::from_secs(1) && delay <= Duration::from_secs(10));
         db.execute(
             "UPDATE embedding_job SET next_attempt_at=?1 WHERE id LIKE 'f%'",
@@ -879,7 +901,7 @@ mod tests {
         )
         .unwrap();
         // Never later than the 30 s recheck used when nothing is scheduled.
-        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        let delay = read_next_delay(&db, keys(), None, false).unwrap().unwrap();
         assert!(delay > Duration::from_secs(20) && delay <= Duration::from_secs(30));
         db.execute(
             "UPDATE embedding_job SET next_attempt_at=?1 WHERE id LIKE 'f%'",
@@ -887,7 +909,7 @@ mod tests {
         )
         .unwrap();
         // Past ineligible rows never make the worker spin.
-        let delay = read_next_delay(&db, keys(), None, false).unwrap();
+        let delay = read_next_delay(&db, keys(), None, false).unwrap().unwrap();
         assert!(delay > Duration::ZERO && delay <= Duration::from_secs(1));
     }
 

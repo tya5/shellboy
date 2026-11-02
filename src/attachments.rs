@@ -1109,7 +1109,9 @@ impl AttachmentService {
             return Err(stale());
         }
         // A new ready image can push retained bytes past clipboard_bytes.
-        self.database.signals().mark(crate::maintenance::Work::Managed);
+        self.database
+            .signals()
+            .mark(crate::maintenance::Work::Managed);
         Ok(ManagedImage {
             id: managed,
             path,
@@ -1170,7 +1172,11 @@ impl AttachmentService {
                     let rows = db
                         .prepare(MANAGED_PAGE)?
                         .query_map(params!["ready", cursor.0, cursor.1, limit.get()], |r| {
-                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(4)?, r.get::<_, i64>(3)?))
+                            Ok((
+                                r.get::<_, String>(0)?,
+                                r.get::<_, String>(4)?,
+                                r.get::<_, i64>(3)?,
+                            ))
                         })?
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok(rows)

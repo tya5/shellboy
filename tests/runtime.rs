@@ -590,12 +590,15 @@ async fn incomplete_response_created_after_gc_roots_survives_sweep() {
     let (_directory, owner, control) = runtime(&url).await;
     let accepted = start(&control).await;
     let request = incoming(&mut requests).await;
-    // Finish the initial maintenance pass before introducing this explicit job.
+    // Finish the initial maintenance pass, then hold the GC requester so the
+    // deletion signal's maintenance pass cannot step this job concurrently
+    // (#171: deletion now starts collection at once instead of on a timer).
     control
         .gc
         .collect(StorageCategory::History, chrono::Utc::now())
         .await
         .unwrap();
+    let mut hold = control.gc.hold().await;
     let deleted = command(
         &control,
         Command::ThreadCreate(ThreadCreateArgs {
@@ -638,9 +641,21 @@ async fn incomplete_response_created_after_gc_roots_survives_sweep() {
         }),
     )
     .await;
-    let job = control.gc.start_history().await.unwrap().unwrap();
+    let job = control
+        .gc
+        .start_history_with(&mut hold)
+        .await
+        .unwrap()
+        .unwrap();
     loop {
-        if control.gc.history_step(&job).await.unwrap().stage == "sweep" {
+        if control
+            .gc
+            .history_step_with(&mut hold, &job)
+            .await
+            .unwrap()
+            .stage
+            == "sweep"
+        {
             break;
         }
     }
@@ -675,7 +690,7 @@ async fn incomplete_response_created_after_gc_roots_survives_sweep() {
     let before = control.store.database.call(|db| {
         Ok(db.query_row("SELECT id,payload_json,payload_revision,turn_id FROM node WHERE kind='incomplete_response'", [], |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,i64>(2)?, row.get::<_,String>(3)?)))?)
     }).await.unwrap();
-    let step = control.gc.history_step(&job).await.unwrap();
+    let step = control.gc.history_step_with(&mut hold, &job).await.unwrap();
     assert!(
         !step.restarted,
         "bounded GC progress must survive new roots"
@@ -685,10 +700,17 @@ async fn incomplete_response_created_after_gc_roots_survives_sweep() {
         "recover must still publish its newly rooted audit node"
     );
     loop {
-        if control.gc.history_step(&job).await.unwrap().complete {
+        if control
+            .gc
+            .history_step_with(&mut hold, &job)
+            .await
+            .unwrap()
+            .complete
+        {
             break;
         }
     }
+    drop(hold);
     control.store.database.call(move |db| {
         let after = db.query_row("SELECT id,payload_json,payload_revision,turn_id FROM node WHERE kind='incomplete_response'", [], |row| Ok((row.get::<_,String>(0)?, row.get::<_,Option<String>>(1)?, row.get::<_,i64>(2)?, row.get::<_,String>(3)?)))?;
         assert_eq!(after, (before.0, Some(before.1), before.2, before.3), "the original audit body and version must survive");

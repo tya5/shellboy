@@ -39,6 +39,13 @@ impl<'a> IndexKeys<'a> {
     }
     /// Byte-exact `[start, end)` key range for this profile's bootstrap rows;
     /// unlike `bootstrap_pattern`, it can use the app_meta key index.
+    /// Byte-exact key range of this profile's authorizations (seekable, unlike LIKE).
+    pub(super) fn auto_range(self) -> (String, String) {
+        (
+            format!("{}{}.", Self::AUTO_PREFIX, self.0),
+            format!("{}{}/", Self::AUTO_PREFIX, self.0),
+        )
+    }
     pub(super) fn bootstrap_range(self) -> (String, String) {
         let start = format!("{}{}.", Self::BOOT_PREFIX, self.0);
         let end = format!("{}{}/", Self::BOOT_PREFIX, self.0);

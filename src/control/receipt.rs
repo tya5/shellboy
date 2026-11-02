@@ -195,7 +195,9 @@ fn collect_range(
           OR (instance_id<>?1 AND substr(operation_id,1,length(?1)+1)<>?1||':'
             AND (?2 OR julianday(created_at)<=julianday('now','-7 days'))))
         ORDER BY {order} LIMIT ?3")).map_err(sql)?.query_map(params![instance, pressure, CLEANUP_BATCH as i64, EXPIRED_OUTCOME, format!("-{RESULT_RETENTION_SECONDS} seconds"), low, high], |r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
-    let last = (rows.len() == CLEANUP_BATCH).then(|| rows.last().map(|row| row.3)).flatten();
+    let last = (rows.len() == CLEANUP_BATCH)
+        .then(|| rows.last().map(|row| row.3))
+        .flatten();
     let mut collected = 0;
     // Preserve malformed durable envelopes. Parse one body at a time and cap
     // aggregate validation bytes as well as row count on this DB-worker pass.

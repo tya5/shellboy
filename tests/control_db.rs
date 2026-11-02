@@ -316,10 +316,10 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     )
     .await;
     let marked = store.database.signals().take();
-    for work in shellboy::maintenance::Work::DELETION
-        .into_iter()
-        .chain([shellboy::maintenance::Work::Managed, shellboy::maintenance::Work::Drafts])
-    {
+    for work in shellboy::maintenance::Work::DELETION.into_iter().chain([
+        shellboy::maintenance::Work::Managed,
+        shellboy::maintenance::Work::Drafts,
+    ]) {
         assert!(marked.contains(work), "{work:?} not signalled by deletion");
     }
     let detail: MessageDetails = serde_json::from_value(

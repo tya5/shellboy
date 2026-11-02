@@ -1118,7 +1118,9 @@ async fn ordinary_history_gc_backfills_markers_and_collects_old_copies_in_batche
         root.path().into(),
         attachments,
     );
-    for expected in [128, 2, 0] {
+    // One pass runs bounded 128-row units back to back until a short unit
+    // (#171), so the second pass finds nothing.
+    for expected in [130, 0] {
         let report = gc
             .collect(StorageCategory::History, chrono::Utc::now())
             .await

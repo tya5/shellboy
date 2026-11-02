@@ -40,6 +40,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (19, "0019_context_attempt_scope"),
     (20, "0020_gc_index_source"),
     (21, "0021_event_retention"),
+    (22, "0022_logical_usage_counters"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -101,9 +102,11 @@ pub(crate) fn save_error(message: impl Into<String>) -> crate::protocol::ApiErro
     crate::protocol::ApiError::new(crate::protocol::ErrorCode::SaveFailed, message)
 }
 
-/// Measured upper bound (SQLite VM steps) of one background unit when a
-/// foreground job is waiting. See storage design #171 for the measurement.
-pub(crate) const BACKGROUND_STEP_BUDGET: u64 = 1 << 20;
+/// Step budget of one background unit while a foreground job waits: the
+/// smallest power of two at or above the largest healthy unit measured by
+/// `maintenance::step_tests` (87,040 steps, managed-image retention, on the
+/// synthetic large fixture; storage design #171). Not a time bound.
+pub(crate) const BACKGROUND_STEP_BUDGET: u64 = 1 << 17;
 /// Progress-handler interval in VM steps; overshoot is at most one interval.
 pub(crate) const PROGRESS_GRANULARITY: u64 = 1024;
 
@@ -158,6 +161,9 @@ impl Lanes {
 /// Consecutive deferrals per background kind, with no completed job of that
 /// kind in between. Bounded by the finite set of background call sites.
 type NoProgress = Arc<Mutex<HashMap<&'static str, u32>>>;
+/// Test-only record of (kind, counted steps, deferred) per background unit.
+#[cfg(test)]
+type StepLog = Arc<Mutex<Vec<(&'static str, u64, bool)>>>;
 /// A kind is reported after this many consecutive deferrals. Every deferral
 /// already consumed the full step budget, and the retry starts from the same
 /// committed state, so a second one shows the unit does not fit one slot.
@@ -176,7 +182,7 @@ struct Shared {
     /// Committed-change signals for background maintenance requesters.
     signals: Arc<crate::maintenance::Signals>,
     #[cfg(test)]
-    background_steps: Arc<Mutex<Vec<(&'static str, u64, bool)>>>,
+    background_steps: StepLog,
     join: Mutex<Option<thread::JoinHandle<Result<(), StorageError>>>>,
     shutdown_result: Mutex<Option<Result<(), String>>>,
     shutdown_done: Notify,
@@ -364,7 +370,9 @@ impl DbWorker {
         }
         if lane == Lane::Foreground {
             // Counted before the worker can take it; the worker decrements.
-            self.shared.foreground_waiting.fetch_add(1, Ordering::AcqRel);
+            self.shared
+                .foreground_waiting
+                .fetch_add(1, Ordering::AcqRel);
         }
         permit.send(command);
         Ok(())
@@ -388,12 +396,29 @@ impl DbWorker {
     /// Once [`BACKGROUND_STEP_BUDGET`] is exceeded while a foreground job
     /// waits, SQLite is interrupted, nothing more commits, the open
     /// transaction rolls back and the result is [`Background::Deferred`].
+    #[cfg(test)]
     async fn call_background<T, F>(&self, operation: F) -> Result<Background<T>, StorageError>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
     {
-        let (command, reply) = make_background_job(operation);
+        self.call_background_kind(job_kind::<F>(), operation).await
+    }
+
+    async fn call_background_kind<T, F>(
+        &self,
+        kind: &'static str,
+        operation: F,
+    ) -> Result<Background<T>, StorageError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
+        let (mut command, reply) = make_background_job(operation);
+        if let Command::Run { kind: named, .. } = &mut command {
+            // The requester's closure, not the wrapper, names the kind.
+            *named = kind;
+        }
         self.admit(Lane::Background, command).await?;
         reply.receive().await
     }
@@ -411,9 +436,13 @@ impl DbWorker {
             .expect("DB admission mutex poisoned");
         let sender = &admission.as_ref().ok_or(StorageError::Closed)?.foreground;
         let (command, reply) = make_job(operation);
-        self.shared.foreground_waiting.fetch_add(1, Ordering::AcqRel);
+        self.shared
+            .foreground_waiting
+            .fetch_add(1, Ordering::AcqRel);
         sender.try_send(command).map_err(|error| {
-            self.shared.foreground_waiting.fetch_sub(1, Ordering::AcqRel);
+            self.shared
+                .foreground_waiting
+                .fetch_sub(1, Ordering::AcqRel);
             match error {
                 mpsc::error::TrySendError::Full(_) => StorageError::QueueFull,
                 mpsc::error::TrySendError::Closed(_) => StorageError::Closed,
@@ -494,7 +523,8 @@ pub struct BackgroundRequester {
 }
 impl std::fmt::Debug for BackgroundRequester {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BackgroundRequester").finish_non_exhaustive()
+        f.debug_struct("BackgroundRequester")
+            .finish_non_exhaustive()
     }
 }
 impl BackgroundRequester {
@@ -513,7 +543,9 @@ impl BackgroundRequester {
     {
         let limit = Limit(limit);
         self.database
-            .call_background(move |connection| operation(connection, limit))
+            .call_background_kind(job_kind::<F>(), move |connection| {
+                operation(connection, limit)
+            })
             .await
     }
 }
@@ -569,59 +601,61 @@ where
     F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
 {
     let (sender, receiver) = oneshot::channel();
-    let job: Job = Box::new(move |connection: &mut Connection, waiting: &Arc<AtomicUsize>| {
-        let budget = Arc::new(StepBudget::default());
-        let (handler_budget, hook_budget) = (budget.clone(), budget.clone());
-        let waiting = waiting.clone();
-        let limit = BACKGROUND_STEP_BUDGET.div_ceil(PROGRESS_GRANULARITY);
-        // Sticky: after the hit every later step is interrupted and every
-        // later COMMIT (explicit or autocommit) becomes a rollback, even if
-        // the closure swallows the interrupt error.
-        let installed = connection
-            .progress_handler(
-                PROGRESS_GRANULARITY as std::ffi::c_int,
-                Some(move || {
-                    if handler_budget.hit.load(Ordering::Acquire) {
-                        return true;
-                    }
-                    let ticks = handler_budget.ticks.fetch_add(1, Ordering::AcqRel) + 1;
-                    if ticks > limit && waiting.load(Ordering::Acquire) > 0 {
-                        handler_budget.hit.store(true, Ordering::Release);
-                        return true;
-                    }
-                    false
-                }),
-            )
-            .and_then(|()| {
-                connection.commit_hook(Some(move || hook_budget.hit.load(Ordering::Acquire)))
-            });
-        let mut result = match installed {
-            Err(error) => Err(StorageError::from(error)),
-            Ok(()) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                operation(connection)
-            })) {
-                Ok(result) => result,
-                Err(_) => Err(StorageError::JobPanicked),
-            },
-        };
-        // Remove both hooks before the cleanup ROLLBACK so it cannot be interrupted.
-        let _ = connection.progress_handler(0, None::<fn() -> bool>);
-        let _ = connection.commit_hook(None::<fn() -> bool>);
-        finish_transaction(connection, &mut result);
-        let deferred = budget.hit.load(Ordering::Acquire);
-        let steps = budget.ticks.load(Ordering::Acquire) * PROGRESS_GRANULARITY;
-        let reply = if deferred {
-            Ok(Background::Deferred)
-        } else {
-            result.map(Background::Done)
-        };
-        let _ = sender.send(reply);
-        JobOutcome {
-            steps,
-            deferred,
-            background: true,
-        }
-    });
+    let job: Job = Box::new(
+        move |connection: &mut Connection, waiting: &Arc<AtomicUsize>| {
+            let budget = Arc::new(StepBudget::default());
+            let (handler_budget, hook_budget) = (budget.clone(), budget.clone());
+            let waiting = waiting.clone();
+            let limit = BACKGROUND_STEP_BUDGET.div_ceil(PROGRESS_GRANULARITY);
+            // Sticky: after the hit every later step is interrupted and every
+            // later COMMIT (explicit or autocommit) becomes a rollback, even if
+            // the closure swallows the interrupt error.
+            let installed = connection
+                .progress_handler(
+                    PROGRESS_GRANULARITY as std::ffi::c_int,
+                    Some(move || {
+                        if handler_budget.hit.load(Ordering::Acquire) {
+                            return true;
+                        }
+                        let ticks = handler_budget.ticks.fetch_add(1, Ordering::AcqRel) + 1;
+                        if ticks > limit && waiting.load(Ordering::Acquire) > 0 {
+                            handler_budget.hit.store(true, Ordering::Release);
+                            return true;
+                        }
+                        false
+                    }),
+                )
+                .and_then(|()| {
+                    connection.commit_hook(Some(move || hook_budget.hit.load(Ordering::Acquire)))
+                });
+            let mut result = match installed {
+                Err(error) => Err(StorageError::from(error)),
+                Ok(()) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    operation(connection)
+                })) {
+                    Ok(result) => result,
+                    Err(_) => Err(StorageError::JobPanicked),
+                },
+            };
+            // Remove both hooks before the cleanup ROLLBACK so it cannot be interrupted.
+            let _ = connection.progress_handler(0, None::<fn() -> bool>);
+            let _ = connection.commit_hook(None::<fn() -> bool>);
+            finish_transaction(connection, &mut result);
+            let deferred = budget.hit.load(Ordering::Acquire);
+            let steps = budget.ticks.load(Ordering::Acquire) * PROGRESS_GRANULARITY;
+            let reply = if deferred {
+                Ok(Background::Deferred)
+            } else {
+                result.map(Background::Done)
+            };
+            let _ = sender.send(reply);
+            JobOutcome {
+                steps,
+                deferred,
+                background: true,
+            }
+        },
+    );
     (
         Command::Run {
             job,
@@ -702,7 +736,7 @@ struct WorkerState {
     foreground_waiting: Arc<AtomicUsize>,
     no_progress: NoProgress,
     #[cfg(test)]
-    background_steps: Arc<Mutex<Vec<(&'static str, u64, bool)>>>,
+    background_steps: StepLog,
 }
 
 /// Two bounded lanes taken in strict alternation when both hold work, so a
@@ -843,11 +877,11 @@ fn run_worker(
                 }
                 if outcome.background {
                     #[cfg(test)]
-                    state
-                        .background_steps
-                        .lock()
-                        .unwrap()
-                        .push((kind, outcome.steps, outcome.deferred));
+                    state.background_steps.lock().unwrap().push((
+                        kind,
+                        outcome.steps,
+                        outcome.deferred,
+                    ));
                     let deferrals = {
                         let mut map = state
                             .no_progress
@@ -1243,7 +1277,8 @@ mod lane_budget_tests {
     use std::sync::mpsc as sync_mpsc;
 
     /// Far beyond the budget: unbounded without interruption (watchdog-protected).
-    const ENDLESS: &str = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c";
+    const ENDLESS: &str =
+        "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT count(*) FROM c";
     const BUDGET_TICKS: u64 = BACKGROUND_STEP_BUDGET.div_ceil(PROGRESS_GRANULARITY);
 
     async fn open(root: &tempfile::TempDir) -> DbWorker {
@@ -1293,11 +1328,20 @@ mod lane_budget_tests {
             started_rx.await.unwrap();
             // Admitted (and counted as waiting) before the heavy query starts.
             let foreground = db
-                .try_call(|db| Ok(db.query_row("SELECT count(*) FROM marker", [], |r| r.get::<_, i64>(0))?))
+                .try_call(|db| {
+                    Ok(db.query_row("SELECT count(*) FROM marker", [], |r| r.get::<_, i64>(0))?)
+                })
                 .unwrap();
             go_tx.send(()).unwrap();
-            assert!(matches!(background.await.unwrap().unwrap(), Background::Deferred));
-            assert_eq!(foreground.receive().await.unwrap(), 0, "no write survived the hit");
+            assert!(matches!(
+                background.await.unwrap().unwrap(),
+                Background::Deferred
+            ));
+            assert_eq!(
+                foreground.receive().await.unwrap(),
+                0,
+                "no write survived the hit"
+            );
             let steps = db.take_background_steps();
             assert_eq!(steps.len(), 1);
             let (_, counted, deferred) = steps[0];
@@ -1378,7 +1422,15 @@ mod lane_budget_tests {
                 }));
             }
             // Admission is asynchronous for background callers; wait for both.
-            while db.shared.sender.lock().unwrap().as_ref().unwrap().background.capacity()
+            while db
+                .shared
+                .sender
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .background
+                .capacity()
                 > DEFAULT_QUEUE_CAPACITY - 2
             {
                 tokio::task::yield_now().await;
@@ -1386,7 +1438,10 @@ mod lane_budget_tests {
             go_tx.send(()).unwrap();
             // Shutdown is requested while jobs are queued; every one still runs.
             db.shutdown().await.unwrap();
-            assert!(matches!(first.await.unwrap().unwrap(), Background::Done(())));
+            assert!(matches!(
+                first.await.unwrap().unwrap(),
+                Background::Done(())
+            ));
             for wait in waits {
                 wait.await.unwrap().unwrap();
             }
@@ -1431,7 +1486,10 @@ mod lane_budget_tests {
             let db = open(&root).await;
             db.attach_diagnostics(diagnostics.clone());
             assert!(matches!(stuck_unit(&db, true).await, Background::Deferred));
-            assert!(db.background_no_progress().is_empty(), "one deferral is not evidence");
+            assert!(
+                db.background_no_progress().is_empty(),
+                "one deferral is not evidence"
+            );
             assert!(matches!(stuck_unit(&db, true).await, Background::Deferred));
             let stuck = db.background_no_progress();
             assert_eq!(stuck.len(), 1);
@@ -1443,13 +1501,20 @@ mod lane_budget_tests {
             db.shutdown().await.unwrap();
             diagnostics.shutdown().await;
             let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
-            let rows: Vec<serde_json::Value> =
-                log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-            let budget: Vec<_> = rows.iter().filter(|r| r["event"] == "db_job_budget").collect();
+            let rows: Vec<serde_json::Value> = log
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            let budget: Vec<_> = rows
+                .iter()
+                .filter(|r| r["event"] == "db_job_budget")
+                .collect();
             assert_eq!(budget.len(), 2, "{log}");
             assert_eq!(budget[0]["db_job_budget"].as_object().unwrap().len(), 4);
-            let no_progress: Vec<_> =
-                rows.iter().filter(|r| r["event"] == "db_job_no_progress").collect();
+            let no_progress: Vec<_> = rows
+                .iter()
+                .filter(|r| r["event"] == "db_job_no_progress")
+                .collect();
             assert_eq!(no_progress.len(), 1, "{log}");
             assert_eq!(no_progress[0]["db_job_no_progress"]["deferrals"], 2);
         })

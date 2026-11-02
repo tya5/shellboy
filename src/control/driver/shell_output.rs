@@ -171,7 +171,11 @@ async fn save_completion(
         tx.commit()?;Ok(())}).await.map_err(storage_error)?;
     control.index.wake();
     // A terminal execution's output becomes eligible for raw retention.
-    control.store.database.signals().mark(crate::maintenance::Work::Raw);
+    control
+        .store
+        .database
+        .signals()
+        .mark(crate::maintenance::Work::Raw);
     Ok(())
 }
 
