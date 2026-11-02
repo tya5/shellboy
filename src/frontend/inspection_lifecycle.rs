@@ -233,11 +233,19 @@ fn decoded_reason(raw: Option<&str>, limited: bool) -> Result<Option<Value>, Api
         crate::context::prepare_reason(raw)
     }
 }
-fn reason_hint(raw: Option<String>, limited: bool) -> Option<String> {
+fn reason_hint(
+    raw: Option<String>,
+    limited: bool,
+    language: crate::config::UiLanguage,
+) -> Option<String> {
     if limited {
         Some(
-            "取得範囲外: 保存された復旧理由は64KiBを超えています。Turn原文で確認してください。"
-                .into(),
+            crate::ui::i18n::local!(
+                language,
+                "取得範囲外: 保存された復旧理由は64KiBを超えています。Turn原文で確認してください。",
+                "Unavailable: the saved recovery reason exceeds 64 KiB. Inspect the original Turn."
+            )
+            .into(),
         )
     } else {
         raw
@@ -252,7 +260,15 @@ fn encoded(value: impl serde::Serialize) -> Result<Value, ApiError> {
     })
 }
 
-pub(super) fn prepare(raw: Raw) -> Result<super::inspection_saved::PreparedSaved, ApiError> {
+#[cfg(test)]
+fn prepare(raw: Raw) -> Result<super::inspection_saved::PreparedSaved, ApiError> {
+    prepare_in(raw, crate::config::UiLanguage::Ja)
+}
+
+pub(super) fn prepare_in(
+    raw: Raw,
+    language: crate::config::UiLanguage,
+) -> Result<super::inspection_saved::PreparedSaved, ApiError> {
     let mut limited_fields = Vec::new();
     let id = match &raw.command {
         Command::RunGet(a) => &a.run_id,
@@ -308,7 +324,7 @@ pub(super) fn prepare(raw: Raw) -> Result<super::inspection_saved::PreparedSaved
                     answer_node_id: raw.answer,
                     owned_run_ids: raw.owned_runs,
                     owned_execution_ids: raw.executions,
-                    recovery_hint: reason_hint(raw.reason, raw.reason_limited),
+                    recovery_hint: reason_hint(raw.reason, raw.reason_limited, language),
                     revisit,
                 })?,
             )
@@ -351,7 +367,7 @@ pub(super) fn prepare(raw: Raw) -> Result<super::inspection_saved::PreparedSaved
                     thread_id: raw.thread,
                     state,
                     answer_node_id: raw.answer,
-                    recovery_hint: reason_hint(raw.reason, raw.reason_limited),
+                    recovery_hint: reason_hint(raw.reason, raw.reason_limited, language),
                 })?,
             )
         }
@@ -399,7 +415,8 @@ pub(super) async fn request(
         },
     )
     .await?;
-    let mut prepared = super::presentation_work(move || prepare(raw)).await??;
+    let language = control.store.config.ui.language;
+    let mut prepared = super::presentation_work(move || prepare_in(raw, language)).await??;
     prepared.value["usage_totals"] = totals;
     prepared.value["view_observation"] =
         serde_json::json!({"observed_at":prepared.observed_at,"thread_id":prepared.thread});
@@ -708,6 +725,42 @@ mod tests {
         let raw = read_tx(&db, &turn()).unwrap();
         drop(db);
         assert_eq!(prepare(raw).unwrap().value["turn_id"], "u");
+    }
+    #[test]
+    fn limited_recovery_hint_follows_language_without_changing_saved_reason() {
+        use crate::config::UiLanguage::{En, Ja};
+        let db = fixture();
+        let saved = json!({"message": "x".repeat(JSON_BYTES)}).to_string();
+        db.execute("UPDATE turn SET recovery_reason_json=?1", [&saved])
+            .unwrap();
+        for command in [run(), turn()] {
+            let ja = prepare_in(read_tx(&db, &command).unwrap(), Ja).unwrap();
+            let en = prepare_in(read_tx(&db, &command).unwrap(), En).unwrap();
+            assert!(
+                ja.value["recovery_hint"]
+                    .as_str()
+                    .unwrap()
+                    .contains("取得範囲外")
+            );
+            assert!(
+                en.value["recovery_hint"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Unavailable")
+            );
+            assert_eq!(ja.value["context"], en.value["context"]);
+            assert_eq!(ja.limited_fields, en.limited_fields);
+        }
+        let unchanged: String = db
+            .query_row(
+                "SELECT recovery_reason_json FROM turn WHERE id='u'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(unchanged, saved);
+        let original = Some("user source 日本語".to_owned());
+        assert_eq!(reason_hint(original.clone(), false, En), original);
     }
     #[test]
     fn reason_and_revisit_share_source_budget_and_decode_after_read() {

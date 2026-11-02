@@ -8641,3 +8641,14 @@ heading/fallback, bilingual help, and #169 index-pause/compaction coexistence
 tests each passed (one test per invocation). Integration layout and language
 audit also passed. Exact-tip task CI and 3-OS integration CI remain required.
 No physical terminal or post-integration behavior is claimed.
+
+### #152 Bounded Recovery Hint (Validation Pending)
+
+Run and Turn inspection now select the generated oversized-reason hint using
+UI language, while passing through non-limited source text unchanged. The
+focused test compares Japanese and English hints, context and limit metadata,
+and verifies the original saved reason remains unchanged. This is one narrow
+Stage C slice, not final #152 acceptance. On macOS arm64 / Rust 1.99.1,
+`cargo check --tests`, the focused regression and all ten lifecycle tests passed.
+The language audit's 18 Python tests and test layout check passed. Exact-tip
+3-OS CI is pending; physical-terminal and post-integration behavior are untested.

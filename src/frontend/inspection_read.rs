@@ -33,7 +33,10 @@ enum Body {
         Box<crate::thread_observation::RawLatest>,
         Option<Box<crate::readback::RawCompactions>>,
     ),
-    Lifecycle(Box<super::inspection_lifecycle::Raw>),
+    Lifecycle(
+        Box<super::inspection_lifecycle::Raw>,
+        crate::config::UiLanguage,
+    ),
     Saved(super::inspection_saved::RawSaved, Option<u64>),
     Attachments(super::inspection_attachments::Raw),
     Operation(super::inspection_operation::RawOperation),
@@ -136,20 +139,22 @@ pub(super) fn read_scoped_tx(
                 let latest = crate::thread_observation::read_latest_display_tx(db, id)?;
                 Body::Thread(header, Box::new(latest), compact.map(Box::new))
             }
-            InspectionTarget::Run(id) => {
-                Body::Lifecycle(Box::new(super::inspection_lifecycle::read_tx(
+            InspectionTarget::Run(id) => Body::Lifecycle(
+                Box::new(super::inspection_lifecycle::read_tx(
                     db,
                     &Command::RunGet(RunTarget { run_id: id.clone() }),
-                )?))
-            }
-            InspectionTarget::Turn(id) => {
-                Body::Lifecycle(Box::new(super::inspection_lifecycle::read_tx(
+                )?),
+                services.config.ui.language,
+            ),
+            InspectionTarget::Turn(id) => Body::Lifecycle(
+                Box::new(super::inspection_lifecycle::read_tx(
                     db,
                     &Command::TurnGet(TurnTarget {
                         turn_id: id.clone(),
                     }),
-                )?))
-            }
+                )?),
+                services.config.ui.language,
+            ),
             InspectionTarget::Shell(id) => Body::Saved(
                 super::inspection_saved::read_tx(
                     db,
@@ -293,8 +298,8 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             }
             (String::new(), value)
         }
-        Body::Lifecycle(raw) => {
-            let prepared = super::inspection_lifecycle::prepare(*raw)?;
+        Body::Lifecycle(raw, language) => {
+            let prepared = super::inspection_lifecycle::prepare_in(*raw, language)?;
             limited_fields = prepared.limited_fields;
             observed_at = prepared.observed_at;
             (prepared.thread.unwrap_or_default(), prepared.value)

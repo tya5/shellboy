@@ -184,3 +184,12 @@ main delivery, pending-failure ownership, coalescing, once-per-Thread warnings,
 raw snapshots/anchors/revisions, shutdown/error results, persistence or limits.
 No source text, user reason or stored draft is translated. Remaining candidates
 and the old prototype are not adopted by this one-notice boundary.
+
+## Bounded Recovery Hint Language (#152)
+
+For private Run/Turn inspection and management views, the synthetic hint for a
+saved recovery reason exceeding the existing 64 KiB read budget follows the
+loaded UI language. Japanese retains the existing sentence. Ordinary saved
+reasons, source bytes, limits, context values and CLI/wire responses are not
+translated or rewritten. The language is captured with the private observation;
+this does not alter recovery or loading behavior.
