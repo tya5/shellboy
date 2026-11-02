@@ -8504,3 +8504,31 @@ physical-terminal acceptance is implied.
 Verified generated cached-token labels and fallback statuses in both Japanese and English. The selected language comes from the loaded `Control` configuration and is passed into refresh projection; asynchronous usage enrichment uses the same setting. Regression coverage confirms numeric counts (including zero) remain numeric, absent counts remain unreported, no-record and ambiguous-owner cases remain distinct, and ambiguous provenance does not surface an attempt ID. Existing Japanese labels/statuses are asserted exactly. The saved attempt owner, attempt IDs, field keys, and serialized source `usage_json` remain unchanged.
 
 Local macOS validation passed: `cargo fmt --all`, `cargo fmt --all -- --check`, `cargo check --tests`, `cargo clippy --tests -- -D warnings`, the focused bilingual projection test, the existing saved-attempt/unchanged-JSON test, the Stage C audit with current fingerprints, and `python3 -m unittest discover -s scripts/tests` (exit 0). Exact-tip branch CI is reported separately. Live providers, physical terminal rendering, clipboard behavior, Windows CI, and the remaining Stage C candidates are not covered by this batch.
+
+## #152 Batch 8: Receipt Restore Hint
+
+The generated restore hint for saved `Cancelled`/`Failed` receipts uses the
+loaded UI language. The Japanese width variants are preserved exactly; the
+English message uses the same `/restore` revision. Regression coverage checks
+both statuses in both languages and verifies draft ID, thread ID, revision and
+status are unchanged. Existing held/applied tests retain their no-hint behavior.
+No receipt state, persistence, user input, or provider diagnostic is translated.
+
+Base: approved Batch 7 commit `097b2c985a3bf84ccc35536eda84de7a92be6cb2`; Batch 7 is unchanged.
+
+Local macOS validation passed: `cargo fmt --all -- --check`; `cargo check --tests`;
+`cargo test --locked --lib frontend::receipt_delivery::tests -- --nocapture` (7
+passed); `cargo test --locked --lib frontend::update_delivery::tests -- --nocapture`
+(16 passed); `cargo clippy --locked --all-targets -- -D warnings`;
+`python3 scripts/check-test-layout.py` (102 suites, watchdog policy passed);
+`python3 -m unittest discover -s scripts/tests` (168 tests, exit 0);
+`python3 scripts/dev/language-audit.py --classifications
+scripts/dev/language-classifications.json --summary` (`receipt_delivery`: a=2,
+b=2, c=0); and `git diff --check`. The scoped raw-timeout allowance keeps its
+single occurrence and reason; its fingerprint was refreshed because test
+callsites now pass `UiLanguage::Ja` explicitly.
+
+Exact-tip task CI is reported in the integration handoff; three-OS integration
+validation remains with the integrator. Live providers, physical terminal
+rendering, clipboard behavior and full Stage C acceptance are not covered by
+this batch.

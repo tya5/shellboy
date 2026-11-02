@@ -434,3 +434,19 @@ separate. This work follows the subsequently selected0.6.1 cutoff.
 The review covers five generated UI literals in `src/frontend/usage.rs`: the cached-token field label, attempt-provenance label, missing-count fallback, no-request-record status, and ambiguous-request-match status. `refresh::project` forwards the loaded UI language to projection; `usage::enrich` captures it from the same immutable `Control` configuration. Each Ja literal is retained exactly. Counts, attempt IDs, field keys, owner matching, saved `usage_json`, and raw provider diagnostics are not rewritten. No-record and ambiguous provenance continue to omit an attempt ID.
 
 The five entries now classify as `(a)` with function-scope fingerprints in `scripts/dev/language-classifications.json`. The audit reports 166 remaining `(c)` entries across 18 nested `src/frontend/` files, so the broader Stage C gate remains open. Local macOS `cargo fmt --all`, `cargo fmt --all -- --check`, `cargo check --tests`, `cargo clippy --tests -- -D warnings`, focused Rust tests, the full Python developer-tool suite (exit 0), and the audit/fingerprint check passed. Exact-tip task-branch CI is reported in the handoff. No live-provider, physical-terminal, clipboard, Windows, or final Stage C acceptance is implied.
+
+## Product Review Batch8: Receipt Restore Hint
+
+The generated restore hint for saved `Cancelled` and `Failed` receipts now follows
+the loaded UI language. The original Japanese width variants are unchanged; the
+English sentence retains the same `/restore` revision instruction and uses ASCII
+punctuation. `Held` receipts remain tracked without a hint, and `Applied`/
+`Completed` behavior is unchanged. Receipt status, draft/thread IDs, revision,
+saved state, provenance and raw provider diagnostics are not rewritten.
+
+The current lexical audit classifies the two Japanese width variants as `(a)` and
+the two matching test literals as `(b)`; `src/frontend/receipt_delivery.rs` now
+has no `(c)` entries. No manual `language-classifications.json` entry or
+source-token fingerprint update was needed; the test-watchdog fingerprint is
+maintained separately. The broader Stage C audit and three-OS integration
+acceptance remain incomplete.

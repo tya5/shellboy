@@ -1,5 +1,15 @@
 # Development status
 
+## #152 Batch 8: Receipt Restore Hint
+
+The frontend-generated restore hint for cancelled or failed receipts now follows
+the loaded UI language. Japanese wide/narrow variants remain unchanged; English
+includes the same `/restore` revision instruction. Held receipts remain tracked
+without a hint, and receipt status, draft/thread IDs, revision, saved state and
+provider diagnostics are unchanged. Local macOS checks are listed in
+acceptance; the exact-tip task CI result is reported in the integration handoff.
+The integrator owns three-OS validation; Stage C remains incomplete.
+
 ## Index-source GC scan (#164, branch CI pending)
 
 `GcService::collect` found deleted/payload-less nodes owning index rows with a

@@ -757,7 +757,7 @@ mod tests {
             mut pending,
             mut batch,
         } = receipt_startup();
-        batch.drain(&mut pending, &out);
+        batch.drain(&mut pending, &out, UiLanguage::Ja);
         assert_eq!(
             out.delivery.pending.lock().unwrap().critical.len(),
             CRITICAL_LIMIT
@@ -772,7 +772,7 @@ mod tests {
         tokio::task::yield_now().await;
         assert_eq!(slots.available_permits(), 0);
         for _ in 0..10 {
-            batch.drain(&mut pending, &out);
+            batch.drain(&mut pending, &out, UiLanguage::Ja);
         }
         assert_eq!(pending.len(), receipt_delivery::BATCH_LIMIT - MAIN_RESERVE);
         rx.try_recv().unwrap();
@@ -781,7 +781,7 @@ mod tests {
         let mut worker_finished = false;
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                batch.drain(&mut pending, &out);
+                batch.drain(&mut pending, &out, UiLanguage::Ja);
                 out.flush();
                 while let Ok(value) = rx.try_recv() {
                     match value {
@@ -829,7 +829,7 @@ mod tests {
         } = receipt_startup();
         drop(rx);
         out.flush();
-        batch.drain(&mut pending, &out);
+        batch.drain(&mut pending, &out, UiLanguage::Ja);
         assert!(out.closed());
         assert!(!out.pending());
         assert!(!batch.active());
