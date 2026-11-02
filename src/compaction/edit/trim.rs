@@ -548,12 +548,22 @@ mod turn_input_tests {
             assert!(!plan.omitted.contains(&kept), "group {kept} must stay");
         }
         for omitted in [0, 1, 3, 5] {
-            assert!(plan.omitted.contains(&omitted), "group {omitted} is omissible");
+            assert!(
+                plan.omitted.contains(&omitted),
+                "group {omitted} is omissible"
+            );
         }
         let marker = plan.marker.unwrap();
-        let retained = marker["context_trim"]["retained_node_ids"].as_array().unwrap();
+        let retained = marker["context_trim"]["retained_node_ids"]
+            .as_array()
+            .unwrap();
         assert!(retained.contains(&json!("current")) && retained.contains(&json!("midturn")));
-        assert!(marker["item"]["content"][0]["text"].as_str().unwrap().contains("any messages delivered later in it"));
+        assert!(
+            marker["item"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("any messages delivered later in it")
+        );
     }
 }
 
