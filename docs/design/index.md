@@ -289,3 +289,27 @@ segment input), not an invented count of unique missing nodes. An explicit
 space selection excludes pre-space authorizations/bootstrap as before. Re-enable
 or explicit reauthorization moves applicable entries back into pending without
 changing saved job state. This is read-only projection, not a new job state.
+
+## No automatic admission while paused (#164)
+
+While the profile or endpoint-family pause exists, or when auto_history is
+false, automatic history work (`new-finalized*` authorization) is not admitted:
+`authorize_new_tx` records no source authorization, the authorization drain does
+not claim, and `enqueue_batch` drops automatic work in the same transaction that
+reads the pause. Explicit backfill/rebuild work is unaffected. There is no
+numeric queue cap; the guarantee is structural.
+
+When a pause exists (entered at runtime, or already saved at owner start), each
+index worker first runs `pause_cleanup::step` until the current pause's pass is
+complete. One step is one short DB-worker transaction that examines at most 128
+`embedding_job` rows or 128 profile-owned `index.bootstrap.*`/`index.auto.*`
+keys, deletes only pending automatic entries of this profile (with each job's
+`index.input.<job>`), and persists its cursor keyed by pause id, so foreground DB
+work interleaves and restarts resume. Running, failed, explicit and other-profile
+work is kept. `index.preview.<chunk>` belongs to stored chunks, never to pending
+jobs, so there is nothing to discard there. An automatic claim that returns to
+pending under a pause rearms the pass. `index status` reports the cumulative
+`discarded_auto_pending`; each completed pass with discards writes one
+`index_auto_discarded` diagnostics record with its count. After explicit retry,
+the paused gap is recovered only by explicit `index preview` → `index backfill`
+over the chosen sources (no automatic historical backfill).

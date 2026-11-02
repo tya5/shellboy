@@ -29,6 +29,7 @@ pub enum DiagnosticEvent {
     UsageTotalsSlow,
     DbJobSlow,
     LineageQuerySlow,
+    IndexAutoDiscarded,
     UiHistory,
     UiTerminalWidthOne,
     UiTerminalWidthTwo,
@@ -108,6 +109,11 @@ struct LineageSlowTrace {
     roots: u8,
     discovered: u16,
     truncated: bool,
+}
+/// Count of pending automatic index objects discarded by one paused cleanup pass.
+#[derive(Debug, Clone, Copy, Serialize)]
+struct IndexDiscardTrace {
+    discarded: u64,
 }
 const LINEAGE_SLOW_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(50);
 
@@ -236,6 +242,8 @@ struct Entry {
     lineage_slow: Option<LineageSlowTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     db_job_slow: Option<DbJobSlowTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    index_discard: Option<IndexDiscardTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -315,6 +323,7 @@ struct Record {
     ui_history: Option<UiHistoryTrace>,
     lineage_slow: Option<LineageSlowTrace>,
     db_job_slow: Option<DbJobSlowTrace>,
+    index_discard: Option<IndexDiscardTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -355,6 +364,7 @@ impl Diagnostics {
                     ui_history,
                     lineage_slow,
                     db_job_slow,
+                    index_discard,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -372,6 +382,7 @@ impl Diagnostics {
                         ui_history,
                         lineage_slow,
                         db_job_slow,
+                        index_discard,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -543,6 +554,7 @@ impl Diagnostics {
             ui_history: Some(trace),
             lineage_slow: None,
             db_job_slow: None,
+            index_discard: None,
         });
     }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
@@ -563,6 +575,7 @@ impl Diagnostics {
             ui_history: None,
             lineage_slow: None,
             db_job_slow: None,
+            index_discard: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -587,6 +600,7 @@ impl Diagnostics {
             ui_history: None,
             lineage_slow: None,
             db_job_slow: None,
+            index_discard: None,
         });
     }
     pub(crate) fn record_db_job(
@@ -614,6 +628,24 @@ impl Diagnostics {
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
             }),
+            index_discard: None,
+        });
+    }
+    /// One numeric observation per completed paused cleanup pass (#164).
+    pub(crate) fn record_index_auto_discarded(&self, discarded: u64) {
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::IndexAutoDiscarded,
+            ids: DiagnosticIds::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job_slow: None,
+            index_discard: Some(IndexDiscardTrace { discarded }),
         });
     }
     /// One aggregate observation after the query; fast queries emit nothing at any level.
@@ -645,6 +677,7 @@ impl Diagnostics {
                 discovered: discovered.min(514) as u16,
                 truncated,
             }),
+            index_discard: None,
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -724,6 +757,7 @@ impl Diagnostics {
             ui_history: None,
             lineage_slow: None,
             db_job_slow: None,
+            index_discard: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -739,6 +773,7 @@ impl Diagnostics {
             ui_history,
             lineage_slow,
             db_job_slow,
+            index_discard,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -770,6 +805,7 @@ impl Diagnostics {
                     ui_history,
                     lineage_slow,
                     db_job_slow,
+                    index_discard,
                 })
                 .is_err()
         }) {

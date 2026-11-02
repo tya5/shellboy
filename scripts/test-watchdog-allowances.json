@@ -762,14 +762,6 @@
   {
     "file": "tests/index.rs",
     "rule": "raw-timeout",
-    "fingerprint": "45bc951fd397866bdb6b01071f326a9c73600d134d7c04217677a771ca6dbccc",
-    "function": "malformed_current_counter_preserves_provider_failure_and_pauses_real_worker",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing malformed_current_counter_preserves_provider_failure_and_pauses_real_worker test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
     "fingerprint": "47555a07e6c5f7b029692f4dfc9d94d78d664a3a0ec2c5895725d8f81a943187",
     "function": "auto_history_off_holds_bootstrap_until_explicit_backfill",
     "count": 1,
@@ -790,14 +782,6 @@
     "function": "expire_embedding",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing expire_embedding test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/index.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "85ee4396de641ebec8dda5190d5a52cd653a915063124d5dee0209b784aa884b",
-    "function": "old_integer_reset_migrates_before_real_workers_and_exhausted_failures_trip_breaker",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing old_integer_reset_migrates_before_real_workers_and_exhausted_failures_trip_breaker test occurrence only; migrate on #41 integration, no file-wide exemption."
   },
   {
     "file": "tests/index.rs",

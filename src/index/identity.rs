@@ -412,6 +412,7 @@ fn read_status(
         space_id: selected.clone(),
         auto_history,
         held_auto_history: 0,
+        discarded_auto_pending: pause_cleanup::total(db)?,
         pending: 0,
         running: 0,
         done: 0,

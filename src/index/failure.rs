@@ -66,6 +66,13 @@ impl IndexService {
                     cancelled,
                     &config,
                 )?;
+                // #164: an automatic claim returning to pending under a pause
+                // is rescanned by the paused cleanup.
+                if pause_cleanup::automatic(&claimed.work.authorization)
+                    && pause_cleanup::pause_id(&tx, &key, Some(&failure_key))?.is_some()
+                {
+                    pause_cleanup::rearm(&tx)?;
+                }
                 tx.commit()?;
                 Ok(changed)
             })

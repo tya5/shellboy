@@ -130,12 +130,18 @@ impl IndexService {
         work: Vec<Work>,
     ) -> Result<usize, ApiError> {
         let key = key.to_owned();
+        let family = self.failure_key().map(str::to_owned);
         let inserted = self
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 let mut inserted = 0;
+                // #164: a pause saved since source admission blocks automatic work.
+                let paused = pause_cleanup::pause_id(&tx, &key, family.as_deref())?.is_some();
                 for work in work {
+                    if paused && pause_cleanup::automatic(&work.authorization) {
+                        continue;
+                    }
                     if !witness_valid(&tx, &work.witness, &work.body_kind)? {
                         continue;
                     }

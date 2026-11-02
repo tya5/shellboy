@@ -163,6 +163,7 @@ impl Control {
             owner.instance_id.clone(),
         );
         store.usage_diagnostics = Some(owner.diagnostics.clone());
+        store.index.set_diagnostics(owner.diagnostics.clone());
         let index = store.index.clone();
         let compactor = crate::compaction::Compactor::with_clients(
             owner.db.clone(),

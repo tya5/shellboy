@@ -29,6 +29,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 mod coverage;
+mod pause_cleanup;
 mod queue;
 pub(crate) mod saved_view;
 mod search;
@@ -143,6 +144,7 @@ pub struct IndexService {
     endpoint_family_key: Option<String>,
     started: AtomicBool,
     storage_diagnostic_stop: OnceLock<StorageDiagnosticStop>,
+    diagnostics: OnceLock<crate::diagnostics::Diagnostics>,
     reader: ShellOutputReader,
     source_slots: Arc<Semaphore>,
     search_slots: Arc<Semaphore>,
@@ -189,6 +191,7 @@ impl IndexService {
             endpoint_family_key,
             started: AtomicBool::new(false),
             storage_diagnostic_stop: OnceLock::new(),
+            diagnostics: OnceLock::new(),
             stop: CancellationToken::new(),
         })
     }
@@ -281,8 +284,37 @@ impl IndexService {
         }
         Ok(IndexWorkers { cancel, joins })
     }
+    /// Owner diagnostics for bounded numeric index observations.
+    pub(crate) fn set_diagnostics(&self, diagnostics: crate::diagnostics::Diagnostics) {
+        let _ = self.diagnostics.set(diagnostics);
+    }
+    /// One bounded paused-cleanup transaction (#164); true when more remain.
+    async fn pause_cleanup_step(&self) -> bool {
+        let Some(profile) = self.profile_key.clone() else {
+            return false;
+        };
+        let family = self.endpoint_family_key.clone();
+        let Ok(step) = self
+            .database
+            .call(move |db| pause_cleanup::step(db, &profile, family.as_deref()))
+            .await
+        else {
+            return false; // The pause itself keeps processing stopped.
+        };
+        if let Some(discarded) = step.finished {
+            self.publish_saved(true);
+            if let Some(diagnostics) = self.diagnostics.get() {
+                diagnostics.record_index_auto_discarded(discarded);
+            }
+        }
+        step.more
+    }
     async fn run_worker(self: Arc<Self>, token: CancellationToken) {
         while !token.is_cancelled() {
+            if self.pause_cleanup_step().await {
+                tokio::task::yield_now().await;
+                continue;
+            }
             match self.process_one(token.clone()).await {
                 Ok(true) => continue,
                 Ok(false) => {}
@@ -310,6 +342,13 @@ impl IndexService {
         let Some(key) = &self.profile_key else {
             return Ok(());
         };
+        // #164: no automatic admission while paused; preview/backfill recovers it.
+        if pause_cleanup::pause_id(tx, key, self.failure_key())
+            .map_err(db_error)?
+            .is_some()
+        {
+            return Ok(());
+        }
         for node_id in node_ids {
             let value = serde_json::to_string(&AutoAdmission {
                 node_id: node_id.clone(),
@@ -343,9 +382,16 @@ impl IndexService {
             return Ok(false);
         }
         let prefix = IndexKeys::new(key).auto_pattern();
+        let profile = key.to_owned();
+        let family = self.failure_key().map(str::to_owned);
         let admission = self
             .database
-            .call(move |db| queue::claim_authorization(db, &prefix))
+            .call(move |db| {
+                if pause_cleanup::pause_id(db, &profile, family.as_deref())?.is_some() {
+                    return Ok(None);
+                }
+                queue::claim_authorization(db, &prefix)
+            })
             .await
             .map_err(db_error)?;
         let Some((record, mut admission)) = admission else {
