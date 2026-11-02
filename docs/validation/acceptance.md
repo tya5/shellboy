@@ -8555,7 +8555,7 @@ remain required. Windows named-pipe behavior is outside the changed path.
 Exact commands, platform and CI results are reported in the task handoff; no
 live-provider or actual sandbox-exec observation is inferred.
 
-### #169 Persisted Index Pause Footer (Local Checks Complete)
+### #169 Persisted Index Pause Footer (Rebased; Local Checks Complete)
 
 On macOS, the pre-rebase tree on main 89dd221d passed `cargo check --tests`,
 four persisted-pause tests (including real retry and an oversized marker), the
@@ -8593,8 +8593,8 @@ the existing fit rule. A subsequent fresh macOS check passed
 `cargo check --tests`, ten focused library tests, and one isolated CLI PTY.
 The stronger coexistence test verified both labels and the fixed reason at
 80/120 columns, in both languages, with default, one-column, and two-column
-ambiguous-width
-policies, actual phase and context spans, and either fact clearing independently.
+ambiguous-width policies, actual phase and context spans, and either fact
+clearing independently.
 Task CI 41494268360 passed macOS but failed the Ubuntu synthetic PTY after a
 conversation switch: the expected pause badge was not observed. Code review
 found that the initial selection activity read omitted the pause fact and could
@@ -8608,6 +8608,15 @@ regression were added. On macOS 26.3.1 arm64 / Rust 1.99.1, a fresh
 test, and one isolated CLI PTY test passed. The configured `auto_history=false`
 / no-pause-marker assertion also passed. Exact-tip task CI and the requested
 3 OS integration CI remain required; the Ubuntu PTY failure is not yet claimed
-as resolved on Linux.
+as resolved on Linux. #173 landed on main at `c1d61d19` after 3 OS CI
+41503286455 passed. The author rebased #169 onto that commit, preserving the
+zero-work retry preview and pause badge assertions. Fresh macOS 26.3.1 arm64 /
+Rust 1.99.1 checks passed: `cargo check --tests`, thirteen focused library tests,
+one headless integration test, and one isolated CLI PTY test. Exact-tip task CI
+remains required. Pre-#173 task CI 41505082629 passed on Ubuntu and macOS at
+`8fbbfef0` but is superseded. Ubuntu job 125482298320 passed the
+initial-selection regression and real synthetic PTY. The saved timing artifact
+recorded 1,803 passing library tests and 1,048 passing integration tests, with no
+failures. This is not post-#173 coverage.
 No physical terminal, live-provider, Windows-local, or post-integration behavior
 has been verified.

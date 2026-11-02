@@ -4022,4 +4022,10 @@ An active stale initial read also requeues a fresh refresh. Fresh macOS checks
 passed: `cargo check --tests`, thirteen focused library tests, one headless
 integration test, and one isolated CLI PTY test. Exact-tip task CI remains pending.
 Display reads `pause::facts` directly rather than depending on the #173-removed
-drain helper. Task CI, handoff, and post-integration behavior remain pending.
+drain helper. #173 landed on main at `c1d61d19` after 3 OS CI 41503286455; the
+#169 author rebased. Fresh macOS checks passed: `cargo check --tests`, thirteen
+focused library tests, one headless integration test, and one isolated CLI PTY
+test. The pre-#173 task CI 41505082629 passed on Ubuntu and macOS but is
+superseded; its Ubuntu job included the initial-selection and real synthetic PTY
+regressions. Fresh exact-tip task CI, handoff, and post-integration behavior
+remain pending.
