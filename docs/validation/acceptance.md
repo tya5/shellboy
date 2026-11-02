@@ -57,6 +57,22 @@ post-change `cargo check --tests`, `cargo test --lib slow_job_tests` (2 tests),
 and `cargo test --lib db_job_slow_tests` (1 test) passed via rust-slot on macOS.
 Three-OS branch CI is pending; this does not establish latency or log
 completeness under a production workload.
+## Automatic compaction activity (#165, in progress)
+
+Before the change, a disposable macOS PTY with a loopback mock reported input
+203,000 against the default 200,000 threshold and gated the actual summary HTTP
+request. After the third Turn's activity update, the footer showed `Preparing`
+and the existing context bar, not an automatic-compaction label. This is a
+synthetic provider/PTY observation, not a physical-terminal or live-provider
+claim. On the candidate, the same loopback fixture held summary requests and
+observed the auto-compaction label with the exact trigger values in English and
+Japanese, followed by its disappearance on completion. A synthetic HTTP 400
+rejection and Ctrl+C during a gated request also cleared the label and recorded
+one bounded start/finish event pair with matching Thread/Run/Turn IDs. Focused
+macOS check, Clippy, timing/recovery unit tests, activity witness/PTY tests and
+seven proactive tests passed; Python tooling 168 and test layout also passed.
+Physical terminal, real provider, Windows-local and post-integration coverage
+remain unverified. Branch CI and fresh checks after rebase remain pending.
 
 ## Proactive retry gate (#153, 2026-11-02)
 

@@ -243,6 +243,14 @@ pub(super) fn footer_lines(
     };
     let phase = view.footer_phase();
     let mut facts = Vec::new();
+    if let Some(auto) = view
+        .activity
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.automatic_compaction.as_ref())
+    {
+        facts.push(auto.label_localized(view.language));
+    }
     if let Some(retry) = view
         .activity
         .snapshot

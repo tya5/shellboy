@@ -22,6 +22,8 @@ pub enum DiagnosticEvent {
     DatabaseFailure,
     ModelFailure,
     ModelStreamDifference,
+    AutomaticCompactionStarted,
+    AutomaticCompactionFinished,
     MessageSend,
     ShellFailure,
     StorageLimit,

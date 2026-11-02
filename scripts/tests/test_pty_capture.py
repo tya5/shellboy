@@ -97,6 +97,18 @@ class ConfigAndCliTests(unittest.TestCase):
             self.assertFalse(json.loads(result.stdout)['ok'])
             self.assertNotIn('must-not-spawn', result.stdout)
 
+    def test_only_supported_fixture_languages_are_accepted(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            for value in ['en', 'ja']:
+                (root / 'config.toml').write_text('[ui]\ncopy_backend="osc52"\nlanguage="' + value + '"\n')
+                capture.check_config(root)
+            for value in ['unsupported', 'EN', '']:
+                (root / 'config.toml').write_text('[ui]\ncopy_backend="osc52"\nlanguage="' + value + '"\n')
+                with self.assertRaises(ValueError):
+                    capture.check_config(root)
+
     def test_config_requires_osc52_loopback_and_no_auth(self):
         import tempfile
         with tempfile.TemporaryDirectory() as scratch:

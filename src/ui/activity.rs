@@ -192,6 +192,29 @@ impl AutomaticRetrySnapshot {
         }
     }
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AutomaticCompactionSnapshot {
+    pub input_tokens: u64,
+    pub threshold: u64,
+    pub started_at: String,
+}
+impl AutomaticCompactionSnapshot {
+    pub fn label_localized(&self, language: UiLanguage) -> String {
+        let input = self.input_tokens;
+        let threshold = self.threshold;
+        match language {
+            UiLanguage::Ja => crate::ui::text_width::glyphs::formatted!(
+                "自動圧縮中 · 入力 {input} / 閾値 {threshold}",
+                "自動圧縮中 | 入力 {input} / 閾値 {threshold}"
+            ),
+            UiLanguage::En => crate::ui::text_width::glyphs::formatted!(
+                "Auto-compacting · Input {input} / threshold {threshold}",
+                "Auto-compacting | Input {input} / threshold {threshold}"
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivitySnapshot {
     pub timing: SavedTiming,
@@ -207,6 +230,7 @@ pub struct ActivitySnapshot {
     /// The bounded attempt prefix did not prove all attachment states were read.
     pub attachment_check_limited: bool,
     pub automatic_retry: Option<AutomaticRetrySnapshot>,
+    pub automatic_compaction: Option<AutomaticCompactionSnapshot>,
     pub recovery: Option<RecoverySnapshot>,
     pub run_id: Option<String>,
     pub turn_id: Option<String>,

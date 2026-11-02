@@ -548,3 +548,15 @@ The absent-driver path uses the existing Thread boundary and rechecks canonical
 Run state before drain, so concurrent stop/retirement cannot repeat terminal
 mutation. Primary-key lookups are bounded. Terminal facts commit before Changed
 is published; live/recovery/completed Runs are not stopped merely by retirement.
+
+## Proactive compaction activity witness (#165)
+
+At the proven provider-reported threshold boundary, the driver commits one
+per-Thread active witness to existing `app_meta` before spill/summary and emits
+Changed plus a bounded diagnostic start event. The witness records Run, Turn,
+trigger input, threshold and the actual start time. On all normal, error and
+cancellation returns the same owner removes it, emits Changed and a bounded
+finish event; an interrupted instance removes leftover witnesses during recovery.
+Selected-view activity reads validate ownership against the latest live Run and
+preparing/running Turn. This is not the receipt-backed explicit context-edit
+wait, and does not add a table, queue, worker, setting or new lifecycle phase.

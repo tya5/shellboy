@@ -7545,6 +7545,7 @@ mod layout_cache_tests {
             attachment_unsupported: false,
             attachment_check_limited: false,
             automatic_retry: None,
+            automatic_compaction: None,
             recovery: None,
             run_id: Some("run".into()),
             turn_id: Some("turn".into()),

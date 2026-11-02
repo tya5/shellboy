@@ -70,7 +70,7 @@ def check_config(root):
 
 class Terminal:
     def __init__(self, binary, root=None, cols=80, palette='dark', term='xterm-256color', no_color=False,
-                 rows=36, connection_url='http://127.0.0.1:9/v1'):
+                 rows=36, connection_url='http://127.0.0.1:9/v1', language='en'):
         if os.name != 'posix':
             raise OSError('Live PTYs require Unix; replay and VT tests are portable')
         import fcntl
@@ -89,7 +89,8 @@ class Terminal:
                 (root / 'config.toml').write_text(
                     'default_connection="fixture"\ndefault_model="offline-fixture"\n'
                     '[connections.fixture]\nbase_url=' + json.dumps(connection_url) + '\n'
-                    '[ui]\ncopy_backend="osc52"\nbell=false\npalette=' + json.dumps(palette) + '\n',
+                    '[ui]\ncopy_backend="osc52"\nbell=false\npalette=' + json.dumps(palette) + '\n'
+                    'language=' + json.dumps(language) + '\n',
                     encoding='utf-8')
             self.root = Path(root).resolve()
             # Existing-root support is for repository-owned synthetic fixtures,

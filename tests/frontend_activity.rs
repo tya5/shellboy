@@ -877,3 +877,113 @@ async fn exhausted_retry_recovery_stage_requires_exact_saved_model_and_counts() 
     }
     db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn automatic_compaction_witness_is_bounded_to_live_run_and_turn() {
+    let root = tempfile::tempdir().unwrap();
+    let db = DbWorker::open(root.path().join("db")).await.unwrap();
+    change(&db, "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','preparing','now');").await;
+    assert!(
+        projection(&db)
+            .await
+            .snapshot
+            .automatic_compaction
+            .is_none()
+    );
+    for (body, expected) in [
+        (
+            r#"{"run_id":"r","turn_id":"u","input_tokens":203000,"threshold":200000,"started_at":"2026-11-02T10:00:00Z"}"#,
+            true,
+        ),
+        (
+            r#"{"run_id":"other","turn_id":"u","input_tokens":203000,"threshold":200000,"started_at":"2026-11-02T10:00:00Z"}"#,
+            false,
+        ),
+        (
+            r#"{"run_id":"r","turn_id":"other","input_tokens":203000,"threshold":200000,"started_at":"2026-11-02T10:00:00Z"}"#,
+            false,
+        ),
+        (
+            r#"{"run_id":"r","turn_id":"u","input_tokens":1,"threshold":200000,"started_at":"2026-11-02T10:00:00Z"}"#,
+            false,
+        ),
+        (
+            r#"{"run_id":"r","turn_id":"u","input_tokens":1,"threshold":0,"started_at":"2026-11-02T10:00:00Z"}"#,
+            false,
+        ),
+        ("invalid", false),
+    ] {
+        let body = body.to_owned();
+        db.call(move |db| {
+            db.execute("INSERT INTO app_meta(key,value)VALUES('compact.automatic_active.t',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [body])?;
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(
+            projection(&db)
+                .await
+                .snapshot
+                .automatic_compaction
+                .is_some(),
+            expected
+        );
+    }
+    change(&db, "UPDATE app_meta SET value='{\"run_id\":\"r\",\"turn_id\":\"u\",\"input_tokens\":203000,\"threshold\":200000,\"started_at\":\"2026-11-02T10:00:00Z\"}'; UPDATE turn SET state='completed',ended_at='now' WHERE id='u';").await;
+    assert!(
+        projection(&db)
+            .await
+            .snapshot
+            .automatic_compaction
+            .is_none()
+    );
+    change(&db, "UPDATE turn SET state='preparing',ended_at=NULL WHERE id='u'; UPDATE run SET state='stopping' WHERE id='r';").await;
+    assert!(
+        projection(&db)
+            .await
+            .snapshot
+            .automatic_compaction
+            .is_none()
+    );
+    db.shutdown().await.unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn automatic_compaction_live_pty_shows_and_clears_in_both_languages() {
+    let root = tempfile::tempdir().unwrap();
+    for (language, mode) in [
+        ("en", "ok"),
+        ("ja", "ok"),
+        ("en", "error"),
+        ("en", "cancel"),
+    ] {
+        let mut command = std::process::Command::new("python3");
+        command
+            .args([
+                "tests/support/auto_compaction_pty.py",
+                "--binary",
+                env!("CARGO_BIN_EXE_shellboy"),
+                "--language",
+                language,
+                "--out",
+            ])
+            .arg(root.path().join(format!("{language}-{mode}.json")));
+        match mode {
+            "error" => {
+                command.arg("--summary-error");
+            }
+            "cancel" => {
+                command.arg("--cancel");
+            }
+            _ => {}
+        }
+        let output = command
+            .output()
+            .expect("run isolated synthetic PTY fixture");
+        assert!(
+            output.status.success(),
+            "{language}, mode={mode}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

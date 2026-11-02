@@ -76,13 +76,35 @@ pub(super) async fn maybe_compact(
     if !budget.permits(evidence.input_tokens, threshold) {
         return Ok(false);
     }
+    let key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_active();
+    let witness = json!({"run_id": snapshot.run, "turn_id": snapshot.turn,
+        "input_tokens": evidence.input_tokens, "threshold": threshold,
+        "started_at": chrono::Utc::now().to_rfc3339()})
+    .to_string();
+    let (saved_key, saved_witness) = (key.clone(), witness.clone());
+    control.store.database.call(move |db| {
+        db.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
+        Ok(())
+    }).await.map_err(storage_error)?;
+    let ids = crate::diagnostics::DiagnosticIds {
+        thread_id: Some(snapshot.thread.clone()),
+        run_id: Some(snapshot.run.clone()),
+        turn_id: Some(snapshot.turn.clone()),
+        ..Default::default()
+    };
+    control.diagnostics.record(
+        crate::diagnostics::DiagnosticEvent::AutomaticCompactionStarted,
+        ids.clone(),
+    );
+    control.changed(&snapshot.thread);
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
+    let result: Result<Value, ApiError> = async {
     let spill = control
         .compactor
         .spill_reducing_cancellable(&snapshot.thread, slot.stop.clone())
         .await;
-    let mut observation = match spill {
+    let observation = match spill {
         Err(error) if error.is_storage_failure() => return Err(error),
         Err(error) => json!({"outcome":"rejected","error":error}),
         Ok(spill) => match control
@@ -121,6 +143,28 @@ pub(super) async fn maybe_compact(
             Err(error) => json!({"outcome":"rejected","error":error}),
         },
     };
+    Ok(observation)
+    }.await;
+    // A retiring owner must not remove a newer owner's witness.
+    let cleanup = control
+        .store
+        .database
+        .call(move |db| {
+            db.execute(
+                "DELETE FROM app_meta WHERE key=?1 AND value=?2",
+                params![key, witness],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(storage_error);
+    control.diagnostics.record(
+        crate::diagnostics::DiagnosticEvent::AutomaticCompactionFinished,
+        ids,
+    );
+    control.changed(&snapshot.thread);
+    cleanup?;
+    let mut observation = result?;
     let adopted = observation["outcome"] == "adopted";
     let summary_rejected = observation.get("summary_error").is_some();
     budget.last_non_adopted_input = (!adopted || summary_rejected).then_some(evidence.input_tokens);

@@ -457,6 +457,10 @@ pub(crate) fn interrupt_previous_work(
     now: &str,
 ) -> Result<RepairReport, StorageError> {
     super::revisit::drop_all_pending(tx)?;
+    tx.execute(
+        "DELETE FROM app_meta WHERE key GLOB 'compact.automatic_active.*'",
+        [],
+    )?;
     tx.execute("UPDATE turn SET state='stopped',ended_at=?1,recovery_reason_json=?2 WHERE state IN ('preparing','running','waiting','recovery_wait')",rusqlite::params![now,r#"{"reason":"previous_instance_interrupted","result_uncertain":true}"#])?;
     #[cfg(unix)]
     tx.execute("UPDATE shell_execution SET state='failed',ended_at=?1,end_reason='previous_instance_interrupted_os_state_unverified',output_complete=0,shell_json=json_set(shell_json,'$.recovery',json('{\"os_state\":\"unverified\",\"result_uncertain\":true}')) WHERE state IN ('starting','running','stopping')",[&now])?;
@@ -969,6 +973,32 @@ mod tests {
 #[cfg(test)]
 mod exit_reason_tests {
     use super::*;
+    #[test]
+    fn startup_removes_only_automatic_compaction_witnesses() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO app_meta(key,value) VALUES('compact.automatic_active.thread','{}'),('compact.automaticXactive.thread','unrelated');").unwrap();
+        let tx = db.transaction().unwrap();
+        interrupt_previous_work(&tx, "now").unwrap();
+        assert_eq!(
+            tx.query_row(
+                "SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.thread'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT value FROM app_meta WHERE key='compact.automaticXactive.thread'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "unrelated"
+        );
+    }
     #[test]
     fn startup_and_both_shutdown_paths_preserve_explicit_stop() {
         for boundary in ["startup", "drained", "fallback"] {

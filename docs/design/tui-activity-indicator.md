@@ -129,3 +129,27 @@ not reintroduce an earlier row layout or overwrite #87's caller-supplied hint AP
 - スピナーの行の選び方は`ui/motion.rs::select`の1関数：Turn進行中に、最新の`running_current`かつ背景でないshell、なければ現attemptの生成中（provisional）回答行、なければなし。描画時に見えている行の印1セルだけを置き換え、layout cache・source・選択・F6/F7・scrollの計算には触れない。
 - `ui.motion = "off"`で3区画とも静止した印に戻す。`NO_COLOR`では明滅しない（スピナーは動く）。overlay・選択固定中は既存の規則どおり期限を止める。
 - DB/出力の読取り・worker・queue・timerは追加しない。
+
+## Automatic compaction activity (#165)
+
+The active proactive operation is an auxiliary fact on the existing selected
+activity snapshot, not a new lifecycle phase. It is distinct from the saved
+receipt-backed explicit context-edit wait above. The driver owns a per-Thread
+`compact.automatic_active.*` witness in existing `app_meta`: exact Run and Turn,
+the provider-reported input and configured threshold that triggered the boundary,
+and the actual start time. The selected read accepts it only for its live Run
+and preparing/running Turn and only when the reported input reaches a positive
+threshold. Invalid, incomplete or mismatched witnesses are not projected. The
+operation removes its own witness on normal return, failure or cancellation;
+interrupted-instance repair removes leftovers. No new table, worker, queue,
+setting, polling cadence, protocol state or marker is introduced.
+
+Render the fact using localized wording and the shared glyph separator; the
+numbers are the trigger facts, not an estimate of current context. The existing
+phase clock uses the saved start time while the fact is active, falling back to
+unknown for an invalid/future time. Two fixed events on the existing bounded
+diagnostic writer mark start and finish with Thread/Run/Turn IDs; no message,
+provider response or input content is logged. These events share the existing
+best-effort bounded queue and can be dropped under pressure; a missing pair is
+not evidence that no compaction occurred. The older initial-scope statement above
+excluding a compaction indication is superseded by this section.

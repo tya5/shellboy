@@ -35,6 +35,12 @@ pause, workers discard pending automatic jobs, their `index.input.*`, automatic
 `index status` shows `discarded_auto_pending`. The `read_next_delay` fix is on
 the separate issue-164/next-delay-bounded branch. Synthetic temp-DB tests only;
 not yet run against a real large backlog. CI pending.
+## Automatic compaction activity (#165, in progress)
+
+The selected footer uses the existing activity snapshot to distinguish active
+proactive compaction from explicit context-edit waits, using the reported trigger
+and actual start time. A bounded diagnostic event pair supports timing analysis.
+Validation and outstanding physical/CI coverage are recorded in acceptance.
 
 ## Attachment MIME and recovery (#158, in progress)
 

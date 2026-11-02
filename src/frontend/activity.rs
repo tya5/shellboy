@@ -115,6 +115,16 @@ pub(super) struct RawProjection {
     cancelled: u64,
     live_work: Option<super::live_work::RawLiveWork>,
     waiting_reason: Option<crate::protocol::RunWaitReason>,
+    automatic_compaction: Option<crate::ui::activity::AutomaticCompactionSnapshot>,
+}
+
+#[derive(serde::Deserialize)]
+struct AutomaticCompactionWitness {
+    run_id: String,
+    turn_id: String,
+    input_tokens: u64,
+    threshold: u64,
+    started_at: String,
 }
 
 /// Latest Run owns the selected Turn; an older Turn cannot revive a newer Run.
@@ -161,6 +171,7 @@ pub(super) fn read_tx_with_limit(
             cancelled: 0,
             live_work: None,
             waiting_reason: None,
+            automatic_compaction: None,
         });
     };
     let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
@@ -179,6 +190,7 @@ pub(super) fn read_tx_with_limit(
         run: None,
         waiting_reason: crate::readback::run_wait_reason(db, thread, run_id)
             .map_err(crate::storage::StorageError::from)?,
+        automatic_compaction: None,
         turn: None,
         attempt: None,
         revisit,
@@ -196,6 +208,28 @@ pub(super) fn read_tx_with_limit(
         },
     };
     if let Some(saved_turn) = turn {
+        if run_state == "live" && matches!(saved_turn.state.as_str(), "preparing" | "running") {
+            let body: Option<String> = db
+                .query_row(
+                    "SELECT substr(value,1,4096) FROM app_meta WHERE key=?1",
+                    [crate::compaction::CompactionKeys::new(thread).automatic_active()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            raw.automatic_compaction = body
+                .and_then(|body| serde_json::from_str::<AutomaticCompactionWitness>(&body).ok())
+                .filter(|w| {
+                    w.run_id == *run_id
+                        && w.turn_id == saved_turn.id
+                        && w.threshold > 0
+                        && w.input_tokens >= w.threshold
+                })
+                .map(|w| crate::ui::activity::AutomaticCompactionSnapshot {
+                    input_tokens: w.input_tokens,
+                    threshold: w.threshold,
+                    started_at: w.started_at,
+                });
+        }
         let turn_id = &saved_turn.id;
         let generation = saved_turn.generation;
         let reason = &saved_turn.recovery_reason;
@@ -261,6 +295,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         cancelled,
         live_work,
         waiting_reason,
+        automatic_compaction,
     } = raw;
     let Some((run_id, run_state, stop_reason, ended_at)) = run else {
         return Projection {
@@ -289,6 +324,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         },
         live_work: live_work.map(super::live_work::prepare),
         waiting_reason,
+        automatic_compaction,
         revisit,
         run_id: Some(run_id),
         ..Default::default()

@@ -40,6 +40,14 @@ mod tests {
             operation_count: 1,
         };
         assert_eq!(label(&reason), "会話要約の完了待ち");
+        assert_eq!(
+            label_localized(&reason, crate::config::UiLanguage::En),
+            "Waiting for conversation summary"
+        );
+        assert_eq!(
+            label_localized(&reason, crate::config::UiLanguage::Ja),
+            "会話要約の完了待ち"
+        );
         reason.action = "compact".into();
         assert_eq!(label(&reason), "会話圧縮の完了待ち");
     }

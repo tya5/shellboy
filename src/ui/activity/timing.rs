@@ -76,11 +76,19 @@ impl PhaseClock {
             },
             phase,
         );
-        let anchor = match phase {
+        let anchor = if matches!(phase, ActivityPhase::Preparing | ActivityPhase::Running) {
+            snapshot
+                .automatic_compaction
+                .as_ref()
+                .map(|auto| auto.started_at.clone())
+        } else {
+            None
+        }
+        .or_else(|| match phase {
             ActivityPhase::AwaitingModel => snapshot.timing.attempt_started_at.clone(),
             ActivityPhase::Tools => snapshot.timing.tool_started_at.clone(),
             _ => None,
-        };
+        });
         if let Some(mut previous) = previous
             && previous.key == key
             && previous.anchor == anchor
@@ -185,6 +193,29 @@ mod tests {
             Some("8秒")
         );
         assert!(!view.accept_at(1, snapshot("a", 999), at));
+    }
+    #[test]
+    fn automatic_compaction_uses_the_saved_start_and_restores_phase_clock_afterwards() {
+        let at = Instant::now();
+        let mut view = ActivityView::default();
+        let mut s = snapshot("a", 120);
+        s.phase = ActivityPhase::Preparing;
+        s.automatic_compaction = Some(AutomaticCompactionSnapshot {
+            input_tokens: 203000,
+            threshold: 200000,
+            started_at: (s.timing.wall_at.unwrap() - chrono::Duration::seconds(12)).to_rfc3339(),
+        });
+        view.accept_at(1, s.clone(), at);
+        assert_eq!(
+            view.phase_time_note(at + Duration::from_secs(3)).as_deref(),
+            Some("15秒")
+        );
+        s.automatic_compaction = None;
+        view.accept_at(2, s, at + Duration::from_secs(4));
+        assert_eq!(
+            view.phase_time_note(at + Duration::from_secs(5)).as_deref(),
+            Some("観測 1秒")
+        );
     }
     #[test]
     fn receive_before_snapshot_survives_old_phase_and_is_transport_not_generated_output() {
