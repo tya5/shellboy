@@ -262,14 +262,13 @@ real conversation content or identifiers produced these single-run measurements:
 
 | Nodes | Unlinked global steps / ms | Linked global steps / ms | Linked Thread steps / ms |
 | ---: | ---: | ---: | ---: |
-| 1,000 | 220,000 / 104 | 74,000 / 90 | 67,000 / 86 |
-| 2,000 | 439,000 / 193 | 147,000 / 174 | 133,000 / 170 |
-| 5,000 | 1,097,000 / 487 | 367,000 / 433 | 332,000 / 424 |
-| 10,000 | 2,193,000 / 965 | 733,000 / 863 | 663,000 / 843 |
+| 1,000 | 223,000 / 101 | 74,000 / 88 | 67,000 / 86 |
+| 2,000 | 445,000 / 202 | 147,000 / 182 | 133,000 / 176 |
+| 5,000 | 1,112,000 / 515 | 367,000 / 463 | 332,000 / 442 |
+| 10,000 | 2,223,000 / 1,027 | 733,000 / 892 | 663,000 / 882 |
 
-The linked measurements exercise the current cursor scanner; the preliminary
-unlinked measurements used the immediately preceding bounded scanner, before
-cursor bookkeeping. SQLite's progress handler samples at 1,000 VM instructions,
+All measurements exercise the cursor scanner with a candidate-specific budget.
+SQLite's progress handler samples at 1,000 VM instructions,
 so counts are approximate. The timings include opening and querying the disposable
 history DB but exclude fixture creation; they are not production latency or
 percentiles. Long raw bodies, many references, deep replacement graphs, busy I/O,
@@ -278,7 +277,7 @@ also stop earlier at the caller's result limit or the 128 KiB hit-output budget;
 the latter reserves space within the existing 512 KiB response cap. All these
 boundaries return a continuation cursor rather than silently dropping later hits.
 
-Reproduce the linked global and Thread samples with:
+Reproduce the unlinked, linked global and Thread samples with:
 `cargo test --lib rag::history::measurement::history_keyword_work_budget -- --ignored --nocapture`.
 The test generates a disposable on-disk database and uses a test-only SQLite
 progress handler; it does not inspect the real owner or database.
