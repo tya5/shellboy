@@ -127,6 +127,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
       CANDIDATE_REF: ${{ inputs.candidate_ref }}
+      SELECTED_SHA: ${{ needs.select.outputs.sha }}
       RELEASE_TARGET: ${{ matrix.target }}
       RELEASE_EXECUTABLE: ${{ matrix.executable }}
       RELEASE_ARCHIVE: ${{ matrix.archive }}
@@ -146,6 +147,7 @@ jobs:
           cache-on-failure: true
       - name: Check tag version and native build host
         run: |
+          [[ -z "$SELECTED_SHA" || "$(git rev-parse HEAD)" == "$SELECTED_SHA" ]]
           python - <<'PY'
           import json, os, re, subprocess
           tag = os.environ['RELEASE_TAG']
@@ -232,11 +234,12 @@ jobs:
 
   assemble:
     name: Assemble validated archives, installers and SHA256SUMS
-    needs: build
+    needs: [build, select]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      SELECTED_SHA: ${{ needs.select.outputs.sha || inputs.candidate_ref }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -250,6 +253,7 @@ jobs:
       - name: Check complete asset set and write SHA-256 checksums
         shell: bash
         run: |
+          [[ -n "$SELECTED_SHA" && "$(git rev-parse HEAD)" == "$SELECTED_SHA" ]]
           python - <<'PY'
           import hashlib, os
           from pathlib import Path
