@@ -38,6 +38,33 @@ class ModelTests(unittest.TestCase):
             else:
                 self.assertEqual(output[0]['content'][0]['text'], 'done')
 
+    def test_optional_io_records_exact_bytes_for_each_thread(self):
+        from bench.observations import RequestLog
+        traffic = RequestLog(2)
+        server = bench.FakeModel(2, traffic=traffic)
+        server.allowed_threads.update(['thread-0', 'thread-1'])
+        server.traffic_threads.update({'thread-0': 0, 'thread-1': 1})
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            sizes = []
+            for thread in ['thread-0', 'thread-1']:
+                context = {'role': 'developer', 'content': [{'type': 'input_text',
+                           'text': f'Shellboy context v1: thread={thread} run=fixture'}]}
+                payload = json.dumps({'input': [instruction(4), context]}).encode()
+                sizes.append(len(payload))
+                request = Request(server.url + '/responses', data=payload,
+                                  headers={'Content-Type': 'application/json'})
+                with urlopen(request, timeout=5) as response:
+                    response.read()
+            result = traffic.result()
+            self.assertEqual([r['bytes'] for r in result['requests']], sizes)
+            self.assertEqual([c['total_bytes'] for c in result['conversations']], sizes)
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=5)
+
     def test_unknown_instruction_is_rejected(self):
         with self.assertRaises(ValueError):
             bench.plan({'input': [{'role': 'user', 'content': 'not a benchmark instruction'}]})
