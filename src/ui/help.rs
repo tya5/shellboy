@@ -1201,7 +1201,10 @@ mod tests {
                     for line in lines.iter().map(ToString::to_string).filter(|line| {
                         line.contains("preview") || (line.contains("⌕") && line.contains("/index"))
                     }) {
-                        assert!(line.width() <= usize::from(width), "{policy:?} {language:?}: {line}");
+                        assert!(
+                            line.width() <= usize::from(width),
+                            "{policy:?} {language:?}: {line}"
+                        );
                     }
                     assert!(text.contains(chain), "{policy:?} {language:?}: {text}");
                     assert!(text.contains(arrows), "{policy:?} {language:?}: {text}");

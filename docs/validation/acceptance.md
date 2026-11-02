@@ -8555,18 +8555,27 @@ remain required. Windows named-pipe behavior is outside the changed path.
 Exact commands, platform and CI results are reported in the task handoff; no
 live-provider or actual sandbox-exec observation is inferred.
 
-### #169 Persisted Index Pause Footer (Pending)
+### #169 Persisted Index Pause Footer (Local Checks Complete)
 
 On macOS, the pre-rebase tree on main 89dd221d passed `cargo check --tests`,
 four persisted-pause tests (including real retry and an oversized marker), the
 bilingual footer test, a draft update test, and an actual DB-to-selected-snapshot
-test. The later width-policy and PTY changes, plus the rebase onto 72f163d5,
-require a fresh check. The first post-rebase `cargo check --tests` failed on an
+test. The later 128 KiB bound adjustment, width-policy and PTY changes, plus the
+rebase onto 72f163d5, require a fresh check. The first post-rebase
+`cargo check --tests` failed on an
 out-of-scope PTY binary variable introduced by the test change; the helper was
 corrected. The subsequent fresh run was interrupted by signal 15 while waiting
-for the shared Rust slot; it did not execute and must be restarted. The work is
-preserved on the task branch, rebased onto 99d10a78, while #165 takes priority. Before handoff, verify saved
-family/profile selection, clear/retry, bounded fixed classifications, 80/120
-columns in both languages, snapshot updates, and the no-selected-thread case.
+for the shared Rust slot and did not execute.
+
+On macOS 26.3.1 arm64 with Rust 1.99.1, the rebased 99d10a78 tree passed a
+forced fresh `cargo check --tests`, four saved-pause tests, four focused
+footer/draft/snapshot/help tests, and one integration PTY test. The PTY used a
+binary copied from the same locked build and verified the badge in a draft and
+selected conversation, then its disappearance after retry. The footer and help
+checks cover Japanese and English at 80/120 columns with default, one-column,
+and two-column ambiguous-width policies. A synthetic-schema SQLite 3.51.1
+EXPLAIN used the app_meta primary-key index for the bounded point read. The
+failed and interrupted attempts above were not counted as validation.
+
 Fresh exact-tip task CI is required. No physical terminal, live-provider,
 Windows-local, or post-integration behavior has been verified.

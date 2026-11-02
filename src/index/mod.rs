@@ -1535,7 +1535,10 @@ mod display_pause_tests {
         }
         let long_error = serde_json::json!({"kind":"provider", "status":401, "message":"x".repeat(crate::model::MAX_ERROR_MESSAGE_CHARS)}).to_string();
         assert_eq!(pause_reason(&long_error), PauseReason::Authentication);
-        assert_eq!(pause_reason(&"x".repeat(MAX_DISPLAY_PAUSE_BYTES + 1)), PauseReason::Other);
+        assert_eq!(
+            pause_reason(&"x".repeat(MAX_DISPLAY_PAUSE_BYTES + 1)),
+            PauseReason::Other
+        );
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
             .unwrap();

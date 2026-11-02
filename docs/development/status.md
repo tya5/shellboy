@@ -4007,7 +4007,9 @@ when initialized or notified. The endpoint-family key takes precedence
 over the configured profile key; absent keys do not imply a pause. The footer
 uses fixed bilingual classifications rather than provider prose. Pause-change
 notifications request a fresh snapshot without reading the database on render.
-This work is not yet validated or handed off; no post-integration behavior is
-claimed. In particular, initial/draft-without-selected-thread behavior still needs
-validation, and the planned #173 removal of `pause_cleanup::pause_id` needs
-author rebase coordination.
+`auto_history=false` alone does not create a badge; the current interpretation
+still shows a real persisted pause if one exists, pending reviewer confirmation.
+Focused macOS checks, including an isolated synthetic PTY, have passed on main
+99d10a78. Task CI and handoff remain pending; no post-integration behavior is
+claimed. The planned #173 removal of `pause_cleanup::pause_id` needs author
+rebase coordination.
