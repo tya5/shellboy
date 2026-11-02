@@ -415,3 +415,11 @@ PRAGMA user_version=18;
 CREATE INDEX attempts_completed_scope ON model_attempt(turn_id,profile_id,model_id) WHERE state='completed';
 INSERT INTO schema_migration(version,name) VALUES(19,'0019_context_attempt_scope');
 PRAGMA user_version=19;
+
+-- Index-source GC (#164): find payload-less/deleted nodes that still own
+-- embedding jobs or chunks by seek instead of a correlated embedding_job scan
+-- per node. Derived indexes only.
+CREATE INDEX jobs_source ON embedding_job(source_node_id);
+CREATE INDEX nodes_index_gc ON node(id) WHERE payload_json IS NULL OR deleted_reason IS NOT NULL;
+INSERT INTO schema_migration(version,name) VALUES(20,'0020_gc_index_source');
+PRAGMA user_version=20;

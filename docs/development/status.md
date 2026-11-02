@@ -1,5 +1,13 @@
 # Development status
 
+## Index-source GC scan (#164, branch CI pending)
+
+`GcService::collect` found deleted/payload-less nodes owning index rows with a
+correlated embedding_job scan per node (measured 64-210 s DB jobs on the user's
+owner, every other DB job queued behind). Migration 0020 adds `jobs_source` and
+the partial `nodes_index_gc`; the query is unchanged and now seeks only
+deleted/payload-less nodes. Plan asserted in `gc::tests`; see acceptance.
+
 ## Bounded index wake-delay read (#164, branch CI pending)
 
 `read_next_delay` no longer scans queues while the profile (not only the endpoint

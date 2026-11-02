@@ -1,5 +1,18 @@
 # Validation record
 
+## Index-source GC scan (#164, 2026-11-02)
+
+macOS, rust-slot: unit test `gc::tests::index_source_scan_seeks_deleted_nodes_and_owned_rows`
+asserts the result (job- and chunk-owning deleted nodes plus a payload-less node)
+and EXPLAIN QUERY PLAN `SCAN n USING INDEX nodes_index_gc` with `jobs_source` /
+`chunks_source` seeks, no other SCAN and no temp B-tree. Synthetic measurement
+(ignored test `index_source_scan_measure`, debug build, in-memory DB, 58,902 live
+~1 KB nodes, 5,098 deleted nodes, 130,000 jobs, 44,000 chunks, zero result rows;
+single run each, recorded facts not bounds): before 60.66 s (`SCAN embedding_job`
+per candidate), `jobs_source` only 20.5 ms (full node scan), both indexes 5.5 ms.
+The user's DB was not opened; the 2m33s figure came from a copy measured earlier.
+Schema upgrade/fresh-equality tests are listed in the commit's check run.
+
 ## Bounded index wake-delay read (#164, 2026-11-02)
 
 macOS, rust-slot: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`

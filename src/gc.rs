@@ -252,12 +252,25 @@ impl GcService {
         }
         if matches!(category, StorageCategory::All | StorageCategory::Index) {
             loop {
-                let removed=self.database.call(|db| {
-                    let tx=db.transaction()?;
-                    let nodes=tx.prepare("SELECT n.id FROM node n WHERE (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL) AND (EXISTS(SELECT 1 FROM embedding_job WHERE source_node_id=n.id) OR EXISTS(SELECT 1 FROM embedding_chunk WHERE source_node_id=n.id)) ORDER BY n.id LIMIT 128")?.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-                    for node in &nodes {if let Err(error)=crate::index::delete_source_vectors_tx(&tx,node){return Ok(Err(error));}}
-                    let count=nodes.len() as u64;tx.commit()?;Ok(Ok(count))
-                }).await.map_err(crate::app::storage_error)??;
+                let removed = self
+                    .database
+                    .call(|db| {
+                        let tx = db.transaction()?;
+                        let nodes = tx
+                            .prepare(INDEX_SOURCES_SQL)?
+                            .query_map([], |row| row.get::<_, String>(0))?
+                            .collect::<rusqlite::Result<Vec<_>>>()?;
+                        for node in &nodes {
+                            if let Err(error) = crate::index::delete_source_vectors_tx(&tx, node) {
+                                return Ok(Err(error));
+                            }
+                        }
+                        let count = nodes.len() as u64;
+                        tx.commit()?;
+                        Ok(Ok(count))
+                    })
+                    .await
+                    .map_err(crate::app::storage_error)??;
                 report.index_sources_collected += removed;
                 if removed < BATCH as u64 {
                     break;
@@ -414,6 +427,11 @@ impl GcService {
         Ok(step)
     }
 }
+
+/// Payload-less/deleted nodes that still own index rows. `nodes_index_gc`
+/// bounds the scan to such nodes and `jobs_source`/`chunks_source` make each
+/// ownership probe a seek, so an empty result stays cheap (#164).
+const INDEX_SOURCES_SQL: &str = "SELECT n.id FROM node n WHERE (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL) AND (EXISTS(SELECT 1 FROM embedding_job WHERE source_node_id=n.id) OR EXISTS(SELECT 1 FROM embedding_chunk WHERE source_node_id=n.id)) ORDER BY n.id LIMIT 128";
 
 /// Shared DB-lane gate for model, shell, child, summary and index workers.
 /// Stop, terminal-record, observation and GC operations must remain available.
@@ -586,4 +604,110 @@ fn error(message: impl Into<String>) -> ApiError {
 }
 fn sql_error(error: rusqlite::Error) -> ApiError {
     self::error(format!("collection database operation failed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::INDEX_SOURCES_SQL;
+    use rusqlite::{Connection, params};
+    use std::time::Instant;
+
+    fn fixture(live: usize, deleted: usize, jobs: usize, chunks: usize) -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        let tx = db.unchecked_transaction().unwrap();
+        tx.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name)VALUES('s','p','m',4,'v','active','vec_s')",[]).unwrap();
+        let payload = format!("{{\"text\":\"{}\"}}", "x".repeat(1000));
+        for i in 0..live {
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES(?1,'user','2026',?2,?3)",params![format!("n{i:06}"),payload,payload.len() as i64]).unwrap();
+        }
+        for i in 0..deleted {
+            tx.execute(
+                "INSERT INTO node(id,kind,created_at,deleted_reason)VALUES(?1,'user','2026','gc')",
+                [format!("d{i:06}")],
+            )
+            .unwrap();
+        }
+        // Index rows belong to live nodes only, like the measured DB: the
+        // query returns zero rows and must still stay bounded.
+        for i in 0..jobs {
+            tx.execute("INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES(?1,'s',?2,0,'text','h',?3,?3,'done')",params![format!("j{i:07}"),format!("n{:06}",i%live.max(1)),i as i64]).unwrap();
+        }
+        for i in 0..chunks {
+            tx.execute("INSERT INTO embedding_chunk(id,job_id,space_id,source_node_id,source_revision,span_start,span_end,content_hash,vec_row_id)VALUES(?1,?2,'s',?3,0,0,0,'h',?4)",params![format!("c{i:07}"),format!("j{i:07}"),format!("n{:06}",i%live.max(1)),i as i64]).unwrap();
+        }
+        tx.commit().unwrap();
+        db
+    }
+
+    fn plan(db: &Connection) -> Vec<String> {
+        db.prepare(&format!("EXPLAIN QUERY PLAN {INDEX_SOURCES_SQL}"))
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    fn sources(db: &Connection) -> Vec<String> {
+        db.prepare(INDEX_SOURCES_SQL)
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn index_source_scan_seeks_deleted_nodes_and_owned_rows() {
+        let db = fixture(4, 3, 8, 4);
+        db.execute_batch("INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES('jd','s','d000001',0,'text','h',0,0,'done'); INSERT INTO embedding_chunk(id,job_id,space_id,source_node_id,source_revision,span_start,span_end,content_hash,vec_row_id)VALUES('cd','jd','s','d000002',0,0,0,'h',99); INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES('m','user','2026',NULL,0); INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES('jm','s','m',0,'text','h',0,0,'done');").unwrap();
+        assert_eq!(sources(&db), ["d000001", "d000002", "m"]);
+        let plan = plan(&db);
+        assert!(
+            plan.iter()
+                .any(|d| d.starts_with("SCAN n USING") && d.ends_with("INDEX nodes_index_gc")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter()
+                .any(|d| d
+                    .contains("embedding_job USING COVERING INDEX jobs_source (source_node_id=?)")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter().any(|d| d
+                .contains("embedding_chunk USING COVERING INDEX chunks_source (source_node_id=?)")),
+            "{plan:?}"
+        );
+        assert!(
+            !plan
+                .iter()
+                .any(|d| d.starts_with("SCAN") && !d.contains("nodes_index_gc")),
+            "{plan:?}"
+        );
+        assert!(!plan.iter().any(|d| d.contains("TEMP B-TREE")), "{plan:?}");
+    }
+
+    /// Synthetic size of the measured stall (#164). Prints timings only.
+    /// `cargo test --lib gc::tests::index_source_scan_measure -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn index_source_scan_measure() {
+        let db = fixture(58_902, 5_098, 130_000, 44_000);
+        let time = |label: &str| {
+            let started = Instant::now();
+            let rows = sources(&db).len();
+            println!(
+                "{label}: {rows} rows in {:?}; plan {:?}",
+                started.elapsed(),
+                plan(&db)
+            );
+        };
+        time("after (jobs_source + nodes_index_gc)");
+        db.execute_batch("DROP INDEX nodes_index_gc").unwrap();
+        time("jobs_source only");
+        db.execute_batch("DROP INDEX jobs_source").unwrap();
+        time("before (no new indexes)");
+    }
 }
