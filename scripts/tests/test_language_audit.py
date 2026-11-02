@@ -136,6 +136,14 @@ class LanguageAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
             AUDIT['inventory'](self.root, decision)
 
+    def test_generic_const_default_does_not_create_a_cross_item_scope(self):
+        self.source(f'fn f<const N: usize = 1>() {{ use_it("{JA}"); }}\n'
+                    'fn sibling() { let value = 1; }')
+        first = self.records()[0]
+        path = self.root / 'src' / 'lib.rs'
+        path.write_text(path.read_text(encoding='utf-8').replace('value = 1', 'value = 2'), encoding='utf-8')
+        self.assertEqual(first['source_tokens_sha256'], self.records()[0]['source_tokens_sha256'])
+
     def test_consistency_command_allows_c_but_rejects_stale_review(self):
         path = self.source(f'fn f() {{ let en = true; if !en {{ use_it("{JA}"); }} }}\n'
                            f'fn pending() {{ use_it("{JA} pending"); }}')

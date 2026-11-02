@@ -185,7 +185,7 @@ def item_ranges(items, pairs):
                 break
             if token.text != 'fn' and text == '=':
                 has_initializer = True
-            if text == '}' or (token.text != 'fn' and not has_initializer and text in (',', '>')):
+            if text == '}' or (token.text != 'fn' and text in (',', '>')):
                 break
             j = pairs[j] + 1 if j in pairs else j + 1
     return spans
