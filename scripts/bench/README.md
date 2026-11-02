@@ -268,3 +268,16 @@ two Shellboy startup numbers are not interchangeable.
   variance. PSS is sampled after rounds, not a peak. Agents that keep
   short-lived helpers get up to ten snapshots (`snapshot_attempts`) instead of
   stage 1's three; persistent process churn is still an error.
+
+### Codex shared-server comparison (#151)
+
+`--agent codex-shared=/path/to/codex` adds a second Codex process topology:
+one `app-server` hosting N distinct Threads, each with its own fixture working
+directory. One reader demultiplexes JSON-RPC responses by request ID and turn
+notifications by Thread ID; all N turns are issued concurrently. The process
+is sampled once with all descendants. It uses the same binary and configuration
+as the existing `codex` adapter, which still uses one app-server per session.
+The comparison workflow passes both variants on the same runner. This does not
+establish equivalent products or represent real-provider tokens; server-side
+features, per-session isolation and memory overhead may differ by topology.
+Unexpected server-initiated requests or mismatched turn IDs fail the run.

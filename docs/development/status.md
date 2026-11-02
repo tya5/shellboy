@@ -3900,3 +3900,13 @@ Resolved localization and glyph conflicts together, preserving raw values and
 both English and Japanese. Public compatibility constants and API remain intact;
 the inventory is in `docs/development/glyphs-issue-157-inventory.md`.
 Exact restack task CI and Windows integration CI remain pending.
+### Codex shared process benchmark (#151)
+
+The comparison harness can also drive multiple concurrent Codex Threads through
+one app-server, without changing the existing per-session adapter. A local macOS
+protocol smoke with Codex 0.165.0 completed N=2, 5 and 10 for five fake-model
+rounds; it has no PSS observations. Linux comparison results for the pinned
+0.166.0 are pending and must not be inferred from that smoke. Claude's public
+CLI exposes one session ID and stream per invocation; the official Python Agent
+SDK uses a CLI subprocess transport. This does not prove other Claude process
+topologies cannot exist.
