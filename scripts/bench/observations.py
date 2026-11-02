@@ -1,6 +1,7 @@
 """Exact synthetic benchmark I/O observations; never retain request content."""
 from pathlib import Path
 import os
+import re
 import stat
 import threading
 
@@ -19,7 +20,8 @@ class RequestLog:
         # A unique workspace is evidence of association, not merely a guess
         # based on concurrent request order or an agent's process shape.
         if conversation is None:
-            matches = [i for i, workspace in enumerate(self.workspaces) if workspace in body]
+            matches = [i for i, workspace in enumerate(self.workspaces)
+                       if re.search(re.escape(workspace) + rb'(?![A-Za-z0-9_.-])', body)]
             if len(matches) == 1:
                 conversation = matches[0]
             elif self.sessions == 1:

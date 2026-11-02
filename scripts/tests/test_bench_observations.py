@@ -29,11 +29,13 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(log.result()['conversations'][0], {
             'conversation': 0, 'requests': 2, 'total_bytes': 5, 'first_bytes': 2, 'last_bytes': 3})
 
-    def test_ambiguous_workspace_is_not_assigned(self):
+    def test_workspace_prefix_collision_and_ambiguity(self):
         log = RequestLog(2)
         log.set_workspaces(['/tmp/workspace-1', '/tmp/workspace-10'])
         log.record('/model', b'/tmp/workspace-10')
-        self.assertIsNone(log.result()['requests'][0]['conversation'])
+        log.record('/model', b'/tmp/workspace-1 and /tmp/workspace-10')
+        self.assertEqual(log.result()['requests'][0]['conversation'], 1)
+        self.assertIsNone(log.result()['requests'][1]['conversation'])
 
 
 class ReportTests(unittest.TestCase):

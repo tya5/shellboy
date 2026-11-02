@@ -335,6 +335,10 @@ def measure_case(binary, sessions, observe_io=False):
             worker.join(timeout=5)
 
 
+def input_ready(text):
+    return '\u5165\u529b\u3067\u304d\u307e\u3059' in text or 'Ready for input' in text
+
+
 def measure_startup(binary):
     import fcntl
     import pty
@@ -368,7 +372,7 @@ def measure_startup(binary):
                     elapsed = (time.perf_counter_ns() - start) / 1e6
                     if first_screen is None and text.strip():
                         first_screen = elapsed
-                    if not probe_sent and '\u5165\u529b\u3067\u304d\u307e\u3059' in text:
+                    if not probe_sent and input_ready(text):
                         os.write(master, ('\x1b[200~' + probe + '\x1b[201~').encode())
                         probe_sent = True
                     if probe in text:

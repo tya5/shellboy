@@ -135,6 +135,13 @@ class PssTests(unittest.TestCase):
                     bench.sample_pss(10, root)
 
 
+class StartupTests(unittest.TestCase):
+    def test_input_readiness_label_in_either_language(self):
+        self.assertTrue(bench.input_ready('Ready for input'))
+        self.assertTrue(bench.input_ready('\u5165\u529b\u3067\u304d\u307e\u3059'))
+        self.assertFalse(bench.input_ready('Starting server'))
+
+
 class SafetyTests(unittest.TestCase):
     def test_only_allowlisted_environment_and_disposable_config(self):
         with tempfile.TemporaryDirectory() as scratch:
