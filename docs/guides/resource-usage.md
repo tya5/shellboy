@@ -346,8 +346,9 @@ the aggregate is not a guaranteed bound on actual provider consumption.
 | 14 | 7,463 / 7,296 / 5 | 30,102 |
 
 OpenCode sent none of the three recorded session/trace headers on these 14
-requests; their values were not retained. Its separately named OpenCode session
-header was forwarded but was not one of the three counted headers. Notably,
+requests; their values were not retained. The relay allowed the separately
+named OpenCode session header through if present, but did not record its
+presence. Notably,
 the first request already reported 1,408 cached input tokens: an earlier
 cross-client or provider cache is possible, but its source is not established.
 A fresh conversation does not guarantee a cold provider cache.
