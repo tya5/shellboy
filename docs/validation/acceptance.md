@@ -23,6 +23,13 @@ query must use indexed range searches for both node and delivery references;
 its plan is checked in the GC unit tests. Three-OS CI is pending. No
 production database mutation or real conversation data was used.
 
+The later restack onto 72f163d5 retains schema20's index-source GC migration
+and moves event retention to schema21. Synthetic 20-to-21 coverage checks both
+index sets and ledger names; Python unittest discovery passed 169 tests on macOS.
+The rebased branch's fresh Rust checks and CI are reported separately; the
+previously passing CI did not test this schema21 tip. Real-database capacity
+savings, throughput and long-term behavior remain unmeasured.
+
 ## Bounded index wake-delay read (#164, 2026-11-02)
 
 macOS, rust-slot: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`

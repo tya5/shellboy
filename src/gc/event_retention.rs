@@ -237,19 +237,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn version_19_upgrade_adds_indexes_without_rewriting_rows() {
+    async fn version_20_upgrade_adds_indexes_without_rewriting_rows() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("db");
         {
             let db = Connection::open(&path).unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch("DROP INDEX node_event_retention; DROP INDEX delivery_event_state; DELETE FROM schema_migration WHERE version=20; PRAGMA user_version=19; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','stopped','now'); INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at) VALUES('e','shell_ended','{}','t','r','{}','now'); INSERT INTO delivery(event_id,recipient_id,state) VALUES('e','r','pending');").unwrap();
+            db.execute_batch("DROP INDEX node_event_retention; DROP INDEX delivery_event_state; DELETE FROM schema_migration WHERE version=21; PRAGMA user_version=20; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','stopped','now'); INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at) VALUES('e','shell_ended','{}','t','r','{}','now'); INSERT INTO delivery(event_id,recipient_id,state) VALUES('e','r','pending');").unwrap();
         }
         for _ in 0..2 {
             let db = crate::storage::DbWorker::open(&path).await.unwrap();
             db.call(|db| {
-                assert_eq!(db.query_row("PRAGMA user_version", [], |r|r.get::<_,i64>(0))?,20);
-                assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('node_event_retention','delivery_event_state')", [], |r|r.get::<_,i64>(0))?,2);
+                assert_eq!(db.query_row("PRAGMA user_version", [], |r|r.get::<_,i64>(0))?,21);
+                assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN ('node_event_retention','delivery_event_state','jobs_source','nodes_index_gc')", [], |r|r.get::<_,i64>(0))?,4);
+                assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=20", [], |r|r.get::<_,String>(0))?,"0020_gc_index_source");
+                assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=21", [], |r|r.get::<_,String>(0))?,"0021_event_retention");
                 assert_eq!(db.query_row("SELECT count(*) FROM delivery WHERE event_id='e' AND state='pending'", [], |r|r.get::<_,i64>(0))?,1);
                 Ok(())
             }).await.unwrap();

@@ -10,7 +10,9 @@ deleted/payload-less nodes. Plan asserted in `gc::tests`; see acceptance.
 ## Dead delivery retention (#170, in progress)
 
 History maintenance incrementally removes terminal-Run pending deliveries and
-only unreferenced shell completion events. See acceptance for verification.
+only unreferenced shell completion events. Rebased after #163 onto 72f163d5:
+#164 retains schema20 and event retention uses schema21. Fresh-tip checks and
+CI are tracked in the handoff; prior CI did not test the restack.
 
 ## Bounded index wake-delay read (#164, branch CI pending)
 

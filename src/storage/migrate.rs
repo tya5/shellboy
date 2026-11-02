@@ -134,7 +134,7 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
     }
     if version < 21 {
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0020_event_retention.sql"))?;
+        tx.execute_batch(include_str!("../../migrations/0021_event_retention.sql"))?;
         tx.commit()?;
     }
     validate_schema(connection)?;

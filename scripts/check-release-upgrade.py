@@ -22,7 +22,7 @@ import time
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17, 18, 19, 20)}
+           for version in (15, 16, 17, 18, 19, 20, 21)}
 PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19}
 
 
@@ -80,6 +80,13 @@ def check_migration(db, before, start, target):
                               if line.startswith('CREATE INDEX attempts_completed_scope '))
         assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
             'context attempt scope index differs from migration 19'
+    if target >= 21:
+        for name in ('node_event_retention', 'delivery_event_state'):
+            row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+            expected_index = next(line for line in DERIVED[21].read_text(encoding='utf-8').splitlines()
+                                  if line.startswith(f'CREATE INDEX {name} '))
+            assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
+                f'{name} differs from migration 21'
 
 
 def prepare_schema(db, target):
@@ -101,8 +108,8 @@ def parse_args(argv=None):
     parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default='0.5.0')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20), default=20,
-                        help='20 for the current candidate; 14/15/17/18/19 retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21), default=21,
+                        help='21 for the current candidate; 14/15/17/18/19/20 retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:
