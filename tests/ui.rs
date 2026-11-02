@@ -109,8 +109,75 @@ fn sent(action: &[UiAction]) -> (String, u64) {
     }
 }
 #[test]
-fn acceptance_clears_only_its_captured_draft() {
+fn japanese_receipts_keep_existing_text_for_every_status() {
+    let cases = [
+        (ReceiptStatus::Accepting, "受付処理中", false, false),
+        (ReceiptStatus::Accepted, "受付済み", true, false),
+        (ReceiptStatus::Preparing, "受付済み／準備中", true, false),
+        (ReceiptStatus::Held, "保留", true, false),
+        (ReceiptStatus::Applied, "会話へ反映済み", true, false),
+        (ReceiptStatus::Failed, "失敗", false, true),
+        (ReceiptStatus::Cancelled, "取消済み", false, true),
+        (ReceiptStatus::Completed, "完了", true, false),
+    ];
+    for (status, label, retained, restore) in cases {
+        for message in [None, Some("raw-日本語")] {
+            let mut config = Config::default();
+            config.ui.language = shellboy::config::UiLanguage::Ja;
+            let mut ui = UiState::new(&config, cwd());
+            text(&mut ui, "first");
+            let (draft_id, revision) = sent(&enter(&mut ui));
+            text(&mut ui, "next");
+            ui.apply(UiUpdate::Receipt {
+                draft_id,
+                revision,
+                thread_id: Some("thread-1".into()),
+                status: status.clone(),
+                message: message.map(str::to_owned),
+            });
+            let mut expected = label.to_owned();
+            if restore {
+                expected.push_str(&format!(" | /restore {revision} で元の入力を復元"));
+            }
+            if let Some(raw) = message {
+                expected.push_str(&format!(": {raw}"));
+            }
+            if retained {
+                expected.push_str(" | 編集中の入力を保持（次は全文送信）");
+            }
+            assert_eq!(ui.view().status.replace(" · ", " | "), expected);
+            assert_eq!(ui.view().draft.text, "firstnext");
+        }
+    }
+}
+
+#[test]
+fn english_receipt_retains_edited_draft_and_raw_message() {
     let mut ui = state();
+    text(&mut ui, "first");
+    let (draft_id, revision) = sent(&enter(&mut ui));
+    text(&mut ui, "next");
+    ui.apply(UiUpdate::Receipt {
+        draft_id,
+        revision,
+        thread_id: Some("thread-1".into()),
+        status: ReceiptStatus::Accepted,
+        message: Some("raw-日本語".into()),
+    });
+    assert_eq!(ui.view().draft.text, "firstnext");
+    assert!(ui.view().status.contains("Accepted: raw-日本語"));
+    assert!(
+        ui.view()
+            .status
+            .contains("Current input retained (next send uses the full text)")
+    );
+}
+
+#[test]
+fn acceptance_clears_only_its_captured_draft() {
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     text(&mut ui, "first");
     let actions = enter(&mut ui);
     let (draft_id, revision) = sent(&actions);

@@ -123,5 +123,65 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui.rs:49d819cd993ade59:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:59639bbf3ec67029:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:608fe041d34bd512:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:6277ca836a850b9f:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:86b86ee263bb3e7c:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:9d0518dbe7e7b83c:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:bb218f39139f8fc9:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:dc05d06eedde6a37:1": {
+    "category": "a",
+    "reason": "Reviewed receipt_label: this Japanese-only branch is called only by on_receipt for UiLanguage::Ja; receipt_english renders the matching status and context as complete English messages. Wire status and source errors are unchanged.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui/view.rs:0266ccfd3bcf7ec9:1": {
+    "category": "a",
+    "reason": "Reviewed the UiLanguage::Ja receipt branch and the matching complete English templates in receipt_english; original Japanese punctuation, glyph alternatives, revisions and raw errors are preserved.",
+    "source_tokens_sha256": "df512f3bfead2c61a485629225f937125d9a45887b825feab442a03eb4bbbe5a"
+  },
+  "src/ui/view.rs:96e61934f7a4902e:1": {
+    "category": "a",
+    "reason": "Reviewed the UiLanguage::Ja receipt branch and the matching complete English templates in receipt_english; original Japanese punctuation, glyph alternatives, revisions and raw errors are preserved.",
+    "source_tokens_sha256": "df512f3bfead2c61a485629225f937125d9a45887b825feab442a03eb4bbbe5a"
+  },
+  "src/ui/view.rs:9a6bd1ff2a02edef:1": {
+    "category": "a",
+    "reason": "Reviewed the UiLanguage::Ja receipt branch and the matching complete English templates in receipt_english; original Japanese punctuation, glyph alternatives, revisions and raw errors are preserved.",
+    "source_tokens_sha256": "df512f3bfead2c61a485629225f937125d9a45887b825feab442a03eb4bbbe5a"
+  },
+  "src/ui/view.rs:f63545560e66db13:1": {
+    "category": "a",
+    "reason": "Reviewed the UiLanguage::Ja receipt branch and the matching complete English templates in receipt_english; original Japanese punctuation, glyph alternatives, revisions and raw errors are preserved.",
+    "source_tokens_sha256": "df512f3bfead2c61a485629225f937125d9a45887b825feab442a03eb4bbbe5a"
   }
 }

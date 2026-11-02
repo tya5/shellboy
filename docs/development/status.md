@@ -3938,3 +3938,10 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: Receipt feedback localization (2026-11-02)
+
+Localized the eight receipt states using complete English messages for each
+message/retained-input combination. The Japanese branch stays identical to main;
+wire status, revisions, raw provider messages, draft contents and width-aware
+symbols are unchanged. This is a separate view/UI batch; recovery and the other
+unrelated view and UI candidates remain for review.

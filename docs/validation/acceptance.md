@@ -8457,3 +8457,16 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+
+### #152 stage C: Receipt feedback localization (2026-11-02)
+
+On main 74d27461, scoped review classified eight Japanese `receipt_label`
+resources and four Japanese receipt templates as a, with the corresponding
+complete English `receipt_english` templates. Whole-manifest audit passed and
+Python audit tests passed 18/18. On macOS, rust-slot `cargo check --tests`,
+14 view unit tests and 88 UI integration tests passed (one existing ignored),
+including all eight Japanese states with and without raw messages, all English
+state/message/retained combinations under all three glyph policies, and a real
+English receipt preserving draft and raw text. No physical terminal or OS
+clipboard test was performed. Exact task CI and three-OS integration CI remain
+pending.
