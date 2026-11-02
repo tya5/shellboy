@@ -27,6 +27,7 @@ pub(super) enum Action {
     Interrupt,
     Stop,
     Toggle,
+    FollowNotice,
     Original,
     Copy,
     Code,
@@ -59,6 +60,7 @@ impl Action {
             Self::Interrupt | Self::Back => "Esc",
             Self::Stop => "Ctrl+C",
             Self::Toggle => "Enter/Space",
+            Self::FollowNotice => "Enter",
             Self::Original => "o",
             Self::Copy => "c",
             Self::Code => "b",
@@ -114,6 +116,7 @@ impl Action {
                 "Stop the Run and its background work"
             ),
             Self::Toggle => local!(language, "開閉", "Toggle"),
+            Self::FollowNotice => local!(language, "参照先", "Source"),
             Self::Original => local!(language, "原文", "Original"),
             Self::Copy => local!(language, "コピー", "Copy"),
             Self::Code => local!(
@@ -148,6 +151,7 @@ impl Action {
             Self::Interrupt => local!(language, "中断", "Interrupt"),
             Self::Stop => local!(language, "停止", "Stop"),
             Self::Toggle => local!(language, "開閉", "Toggle"),
+            Self::FollowNotice => local!(language, "参照先", "Source"),
             Self::Original => local!(language, "原文", "Original"),
             Self::Copy => local!(language, "コピー", "Copy"),
             Self::Code => local!(language, "コードをコピー", "Copy code"),
@@ -197,6 +201,8 @@ pub(super) enum Context {
     Typing,
     Running,
     History,
+    HistoryNotice,
+    HistoryNoticeGroup,
     LiveWork,
     Selection,
     Completion,
@@ -222,6 +228,8 @@ impl Context {
             Self::Typing => &[Send, Newline],
             Self::Running => &[Interrupt, Stop],
             Self::History => &[Copy, Code, Original],
+            Self::HistoryNotice => &[FollowNotice, Copy, Original],
+            Self::HistoryNoticeGroup => &[Toggle, Copy, Original],
             Self::LiveWork => &[Toggle, Back],
             Self::Selection => &[SelectionBack, LongCopy],
             Self::Completion => &[Move, Complete, Back],
@@ -391,7 +399,29 @@ impl UiState {
             Some(Overlay::Management) => Context::Management,
             Some(Overlay::Operations) => self.operations.as_ref().unwrap().hint_context(),
             Some(_) => Context::Popup,
-            None if self.view().items.active => Context::History,
+            None if self.view().items.active => match self.view().items.focus.as_ref() {
+                Some(super::ItemKey::NoticeGroup(_)) => Context::HistoryNoticeGroup,
+                Some(super::ItemKey::Node(id))
+                    if self.view().nodes().iter().any(|node| {
+                        node.node_id == *id
+                            && node.presentation.kind
+                                == crate::presentation::PresentationKind::Event
+                            && node.presentation.fields.iter().any(|field| {
+                                matches!(
+                                    field.key.as_str(),
+                                    "/ui_notice/execution_id"
+                                        | "/payload/execution_id"
+                                        | "/ui_notice/thread_id"
+                                        | "/payload/thread_id"
+                                        | "/ui_notice/unavailable"
+                                )
+                            })
+                    }) =>
+                {
+                    Context::HistoryNotice
+                }
+                _ => Context::History,
+            },
             None if self.view().live_work.active => Context::LiveWork,
             None if self.has_completions() => Context::Completion,
             None if self

@@ -1,9 +1,10 @@
-//! Facts from persisted event/tool envelopes, independent of UI layout.
+//! Japanese-compatible projection of facts from persisted event/tool envelopes.
+//! English UI copy comes from typed messages, not by translating these strings.
 use super::{PresentationField, short};
 
 pub(super) fn event_title(kind: &str) -> &str {
     match kind {
-        "revisit" => "Revisit resumed",
+        "revisit" => "再訪を再開",
         "index_state" => "索引の状態",
         "previous_instance_interrupted" => "前回の中断記録",
         "app_shutdown" => "終了時の保存記録",
@@ -57,7 +58,7 @@ pub(super) fn routine_index_ready(event: &serde_json::Value) -> bool {
 }
 
 /// A saved observation is historical, even while the same pause remains current.
-pub(super) fn index_pause_notice(event: &serde_json::Value) -> Option<(String, Vec<String>)> {
+pub(super) fn index_pause_notice_ja(event: &serde_json::Value) -> Option<(String, Vec<String>)> {
     let after = event.pointer("/change/after")?;
     if event["kind"] != "index_state" || after["paused"] != true {
         return None;
@@ -164,9 +165,9 @@ fn continuation_title(kind: &str, event: &serde_json::Value) -> Option<String> {
     Some(parts.join(crate::ui::text_width::glyphs::separator()))
 }
 
-pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
+pub(super) fn title_ja(kind: &str, event: &serde_json::Value) -> String {
     use serde_json::Value;
-    if let Some((title, _)) = index_pause_notice(event) {
+    if let Some((title, _)) = index_pause_notice_ja(event) {
         return title;
     }
     if kind == "revisit" {
@@ -404,7 +405,7 @@ pub(super) fn changes(value: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn interruption(value: &serde_json::Value, kind: &str) -> (String, Vec<String>) {
+pub(super) fn interruption_ja(value: &serde_json::Value, kind: &str) -> (String, Vec<String>) {
     use serde_json::Value;
     if kind == "interrupted_wait" {
         let count = value
@@ -532,7 +533,7 @@ mod tests {
     #[test]
     fn continuation_has_saved_identity_outcome_and_duration_without_inventing_name() {
         let event = serde_json::json!({"event_id":"saved", "payload":{"execution_id":"execution-complete-id", "exit_code":7, "elapsed_ms":316000}});
-        let title = title("shell_ended", &event);
+        let title = title_ja("shell_ended", &event);
         assert!(title.contains("execution-comple"));
         assert!(
             title.contains("終了 7")

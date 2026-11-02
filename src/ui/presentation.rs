@@ -765,6 +765,232 @@ fn node_lines_with_header(
     }
     lines
 }
+fn notice_message(message: &Message) -> Option<&Message> {
+    match message {
+        Message::EventSummary { title, .. } => notice_message(title),
+        Message::EventIdentity { .. } | Message::EventTitle { .. } => Some(message),
+        _ => None,
+    }
+}
+
+fn notice_kind(node: &UiNode) -> Option<&str> {
+    match node
+        .presentation
+        .ui_messages
+        .title
+        .as_ref()
+        .and_then(notice_message)
+    {
+        Some(Message::EventIdentity { kind, .. } | Message::EventTitle { kind }) => Some(kind),
+        _ => node
+            .presentation
+            .fields
+            .iter()
+            .find(|f| f.key == "/kind" && !f.value_omitted)
+            .map(|f| f.value.as_str()),
+    }
+}
+
+fn notice_symbol(kind: &str) -> Option<&'static str> {
+    match kind {
+        "shell_ended" => Some("$"),
+        "child_turn_completed" | "child_run_ended" | "child_report" => Some("↳"),
+        "recovery_wait" | "child_recovery_wait" => Some("⋯"),
+        "revisit" => Some("↻"),
+        "thread_settings"
+        | "connection_changed"
+        | "model_changed"
+        | "settings_changed"
+        | "instructions_observed"
+        | "instruction_changed"
+        | "agents_changed"
+        | "agents_reference" => Some("⌘"),
+        "previous_instance_interrupted"
+        | "app_shutdown"
+        | "recovery_resumed"
+        | "interrupted_messages_recovered" => Some("⏻"),
+        "index_state" => Some("⌕"),
+        "turn_started" | "run_started" => Some("⟡"),
+        _ => None,
+    }
+}
+
+fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> Line<'static> {
+    use crate::ui::text_width::glyphs;
+    let language = view.language;
+    let field = |key: &str| {
+        node.presentation
+            .fields
+            .iter()
+            .find(|f| f.key == key && !f.value_omitted)
+            .map(|f| f.value.as_str())
+    };
+    let kind = notice_kind(node).unwrap_or("");
+    let revisit_instruction = (kind == "revisit")
+        .then(|| {
+            node.presentation
+                .ui_messages
+                .bodies
+                .iter()
+                .flat_map(|(_, body)| body)
+                .find_map(|message| match message {
+                    Message::Raw { text } if !text.trim().is_empty() => Some(text.as_str()),
+                    _ => None,
+                })
+        })
+        .flatten();
+    let saved = saved_failure_text(node, language);
+    let title = if let Some(instruction) = revisit_instruction {
+        instruction.to_owned()
+    } else if let Some((_, reason)) = &saved {
+        let count = field("/saved_model_failures/count").unwrap_or("?");
+        let summary = format!(
+            "{}{count}{}",
+            crate::ui::i18n::local!(language, "記録したモデル失敗", ""),
+            crate::ui::i18n::local!(language, "件", " model failures recorded")
+        );
+        format!("{summary}{}{}", glyphs::separator(), reason)
+    } else if let Some(Message::IndexPause {
+        at: Some(at),
+        reason: Some(reason),
+    }) = node
+        .presentation
+        .ui_messages
+        .title
+        .as_ref()
+        .and_then(|m| match m {
+            Message::EventSummary { title, .. } => Some(title.as_ref()),
+            _ => Some(m),
+        })
+    {
+        format!(
+            "{}{}{at}{}{reason}",
+            glyphs::select("/index → T", "/index > T"),
+            glyphs::separator(),
+            glyphs::separator()
+        )
+    } else {
+        match &node.presentation.ui_messages.notice {
+            Some(Message::CommandNotice { command, .. }) => view
+                .describe_calls
+                .then(|| field("/ui_notice/description"))
+                .flatten()
+                .filter(|_| {
+                    !(view.items.active
+                        && view.items.focus.as_ref() == Some(&ItemKey::Node(node.node_id.clone())))
+                })
+                .or(command.as_deref())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(Text::NoticeCommandUnrecorded.render(language))
+                .to_owned(),
+            Some(Message::ThreadNotice { title }) => title
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(Text::NoticeUntitled.render(language))
+                .to_owned(),
+            Some(Message::Text(text)) => text.render(language).to_owned(),
+            _ => node
+                .presentation
+                .ui_messages
+                .title
+                .as_ref()
+                .map(|message| message.render(language))
+                .unwrap_or_else(|| {
+                    if language == UiLanguage::En {
+                        Text::ReviewChange.render(language).to_owned()
+                    } else {
+                        node.presentation.title.clone()
+                    }
+                }),
+        }
+    };
+    let title = crate::presentation::sanitize_plain(&title, 0)
+        .0
+        .replace(['\n', '\r'], " ");
+    let (status, code, elapsed) = match node
+        .presentation
+        .ui_messages
+        .title
+        .as_ref()
+        .and_then(notice_message)
+    {
+        Some(Message::EventIdentity {
+            status,
+            code,
+            elapsed_ms,
+            ..
+        }) => (status.as_deref(), *code, *elapsed_ms),
+        _ => (None, None, None),
+    };
+    let mut outcome = match (status, code) {
+        (Some(status), code) => crate::presentation::messages::tool_state(status, code, language),
+        (None, Some(code)) => Message::Exit { code }.render(language),
+        _ => String::new(),
+    };
+    if outcome.is_empty() && kind == "child_turn_completed" {
+        outcome = crate::ui::i18n::local!(language, "回答", "Answer").into();
+    } else if outcome.is_empty() && kind == "child_report" {
+        outcome = crate::ui::i18n::local!(language, "報告", "Report").into();
+    }
+    let signal = node
+        .presentation
+        .fields
+        .iter()
+        .find(|f| f.key.ends_with("/exit_signal") && !f.value_omitted)
+        .and_then(|f| f.value.parse::<i64>().ok());
+    if let Some(signal) = signal {
+        let name = match signal {
+            1 => "SIGHUP".into(),
+            2 => "SIGINT".into(),
+            3 => "SIGQUIT".into(),
+            9 => "SIGKILL".into(),
+            15 => "SIGTERM".into(),
+            _ => format!("signal {signal}"),
+        };
+        if outcome.is_empty() {
+            outcome = crate::ui::i18n::local!(language, "停止", "Stopped").into();
+        }
+        outcome.push_str(&format!("({name})"));
+    }
+    let elapsed = elapsed.map(|ms| Message::Elapsed { ms, decimal: false }.render(language));
+    let background = match &node.presentation.ui_messages.notice {
+        Some(Message::CommandNotice {
+            background: Some(true),
+            ..
+        }) => Some(
+            crate::ui::i18n::local!(language, "背景指定あり", "Background requested").to_owned(),
+        ),
+        Some(Message::CommandNotice {
+            background: Some(false),
+            ..
+        }) => Some(
+            crate::ui::i18n::local!(language, "背景指定なし", "Foreground requested").to_owned(),
+        ),
+        _ => None,
+    };
+    let metadata = [
+        (!outcome.is_empty()).then_some(outcome),
+        elapsed,
+        background,
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(glyphs::separator());
+    let (label, gap, right) =
+        super::live_work::row_columns(usize::from(width), &prefix, &title, &metadata, "");
+    Line::from(vec![
+        Span::styled(prefix, Style::default().fg(theme::TEXT)),
+        Span::raw(label),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(right, Style::default().fg(theme::MUTED)),
+    ])
+}
+
+fn is_notice(node: &UiNode) -> bool {
+    node.presentation.kind == PresentationKind::Event && node.role != "received_response"
+}
+
 fn quiet_event(node: &UiNode) -> bool {
     // Received audit previews retain their paid body even after recovery ends.
     node.role != "received_response"
@@ -962,10 +1188,12 @@ pub(super) fn history_with_cache(
     let mut sources = Vec::new();
     let (begin, end) = projection_bounds(view);
     if view.nodes()[begin..end].iter().any(|node| {
-        node.presentation
-            .blocks
-            .iter()
-            .any(|block| block.tool.is_some())
+        node.presentation.kind == PresentationKind::Event
+            || node
+                .presentation
+                .blocks
+                .iter()
+                .any(|block| block.tool.is_some())
     }) {
         return typed_history(view, begin, end, width, cache, budget);
     }
@@ -1846,6 +2074,99 @@ fn correlated_tool_key(
         key
     }
 }
+fn append_notice_run(
+    view: &ThreadView,
+    begin: usize,
+    end: usize,
+    width: u16,
+    lines: &mut Vec<Line<'static>>,
+    sources: &mut Vec<RowSource>,
+) {
+    use crate::ui::text_width::glyphs;
+    let nodes = &view.nodes()[begin..end];
+    let first = &nodes[0];
+    if nodes.len() == 1 {
+        let symbol = notice_kind(first).and_then(notice_symbol).unwrap_or("");
+        let prefix = format!("{} {symbol} ", RowKind::Notice.mark());
+        append_item_rows(
+            lines,
+            sources,
+            vec![notice_row(view, first, width, prefix)],
+            first,
+            begin,
+            node_region(view, first),
+            width,
+        );
+        return;
+    }
+    let key = ItemKey::NoticeGroup(first.node_id.clone());
+    let open = view.items.is_open(&key, false, "");
+    let mut counts = BTreeMap::<&str, usize>::new();
+    for node in nodes {
+        if let Some(symbol) = notice_kind(node).and_then(notice_symbol) {
+            *counts.entry(symbol).or_default() += 1;
+        }
+    }
+    let count_text = counts
+        .into_iter()
+        .map(|(symbol, count)| format!("{symbol} {}{count}", glyphs::select("×", "x")))
+        .collect::<Vec<_>>()
+        .join("  ");
+    let title = match view.language {
+        UiLanguage::Ja => format!("通知 {}件  {count_text}", nodes.len()),
+        UiLanguage::En => format!("{} notices  {count_text}", nodes.len()),
+    };
+    let action = match (view.language, open) {
+        (UiLanguage::Ja, false) => "展開",
+        (UiLanguage::Ja, true) => "折り畳み",
+        (UiLanguage::En, false) => "Expand",
+        (UiLanguage::En, true) => "Collapse",
+    };
+    let prefix = format!("{} ", RowKind::Notice.mark());
+    let (label, gap, right) =
+        super::live_work::row_columns(usize::from(width), &prefix, &title, action, "");
+    let header = Line::from(format!("{prefix}{label}{}{right}", " ".repeat(gap)));
+    let region = ItemRegion {
+        key: key.clone(),
+        source_node_ids: nodes.iter().map(|node| node.node_id.clone()).collect(),
+        primary_node_id: first.node_id.clone(),
+        execution_id: None,
+        expandable: true,
+        default_open: false,
+        outcome: String::new(),
+    };
+    append_item_rows(lines, sources, vec![header], first, begin, region, width);
+    if let Some(source) = sources.last_mut() {
+        source.covered_end = end;
+    }
+    if open {
+        for (i, node) in nodes.iter().enumerate() {
+            let marker = if view.items.active
+                && view.items.focus.as_ref() == Some(&ItemKey::Node(node.node_id.clone()))
+            {
+                glyphs::SELECTED
+            } else {
+                " "
+            };
+            let symbol = notice_kind(node).and_then(notice_symbol).unwrap_or("");
+            let prefix = format!(
+                "{}[{}]{marker}{symbol} ",
+                glyphs::branch(i + 1 == nodes.len()),
+                i + 1
+            );
+            append_item_rows(
+                lines,
+                sources,
+                vec![notice_row(view, node, width, prefix)],
+                node,
+                begin + i,
+                node_region(view, node),
+                width,
+            );
+        }
+    }
+}
+
 fn typed_history(
     view: &ThreadView,
     begin: usize,
@@ -1877,7 +2198,19 @@ fn typed_history(
     }
     let mut seen = BTreeSet::new();
     let mut summary_until = begin;
+    let mut notice_until = begin;
     for index in begin..end {
+        if index < notice_until {
+            continue;
+        }
+        if is_notice(&view.nodes()[index]) {
+            notice_until = index + 1;
+            while notice_until < end && is_notice(&view.nodes()[notice_until]) {
+                notice_until += 1;
+            }
+            append_notice_run(view, index, notice_until, width, &mut lines, &mut sources);
+            continue;
+        }
         if index < summary_until {
             continue;
         }
@@ -2258,7 +2591,6 @@ fn typed_history(
             }
         }
     }
-    let (lines, sources) = quiet_section_tails(view, lines, sources, width);
     let (lines, sources) = row_boundaries(view, lines, sources);
     (lines, links, sources)
 }
@@ -2658,6 +2990,141 @@ fn japanese_config() -> crate::config::Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shell_notice_uses_description_setting_signal_and_localized_elapsed() {
+        let node = UiNode {
+            node_id: "one".into(),
+            presentation: crate::presentation::NodePresentation {
+                kind: PresentationKind::Event,
+                fields: vec![
+                    crate::presentation::PresentationField {
+                        key: "/ui_notice/description".into(),
+                        value: "check tests".into(),
+                        ..Default::default()
+                    },
+                    crate::presentation::PresentationField {
+                        key: "/payload/exit_signal".into(),
+                        value: "15".into(),
+                        ..Default::default()
+                    },
+                ],
+                ui_messages: crate::presentation::messages::PresentationMessages {
+                    title: Some(Message::EventIdentity {
+                        kind: "shell_ended".into(),
+                        identity: "secret-id".into(),
+                        status: Some("stopped".into()),
+                        code: None,
+                        elapsed_ms: Some(149000),
+                    }),
+                    notice: Some(Message::CommandNotice {
+                        command: Some("cargo test".into()),
+                        background: None,
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            for width in [80, 120] {
+                let mut view =
+                    ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+                view.language = language;
+                view.describe_calls = true;
+                let line = notice_row(&view, &node, width, "⁂ $ ".into());
+                let text = plain(&[line]);
+                assert!(
+                    text.contains("check tests") && text.contains("SIGTERM"),
+                    "{text}"
+                );
+                assert!(!text.contains("secret-id") && !text.contains("cargo test"));
+                assert!(
+                    text.contains(if language == UiLanguage::Ja {
+                        "2分29秒"
+                    } else {
+                        "2m29s"
+                    }),
+                    "{text}"
+                );
+                view.describe_calls = false;
+                assert!(
+                    plain(&[notice_row(&view, &node, width, "⁂ $ ".into())]).contains("cargo test")
+                );
+                view.describe_calls = true;
+                view.items.active = true;
+                view.items.focus = Some(ItemKey::Node("one".into()));
+                assert!(
+                    plain(&[notice_row(&view, &node, width, "⁂ $ ".into())]).contains("cargo test")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn notification_group_preserves_individual_sources_and_measured_rows() {
+        use crate::ui::text_width::UnicodeWidthStr;
+        fn event(id: &str, kind: &str) -> UiNode {
+            UiNode {
+                node_id: id.into(),
+                text: format!("raw-{id}"),
+                total_chars: 5,
+                presentation: crate::presentation::NodePresentation {
+                    kind: PresentationKind::Event,
+                    ui_messages: crate::presentation::messages::PresentationMessages {
+                        title: Some(Message::EventTitle { kind: kind.into() }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        }
+        for width in [80, 120] {
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                crate::ui::text_width::set_terminal_width(Some(1));
+                let mut view =
+                    ThreadView::new(&crate::config::Config::default(), std::env::temp_dir());
+                view.language = language;
+                *view.nodes_mut_for_test() =
+                    vec![event("one", "run_started"), event("two", "index_state")];
+                view.total_nodes = 2;
+                let (lines, _, sources) = history(&view, width);
+                assert_eq!(sources.iter().filter(|s| s.item.is_some()).count(), 1);
+                assert!(plain(&lines).contains("⁂"));
+                assert!(
+                    lines
+                        .iter()
+                        .all(|line| plain(std::slice::from_ref(line)).width() <= width as usize)
+                );
+                assert_eq!(sources[0].covered_end, 2);
+                view.items
+                    .toggle(ItemKey::NoticeGroup("one".into()), false, "");
+                let (lines, _, sources) = history(&view, width);
+                let text = plain(&lines);
+                assert!(
+                    text.contains("├─[1] ⟡") && text.contains("└─[2] ⌕"),
+                    "{text}"
+                );
+                assert!(sources.iter().any(|s| {
+                    s.item
+                        .as_ref()
+                        .is_some_and(|i| i.key == ItemKey::Node("one".into()))
+                }));
+                assert!(sources.iter().any(|s| {
+                    s.item
+                        .as_ref()
+                        .is_some_and(|i| i.key == ItemKey::Node("two".into()))
+                }));
+                assert!(
+                    lines
+                        .iter()
+                        .all(|line| plain(std::slice::from_ref(line)).width() <= width as usize)
+                );
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
     #[test]
     fn formal_shutdown_group_identity_survives_generic_field_limits() {
         fn scene(value: &serde_json::Value, summary_kind: &str) -> Vec<UiNode> {
@@ -4996,6 +5463,19 @@ mod conversation_item_tests {
                 "index not configured"
             }
             .into();
+            quiet
+                .presentation
+                .fields
+                .push(crate::presentation::PresentationField {
+                    key: "/kind".into(),
+                    value: if index % 2 == 0 {
+                        "instructions_observed"
+                    } else {
+                        "index_state"
+                    }
+                    .into(),
+                    ..Default::default()
+                });
             nodes.push(quiet);
         }
         nodes.push(node("answer", "FINAL ANSWER", vec![]));
@@ -5003,7 +5483,12 @@ mod conversation_item_tests {
         let (lines, _, sources) = history(&view, 100);
         let shown = plain(&lines);
         assert!(shown.contains("FIRST USER") && shown.contains("FINAL ANSWER"));
-        assert!(shown.contains("AGENTS.md none x60") && shown.contains("index not configured x60"));
+        let multiplier = crate::ui::text_width::glyphs::select("×", "x");
+        assert!(
+            shown.contains(&format!("⌘ {multiplier}60"))
+                && shown.contains(&format!("⌕ {multiplier}60")),
+            "{shown}"
+        );
         let groups = sources
             .iter()
             .filter_map(|source| source.item.as_ref())
@@ -5020,8 +5505,9 @@ mod conversation_item_tests {
             .filter_map(|source| source.item.as_ref())
             .find(|item| item.primary_node_id.starts_with("event-"))
             .unwrap();
-        assert_eq!(group.source_node_ids, ["event-119", "event-120"]);
-        assert_eq!(group.source_node_ids.len(), 2);
+        assert_eq!(group.source_node_ids.first().unwrap(), "event-1");
+        assert_eq!(group.source_node_ids.last().unwrap(), "event-120");
+        assert_eq!(group.source_node_ids.len(), 120);
         assert_eq!(sources.first().unwrap().node, 0);
         assert_eq!(sources.last().unwrap().covered_end, 122);
         assert_eq!(
@@ -5060,15 +5546,12 @@ mod conversation_item_tests {
         assert_eq!(end - begin, 128);
         let (lines, _, sources) = history(&view, 80);
         assert!(plain(&lines).contains("FINAL ANSWER"));
-        assert_eq!(
-            sources.first().unwrap().node,
-            269,
-            "visible rows begin at the later answer"
-        );
-        assert!(
-            begin < sources.first().unwrap().node,
-            "backward navigation must retain the hidden canonical prefix"
-        );
+        assert_eq!(sources.first().unwrap().node, begin);
+        assert_eq!(sources.first().unwrap().covered_end, 269);
+        assert!(matches!(
+            sources.first().unwrap().item.as_ref().unwrap().key,
+            ItemKey::NoticeGroup(_)
+        ));
         assert_eq!(begin.checked_sub(1), Some(141));
     }
     #[test]

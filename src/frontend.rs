@@ -2568,7 +2568,7 @@ async fn run_with_delivery(
                                         group_id.as_deref() == Some(expected_group.as_str()) && call_id == *expected_call
                                     }
                                     ItemKey::LocalTool { node_id, .. } => node_id == &source_node_id,
-                                    ItemKey::Node(_) => false,
+                                    ItemKey::Node(_) | ItemKey::NoticeGroup(_) => false,
                                 };
                                 let result = if !identity_matches {
                                     Err(i18n::local!(language, "出力の表示対象が変わりました。項目を開き直してください", "The displayed output target changed. Reopen the item").into())

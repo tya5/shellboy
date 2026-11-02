@@ -16,7 +16,7 @@ pub(super) struct OperationNotice {
 
 pub(super) fn key_bytes(key: &ItemKey) -> usize {
     match key {
-        ItemKey::Node(id) => id.capacity(),
+        ItemKey::Node(id) | ItemKey::NoticeGroup(id) => id.capacity(),
         ItemKey::Tool { group_id, call_id } => group_id.capacity() + call_id.capacity(),
         ItemKey::LocalTool { node_id, .. } => node_id.capacity(),
     }
@@ -265,8 +265,15 @@ impl UiState {
                 Some(vec![])
             }
             KeyCode::Enter => Some(
-                self.follow_history_notice()
-                    .unwrap_or_else(|| self.toggle_history_item()),
+                if self
+                    .selected_history_item()
+                    .is_some_and(|item| matches!(item.key, ItemKey::NoticeGroup(_)))
+                {
+                    self.toggle_history_item()
+                } else {
+                    self.follow_history_notice()
+                        .unwrap_or_else(|| self.toggle_history_item())
+                },
             ),
             KeyCode::Char(' ') => Some(self.toggle_history_item()),
             code if key_hints::Action::Code.matches(code) => Some(self.choose_code(false)),
@@ -795,6 +802,77 @@ mod tests {
         key(&mut ui, KeyCode::Enter);
         assert_eq!(ui.view().thread_id.as_deref(), Some("child"));
     }
+    #[test]
+    fn expanded_notice_group_preserves_each_original_and_enter_target() {
+        let mut ui = fixture();
+        let notice = |id: &str, source: &str| {
+            let mut fields = crate::presentation::fields_of_value(
+                &serde_json::json!({"kind":"shell_ended", "payload":{"execution_id":id}}),
+            );
+            fields.extend(
+                [
+                    ("execution_id", id),
+                    ("group_id", "group"),
+                    ("call_id", id),
+                    ("source_node", source),
+                ]
+                .into_iter()
+                .map(|(key, value)| crate::presentation::PresentationField {
+                    key: format!("/ui_notice/{key}"),
+                    value: value.into(),
+                    ..Default::default()
+                }),
+            );
+            UiNode {
+                node_id: id.into(),
+                role: "event".into(),
+                text: format!("original-{id}"),
+                total_chars: 12,
+                presentation: crate::presentation::NodePresentation {
+                    kind: crate::presentation::PresentationKind::Event,
+                    fields,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        };
+        ui.apply(UiUpdate::History {
+            thread_id: "thread".into(),
+            generation: ui.view().generation,
+            nodes: vec![notice("a", "original-a"), notice("b", "original-b")],
+            pending: Default::default(),
+            read_revision: 2,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 2,
+            total_nodes: 2,
+        });
+        Terminal::new(TestBackend::new(80, 28))
+            .unwrap()
+            .draw(|frame| draw(frame, &mut ui))
+            .unwrap();
+        key(&mut ui, KeyCode::Tab);
+        assert_eq!(
+            ui.view().items.focus,
+            Some(ItemKey::NoticeGroup("a".into()))
+        );
+        assert!(key(&mut ui, KeyCode::Enter).is_empty());
+        assert!(
+            ui.view()
+                .items
+                .is_open(&ItemKey::NoticeGroup("a".into()), false, "")
+        );
+        key(&mut ui, KeyCode::Down);
+        assert_eq!(ui.view().items.focus, Some(ItemKey::Node("a".into())));
+        key(&mut ui, KeyCode::Down);
+        assert_eq!(ui.view().items.focus, Some(ItemKey::Node("b".into())));
+        let actions = key(&mut ui, KeyCode::Enter);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::LoadOriginal { node_id, .. }] if node_id == "original-b")
+        );
+    }
+
     #[test]
     fn history_focus_keeps_global_popups_and_exact_detail_target() {
         let mut ui = fixture();

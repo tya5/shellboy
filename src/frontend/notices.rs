@@ -59,7 +59,7 @@ SELECT refs.node_id,refs.kind,refs.execution_id,
  CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.background') IN ('true','false') THEN json_extract(c.arguments_json,'$.background') END END,
  c.group_id,c.call_id,r.node_id,
  COALESCE(refs.saved_thread,child.thread_id),substr(t.title,1,80),t.deleted_at,t.id,s.id,original.deleted_reason,
- substr(CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.description')='text' THEN json_extract(c.arguments_json,'$.description') END END,1,80)
+ substr(CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.description')='text' THEN json_extract(c.arguments_json,'$.description') END END,1,512)
 FROM refs
 LEFT JOIN shell_execution s ON s.id=refs.execution_id
 LEFT JOIN tool_call c ON c.operation_id=s.id AND EXISTS(SELECT 1 FROM tool_group g WHERE g.id=c.group_id AND g.turn_id=s.turn_id)
@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn notice_description_is_bounded_sanitized_and_does_not_replace_original_command() {
         let db = fixture();
-        let raw = format!("  inspect\n{}  ", "x".repeat(100));
+        let raw = format!("{}inspect\n{}  ", " ".repeat(90), "x".repeat(100));
         let args = json!({"command": "printf CORRECT", "description": raw});
         db.execute(
             "UPDATE tool_call SET arguments_json=?1 WHERE group_id='g' AND call_id='same'",

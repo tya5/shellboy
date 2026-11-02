@@ -266,6 +266,18 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
 fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (String, String) {
     use crate::presentation::{BlockKind, PresentationKind};
     let sep = crate::ui::text_width::glyphs::separator();
+    let event_title = || {
+        if language == UiLanguage::En {
+            node.presentation
+                .ui_messages
+                .title
+                .as_ref()
+                .map(|m| m.render(language))
+                .unwrap_or_else(|| node.presentation.title.clone())
+        } else {
+            node.presentation.title.clone()
+        }
+    };
     let has_call = node
         .presentation
         .blocks
@@ -304,7 +316,7 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
         },
         PresentationKind::Event => match language {
             UiLanguage::Ja => format!("状態変更{sep}{}", safe(&node.presentation.title)),
-            UiLanguage::En => format!("State change{sep}{}", safe(&node.presentation.title)),
+            UiLanguage::En => format!("State change{sep}{}", safe(&event_title())),
         },
         PresentationKind::Summary => local!(language, "会話の要約", "Conversation summary").into(),
         PresentationKind::Spill
@@ -319,7 +331,7 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
         }
         PresentationKind::Spill => local!(language, "原文への参照", "Reference to original").into(),
         PresentationKind::Interrupted if !node.presentation.title.is_empty() => {
-            safe(&node.presentation.title)
+            safe(&event_title())
         }
         PresentationKind::Interrupted => {
             local!(language, "中断情報", "Interruption details").into()
@@ -349,7 +361,39 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
                 .iter()
                 .find(|b| !b.text.trim().is_empty())
         });
-    let raw = source.map_or(node.text.as_str(), |block| block.text.as_str());
+    let localized_body = if language == UiLanguage::En
+        && matches!(
+            node.presentation.kind,
+            PresentationKind::Event | PresentationKind::Interrupted
+        ) {
+        source
+            .filter(|block| !block.source_exact)
+            .and_then(|block| {
+                let index = node
+                    .presentation
+                    .blocks
+                    .iter()
+                    .position(|candidate| std::ptr::eq(candidate, block))?;
+                let (_, messages) = node
+                    .presentation
+                    .ui_messages
+                    .bodies
+                    .iter()
+                    .find(|(body_index, _)| *body_index == index)?;
+                Some(
+                    messages
+                        .iter()
+                        .map(|message| message.render(language))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                )
+            })
+    } else {
+        None
+    };
+    let raw = localized_body
+        .as_deref()
+        .unwrap_or_else(|| source.map_or(node.text.as_str(), |block| block.text.as_str()));
     let context = if matches!(node.presentation.kind, PresentationKind::Event) {
         node.presentation
             .fields
@@ -364,7 +408,18 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
             .map(|field| {
                 format!(
                     "{}: {}",
-                    field.label,
+                    if language == UiLanguage::En {
+                        match field.key.rsplit(['/', '.']).next().unwrap_or("") {
+                            "model" | "model_id" => "Model",
+                            "cwd" => "Working directory",
+                            "state" => "State",
+                            "status" => "Status",
+                            "reason" => "Reason",
+                            _ => &field.label,
+                        }
+                    } else {
+                        &field.label
+                    },
                     field.value.chars().take(120).collect::<String>()
                 )
             })
@@ -1692,6 +1747,74 @@ impl Details {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_entry_localizes_only_known_projection_and_preserves_saved_values() {
+        use crate::presentation::messages::{Message, PresentationMessages};
+        use crate::presentation::{
+            BlockKind, NodePresentation, PresentationBlock, PresentationField, PresentationKind,
+        };
+        let mut node = UiNode {
+            text: "canonical raw".into(),
+            total_chars: 13,
+            presentation: NodePresentation {
+                kind: PresentationKind::Event,
+                title: "索引の状態".into(),
+                blocks: vec![PresentationBlock {
+                    kind: BlockKind::Event,
+                    text: "生成済み".into(),
+                    source_exact: false,
+                    ..Default::default()
+                }],
+                ui_messages: PresentationMessages {
+                    title: Some(Message::EventTitle {
+                        kind: "index_state".into(),
+                    }),
+                    bodies: vec![(
+                        0,
+                        vec![Message::Raw {
+                            text: "保存された本文".into(),
+                        }],
+                    )],
+                    ..Default::default()
+                },
+                fields: vec![PresentationField {
+                    key: "/payload/reason".into(),
+                    label: "理由".into(),
+                    value: "保存された値".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (en, preview) = entry_for(&node, 80, UiLanguage::En);
+        assert!(
+            en.contains("Index state") && !en.contains("索引の状態"),
+            "{en}"
+        );
+        assert!(
+            preview.contains("Reason") && preview.contains("保存された値"),
+            "{preview}"
+        );
+        let (ja, _) = entry_for(&node, 80, UiLanguage::Ja);
+        assert!(ja.contains("索引の状態"));
+        node.presentation.fields.clear();
+        assert!(
+            entry_for(&node, 80, UiLanguage::En)
+                .1
+                .contains("保存された本文")
+        );
+        node.presentation.blocks[0].source_exact = true;
+        node.presentation.blocks[0].text = "原文・改変禁止".into();
+        assert!(
+            entry_for(&node, 80, UiLanguage::En)
+                .1
+                .contains("原文・改変禁止")
+        );
+        assert_eq!(node.text, "canonical raw");
+    }
+
     use crate::{
         config::Config,
         presentation::{NodePresentation, PresentationLink},

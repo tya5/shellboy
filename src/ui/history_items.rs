@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ItemKey {
     Node(String),
+    NoticeGroup(String),
     Tool { group_id: String, call_id: String },
     LocalTool { node_id: String, block_index: usize },
 }
@@ -12,7 +13,7 @@ impl ItemKey {
     fn retained_bytes(&self) -> usize {
         std::mem::size_of::<Self>()
             + match self {
-                Self::Node(id) => id.capacity(),
+                Self::Node(id) | Self::NoticeGroup(id) => id.capacity(),
                 Self::Tool { group_id, call_id } => group_id.capacity() + call_id.capacity(),
                 Self::LocalTool { node_id, .. } => node_id.capacity(),
             }

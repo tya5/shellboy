@@ -56,7 +56,7 @@ fn event(
     kind: &str,
 ) {
     if p.kind == PresentationKind::Interrupted {
-        let (title, body) = events::interruption(value, kind);
+        let (title, body) = events::interruption_ja(value, kind);
         p.title = title;
         b.text = body.join("\n");
         prioritize_interruption_identity(p, value, kind);
@@ -94,8 +94,8 @@ fn event(
             | "agents_changed" => EventClass::Change,
             _ => EventClass::Unknown,
         };
-        p.title = events::title(event_kind, event);
-        let (states, body) = if let Some((_, body)) = events::index_pause_notice(event) {
+        p.title = events::title_ja(event_kind, event);
+        let (states, body) = if let Some((_, body)) = events::index_pause_notice_ja(event) {
             (Vec::new(), body)
         } else if event_kind == "revisit" {
             (

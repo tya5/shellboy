@@ -23,7 +23,7 @@ def main():
     args.out.mkdir(parents=True, exist_ok=False)
     manifest = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "cases": []}
     env = {key: os.environ[key] for key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SYSTEMROOT", "WINDIR") if key in os.environ}
-    for cols in (80, 140):
+    for cols in (80, 120):
         for mode, palette, term, plain in (("dark", "dark", "xterm-256color", False),
                 ("light", "light", "xterm-256color", False), ("plain", "dark", "xterm-256color", True),
                 ("vt100", "dark", "vt100", False)):
@@ -50,27 +50,30 @@ def main():
                         payload = json.loads(result.stdout)
                         assert payload.get("ok"), payload
 
+                    def notice_line(text, symbol, content):
+                        return any("⁂" in line and symbol in line and content in line for line in text.splitlines())
+
                     try:
                         scene("ready", lambda s: "Ctrl+T 会話" in s)
                         if target == "shell":
                             terminal.send("/switch visual-notice-shell\r")
-                            text = scene("saved-command", lambda s: "NOTICE_SOURCE_COMMAND" in s and "背景指定あり" in s)
+                            text = scene("saved-command", lambda s: notice_line(s, "$", "NOTICE_SOURCE_COMMAND") and "背景指定あり" in s)
                             assert "EXACT_NOTICE_SOURCE_MARKER" not in text
                             terminal.send("\t\r")
                             scene("exact-original", lambda s: "EXACT_NOTICE_SOURCE_MARKER" in s and "原文" in s)
                         else:
                             terminal.send("/switch visual-notice-parent\r")
-                            scene("current-name", lambda s: "現在の名前: Twin" in s)
+                            scene("current-name", lambda s: notice_line(s, "↳", "Twin"))
                             terminal.send("\t")
                             # Tab pauses follow and selects history, not F2 display freeze.
-                            scene("paused-child", lambda s: "o 原文" in s and "v" in s and "現在の名前: Twin" in s)
+                            scene("paused-child", lambda s: "o 原文" in s and "v" in s and notice_line(s, "↳", "Twin"))
                             cli("thread", "set", "--thread", "visual-notice-child", "--title", "RenamedChild")
-                            scene("renamed-without-input", lambda s: "現在の名前: RenamedChild" in s)
+                            scene("renamed-without-input", lambda s: notice_line(s, "↳", "RenamedChild"))
                             terminal.send("\r")
                             text = scene("exact-child", lambda s: "RIGHT_CHILD_MARKER" in s)
                             assert "WRONG_CHILD_MARKER" not in text
                             terminal.send("/switch visual-notice-parent\r")
-                            scene("parent-again", lambda s: "現在の名前: RenamedChild" in s)
+                            scene("parent-again", lambda s: notice_line(s, "↳", "RenamedChild"))
                             cli("thread", "delete", "--thread", "visual-notice-child")
                             scene("deleted-without-input", lambda s: "削除済み" in s or "参照先の会話を取得できません" in s)
                         assert b"\x1b]52;" not in terminal.raw
