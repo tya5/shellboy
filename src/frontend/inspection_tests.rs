@@ -1921,6 +1921,10 @@ async fn f8_history_repeat_hint_uses_service_language_and_renders_at_80_columns(
                     .iter()
                     .position(|f| f.key == "/current_source/repeat_result")
                     .unwrap();
+                // Retained results can preserve a selection after the current fields.
+                for _ in 0..256 {
+                    key(&mut ui, &sender, KeyCode::Up, KeyModifiers::NONE);
+                }
                 for _ in 0..index {
                     key(&mut ui, &sender, KeyCode::Down, KeyModifiers::NONE);
                 }
