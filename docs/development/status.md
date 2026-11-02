@@ -13,6 +13,13 @@ conditions) awaits the user's approval.
 ## Mid-Turn summary design (#181, awaiting review)
 ## Mid-Turn summary design (#181, implementation on hold)
 ## Mid-Turn active-Turn summary (#181, branch CI pending)
+## Recovery trim keeps Turn inputs (#185, stacked on #181)
+
+Branch `issue-185/keep-turn-inputs`: the overflow-recovery maximum omission now
+retains every user message of the active Turn (request and mid-Turn messages)
+verbatim, and its notice says so. See
+[compaction](../design/compaction.md#failure-driven-maximum-reduction-50).
+
 ## Mid-Turn active-Turn summary (#181, branch CI passed)
 
 Proactive compaction now replaces the oldest eligible run of whole groups inside

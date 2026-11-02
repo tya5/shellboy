@@ -192,7 +192,7 @@ fn marker_item(
         String::new()
     };
     let notice = format!(
-        "Shellboy context notice: {location} was omitted after {reason}. {count} source nodes ({first_id} through {last_id}); projected input before reduction: {before} characters; {spilled} tool groups spilled. The active Turn's initial user request (if any) and the latest group remain.{work} Executed actions, file changes, and command side effects have NOT been undone. Inspect the current state before repeating any earlier operation. Original data is retained and can stay omitted. Search only what you need with shellboy rag search --scope history:{} --mode keyword --query TEXT or shellboy history get --node <source_node_id> with a bounded limit. Only to bring key facts back into context, use shellboy compact --summary --from {first_id} --to {last_id}. To restore this specific range use shellboy compact --restore --from {first_id}; restoring or summarizing omitted history can enlarge context and reproduce the failure.{semantic}{attachment}",
+        "Shellboy context notice: {location} was omitted after {reason}. {count} source nodes ({first_id} through {last_id}); projected input before reduction: {before} characters; {spilled} tool groups spilled. The active Turn's user messages (its request and any messages delivered later in it) and the latest group remain.{work} Executed actions, file changes, and command side effects have NOT been undone. Inspect the current state before repeating any earlier operation. Original data is retained and can stay omitted. Search only what you need with shellboy rag search --scope history:{} --mode keyword --query TEXT or shellboy history get --node <source_node_id> with a bounded limit. Only to bring key facts back into context, use shellboy compact --summary --from {first_id} --to {last_id}. To restore this specific range use shellboy compact --restore --from {first_id}; restoring or summarizing omitted history can enlarge context and reproduce the failure.{semantic}{attachment}",
         details.thread
     );
     json!({"item":{"role":"developer","content":[{"type":"input_text","text":notice}]},"context_trim":{"version":1,"omitted_nodes":count,"history_characters":before,"spilled_groups":spilled,"reason":details.reason,"first_node_id":first_id,"last_node_id":last_id,"after_current_request_nodes":details.after_request_nodes,"excluded_attachment_refs":details.excluded_attachment_refs}})
@@ -201,14 +201,18 @@ fn marker_item(
 fn disconnect_plan(snapshot: &Snapshot, reason: &str, semantic_search: bool) -> TrimPlan {
     let latest_tool = snapshot.groups.iter().rposition(|g| g.complete && g.tool);
     let request = protected_request(snapshot);
+    let turn = snapshot.current_turn.as_deref();
     let mut omitted = HashSet::new();
     let mut first_offset = None;
     let mut offset = 0usize;
     let mut provenance_limited = false;
     for (index, group) in snapshot.groups.iter().enumerate() {
         let end = offset.saturating_add(group.sources.len());
+        // #185: every user input of the active Turn (the request and messages
+        // delivered later) stays verbatim as a retained anchor.
         let eligible = Some(index) != latest_tool
             && !range::trim_group_protected(index, snapshot.groups.len(), request)
+            && !turn.is_some_and(|turn| policy::turn_user(group, turn))
             && range::group_is_safe(snapshot, index);
         if eligible {
             let start = first_offset.unwrap_or(offset);
@@ -523,6 +527,34 @@ pub(in crate::compaction) fn preview_trim(
         .flat_map(|(_, g)| g.sources.iter().map(|s| s.id.clone()))
         .collect();
     Ok((projected, ids))
+}
+
+#[cfg(test)]
+mod turn_input_tests {
+    use super::*;
+    /// #185: maximum recovery omission keeps every user message of the active
+    /// Turn as a retained anchor, and omits only the work between them.
+    #[test]
+    fn recovery_trim_retains_request_and_midturn_messages() {
+        let mut snapshot = crate::compaction::tests::staged_snapshot();
+        snapshot.groups[2].sources[0].payload = json!({"role":"user","content":"request"});
+        let mut message = snapshot.groups[2].clone();
+        message.sources[0].id = "midturn".into();
+        message.sources[0].payload = json!({"role":"user","content":"leader instruction"});
+        snapshot.groups.insert(4, message);
+        // old(0) last(1) request(2) tool(3) midturn(4) spilled(5) latest tool(6)
+        let plan = disconnect_plan(&snapshot, "failure", false);
+        for kept in [2, 4, 6] {
+            assert!(!plan.omitted.contains(&kept), "group {kept} must stay");
+        }
+        for omitted in [0, 1, 3, 5] {
+            assert!(plan.omitted.contains(&omitted), "group {omitted} is omissible");
+        }
+        let marker = plan.marker.unwrap();
+        let retained = marker["context_trim"]["retained_node_ids"].as_array().unwrap();
+        assert!(retained.contains(&json!("current")) && retained.contains(&json!("midturn")));
+        assert!(marker["item"]["content"][0]["text"].as_str().unwrap().contains("any messages delivered later in it"));
+    }
 }
 
 #[cfg(test)]

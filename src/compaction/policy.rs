@@ -84,7 +84,9 @@ pub(super) fn overflow_prefix(s: &Snapshot, completed: usize) -> usize {
     }
     count
 }
-fn turn_user(group: &Group, id: &str) -> bool {
+/// Whether a group holds a user message of Turn `id` (its request or a message
+/// delivered later in it).
+pub(super) fn turn_user(group: &Group, id: &str) -> bool {
     group.sources.iter().any(|n| {
         n.turn.as_deref() == Some(id)
             && (n.payload["role"] == "user"

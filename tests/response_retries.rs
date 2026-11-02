@@ -1435,6 +1435,60 @@ async fn a_long_turn_can_reduce_again_after_successful_tool_work() {
     f.close().await;
 }
 
+/// #185: an overflow inside a huge Turn must not drop user input delivered in
+/// that Turn. The request and every mid-Turn message stay verbatim around the
+/// omission notice; only work between them is omitted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
+    fn tool(name: &str, command: String) -> Reply {
+        Reply::http(200,"application/json",&json!({"id":name,"status":"completed","output":[{
+            "type":"function_call","call_id":name,"name":"shell","arguments":json!({"command":command}).to_string()
+        }]}).to_string(),"")
+    }
+    let mut f = Fixture::with_history(8, 10, 5000, true, None, true, None, "TURN_REQUEST_MARKER").await;
+    let thread = f.accepted.thread_id.clone();
+    let mut sent = Vec::new();
+    for (index, work) in ["early-work", "middle-work", "late-work"].into_iter().enumerate() {
+        let current = f.incoming().await;
+        // A leader/user message arrives while the Turn is waiting on the model;
+        // it is delivered into this Turn at the next boundary.
+        let text = format!("MIDTURN_INSTRUCTION_{index}");
+        request(&f.control, Command::MessageSend(MessageSendArgs {
+            sender_label: Some("leader".into()), now: false, thread_id: Some(thread.clone()), text: text.clone(),
+        })).await;
+        sent.push(text);
+        current.reply.send(tool(work, format!("echo {}{}", work.to_uppercase(), "x".repeat(20_000)))).ok().unwrap();
+    }
+    let overflowing = f.incoming_after_tool().await;
+    let body = overflowing.body.to_string();
+    for text in &sent {
+        assert!(body.contains(text.as_str()), "{text} was delivered into the Turn before the overflow");
+    }
+    overflowing.reply.send(Reply::http(400, "application/json",
+        &json!({"error":{"code":"context_length_exceeded","message":"context limit"}}).to_string(), "")).ok().unwrap();
+    let reduced = f.incoming().await;
+    let input = reduced.body["input"].as_array().unwrap().clone();
+    let reduced_text = reduced.body.to_string();
+    assert!(reduced_text.contains("TURN_REQUEST_MARKER"));
+    for text in &sent {
+        assert!(reduced_text.contains(text.as_str()), "{text} must survive the recovery trim: {input:?}");
+    }
+    assert!(!reduced_text.contains("EARLY-WORKxxxx"), "omitted work proves the trim ran");
+    let notice = input.iter().position(|item| item.to_string().contains("Shellboy context notice:")).expect("omission notice");
+    assert!(input[notice].to_string().contains("user messages (its request and any messages delivered later in it)"));
+    let request_at = input.iter().position(|item| item.to_string().contains("TURN_REQUEST_MARKER")).unwrap();
+    let last_message = input.iter().rposition(|item| item.to_string().contains("MIDTURN_INSTRUCTION_")).unwrap();
+    assert!(request_at < notice && notice < last_message, "original order: request, notice, retained messages");
+    reduced.reply.send(Reply::success()).ok().unwrap();
+    assert_eq!(f.settled().await, "completed");
+    f.control.store.database.call(|db| {
+        assert_eq!(db.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get::<_, i64>(0))?, 3);
+        assert_eq!(db.query_row("SELECT count(*) FROM replacement WHERE format_version='context-trim-v1'", [], |r| r.get::<_, i64>(0))?, 1);
+        Ok(())
+    }).await.unwrap();
+    f.close().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unreducible_explicit_overflow_recovers_without_any_resend() {
     let mut f = Fixture::with_history(

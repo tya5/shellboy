@@ -145,6 +145,16 @@ resends tools or calls a summary API. Only the existing second explicit-overflow
 stage may spill the latest group and summarize. /compact-max and compact --maximal
 expose the API-free action without node IDs, independently of retry.
 
+Turn inputs are never omitted (#185): the automatic maximum omission keeps
+every user message of the active Turn verbatim, i.e. the request and every
+message delivered later in the same Turn (including leader messages), as
+retained anchors inside the single omission marker. The marker notice states
+this, and only work between those anchors is omitted. Before this rule, a
+2026-11-02 overflow recovery reduced an 11.7M-character Turn to 19K characters
+and dropped four mid-Turn leader instructions. The operation stays API-free; if
+the retained inputs alone still exceed the provider limit, the existing
+recovery wait applies rather than dropping them. No setting.
+
 ContextEditResult reports before_characters, after_characters and
 changed_suffix_characters: exact Unicode scalar counts of replay JSON, not token
 or cache-hit estimates. Original sources and side effects remain; restore can
