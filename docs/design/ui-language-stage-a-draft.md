@@ -42,20 +42,6 @@ If a CLI/wire copy route is added, give it an explicit English non-TUI diagnosti
 boundary instead of reusing localized key guidance. Underlying History/API
 errors continue to propagate unchanged; do not translate their source text.
 
-## History Inspection Repeat Hint Boundary (#152)
-
-The generated `repeat_result` hint for a retained History inspection follows the
-immutable UI language captured with the private history observation. Explicit Ja
-retains the original sentence byte-for-byte. En says to use `a` to enter the same
-query and arguments and distinguishes this explicit action from refresh. The `a`
-key opens the Operations overlay; it does not itself rerun a stored command.
-
-Only this application-generated hint changes. Retained source text, query scope
-and arguments, IDs, timestamps, observation order, source revisions, selection,
-refresh, result identity and dispatch are unchanged. The adjacent current-source
-label is outside this slice. The 80-column TestBackend case covers wrapped
-rendering but does not establish physical-terminal or IME behavior.
-
 ## Terminal width
 
 After raw mode and the alternate screen are active, an isolated helper process
@@ -89,6 +75,20 @@ borders carry a private style marker, so fallback conversion affects only the
 renderer-generated border; a user-supplied identical character is not converted.
 Source anchor mapping removes the tagged output guide, rather than stripping
 ASCII pipes from user text.
+
+## History Inspection Repeat Hint Boundary (#152)
+
+The generated `repeat_result` hint for a retained History inspection follows the
+immutable UI language captured with the private history observation. Explicit Ja
+retains the original sentence byte-for-byte. En says to use `a` to enter the same
+query and arguments and distinguishes this explicit action from refresh. The `a`
+key opens the Operations overlay; it does not itself rerun a stored command.
+
+Only this application-generated hint changes. Retained source text, query scope
+and arguments, IDs, timestamps, observation order, source revisions, selection,
+refresh, result identity and dispatch are unchanged. The adjacent current-source
+label is outside this slice. The 80-column TestBackend case covers wrapped
+rendering but does not establish physical-terminal or IME behavior.
 
 ## Stage B partition proposal
 
