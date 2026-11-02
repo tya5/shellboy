@@ -106,7 +106,7 @@ mod tests {
                 node_id: Some("retained".into()),
                 char_offset: 37,
             };
-            ui.view_mut().navigation.set_follow(false);
+            ui.view_mut().navigation.select_reading();
             ui.input_notice = Some("preserve existing notice");
             match owner {
                 "help" => {

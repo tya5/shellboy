@@ -3,7 +3,7 @@ use super::*;
 
 mod events;
 mod read;
-pub(in crate::ui) use events::NavEvent;
+pub(in crate::ui) use events::{NavEvent, ResolutionCause};
 pub(in crate::ui) use read::ReadEvent;
 
 #[derive(Debug)]
@@ -97,8 +97,11 @@ impl Navigation {
             FollowMode::FollowingUnseen | FollowMode::ReadingUnseen
         )
     }
-    pub fn set_follow(&mut self, follow: bool) {
-        self.on_event(NavEvent::FollowingSelected(follow));
+    pub fn select_reading(&mut self) {
+        self.on_event(NavEvent::ReadingSelected);
+    }
+    pub fn request_tail(&mut self) {
+        self.on_event(NavEvent::TailRequested);
     }
     pub fn set_unseen(&mut self, unseen: bool) {
         self.on_event(NavEvent::UnseenSelected(unseen));
@@ -216,7 +219,7 @@ impl ThreadView {
                 view.navigation.on_event(NavEvent::PositionResolved {
                     position: Some((origin, within)),
                     row: top,
-                    follow_tail: false,
+                    cause: ResolutionCause::ContentChange,
                     local_read: false,
                 });
                 view.navigation.on_event(NavEvent::ReadRequested {
@@ -292,7 +295,9 @@ impl ThreadView {
                     self.navigation.on_event(NavEvent::PositionResolved {
                         position: Some((anchor, target.saturating_sub(first))),
                         row: target,
-                        follow_tail: false,
+                        cause: ResolutionCause::UserScroll {
+                            reached_tail: false,
+                        },
                         local_read: true,
                     });
                     return Some(vec![]);
@@ -553,7 +558,7 @@ impl ThreadView {
                     view.navigation.on_event(NavEvent::PositionResolved {
                         position,
                         row: checkpoint,
-                        follow_tail: false,
+                        cause: ResolutionCause::ContentChange,
                         local_read: false,
                     });
                     let node = &view.nodes[index];
@@ -608,7 +613,9 @@ impl ThreadView {
             view.navigation.on_event(NavEvent::PositionResolved {
                 position,
                 row,
-                follow_tail,
+                cause: ResolutionCause::UserScroll {
+                    reached_tail: follow_tail,
+                },
                 local_read: false,
             });
             let boundary = if target < 0 {
@@ -686,14 +693,119 @@ mod tests {
         for follow in [false, true] {
             for unseen in [false, true] {
                 let mut nav = Navigation::default();
-                nav.set_follow(follow);
+                if follow {
+                    nav.request_tail();
+                } else {
+                    nav.select_reading();
+                }
                 nav.set_unseen(unseen);
                 assert_eq!((nav.follow(), nav.unseen()), (follow, unseen));
-                nav.set_follow(!follow);
-                assert_eq!((nav.follow(), nav.unseen()), (!follow, unseen));
+                if !follow {
+                    nav.request_tail();
+                } else {
+                    nav.select_reading();
+                }
+                assert_eq!((nav.follow(), nav.unseen()), (!follow, follow && unseen));
                 nav.set_unseen(!unseen);
                 assert_eq!((nav.follow(), nav.unseen()), (!follow, !unseen));
             }
+        }
+    }
+
+    #[test]
+    fn reading_transitions_require_user_tail_intent_or_restoration() {
+        // Exhaustive match forces new event variants to be classified here.
+        fn classified(event: &NavEvent) -> bool {
+            match event {
+                NavEvent::TailRequested => true,
+                NavEvent::Restored { follow, .. } => *follow,
+                NavEvent::PositionResolved { cause, .. } => match cause {
+                    ResolutionCause::UserScroll { reached_tail } => *reached_tail,
+                    ResolutionCause::ContentChange => false,
+                },
+                NavEvent::Cancel { .. }
+                | NavEvent::StartRebase
+                | NavEvent::ReadingSelected
+                | NavEvent::UnseenSelected(_)
+                | NavEvent::Read(_)
+                | NavEvent::ReplyConsumed
+                | NavEvent::ReadRequested { .. }
+                | NavEvent::ScrollInitiated
+                | NavEvent::FrameProjected { .. }
+                | NavEvent::HistoryFocused { .. }
+                | NavEvent::ReasoningExpanded { .. }
+                | NavEvent::SourceInvalidated => false,
+            }
+        }
+        let events = vec![
+            NavEvent::Cancel {
+                keep_pending: false,
+            },
+            NavEvent::StartRebase,
+            NavEvent::TailRequested,
+            NavEvent::Restored {
+                anchor: ViewAnchor::default(),
+                follow: false,
+            },
+            NavEvent::Restored {
+                anchor: ViewAnchor::default(),
+                follow: true,
+            },
+            NavEvent::ReadingSelected,
+            NavEvent::UnseenSelected(true),
+            NavEvent::Read(ReadEvent::WaitStarted),
+            NavEvent::ReplyConsumed,
+            NavEvent::ReadRequested {
+                ticket: (0, None),
+                pending: None,
+                new_epoch: false,
+            },
+            NavEvent::ScrollInitiated,
+            NavEvent::FrameProjected {
+                row: 1,
+                width: 80,
+                height: 10,
+                revision: 1,
+                origin: 0,
+            },
+            NavEvent::PositionResolved {
+                position: None,
+                row: 0,
+                cause: ResolutionCause::ContentChange,
+                local_read: false,
+            },
+            NavEvent::PositionResolved {
+                position: None,
+                row: 0,
+                cause: ResolutionCause::UserScroll {
+                    reached_tail: false,
+                },
+                local_read: false,
+            },
+            NavEvent::PositionResolved {
+                position: None,
+                row: 0,
+                cause: ResolutionCause::UserScroll { reached_tail: true },
+                local_read: false,
+            },
+            NavEvent::HistoryFocused {
+                position: None,
+                row: 0,
+                revision: 0,
+                origin: 0,
+            },
+            NavEvent::ReasoningExpanded {
+                anchor: ViewAnchor::default(),
+            },
+            NavEvent::SourceInvalidated,
+        ];
+        for event in events {
+            let expected = classified(&event);
+            let mut nav = Navigation::default();
+            nav.select_reading();
+            nav.set_unseen(true);
+            nav.on_event(event);
+            assert_eq!(nav.follow(), expected);
         }
     }
 

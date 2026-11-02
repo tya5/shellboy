@@ -1,6 +1,11 @@
 //! Navigation events choose complete mode, read and projection transitions.
 use super::*;
 
+pub(in crate::ui) enum ResolutionCause {
+    UserScroll { reached_tail: bool },
+    ContentChange,
+}
+
 pub(in crate::ui) enum NavEvent {
     Cancel {
         keep_pending: bool,
@@ -11,7 +16,7 @@ pub(in crate::ui) enum NavEvent {
         anchor: ViewAnchor,
         follow: bool,
     },
-    FollowingSelected(bool),
+    ReadingSelected,
     UnseenSelected(bool),
     Read(ReadEvent),
     ReplyConsumed,
@@ -31,7 +36,7 @@ pub(in crate::ui) enum NavEvent {
     PositionResolved {
         position: Option<(ViewAnchor, usize)>,
         row: usize,
-        follow_tail: bool,
+        cause: ResolutionCause,
         local_read: bool,
     },
     HistoryFocused {
@@ -99,8 +104,8 @@ impl Navigation {
                 mode = Some(FollowMode::new(follow, false));
                 None
             }
-            NavEvent::FollowingSelected(follow) => {
-                mode = Some(FollowMode::new(follow, self.unseen()));
+            NavEvent::ReadingSelected => {
+                mode = Some(FollowMode::new(false, self.unseen()));
                 None
             }
             NavEvent::UnseenSelected(unseen) => {
@@ -144,7 +149,7 @@ impl Navigation {
             NavEvent::PositionResolved {
                 position,
                 row: projected,
-                follow_tail,
+                cause,
                 local_read,
             } => {
                 if let Some((source, offset)) = position {
@@ -152,11 +157,15 @@ impl Navigation {
                     within = Some(offset);
                 }
                 row = Some(projected);
-                mode = Some(if follow_tail {
-                    FollowMode::Following
-                } else {
-                    FollowMode::new(false, self.unseen())
-                });
+                mode = match cause {
+                    ResolutionCause::UserScroll { reached_tail: true } => {
+                        Some(FollowMode::Following)
+                    }
+                    ResolutionCause::UserScroll {
+                        reached_tail: false,
+                    } => Some(FollowMode::new(false, self.unseen())),
+                    ResolutionCause::ContentChange => None,
+                };
                 local_read.then_some(ReadEvent::PositionMoved)
             }
             NavEvent::HistoryFocused {

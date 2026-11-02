@@ -7186,7 +7186,7 @@ mod layout_cache_tests {
         ui.select_thread("t".into());
         *ui.view_mut().nodes_mut_for_test() = vec![window(512)];
         ui.view_mut().total_nodes = 1;
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("answer".into()),
             char_offset: 64_000,
@@ -7260,7 +7260,7 @@ mod layout_cache_tests {
                 })
                 .collect();
             ui.view_mut().total_nodes = 400;
-            ui.view_mut().navigation.set_follow(false);
+            ui.view_mut().navigation.select_reading();
             ui.view_mut().navigation.anchor = ViewAnchor {
                 node_id: Some("n100".into()),
                 char_offset: 0,
@@ -7789,7 +7789,7 @@ mod layout_cache_tests {
         assert!(expanded.text.contains("hidden 日本語"));
         assert!(!Arc::ptr_eq(&expanded, &ui.history_layout(21, 8)));
         assert!(Arc::ptr_eq(&expanded, &ui.history_layout(20, 9)));
-        ui.active_view_mut().navigation.set_follow(false);
+        ui.active_view_mut().navigation.select_reading();
         ui.active_view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("n".into()),
             char_offset: 11,
@@ -8272,7 +8272,7 @@ mod tool_refresh_tests {
         let mut ui = UiState::new(&Config::default(), PathBuf::from("/"));
         ui.select_thread("t".into());
         *ui.view_mut().nodes_mut_for_test() = vec![tool("running_current")];
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("call-node".into()),
             char_offset: 505,
@@ -8401,7 +8401,7 @@ mod tool_refresh_tests {
             crate::config::Logging::default(),
         );
         let mut ui = paused();
-        ui.view_mut().navigation.set_follow(true);
+        ui.view_mut().navigation.request_tail();
         ui.set_diagnostics(diagnostics.clone());
         let before = ui.retention_passes;
         ui.apply(frame(&ui, 10, None));
@@ -8450,7 +8450,7 @@ mod tool_refresh_tests {
         user.presentation.input_source = crate::presentation::InputSource::OtherModel;
         user.presentation.created_at = Some("2026-10-31T00:00:00Z".into());
         user.presentation.read_revision = 12;
-        ui.view_mut().navigation.set_follow(true);
+        ui.view_mut().navigation.request_tail();
         let mut update = frame(&ui, 12, None);
         if let UiUpdate::CurrentView { history, .. } = &mut update
             && let UiUpdate::History { nodes, .. } = history.as_mut()
@@ -8503,12 +8503,12 @@ mod tool_refresh_tests {
     fn follow_and_thread_switch_clear_saved_observation_once() {
         let mut ui = paused();
         let _ = observation(&mut ui);
-        ui.view_mut().navigation.set_follow(true);
+        ui.view_mut().navigation.request_tail();
         assert!(
             matches!(ui.take_deferred_actions().as_slice(),[UiAction::ClearToolObservation {thread_id,..}] if thread_id=="t")
         );
         assert!(ui.take_deferred_actions().is_empty());
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         let _ = observation(&mut ui);
         ui.select_thread("other".into());
         assert!(
@@ -8524,7 +8524,7 @@ mod tool_refresh_tests {
         let original = tool("background_current");
         let view = ui.view_mut();
         *view.nodes_mut_for_test() = vec![original.clone()];
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("call-node".into()),
             char_offset: 505,
@@ -8665,7 +8665,7 @@ mod thread_view_boundary_tests {
             [UiAction::SaveDraft { .. }]
         ));
         ui.view_mut().save_retry = false;
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 5,
@@ -8676,7 +8676,7 @@ mod thread_view_boundary_tests {
         let resized = ui.history_layout(20, 8);
         assert!(!Arc::ptr_eq(&layout, &resized));
         assert_eq!(ui.view().navigation.anchor.char_offset, 5);
-        ui.view_mut().navigation.set_follow(true);
+        ui.view_mut().navigation.request_tail();
         history(&mut ui, "changed retained source");
         let changed = ui.history_layout(40, 8);
         assert!(!Arc::ptr_eq(&layout, &changed));
@@ -8703,7 +8703,7 @@ mod thread_view_boundary_tests {
             presentation: Default::default(),
             ack: None,
         });
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("attempt".into()),
             char_offset: 7,
@@ -8762,7 +8762,7 @@ mod thread_view_boundary_tests {
         history(&mut ui, "saved source");
         let owner = ui.active.clone();
         let generation = ui.view().generation;
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 3,
@@ -8833,7 +8833,7 @@ mod stale_rebase_retry_tests {
             total_nodes: 1,
         });
         let view = ui.view_mut();
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("anchor".into()),
             char_offset: 0,

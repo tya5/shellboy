@@ -229,7 +229,7 @@ fn thread_switch_restores_draft_and_anchor_and_rejects_stale_pages() {
         node_id: Some("old-node".into()),
         char_offset: 17,
     };
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     let actions = ui.select_thread("two".into());
     assert!(matches!(&actions[0], UiAction::SaveDraft { thread_id, .. } if thread_id == "one"));
     text(&mut ui, "draft two");
@@ -1254,7 +1254,7 @@ fn evicted_history_metadata_recovers_previous_and_next_ordinals() {
     });
     assert_eq!(ui.view().nodes().len(), 3);
     assert_eq!(ui.view().first_ordinal, 7);
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("node-7".into()),
         char_offset: 0,
@@ -1343,7 +1343,7 @@ fn evicted_body_keeps_node_identity_and_reloads_at_original_character_offset() {
     assert_eq!(ui.view().nodes().len(), 5);
     assert!(ui.view().nodes()[0].text.is_empty());
     assert_eq!(ui.view().nodes()[0].total_chars, 10000);
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("node-0".into()),
         char_offset: 10,
@@ -1799,7 +1799,7 @@ fn markdown_resize_and_internal_source_anchor_request_bounded_worker_reprojectio
             presentation: projection,
         }],
     });
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("node".into()),
         char_offset: offset,
@@ -2218,7 +2218,7 @@ fn body_window_boundaries_replay_visible_rows_with_real_frontend_overlap() {
                 node_id: Some("scroll-0".into()),
                 char_offset: offset,
             };
-            ui.view_mut().navigation.set_follow(false);
+            ui.view_mut().navigation.select_reading();
         }
         let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
         let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
@@ -2322,7 +2322,7 @@ fn slow_downward_wheels_remain_monotonic_across_settled_body_windows() {
     let mut actual = scroll_fixture(vec![window(40_000)], 0, 1);
     let mut expected = scroll_fixture(vec![scroll_fixture_node(0, source.clone())], 0, 1);
     for ui in [&mut actual, &mut expected] {
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("scroll-0".into()),
             char_offset: 104_650,
@@ -2376,7 +2376,7 @@ fn slow_forward_history_page_keeps_the_visible_rows_until_the_reply() {
     let mut actual = scroll_fixture(all[..50].to_vec(), 0, 120);
     let mut expected = scroll_fixture(all.clone(), 0, 120);
     for ui in [&mut actual, &mut expected] {
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("scroll-30".into()),
             char_offset: 0,
@@ -2500,7 +2500,7 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
             node_id: Some("scroll-0".into()),
             char_offset: 65_000,
         };
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
     }
     let mut a = Terminal::new(TestBackend::new(100, 36)).unwrap();
     let mut b = Terminal::new(TestBackend::new(100, 36)).unwrap();
@@ -2585,7 +2585,7 @@ fn forward_page_loads_the_first_unknown_neighbor_before_using_later_rows() {
     let mut actual = scroll_fixture(nodes, 0, 10);
     let mut expected = scroll_fixture(all.clone(), 0, 10);
     for ui in [&mut actual, &mut expected] {
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("scroll-3".into()),
             char_offset: "N3 row 000\n".chars().count() * 95,
@@ -2641,7 +2641,7 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
     config.cache.body_bytes = 0;
     let mut actual = UiState::new(&config, cwd());
     actual.select_thread("scroll-fixture".into());
-    actual.view_mut().navigation.set_follow(false);
+    actual.view_mut().navigation.select_reading();
     actual.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("scroll-0".into()),
         char_offset: 0,
@@ -2663,7 +2663,7 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
         total_nodes: 80,
     });
     let mut expected = scroll_fixture(all.clone(), 0, 80);
-    expected.view_mut().navigation.set_follow(false);
+    expected.view_mut().navigation.select_reading();
     expected.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("scroll-0".into()),
         char_offset: 0,
@@ -2796,7 +2796,7 @@ fn adjacent_partial_prefix_and_suffix_gaps_preserve_full_reference_page_position
             let mut actual = scroll_fixture(nodes, 0, 3);
             let mut expected = scroll_fixture(all.clone(), 0, 3);
             for ui in [&mut actual, &mut expected] {
-                ui.view_mut().navigation.set_follow(false);
+                ui.view_mut().navigation.select_reading();
                 ui.view_mut().navigation.anchor = ViewAnchor {
                     node_id: Some(if up { "scroll-2" } else { "scroll-0" }.into()),
                     char_offset: if up { 0 } else { 95 * row_chars },
@@ -3035,7 +3035,7 @@ fn wheel_crosses_large_coalesced_event_groups_without_recursive_calls_or_skipped
         node_id: Some("scroll-0".into()),
         char_offset: 0,
     };
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     assert!(
         scroll_cells(&mut ui, &mut terminal)
@@ -3085,7 +3085,7 @@ fn recovery_view() -> UiState {
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("old1".into()),
         char_offset: 0,
@@ -3320,7 +3320,7 @@ fn sending_cancels_history_rebase_and_later_navigation_can_recover_again() {
         anchor: ViewAnchor::default(),
     });
     assert!(ui.view().navigation.follow());
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.apply(UiUpdate::HistoryInvalidated {
         thread_id: "recovery".into(),
         generation,
@@ -4083,7 +4083,7 @@ fn short_collapsed_tail_down_without_row_progress_does_not_refollow() {
         70,
         120,
     );
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     let mut terminal = Terminal::new(TestBackend::new(100, 100)).unwrap();
     scroll_cells(&mut ui, &mut terminal);
     scroll_wheel(&mut ui, false);

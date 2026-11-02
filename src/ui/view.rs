@@ -1598,7 +1598,7 @@ mod owner_tests {
             1,
             1,
         );
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("source".into()),
             char_offset: 0,
@@ -1740,7 +1740,7 @@ mod stream_refresh_tests {
         let revision = view.history_revision();
         view.on_stream(stream("前半後半"));
         assert_eq!(view.history_revision(), revision);
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("attempt".into()),
             char_offset: 2,
@@ -1848,7 +1848,7 @@ mod completion_notice_tests {
         ui.select_thread("thread".into());
         let generation = ui.view().generation;
         let revision = ui.view().navigation.view_revision;
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         // Model the accepted HistoryWindow, not the initial selection load.
         ui.view_mut().navigation.set_loading(false);
         ui.view_mut().navigation.anchor = ViewAnchor {
@@ -1862,7 +1862,7 @@ mod completion_notice_tests {
         assert_eq!(ui.view().status, "reader moved to latest path");
         ui.apply(notice(generation, revision, "saved", "verified source"));
         assert_eq!(ui.view().status, "verified source");
-        ui.view_mut().navigation.set_follow(true);
+        ui.view_mut().navigation.request_tail();
         ui.apply(notice(generation, revision, "saved", "stale after follow"));
         assert_eq!(ui.view().status, "verified source");
     }
@@ -1942,7 +1942,7 @@ mod completion_notice_tests {
         }];
         view.thread_id = Some("thread".into());
         view.total_nodes = 2;
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: offset,
@@ -1983,7 +1983,7 @@ mod completion_notice_tests {
             .collect();
         view.thread_id = Some("thread".into());
         view.total_nodes = 31;
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("node-15".into()),
             char_offset: 0,
@@ -2015,7 +2015,7 @@ mod completion_notice_tests {
         }];
         view.thread_id = Some("thread".into());
         view.total_nodes = 1;
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: "cached line 000\n".len() * 80,
@@ -2058,7 +2058,7 @@ mod completion_notice_tests {
             ..Default::default()
         };
         view.nodes = vec![node.clone()];
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 100,
@@ -2088,7 +2088,7 @@ mod completion_notice_tests {
             ..Default::default()
         };
         view.nodes = vec![node.clone()];
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 100,
@@ -2105,7 +2105,7 @@ mod completion_notice_tests {
     fn stream_commit_rebase_does_not_discard_queued_navigation() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
         view.thread_id = Some("thread".into());
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor = ViewAnchor {
             node_id: Some("saved".into()),
             char_offset: 0,
@@ -2191,7 +2191,7 @@ mod completion_notice_tests {
             ack: None,
         });
         let offset = "source line 000\n".len() * 50;
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.scroll.width = 80;
         ui.view_mut().navigation.scroll.height = 10;
         ui.view_mut().navigation.anchor = ViewAnchor {
@@ -2261,7 +2261,7 @@ mod completion_notice_tests {
             presentation: Default::default(),
             ack: None,
         });
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("attempt".into()),
             char_offset: 7,
@@ -2466,7 +2466,7 @@ mod received_tests {
         ];
         ui.view_mut().selection_revision = 7;
         ui.view_mut().received_revision = 10;
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().reasoning_expanded.insert("paid".into());
         ui.view_mut().navigation.anchor = ViewAnchor {
             node_id: Some("paid".into()),
@@ -2737,7 +2737,7 @@ mod received_tests {
             root_revision,
             nodes: vec![("anchor".into(), node("paid", "received_response"))],
         };
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut().selection_revision = 7;
         ui.view_mut().navigation.view_revision = 5;
         ui.view_mut().navigation.set_request(Some((5, None)));
@@ -3057,7 +3057,7 @@ mod body_accounting_tests {
     #[test]
     fn paused_stream_window_extent_changes_render_unit_identity_without_losing_old_text() {
         let mut view = ThreadView::new(&Config::default(), std::env::temp_dir());
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.anchor.node_id = Some("live".into());
         view.navigation.anchor.char_offset = 0;
         let mut original = UiNode {
@@ -3153,7 +3153,7 @@ mod retention_regressions {
                 1,
                 61,
             );
-            paused.navigation.set_follow(false);
+            paused.navigation.select_reading();
             paused.navigation.anchor = ViewAnchor {
                 node_id: Some("n0".into()),
                 char_offset: 0,
@@ -3318,7 +3318,7 @@ mod retention_regressions {
         view.on_node_window(0, node("n", "needed hydration", 11));
         assert_eq!(view.nodes[0].text, "needed hydration");
         assert_eq!(view.delivery_read_revision, 100);
-        view.navigation.set_follow(false);
+        view.navigation.select_reading();
         view.navigation.set_request(Some((0, Some("n".into()))));
         let mut navigation = node("n", "earlier source offset", 4);
         navigation.base_char_offset = 42;
@@ -3369,7 +3369,7 @@ mod retention_regressions {
     fn navigation_keeps_newer_queue_snapshot_and_releases_its_slot() {
         let mut ui = UiState::new(&Config::default(), PathBuf::new());
         ui.view_mut().thread_id = Some("thread".into());
-        ui.view_mut().navigation.set_follow(false);
+        ui.view_mut().navigation.select_reading();
         ui.view_mut()
             .on_history(vec![node("n", "body", 20)], None, false, 0, 1, 1);
         ui.view_mut().delivery_read_revision = 20;
@@ -3436,7 +3436,11 @@ mod received_window_retention_tests {
             ("a".into(), node("paid-a2", "received_response")),
             ("b".into(), node("paid-b", "received_response")),
         ]);
-        view.navigation.set_follow(follow);
+        if follow {
+            view.navigation.request_tail();
+        } else {
+            view.navigation.select_reading();
+        }
         view.navigation.anchor = ViewAnchor {
             node_id: Some("b".into()),
             char_offset: 2,

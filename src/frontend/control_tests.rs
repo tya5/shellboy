@@ -998,7 +998,7 @@ fn request_pinned_history_navigation(ui: &mut crate::ui::UiState) -> Vec<UiActio
         char_offset: first.base_char_offset,
     };
     assert!(ui.view().first_ordinal > 0);
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = anchor;
     // Use the actual navigation owner: it registers scroll.request/view_revision
     // before dispatch. A handcrafted LoadHistoryWindow lacks that read fence.
@@ -2057,7 +2057,7 @@ async fn pinned_history_navigation_keeps_a_required_window_after_a_newer_read() 
             .iter()
             .any(|n| n.node_id == "call-node")
     );
-    legacy.view_mut().navigation.set_follow(false);
+    legacy.view_mut().navigation.select_reading();
     legacy.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("call-node".into()),
         char_offset: 0,
