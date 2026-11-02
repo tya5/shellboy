@@ -4,6 +4,22 @@ Status: initial inventory, not completion or permission to translate source data
 Baseline: main `b12a8291b1950a5f7db58de4dccbb12101a2a074` (W6 task 1 landed).
 B-5/B-6 are not yet included. No third-party production source was edited.
 
+## #152 Deletion, Key Hint, And Count Message Audit
+
+On base c1d61d19, eight deletion-review glyph arms, four key-hint literals,
+and four typed width/count message literals are individually classified as
+Japanese UI branches with complete English alternatives. No production UI,
+API, state transition, action, or stored value changes. The legacy Japanese
+`detail_footer` builder is selected by the current `detail_footer_for` caller
+only for Japanese; its fingerprint does not cover that caller, so a caller
+change requires re-review. The glyph macro is also outside the literal
+fingerprints and must be re-reviewed if changed. Synthetic tests cover both
+languages, width 1/2 or unknown, disabled/ready/executing deletion states,
+synthetic rendered title and thread ID preservation, and counts 0/1/2/1000.
+On this base 1,393 category (c) records remain;
+fingerprint consistency is not a zero gate. Physical PTY and Windows
+integration remain separate checks.
+
 ## Post-0.6.0 Follow-Up Review
 
 The first two product batches were rebased onto main
@@ -428,19 +444,3 @@ returned no items with an incompatible/degraded index; no index was rebuilt.
 No broad classification or fingerprint change is claimed. Exact3OS integration,
 physical terminal, clipboard, live provider and final Stage C acceptance remain
 separate. This work follows the subsequently selected0.6.1 cutoff.
-
-### #152 Deletion, Key Hint, And Count Message Audit
-
-On base c1d61d19, eight deletion-review glyph arms, four key-hint literals,
-and four typed width/count message literals are individually classified as
-Japanese UI branches with complete English alternatives. No production UI,
-API, state transition, action, or stored value changes. The legacy Japanese
-`detail_footer` builder is selected by the current `detail_footer_for` caller
-only for Japanese; its fingerprint does not cover that caller, so a caller
-change requires re-review. The glyph macro is also outside the literal
-fingerprints and must be re-reviewed if changed. Synthetic tests cover both
-languages, width 1/2 or unknown, disabled/ready/executing deletion states,
-synthetic rendered title and thread ID preservation, and counts 0/1/2/1000.
-On this base 1,393 category (c) records remain;
-fingerprint consistency is not a zero gate. Physical PTY and Windows
-integration remain separate checks.
