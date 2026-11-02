@@ -1,5 +1,6 @@
 //! Saved attempt usage for F6; never infer the attempt from the latest Turn.
 use crate::{
+    config::UiLanguage,
     control::Control,
     presentation::{PresentationField, PresentationKind},
     protocol::ApiError,
@@ -24,10 +25,14 @@ const SOURCE: &str = "WITH owners AS (
     FROM owners JOIN model_attempt a ON a.id=owners.attempt_id
     WHERE owners.ordinal<=2";
 
-fn cached_tokens(count: Option<u64>) -> String {
-    count
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "未報告".into())
+fn cached_tokens(count: Option<u64>, language: UiLanguage) -> String {
+    count.map_or_else(
+        || match language {
+            UiLanguage::Ja => "未報告".into(),
+            UiLanguage::En => "Unreported".into(),
+        },
+        |n| n.to_string(),
+    )
 }
 
 pub(super) struct Observation {
@@ -87,23 +92,38 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
     if requests.is_empty() {
         return Ok(());
     }
+    let language = control.store.config.ui.language;
     let observations = control
         .store
         .database
         .call(move |db| read_tx(db, &requests))
         .await
         .map_err(|error| error.into_api_error())?;
-    apply(nodes, observations);
+    apply(nodes, observations, language);
     Ok(())
 }
 
-pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>) {
+pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>, language: UiLanguage) {
     for observation in observations {
         let index = observation.index;
         let (attempt, display) = match observation.sources.as_slice() {
-            [(id, count)] => (Some(id.clone()), cached_tokens(*count)),
-            [] => (None, "未報告（要求の記録なし）".into()),
-            _ => (None, "未報告（要求との対応が一意でない）".into()),
+            [(id, count)] => (Some(id.clone()), cached_tokens(*count, language)),
+            [] => (
+                None,
+                match language {
+                    UiLanguage::Ja => "未報告（要求の記録なし）",
+                    UiLanguage::En => "Unreported (no request record)",
+                }
+                .into(),
+            ),
+            _ => (
+                None,
+                match language {
+                    UiLanguage::Ja => "未報告（要求との対応が一意でない）",
+                    UiLanguage::En => "Unreported (ambiguous request match)",
+                }
+                .into(),
+            ),
         };
         let presentation = &mut nodes[index].presentation;
         presentation
@@ -116,7 +136,11 @@ pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>) {
                     value_omitted: false,
                     display: None,
                     key: ATTEMPT.into(),
-                    label: "モデル要求ID（使用量の記録元）".into(),
+                    label: match language {
+                        UiLanguage::Ja => "モデル要求ID（使用量の記録元）",
+                        UiLanguage::En => "Model request ID (usage source)",
+                    }
+                    .into(),
                     value: attempt,
                 },
             );
@@ -127,7 +151,11 @@ pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>) {
                 value_omitted: false,
                 display: None,
                 key: FIELD.into(),
-                label: "入力キャッシュ（cached_tokens）".into(),
+                label: match language {
+                    UiLanguage::Ja => "入力キャッシュ（cached_tokens）",
+                    UiLanguage::En => "Cached input tokens (cached_tokens)",
+                }
+                .into(),
                 value: display,
             },
         );

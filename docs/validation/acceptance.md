@@ -8498,3 +8498,9 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+
+## #152 Batch7: Saved Attempt-Usage Fields
+
+Verified generated cached-token labels and fallback statuses in both Japanese and English. The selected language comes from the loaded `Control` configuration and is passed into refresh projection; asynchronous usage enrichment uses the same setting. Regression coverage confirms numeric counts (including zero) remain numeric, absent counts remain unreported, no-record and ambiguous-owner cases remain distinct, and ambiguous provenance does not surface an attempt ID. Existing Japanese labels/statuses are asserted exactly. The saved attempt owner, attempt IDs, field keys, and serialized source `usage_json` remain unchanged.
+
+Local macOS validation passed: `cargo fmt --all`, `cargo fmt --all -- --check`, `cargo check --tests`, `cargo clippy --tests -- -D warnings`, the focused bilingual projection test, the existing saved-attempt/unchanged-JSON test, the Stage C audit with current fingerprints, and `python3 -m unittest discover -s scripts/tests` (exit 0). Exact-tip branch CI is reported separately. Live providers, physical terminal rendering, clipboard behavior, Windows CI, and the remaining Stage C candidates are not covered by this batch.

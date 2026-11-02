@@ -428,3 +428,9 @@ returned no items with an incompatible/degraded index; no index was rebuilt.
 No broad classification or fingerprint change is claimed. Exact3OS integration,
 physical terminal, clipboard, live provider and final Stage C acceptance remain
 separate. This work follows the subsequently selected0.6.1 cutoff.
+
+## Product Review Batch7: Saved Attempt-Usage Fields
+
+The review covers five generated UI literals in `src/frontend/usage.rs`: the cached-token field label, attempt-provenance label, missing-count fallback, no-request-record status, and ambiguous-request-match status. `refresh::project` forwards the loaded UI language to projection; `usage::enrich` captures it from the same immutable `Control` configuration. Each Ja literal is retained exactly. Counts, attempt IDs, field keys, owner matching, saved `usage_json`, and raw provider diagnostics are not rewritten. No-record and ambiguous provenance continue to omit an attempt ID.
+
+The five entries now classify as `(a)` with function-scope fingerprints in `scripts/dev/language-classifications.json`. The audit reports 166 remaining `(c)` entries across 18 nested `src/frontend/` files, so the broader Stage C gate remains open. Local macOS `cargo fmt --all`, `cargo fmt --all -- --check`, `cargo check --tests`, `cargo clippy --tests -- -D warnings`, focused Rust tests, the full Python developer-tool suite (exit 0), and the audit/fingerprint check passed. Exact-tip task-branch CI is reported in the handoff. No live-provider, physical-terminal, clipboard, Windows, or final Stage C acceptance is implied.
