@@ -123,5 +123,230 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/composer.rs:005b3ac4be29a66c:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:06f0130720646c06:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:0a657b522c25d762:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:0ed5b51842ece42b:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:1397abe16fc1fb6a:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:18be0a3a11fe9c4c:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:21cefe5d81d79831:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:294489f5e115e1a4:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:2d15a7933d9633f8:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:38277a3a0167dd51:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:3ba00e7111fc8899:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:47a87128497a30f1:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:4b30983978d12554:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:537fa3dcbfc93ce5:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:57ced5fcb3fd1b23:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:5e7460db3bc761e3:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:840564be8dc1ff27:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:9304c2515764d405:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:94601e062908db37:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:947469e190c0700a:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:94eb9c65af30e224:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:9e104bf421788101:1": {
+    "category": "a",
+    "reason": "Reviewed glyphs::localized!: English and Japanese each have width-specific alternatives with identical bindings.",
+    "source_tokens_sha256": "af826c83d78c16b7167e5f0d030219eeee87ccd00b1b5a4f4b20effc7dbfbfb0"
+  },
+  "src/ui/composer.rs:a06d6d315c53ea5c:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:a23e2ce89f0b16d5:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:a361059f159924ba:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:aeeeb29e79a365db:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:b3808ead280a171f:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:b3ba9639999c6cc7:1": {
+    "category": "a",
+    "reason": "Reviewed glyphs::localized!: English and Japanese each have width-specific alternatives with identical bindings.",
+    "source_tokens_sha256": "f6516e9da82d2bb6f2e72dcc4d0c35d6a3d7ab51815deadf9893f5669cc5ccf6"
+  },
+  "src/ui/composer.rs:b45a9c2c7fc5aa0a:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:b5b1aee2c5a17dab:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:bb9e8dc5dc62d7ff:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:bbc2fa8508a3f46d:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:d29b66dafa4db100:1": {
+    "category": "a",
+    "reason": "Reviewed glyphs::localized!: English and Japanese each have width-specific alternatives with identical bindings.",
+    "source_tokens_sha256": "f6516e9da82d2bb6f2e72dcc4d0c35d6a3d7ab51815deadf9893f5669cc5ccf6"
+  },
+  "src/ui/composer.rs:d6ef98bf224a5d78:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:dbfffff0f4351be1:1": {
+    "category": "a",
+    "reason": "Reviewed glyphs::localized!: English and Japanese each have width-specific alternatives with identical bindings.",
+    "source_tokens_sha256": "af826c83d78c16b7167e5f0d030219eeee87ccd00b1b5a4f4b20effc7dbfbfb0"
+  },
+  "src/ui/composer.rs:dd7d9d7230110d0d:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:de3e5c26fac8d448:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:deb714829ae5e506:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:f174b34c07aa5ef9:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:f2a8c343c7cc2266:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:f46a2e6697c5ecf3:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:f974c7bcf3aabe9f:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:fcea67d8288c1502:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:fd8d7102401a0f7a:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
+  },
+  "src/ui/composer.rs:fe389c0f821b3d2c:1": {
+    "category": "a",
+    "reason": "Reviewed CommandHint: this Japanese help has an adjacent English help_en for the same unchanged command name and both are selected by UI language.",
+    "source_tokens_sha256": "f5e81bc4bb2815fddacb79dfba4c59c1b63c25da8a6f0268fe9fb940854fb63a"
   }
 }

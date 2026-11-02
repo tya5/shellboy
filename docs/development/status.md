@@ -3938,3 +3938,9 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: Composer localization (2026-11-02)
+
+Localized command completion explanations, paste warnings and input-history
+feedback without changing command names, draft contents, or key bindings.
+The `入力できます` status remains Japanese because history_interaction uses it
+as a control predicate; changing it needs a coordinated typed-status fix.

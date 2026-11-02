@@ -8457,3 +8457,11 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+### #152 stage C: Composer localization (2026-11-02)
+
+On macOS, rust-slot `cargo check --tests` and 14 composer contract tests pass,
+including both languages, ASCII English help and real Tab dispatch. Scoped audit
+reports a=54, b=1, c=1; the remaining status has a cross-file control dependency.
+The full manifest is blocked by a pre-existing stale presentation fingerprint on
+main 2607218b. Physical terminal and clipboard testing were not performed;
+exact task CI and three-OS integration validation remain pending.
