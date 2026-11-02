@@ -20,12 +20,16 @@ only unreferenced shell completion events. Rebased after #163 onto 72f163d5:
 #164 retains schema20 and event retention uses schema21. Fresh-tip checks and
 CI are tracked in the handoff; prior CI did not test the restack.
 ## DB worker lanes and background step budget (#171, design review)
+## DB writer occupancy (#171, design revision 2 in review)
 
-Design memo only, in [storage](../design/storage.md#db-worker-lanes-and-background-step-budget-171-proposed):
-two admission lanes, a progress-handler step budget for background jobs with a
-typed `Deferred` outcome, `db_job_budget` diagnostic, call-site classification
-and the jobs to split. Not implemented or tested. Resume point: review answers
-to the open questions, then phase 2 (measurement, implementation, tests).
+[Storage design](../design/storage.md#db-writer-occupancy-requester-contract-and-backend-safety-net-171)
+now makes the requester contract primary: a declared bounded unit, at most one
+outstanding request per requester, trigger- or deadline-driven repetition, and
+reader connections for foreground views. Two lanes and a conditional step budget
+remain as the backend safety net. A backend prototype (two lanes, conditional
+budget, typed `Deferred`, diagnostics, no-progress state, receipt windows) passed
+its 10 focused storage unit tests on macOS. It is kept in a local stash in this
+worktree, not pushed, until review. Resume: review answers, then implement.
 
 ## Bounded index wake-delay read (#164, branch CI pending)
 
