@@ -8562,29 +8562,30 @@ overall Stage C acceptance remains open.
 ## #152 Batch 10: Received Response Display Labels
 
 The read-only `incomplete_response` and `model_stream_observation` projections
-now use the configured UI language for their generated titles and saved-source
-field label. Both locales use `glyphs::formatted!` for the shared `·`/`|` layout
+use the configured UI language for generated titles and the saved-source field
+label. Both locales use `glyphs::formatted!` for the shared `·`/`|` layout
 separator, including the observation title. The `/received` command token,
 source node ID, event kind/class, saved payload, partial response text and
-reasoning, preview omission state, and canonical replay/path behavior are
-unchanged. Regression coverage exercises both message kinds in Japanese and
-English and checks that source facts remain intact.
+reasoning, preview omission state, and canonical replay/path behavior remain
+unchanged. Tests cover both message kinds in Japanese and English and verify the
+source facts.
 
-Build-free validation passed: `python3 -m unittest discover -s scripts/tests` (168
-tests), `python3 scripts/check-test-layout.py` (102 suites), language audit
-(`received.rs`: a=7, b=33, c=0), and `git diff --check`. An earlier local run
-passed format and `cargo check --tests`; the focused received suite reported 7/8
-tests because its saved-preview assertion assumed Japanese under the default
-English configuration. That assertion is now language-neutral. The fresh local
-Rust recheck is queued behind the shared slot; history-reader/refresh tests and
-Clippy remain pending locally.
+Local validation passed: `cargo fmt --all -- --check`; `cargo check --tests`;
+`cargo test --locked --lib frontend::received::tests -- --nocapture` (8 passed);
+`cargo test --locked --lib frontend::history_reader::tests -- --nocapture` (0
+matched tests; all test code compiled via `cargo check --tests`);
+`cargo test --locked --lib frontend::refresh::tests -- --nocapture` (6 passed);
+`cargo clippy --locked --all-targets -- -D warnings`;
+`python3 -m unittest discover -s scripts/tests` (168 tests);
+`python3 scripts/check-test-layout.py` (102 suites);
+language audit (`received.rs`: a=7, b=33, c=0); and `git diff --check`.
 
-CI run `41504566436` failed on Linux and macOS with E0061 at
-`src/frontend/refresh.rs:141`; the follow-up passes `UiLanguage` through the
-history projection. Run `41505546494` compiled but both platforms failed the
-saved-preview locale assertion and guide-caption source-literal check. This
-follow-up accepts either configured title language and retains the observation
-caption literal in the `glyphs::formatted!` pair. Run `41509227853` failed both
-platforms at `Format` on a rustfmt line-wrap difference in the mixed-separator
-assertion; the current follow-up matches rustfmt. Final exact-tip CI and three-OS
-integration are reported separately; overall Stage C acceptance remains open.
+CI history: run `41504566436` failed on Linux/macOS with E0061 for the missing
+`UiLanguage` argument in the refresh history projection; that call was fixed.
+Run `41505546494` compiled but failed on both platforms because the saved-preview
+test assumed Japanese under the default English configuration and the guide-caption
+test expected a composed label as one source literal; both are corrected. Run
+`41509227853` failed both platforms on a rustfmt line wrap in the mixed-separator
+assertion; the source now matches rustfmt. Exact-tip CI for the current SHA and
+three-OS integration validation are reported separately; overall Stage C remains
+open.
