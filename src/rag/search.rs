@@ -684,7 +684,7 @@ pub(super) async fn search(
                     if page.next.is_some() || (has_hits && (scopes.len() != 1 || mode != SearchMode::Keyword)) {
                         // Mixed scopes or hybrid fusion can discard keyword hits; restart the
                         // focused keyword stream so the cursor never silently skips them.
-                        next_cursor = if scopes.len() != 1 || mode != SearchMode::Keyword {
+                        next_cursor = if has_hits && (scopes.len() != 1 || mode != SearchMode::Keyword) {
                             Some(page.restart)
                         } else {
                             page.next
