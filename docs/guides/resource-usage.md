@@ -292,3 +292,21 @@ N prepared threads. For N=1/5/10/20, its median baseline PSS was
 16,622/16,637/16,514/17,078 KiB (three repetitions). This is a different owner
 and an idle baseline, not the incremental cost of adding a TUI to `serve`, and
 not a TUI-colocated in-flight peak. Workload-time TUI PSS remains unmeasured.
+
+A subsequent same-run Linux observation exercised the same synthetic workload
+with a TUI-hosted owner, rather than just sampling an idle TUI. Each cell is
+minimum / median / maximum of three observed in-flight maxima, in KiB. The
+owners were independent and the samples were not simultaneous; neither the
+differences nor a negative difference are an incremental TUI cost. The TUI
+itself hosts the owner; it does not attach to a separately running `serve`.
+The sampler can miss short peaks. The overall comparison job failed in other
+agents (Codex process-tree churn and jcode cleanup), so these are the completed
+Shellboy cases from a **partial failed run**, not a successful full comparison:
+[run 41438117453](https://github.com/tya5/shellboy/actions/runs/41438117453).
+
+| N | `serve` observed maximum | TUI-hosted owner observed maximum |
+| ---: | ---: | ---: |
+| 1 | 26,395 / 26,828 / 27,230 | 21,019 / 21,094 / 21,152 |
+| 5 | 27,332 / 27,516 / 30,919 | 24,724 / 24,827 / 25,457 |
+| 10 | 29,379 / 29,411 / 30,132 | 25,875 / 26,504 / 27,490 |
+| 20 | 34,655 / 35,084 / 37,056 | 28,694 / 29,731 / 32,209 |
