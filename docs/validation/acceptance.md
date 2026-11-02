@@ -8692,3 +8692,12 @@ collection tests remain relevant. On macOS arm64 / Rust 1.99.1, `cargo check
 language audit's 18 Python tests and test layout check also passed. Exact-tip
 3-OS CI is pending; terminal and integration behavior are untested. This is one
 Stage C slice, not final #152 acceptance.
+
+### #152 Thread Usage Pending Copy (Validation Pending)
+
+The Thread observation regression exercises the not-yet-read generated detail in
+English and Japanese, checks the canonical observation identifier and inspect
+command, verifies metadata remains unchanged, and admits a matching-scope usage
+observation to check original values survive both locales. Rust validation and
+exact-tip 3-OS CI are pending; physical terminal, provider and post-integration
+behavior are untested. This is one Stage C slice, not final #152 acceptance.
