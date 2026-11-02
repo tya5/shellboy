@@ -8360,11 +8360,13 @@ fake-model run, not a repeatability study, peak usage or real-provider token-cos
 claim. jcode was run only in Linux CI; no real model or paid provider was used.
 ### #152 Flat Field Label Candidate
 
-A macOS unit test covered every mapped field label in both languages, nested
-and custom-label fallback, and unchanged field values; `cargo check --tests`
-passed on the pre-rebase candidate. The screen/copy test, current-base local
-checks, task CI, Windows integration CI and a physical terminal check remain
-unverified. Stage C consistency is not the project-wide zero gate.
+On macOS, `cargo fmt --all -- --check`, `cargo check --tests`, and both focused
+tests passed on the current base. The unit test covers every mapped label in
+both languages, nested and custom-label fallback, and unchanged field values;
+the TestBackend screen test covers both languages, three width policies and
+copying the original value. Task CI, Windows integration CI and a physical
+terminal check are separate. Stage C consistency is not the project-wide zero
+gate.
 
 ### #152 Batch4 Watch Discovery Notice Language
 
