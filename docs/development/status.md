@@ -5,7 +5,7 @@
 The per-request `Shellboy context v1` tail item is now a saved `context` node,
 appended at the Turn start, after a mid-Turn setting change and after a
 replacement removed it; requests within a Turn are strict appends. Loopback
-evidence and checks are in acceptance. Paid cache-hit re-measurement (#151
+evidence and checks are in acceptance; 3-OS CI 41545744676 passed on `d71c1e76`. Paid cache-hit re-measurement (#151
 conditions) awaits the user's approval.
 
 ## Paused index consumption (#173)

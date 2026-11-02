@@ -8693,6 +8693,7 @@ language audit's 18 Python tests and test layout check also passed. Exact-tip
 3-OS CI is pending; terminal and integration behavior are untested. This is one
 Stage C slice, not final #152 acceptance.
 ### #183 Saved Turn Context Line (Local Checks; CI Pending)
+### #183 Saved Turn Context Line (3-OS CI Passed)
 
 Baseline on origin/main `777c100d` (macOS 26.3.1 arm64, loopback proxy, no paid
 API): the new `turn_requests_strictly_append_and_mid_turn_changes_are_appended`
@@ -8719,6 +8720,11 @@ Local: `cargo fmt`, `cargo clippy --all-targets -D warnings`, and the
 integration runtime_features/request_inspect/runtime_hierarchy/anthropic_messages/
 model_http/replay_cache/performance_lifecycle subsets and lib control/ui
 presentation/compaction subsets passed except three timing-sensitive shell
-tests that failed under the shared build host's load; see the isolated rerun
-note below. Not verified: a real provider's cache hit rate (#151 conditions; needs the user's
-approval), Windows/Linux locally (3-OS CI pending), physical terminal.
+tests. Rerun alone, `successful_incomplete_output_is_saved_and_cancels_unexecuted_calls`
+and `completed_shell_cannot_be_backgrounded_while_excerpt_is_loading` passed twice
+(load-sensitive under the shared build host). `headless_stop_boundaries_preserve_saved_tool_effects_and_recovery_counts`
+fails the same way on unmodified main `777c100d` in this local environment (the
+spawned `serve` printed no ready line), so it is not attributed to this change.
+3-OS CI run 41545744676 on `d71c1e76` passed (macOS, Ubuntu, Windows check jobs,
+including Format, Clippy and Tests). Not verified: a real provider's cache hit
+rate (#151 conditions; needs the user's approval), physical terminal.
