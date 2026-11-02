@@ -8618,5 +8618,11 @@ remains required. Pre-#173 task CI 41505082629 passed on Ubuntu and macOS at
 initial-selection regression and real synthetic PTY. The saved timing artifact
 recorded 1,803 passing library tests and 1,048 passing integration tests, with no
 failures. This is not post-#173 coverage.
+The user confirmed that a genuine persisted marker remains visible with
+`auto_history=false`, using the same wording as when enabled. The focused retry
+regression checks both settings before and after clearing. The discarded result
+of `pause::facts` did not determine the display reason; the projection instead
+classifies the bounded saved value directly. Task CI 41510295351 passed Ubuntu
+and macOS on `0fe2f793`; a fresh exact-tip run is required for this revision.
 No physical terminal, live-provider, Windows-local, or post-integration behavior
 has been verified.

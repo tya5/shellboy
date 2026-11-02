@@ -235,8 +235,6 @@ fn read_display_pause_tx(
             return Ok(Some(PauseReason::Other));
         }
         if let Some(value) = meta(db, &pause_key)? {
-            // Interpret the same saved fact without exposing its contents in the UI.
-            let _facts = pause::facts(&pause_key, &value);
             return Ok(Some(pause_reason(&value)));
         }
         return Ok(None);
@@ -1445,8 +1443,9 @@ mod display_pause_tests {
         let disabled = IndexService::new(db.clone(), Arc::new(disabled_config));
         assert!(disabled.profile_key.is_some());
         assert!(disabled.endpoint_family_key.is_some());
+        let index = disabled.clone();
         assert_eq!(
-            db.call(move |db| disabled.read_display_pause(db))
+            db.call(move |db| index.read_display_pause(db))
                 .await
                 .unwrap(),
             None
@@ -1468,24 +1467,26 @@ mod display_pause_tests {
         })
         .await
         .unwrap();
-        let index = service.clone();
-        assert_eq!(
-            db.call(move |db| index.read_display_pause(db))
-                .await
-                .unwrap(),
-            Some(PauseReason::Transport)
-        );
+        for index in [service.clone(), disabled.clone()] {
+            assert_eq!(
+                db.call(move |db| index.read_display_pause(db))
+                    .await
+                    .unwrap(),
+                Some(PauseReason::Transport)
+            );
+        }
         service.retry(IndexArgs::default()).await.unwrap();
         crate::test_watchdog::watchdog("saved pause retry notification", service.pause_changed())
             .await
             .unwrap();
-        let index = service.clone();
-        assert_eq!(
-            db.call(move |db| index.read_display_pause(db))
-                .await
-                .unwrap(),
-            None
-        );
+        for index in [service.clone(), disabled] {
+            assert_eq!(
+                db.call(move |db| index.read_display_pause(db))
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
         db.shutdown().await.unwrap();
     }
 

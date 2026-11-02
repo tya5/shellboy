@@ -4008,7 +4008,8 @@ over the configured profile key; absent keys do not imply a pause. The footer
 uses fixed bilingual classifications rather than provider prose. Pause-change
 notifications request a fresh snapshot without reading the database on render.
 `auto_history=false` alone does not create a badge; the current interpretation
-still shows a real persisted pause if one exists, pending reviewer confirmation.
+shows a real persisted pause if one exists, as confirmed by the user; the
+wording does not depend on that setting.
 Focused macOS checks, including an isolated synthetic PTY, passed on main
 99d10a78 after the direct-fact-read change. After #165 landed on 4b9c665e, the
 author rebased while preserving automatic-compaction and index-pause facts; ten
@@ -4021,8 +4022,9 @@ invalidate only stale initial reads, leaving ordinary progress epochs stable.
 An active stale initial read also requeues a fresh refresh. Fresh macOS checks
 passed: `cargo check --tests`, thirteen focused library tests, one headless
 integration test, and one isolated CLI PTY test. Exact-tip task CI remains pending.
-Display reads `pause::facts` directly rather than depending on the #173-removed
-drain helper. #173 landed on main at `c1d61d19` after 3 OS CI 41503286455; the
+Display classifies the saved value directly rather than depending on the
+#173-removed drain helper. `pause::facts` supplies timestamp and identity, not
+the display reason, so its unused result is not part of this projection. #173 landed on main at `c1d61d19` after 3 OS CI 41503286455; the
 #169 author rebased. Fresh macOS checks passed: `cargo check --tests`, thirteen
 focused library tests, one headless integration test, and one isolated CLI PTY
 test. The pre-#173 task CI 41505082629 passed on Ubuntu and macOS but is
