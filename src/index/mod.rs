@@ -173,8 +173,11 @@ pub enum PauseReason {
     Other,
 }
 
+// Match the existing saved-observation metadata bound, including normal provider errors.
+const MAX_DISPLAY_PAUSE_BYTES: usize = 128 * 1024;
+
 fn pause_reason(raw: &str) -> PauseReason {
-    if raw.len() > 4096 {
+    if raw.len() > MAX_DISPLAY_PAUSE_BYTES {
         return PauseReason::Other;
     }
     let Ok(value) = serde_json::from_str::<Value>(raw) else {
@@ -228,7 +231,7 @@ fn read_display_pause_tx(
             .optional()?;
         let Some(size) = size else { continue };
         // Keep malformed oversized saved values bounded, but do not hide the marker.
-        if size > 4096 {
+        if size > MAX_DISPLAY_PAUSE_BYTES as i64 {
             return Ok(Some(PauseReason::Other));
         }
         if pause_cleanup::pause_id(db, key, family)?.is_some() {
@@ -1530,7 +1533,9 @@ mod display_pause_tests {
         ] {
             assert_eq!(pause_reason(raw), expected);
         }
-        assert_eq!(pause_reason(&"x".repeat(4097)), PauseReason::Other);
+        let long_error = serde_json::json!({"kind":"provider", "status":401, "message":"x".repeat(crate::model::MAX_ERROR_MESSAGE_CHARS)}).to_string();
+        assert_eq!(pause_reason(&long_error), PauseReason::Authentication);
+        assert_eq!(pause_reason(&"x".repeat(MAX_DISPLAY_PAUSE_BYTES + 1)), PauseReason::Other);
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
             .unwrap();

@@ -141,7 +141,12 @@ async fn read_repaint_text(terminal: &mut File, output: &mut Vec<u8>, labels: &[
     read_repaint_facts(terminal, output, labels, &[]).await;
 }
 
-async fn read_repaint_facts(terminal: &mut File, output: &mut Vec<u8>, labels: &[&str], absent: &[&str]) {
+async fn read_repaint_facts(
+    terminal: &mut File,
+    output: &mut Vec<u8>,
+    labels: &[&str],
+    absent: &[&str],
+) {
     eprintln!("PTY awaiting fresh repaint: {labels:?}; absent: {absent:?}");
     let mut frame = Vec::new();
     crate::test_watchdog::watchdog("fresh repaint containing expected labels", async {
@@ -168,7 +173,9 @@ async fn read_repaint_facts(terminal: &mut File, output: &mut Vec<u8>, labels: &
             if let Some(clear) = frame.windows(4).rposition(|v| v == b"\x1b[2J") {
                 frame.drain(..clear);
                 let shown = emitted_text(&frame);
-                if labels.iter().all(|label| shown.contains(label)) && absent.iter().all(|label| !shown.contains(label)) {
+                if labels.iter().all(|label| shown.contains(label))
+                    && absent.iter().all(|label| !shown.contains(label))
+                {
                     return;
                 }
             }
@@ -478,7 +485,12 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
     // F1 belongs to the normal footer. Bootstrap already offers Ctrl+Q, but
     // cannot accept conversation input or promise that IPC is ready yet.
     read_until(&mut terminal, &mut output, b"F1").await;
-    read_repaint_text(&mut terminal, &mut output, &["⌕", "索引停止中", "認証・利用枠"]).await;
+    read_repaint_text(
+        &mut terminal,
+        &mut output,
+        &["⌕", "索引停止中", "認証・利用枠"],
+    )
+    .await;
     // Load an immutable pause observation from disk, then use real management
     // dispatch to clear it after the failed work was discarded.
     terminal
@@ -486,7 +498,12 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         .unwrap();
     read_until_text(&mut terminal, &mut output, "/index > T").await;
     read_until_text(&mut terminal, &mut output, &paused_at).await;
-    read_repaint_text(&mut terminal, &mut output, &["⌕", "索引停止中", "認証・利用枠"]).await;
+    read_repaint_text(
+        &mut terminal,
+        &mut output,
+        &["⌕", "索引停止中", "認証・利用枠"],
+    )
+    .await;
     terminal.write_all(b"/index\r").unwrap();
     read_until_text(&mut terminal, &mut output, "P 費用preview").await;
     terminal.write_all(b"p").unwrap();
@@ -763,7 +780,7 @@ async fn seed_collapsed_history(data: &std::path::Path, cwd: &std::path::Path) -
 async fn short_history_cli(root: &std::path::Path, args: &[&str]) -> serde_json::Value {
     let output = crate::test_watchdog::watchdog(
         "short history CLI",
-        tokio::process::Command::new(&binary)
+        tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
             .arg("--config")
             .arg(root.join("config.toml"))
             .arg("--data-dir")

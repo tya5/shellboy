@@ -612,65 +612,65 @@ mod tests {
         ] {
             for ambiguous in [None, Some(1), Some(2)] {
                 crate::ui::text_width::set_terminal_width(ambiguous);
-            let mut config = crate::config::Config::default();
-            config.ui.language = language;
-            let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
-            let palette = super::super::theme::Palette::from_capabilities(
-                crate::config::PaletteMode::Dark,
-                false,
-                true,
-            );
-            let mut epoch = 0;
-            for width in [80, 120] {
-                for (reason, ja, en) in [
-                    (PauseReason::Transport, "通信失敗", "transport failure"),
-                    (
-                        PauseReason::Authentication,
-                        "認証・利用枠",
-                        "credentials or credit",
-                    ),
-                    (
-                        PauseReason::Configuration,
-                        "設定不備",
-                        "configuration error",
-                    ),
-                    (PauseReason::Dimension, "次元不一致", "dimension mismatch"),
-                    (PauseReason::Capacity, "容量制限", "capacity limit"),
-                    (PauseReason::Other, "理由不明", "unknown reason"),
-                ] {
+                let mut config = crate::config::Config::default();
+                config.ui.language = language;
+                let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+                let palette = super::super::theme::Palette::from_capabilities(
+                    crate::config::PaletteMode::Dark,
+                    false,
+                    true,
+                );
+                let mut epoch = 0;
+                for width in [80, 120] {
+                    for (reason, ja, en) in [
+                        (PauseReason::Transport, "通信失敗", "transport failure"),
+                        (
+                            PauseReason::Authentication,
+                            "認証・利用枠",
+                            "credentials or credit",
+                        ),
+                        (
+                            PauseReason::Configuration,
+                            "設定不備",
+                            "configuration error",
+                        ),
+                        (PauseReason::Dimension, "次元不一致", "dimension mismatch"),
+                        (PauseReason::Capacity, "容量制限", "capacity limit"),
+                        (PauseReason::Other, "理由不明", "unknown reason"),
+                    ] {
+                        epoch += 1;
+                        ui.view_mut().activity.accept(
+                            epoch,
+                            ActivitySnapshot {
+                                index_pause: Some(reason),
+                                ..Default::default()
+                            },
+                        );
+                        let rows = footer_lines(ui.view(), width, "", palette, vec![], None, None);
+                        let text = rows[0]
+                            .spans
+                            .iter()
+                            .map(|s| s.content.as_ref())
+                            .collect::<String>();
+                        assert!(
+                            text.contains("⌕") && text.contains(expected),
+                            "{width}: {text}"
+                        );
+                        assert!(
+                            text.contains(if language == UiLanguage::Ja { ja } else { en }),
+                            "{width}: {text}"
+                        );
+                        assert!(text.width() <= usize::from(width));
+                    }
                     epoch += 1;
-                    ui.view_mut().activity.accept(
-                        epoch,
-                        ActivitySnapshot {
-                            index_pause: Some(reason),
-                            ..Default::default()
-                        },
-                    );
+                    ui.view_mut()
+                        .activity
+                        .accept(epoch, ActivitySnapshot::default());
                     let rows = footer_lines(ui.view(), width, "", palette, vec![], None, None);
-                    let text = rows[0]
-                        .spans
-                        .iter()
-                        .map(|s| s.content.as_ref())
-                        .collect::<String>();
-                    assert!(
-                        text.contains("⌕") && text.contains(expected),
-                        "{width}: {text}"
-                    );
-                    assert!(
-                        text.contains(if language == UiLanguage::Ja { ja } else { en }),
-                        "{width}: {text}"
-                    );
-                    assert!(text.width() <= usize::from(width));
+                    assert!(!rows[0].spans.iter().any(|s| s.content.contains("⌕")));
                 }
-                epoch += 1;
-                ui.view_mut()
-                    .activity
-                    .accept(epoch, ActivitySnapshot::default());
-                let rows = footer_lines(ui.view(), width, "", palette, vec![], None, None);
-                assert!(!rows[0].spans.iter().any(|s| s.content.contains("⌕")));
             }
-            }
-            crate::ui::text_width::set_terminal_width(None);
+            crate::ui::text_width::clear_terminal_width();
         }
     }
 

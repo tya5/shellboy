@@ -8557,10 +8557,15 @@ live-provider or actual sandbox-exec observation is inferred.
 
 ### #169 Persisted Index Pause Footer (Pending)
 
-An initial macOS check on main 89dd221d passed `cargo check --tests`, two
-persisted-pause tests, and the 80/120-column bilingual footer test. Subsequent
-draft, real-retry and help changes require a fresh check, queued through the
-shared Rust slot; the earlier results do not validate those later changes. Before handoff, verify saved
+On macOS, the pre-rebase tree on main 89dd221d passed `cargo check --tests`,
+four persisted-pause tests (including real retry and an oversized marker), the
+bilingual footer test, a draft update test, and an actual DB-to-selected-snapshot
+test. The later width-policy and PTY changes, plus the rebase onto 72f163d5,
+require a fresh check. The first post-rebase `cargo check --tests` failed on an
+out-of-scope PTY binary variable introduced by the test change; the helper was
+corrected. The subsequent fresh run was interrupted by signal 15 while waiting
+for the shared Rust slot; it did not execute and must be restarted. Work remains
+uncommitted on top of the task branch while #165 takes priority. Before handoff, verify saved
 family/profile selection, clear/retry, bounded fixed classifications, 80/120
 columns in both languages, snapshot updates, and the no-selected-thread case.
 Fresh exact-tip task CI is required. No physical terminal, live-provider,
