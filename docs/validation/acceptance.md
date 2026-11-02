@@ -8468,3 +8468,10 @@ pending; no physical terminal or OS clipboard test was performed.
 Task CI 41413856794 failed on two default-English history rebase integration
 tests that still expected Japanese status. Their expectations now match the
 English display; both focused tests pass on macOS. Source anchors are unchanged.
+
+After W1 landed on main 74d27461 (three-OS CI 41415178623), re-reviewed the
+seven localized view feedback resources and their English variants. The source
+and tests match prior task commit d0a1d278; each decision and literal matches.
+Only those scope fingerprints changed, preserving all main decisions. The full
+classification manifest validates; this is still a partial view batch and
+rebased task CI is pending.
