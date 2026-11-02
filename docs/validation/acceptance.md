@@ -8962,3 +8962,9 @@ On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 history-interaction suites passed (24, 2, and 15 tests respectively). Final-tip three-OS CI run `41561161744` succeeded on UI/code/test SHA
 `499e764407` across Windows, macOS, and Ubuntu. This follow-up commit changes
 only validation documentation; the tested UI implementation is unchanged.
+### #152 Received List Language Slice
+
+Synthetic tests cover both languages, zero/one/two/many counts, receipt states,
+page bounds, user text preservation and control-character sanitization. Exact
+commands and CI results are recorded in the handoff. These tests do not establish
+physical-terminal behavior or completion of Stage C.

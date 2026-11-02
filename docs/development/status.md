@@ -4168,3 +4168,9 @@ observations and clarifies that cold interactive startup includes owner startup.
 These are historical fake-model measurements, not new provider measurements.
 The historical sampler is not yet integrated into main; the guide identifies
 its exact source and workflow. Review and integration CI remain pending.
+### #152 Received List Language Slice
+
+The bounded received-record list uses the startup UI language for generated
+headings, page controls, state labels and missing-text hints. Request and
+received excerpts remain source text, subject to the existing sanitization and
+length limits. This is one Stage C slice, not the full language audit.
