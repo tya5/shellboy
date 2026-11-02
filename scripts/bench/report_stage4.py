@@ -29,8 +29,10 @@ def render(result):
             columns = [show_median([row.get(key) for row in conversations])
                        for key in ('total_bytes', 'first_bytes', 'last_bytes')]
             stored = case['storage']
+            storage_columns = [str(stored[key]) if stored[key] is not None else 'unknown'
+                               for key in ('bytes', 'files')]
             lines.append('| ' + ' | '.join([agent['agent'], str(case['n']), *columns,
-                                             str(stored['bytes']), str(stored['files'])]) + ' |')
+                                             *storage_columns]) + ' |')
     return '\n'.join(lines)
 
 
