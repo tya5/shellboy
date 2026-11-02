@@ -634,9 +634,19 @@
     "reason": "Reviewed RecoveryStage::localized: this complete Japanese stage label has an explicit English counterpart selected by UiLanguage; the recovery renderer and bilingual tests use that mapping.",
     "source_tokens_sha256": "8025dee052f806da46f2b459ebae0559daad8df6dc0b9d0951462221db6ad2d8"
   },
+  "src/ui/activity.rs:937cabd1907505bc:1": {
+    "category": "a",
+    "reason": "Reviewed ContextReductionSummary::localized: this complete Japanese summary is matched by a complete ASCII English sentence in the UiLanguage::En arm; Japanese width variants are retained and tested.",
+    "source_tokens_sha256": "d7af911f88b2e1debdad07e43c3c6499361c83723bc50ea176c87e4be92e083e"
+  },
   "src/ui/activity.rs:bc1dc00855e49894:1": {
     "category": "a",
     "reason": "Reviewed saved_recovery_reason_unavailable: the complete fallback sentence has explicit Japanese and English variants; English is ASCII, and raw provider messages bypass the fallback translation.",
     "source_tokens_sha256": "6bf7e1f513731bc2de7fda549bf6fa1bba6b33c25932cc58a4f3ee704d2eb588"
+  },
+  "src/ui/activity.rs:f806b12407895eae:1": {
+    "category": "a",
+    "reason": "Reviewed ContextReductionSummary::localized: this complete Japanese summary is matched by a complete ASCII English sentence in the UiLanguage::En arm; Japanese width variants are retained and tested.",
+    "source_tokens_sha256": "d7af911f88b2e1debdad07e43c3c6499361c83723bc50ea176c87e4be92e083e"
   }
 }

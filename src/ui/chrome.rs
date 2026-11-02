@@ -367,7 +367,7 @@ pub(super) fn footer_lines(
         if phase.is_active()
             && let Some(reduction) = snapshot.context_reduction.as_ref()
         {
-            facts.push(reduction.clone());
+            facts.push(reduction.localized(view.language));
         }
     }
     if let Some(gap) = view
