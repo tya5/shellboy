@@ -7,9 +7,10 @@ call arguments, which remain on the call item; it retains the original result
 reference and reports the UTF-8 byte length of the original serialized tool-result output.
 Prior placeholders did not carry a size; already-saved spills are not rewritten.
 
-The user chose the simplest policy: B adds a replacement operation and its
-reasoning replay contract cannot be established with mocks. The only real case
-so far is one W3 conversation from before the #153 fix. The user will check
+The reviewer chose, following the user's direction to keep Shellboy simple,
+the simplest policy: B adds a replacement operation and its reasoning replay
+contract cannot be established with mocks. The only real case so far is one W3
+conversation from before the #153 fix. The reviewer will check
 post-0.6.0 worker conversations twice daily, tracking reported `input_tokens`
 within a Turn and what remains after spill. Reconsider B only if a real example
 continues growing substantially beyond the threshold. Synthetic bytes are not
