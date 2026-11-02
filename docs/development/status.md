@@ -34,11 +34,14 @@ Synthetic checks cover fast and slow jobs, privacy and emission limits; CI and
 integration are tracked separately in acceptance.
 ## Drain while paused (#164, superseded by #173)
 
-The #164 hotfix blocked automatic history admission and used persisted cleanup
-state to discard pending automatic work. #173 replaces that behavior with
-paused-consumer discarding and removes the `discarded_auto_pending` status field.
-The separate #164 `read_next_delay` fix remains in place. Validation used
-synthetic temp-DB tests; real large-backlog behavior was not measured.
+The #164 hotfix blocked automatic history admission while paused or while
+`auto_history` was false. Its persisted cleanup state discarded pending automatic
+jobs, their `index.input.*`, automatic `index.bootstrap.*`, and pending
+`index.auto.*` in 128-row/key transactions, and reported
+`discarded_auto_pending` in `index status`. #173 replaces that behavior with
+paused-consumer discarding and removes that status field. The separate #164
+`read_next_delay` fix remains in place. Validation used synthetic temp-DB tests;
+real large-backlog behavior was not measured.
 
 ## Automatic compaction activity (#165, in progress)
 
