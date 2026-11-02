@@ -123,7 +123,11 @@ async fn proxy_with_sse(
                         "text/event-stream",
                         format!(
                             "data: {}\n\n",
-                            json!({"type":"response.completed","response":body})
+                            json!({"type":match body["status"].as_str() {
+                                Some("incomplete") => "response.incomplete",
+                                Some("failed") => "response.failed",
+                                _ => "response.completed",
+                            },"response":body})
                         ),
                     )
                 } else {
@@ -3909,7 +3913,11 @@ async fn content_filter_terminal_preserves_facts_without_automatic_retry() {
             },
             "output": []
         });
-        incoming(&control, &mut receive).await.reply.send((200, response.clone())).unwrap();
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, response.clone()))
+            .unwrap();
         settled(&control, &target).await;
         control.store.database.call(move |db| {
             let (state, attempts, error): (String, i64, String) = db.query_row(
@@ -3924,7 +3932,10 @@ async fn content_filter_terminal_preserves_facts_without_automatic_retry() {
             assert!(error.get("automatic_retry_exhausted").is_none());
             Ok(())
         }).await.unwrap();
-        assert!(receive.try_recv().is_err(), "no second POST with retry budget enabled");
+        assert!(
+            receive.try_recv().is_err(),
+            "no second POST with retry budget enabled"
+        );
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();

@@ -92,6 +92,7 @@ impl ActivityPhase {
 pub struct RecoverySnapshot {
     pub resolved: bool,
     pub usage_limit: Option<crate::model::usage_limit::UsageLimit>,
+    pub content_filter: Option<crate::model::content_filter::ContentFilterFacts>,
     pub stage: String,
     pub message: String,
     pub pending_messages: u64,

@@ -103,6 +103,21 @@ pub(super) async fn retry_or_recover(
             details["usage_limit"] = fact.details();
         }
     }
+    if failure.error.kind == "incomplete" {
+        let facts = model::content_filter::ContentFilterFacts::from_response(
+            failure.raw_response.as_ref().unwrap_or(&Value::Null),
+        );
+        if facts.is_content_filter() {
+            error.hint = Some(format!(
+                "{} {}",
+                error.hint.as_deref().unwrap_or(""),
+                model::content_filter::NEXT_ACTIONS_HINT
+            ));
+        }
+        if let Some(details) = &mut error.details {
+            details["content_filter"] = json!(facts);
+        }
+    }
     let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
     if let Some(observation) = trim_not_applied {
         saved["automatic_trim_attempt"] = observation;

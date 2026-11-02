@@ -1,6 +1,7 @@
 //! Bounded Responses SSE parsing and completed-response validation.
 
 pub(crate) mod cache_diagnostics;
+pub mod content_filter;
 pub mod dialect;
 pub mod http;
 pub mod opaque;

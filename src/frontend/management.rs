@@ -127,6 +127,7 @@ pub(super) fn report(value: Value, budget: usize) -> Report {
         ],
     );
     presentation::fields::decorate(&mut fields, &safe);
+    presentation::content_filter::append_fields(&mut fields, &safe, crate::config::UiLanguage::Ja);
     fn order(pointer: &str) -> (String, u8, String) {
         let (parent, key) = pointer.rsplit_once('/').unwrap_or(("", pointer));
         let parent = parent

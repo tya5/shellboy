@@ -22,6 +22,7 @@ pub(crate) async fn work<T: Send + 'static>(
 
 mod time_text;
 pub use time_text::{TIME_TEXT, elapsed_text, ended_text};
+pub mod content_filter;
 mod events;
 pub(crate) mod fields;
 mod markdown_links;

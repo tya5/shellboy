@@ -5330,6 +5330,24 @@ pub(super) fn recovery_lines(
         (false, false) => "入力で新しい作業 | F8 作業/応答処理の詳細",
     };
     let mut essential = vec![Line::from(title)];
+    if let Some(facts) = &recovery.content_filter {
+        let summary = crate::presentation::content_filter::summary(facts, language);
+        essential.extend(
+            hanging_wrap(vec![Line::from(summary)], width.max(1))
+                .into_iter()
+                .take(2),
+        );
+        if current && facts.is_content_filter() {
+            essential.extend(hanging_wrap(
+                vec![Line::from(
+                    crate::presentation::content_filter::compact_actions(language),
+                )],
+                width.max(1),
+            ));
+            essential.truncate(usize::from(height));
+            return essential;
+        }
+    }
     essential.push(Line::from(if en {
         format!(
             "{} live shells | {} uncollected | Review side effects in details",

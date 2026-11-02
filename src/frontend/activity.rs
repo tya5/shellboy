@@ -371,6 +371,11 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                     .and_then(|e| e.details.as_ref())
                     .and_then(|d| d.get("usage_limit"))
                     .and_then(|v| serde_json::from_value(v.clone()).ok()),
+                content_filter: error
+                    .as_ref()
+                    .and_then(|e| e.details.as_ref())
+                    .and_then(|d| d.get("content_filter"))
+                    .and_then(|v| serde_json::from_value(v.clone()).ok()),
                 stage,
                 message,
                 pending_messages,

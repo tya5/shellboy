@@ -601,3 +601,43 @@ fn resumed_saved_failure_count_and_raw_reason_survive_provenance_in_both_languag
         UiLanguage::Ja => &["記録したモデル失敗2件", "Raw saved failure"],
     });
 }
+
+#[test]
+fn content_filter_banner_keeps_provider_category_and_recovery_actions_in_both_languages() {
+    use crate::ui::activity::{ActivitySnapshot, RecoverySnapshot};
+    let facts = crate::model::content_filter::ContentFilterFacts::from_response(&json!({
+        "incomplete_details":{"reason":"content_filter"},
+        "content_filter_results":{"protected_material_code":{"filtered":true,"detected":true}}
+    }));
+    for language in [UiLanguage::En, UiLanguage::Ja] {
+        for width in [80, 120] {
+            let snapshot = ActivitySnapshot {
+                phase: crate::activity::ActivityPhase::Recovery,
+                recovery: Some(RecoverySnapshot {
+                    content_filter: Some(facts.clone()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let lines = recovery_lines(&snapshot, language, width, 6);
+            let text = lines
+                .iter()
+                .flat_map(|line| line.spans.iter().map(|span| span.content.as_ref()))
+                .collect::<String>();
+            for expected in [
+                "content_filter",
+                "protected_material_code",
+                "/retry",
+                "/detach",
+                "cp",
+                "curl",
+                "F8",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "{language:?}/{width}: missing {expected}: {text}"
+                );
+            }
+        }
+    }
+}
