@@ -291,7 +291,7 @@ A separate TUI-hosted Shellboy owner was also sampled before any workload with
 N prepared threads. For N=1/5/10/20, its median baseline PSS was
 16,622/16,637/16,514/17,078 KiB (three repetitions). This is a different owner
 and an idle baseline, not the incremental cost of adding a TUI to `serve`, and
-not a TUI-colocated in-flight peak. Workload-time TUI PSS remains unmeasured.
+not a TUI-colocated in-flight peak. A separate workload-time observation follows.
 
 A subsequent same-run Linux observation exercised the same synthetic workload
 with a TUI-hosted owner, rather than just sampling an idle TUI. Each cell is
