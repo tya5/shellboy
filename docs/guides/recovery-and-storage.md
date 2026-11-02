@@ -142,6 +142,24 @@ Recovery wait is time awaiting human action, not continued model processing. An 
 shellboy run retry --run RUN_ID
 ```
 
+If a provider rejects an attachment, inspect `shellboy attachment list --thread
+THREAD_ID`, then exclude the specific attachment before retrying:
+
+```sh
+shellboy attachment remove --thread THREAD_ID --attachment ATTACHMENT_ID
+shellboy run retry --run RUN_ID
+```
+
+The TUI equivalents are `/attachments`, `/detach ATTACHMENT_ID`, and `/retry`.
+Exclusion does not delete the file; the model receives an exclusion notice
+instead of its contents. Confirm the Thread, attachment, and recovery-wait Run
+before acting. If removal is unavailable, an external file can instead be
+moved or renamed by its owner so that the saved absolute path is unavailable;
+the retry sends an unavailable notice. Do not move a managed or shared file
+without checking its impact. Restoring the original path can cause later sends
+to include it again and repeat the rejection. Neither workaround proves the
+provider accepts other attachments.
+
 An external human CLI or the direct owning parent decides recovery. Merely being an ancestor model or an independent chat does not confer the same authority. An ordinary parent message is not a retry. A human's new instruction can explicitly resume the same recovery Turn, but the command above clearly retries the original Turn after its cause is fixed.
 
 `run retry` does not revive a terminal Run. After stop/restart, send a new instruction to create a new Run/Turn. Restart never stops an old PID or automatically repeats shell side effects. Previously uncertain state becomes history/restart context.

@@ -8171,3 +8171,22 @@ Local macOS fmt/check and4 copy tests plus1 injected original-body integration
 passed. Exact corrected-tip CI is reported separately; old-tip CI does not
 qualify this correction. No physical terminal, OS clipboard or live-provider
 acceptance is inferred. This product change is not for0.6.0.
+
+## #158 attachment MIME investigation (in progress)
+
+On macOS, isolated source-built binaries at v0.5.0 `02fda155` and v0.6.0
+`358ed63b` used separate temporary data directories and a loopback Responses
+mock. An external UTF-8 `.log` attachment was sent as octet-stream in the
+first and a later Turn on both versions; the mock deliberately accepted the
+first and rejected the second. Moving the synthetic file before retry sent an
+unavailable notice and completed the same Turn in both versions. A separate
+v0.6.0 run explicitly removed the attachment before retry and completed while
+keeping the synthetic file. No real provider or user file was accessed.
+
+On macOS, `cargo fmt`, `cargo check --tests`, the focused MIME unit test,
+three `issue_158_` loopback integration tests, all 11 attachment provenance
+tests and all 25 attachment service tests passed after the approved change.
+They cover UTF-8 files with five unknown/no extensions, unknown binary replaced
+with an unavailable notice, conversion and later replay, and both removal and
+moving of a rejected protected attachment before retry. Native Linux/Windows and
+actual provider compatibility remain untested locally; branch CI is pending.

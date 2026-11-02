@@ -94,6 +94,14 @@ Managed images removed from selection or drafts become candidates for age/capaci
 
 When the total exceeds the limit, attachments already sent as history are excluded oldest first. Newly added attachments remain protected until a successful request completes; Shellboy does not guess their importance and discard them. Adding protected content that alone exceeds the limit is an error. If files grow after acceptance and protected content exceeds the limit, the request is held in recovery wait too. Reduce, shrink, or split the target content, then explicitly retry.
 
+Shellboy identifies PNG, JPEG, GIF, WebP and PDF from their signatures and
+valid UTF-8 text from its bytes rather than its extension. A file that is
+neither recognized nor readable text is treated like an unavailable attachment:
+the model receives an English notice at its original position instead of file
+bytes. The original file and reference remain; the notice does not establish a
+successful file-send baseline. Converting the file can make it sendable on a
+later request. The notice and manifest indicate the file was not sent.
+
 Accepting paths with arbitrary extensions does not mean the model understands their content. Image, PDF, and other file support depend on the proxy/model. Shellboy does not automatically add Office conversion, OCR, or audio/video conversion. For rejection of an unsupported format, convert it yourself into a supported input, exclude the attachment, or choose a suitable connection. There is no automatic model or format fallback.
 
 See [Recovery and storage](recovery-and-storage.md) for retention, reclamation, and quotas, and [History and search](history-and-search.md) for original-content references.

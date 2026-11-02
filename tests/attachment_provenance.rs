@@ -1222,3 +1222,235 @@ async fn unavailable_new_attachment_is_consumed_by_success_without_a_fabricated_
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue_158_utf8_unknown_extensions_send_as_text() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let mut inputs = Vec::new();
+    for name in [
+        "sample.log",
+        "settings.yaml",
+        "script.sh",
+        "code.ts",
+        "no-extension",
+    ] {
+        let path = root.path().join(name);
+        std::fs::write(&path, "synthetic text\n").unwrap();
+        inputs.push(AttachmentInput {
+            path,
+            kind: AttachmentKind::File,
+        });
+    }
+    let accepted = control
+        .send_draft(
+            operation(&control),
+            defaults(),
+            None,
+            "inspect files".into(),
+            inputs,
+        )
+        .await
+        .unwrap();
+    let thread = accepted["thread_id"].as_str().unwrap();
+    let incoming = incoming(&control, thread, &mut receive).await;
+    let files: Vec<_> = incoming.body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|item| item["content"].as_array().into_iter().flatten())
+        .filter(|part| part["type"] == "input_file")
+        .collect();
+    assert_eq!(files.len(), 5);
+    assert!(files.iter().all(|file| {
+        file["file_data"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:text/plain;base64,")
+    }));
+    let recorded = manifest(&control, thread).await;
+    assert_eq!(attachments(&recorded).len(), 5);
+    assert!(
+        attachments(&recorded)
+            .iter()
+            .all(|item| item["mime_type"] == "text/plain")
+    );
+    finish(&control, thread, incoming).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue_158_recovery_can_remove_or_move_rejected_attachment_before_retry() {
+    for remove in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = owner(root.path(), &url).await;
+        let control = Control::new(&owner, root.path().into());
+        let path = root.path().join("synthetic.pdf");
+        std::fs::write(&path, b"%PDF-1.7 synthetic").unwrap();
+        let accepted = control
+            .send_draft(
+                operation(&control),
+                defaults(),
+                None,
+                "inspect".into(),
+                vec![AttachmentInput {
+                    path: path.clone(),
+                    kind: AttachmentKind::File,
+                }],
+            )
+            .await
+            .unwrap();
+        let thread = accepted["thread_id"].as_str().unwrap().to_owned();
+        let turn = accepted["turn_id"].as_str().unwrap().to_owned();
+        let run = accepted["run_id"].as_str().unwrap().to_owned();
+        let first = incoming(&control, &thread, &mut receive).await;
+        assert!(
+            first
+                .body
+                .to_string()
+                .contains("data:application/pdf;base64,")
+        );
+        let saved = manifest(&control, &thread).await;
+        let id = attachments(&saved)[0]["attachment_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        first
+            .reply
+            .send((
+                400,
+                json!({"error":{"message":"synthetic unsupported attachment"}}),
+            ))
+            .unwrap();
+        settled(&control, &thread).await;
+        let target = turn.clone();
+        assert_eq!(
+            control
+                .store
+                .database
+                .call(move |db| db
+                    .query_row("SELECT state FROM turn WHERE id=?1", [target], |r| r
+                        .get::<_, String>(0))
+                    .map_err(Into::into))
+                .await
+                .unwrap(),
+            "recovery_wait"
+        );
+        if remove {
+            request(
+                &control,
+                Command::AttachmentRemove(AttachmentRemoveArgs {
+                    thread_id: Some(thread.clone()),
+                    attachment_id: id,
+                }),
+            )
+            .await;
+            assert!(path.exists(), "removal must not delete the external file");
+        } else {
+            std::fs::rename(&path, root.path().join("moved.pdf")).unwrap();
+        }
+        request(&control, Command::RunRetry(RunTarget { run_id: run })).await;
+        let retry = incoming(&control, &thread, &mut receive).await;
+        let body = retry.body.to_string();
+        assert!(!body.contains("data:application/pdf;base64,"));
+        assert!(body.contains(if remove {
+            "Attachment excluded from sending"
+        } else {
+            "Attachment unavailable"
+        }));
+        let recorded = manifest(&control, &thread).await;
+        assert_eq!(
+            attachments(&recorded)[0]["state"],
+            if remove { "excluded" } else { "unavailable" }
+        );
+        finish(&control, &thread, retry).await;
+        let target = turn.clone();
+        assert_eq!(
+            control
+                .store
+                .database
+                .call(move |db| db
+                    .query_row("SELECT state FROM turn WHERE id=?1", [target], |r| r
+                        .get::<_, String>(0))
+                    .map_err(Into::into))
+                .await
+                .unwrap(),
+            "completed"
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue_158_unknown_binary_is_unavailable_not_sent_and_can_be_converted() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let path = root.path().join("misleading.txt");
+    let bytes = b"\x00\xff\x80synthetic";
+    std::fs::write(&path, bytes).unwrap();
+    let accepted = control
+        .send_draft(
+            operation(&control),
+            defaults(),
+            None,
+            "inspect binary".into(),
+            vec![AttachmentInput {
+                path: path.clone(),
+                kind: AttachmentKind::File,
+            }],
+        )
+        .await
+        .unwrap();
+    let thread = accepted["thread_id"].as_str().unwrap().to_owned();
+    let first = incoming(&control, &thread, &mut receive).await;
+    let original = manifest(&control, &thread).await;
+    let entry = &attachments(&original)[0];
+    assert_eq!(entry["state"], "unavailable");
+    assert!(entry["content_hash"].is_null());
+    assert!(entry["mime_type"].is_null());
+    assert!(
+        entry["error"]
+            .as_str()
+            .unwrap()
+            .contains("Unsupported attachment format")
+    );
+    assert_position(&first.body, entry, "inspect binary", None, "input_text");
+    let wire = first.body.to_string();
+    assert!(wire.contains("Attachment unavailable"));
+    assert!(wire.contains("the file was not sent"));
+    assert!(!wire.contains("input_file"));
+    assert!(!wire.contains("application/octet-stream"));
+    let id = entry["attachment_id"].as_str().unwrap().to_owned();
+    let source = entry["source_node_id"].as_str().unwrap().to_owned();
+    finish(&control, &thread, first).await;
+    let copy = id.clone();
+    control.store.database.call(move |db| {
+        assert_eq!(db.query_row("SELECT COUNT(*) FROM attachment_send WHERE attachment_id=?1 AND (state='sent' OR content_hash IS NOT NULL)",[copy],|r|r.get::<_,i64>(0))?,0);
+        Ok(())
+    }).await.unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    std::fs::write(&path, b"converted to valid UTF-8 text\n").unwrap();
+    send(&control, &thread, "inspect after conversion").await;
+    let second = incoming(&control, &thread, &mut receive).await;
+    let converted = manifest(&control, &thread).await;
+    let entry = &attachments(&converted)[0];
+    assert_eq!(entry["attachment_id"], id);
+    assert_eq!(entry["source_node_id"], source);
+    assert_eq!(entry["state"], "ready");
+    assert_eq!(entry["mime_type"], "text/plain");
+    assert!(entry["previous_hash"].is_null());
+    assert!(second.body.to_string().contains("data:text/plain;base64,"));
+    finish(&control, &thread, second).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}

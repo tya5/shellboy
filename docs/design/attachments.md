@@ -94,3 +94,30 @@ the SQLite connection before starting path observations. Metadata/open probes th
 reuse the existing control-file admission owned by InstructionLoader (the same
 finite permit/deadline/actual-closure lifetime as AGENTS/cwd reads). No additional
 worker, queue, DB connection or cache is created for the file phase.
+
+## Content-based attachment MIME detection (#158)
+
+Request preparation determines MIME from the bytes actually read, never from a
+filename extension. Existing PNG, JPEG, GIF, WebP and PDF signatures take
+precedence. Other contents are text/plain when they are valid UTF-8 text and
+contain no non-whitespace control characters; otherwise they are unknown binary.
+Recognized signatures and text are independent of extension. A known extension
+must not cause invalid UTF-8 or arbitrary binary to be declared text or an image.
+This classification does not prove that a provider accepts a recognized format.
+
+Unknown binary is handled exactly like an unreadable attachment: no binary is
+sent, its original source slot expands to an English unavailable notice saying
+the format was not sent, and the attempt manifest records `unavailable` with
+the reason. The original file and reference remain intact, and success does
+not mark that content sent or establish a hash baseline. A later request reads
+the current bytes again. User-facing inspection uses the existing unavailable
+contract and localization rules. No new setting or fallback is introduced.
+
+Explicit removal from a saved Thread excludes the selected attachment by ID,
+including while a Turn waits for recovery, without deleting the file or source
+node. Selection revision fencing still prevents a stale in-flight preparation
+from being adopted. Explicit retry re-prepares the original Turn and emits an
+excluded notice in place of the bytes. File unavailability is an alternative
+non-destructive workaround: the existing path is read on preparation and an
+unavailable notice is sent in place of content; restoring the path makes it
+eligible on later requests again. Never automatically move a user's file.

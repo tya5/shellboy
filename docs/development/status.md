@@ -1,5 +1,15 @@
 # Development status
 
+## Attachment MIME and recovery (#158, in progress)
+
+The v0.5.0 and v0.6.0 synthetic loopback reproductions both resend historical
+attachments; moving the rejected external file or explicitly excluding it before
+retry recovered the v0.6.0 fixture. Content-based MIME classification and
+recovery regression coverage use content-based MIME detection. The user approved
+and the implementation uses the existing unavailable notice for unknown binary
+attachments. Focused macOS checks passed; branch CI and integration are pending.
+See acceptance for confirmed checks and untested cases.
+
 ## Proactive compaction retries (#153)
 
 A non-adopted proactive attempt no longer disables its entire Run. Retry requires

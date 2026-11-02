@@ -264,6 +264,8 @@ Before deleting, use F8's “会話 | 削除影響” (deletion impact) to inspe
 
 ### Recovery without token guesses
 
+For an attachment rejected during recovery, inspect `/attachments`, use `/detach ATTACHMENT_ID`, then `/retry`. Exclusion does not delete the file. See [Recovery and storage](recovery-and-storage.md) for the CLI and file-move alternative.
+
 After a failure, inspect Run/Turn context in F8. `/compact-max` reduces safe
 context without a summary API; `/retry` separately resends and may charge again.
 `/restore` can recover omitted text. Core no longer estimates tokens or uses a

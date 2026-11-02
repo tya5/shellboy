@@ -867,12 +867,18 @@ fn read_encoded(
         bytes.extend_from_slice(&buffer[..count]);
     }
     let hash = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    let mime = mime_type(path, &bytes).into();
+    let mime = mime_type(&bytes);
+    if mime == "application/octet-stream" {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "Unsupported attachment format; the file was not sent. Convert it to a supported text, image, or PDF format",
+        ));
+    }
     let encoded = Arc::new(Encoded {
         base64: STANDARD.encode(&bytes),
         hash,
         raw_size: bytes.len() as u64,
-        mime,
+        mime: mime.into(),
     });
     let mut cache = cache.lock().expect("attachment cache poisoned");
     cache.clock += 1;
@@ -909,7 +915,7 @@ fn read_encoded(
     }
     Ok(encoded)
 }
-fn mime_type(path: &Path, bytes: &[u8]) -> &'static str {
+fn mime_type(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         "image/png"
     } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
@@ -921,18 +927,14 @@ fn mime_type(path: &Path, bytes: &[u8]) -> &'static str {
     } else if bytes.starts_with(b"%PDF-") {
         "application/pdf"
     } else {
-        match path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "txt" | "md" | "rs" | "py" | "json" | "toml" | "csv" => "text/plain",
-            "png" => "image/png",
-            "jpg" | "jpeg" => "image/jpeg",
-            "gif" => "image/gif",
-            "webp" => "image/webp",
+        match std::str::from_utf8(bytes) {
+            Ok(text)
+                if text
+                    .chars()
+                    .all(|ch| !ch.is_control() || matches!(ch, '\n' | '\r' | '\t' | '\x0c')) =>
+            {
+                "text/plain"
+            }
             _ => "application/octet-stream",
         }
     }
@@ -1200,5 +1202,29 @@ impl AttachmentService {
             .await
             .map_err(storage_error)?;
         Ok(report)
+    }
+}
+
+#[cfg(test)]
+mod mime_tests {
+    use super::mime_type;
+
+    #[test]
+    fn classifies_content_without_filename_hints() {
+        for text in [
+            "hello\n",
+            "\u{65e5}\u{672c}\u{8a9e}\ttext\r\n",
+            "",
+            "#!/bin/sh\necho ok\n",
+        ] {
+            assert_eq!(mime_type(text.as_bytes()), "text/plain");
+        }
+        assert_eq!(mime_type(b"%PDF-1.7\n"), "application/pdf");
+        assert_eq!(mime_type(b"\x89PNG\r\n\x1a\n"), "image/png");
+        assert_eq!(mime_type(b"GIF89a"), "image/gif");
+        assert_eq!(mime_type(b"\xff\xd8\xff"), "image/jpeg");
+        assert_eq!(mime_type(b"RIFF\x00\x00\x00\x00WEBP"), "image/webp");
+        assert_eq!(mime_type(b"binary\x00data"), "application/octet-stream");
+        assert_eq!(mime_type(b"invalid\xffutf8"), "application/octet-stream");
     }
 }
