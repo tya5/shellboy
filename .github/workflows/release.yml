@@ -22,16 +22,86 @@ on:
         default: ''
         type: string
 
+      dry_run:
+        description: Select and verify candidate without building or publishing
+        required: false
+        default: false
+        type: boolean
+
+      dry_run_sha:
+        description: Exact SHA to inspect in dry-run mode (no tag required)
+        required: false
+        default: ''
+        type: string
+
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-${{ inputs.candidate_ref || inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  build:
+  select:
+    name: Select verified candidate or build
     if: ${{ !inputs.installer_checks }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      route: ${{ steps.route.outputs.route }}
+      sha: ${{ steps.route.outputs.sha }}
+      candidate_run: ${{ steps.route.outputs.candidate_run }}
+      candidate_attempt: ${{ steps.route.outputs.candidate_attempt }}
+      ci_run: ${{ steps.route.outputs.ci_run }}
+      ci_attempt: ${{ steps.route.outputs.ci_attempt }}
+    steps:
+      - name: Validate non-publishing mode
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN_SHA: ${{ inputs.dry_run_sha }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+        run: |
+          if [[ "$DRY_RUN" == "true" ]]; then
+            [[ "$DRY_RUN_SHA" =~ ^[0-9a-f]{40}$ && -z "$CANDIDATE_REF" ]] || { echo 'dry_run requires dry_run_sha and no candidate_ref' >&2; exit 1; }
+          elif [[ -n "$DRY_RUN_SHA" ]]; then
+            echo 'dry_run_sha is allowed only in dry_run mode' >&2; exit 1
+          fi
+      - uses: actions/checkout@v4
+        if: ${{ !inputs.candidate_ref }}
+        with:
+          ref: ${{ inputs.dry_run_sha || format('refs/tags/{0}', inputs.release_tag || github.ref_name) }}
+          persist-credentials: false
+      - name: Resolve candidate
+        id: route
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          DRY_RUN_SHA: ${{ inputs.dry_run_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CANDIDATE_REF" ]]; then
+            echo 'route=build' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha=$(git rev-parse HEAD)
+          [[ -z "$DRY_RUN_SHA" || "$sha" == "$DRY_RUN_SHA" ]]
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          python3 scripts/release_candidate.py --sha "$sha" --tag "$RELEASE_TAG" --output selected-dist
+      - uses: actions/upload-artifact@v4
+        if: ${{ steps.route.outputs.route == 'reuse' && !inputs.dry_run }}
+        with:
+          name: selected-release-assets
+          path: selected-dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  build:
+    needs: select
+    if: ${{ !inputs.installer_checks && !inputs.dry_run && needs.select.outputs.route == 'build' }}
     name: Build ${{ matrix.target }}
     strategy:
       fail-fast: false
@@ -202,12 +272,39 @@ jobs:
           PY
           (cd dist && sha256sum --check SHA256SUMS)
       - uses: actions/upload-artifact@v4
+        id: assets
         with:
           name: candidate-assets
           path: dist/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+      - name: Record candidate identity
+        if: ${{ inputs.candidate_ref }}
+        shell: bash
+        env:
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          ASSET_ID: ${{ steps.assets.outputs.artifact-id }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert sha == os.environ['CANDIDATE_REF']
+          proof = {'repository': os.environ['GITHUB_REPOSITORY'], 'sha': sha,
+                   'tag': os.environ['RELEASE_TAG'], 'run_id': int(os.environ['GITHUB_RUN_ID']),
+                   'attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+                   'asset_id': int(os.environ['ASSET_ID']),
+                   'sums_sha256': hashlib.sha256(Path('dist/SHA256SUMS').read_bytes()).hexdigest()}
+          Path('candidate-proof.json').write_text(json.dumps(proof, sort_keys=True), encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.candidate_ref }}
+        with:
+          name: candidate-proof-${{ inputs.candidate_ref }}-${{ inputs.release_tag }}-a${{ github.run_attempt }}
+          path: candidate-proof.json
+          if-no-files-found: error
+          retention-days: 90
 
 
   candidate-installers:
@@ -261,21 +358,66 @@ jobs:
 
   publish:
     name: Publish release and checksums
-    if: ${{ !inputs.installer_checks && !inputs.candidate_ref }}
-    needs: assemble
+    if: ${{ always() && !inputs.installer_checks && !inputs.candidate_ref && !inputs.dry_run && needs.select.result == 'success' && (needs.select.outputs.route == 'reuse' || needs.assemble.result == 'success') }}
+    needs: [select, assemble]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
+      actions: read
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      SELECTED_SHA: ${{ needs.select.outputs.sha }}
+      RELEASE_ROUTE: ${{ needs.select.outputs.route }}
+      CANDIDATE_RUN: ${{ needs.select.outputs.candidate_run }}
+      CANDIDATE_ATTEMPT: ${{ needs.select.outputs.candidate_attempt }}
+      CI_RUN: ${{ needs.select.outputs.ci_run }}
+      CI_ATTEMPT: ${{ needs.select.outputs.ci_attempt }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ format('refs/tags/{0}', inputs.release_tag || github.ref_name) }}
+          persist-credentials: false
+      - name: Verify tag remains on selected commit
+        run: test "$(git rev-parse HEAD)" = "$SELECTED_SHA"
+      - name: Recheck candidate and CI attempts
+        if: ${{ needs.select.outputs.route == 'reuse' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pair in "$CANDIDATE_RUN:$CANDIDATE_ATTEMPT" "$CI_RUN:$CI_ATTEMPT"; do
+            id=${pair%:*}; attempt=${pair#*:}
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '[.run_attempt, .status, .conclusion] | @tsv' | grep -Fx "$attempt"$'\tcompleted\tsuccess'
+          done
       - uses: actions/download-artifact@v4
         with:
-          name: candidate-assets
+          name: ${{ needs.select.outputs.route == 'reuse' && 'selected-release-assets' || 'candidate-assets' }}
           path: dist
+      - name: Verify publication assets and record provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check SHA256SUMS)
+          python3 - <<'PY'
+          import hashlib, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from release_candidate import verify_assets
+          assets = {p.name: p.read_bytes() for p in Path('dist').iterdir() if p.is_file()}
+          verify_assets(assets, os.environ['RELEASE_TAG'], hashlib.sha256(assets['SHA256SUMS']).hexdigest())
+          route = os.environ['RELEASE_ROUTE']
+          origin = (f"Candidate run: {os.environ['CANDIDATE_RUN']} (attempt {os.environ['CANDIDATE_ATTEMPT']})"
+                    if route == 'reuse' else f"Publication build run: {os.environ['GITHUB_RUN_ID']} (no candidate reused)")
+          if route == 'reuse':
+              origin += f"\nThree-OS CI run: {os.environ['CI_RUN']} (attempt {os.environ['CI_ATTEMPT']})"
+          evidence = f"{origin}\nCommit: {os.environ['SELECTED_SHA']}\n\nSHA256SUMS:\n```\n{assets['SHA256SUMS'].decode()}```\n"
+          Path('release-evidence.txt').write_text(evidence, encoding='utf-8')
+          print(evidence)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(evidence)
+          PY
       - name: Upload all assets before publishing
         shell: bash
         run: |
@@ -287,8 +429,17 @@ jobs:
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft --title "Shellboy $RELEASE_TAG" --generate-notes
           fi
+          gh release view "$RELEASE_TAG" --json body --jq .body > release-notes.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          notes = Path('release-notes.txt').read_text(encoding='utf-8')
+          marker = '<!-- shellboy-release-provenance -->'
+          notes = notes.split(marker, 1)[0].rstrip()
+          evidence = Path('release-evidence.txt').read_text(encoding='utf-8')
+          Path('release-notes.txt').write_text(f'{notes}\n\n{marker}\n{evidence}', encoding='utf-8')
+          PY
           gh release upload "$RELEASE_TAG" dist/* --clobber
-          gh release edit "$RELEASE_TAG" --draft=false
+          gh release edit "$RELEASE_TAG" --notes-file release-notes.txt --draft=false
 
   installer-unix:
     if: ${{ inputs.installer_checks }}
