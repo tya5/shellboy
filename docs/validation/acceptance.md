@@ -356,7 +356,8 @@ surfaces, cache percentage and successful image-attachment notice. F6 groups map
 `その他`/`Other`. Group identity is derived from field keys; labels, values,
 copy targets and attachment data are not translated.
 
-macOS rust-slot focused tests: `ui::chrome::tests` (12),
+On macOS after rebasing to main `87d80574`, rust-slot focused tests
+`ui::chrome::tests` (15), `ui::chrome::context_bar_tests` (3),
 `field_group_headings_are_bilingual` (1), and
 `group_labels_follow_language_without_changing_group_identity` (1) passed.
 They cover both languages, narrow/full welcome hints, width policies 1/2/unknown,

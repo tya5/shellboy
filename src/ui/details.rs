@@ -1892,7 +1892,10 @@ mod tests {
             let mut details = Details::new(ui.view(), false);
             details.mode = Mode::Fields;
             let fields = details.fields(ui.view());
-            details.selected = fields.iter().position(|field| field.key == "/state").unwrap();
+            details.selected = fields
+                .iter()
+                .position(|field| field.key == "/state")
+                .unwrap();
             assert_eq!(fields[details.selected].label, "実行中");
             assert_eq!(fields[details.selected].value, "実行中");
             let mut next = 0;
