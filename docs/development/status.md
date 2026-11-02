@@ -3892,3 +3892,14 @@ slot/locked/two-thread fmt/check/Clippy passed, with diagnostics4, clipboard1,
 startup5, management18, content-filter unit10/integration2, layout102/watchdog
 and Python146 passing. Exact task CI/formal handoff are pending; earlier
 027e455e CI does not validate this restack. No new feature/policy/config change.
+
+### Codex shared process benchmark (#151)
+
+The comparison harness can also drive multiple concurrent Codex Threads through
+one app-server, without changing the existing per-session adapter. A local macOS
+protocol smoke with Codex 0.165.0 completed N=2, 5 and 10 for five fake-model
+rounds; it has no PSS observations. Linux comparison results for the pinned
+0.166.0 are pending and must not be inferred from that smoke. Claude's public
+CLI exposes one session ID and stream per invocation; the official Python Agent
+SDK uses a CLI subprocess transport. This does not prove other Claude process
+topologies cannot exist.
