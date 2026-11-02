@@ -39,6 +39,12 @@ Run: stop, shutdown and recovery wait hand it to the ordinary held-input rules. 
 `limits.revisit_max_per_run`, `revisit_limit_reached` and the Revisit capture
 diagnostic are removed. Migration 24 drops the old metadata and adds
 `receipt_run_completion`. Validation status is in acceptance.
+## F8 action list scrollbar (#176)
+
+The grouped action list uses the shared popup list and scrollbar. Section
+headings remain display-only; selection, marker, colors, labels, and input
+routing remain unchanged. Synthetic viewport checks and native CI are recorded
+in the handoff; physical-terminal behavior remains unverified.
 
 ## Paused index consumption (#173)
 

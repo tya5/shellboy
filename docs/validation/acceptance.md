@@ -129,6 +129,13 @@ behaviour (the harness omitted Shellboy's routing headers), other
 models/endpoints, long Turns. Not validated: Claude (by instruction), Chat
 Completions, Shellboy's own B adoption code. Details:
 [midturn-compaction](../design/midturn-compaction.md#9-real-provider-validation-2026-11-03-approved-gpt-subscription-only).
+## F8 action list scrollbar (#176)
+
+Synthetic Ratatui TestBackend coverage checks small and large viewports, the
+first and final action, selection and heading styles, the scrollbar endpoints,
+nonselectable headings and a filtered list that fits. Native local results and
+three-OS CI are reported separately in the handoff. Physical terminals and IME
+behavior are not established by these tests.
 
 ## Index-source GC scan (#164, 2026-11-02)
 

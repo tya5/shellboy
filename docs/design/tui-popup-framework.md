@@ -19,6 +19,16 @@
 - 読込み中・空・失敗・表示外field・raw取得失敗は本文/補足の状態として保持し、選択行と区別する。確認は既定非実行、Y実行・N/Esc取消を維持する。フォームのvalidation errorとwait条件操作を画面外へ隠さない。
 - スレッドtreeの枝線/列/詳細、モデルのlive取得/絞込み/現在モデルを維持し、frameとselection style等の共通部品を使う。各リストのPgDn取得等、対象固有の意味を共通描画部品へ押し込まない。
 
+## F8 Action List Scrollbar (#176)
+
+The F8 action list uses the shared `popup::list` rendering and scrollbar.
+Section headings are display-only rows: operation navigation continues to select
+from the typed action list, and maps that selection to the corresponding rendered
+row. Headings count toward the visual scroll range but cannot become actions.
+Selection markers and colors, heading colors, and all labels remain unchanged.
+The footer and action counts retain their existing behavior. No new popup state,
+input controller, or wire behavior is introduced.
+
 ## リアクティブ性と検証
 
 ### 会話詳細の対象識別（2026-10-25追補）
