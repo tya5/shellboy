@@ -1,0 +1,140 @@
+//! Fixed command labels for DB jobs without capturing request data in diagnostics.
+use crate::{
+    protocol::Command,
+    storage::{DbWorker, StorageError},
+};
+use rusqlite::Connection;
+use std::any::Any;
+
+type Output = Box<dyn Any + Send>;
+type Operation = Box<dyn FnOnce(&mut Connection) -> Result<Output, StorageError> + Send>;
+
+macro_rules! named_jobs {
+    ($($variant:ident => $function:ident),+ $(,)?) => {
+        #[derive(Clone, Copy)]
+        pub(super) enum Kind { $($variant),+ }
+
+        impl Kind {
+            pub(super) fn of(command: &Command) -> Self {
+                match command {
+                    $(Command::$variant(_) => Self::$variant,)+
+                }
+            }
+        }
+
+        $(async fn $function(db: &DbWorker, operation: Operation) -> Result<Output, StorageError> {
+            db.call(move |connection| operation(connection)).await
+        })+
+
+        pub(super) async fn call<T, F>(
+            db: &DbWorker,
+            kind: Kind,
+            operation: F,
+        ) -> Result<T, StorageError>
+        where
+            T: Send + 'static,
+            F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+        {
+            // Keep the named job's type independent of request-specific closure types.
+            let boxed: Operation = Box::new(move |connection| {
+                operation(connection).map(|value| Box::new(value) as Output)
+            });
+            let value = match kind {
+                $(Kind::$variant => $function(db, boxed).await,)+
+            }?;
+            Ok(*value.downcast::<T>().unwrap_or_else(|_| unreachable!("job output type")))
+        }
+    };
+}
+
+// The exhaustive match ensures every future protocol variant gets a fixed label.
+named_jobs! {
+    OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
+    ThreadList => thread_list, ThreadGet => thread_get, UsageGet => usage_get,
+    CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
+    ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
+    ThreadDeletePreview => thread_delete_preview, ThreadSet => thread_set,
+    MessageSend => message_send, MessageCancel => message_cancel, MessageGet => message_get,
+    OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
+    RevisitSet => revisit_set, RevisitGet => revisit_get, RevisitCancel => revisit_cancel,
+    TurnGet => turn_get, Wait => wait, HistoryList => history_list, HistoryGet => history_get,
+    HistorySearch => history_search, HistoryRelations => history_relations, ShellGet => shell_get,
+    ShellRead => shell_read, ShellWrite => shell_write, ShellEof => shell_eof, ShellStop => shell_stop,
+    AttachmentAdd => attachment_add, AttachmentList => attachment_list, AttachmentRemove => attachment_remove,
+    Compact => compact, ContextEdit => context_edit, IndexStatus => index_status,
+    IndexPreview => index_preview, IndexBackfill => index_backfill, IndexRetry => index_retry,
+    IndexRebuild => index_rebuild, IndexProbe => index_probe, StorageStatus => storage_status,
+    StorageCollect => storage_collect,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn labeled_jobs_preserve_values_and_storage_errors() {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(root.path().join("db")).await.unwrap();
+        let value = call(&db, Kind::MessageSend, |_| Ok(vec![1_u8, 2, 3]))
+            .await
+            .unwrap();
+        assert_eq!(value, vec![1, 2, 3]);
+        let error = call::<(), _>(&db, Kind::Status, |_| Err(StorageError::QueueFull))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, StorageError::QueueFull));
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn slow_jobs_name_commands_without_captured_data() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            root.path().join("logs"),
+            crate::config::Logging::default(),
+        );
+        let db = DbWorker::open(root.path().join("db")).await.unwrap();
+        db.attach_diagnostics(diagnostics.clone());
+        let commands: Vec<Command> = vec![
+            serde_json::from_value(serde_json::json!({
+                "command": "message.send", "args": {"text": "PRIVATE REQUEST BODY AND ID"}
+            }))
+            .unwrap(),
+            Command::Status(Default::default()),
+        ];
+        for command in commands {
+            let kind = Kind::of(&command);
+            let private = "PRIVATE REQUEST BODY AND ID".to_owned();
+            call(&db, kind, move |_| {
+                assert!(!private.is_empty());
+                std::thread::sleep(std::time::Duration::from_millis(1100));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        }
+        db.shutdown().await.unwrap();
+        diagnostics.shutdown().await;
+        let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        assert!(!log.contains("PRIVATE"));
+        let kinds: Vec<String> = log
+            .lines()
+            .map(|line| {
+                let row: serde_json::Value = serde_json::from_str(line).unwrap();
+                assert_eq!(row["ids"], serde_json::json!({}));
+                assert!(row["db_job_slow"]["run_ms"].as_u64().unwrap() >= 1000);
+                assert!(row["db_job_slow"]["queue_ms"].is_u64());
+                row["db_job_slow"]["kind"].as_str().unwrap().to_owned()
+            })
+            .collect();
+        for name in [
+            "control.db.execute_kind.message_send",
+            "control.db.execute_kind.status",
+        ] {
+            assert!(
+                kinds.iter().any(|kind| kind == name),
+                "missing {name}: {kinds:?}"
+            );
+        }
+    }
+}

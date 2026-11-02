@@ -1,4 +1,5 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
+mod execute_kind;
 mod run_action;
 pub(crate) mod thread_summary;
 use crate::digest::sha256_hex as hash;
@@ -246,17 +247,15 @@ impl Store {
                 args.thread_id = caller.as_ref().map(|origin| origin.thread_id.clone());
             }
             let instance = self.instance_id.clone();
-            return self
-                .database
-                .call(move |db| {
-                    let tx = db.transaction()?;
-                    let result = crate::status::snapshot(&tx, &args, &instance);
-                    tx.commit()?;
-                    Ok(result)
-                })
-                .await
-                .map_err(storage_error)?
-                .and_then(MutationResult::value);
+            return execute_kind::call(&self.database, execute_kind::Kind::Status, move |db| {
+                let tx = db.transaction()?;
+                let result = crate::status::snapshot(&tx, &args, &instance);
+                tx.commit()?;
+                Ok(result)
+            })
+            .await
+            .map_err(storage_error)?
+            .and_then(MutationResult::value);
         }
         if let Command::CompactPreview(args) = &request.command {
             let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
@@ -347,26 +346,26 @@ impl Store {
         let plan = self.prepare_agents(&request, &caller).await?;
         let mut store = self.clone();
         store.usage_context = crate::usage_totals::read_context();
-        self.database
-            .call(move |connection| {
-                if !request.command.requires_receipt() {
-                    // Use the canonical query projections without reserving,
-                    // replaying, or collecting immutable mutation receipts.
-                    let tx = connection.transaction()?;
-                    let result = store.dispatch(
-                        &tx,
-                        &request.command,
-                        caller.as_ref(),
-                        &request.operation_id,
-                        &chrono::Utc::now().to_rfc3339(),
-                    );
-                    tx.commit()?;
-                    return Ok(result);
-                }
-                Ok(store.execute_transaction(connection, &request, caller.as_ref(), plan.as_ref()))
-            })
-            .await
-            .map_err(storage_error)?
+        let kind = execute_kind::Kind::of(&request.command);
+        execute_kind::call(&self.database, kind, move |connection| {
+            if !request.command.requires_receipt() {
+                // Use the canonical query projections without reserving,
+                // replaying, or collecting immutable mutation receipts.
+                let tx = connection.transaction()?;
+                let result = store.dispatch(
+                    &tx,
+                    &request.command,
+                    caller.as_ref(),
+                    &request.operation_id,
+                    &chrono::Utc::now().to_rfc3339(),
+                );
+                tx.commit()?;
+                return Ok(result);
+            }
+            Ok(store.execute_transaction(connection, &request, caller.as_ref(), plan.as_ref()))
+        })
+        .await
+        .map_err(storage_error)?
     }
 
     pub async fn execute_with_plan(

@@ -17,6 +17,13 @@ remain bounded and best-effort. Diagnostics attach after DB initialization;
 startup migration and checkpoint work are not jobs. DB shutdown drains jobs
 before diagnostics shutdown; diagnostics may still be dropped under pressure.
 
+For Store.execute, the call-site name includes a fixed protocol-command label
+chosen by an exhaustive match on the protocol command enum. New variants must
+supply a label at compile time. Status has its own label. The label is independent of request
+arguments, origin, IDs and SQL. Existing run and queue timings are whole-job
+measurements, not acceptance, dispatch or commit phase timings. The labels do
+not change DB queue admission, diagnostic sampling or privacy bounds.
+
 ## DB writer occupancy: requester contract and backend safety net (#171)
 
 Status: adopted (revision 2, approved 2026-11-02) and implemented on
