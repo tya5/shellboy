@@ -164,6 +164,7 @@ mod tests {
     fn frame(id: &str, group: Option<&str>, items: Vec<Value>, ledger: &Arc<Ledger>) -> Arc<Frame> {
         ledger.live.fetch_add(1, Ordering::AcqRel);
         Arc::new(Frame {
+            ordinal: 0,
             stamp: Stamp {
                 id: id.into(),
                 revision: 0,
@@ -171,6 +172,9 @@ mod tests {
             },
             group: group.map(str::to_owned),
             items,
+            spill_result_item: false,
+            spill_projection_safe: true,
+            spill_marker: false,
             bytes: 1,
             pins: AtomicUsize::new(0),
             ledger: ledger.clone(),

@@ -335,7 +335,9 @@ Thread boundary guard is held, all tool groups are complete and no request is in
 flight, i.e. the same boundary as queued `/compact`. The Driver releases its
 replay lease and runs the argument-free compact unchanged (spill, then the bounded
 summary with the ordinary protections); never maximal omission. Afterwards it
-re-reads the snapshot. No table, worker, queue, timer or HTTP stage is added.
+re-reads the snapshot. Candidate forecasting uses the existing bounded read-only
+preview loader and presentation workers; no table, queue, timer or HTTP stage is
+added.
 
 Partial spill adoption (#153 review): proactive compaction spills only whole safe
 eligible tool groups whose exact replay JSON character projection shrinks; this
@@ -346,24 +348,73 @@ already committed spill is recorded as `adopted` with `summary_rejected: true`,
 the original summary error, its provider-reported summary usage and the spill
 counts. No spill plus summary failure remains `rejected`. Storage failures
 propagate; cancellation keeps its existing error behavior. Manual compact keeps
-its existing contract. A partial adoption still advances the failure retry gate:
-a fresh reported input must grow by the interval before another summary attempt,
-preventing repeated paid summary failures merely because another spill succeeded.
-Replayed character reduction is not a guarantee of provider token reduction.
+its existing contract. Replay character reduction is not a guarantee of provider
+token reduction.
 
-Retry gate (#153): a non-adopted outcome (`rejected`, `no_safe_reduction`)
-remembers the triggering provider-reported input count in ephemeral per-`drive`
-state. Another attempt in that Run requires a fresh, non-stale reported count
-at least `ceil(auto_at_tokens / 10)` tokens above that count, and still at or
-above the threshold. Every non-adopted retry moves this baseline forward;
-unchanged, decreasing, unknown and insufficiently increased usage cannot retry.
-A spill-only adoption with a rejected summary also uses that gate.
-There is no estimate, timer or new setting. For a fixed threshold T > 0 and
-non-adopted baseline B, additional non-adopted attempts up to observed high-water
-H are bounded by `floor((H - B) / ceil(T / 10))`. Subtraction avoids overflow at
-u64 limits. Adoption clears the failure baseline but still requires a fresh
-post-replacement measurement. The request continues normally; a rejection is
-not a Turn failure. Storage failures still propagate.
+Progress gate (#180): crossing the provider threshold is necessary but not
+sufficient. Before starting, a bounded read-only forecast applies the same
+ordinary Turn/tool fences, protection checks and reducing-spill projection. If
+there are no eligible sources, no compaction is started, no summary request is
+sent and no `no_safe_reduction` attempt is written. If an attempt or its summary
+is rejected or makes no progress, automatic work is not retried solely because
+reported tokens or protected current-Turn text grew. It is reconsidered only
+when saved source evidence permits a new older summary source, a larger
+previously eligible source, or an older complete tool group that can reduce.
+Summary and spill evidence are tracked separately: a new spill opportunity does
+not reissue a rejected summary for the same older sources, and a new summary
+opportunity does not repeat an unchanged spill pass. If a partial spill changes
+the selected path while coverage remains unknown, its exact committed selection
+revision permits the guard to refresh its own witness without treating that
+replacement as new input. When the newest tool anchor belongs to the current
+protected Turn, later appended groups there do not unfreeze that rejected older
+summary; an intervening path rewrite or new Turn is evaluated again. The latest tool group, every active-Turn user input, the latest completed
+Turn, pending receipts and held deliveries retain their existing protections.
+The active-Turn middle remains eligible only through the #181/#185 safe range;
+its evidence is separate from the older-Turn summary evidence. Explicit compact and
+failure-driven overflow recovery use their original separate policies.
+
+After a no-target decision or no-progress attempt, one bounded `app_meta` guard
+per Thread stores the prior selected-path witness, a hash of older complete tool
+frames, anonymous source-identity hashes, maximum model-visible character counts
+per spill/summary opportunity, fixed reason and saturating rejection counters.
+It stores no prompts, outputs or provider error text. Source history is capped
+at 8,192 marks and encoded state at 1 MiB; Thread deletion removes it and its
+small status record. A successful reduction clears the guard. The fast path
+compares metadata already present in the replay lease and does not read model
+payloads again. A path rewrite, new Turn or newly older tool group triggers a
+fresh bounded forecast; identical or smaller prior candidates stay suppressed.
+When a complete forecast identifies receipt/delivery-protected sources, the
+bounded forecast is repeated to observe a possible protection release, but an
+unchanged candidate set neither starts compaction nor emits another skip
+diagnostic. A coverage-limited forecast cannot currently observe a protection
+state change that leaves the selected path and tool frontier unchanged; detecting
+that case without an unbounded scan remains an open limitation.
+The existing preview bounds (4,096 nodes/rows/turns, 8 MiB copied text, 1 MiB
+per payload, eight ancestry levels and 128 SQL statements) apply. If a protected
+payload alone exceeds those bounds, an additional metadata-only proof can still
+establish that the first selected source is behind the current/latest-complete
+Turn fence, cached replay proves that older tool groups cannot reduce, and no
+active-Turn middle tool group or spill marker could be summarized. This
+proof reads no saved payload from SQLite; it examines at most 8 MiB of already
+replayed JSON and 4,096 frames when multiple tool groups exist. A direct first
+source/Turn check also covers longer paths; ancestry expansion visits at most
+4,096 path nodes and 512 Turns. The proof interrupts after at most 131,000 SQLite
+VM instructions. Interruption or an
+inconclusive lower bound discards the proof. If coverage
+remains incomplete, it is explicitly unknown, never reported as an empty set;
+the first attempt, or a subsequent changed-path/Turn/tool frontier, may proceed
+conservatively. An unchanged frontier remains suppressed. This bounded fallback
+can reevaluate a changed but non-growing candidate set when exact evidence is
+unavailable; it does not infer eligibility from token growth.
+
+The existing activity footer shows a localized deferred reason, never an active
+compaction spinner, and only for the corresponding live Run and Turn. Fixed,
+content-free diagnostic events distinguish measured below-threshold, no target,
+no new target and rejected `invalid_state`/other outcomes. Rejection counters
+saturate rather than grow
+without bound. The request continues normally; no-target and non-storage
+rejections are not Turn failures. Storage failures still propagate. No new
+configuration or retry interval is introduced.
 
 Ordinary summary scope is intentionally narrower than the input: it ends before
 the current Turn and latest completed Turn, or an earlier protected/incomplete

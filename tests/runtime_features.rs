@@ -3430,24 +3430,16 @@ async fn proactive_events(control: &Arc<Control>, thread: &str) -> Vec<Value> {
         .cloned()
         .collect()
 }
-async fn proactive_run_ids(control: &Arc<Control>, events: &[Value]) -> Vec<String> {
-    let ids: Vec<String> = events
-        .iter()
-        .map(|event| event["attempt_id"].as_str().unwrap().to_owned())
-        .collect();
-    control.store.database.call(move |db| {
-        ids.iter().map(|id| db.query_row(
-            "SELECT json_extract(error_json, '$.automatic_trim_attempt.trigger.run_id') FROM model_attempt WHERE id=?1",
-            [id], |row| row.get::<_, String>(0),
-        )).collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }).await.unwrap()
-}
-#[tokio::test]
-async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
-    crate::test_watchdog::watchdog("proactive partial spill adoption", async {
+async fn proactive_partial_spill_fixture(oversized: bool) {
+    crate::test_watchdog::watchdog("proactive partial spill adoption", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await;
+        let options = if oversized {
+            "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
+        } else {
+            "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
+        };
+        let owner = proactive_owner(root.path(), &url, options).await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
         for text in ["hi", "yo"] {
@@ -3455,7 +3447,8 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
             incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
             settled(&control, &target).await;
         }
-        send(&control, &target, "long current turn").await;
+        let current = if oversized { "protected current ".repeat(70_000) } else { "long current turn".to_owned() };
+        send(&control, &target, &current).await;
         let tool_response = |index: u32, tokens: u32| json!({"id":format!("small-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("small-{index}"),"name":"shell","arguments":json!({"command":"echo last"}).to_string()}]});
         let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
         for index in 0..2 {
@@ -3466,7 +3459,7 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
             }]}))).unwrap();
         }
         let before = incoming(&control, &mut receive).await;
-        let before_size = before.body["input"].to_string().len();
+        let before_size = before.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
         assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
         before.reply.send((200, tool_response(2, 200))).unwrap();
         let summary = incoming(&control, &mut receive).await;
@@ -3478,13 +3471,13 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
         assert_ne!(after.body["tools"], json!([]), "the measured request must be an ordinary conversation request, not a summary reduce request");
         let context = current_context(&control, &target).await;
         assert_current_context_once(&after.body, &context, "after proactive spill");
-        let after_size = after.body["input"].to_string().len();
+        let after_size = after.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
         assert!(after_size < before_size / 3, "actual replay input must shrink: {before_size} -> {after_size}");
         let omitted = after.body["input"].as_array().unwrap().iter()
             .filter_map(|item| item.get("output").and_then(Value::as_str))
             .filter_map(|output| serde_json::from_str::<Value>(output).ok())
             .filter(|output| output["omitted"] == true).count();
-        assert!(omitted >= 2, "both tool output replacements must be replayed: {omitted}; input={}", after.body["input"]);
+        assert!(omitted >= 2, "both tool output replacements must be replayed: {omitted}");
         let first_events = proactive_events(&control, &target).await;
         assert_eq!(first_events.len(), 1, "{first_events:#?}");
         assert_eq!(first_events[0]["metrics"]["summary_rejected"], true, "{first_events:#?}");
@@ -3497,8 +3490,12 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
         gated.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
-        assert_eq!(events.len(), 1, "{events:#?}");
-        let item = &events[0];
+        assert!((1..=2).contains(&events.len()), "only a newly eligible tool group can add one attempt: {events:#?}");
+        assert_eq!(events.iter().filter(|event| event["metrics"]["summary_rejected"] == true).count(), 1, "the rejected summary must not be reissued");
+        let item = events.iter().find(|event| event["metrics"]["summary_rejected"] == true).expect("original summary rejection is retained");
+        if let Some(later) = events.iter().find(|event| event["metrics"]["summary_rejected"] != true) {
+            assert!(later["metrics"].get("summary_usage").is_none_or(Value::is_null), "a new spill must not retry the old summary");
+        }
         assert_eq!(item["state"], "adopted");
         assert_eq!(item["metrics"]["summary_rejected"], true);
         assert!(item["metrics"]["spilled_groups"].as_u64().unwrap() >= 2);
@@ -3584,6 +3581,16 @@ async fn proactive_active_turn_summary_replaces_middle_and_drops_reasoning() {
         assert_eq!(executions, 4, "no saved tool is executed again");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
+}
+
+#[tokio::test]
+async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
+    proactive_partial_spill_fixture(false).await;
+}
+
+#[tokio::test]
+async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary() {
+    proactive_partial_spill_fixture(true).await;
 }
 
 /// Two completed Turns (input 50 then `second`), then a third request. Returns
@@ -3723,12 +3730,30 @@ async fn proactive_threshold_does_not_fire_below_threshold_or_when_disabled() {
         );
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
+        let log = std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
+        let below = log
+            .lines()
+            .filter(|line| line.contains("\"event\":\"automatic_compaction_below_threshold\""))
+            .count();
+        if second == 99 {
+            assert!(
+                (1..=2).contains(&below),
+                "below threshold must be observable once per Turn: {below}"
+            );
+        } else {
+            assert_eq!(
+                below, 0,
+                "disabled compaction is not a measured below-threshold event"
+            );
+        }
+        assert!(!log.contains("saved answer"));
+        assert!(!log.contains("current task"));
         server.abort();
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_summary_failure_waits_for_measured_growth() {
+async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
@@ -3745,11 +3770,11 @@ async fn proactive_summary_failure_waits_for_measured_growth() {
     }
     send(&control, &thread, "current task").await;
     let mut summaries = 0;
-    // Ordinary replies: one tool call, then an answer. Growth of 9 tokens is
-    // below the retry gate (10% of threshold 100), despite staying over threshold.
+    // A large token increase in the current protected Turn is not a new
+    // summarizable source and must not restart the rejected attempt.
     let mut ordinary = vec![answer_with_usage("done", 150), {
         let mut body = json!({"id":"tool","status":"completed","output":[{"type":"function_call","call_id":"proactive-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]});
-        body["usage"] = json!({"input_tokens":159,"output_tokens":1});
+        body["usage"] = json!({"input_tokens":9999,"output_tokens":1});
         body
     }];
     while let Some(reply) = ordinary.last().cloned() {
@@ -3766,7 +3791,10 @@ async fn proactive_summary_failure_waits_for_measured_growth() {
         next.reply.send((200, reply)).unwrap();
     }
     settled(&control, &thread).await;
-    assert_eq!(summaries, 1, "no retry before sufficient measured growth");
+    assert_eq!(
+        summaries, 1,
+        "token growth alone must not retry the same source"
+    );
     assert!(receive.try_recv().is_err());
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 1, "{events:?}");
@@ -3803,114 +3831,191 @@ async fn proactive_summary_failure_waits_for_measured_growth() {
     server.abort();
 }
 
-// Every mock emits at most nine tool calls, regardless of compaction behavior.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_retries_after_growth_and_bounds_repeated_rejections() {
-    for eventually_adopts in [true, false] {
-        let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
-        let control = Control::new(&owner, root.path().into());
-        let thread = thread(&control).await;
-        for (n, tokens) in [(0, 50), (1, 150)] {
-            send(&control, &thread, &format!("task {n}")).await;
-            incoming(&control, &mut receive)
-                .await
-                .reply
-                .send((200, answer_with_usage("saved answer", tokens)))
-                .unwrap();
-            settled(&control, &thread).await;
-        }
-        send(&control, &thread, "current task").await;
-        // None is deliberately unknown, not a text-size estimate. Crossing the
-        // gate at 160 permits one retry, but 150/149/unknown/159 cannot do so.
-        let counts = if eventually_adopts {
-            vec![Some(150), Some(149), None, Some(159), Some(160)]
-        } else {
-            vec![
-                Some(150),
-                Some(149),
-                None,
-                Some(159),
-                Some(160),
-                Some(160),
-                Some(170),
-                Some(179),
-                Some(180),
-            ]
-        };
-        let mut ordinary = 0;
-        let mut summaries = 0;
-        loop {
-            let next = incoming(&control, &mut receive).await;
-            if next.body["tools"] == json!([]) {
-                summaries += 1;
-                assert!(summaries <= 4, "bounded summary mock");
-                if eventually_adopts && summaries > 1 {
-                    next.reply.send((200, answer("short summary"))).unwrap();
-                } else {
-                    next.reply.send((400, json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}))).unwrap();
-                }
-                continue;
-            }
-            if ordinary == counts.len() {
-                next.reply
-                    .send((200, answer_with_usage("done", 10)))
-                    .unwrap();
-                break;
-            }
-            assert!(ordinary < 9, "hard tool-call cap");
-            let mut body = json!({"id":format!("tool-{ordinary}"),"status":"completed","output":[{"type":"function_call","call_id":format!("retry-{ordinary}"),"name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]});
-            if let Some(tokens) = counts[ordinary] {
-                body["usage"] = json!({"input_tokens":tokens,"output_tokens":1});
-            }
-            ordinary += 1;
-            next.reply.send((200, body)).unwrap();
-        }
+async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    for (n, tokens) in [(0, 50), (1, 150)] {
+        send(&control, &thread, &format!("task {n}")).await;
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("saved answer", tokens)))
+            .unwrap();
         settled(&control, &thread).await;
-        assert_eq!(ordinary, counts.len());
-        assert_eq!(summaries, if eventually_adopts { 2 } else { 4 });
-        assert!(receive.try_recv().is_err());
-        let mut events = proactive_events(&control, &thread).await;
-        events.sort_by_key(|event| event["trigger"]["input_tokens"].as_u64().unwrap());
-        let observed: Vec<_> = events
-            .iter()
-            .map(|event| event["trigger"]["input_tokens"].as_u64().unwrap())
-            .collect();
-        assert_eq!(
-            observed,
-            if eventually_adopts {
-                vec![150, 160]
-            } else {
-                vec![150, 160, 170, 180]
-            }
-        );
-        assert_eq!(events[0]["state"], "rejected");
-        for event in &events[1..] {
-            if eventually_adopts {
-                assert_eq!(event["state"], "adopted");
-                assert!(event["metrics"]["summary_node_id"].is_string());
-            } else if event["state"] == "adopted" {
-                assert_eq!(event["metrics"]["summary_rejected"], true);
-                assert!(event["metrics"]["spilled_groups"].as_u64().unwrap() > 0);
-                assert!(event["metrics"]["summary_node_id"].is_null());
-            } else {
-                assert_eq!(event["state"], "rejected");
-            }
-        }
-        let runs = proactive_run_ids(&control, &events).await;
-        assert!(runs.iter().all(|run| run == &runs[0]), "same Run: {runs:?}");
-        if eventually_adopts {
-            assert!(events[1]["metrics"]["summary_node_id"].is_string());
-        }
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-        server.abort();
     }
+    send(&control, &thread, "third task").await;
+    let first = incoming(&control, &mut receive).await;
+    assert_eq!(first.body["tools"], json!([]));
+    first
+        .reply
+        .send((
+            400,
+            json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
+        ))
+        .unwrap();
+    let ordinary = incoming(&control, &mut receive).await;
+    assert_ne!(ordinary.body["tools"], json!([]));
+    ordinary
+        .reply
+        .send((200, answer_with_usage("third answer", 150)))
+        .unwrap();
+    settled(&control, &thread).await;
+    send(&control, &thread, "fourth task").await;
+    let second = incoming(&control, &mut receive).await;
+    assert_eq!(
+        second.body["tools"],
+        json!([]),
+        "the newly unprotected older Turn is eligible"
+    );
+    second.reply.send((200, answer("short summary"))).unwrap();
+    let ordinary = incoming(&control, &mut receive).await;
+    assert_ne!(ordinary.body["tools"], json!([]));
+    ordinary
+        .reply
+        .send((200, answer_with_usage("finished", 10)))
+        .unwrap();
+    settled(&control, &thread).await;
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["state"] == "rejected")
+            .count(),
+        1,
+        "{events:?}"
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event["state"] == "adopted")
+            .count(),
+        1,
+        "{events:?}"
+    );
+    assert!(receive.try_recv().is_err());
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_no_safe_reduction_retries_only_after_growth() {
+async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    send(&control, &thread, "only completed task").await;
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((200, answer_with_usage("saved", 150)))
+        .unwrap();
+    settled(&control, &thread).await;
+    send(&control, &thread, "current task").await;
+    let command = if cfg!(windows) {
+        "powershell -NoProfile -Command \"[Console]::Write(('x' * 50000))\""
+    } else {
+        "head -c 50000 /dev/zero | tr '\\0' x"
+    };
+    for index in 0..2 {
+        let request = incoming(&control, &mut receive).await;
+        assert_ne!(
+            request.body["tools"],
+            json!([]),
+            "there is no older Turn eligible for a summary"
+        );
+        request.reply.send((200, json!({"id":format!("response-{index}"),"status":"completed","usage":{"input_tokens":200,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("call-{index}"),"name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
+    }
+    let mut next = incoming(&control, &mut receive).await;
+    if next.body["tools"] == json!([]) {
+        let input = next.body["input"].to_string();
+        assert!(input.contains("call-0"));
+        assert!(!input.contains("call-1"), "the latest group stays protected");
+        next.reply.send((200, answer("short middle summary"))).unwrap();
+        next = incoming(&control, &mut receive).await;
+    }
+    assert_ne!(next.body["tools"], json!([]), "ordinary work continues after compaction");
+    assert!(next.body["input"].to_string().contains("call-1"), "the newest group must remain replayable");
+    next.reply
+        .send((200, answer_with_usage("done", 10)))
+        .unwrap();
+    settled(&control, &thread).await;
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(
+        events.len(),
+        1,
+        "one actual attempt follows the new eligible group: {events:?}"
+    );
+    assert_eq!(events[0]["state"], "adopted");
+    assert!(events[0]["metrics"]["spilled_groups"].as_u64().unwrap_or(0) >= 1);
+    assert!(receive.try_recv().is_err());
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_large_protected_turn_uses_bounded_no_target_proof() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(
+        root.path(),
+        &url,
+        "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=100\n",
+    )
+    .await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    send(&control, &thread, "one protected completed turn").await;
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((200, answer_with_usage("saved", 150)))
+        .unwrap();
+    settled(&control, &thread).await;
+    let protected = "synthetic protected text ".repeat(48_000);
+    assert!(protected.len() > 1024 * 1024);
+    send(&control, &thread, &protected).await;
+    let next = incoming(&control, &mut receive).await;
+    assert_ne!(
+        next.body["tools"],
+        json!([]),
+        "a large protected message is not a summary request"
+    );
+    let id = thread.clone();
+    let projected = control
+        .store
+        .database
+        .call(move |db| shellboy::frontend::activity::project(db, &id))
+        .await
+        .unwrap();
+    assert_eq!(
+        projected.snapshot.automatic_compaction_skip,
+        Some(shellboy::ui::activity::AutomaticCompactionSkip::NoTarget)
+    );
+    assert!(projected.snapshot.automatic_compaction.is_none());
+    next.reply
+        .send((200, answer_with_usage("done", 10)))
+        .unwrap();
+    settled(&control, &thread).await;
+    assert!(
+        proactive_events(&control, &thread).await.is_empty(),
+        "proof must precede any compaction attempt"
+    );
+    assert!(receive.try_recv().is_err());
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_no_safe_reduction_is_not_started_or_retried() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
@@ -3928,27 +4033,83 @@ async fn proactive_no_safe_reduction_retries_only_after_growth() {
     // protected. One tool call is a hard cap, not a usage-dependent loop.
     let next = incoming(&control, &mut receive).await;
     assert_ne!(next.body["tools"], json!([]));
-    next.reply.send((200, json!({"id":"single-tool","status":"completed","usage":{"input_tokens":160,"output_tokens":1},"output":[{"type":"function_call","call_id":"single-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]}))).unwrap();
+    next.reply.send((200, json!({"id":"single-tool","status":"completed","usage":{"input_tokens":9999,"output_tokens":1},"output":[{"type":"function_call","call_id":"single-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]}))).unwrap();
     let next = incoming(&control, &mut receive).await;
     assert_ne!(
         next.body["tools"],
         json!([]),
         "no summary source is eligible"
     );
+    let projected_thread = thread.clone();
+    let projected = control
+        .store
+        .database
+        .call(move |db| shellboy::frontend::activity::project(db, &projected_thread))
+        .await
+        .unwrap();
+    assert_eq!(
+        projected.snapshot.automatic_compaction_skip,
+        Some(shellboy::ui::activity::AutomaticCompactionSkip::NoTarget)
+    );
+    assert!(
+        projected.snapshot.automatic_compaction.is_none(),
+        "skipped work must not appear active"
+    );
     next.reply
         .send((200, answer_with_usage("done", 10)))
         .unwrap();
     settled(&control, &thread).await;
-    let mut events = proactive_events(&control, &thread).await;
-    events.sort_by_key(|event| event["trigger"]["input_tokens"].as_u64().unwrap());
-    assert_eq!(events.len(), 2, "{events:?}");
-    for (event, tokens) in events.iter().zip([150, 160]) {
-        assert_eq!(event["state"], "no_safe_reduction");
-        assert_eq!(event["trigger"]["input_tokens"], tokens);
-    }
-    let runs = proactive_run_ids(&control, &events).await;
-    assert_eq!(runs[0], runs[1]);
+    let events = proactive_events(&control, &thread).await;
+    assert!(events.is_empty(), "no compaction was started: {events:?}");
+    let key = format!("compact.automatic_guard.{thread}");
+    let saved: String = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(
+                db.query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .await
+        .unwrap();
+    let saved: Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(saved["reason"], "no_target");
+    assert!(saved["marks"].as_array().unwrap().is_empty());
+    assert_eq!(saved["invalid_state"], 0);
+    assert_eq!(saved["other_rejections"], 0);
+    assert!(!saved.to_string().contains("only completed task"));
     assert!(receive.try_recv().is_err());
+    request(
+        &control,
+        Command::ThreadDelete(ThreadDeleteArgs {
+            thread_id: thread.clone(),
+            descendants: false,
+            preview_marker: None,
+        }),
+    )
+    .await;
+    let keys = [
+        format!("compact.automatic_guard.{thread}"),
+        format!("compact.automatic_status.{thread}"),
+    ];
+    let remaining = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
+                [&keys[0], &keys[1]],
+                |row| row.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        remaining, 0,
+        "Thread deletion removes both bounded witnesses"
+    );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

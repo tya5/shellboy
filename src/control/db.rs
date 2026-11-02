@@ -2459,6 +2459,14 @@ fn delete_thread(
             [crate::index::IndexKeys::observed(id)],
         )
         .map_err(sql_error)?;
+        tx.execute(
+            "DELETE FROM app_meta WHERE key IN (?1,?2)",
+            params![
+                crate::compaction::CompactionKeys::new(id).automatic_guard(),
+                crate::compaction::CompactionKeys::new(id).automatic_status()
+            ],
+        )
+        .map_err(sql_error)?;
         tx.execute("UPDATE attachment_delivery SET status='cancelled' WHERE thread_id=?1 AND status IN ('accepted','held')",[id]).map_err(sql_error)?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason='target_unavailable',updated_at=?2 WHERE target_thread_id=?1 AND state IN ('accepted','held')",params![id,now]).map_err(sql_error)?;
     }

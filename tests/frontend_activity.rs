@@ -946,6 +946,68 @@ async fn automatic_compaction_witness_is_bounded_to_live_run_and_turn() {
     db.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn automatic_compaction_skip_is_limited_to_the_live_run_and_turn() {
+    use shellboy::ui::activity::AutomaticCompactionSkip;
+    let root = tempfile::tempdir().unwrap();
+    let db = DbWorker::open(root.path().join("db")).await.unwrap();
+    change(&db, "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','preparing','now');").await;
+    for (body, expected) in [
+        (
+            r#"{"run_id":"r","turn_id":"u","reason":"no_target"}"#,
+            Some(AutomaticCompactionSkip::NoTarget),
+        ),
+        (
+            r#"{"run_id":"r","turn_id":"u","reason":"no_new_target"}"#,
+            Some(AutomaticCompactionSkip::NoNewTarget),
+        ),
+        (
+            r#"{"run_id":"r","turn_id":"u","reason":"rejected_invalid_state"}"#,
+            Some(AutomaticCompactionSkip::RejectedInvalidState),
+        ),
+        (
+            r#"{"run_id":"other","turn_id":"u","reason":"no_target"}"#,
+            None,
+        ),
+        (
+            r#"{"run_id":"r","turn_id":"other","reason":"no_target"}"#,
+            None,
+        ),
+        (
+            r#"{"run_id":"r","turn_id":"u","reason":"untrusted raw text"}"#,
+            None,
+        ),
+        ("invalid", None),
+    ] {
+        let body = body.to_owned();
+        db.call(move |db| {
+            db.execute("INSERT INTO app_meta(key,value) VALUES('compact.automatic_status.t',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [body])?;
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(
+            projection(&db).await.snapshot.automatic_compaction_skip,
+            expected
+        );
+        assert!(
+            projection(&db)
+                .await
+                .snapshot
+                .automatic_compaction
+                .is_none(),
+            "a skipped attempt is not active work"
+        );
+    }
+    change(&db, "UPDATE app_meta SET value='{\"run_id\":\"r\",\"turn_id\":\"u\",\"reason\":\"no_target\"}' WHERE key='compact.automatic_status.t'; UPDATE turn SET state='completed',ended_at='now' WHERE id='u';").await;
+    assert!(
+        projection(&db)
+            .await
+            .snapshot
+            .automatic_compaction_skip
+            .is_none()
+    );
+    db.shutdown().await.unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn automatic_compaction_live_pty_shows_and_clears_in_both_languages() {
