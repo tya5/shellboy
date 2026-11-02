@@ -8358,6 +8358,14 @@ sampling method is unchanged. Local macOS `cargo check --locked --tests` and the
 focused Python tests passed before the measurement. The measurement is one
 fake-model run, not a repeatability study, peak usage or real-provider token-cost
 claim. jcode was run only in Linux CI; no real model or paid provider was used.
+### #152 Flat Field Label Candidate
+
+A macOS unit test covered every mapped field label in both languages, nested
+and custom-label fallback, and unchanged field values; `cargo check --tests`
+passed on the pre-rebase candidate. The screen/copy test, current-base local
+checks, task CI, Windows integration CI and a physical terminal check remain
+unverified. Stage C consistency is not the project-wide zero gate.
+
 ### #152 Batch4 Watch Discovery Notice Language
 
 The2generated scope-unavailable / bounded-search continuation notices follow

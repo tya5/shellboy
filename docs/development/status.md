@@ -3877,6 +3877,14 @@ comparison artifact is 13113493939, measured source 8d3201e3. Attempt 1's Codex
 PSS sample failed on changing process membership; the same SHA's comparison was
 rerun without changing the measurement guard. Real-provider tokens, repeated-run
 variance and physical-terminal behavior remain unverified.
+### #152 Flat Field Label Candidate
+
+English display now translates a bounded set of known flat field labels when
+the label matches the generated Japanese label. Nested, unknown and custom
+labels, field keys and stored/copyable values remain unchanged. This candidate
+overlaps the pending field-values candidate and requires integration ordering
+and conflict resolution before both can land.
+
 ### #152 Product Batch4: Watch Page Notices
 
 Read-only producer/consumer review confirms2generated Watch discovery notices
