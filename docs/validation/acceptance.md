@@ -8885,3 +8885,6 @@ cause not determined; branch input is 2,580 tokens higher in total because
 earlier Turns' context lines remain in history (581 tokens at the last
 request, four earlier lines). LiteLLM-internal retry usage is unknown. The
 subscription is not billed per token; cost is reference only.
+## #175 Shift+Enter Keyboard Enhancement
+
+Physical terminal verification is UNVERIFIED. No real terminal emulator or physical TTY was exercised for this change; synthetic PTY tests and 3-OS CI are not counted as physical-terminal success. No configuration setting was added.
