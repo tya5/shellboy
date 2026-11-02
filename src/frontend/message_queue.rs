@@ -366,8 +366,12 @@ pub(super) async fn cancel(
     } else {
         let separator = crate::ui::text_width::glyphs::separator();
         match language {
-            UiLanguage::Ja => format!("{outcomes}{separator}/restore list に保存済み。編集中の入力は保持します"),
-            UiLanguage::En => format!("{outcomes}{separator}Saved in /restore list. Current input is kept"),
+            UiLanguage::Ja => {
+                format!("{outcomes}{separator}/restore list に保存済み。編集中の入力は保持します")
+            }
+            UiLanguage::En => {
+                format!("{outcomes}{separator}Saved in /restore list. Current input is kept")
+            }
         }
     };
     update(

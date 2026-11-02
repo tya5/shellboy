@@ -53,7 +53,9 @@ pub(super) fn failed_operation(
 ) -> String {
     let separator = crate::ui::text_width::glyphs::separator();
     match (language, restore_revision) {
-        (UiLanguage::Ja, None) => format!("操作は失敗しました{separator}入力を復元しました: {error}"),
+        (UiLanguage::Ja, None) => {
+            format!("操作は失敗しました{separator}入力を復元しました: {error}")
+        }
         (UiLanguage::En, None) => format!("Operation failed{separator}Input restored: {error}"),
         (UiLanguage::Ja, Some(revision)) => format!(
             "操作は失敗しました{separator}現在の入力を保持{separator}/restore {revision} で元の操作を復元: {error}"

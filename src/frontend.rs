@@ -1640,7 +1640,7 @@ async fn run_with_delivery(
                             }
                             continue;
                         };
-                        status(&updates, target.clone(), i18n::local!(language, crate::ui::text_width::glyphs::select("設定を反映中…", "設定を反映中."), crate::ui::text_width::glyphs::select("Applying settings…", "Applying settings."))).await;
+                        status(&updates, target.clone(), crate::ui::text_width::glyphs::select(i18n::local!(language, "設定を反映中…", "Applying settings…"), i18n::local!(language, "設定を反映中.", "Applying settings."))).await;
                         let control = control.clone();
                         let sender = updates.worker();
                         spawn_work(&mut workers, permit, async move {
@@ -1806,7 +1806,7 @@ async fn run_with_delivery(
                                     value.get("ok").and_then(Value::as_bool) != Some(false)
                                         && value.get("exit_code").and_then(Value::as_u64).is_none_or(|code| code == 0)
                                 });
-                                update(&outcomes, owner.update(format!("{title}{}{}", crate::ui::text_width::glyphs::separator(), if success {i18n::local!(language, "処理結果を受信", "Result received")} else {i18n::local!(language, crate::ui::text_width::glyphs::select("失敗 · 詳細を確認してください", "失敗 | 詳細を確認してください"), crate::ui::text_width::glyphs::select("Failed · Check details", "Failed | Check details"))}))).await;
+                                update(&outcomes, owner.update(format!("{title}{}{}", crate::ui::text_width::glyphs::separator(), if success {i18n::local!(language, "処理結果を受信", "Result received")} else {crate::ui::text_width::glyphs::select(i18n::local!(language, "失敗 · 詳細を確認してください", "Failed · Check details"), i18n::local!(language, "失敗 | 詳細を確認してください", "Failed | Check details"))}))).await;
                             }
                             let (external, result) = prepare_external(language,response, control.store.config.cache.body_bytes, external).await;
                             let _ = sender.send(BackgroundResult::Command { external, retained:None,list_command:None, work_status: false, context, generation, title, result }).await;
@@ -2275,7 +2275,7 @@ async fn run_with_delivery(
                     UiAction::WatchAction(target)=>{
                         let Ok(permit)=command_slots.clone().try_acquire_owned() else {status(&updates,selection.active_thread.clone(),i18n::local!(language, "Watchの操作キューが満杯です。再操作してください", "The Watch operation queue is full. Try again")).await;continue;};
                         let output=target.kind==watch::WatchActionKind::Output;
-                        let title=match target.kind {watch::WatchActionKind::Stop=>i18n::local!(language, crate::ui::text_width::glyphs::select("Watch · 停止", "Watch | 停止"), crate::ui::text_width::glyphs::select("Watch · Stop", "Watch | Stop")),watch::WatchActionKind::Retry=>i18n::local!(language, crate::ui::text_width::glyphs::select("Watch · 再試行", "Watch | 再試行"), crate::ui::text_width::glyphs::select("Watch · Retry", "Watch | Retry")),watch::WatchActionKind::Output=>i18n::local!(language, crate::ui::text_width::glyphs::select("Watch · 保存出力", "Watch | 保存出力"), crate::ui::text_width::glyphs::select("Watch · Saved output", "Watch | Saved output"))}.to_owned();
+                        let title=match target.kind {watch::WatchActionKind::Stop=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 停止", "Watch · Stop"), i18n::local!(language, "Watch | 停止", "Watch | Stop")),watch::WatchActionKind::Retry=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 再試行", "Watch · Retry"), i18n::local!(language, "Watch | 再試行", "Watch | Retry")),watch::WatchActionKind::Output=>crate::ui::text_width::glyphs::select(i18n::local!(language, "Watch · 保存出力", "Watch · Saved output"), i18n::local!(language, "Watch | 保存出力", "Watch | Saved output"))}.to_owned();
                         let generation=if output {management.next_generation()}else{0};
                         let selected=selection.active_thread.clone();let control=control.clone();let results=background_tx.clone();let outcomes=updates.worker();
                         spawn_work(&mut workers,permit,async move {
@@ -2755,7 +2755,7 @@ async fn run_with_delivery(
                             &updates,
                             UiUpdate::DraftStatus {
                                 draft_id: draft_id.clone(),
-                                text: i18n::local!(language, crate::ui::text_width::glyphs::select("クリップボード画像を保存中…", "クリップボード画像を保存中."), crate::ui::text_width::glyphs::select("Saving clipboard image…", "Saving clipboard image.")).into(),
+                                text: crate::ui::text_width::glyphs::select(i18n::local!(language, "クリップボード画像を保存中…", "Saving clipboard image…"), i18n::local!(language, "クリップボード画像を保存中.", "Saving clipboard image.")).into(),
                             },
                         )
                         .await;

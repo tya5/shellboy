@@ -8396,3 +8396,17 @@ existing assertion/guard were changed by restack. New exact task CI is pending;
 its SHA and outcome will be reported in the formal handoff. New-candidate Windows,
 physical terminal/IME, real providers/Azure and OS clipboard remain unverified.
 No main push, release, installed-binary or user-data operation is performed here.
+
+### #157 restack after #150 (2026-11-02)
+
+Native macOS shared-slot `cargo check --tests` passed. Focused library tests
+passed: text-width 4, startup 5, frontend diagnostics 2, command diagnostics 1,
+observation notice 3 and management 17. Width-aware diagnostics preserve raw
+arguments and localization; task CI on the restack and Windows integration CI
+remain to be verified. No physical terminal or OS clipboard was tested here.
+A focused #158 UTF-8 unknown-extension attachment integration test also passed
+(1 test). A first run of the new diagnostics regression selected zero tests
+because the shared target had another worktree's artifact; it is being rerun
+after refreshing the crate source mtime under the slot.
+The fresh-mtime rerun passed `cargo check --tests`, `cargo fmt --all -- --check`
+and the new localized-diagnostics regression (1 test), all in one slot.

@@ -239,10 +239,18 @@ impl ObservationNotice {
             ),
         };
         let separator = crate::ui::text_width::glyphs::separator();
-        let attempt = self.last_attempt_at.map_or_else(String::new, |time| match language {
-            UiLanguage::Ja => format!("{separator}最終要求 UTC {}", time.to_rfc3339_opts(SecondsFormat::Millis, true)),
-            UiLanguage::En => format!("{separator}Last request UTC {}", time.to_rfc3339_opts(SecondsFormat::Millis, true)),
-        });
+        let attempt = self
+            .last_attempt_at
+            .map_or_else(String::new, |time| match language {
+                UiLanguage::Ja => format!(
+                    "{separator}最終要求 UTC {}",
+                    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+                ),
+                UiLanguage::En => format!(
+                    "{separator}Last request UTC {}",
+                    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+                ),
+            });
         format!(
             "{}{separator}{captured}{separator}{state}{attempt}{separator}{}",
             self.kind.label(language),

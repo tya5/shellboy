@@ -214,7 +214,9 @@ pub(super) fn preview_notice(
     };
     match language {
         UiLanguage::Ja => format!("取得 {time} UTC{separator}閉じて開くと再取得{extra}"),
-        UiLanguage::En => format!("Captured {time} UTC{separator}Close and reopen to refresh.{extra}"),
+        UiLanguage::En => {
+            format!("Captured {time} UTC{separator}Close and reopen to refresh.{extra}")
+        }
     }
 }
 
@@ -273,6 +275,27 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn localized_diagnostics_use_measured_separator_without_rewriting_arguments() {
+        use crate::ui::text_width;
+        let raw = "RAW | · /restore 42";
+        for (policy, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let changed = settings_changed(language, raw, raw);
+                assert!(changed.replace(raw, "RAW").contains(separator));
+                assert_eq!(changed.matches(raw).count(), 2);
+                let rejected = not_accepted(language, raw, raw);
+                assert_eq!(rejected.matches(raw).count(), 2);
+                assert!(rejected.replace(raw, "RAW").contains(separator));
+                let not_applied = not_applied(language, raw, raw);
+                assert_eq!(not_applied.matches(raw).count(), 2);
+                assert!(not_applied.replace(raw, "RAW").contains(separator));
             }
         }
         text_width::clear_terminal_width();

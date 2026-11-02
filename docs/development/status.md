@@ -3892,3 +3892,11 @@ slot/locked/two-thread fmt/check/Clippy passed, with diagnostics4, clipboard1,
 startup5, management18, content-filter unit10/integration2, layout102/watchdog
 and Python146 passing. Exact task CI/formal handoff are pending; earlier
 027e455e CI does not validate this restack. No new feature/policy/config change.
+
+### #157 restack after #150 (2026-11-02)
+
+Restacked the approved width-aware glyph restoration onto main 89c570a1.
+Resolved localization and glyph conflicts together, preserving raw values and
+both English and Japanese. Public compatibility constants and API remain intact;
+the inventory is in `docs/development/glyphs-issue-157-inventory.md`.
+Exact restack task CI and Windows integration CI remain pending.

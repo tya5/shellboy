@@ -134,7 +134,12 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
     } else {
         format!(
             "{} {}",
-            [super::text_width::glyphs::select("·", "|"), super::text_width::glyphs::select("··", "||"), super::text_width::glyphs::select("···", "|||"), super::text_width::glyphs::select("··", "||")][tick % 4],
+            [
+                super::text_width::glyphs::select("·", "|"),
+                super::text_width::glyphs::select("··", "||"),
+                super::text_width::glyphs::select("···", "|||"),
+                super::text_width::glyphs::select("··", "||")
+            ][tick % 4],
             stage_text(stage, language)
         )
     };
@@ -148,10 +153,17 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
             "Waiting for safe shutdown; started work is not interrupted"
         )
     } else if screen.ignored_input {
-        i18n::local!(
-            language,
-            super::text_width::glyphs::select("起動完了まで入力できません · Esc / Ctrl+C / Ctrl+Q 終了", "起動完了まで入力できません | Esc / Ctrl+C / Ctrl+Q 終了"),
-            super::text_width::glyphs::select("Input disabled during startup · Esc / Ctrl+C / Ctrl+Q Quit", "Input disabled during startup | Esc / Ctrl+C / Ctrl+Q Quit")
+        crate::ui::text_width::glyphs::select(
+            i18n::local!(
+                language,
+                "起動完了まで入力できません · Esc / Ctrl+C / Ctrl+Q 終了",
+                "Input disabled during startup · Esc / Ctrl+C / Ctrl+Q Quit"
+            ),
+            i18n::local!(
+                language,
+                "起動完了まで入力できません | Esc / Ctrl+C / Ctrl+Q 終了",
+                "Input disabled during startup | Esc / Ctrl+C / Ctrl+Q Quit"
+            ),
         )
     } else {
         i18n::local!(

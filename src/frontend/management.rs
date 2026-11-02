@@ -598,8 +598,14 @@ fn index_preview_text_in(language: UiLanguage, value: &Value) -> String {
     }
     lines.push(
         match language {
-            UiLanguage::Ja => crate::ui::text_width::glyphs::select("API未送信 · 金額は未見積", "API未送信 | 金額は未見積"),
-            UiLanguage::En => crate::ui::text_width::glyphs::select("No API request sent · Cost not estimated", "No API request sent | Cost not estimated"),
+            UiLanguage::Ja => crate::ui::text_width::glyphs::select(
+                "API未送信 · 金額は未見積",
+                "API未送信 | 金額は未見積",
+            ),
+            UiLanguage::En => crate::ui::text_width::glyphs::select(
+                "No API request sent · Cost not estimated",
+                "No API request sent | Cost not estimated",
+            ),
         }
         .into(),
     );
