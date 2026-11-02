@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Observe synthetic send/draft state through Windows ConPTY, never user data."""
+import argparse
+import os
+from pathlib import Path
+import queue
+import tempfile
+import threading
+import time
+
+import pyte
+from winpty import Backend, PtyProcess
+
+
+def run_case(binary, shell, mode, index):
+    with tempfile.TemporaryDirectory(prefix='shellboy-conpty-162-') as scratch:
+        root = Path(scratch)
+        home = root / 'home'
+        home.mkdir()
+        (root / 'config.toml').write_text(
+            'default_connection="fixture"\ndefault_model="offline-fixture"\n'
+            '[connections.fixture]\nbase_url="http://127.0.0.1:9/v1"\n'
+            '[ui]\ncopy_backend="osc52"\nbell=false\nlanguage="en"\n', encoding='utf-8')
+        args = [str(binary), '--config', str(root / 'config.toml'), '--data-dir', str(root / 'data')]
+        if shell == 'powershell':
+            quote = lambda value: "'" + value.replace("'", "''") + "'"
+            command = ['pwsh', '-NoLogo', '-NoProfile', '-Command',
+                       '& ' + ' '.join(map(quote, args))]
+        else:
+            command = ['bash', '--noprofile', '--norc', '-c', 'exec "$@"', '_', *args]
+        env = {k: v for k, v in os.environ.items() if k.upper() in
+               {'PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT', 'NUMBER_OF_PROCESSORS'}}
+        env.update(HOME=str(home), USERPROFILE=str(home), APPDATA=str(home / 'config'),
+                   LOCALAPPDATA=str(home / 'local'), TMP=str(root), TEMP=str(root), TERM='xterm-256color',
+                   PYWINPTY_BACKEND='0')
+        process = PtyProcess.spawn(command, cwd=str(root), env=env, dimensions=(36, 100),
+                                   backend=Backend.ConPTY)
+        chunks = queue.Queue()
+        def reader():
+            try:
+                while process.isalive():
+                    text = process.read(4096)
+                    if text:
+                        chunks.put(text)
+            except (EOFError, OSError):
+                pass
+        thread = threading.Thread(target=reader, daemon=True)
+        thread.start()
+        screen = pyte.Screen(100, 36)
+        stream = pyte.Stream(screen)
+        def until(predicate, label, timeout=45):
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    stream.feed(chunks.get(timeout=.1))
+                except queue.Empty:
+                    pass
+                frame = '\n'.join(screen.display)
+                if predicate(frame):
+                    return frame
+            raise RuntimeError(f'{shell}/{mode}/{index}: timeout {label}\n{frame}')
+        try:
+            until(lambda frame: 'Ctrl+T' in frame, 'startup')
+            marker = f'synthetic-{shell}-{mode}-{index}'
+            if mode == 'paste':
+                process.write('\x1b[200~' + marker + '\x1b[201~')
+            else:
+                process.write(marker)
+            until(lambda frame: marker in frame, 'draft typed')
+            process.write('\r')
+            frame = until(lambda frame: ('Pending' in frame or 'Submitting' in frame)
+                          and marker in frame, 'queue')
+            time.sleep(1)
+            while not chunks.empty():
+                stream.feed(chunks.get_nowait())
+            frame = '\n'.join(screen.display)
+            print(f'=== shell={shell} transport=ConPTY mode={mode} index={index} ===', flush=True)
+            print(frame, flush=True)
+            print(f'marker_occurrences={frame.count(marker)}', flush=True)
+        finally:
+            if process.isalive():
+                process.write('\x11')
+                deadline = time.monotonic() + 5
+                while process.isalive() and time.monotonic() < deadline:
+                    time.sleep(.05)
+                if process.isalive():
+                    process.terminate(force=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binary', type=Path, required=True)
+    parser.add_argument('--repeat', type=int, default=3)
+    args = parser.parse_args()
+    binary = args.binary.resolve(strict=True)
+    for shell in ('powershell', 'git-bash'):
+        for mode in ('typed', 'paste'):
+            for index in range(args.repeat):
+                run_case(binary, shell, mode, index)
+
+
+if __name__ == '__main__':
+    main()
