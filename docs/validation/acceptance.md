@@ -8294,7 +8294,9 @@ At preparation base `3fe829a965d7511069f93ab28c0cda09e5265689`, the current
 schema and migration sources match tag `v0.6.0`: conversation schema 19 and
 standalone RAG schema 3. The upgrade-check parser and synthetic fixture accept
 0.6.0/schema 19; focused Python tests cover argument defaults. This is a source
-comparison, not an executed upgrade test. Recheck the final cutoff and run the
-disposable synthetic upgrade test on
+comparison, not an executed upgrade test. The selected cutoff
+`49d68c63896cbd660740793c07eec88927388cf4` has no differences from `v0.6.0`
+in the current schema, migration and RAG schema sources. Run the disposable
+synthetic upgrade test on
 the candidate; no candidate, tag, publication or installed-binary change is
 claimed by this preparation.

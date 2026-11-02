@@ -4,11 +4,10 @@ Attachment handling and staged display-language fixes.
 
 ## Before upgrading
 
-- **Stop the owner and back up the complete data directory.** At the current
-  draft base, the conversation database remains schema 19 and standalone RAG
-  remains schema 3, unchanged from v0.6.0. Recheck this against the final release
-  source before publishing. Before 1.0.0, compatibility with earlier releases is
-  not guaranteed; keep the backup for rollback.
+- **Stop the owner and back up the complete data directory.** The conversation
+  database remains schema 19 and standalone RAG remains schema 3, unchanged
+  from v0.6.0 at the release cutoff. Before 1.0.0, compatibility with earlier
+  releases is not guaranteed; keep the backup for rollback.
 - **Update the owner and CLI together, then restart the owner.** Replacing an
   executable does not update a running owner. The local protocol remains 2.
 - **Retry a conversation stuck after detaching an attachment and compaction.**
@@ -27,6 +26,13 @@ Attachment handling and staged display-language fixes.
 - Missing or unsupported attachments produce visible notices rather than
   silently disappearing. This is based on synthetic tests; it is not a claim
   that every provider accepts every supported file (#158).
+
+## Recovery
+
+- When a provider stops an incomplete response with `content_filter`, recovery
+  displays the categories supplied by the provider and possible next steps.
+  Missing or unrecognized categories remain unknown; categories do not establish
+  why a match occurred. Retry, rephrase or stop remain explicit choices (#159).
 
 ## Display language
 
@@ -49,8 +55,10 @@ Windows x64, macOS Apple Silicon and Linux x64 archives are intended to include
 an executable, LICENSE, configuration example and offline documentation. Verify
 all archives and installer scripts against `SHA256SUMS` when candidates exist.
 
-**Draft snapshot:** the release cutoff is not yet selected. This draft currently
-covers only changes confirmed on main at its preparation base. CI, candidate
+**Draft snapshot:** the source cutoff is main
+`49d68c63896cbd660740793c07eec88927388cf4` (includes #160 and #159). The
+#116 Stage 4 benchmark and the later #153 placeholder-argument change are not
+in this cutoff and are not release features. CI, candidate
 archives/installers/checksums and upgrade verification are separate gates; this
 preparation does not create a tag, publish a release, replace an installed binary
 or modify user data.
