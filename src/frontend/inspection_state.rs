@@ -1146,9 +1146,8 @@ mod tests {
         assert!(state.presentation_finished(&ready));
         state.changed("foreign");
         let (_root2, diagnostics2) = logger();
-        let stale_ticket = state
-            .take_usage(Instant::now() + USAGE_PERIOD, diagnostics2)
-            .unwrap();
+        let due = state.scope.as_ref().unwrap().usage_next.unwrap();
+        let stale_ticket = state.take_usage(due, diagnostics2).unwrap();
         assert!(matches!(
             state.complete_usage(
                 &stale_ticket,
