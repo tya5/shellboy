@@ -138,7 +138,7 @@ fn bounded_group_counts(
 ) -> Result<(u64, u64, bool), crate::storage::StorageError> {
     let (saved, cancelled, groups): (i64, i64, i64) = db.query_row(
         "WITH groups AS MATERIALIZED (SELECT id FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=?1 LIMIT 128),
-         results AS MATERIALIZED (SELECT r.status FROM groups g CROSS JOIN tool_result r ON r.group_id=g.id LIMIT 128)
+         results AS MATERIALIZED (SELECT r.status FROM groups g CROSS JOIN tool_result r INDEXED BY sqlite_autoindex_tool_result_1 ON r.group_id=g.id LIMIT 128)
          SELECT (SELECT count(*) FROM results),
                 (SELECT count(*) FROM results WHERE status='cancelled'),
                 (SELECT count(*) FROM groups)",
