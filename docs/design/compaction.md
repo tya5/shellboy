@@ -379,7 +379,11 @@ frames, anonymous source-identity hashes, maximum model-visible character counts
 per spill/summary opportunity, fixed reason and saturating rejection counters.
 It stores no prompts, outputs or provider error text. Source history is capped
 at 8,192 marks and encoded state at 1 MiB; Thread deletion removes it and its
-small status record. A successful reduction clears the guard. The fast path
+small status record. A successful reduction clears the guard. Like other
+internal `compact.automatic_*` metadata, these keys are not included in the
+#171 `logical.history` counter: the cap is per Thread, not a global disk quota,
+so many blocked Threads can accumulate additional disk usage. This accounting
+boundary remains under review. The fast path
 compares metadata already present in the replay lease and does not read model
 payloads again. A path rewrite, new Turn or newly older tool group triggers a
 fresh bounded forecast; identical or smaller prior candidates stay suppressed.
