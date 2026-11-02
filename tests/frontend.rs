@@ -2861,7 +2861,12 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
                 ..
             } => {
                 assert_eq!(anchor.char_offset, expected_offset);
-                assert_eq!(message.contains("先頭"), expected_offset == 0);
+                let expected_message = if expected_offset == 0 {
+                    "Stream and final text differ; showing final text start."
+                } else {
+                    "Matched the streamed position to the final text."
+                };
+                assert_eq!(message, expected_message);
                 Some(())
             }
             _ => None,

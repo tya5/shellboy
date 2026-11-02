@@ -8560,8 +8560,11 @@ live-provider or actual sandbox-exec observation is inferred.
 The focused suite covers complete En/Ja messages for success and all six
 failures, unchanged Japanese wording and offsets, and existing Unicode/source
 correspondence and stale-notice guards. On macOS arm64, the layout and watchdog
-checks and all 18 language-audit Python tests passed; Rust and exact-tip three-OS
-CI results are reported in the handoff. The audit still reports pending (c)
-items elsewhere. This synthetic coverage does not establish physical-terminal,
+checks and all 18 language-audit Python tests passed; Rust and exact-tip CI
+results are reported in the handoff. Initial CI run 41504220256 at 36efeade
+failed on Linux and macOS because an existing default-English integration
+fixture still checked for Japanese notice text. Its assertion now checks the
+complete English success and failure messages; fresh CI is required. The audit
+still reports pending (c) items elsewhere. This synthetic coverage does not establish physical-terminal,
 IME, provider, or real-conversation behavior; the broader Stage C audit remains
 incomplete.
