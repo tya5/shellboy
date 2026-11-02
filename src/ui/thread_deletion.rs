@@ -716,13 +716,35 @@ mod language_rendering_tests {
                 config.ui.language = language;
                 let mut ui = UiState::new(&config, std::env::temp_dir());
                 let _ = ui.begin_thread_deletion(thread.into());
-                let Some(Confirmation::ThreadDeletion(dialog)) = &mut ui.confirmation else { panic!("expected deletion dialog") };
+                let Some(Confirmation::ThreadDeletion(dialog)) = &mut ui.confirmation else {
+                    panic!("expected deletion dialog")
+                };
                 dialog.title = title.into();
                 let (loading, executing, disabled, enabled) = match (language, narrow) {
-                    (UiLanguage::Ja, true) => ("削除影響を確認中… Y はまだ使えません。", "削除を実行中… 閉じても受理済みの処理は継続します。", "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 使用不可 · ↑↓/PgUp/PgDn 閲覧", "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 削除 · ↑↓/PgUp/PgDn 閲覧"),
-                    (UiLanguage::Ja, false) => ("削除影響を確認中. Y はまだ使えません。", "削除を実行中. 閉じても受理済みの処理は継続します。", "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧", "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧"),
-                    (UiLanguage::En, true) => ("Checking deletion impact… Y is not available yet.", "Deleting… Closing this screen does not cancel accepted work.", "D / Space Toggle descendants · N / Esc Back\nY disabled · ↑↓/PgUp/PgDn Scroll", "D / Space Toggle descendants · N / Esc Back\nY Delete · ↑↓/PgUp/PgDn Scroll"),
-                    (UiLanguage::En, false) => ("Checking deletion impact. Y is not available yet.", "Deleting. Closing this screen does not cancel accepted work.", "D / Space Toggle descendants | N / Esc Back\nY disabled | ^v/PgUp/PgDn Scroll", "D / Space Toggle descendants | N / Esc Back\nY Delete | ^v/PgUp/PgDn Scroll"),
+                    (UiLanguage::Ja, true) => (
+                        "削除影響を確認中… Y はまだ使えません。",
+                        "削除を実行中… 閉じても受理済みの処理は継続します。",
+                        "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 使用不可 · ↑↓/PgUp/PgDn 閲覧",
+                        "D / Space 子の会話も削除を切替 · N / Esc 戻る\nY 削除 · ↑↓/PgUp/PgDn 閲覧",
+                    ),
+                    (UiLanguage::Ja, false) => (
+                        "削除影響を確認中. Y はまだ使えません。",
+                        "削除を実行中. 閉じても受理済みの処理は継続します。",
+                        "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧",
+                        "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧",
+                    ),
+                    (UiLanguage::En, true) => (
+                        "Checking deletion impact… Y is not available yet.",
+                        "Deleting… Closing this screen does not cancel accepted work.",
+                        "D / Space Toggle descendants · N / Esc Back\nY disabled · ↑↓/PgUp/PgDn Scroll",
+                        "D / Space Toggle descendants · N / Esc Back\nY Delete · ↑↓/PgUp/PgDn Scroll",
+                    ),
+                    (UiLanguage::En, false) => (
+                        "Checking deletion impact. Y is not available yet.",
+                        "Deleting. Closing this screen does not cancel accepted work.",
+                        "D / Space Toggle descendants | N / Esc Back\nY disabled | ^v/PgUp/PgDn Scroll",
+                        "D / Space Toggle descendants | N / Esc Back\nY Delete | ^v/PgUp/PgDn Scroll",
+                    ),
                 };
                 assert!(dialog.text().contains(loading));
                 assert!(dialog.text().contains(title));
@@ -736,7 +758,9 @@ mod language_rendering_tests {
                 assert_eq!(dialog.title, title);
                 assert_eq!(dialog.args.thread_id, thread);
                 show_ready(&mut ui);
-                let Some(Confirmation::ThreadDeletion(dialog)) = &ui.confirmation else { panic!("expected ready dialog") };
+                let Some(Confirmation::ThreadDeletion(dialog)) = &ui.confirmation else {
+                    panic!("expected ready dialog")
+                };
                 assert!(dialog.can_execute());
                 assert_eq!(dialog.footer(), enabled);
             }

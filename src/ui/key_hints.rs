@@ -451,17 +451,33 @@ mod tests {
             text_width::set_terminal_width(policy);
             let narrow = policy == Some(1);
             let (ja, en) = if narrow {
-                ("コマンド候補を表示。↑↓で選び、Tabで補完", "Show commands; select with ↑↓ and complete with Tab")
+                (
+                    "コマンド候補を表示。↑↓で選び、Tabで補完",
+                    "Show commands; select with ↑↓ and complete with Tab",
+                )
             } else {
-                ("コマンド候補を表示。^vで選び、Tabで補完", "Show commands; select with ^v and complete with Tab")
+                (
+                    "コマンド候補を表示。^vで選び、Tabで補完",
+                    "Show commands; select with ^v and complete with Tab",
+                )
             };
             assert_eq!(Action::Commands.description(UiLanguage::Ja), ja);
             assert_eq!(Action::Commands.description(UiLanguage::En), en);
             assert_eq!(Action::Commands.spec().0, "/");
-            for context in [Context::Details, Context::Fields, Context::Original { next: true }, Context::Original { next: false }, Context::OriginalPending] {
+            for context in [
+                Context::Details,
+                Context::Fields,
+                Context::Original { next: true },
+                Context::Original { next: false },
+                Context::OriginalPending,
+            ] {
                 let japanese = detail_footer_for(context, UiLanguage::Ja);
                 assert_eq!(japanese, detail_footer(context));
-                let header = if narrow { "Esc 戻る · ↑↓/PgUp/PgDn 移動" } else { "Esc 戻る | ^v/PgUp/PgDn 移動" };
+                let header = if narrow {
+                    "Esc 戻る · ↑↓/PgUp/PgDn 移動"
+                } else {
+                    "Esc 戻る | ^v/PgUp/PgDn 移動"
+                };
                 assert!(japanese.starts_with(header));
                 let english = detail_footer_for(context, UiLanguage::En);
                 assert!(english.starts_with("Esc Back"));
