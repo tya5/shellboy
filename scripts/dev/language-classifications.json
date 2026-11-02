@@ -123,5 +123,95 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/rows.rs:e473acb290667527:1": {
+    "category": "a",
+    "reason": "Japanese fallback row notice; Text::SourceOutsideWindow.render provides the paired English text; this constant has no production callers.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:84848997ab9fdca5:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:fac549e0a3671bef:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:6785acb9335c8a33:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:018774a2dd73f471:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:0c8b667104f23ad1:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:8f4dc91ecb4a3c29:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:38b97d4418d37b97:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:d2deeb848be13849:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:286d3cba4dbcd899:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:cda5e0611641b10e:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:b13cd63d1f62d84a:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:86b86ee263bb3e7c:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:fd4e6ed6da2e25c0:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:646bb04d1f6ce13c:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:d668d550336840ac:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:96b2bcd99d99fff2:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
+  },
+  "src/presentation/rows.rs:2d113574dbaa3be1:1": {
+    "category": "a",
+    "reason": "Japanese RowKind::spec label; messages::row_label and ui::help::row_label each select an English label for the same variant. Both select spec only in Japanese.",
+    "source_tokens_sha256": "3646e5e9ad5b9e187949a110f15929e23893f41d247bfb747047b868dcf4e341"
   }
 }

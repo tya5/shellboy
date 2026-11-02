@@ -160,6 +160,23 @@ mod tests {
         assert_ne!(RowKind::Notice.mark(), RowKind::Parent.mark());
     }
     #[test]
+    fn japanese_row_labels_have_english_counterparts() {
+        use crate::config::UiLanguage;
+        use crate::presentation::messages::{Text, row_label};
+
+        for kind in RowKind::ALL {
+            assert_eq!(row_label(kind, UiLanguage::Ja), kind.spec().1);
+            let english = row_label(kind, UiLanguage::En);
+            assert!(!english.is_empty());
+            assert!(english.is_ascii(), "{kind:?}: {english}");
+        }
+        assert_eq!(
+            Text::SourceOutsideWindow.render(UiLanguage::Ja),
+            NOTICE_SOURCE_OUTSIDE_WINDOW
+        );
+        assert!(Text::SourceOutsideWindow.render(UiLanguage::En).is_ascii());
+    }
+    #[test]
     fn metadata_is_muted_except_attention_and_unchanged_without_color() {
         use crate::config::PaletteMode;
         for mode in [PaletteMode::Dark, PaletteMode::Light] {
