@@ -370,6 +370,45 @@ fn send_progress_does_not_become_a_stale_operation_notice() {
     assert!(!footer(&ui).contains("送信要求を受け付け中"));
 }
 #[test]
+fn english_receipt_progress_does_not_become_a_stale_operation_notice() {
+    let mut ui = ui_in(crate::config::UiLanguage::En);
+    ui.insert("synthetic request", false);
+    let id = ui.view().draft.draft_id.clone();
+    let revision = ui.view().draft.revision;
+    let actions = ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Enter,
+        KeyModifiers::NONE,
+    )));
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, UiAction::Send { .. }))
+    );
+    // Isolate receipt handling from the pre-existing English send-progress notice.
+    ui.view_mut().clear_operation_notice();
+    receipt(&mut ui, &id, revision, ReceiptStatus::Accepted);
+    source(&mut ui, &id, revision, "m1");
+    history(&mut ui, "m1", 1);
+    receipt(&mut ui, &id, revision, ReceiptStatus::Completed);
+    let generation = ui.view().generation;
+    ui.apply(UiUpdate::Activity {
+        thread_id: "t".into(),
+        generation,
+        epoch: 1,
+        observed_at: Instant::now(),
+        snapshot: activity::ActivitySnapshot {
+            phase: activity::ActivityPhase::Completed,
+            ..Default::default()
+        },
+    });
+    ui.event(Event::Key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+    assert!(
+        ui.view().operation_notice.is_none(),
+        "navigation cannot announce an old English receipt again"
+    );
+}
+
+#[test]
 fn history_failure_remains_visible_in_quiet_footer() {
     let mut ui = ui();
     ui.select_thread("t".into());

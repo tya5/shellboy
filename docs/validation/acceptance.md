@@ -8474,3 +8474,10 @@ pending.
 Task CI 41423110762 failed on a default-English `send_tests` test that still
 expected Japanese receipt status. That test now explicitly selects Japanese;
 the focused send unit, 14 view units and UI integration suite pass on macOS.
+
+An added English progress regression exposed a pre-existing send-stage notice:
+`history_interaction::promote_status_notice` suppresses only the Japanese
+send-progress literal although the sending status is localized. This is before
+any receipt and is being coordinated separately. The receipt-specific test
+clears that pre-existing notice, then verifies that accepted/completed receipt
+progress is not re-announced by navigation; it passes on macOS.
