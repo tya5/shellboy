@@ -1568,6 +1568,60 @@ mod tests {
         }
     }
     #[test]
+    fn dynamic_notices_preserve_opaque_facts_in_both_languages() {
+        use crate::ui::text_width;
+        let raw = "opaque: user | data";
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                let cases = [
+                    Message::IndexPause { at: Some(raw.into()), reason: Some(raw.into()) },
+                    Message::Reclaimed { reason: raw.into() },
+                    Message::RetryError { refresh: true, error: raw.into() },
+                    Message::RetryError { refresh: false, error: raw.into() },
+                    Message::CommandNotice { command: Some(raw.into()), background: None },
+                ];
+                for message in cases {
+                    let before = message.clone();
+                    let shown = message.render(language);
+                    assert!(shown.contains(raw), "{policy:?} {language:?}: {shown}");
+                    assert_eq!(message, before);
+                }
+                let fallback = Message::IndexPause { at: None, reason: None }.render(language);
+                let expected = if language == UiLanguage::Ja { "理由不明" } else { "Reason unavailable" };
+                assert!(fallback.contains(expected), "{fallback}");
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn dynamic_ranges_and_excerpts_cover_width_and_count_boundaries() {
+        use crate::ui::text_width;
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for count in [0, 1, 2] {
+                let excerpt = Message::Excerpt { rows: count, omitted: count };
+                let en = excerpt.render(UiLanguage::En);
+                let ja = excerpt.render(UiLanguage::Ja);
+                assert!(en.contains(if count == 1 { "1 row omitted" } else { "rows omitted" }), "{en}");
+                assert!(ja.contains(&format!("{count}行中{count}行省略")), "{ja}");
+                for live in [false, true] {
+                    let window = Message::SourceWindow { start: 0, end: count, total: count, live };
+                    let en = window.render(UiLanguage::En);
+                    let ja = window.render(UiLanguage::Ja);
+                    assert!(en.contains(if count == 1 { "/1 character" } else { "characters" }), "{en}");
+                    assert!(ja.contains(&format!("/{count}文字")), "{ja}");
+                    if policy != Some(1) {
+                        assert!(en.is_ascii(), "{en}");
+                    }
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn dynamic_sentences_use_singular_only_for_one() {
         for count in [0, 1, 2] {
             let singular = count == 1;
