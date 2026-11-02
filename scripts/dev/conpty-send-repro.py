@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import queue
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -66,11 +67,12 @@ def run_case(binary, shell, mode, index):
             process.write('synthetic-warmup\r')
             until(lambda frame: 'Turn started' in frame or 'Retrying' in frame, 'active run')
             marker = f'synthetic-{shell}-{mode}-{index}'
-            if mode == 'paste':
+            if mode.startswith('paste'):
                 process.write('\x1b[200~' + marker + '\x1b[201~')
             else:
                 process.write(marker)
-            until(lambda frame: marker in frame, 'draft typed')
+            if not mode.endswith('-burst'):
+                until(lambda frame: marker in frame, 'draft typed')
             process.write('\r')
             frame = until(lambda frame: ('Pending' in frame or 'Submitting' in frame)
                           and marker in frame, 'queue')
@@ -86,7 +88,20 @@ def run_case(binary, shell, mode, index):
             while not chunks.empty():
                 stream.feed(chunks.get_nowait())
             print('=== after second Enter ===', flush=True)
-            print('\n'.join(screen.display), flush=True)
+            final = '\n'.join(screen.display)
+            print(final, flush=True)
+            assert frame.count(marker) == 1 and final.count(marker) == 1, (shell, mode, index)
+            db_path = root / 'data' / 'shellboy.db'
+            with sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True) as db:
+                count = db.execute(
+                    'SELECT count(*) FROM receipt r JOIN node n ON n.id=r.message_node_id '
+                    'WHERE instr(n.payload_json, ?) > 0', (marker,)).fetchone()[0]
+                drafts = db.execute(
+                    "SELECT count(*) FROM draft WHERE state='editing' AND "
+                    "instr(COALESCE(json_extract(body_json, '$.text'), ''), ?) > 0",
+                    (marker,)).fetchone()[0]
+            print(f'db_receipts={count} editing_drafts_with_marker={drafts}', flush=True)
+            assert count == 1 and drafts == 0, (shell, mode, index, count, drafts)
         finally:
             if process.isalive():
                 process.write('\x11')
@@ -107,7 +122,7 @@ def main():
     os.environ['PYWINPTY_BACKEND'] = '0'
     binary = args.binary.resolve(strict=True)
     for shell in ('powershell', 'git-bash'):
-        for mode in ('typed', 'paste'):
+        for mode in ('typed', 'paste', 'typed-burst', 'paste-burst'):
             for index in range(args.repeat):
                 run_case(binary, shell, mode, index)
 
