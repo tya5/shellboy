@@ -8204,7 +8204,7 @@ an `automatic_retry` record. The implementation does not change retry policy.
 
 Fresh source-mtime validation through the shared Rust slot, locked dependencies,
 CARGO_BUILD_JOBS=2 and RUST_TEST_THREADS=2: cargo check --locked --tests and strict
-all-target Clippy (-D warnings) pass; nine focused unit tests and two integration
+all-target Clippy (-D warnings) pass; ten focused unit tests and two integration
 tests pass. Coverage includes bounded nested verdicts, unknown enum strings,
 missing versus returned null after JSON roundtrip, 1,000 overlong synthetic
 categories, explicitly filtered category display priority, raw hint/pointer/copy
@@ -8218,6 +8218,9 @@ assumption about existing safe-detail JSON-string expansion, and Japanese
 wide-cell reconstruction in a new screen assertion. Corrections retain raw
 wire/hint data, keep generated advice separate from real JSON pointers, and do
 not weaken existing watchdogs, guards or assertions. No provider API, OS clipboard,
-user data, installation or release operation was used. These local results precede
-the latest-main rebase; exact candidate CI and rebase validation remain pending.
+user data, installation or release operation was used. Fresh native checks also
+pass after rebasing onto main 3fe829a9 (#158), including its existing attachment
+warning regression. A self-review regression keeps JSON-looking provider string
+values opaque before generic safe-detail expansion. Python checks pass (134).
+Exact candidate branch CI remains pending; evidence is reported separately.
 Windows, physical terminal/IME and real Azure/provider behavior remain unverified.

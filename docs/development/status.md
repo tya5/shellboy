@@ -3808,6 +3808,10 @@ recovery reason and preserves original attempt/audit response JSON. Missing fact
 stay unknown; UI guidance is bilingual and raw Turn/Run hints/copy values remain
 unchanged by display projection. No new setting or automatic retry policy change.
 A local loopback mock baseline with retry budget 8 verifies one attempt for
-terminal incomplete JSON/SSE, not repeated POSTs. Focused extraction/message tests
-passed before the latest readback acceptance additions; fresh end-to-end checks
-and branch CI are pending. No real API, clipboard, installation or release used.
+terminal incomplete JSON/SSE, not repeated POSTs. Latest-main (3fe829a9) native
+macOS validation passes: check, strict Clippy, ten focused unit tests and two
+integrated mock tests (JSON/SSE, both languages, absent verdicts, Turn/Run readback,
+80/120-column real UI). JSON-looking provider strings remain opaque, even though
+the generic safe-detail viewer independently expands container-like strings.
+Layout/watchdog checks and 134 Python checks pass. Branch CI is pending.
+No real API, clipboard, installation or release used.

@@ -505,3 +505,13 @@ use stable action identifiers; localized prose is a UI/readback projection.
 Source: issue #159 and its protected-material example comment (2026-11-02).
 Verification is recorded separately in acceptance; mock evidence does not establish
 behavior of a real Azure/OpenAI deployment.
+
+Projection bounds: 32 scalar/unknown facts, 512 visited nodes, depth 8, path 192
+characters and scalar string 128 characters. Output/content lists and filter maps
+are inspected only up to the fact limit. Saved JSON for synthetic hostile inputs
+is checked below 64 KiB. Within this bounded set, a literal returned
+`filtered=true` field is shown first in the short band; this is display ordering,
+not category interpretation. Full bounded verdicts remain in details. Facts for
+the generated recovery guide are projected before generic safe-detail string
+expansion so provider strings that look like JSON remain strings. Existing raw
+safe-detail/copy behavior is otherwise unchanged.

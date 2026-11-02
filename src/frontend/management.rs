@@ -90,6 +90,8 @@ pub(super) fn report_in(
     value: Value,
     budget: usize,
 ) -> Report {
+    let mut filter_fields = Vec::new();
+    presentation::content_filter::append_fields(&mut filter_fields, &value, language);
     let safe = presentation::safe_detail_value(value);
     if safe.get("filters").is_some() && safe.get("items").is_some() {
         return work_report(safe, budget);
@@ -134,7 +136,7 @@ pub(super) fn report_in(
         ],
     );
     presentation::fields::decorate(&mut fields, &safe);
-    presentation::content_filter::append_fields(&mut fields, &safe, language);
+    fields.extend(filter_fields);
     fn order(pointer: &str) -> (String, u8, String) {
         let (parent, key) = pointer.rsplit_once('/').unwrap_or(("", pointer));
         let parent = parent
@@ -1017,6 +1019,39 @@ mod content_filter_tests {
             assert_eq!(
                 report.detail.unwrap(),
                 presentation::safe_detail_value(source)
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod opaque_filter_string_tests {
+    use super::*;
+
+    #[test]
+    fn content_filter_json_looking_string_values_are_not_decoded() {
+        let raw = r#"{"provider":"still opaque"}"#;
+        let facts = crate::model::content_filter::ContentFilterFacts::from_response(
+            &serde_json::json!({"incomplete_details":{"reason":"content_filter"},"content_filter_results":{"protected_material_code":{"filtered":true,"diagnostic":raw}}}),
+        );
+        let hint = serde_json::to_string(
+            &ApiError::new(ErrorCode::IoFailed, "raw provider diagnosis")
+                .details(serde_json::json!({"content_filter":facts})),
+        )
+        .unwrap();
+        let source = serde_json::json!({"recovery_hint":hint});
+        let expected = format!("/diagnostic={}", serde_json::json!(raw));
+        for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+            let report = report_in(language, source.clone(), 1024 * 1024);
+            assert!(
+                report
+                    .fields
+                    .iter()
+                    .any(|f| f.key.is_empty() && f.value.contains(&expected))
+            );
+            assert_eq!(
+                report.detail.unwrap(),
+                presentation::safe_detail_value(source.clone())
             );
         }
     }
