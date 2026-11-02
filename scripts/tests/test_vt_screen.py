@@ -9,6 +9,12 @@ spec.loader.exec_module(vt)
 
 
 class VtScreenTests(unittest.TestCase):
+    def test_keyboard_enhancement_query_is_ignored_across_chunks(self):
+        screen = vt.Screen(12, 2)
+        screen.feed('ready\x1b[?')
+        screen.feed('u')
+        self.assertTrue(screen.text().startswith('ready'))
+
     def test_cursor_erase_and_split_control_sequences(self):
         screen = vt.Screen(12, 3)
         for chunk in ['abc', '\x1b[2;', '3Hxy', '\x1b[1G!', '\x1b[K']:
