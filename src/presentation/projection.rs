@@ -316,3 +316,48 @@ fn fallback_window(
         });
     }
 }
+
+#[cfg(test)]
+mod language_audit_tests {
+    use super::*;
+    use crate::config::UiLanguage::{En, Ja};
+
+    #[test]
+    fn generated_titles_pair_japanese_with_english_without_changing_source_values() {
+        for (kind, japanese, english) in [
+            ("user", "あなた", "You"),
+            ("reasoning", "推論", "Reasoning"),
+            ("summary", "要約", "Summary"),
+            ("spill", "原文参照", "Original reference"),
+            (
+                "future-kind",
+                "未対応の項目: future-kind",
+                "Unsupported item: future-kind",
+            ),
+        ] {
+            let (projected, _) = initial(kind, &serde_json::json!({}));
+            let title = projected.ui_messages.title.as_ref().unwrap();
+            assert_eq!(projected.title, japanese);
+            assert_eq!(title.render(Ja), japanese);
+            assert_eq!(title.render(En), english);
+        }
+        let (reclaimed, _) = initial(
+            "future-kind",
+            &serde_json::json!({"tombstone_reason":"saved raw"}),
+        );
+        let title = reclaimed.ui_messages.title.as_ref().unwrap();
+        assert_eq!(reclaimed.title, "原文回収済み | saved raw");
+        assert_eq!(title.render(Ja), reclaimed.title);
+        assert_eq!(title.render(En), "Original reclaimed | saved raw");
+    }
+    #[test]
+    fn generated_summary_count_title_has_bilingual_projection() {
+        let payload = serde_json::json!({"source_node_ids":["node-a", "node-b"]});
+        let (mut projected, _) = initial("summary", &payload);
+        summary_projection(&mut projected, &payload);
+        let title = projected.ui_messages.title.as_ref().unwrap();
+        assert_eq!(projected.title, "要約 | 出典2件 | F6>O 原文");
+        assert_eq!(title.render(Ja), projected.title);
+        assert_eq!(title.render(En), "Summary | 2 sources | F6>O Original");
+    }
+}
