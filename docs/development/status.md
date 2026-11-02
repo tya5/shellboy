@@ -24,9 +24,10 @@ integration and overall Stage C acceptance remain open.
 The saved-response and stream-observation titles plus the saved-source field
 label now follow `UiLanguage`. Display separators continue to use the shared
 `glyphs::formatted!` `·`/`|` variants. Source IDs, status classes, saved payloads,
-partial response text/reasoning, and replay/path semantics are unchanged. Build-free
-checks pass; the local Rust command is queued behind the shared slot. The initial
-CI found a missing language argument; its follow-up is recorded in acceptance.
+partial response text/reasoning, and replay/path semantics are unchanged.
+Build-free checks pass; the local Rust recheck is queued behind the shared slot.
+CI run 415045 found a missing language argument; run 415055 exposed stale
+locale/caption expectations, corrected in this follow-up.
 
 ## Index-source GC scan (#164, branch CI pending)
 

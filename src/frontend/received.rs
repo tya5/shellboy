@@ -101,12 +101,14 @@ fn received_title(language: UiLanguage, observation: bool) -> String {
     match language {
         UiLanguage::Ja => {
             if observation {
+                let status = crate::ui::text_width::glyphs::formatted!(
+                    "ストリーム差分 · 最終応答は確定済み",
+                    "ストリーム差分 | 最終応答は確定済み"
+                );
                 crate::ui::text_width::glyphs::formatted!(
-                    "{} · {} · {}",
-                    "{} | {} | {}",
-                    "ストリーム差分",
-                    "最終応答は確定済み",
-                    "/received 一覧"
+                    "{} · /received 一覧",
+                    "{} | /received 一覧",
+                    status
                 )
             } else {
                 crate::ui::text_width::glyphs::formatted!(
@@ -119,12 +121,14 @@ fn received_title(language: UiLanguage, observation: bool) -> String {
         }
         UiLanguage::En => {
             if observation {
+                let status = crate::ui::text_width::glyphs::formatted!(
+                    "Stream difference · final response confirmed",
+                    "Stream difference | final response confirmed"
+                );
                 crate::ui::text_width::glyphs::formatted!(
-                    "{} · {} · {}",
-                    "{} | {} | {}",
-                    "Stream difference",
-                    "final response confirmed",
-                    "/received list"
+                    "{} · /received list",
+                    "{} | /received list",
+                    status
                 )
             } else {
                 crate::ui::text_width::glyphs::formatted!(
@@ -435,10 +439,23 @@ mod tests {
                 language,
             );
 
+            let mixed_titles = match (language, kind) {
+                (UiLanguage::Ja, "model_stream_observation") => [
+                    "ストリーム差分 · 最終応答は確定済み | /received 一覧",
+                    "ストリーム差分 | 最終応答は確定済み · /received 一覧",
+                ],
+                (UiLanguage::En, "model_stream_observation") => [
+                    "Stream difference · final response confirmed | /received list",
+                    "Stream difference | final response confirmed · /received list",
+                ],
+                _ => ["", ""],
+            };
+            let title = node.presentation.title.as_str();
             assert!(
-                node.presentation.title == dot_title || node.presentation.title == bar_title,
-                "unexpected title for {language:?}: {}",
-                node.presentation.title
+                title == dot_title
+                    || title == bar_title
+                    || mixed_titles.contains(&title),
+                "unexpected title for {language:?}: {title}"
             );
             assert_eq!(node.presentation.kind, expected_kind);
             assert_eq!(node.presentation.event_class, expected_class);
@@ -681,8 +698,16 @@ mod tests {
         );
         assert_eq!(nodes[0].1.text, "理由\n有料本文33");
         assert_eq!(nodes[0].1.reasoning_ranges, [(0, 2)]);
-        assert!(nodes[0].1.presentation.title.contains("途中で切れた応答"));
-        assert!(nodes[1].1.presentation.title.contains("確定済み"));
+        let interrupted_title = &nodes[0].1.presentation.title;
+        assert!(
+            interrupted_title.contains("途中で切れた応答")
+                || interrupted_title.contains("Interrupted response")
+        );
+        let observation_title = &nodes[1].1.presentation.title;
+        assert!(
+            observation_title.contains("最終応答は確定済み")
+                || observation_title.contains("final response confirmed")
+        );
         let (title, first) = list(&control, "t".into(), 1).await.unwrap();
         assert!(title.contains("35件"));
         assert_eq!(

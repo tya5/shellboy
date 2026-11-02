@@ -8572,11 +8572,18 @@ English and checks that source facts remain intact.
 
 Build-free validation passed: `python3 -m unittest discover -s scripts/tests` (168
 tests), `python3 scripts/check-test-layout.py` (102 suites), language audit
-(`received.rs`: a=6, b=31, c=0), and `git diff --check`. The local Rust format/check/focused-test/Clippy command remains queued behind the
-shared slot. Initial exact-tip CI run `41504566436` failed on Linux and macOS with
-E0061 at `src/frontend/refresh.rs:141`; the follow-up passes `UiLanguage` to the
-history projection. Final exact-tip CI and three-OS integration are reported
-separately.
+(`received.rs`: a=7, b=33, c=0), and `git diff --check`. An earlier local run
+passed format and `cargo check --tests`; the focused received suite reported 7/8
+tests because its saved-preview assertion assumed Japanese under the default
+English configuration. That assertion is now language-neutral. The fresh local
+Rust recheck is queued behind the shared slot; history-reader/refresh tests and
+Clippy remain pending locally.
 
-Exact-tip task CI and three-OS integration validation are reported separately;
-overall Stage C acceptance remains open.
+CI run `41504566436` failed on Linux and macOS with E0061 at
+`src/frontend/refresh.rs:141`; the follow-up passes `UiLanguage` through the
+history projection. Run `41505546494` compiled but both platforms failed the
+saved-preview locale assertion and guide-caption source-literal check. This
+follow-up accepts either configured title language and retains the observation
+caption literal in the `glyphs::formatted!` pair. The final exact-tip CI and
+three-OS integration are reported separately; overall Stage C acceptance remains
+open.
