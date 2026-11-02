@@ -18,6 +18,29 @@ landing `c090fa799` with migration 23; combined validation and three-OS CI are
 pending. SQLite JSON work, exact usage accounting and elapsed time
 have no wall-clock bound. No user database was opened for synthetic preparation.
 
+## Activity index write cost after #171 landing (2026-11-03, synthetic)
+
+Reproduced the earlier fixture against the landed schema 22 at
+`c090fa799f1c5d873a36ea07994c936244377437`, using
+`scripts/dev/measure-activity-index-vm.sh --base c090fa799f1c5d873a36ea07994c936244377437`.
+The `after` case adds the six migration 23 indexes. SQLite CLI 3.51.0 on macOS
+uses disposable in-memory databases, foreign keys, identical seeds of 1,000
+completed Turns and 1,000 exited shell executions, and the schema 22 quota
+triggers. No user database is opened.
+
+| Synthetic SQL statement | Before VM steps | After VM steps | Delta |
+| --- | ---: | ---: | ---: |
+| Insert preparing Turn | 133 | 148 | +15 |
+| Update Turn to running | 105 | 116 | +11 |
+| Insert starting shell execution | 585 | 617 | +32 |
+| Update shell as spawned/running | 146 | 208 | +62 |
+| Update shell as exited | 167 | 234 | +67 |
+
+These are per-statement VM counts including triggers, not end-to-end latency,
+disk cost, total transaction cost, a bound, or measurements on bundled SQLite.
+The helper's synthetic fixture and CLI may behave differently from application
+workloads and other SQLite builds.
+
 ## DB writer occupancy (#171, 2026-11-03)
 
 macOS (development Mac), rust-slot, debug builds, temporary databases only; the

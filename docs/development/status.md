@@ -257,7 +257,9 @@ accepting-footer test, 170 Python tests, test layout, formatting and five
 focused integration tests passed, as did two draft and first-send tests and one
 attachment-plan test. The exact usage sum and elapsed time remain unbounded.
 Rebased onto #171 landing `c090fa799`; the activity migration is 23. Combined
-post-rebase validation, write-step remeasurement and three-OS CI are pending.
+post-rebase Rust validation and three-OS CI are pending. Synthetic write-step
+remeasurement against the landed schema 22 is recorded in
+[acceptance](../validation/acceptance.md#activity-index-write-cost-after-171-landing-2026-11-03-synthetic).
 
 ## v0.5.0 release preparation
 
