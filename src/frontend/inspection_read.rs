@@ -25,7 +25,7 @@ pub(super) struct RawInspection {
     at: String,
 }
 enum Body {
-    History(crate::history::observation::Raw),
+    History(crate::history::observation::Raw, crate::config::UiLanguage),
     Lists(super::inspection_lists::RawLists),
     Retained(Box<super::inspection_retained::OwnedRetainedRaw>),
     Thread(
@@ -110,15 +110,18 @@ pub(super) fn read_scoped_tx(
                     )
                     .into());
                 }
-                Body::History(crate::history::observation::read_tx(
-                    db,
-                    &scope
-                        .nodes
-                        .iter()
-                        .map(|(id, _)| id.clone())
-                        .collect::<Vec<_>>(),
-                    scope.thread_id.as_deref(),
-                )?)
+                Body::History(
+                    crate::history::observation::read_tx(
+                        db,
+                        &scope
+                            .nodes
+                            .iter()
+                            .map(|(id, _)| id.clone())
+                            .collect::<Vec<_>>(),
+                        scope.thread_id.as_deref(),
+                    )?,
+                    services.config.ui.language,
+                )
             }
             InspectionTarget::Usage(_) => {
                 return Err(ApiError::new(
@@ -271,13 +274,15 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             let value = super::inspection_retained::prepare_inspection(*raw)?;
             (String::new(), value)
         }
-        Body::History(raw) => {
+        Body::History(raw, language) => {
             let mut value = crate::history::observation::prepare(raw);
             if let InspectionTarget::HistorySources(scope) = &target {
                 value["captured_result_at"] = serde_json::json!(scope.captured_at);
-                value["repeat_result"] = serde_json::json!(
-                    "aから同じ履歴照会と引数を指定して再取得。現在状態の更新は元の結果を取り直しません"
-                );
+                value["repeat_result"] = serde_json::json!(crate::ui::i18n::local!(
+                    language,
+                    "aから同じ履歴照会と引数を指定して再取得。現在状態の更新は元の結果を取り直しません",
+                    "Use a to enter the same query/args; refresh does not rerun."
+                ));
             }
             if let InspectionTarget::HistorySources(scope) = &target
                 && let Some(nodes) = value["nodes"].as_array_mut()
@@ -347,4 +352,75 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
         observed_at,
         limited_fields,
     })
+}
+
+#[cfg(test)]
+mod history_language_tests {
+    use super::*;
+    use crate::{config::UiLanguage, ui::HistorySourceScope};
+
+    fn snapshot(db: &Connection, scope: &HistorySourceScope, language: UiLanguage) -> Value {
+        let ids: Vec<_> = scope.nodes.iter().map(|(id, _)| id.clone()).collect();
+        let raw =
+            crate::history::observation::read_tx(db, &ids, scope.thread_id.as_deref()).unwrap();
+        prepare(RawInspection {
+            target: InspectionTarget::HistorySources(scope.clone()),
+            body: Body::History(raw, language),
+            at: "fixture-time".into(),
+        })
+        .unwrap()
+        .value
+    }
+
+    #[test]
+    fn repeat_hint_changes_only_generated_text_across_scopes_and_revisions() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');").unwrap();
+        for i in 0..10 {
+            let id = format!("n{i}");
+            let payload =
+                serde_json::json!({"content": format!("retained source {i} 日本語")}).to_string();
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_revision,body_hash) VALUES(?1,'user','now',?2,7,'hash')", rusqlite::params![id, payload]).unwrap();
+            db.execute(
+                "INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t',?1,?2)",
+                rusqlite::params![i, id],
+            )
+            .unwrap();
+        }
+        let ja =
+            "aから同じ履歴照会と引数を指定して再取得。現在状態の更新は元の結果を取り直しません";
+        let en = "Use a to enter the same query/args; refresh does not rerun.";
+        for changed in [false, true] {
+            if changed {
+                db.execute_batch("DELETE FROM thread_path WHERE thread_id='t' AND ordinal=0; UPDATE thread SET selection_revision=1 WHERE id='t'; UPDATE node SET payload_revision=8 WHERE id='n0';").unwrap();
+            }
+            for count in [0, 1, 2, 10] {
+                let scope = HistorySourceScope {
+                    nodes: (0..count).map(|i| (format!("n{i}"), Some(7))).collect(),
+                    thread_id: Some("t".into()),
+                    captured_at: "captured-time".into(),
+                    scope_limited: false,
+                };
+                let mut japanese = snapshot(&db, &scope, UiLanguage::Ja);
+                let mut english = snapshot(&db, &scope, UiLanguage::En);
+                assert_eq!(japanese["repeat_result"], ja);
+                assert_eq!(english["repeat_result"], en);
+                japanese.as_object_mut().unwrap().remove("repeat_result");
+                english.as_object_mut().unwrap().remove("repeat_result");
+                assert_eq!(japanese, english, "count={count}, changed={changed}");
+                assert_eq!(japanese["captured_result_at"], "captured-time");
+                assert_eq!(japanese["nodes"].as_array().unwrap().len(), count);
+            }
+        }
+        let retained: String = db
+            .query_row("SELECT payload_json FROM node WHERE id='n0'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&retained).unwrap()["content"],
+            "retained source 0 日本語"
+        );
+    }
 }

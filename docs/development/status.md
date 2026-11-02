@@ -3998,3 +3998,12 @@ The same private-mode, owner, protected-ancestor, non-symlink, path-length and
 identity/lease checks apply; endpoint publication and cleanup retain their
 ordering. Windows named pipes and configuration are unchanged. Validation
 results and untested environments are reported separately in acceptance.
+
+## #152 history inspection repeat hint follow-up
+
+The private History inspection observation captures the loaded UI language for
+its application-owned repeat hint. En explains that the user enters the same
+query and arguments via `a` and that refresh does not rerun it; Ja retains the
+original wording. Retained bytes, source facts, selection, dispatch and refresh
+are unchanged. Focused local and exact-tip CI results are recorded in the handoff;
+the remaining Stage C audit and physical-terminal behavior are not claimed.

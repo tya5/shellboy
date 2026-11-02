@@ -184,3 +184,17 @@ main delivery, pending-failure ownership, coalescing, once-per-Thread warnings,
 raw snapshots/anchors/revisions, shutdown/error results, persistence or limits.
 No source text, user reason or stored draft is translated. Remaining candidates
 and the old prototype are not adopted by this one-notice boundary.
+
+## History Inspection Repeat Hint Boundary (#152)
+
+The generated `repeat_result` hint for a retained History inspection follows the
+immutable UI language captured with the private history observation. Explicit Ja
+retains the original sentence byte-for-byte. En says to use `a` to enter the same
+query and arguments and distinguishes this explicit action from refresh. The `a`
+key opens the Operations overlay; it does not itself rerun a stored command.
+
+Only this application-generated hint changes. Retained source text, query scope
+and arguments, IDs, timestamps, observation order, source revisions, selection,
+refresh, result identity and dispatch are unchanged. The adjacent current-source
+label is outside this slice. The 80-column TestBackend case covers wrapped
+rendering but does not establish physical-terminal or IME behavior.

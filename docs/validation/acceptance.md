@@ -8554,3 +8554,14 @@ Stale cleanup, owner/mode/symlink protections and existing cleanup behavior
 remain required. Windows named-pipe behavior is outside the changed path.
 Exact commands, platform and CI results are reported in the task handoff; no
 live-provider or actual sandbox-exec observation is inferred.
+
+## #152 history inspection repeat hint follow-up
+
+The targeted contract compares En and Ja prepared observations after removing
+only `repeat_result` for 0, 1, 2 and 10 nodes, before and after a source revision
+and selection change. Real local F8 History get/list fixtures check loaded
+language propagation; an 80-column TestBackend checks prefixed, wrapped En
+rendering. Retained payload and source facts remain unchanged. Local Rust and
+exact-tip native CI results are reported separately in the handoff. These are
+synthetic fixtures, not physical-terminal, IME, live-provider or real-conversation
+proof; remaining Stage C candidates are not covered by this slice.
