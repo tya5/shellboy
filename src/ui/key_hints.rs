@@ -459,7 +459,10 @@ mod tests {
             assert_eq!(Action::Commands.description(UiLanguage::En), en);
             assert_eq!(Action::Commands.spec().0, "/");
             for context in [Context::Details, Context::Fields, Context::Original { next: true }, Context::Original { next: false }, Context::OriginalPending] {
-                assert_eq!(detail_footer_for(context, UiLanguage::Ja), detail_footer(context));
+                let japanese = detail_footer_for(context, UiLanguage::Ja);
+                assert_eq!(japanese, detail_footer(context));
+                let header = if narrow { "Esc 戻る · ↑↓/PgUp/PgDn 移動" } else { "Esc 戻る | ^v/PgUp/PgDn 移動" };
+                assert!(japanese.starts_with(header));
                 let english = detail_footer_for(context, UiLanguage::En);
                 assert!(english.starts_with("Esc Back"));
                 assert!(!english.contains("戻る"));
