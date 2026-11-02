@@ -203,3 +203,11 @@ Provider reasons and other source strings are not translated. Pointers, opaque
 cursors, underlying values, anchor derivation and the existing bounded projection
 remain unchanged. Empty-key details are retained by key, not inferred from a
 translated or caller-supplied label.
+
+## Thread Usage Pending Copy (#152)
+
+The synthetic private Thread inspection detail for a usage read that has not yet
+completed follows UI language. The `not_yet_read` observation identifier,
+inspection command, actual saved usage, metadata and source data are unchanged.
+A completed usage observation, including its provider-origin content and prior
+configuration, is never translated by matching its text.

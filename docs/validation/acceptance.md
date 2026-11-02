@@ -8702,3 +8702,12 @@ Stage C slice, not final #152 acceptance.
 ## #175 Shift+Enter Keyboard Enhancement
 
 Physical terminal verification is UNVERIFIED. No real terminal emulator or physical TTY was exercised for this change; synthetic PTY tests and 3-OS CI are not counted as physical-terminal success. No configuration setting was added.
+
+### #152 Thread Usage Pending Copy (Validation Pending)
+
+The Thread observation regression exercises the not-yet-read generated detail in
+English and Japanese, checks the canonical observation identifier and inspect
+command, verifies metadata remains unchanged, and admits a matching-scope usage
+observation to check original values survive both locales. Rust validation and
+exact-tip 3-OS CI are pending; physical terminal, provider and post-integration
+behavior are untested. This is one Stage C slice, not final #152 acceptance.
