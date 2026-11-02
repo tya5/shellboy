@@ -202,15 +202,10 @@ impl AutomaticCompactionSnapshot {
     pub fn label_localized(&self, language: UiLanguage) -> String {
         let input = self.input_tokens;
         let threshold = self.threshold;
+        let sep = crate::ui::text_width::glyphs::separator();
         match language {
-            UiLanguage::Ja => crate::ui::text_width::glyphs::formatted!(
-                "自動圧縮中 · 入力 {input} / 閾値 {threshold}",
-                "自動圧縮中 | 入力 {input} / 閾値 {threshold}"
-            ),
-            UiLanguage::En => crate::ui::text_width::glyphs::formatted!(
-                "Auto-compacting · Input {input} / threshold {threshold}",
-                "Auto-compacting | Input {input} / threshold {threshold}"
-            ),
+            UiLanguage::Ja => format!("自動圧縮中{sep}入力 {input} / 閾値 {threshold}"),
+            UiLanguage::En => format!("Auto-compacting{sep}Input {input} / threshold {threshold}"),
         }
     }
 }
@@ -764,6 +759,28 @@ impl Animation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn automatic_compaction_labels_use_the_shared_separator() {
+        use crate::ui::text_width;
+        let activity = AutomaticCompactionSnapshot {
+            input_tokens: 203000,
+            threshold: 200000,
+            started_at: "2026-11-02T10:00:00Z".into(),
+        };
+        for (policy, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            text_width::set_terminal_width(policy);
+            assert_eq!(
+                activity.label_localized(UiLanguage::Ja),
+                format!("自動圧縮中{separator}入力 203000 / 閾値 200000")
+            );
+            assert_eq!(
+                activity.label_localized(UiLanguage::En),
+                format!("Auto-compacting{separator}Input 203000 / threshold 200000")
+            );
+        }
+        text_width::clear_terminal_width();
+    }
 
     #[test]
     fn activity_markers_and_retry_text_follow_measured_width() {
