@@ -115,19 +115,34 @@ pub(super) async fn embed_revision(
     revision: &str,
     profile: &Profile,
 ) -> Result<()> {
-    let pending = {
-        let mut q=s.db.prepare("WITH positioned AS (SELECT revision_id, text, COALESCE(SUM(length(CAST(text AS BLOB))+1) OVER (PARTITION BY revision_id ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start FROM blocks WHERE revision_id=?1) SELECT DISTINCT c.hash,CAST(substr(CAST(b.text AS BLOB),c.start-b.start+1,c.end-c.start) AS TEXT) FROM chunks c LEFT JOIN positioned b ON b.revision_id=c.revision_id AND c.start>=b.start AND c.end<=b.start+length(CAST(b.text AS BLOB)) WHERE c.revision_id=?1 AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.space_id=?2 AND e.hash=c.hash) ORDER BY c.ordinal")?;
+    let ranges = {
+        let mut q = s.db.prepare("SELECT c.hash,c.start,c.end FROM chunks c WHERE c.revision_id=?1 AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.space_id=?2 AND e.hash=c.hash) ORDER BY c.ordinal")?;
         q.query_map(params![revision, profile.id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?
     };
-    for (expected, text) in &pending {
-        if hash(text.as_bytes()) != *expected {
-            return Err(err(
-                "index_incompatible",
-                "Saved chunk range does not match its hash",
-            ));
+    let mut pending = Vec::new();
+    if !ranges.is_empty() {
+        let blocks = store::BlockRanges::load(&s.db, revision)?;
+        let mut seen = HashSet::new();
+        for (expected, start, end) in ranges {
+            let text = blocks
+                .get(start, end)
+                .filter(|text| hash(text.as_bytes()) == expected)
+                .ok_or_else(|| {
+                    err(
+                        "index_incompatible",
+                        "Saved chunk range does not match its hash",
+                    )
+                })?;
+            if seen.insert(expected.clone()) {
+                pending.push((expected, text.to_owned()));
+            }
         }
     }
     for batch in pending.chunks(8) {

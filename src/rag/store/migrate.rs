@@ -1,5 +1,5 @@
 //! Startup-only upgrades; read-only operations never interpret an older schema.
-use super::{Connection, HOT_QUERY_INDEXES, Result, err};
+use super::{BlockRanges, Connection, HOT_QUERY_INDEXES, Result, err};
 
 pub(super) fn run(db: &Connection, version: i64) -> Result<()> {
     if version == 4 {
@@ -17,12 +17,31 @@ pub(super) fn run(db: &Connection, version: i64) -> Result<()> {
         |row| row.get(0),
     )?;
     if has_text {
-        let invalid: bool = tx.query_row("WITH positioned AS (SELECT revision_id,text,COALESCE(SUM(length(CAST(text AS BLOB))+1) OVER (PARTITION BY revision_id ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start FROM blocks) SELECT EXISTS(SELECT 1 FROM chunks c WHERE NOT EXISTS(SELECT 1 FROM positioned b WHERE b.revision_id=c.revision_id AND c.start>=b.start AND c.end>=c.start AND c.end<=b.start+length(CAST(b.text AS BLOB)) AND substr(CAST(b.text AS BLOB),c.start-b.start+1,c.end-c.start)=CAST(c.text AS BLOB)))", [], |row| row.get(0))?;
-        if invalid {
-            return Err(err(
-                "index_incompatible",
-                "Cannot migrate: a saved chunk differs from its block range",
-            ));
+        let revisions = {
+            let mut q = tx.prepare("SELECT DISTINCT revision_id FROM chunks")?;
+            q.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        for revision in revisions {
+            let blocks = BlockRanges::load(&tx, &revision)?;
+            let mut q = tx.prepare("SELECT start,end,text FROM chunks WHERE revision_id=?1")?;
+            let rows = q.query_map([&revision], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (start, end, saved) = row?;
+                let actual = blocks.get(start, end);
+                if actual != Some(saved.as_str()) {
+                    return Err(err(
+                        "index_incompatible",
+                        "Cannot migrate: a saved chunk differs from its block range",
+                    ));
+                }
+            }
         }
     }
     tx.execute_batch("CREATE TABLE chunks_v4(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));

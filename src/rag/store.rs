@@ -29,6 +29,40 @@ const HOT_QUERY_INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS embeddings_vec_rowid ON embeddings(space_id,vec_rowid);
 CREATE INDEX IF NOT EXISTS chunks_hash ON chunks(hash);";
 
+pub(super) struct BlockRanges {
+    blocks: Vec<String>,
+    starts: Vec<usize>,
+}
+impl BlockRanges {
+    pub(super) fn load(db: &Connection, revision: &str) -> Result<Self> {
+        let blocks = {
+            let mut q =
+                db.prepare("SELECT text FROM blocks WHERE revision_id=?1 ORDER BY ordinal")?;
+            q.query_map([revision], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut starts = Vec::with_capacity(blocks.len());
+        let mut offset = 0usize;
+        for block in &blocks {
+            starts.push(offset);
+            offset = offset
+                .checked_add(block.len())
+                .and_then(|n| n.checked_add(1))
+                .ok_or_else(|| err("index_incompatible", "Saved block ranges overflow"))?;
+        }
+        Ok(Self { blocks, starts })
+    }
+    pub(super) fn get(&self, start: i64, end: i64) -> Option<&str> {
+        let start = usize::try_from(start).ok()?;
+        let end = usize::try_from(end).ok()?;
+        let index = self
+            .starts
+            .partition_point(|&position| position <= start)
+            .checked_sub(1)?;
+        self.blocks[index]
+            .get(start.checked_sub(self.starts[index])?..end.checked_sub(self.starts[index])?)
+    }
+}
 pub(super) struct Store {
     pub db: Connection,
     pub uuid: String,
@@ -709,6 +743,21 @@ pub(super) fn inspect(path: &Path, id: &str) -> Result<Value> {
 #[cfg(test)]
 mod lock_tests {
     use super::*;
+
+    #[test]
+    fn block_ranges_check_utf8_boundaries_and_block_separators() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE blocks(revision_id TEXT,ordinal INTEGER,text TEXT); INSERT INTO blocks VALUES('r',0,'あい'),('r',1,'🙂え');").unwrap();
+        let blocks = BlockRanges::load(&db, "r").unwrap();
+        assert_eq!(blocks.get(0, 3), Some("あ"));
+        assert_eq!(blocks.get(7, 11), Some("🙂"));
+        assert_eq!(blocks.get(11, 14), Some("え"));
+        assert_eq!(blocks.get(1, 3), None);
+        assert_eq!(blocks.get(6, 7), None);
+        assert_eq!(blocks.get(3, 11), None);
+        assert_eq!(blocks.get(-1, 3), None);
+        assert_eq!(blocks.get(11, 7), None);
+    }
 
     #[test]
     fn writer_lease_ends_after_store_even_while_its_duplicate_handle_remains_open() {
