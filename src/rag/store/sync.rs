@@ -29,7 +29,11 @@ impl FileIndexPolicy {
             && previous_extractor == "text:utf8-v1"
         {
             counts.unchanged += 1;
-            let (segments, bytes): (i64, i64) = store.db.query_row("SELECT COUNT(*),COALESCE(SUM(length(CAST(text AS BLOB))),0) FROM chunks WHERE revision_id=?1", [revision], |row| Ok((row.get(0)?,row.get(1)?)))?;
+            let (segments, bytes): (i64, i64) = store.db.query_row(
+                "SELECT COUNT(*),COALESCE(SUM(end-start),0) FROM chunks WHERE revision_id=?1",
+                [revision],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )?;
             counts.segments += segments as usize;
             counts.text_bytes += bytes as usize;
             if let Some(profile) = &self.profile {

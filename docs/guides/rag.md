@@ -4,7 +4,7 @@
 
 `shellboy rag` is a search CLI that works without starting the conversation application. It does not generate answers to questions. Start with `shellboy docs search --query 'search'` to find operation guides. The bundled guides are English. Queries are not translated automatically.
 
-The standalone RAG store uses schema 3. Readers and dry-run require the current schema and do not migrate it. The writer owns schema preparation; the general schema-version/ledger mechanism is separate from a promise to support older releases. The standalone store does not modify the conversation DB.
+The standalone RAG store uses schema 4. Readers and dry-run require the current schema and do not migrate it. The writer owns schema preparation; the general schema-version/ledger mechanism is separate from a promise to support older releases. The standalone store does not modify the conversation DB.
 
 ## Register documents
 
@@ -154,4 +154,6 @@ deleted while a query embedding is in flight, the scope reports
 it does not disable standalone source indexing or semantic/hybrid queries.
 History-scoped semantic/hybrid queries still search retained vectors, but report
 `degraded=true` and `scope_status.reason=auto_history_disabled` because newer
-conversation nodes may be absent. Keyword history retrieval is unchanged.
+conversation nodes may be absent. Keyword history retrieval remains available, subject to the limit below.
+
+History keyword search examines at most the most recently inserted 10,000 nodes per scope. If more nodes exist, `scope_status.keyword` is `partial` and a `history_keyword_limit` warning marks results as incomplete; older matches and matches in a Thread may be omitted. There is currently no continuation cursor.

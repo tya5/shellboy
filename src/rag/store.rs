@@ -19,10 +19,10 @@ CREATE TABLE sources(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,root TEXT NOT
 CREATE TABLE documents(id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES sources(id),key TEXT NOT NULL,active_revision TEXT,status TEXT NOT NULL DEFAULT 'ready',error TEXT,UNIQUE(source_id,key));
 CREATE TABLE revisions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES documents(id),source_hash TEXT NOT NULL,body_hash TEXT NOT NULL,extractor TEXT NOT NULL,kind TEXT NOT NULL,title TEXT NOT NULL,provenance TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE TABLE blocks(revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,text TEXT NOT NULL,location TEXT NOT NULL,PRIMARY KEY(revision_id,ordinal));
-CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,text TEXT NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
+CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
 CREATE TABLE spaces(id TEXT PRIMARY KEY,dimension INTEGER NOT NULL,profile TEXT NOT NULL,model TEXT NOT NULL,endpoint_hash TEXT NOT NULL,table_name TEXT NOT NULL);
 CREATE TABLE embeddings(space_id TEXT NOT NULL REFERENCES spaces(id),hash TEXT NOT NULL,vec_rowid INTEGER NOT NULL,PRIMARY KEY(space_id,hash));
-PRAGMA user_version=3;";
+PRAGMA user_version=4;";
 
 // Proven hot paths: max vector row allocation and orphan-hash cleanup (#26).
 const HOT_QUERY_INDEXES: &str = "
@@ -60,7 +60,7 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
         db.execute_batch("PRAGMA query_only=ON;")?;
     }
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if !matches!(version, 1..=3) {
+    if !matches!(version, 1..=4) {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema is not supported; no migration was attempted",
@@ -89,13 +89,13 @@ pub(super) fn open(path: &Path, write: bool) -> Result<Store> {
     Ok(Store {
         db,
         uuid,
-        migrated_from_schema: (write && version < 3).then_some(version),
+        migrated_from_schema: (write && version < 4).then_some(version),
         _lock: lock,
     })
 }
 fn validate_schema(db: &Connection) -> Result<()> {
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    if version != 3 {
+    if version != 4 {
         return Err(err(
             "schema_unsupported",
             "Knowledge database schema requires migration; run shellboy rag init to migrate without registering materials or indexing before reading",
@@ -163,7 +163,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
         drop(_lock);
         let s = open(path, true)?;
         return Ok(
-            json!({"database_uuid":s.uuid,"already_initialized":true,"schema_version":3,"migrated_from_schema":s.migrated_from_schema,"next":"Knowledge database is ready. Optional: register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+            json!({"database_uuid":s.uuid,"already_initialized":true,"schema_version":4,"migrated_from_schema":s.migrated_from_schema,"next":"Knowledge database is ready. Optional: register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
         );
     }
     crate::storage::register_vec()
@@ -179,7 +179,7 @@ pub(super) fn initialize(path: &Path) -> Result<Value> {
     tx.execute("INSERT INTO sources(id,name,root,kind) VALUES('@docs','@docs','','builtin'),('@derived','derived','','derived')",[])?;
     tx.commit()?;
     Ok(
-        json!({"database_uuid":uuid,"already_initialized":false,"schema_version":3,"migrated_from_schema":null,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
+        json!({"database_uuid":uuid,"already_initialized":false,"schema_version":4,"migrated_from_schema":null,"next":"Register materials with rag source add PATH --name NAME, then rag index --dry-run; for bundled guide semantics use rag index --source docs --dry-run --mode semantic"}),
     )
 }
 pub(super) fn resolve_source(db: &Connection, id: &str) -> Result<String> {
@@ -388,14 +388,13 @@ pub(super) fn prepare(s: &mut Store, input: RevisionInput<'_>) -> Result<(String
             local_byte += segment.text.len();
             local_scalar = segment.end;
             tx.execute(
-                "INSERT INTO chunks VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+                "INSERT INTO chunks VALUES(?1,?2,?3,?4,?5,?6,?7)",
                 params![
                     id,
                     revision,
                     chunk_ordinal,
                     start as i64,
                     end as i64,
-                    segment.text,
                     hash(segment.text.as_bytes()),
                     block.location.to_string()
                 ],
@@ -561,7 +560,7 @@ pub(super) async fn index(
         }
     }
     if dry_run && selected.as_deref().is_none_or(|id| id == "@derived") {
-        let (documents, segments, bytes): (i64,i64,i64) = s.db.query_row("SELECT (SELECT COUNT(*) FROM documents WHERE source_id='@derived' AND active_revision IS NOT NULL),COUNT(*),COALESCE(SUM(length(CAST(c.text AS BLOB))),0) FROM chunks c JOIN documents d ON d.active_revision=c.revision_id WHERE d.source_id='@derived'", [], |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+        let (documents, segments, bytes): (i64,i64,i64) = s.db.query_row("SELECT (SELECT COUNT(*) FROM documents WHERE source_id='@derived' AND active_revision IS NOT NULL),COUNT(*),COALESCE(SUM(c.end-c.start),0) FROM chunks c JOIN documents d ON d.active_revision=c.revision_id WHERE d.source_id='@derived'", [], |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
         counts.unchanged += documents as usize;
         counts.segments += segments as usize;
         counts.text_bytes += bytes as usize;

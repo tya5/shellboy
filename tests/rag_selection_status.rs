@@ -17,7 +17,7 @@ async fn call(root: &Path, command: RagCommand) -> Value {
 async fn init(root: &Path) {
     let result = call(root, RagCommand::Init).await;
     assert_eq!(result["ok"], true, "{result}");
-    assert_eq!(result["result"]["schema_version"], 3);
+    assert_eq!(result["result"]["schema_version"], 4);
     assert_eq!(result["result"]["migrated_from_schema"], Value::Null);
 }
 async fn add(root: &Path, path: &str, exclude: &[&str], clear: bool) -> Value {
@@ -551,11 +551,11 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     let migrated = call(root, RagCommand::Init).await;
     assert_eq!(migrated["ok"], true, "{migrated}");
     assert_eq!(migrated["result"]["already_initialized"], true);
-    assert_eq!(migrated["result"]["schema_version"], 3);
+    assert_eq!(migrated["result"]["schema_version"], 4);
     assert_eq!(migrated["result"]["migrated_from_schema"], 1);
     let reopened = call(root, RagCommand::Init).await;
     assert_eq!(reopened["result"]["migrated_from_schema"], Value::Null);
-    assert_eq!(reopened["result"]["schema_version"], 3);
+    assert_eq!(reopened["result"]["schema_version"], 4);
     let listed = call(
         root,
         RagCommand::Source {
@@ -569,7 +569,7 @@ async fn version_one_readers_reject_without_writes_then_writer_migrates_existing
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
     assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN ('embeddings_vec_rowid','chunks_hash')", [], |row| row.get::<_,i64>(0)).unwrap(), 2);
     assert_eq!(
@@ -705,7 +705,7 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     let migrated = call(root, RagCommand::Init).await;
     assert_eq!(migrated["ok"], true, "{migrated}");
     assert_eq!(migrated["result"]["migrated_from_schema"], 2);
-    assert_eq!(migrated["result"]["schema_version"], 3);
+    assert_eq!(migrated["result"]["schema_version"], 4);
     let db = rusqlite::Connection::open(&path).unwrap();
     assert_eq!(
         db.query_row("SELECT count(*) FROM sources", [], |r| r.get::<_, i64>(0))
@@ -715,7 +715,7 @@ async fn version_two_migration_adds_same_hot_indexes_as_fresh_store_without_touc
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        3
+        4
     );
     assert_eq!(indexes(&db), expected);
 }

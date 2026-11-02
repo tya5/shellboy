@@ -183,7 +183,7 @@ Issue #16〜#18の範囲選択・明示spill/summary・prefix/途中omit・復�
 
 Issue #19の削除確定と後片付け警告は[Thread一覧](thread-browser.md)、#20〜#22のsource除外・hybrid準備状態・独立RAGの状態投影は[Docs/RAG設計](docs-and-rag.md)、#23の抜粋制限とpayload_charsは[履歴検索設計](search-and-relations.md)に従う。独立RAGの除外列以外に表を増やさず、会話Coreの操作・worker・event・queueは追加しない。
 
-Issue #24の内部形式変換の廃止と原本付きingestは[Docs/RAG](docs-and-rag.md)、#25/#26の末尾採用・CAS・DB v10の索引は[経路とhot query](history-adoption-performance.md)、#27/#28の有限readonly検索と出力通知は[readerとwait](history-search-readers-and-waits.md)に従う。新しい一次情報の表や汎用pool/ジョブengineは作らない。独立RAGはschema 3へ前進し、会話DBのmigrationとは分ける。
+Issue #24の内部形式変換の廃止と原本付きingestは[Docs/RAG](docs-and-rag.md)、#25/#26の末尾採用・CAS・DB v10の索引は[経路とhot query](history-adoption-performance.md)、#27/#28の有限readonly検索と出力通知は[readerとwait](history-search-readers-and-waits.md)に従う。新しい一次情報の表や汎用pool/ジョブengineは作らない。独立RAGはschema 4へ前進し、会話DBのmigrationとは分ける。
 
 Issue #29/#30のrender-unit再利用、可視範囲の幅再描画、有限outboxとUI専用購読は[描画・配送設計](tui-render-delivery-performance.md)に従う。layout予算は既存合計を維持し、重要結果は最新状態へ集約しない。新しい永続表/worker/event型は作らず、有限UI channelの所有とpriority終了経路を明示する。
 

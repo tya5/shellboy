@@ -1115,6 +1115,117 @@ async fn history_keyword_crosses_finite_id_batches_without_creating_an_index() {
 }
 
 #[tokio::test]
+async fn history_keyword_warns_when_node_limit_truncates_search() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("data")).unwrap();
+    let db = shellboy::storage::DbWorker::open(root.join("data/shellboy.db"))
+        .await
+        .unwrap();
+    db.call(|c| {
+        c.execute_batch("WITH RECURSIVE seq(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM seq WHERE n<10000) INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) SELECT 'limit-'||n,'user','now',CASE WHEN n=10000 THEN '{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"LATEST_LIMIT_MATCH\"}]}' ELSE '{\"role\":\"user\",\"content\":[]}' END,100 FROM seq;")?;
+        Ok(())
+    }).await.unwrap();
+    let found = search(root, "history", "LATEST_LIMIT_MATCH", SearchMode::Keyword).await;
+    assert_eq!(found["ok"], true, "{found}");
+    assert_eq!(found["result"]["scope_status"][0]["keyword"], "partial");
+    assert_eq!(
+        found["result"]["warnings"][0]["code"],
+        "history_keyword_limit"
+    );
+    assert_eq!(found["result"]["degraded"], true);
+    assert_eq!(
+        found["result"]["items"][0]["location"]["node_id"],
+        "limit-10000"
+    );
+    db.call(|c| {
+        c.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old-thread','/','/agents','p','m','now'); INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('old-thread',0,'limit-0');")?;
+        let payload = json!({"role":"user","content":[{"type":"input_text","text":"OLDER_MATCH"}]}).to_string();
+        c.execute("UPDATE node SET payload_json=?1 WHERE id='limit-0'", [&payload])?;
+        Ok(())
+    }).await.unwrap();
+    let scoped = search(
+        root,
+        "history:old-thread",
+        "OLDER_MATCH",
+        SearchMode::Keyword,
+    )
+    .await;
+    assert_eq!(
+        scoped["result"]["scope_status"][0]["keyword"], "partial",
+        "{scoped}"
+    );
+    assert!(scoped["result"]["items"].as_array().unwrap().is_empty());
+    db.call(|c| {
+        c.execute("DELETE FROM thread_path WHERE thread_id='old-thread'", [])?;
+        c.execute("DELETE FROM node WHERE id='limit-0'", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let exact = search(root, "history", "LATEST_LIMIT_MATCH", SearchMode::Keyword).await;
+    assert_eq!(
+        exact["result"]["scope_status"][0]["keyword"], "ok",
+        "{exact}"
+    );
+    assert_eq!(exact["result"]["degraded"], false);
+    db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn legacy_chunks_migrate_without_duplicate_text_and_embed_utf8_ranges() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let (_, _, server) = proxy(root).await;
+    init(root).await;
+    std::fs::write(
+        root.join("notes.md"),
+        format!("{}復旧🙂", "あ".repeat(2300)),
+    )
+    .unwrap();
+    add(root, "notes", "notes.md").await;
+    assert_eq!(index(root, None, IndexMode::Keyword).await["ok"], true);
+    {
+        let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
+        db.execute_batch("ALTER TABLE chunks ADD COLUMN text TEXT; UPDATE chunks SET text=(SELECT CAST(substr(CAST(b.text AS BLOB),chunks.start+1,chunks.end-chunks.start) AS TEXT) FROM blocks b WHERE b.revision_id=chunks.revision_id AND b.ordinal=0); PRAGMA user_version=3;").unwrap();
+    }
+    {
+        let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
+        db.execute("UPDATE chunks SET text='corrupt' WHERE ordinal=0", [])
+            .unwrap();
+    }
+    let rejected = call(root, RagCommand::Init).await;
+    assert_eq!(rejected["error"]["code"], "index_incompatible");
+    {
+        let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
+        let version: i64 = db
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 3, "failed migration must roll back");
+        db.execute_batch("UPDATE chunks SET text=(SELECT CAST(substr(CAST(b.text AS BLOB),chunks.start+1,chunks.end-chunks.start) AS TEXT) FROM blocks b WHERE b.revision_id=chunks.revision_id AND b.ordinal=0);").unwrap();
+    }
+    let migrated = call(root, RagCommand::Init).await;
+    assert_eq!(migrated["ok"], true, "{migrated}");
+    assert_eq!(migrated["result"]["migrated_from_schema"], 3);
+    {
+        let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
+        let duplicate: i64 = db
+            .query_row(
+                "SELECT count(*) FROM pragma_table_info('chunks') WHERE name='text'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(duplicate, 0);
+    }
+    let indexed = index(root, None, IndexMode::Semantic).await;
+    assert_eq!(indexed["ok"], true, "{indexed}");
+    let result = search(root, "source:notes", "復旧", SearchMode::Keyword).await;
+    assert_eq!(result["result"]["items"].as_array().unwrap().len(), 1);
+    server.abort();
+}
+
+#[tokio::test]
 async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides() {
     use fs2::FileExt;
     let temp = tempfile::tempdir().unwrap();

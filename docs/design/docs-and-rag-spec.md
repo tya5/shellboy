@@ -110,7 +110,11 @@ Hits distinguish `thread_scope.on_current_path`; merged matches from several
 explicit Threads retain `thread_scopes`. `provenance.current_thread_paths`
 remains a current-path-only projection. The same SQL scope helper is used for
 ranking, candidate filtering and snapshot revalidation. A deleted/missing Thread
-is a scope failure, not an implicit all-history search.
+is a scope failure, not an implicit all-history search. Keyword retrieval examines
+at most the most recently inserted 10,000 nodes before checking Thread membership;
+when additional nodes exist, its scope status is `partial` and it emits a
+`history_keyword_limit` warning. Older matches can be omitted, including matches
+for a Thread with few nodes; no continuation cursor is provided.
 
 ### Overlapping retrieval scopes and deleted Threads
 

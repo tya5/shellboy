@@ -116,12 +116,20 @@ pub(super) async fn embed_revision(
     profile: &Profile,
 ) -> Result<()> {
     let pending = {
-        let mut q=s.db.prepare("SELECT DISTINCT c.hash,c.text FROM chunks c WHERE c.revision_id=?1 AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.space_id=?2 AND e.hash=c.hash) ORDER BY c.ordinal")?;
+        let mut q=s.db.prepare("WITH positioned AS (SELECT revision_id, text, COALESCE(SUM(length(CAST(text AS BLOB))+1) OVER (PARTITION BY revision_id ORDER BY ordinal ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS start FROM blocks WHERE revision_id=?1) SELECT DISTINCT c.hash,CAST(substr(CAST(b.text AS BLOB),c.start-b.start+1,c.end-c.start) AS TEXT) FROM chunks c LEFT JOIN positioned b ON b.revision_id=c.revision_id AND c.start>=b.start AND c.end<=b.start+length(CAST(b.text AS BLOB)) WHERE c.revision_id=?1 AND NOT EXISTS(SELECT 1 FROM embeddings e WHERE e.space_id=?2 AND e.hash=c.hash) ORDER BY c.ordinal")?;
         q.query_map(params![revision, profile.id], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?
     };
+    for (expected, text) in &pending {
+        if hash(text.as_bytes()) != *expected {
+            return Err(err(
+                "index_incompatible",
+                "Saved chunk range does not match its hash",
+            ));
+        }
+    }
     for batch in pending.chunks(8) {
         let dimension: Option<usize> =
             s.db.query_row(
@@ -643,8 +651,15 @@ pub(super) async fn search(
                 }
                 if mode != SearchMode::Semantic {
                     keyword = "error";
-                    lists.push(history::keyword(&context.history, query, thread)?);
-                    keyword = "ok";
+                    let (hits, truncated) = history::keyword(&context.history, query, thread)?;
+                    lists.push(hits);
+                    keyword = if truncated { "partial" } else { "ok" };
+                    if truncated {
+                        let warning = warnings.entry("history_keyword_limit".into()).or_insert_with(|| json!({
+                            "code":"history_keyword_limit", "scopes":[],
+                            "message":"History keyword search scanned only the most recently inserted 10000 nodes; older results may be missing"}));
+                        warning["scopes"].as_array_mut().expect("warning scopes").push(json!(scope));
+                    }
                 }
                 if mode != SearchMode::Keyword {
                     semantic = "error";
@@ -719,7 +734,9 @@ pub(super) async fn search(
                 preparation_reason(&error.code).map_or(error.code.as_str(), |(_, code)| code);
             status["error_code"] = json!(wire_code);
             let preparation = diagnose_preparation(context, scope, source_id.as_deref(), &error);
-            let degraded = mode == SearchMode::Hybrid && keyword == "ok" && preparation.is_some();
+            let degraded = mode == SearchMode::Hybrid
+                && (keyword == "ok" || keyword == "partial")
+                && preparation.is_some();
             let mut failure = json!({"scope":scope,"code":wire_code,"message":error.message});
             if let Some(preparation) = preparation {
                 let next = preparation_next(context, scope, source_id.as_deref(), &preparation);

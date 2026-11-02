@@ -32,7 +32,7 @@ driverのsystem promptには `shellboy docs list` と `shellboy docs search --qu
 
 ## 文書store
 
-独立SQLite schema 3。Readers and dry-run require the current schema; only the writer owns schema preparation.metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
+独立SQLite schema 4。Readers and dry-run require the current schema; only the writer owns schema preparation.metaにUUID/schema/generation、sourcesに絶対root/名前/種別、
 documentsにsource/key/active_revision/status、revisionsにcontent/extractor hashと
 原本/派生provenance、blocksに本文/位置、chunksにUTF-8範囲、embedding spaceに
 endpoint/profile/model/dimension/splitter fingerprint、vectorsと処理状態を保存する。
@@ -165,7 +165,7 @@ Scoped history hits expose `thread_scope` with `thread_id` and `on_current_path`
 
 ### Explicit upgrade result (#33 follow-up)
 
-`rag init` returns `schema_version: 3` and nullable `migrated_from_schema` in its
+`rag init` returns `schema_version: 4` and nullable `migrated_from_schema` in its
 existing result. The latter is the pre-upgrade version only when this call
 actually upgraded an existing store; fresh creation and reopening a current
 store return null. Existing-source identities/counts remain unchanged and no
@@ -218,3 +218,16 @@ After query embedding returns, recheck the selected Thread in the new history
 snapshot. A missing/deleted Thread returns `thread_not_found`; changing index
 identity or unavailable source witnesses still returns `history_changed`. Neither
 condition starts indexing or retries automatically.
+
+## Chunk storage and bounded history keyword search (#168)
+
+Schema 4 stores document text only in blocks. Chunks retain byte ranges and hashes;
+embedding reconstructs UTF-8 bytes from the containing block and verifies the hash.
+A writer migrates schema 1-3 transactionally, validating old chunk text before
+dropping it. Read-only commands require migration first. Freed SQLite pages may
+be reused; the database file does not necessarily shrink.
+
+History keyword search examines at most the most recently inserted 10,000 nodes per
+scope, before Thread-membership checks. When older nodes exist, keyword status
+is `partial` and `history_keyword_limit` marks degraded results. There is no
+continuation cursor; searches may omit older or Thread-scoped matches.

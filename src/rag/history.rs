@@ -199,7 +199,12 @@ fn validate_thread(db: &Connection, thread: Option<&str>) -> Result<()> {
     }
     Ok(())
 }
-pub(super) fn keyword(path: &Path, query: &str, thread: Option<&str>) -> Result<Vec<search::Hit>> {
+const KEYWORD_NODE_LIMIT: usize = 10_000;
+pub(super) fn keyword(
+    path: &Path,
+    query: &str,
+    thread: Option<&str>,
+) -> Result<(Vec<search::Hit>, bool)> {
     if query.trim().is_empty() {
         return Err(err("invalid_argument", "Provide a nonempty keyword query"));
     }
@@ -207,19 +212,22 @@ pub(super) fn keyword(path: &Path, query: &str, thread: Option<&str>) -> Result<
     // node snapshot; source witnesses, not one whole-history transaction, bind hits.
     let db = open(path)?;
     validate_thread(&db.connection, thread)?;
-    let mut after = 0i64;
+    let mut scanned = 0usize;
     let watermark =
         db.connection
             .query_row("SELECT COALESCE(MAX(rowid),0) FROM node", [], |r| {
                 r.get::<_, i64>(0)
             })?;
+    let mut after = Some(watermark);
     let mut hits = Vec::new();
-    loop {
+    while let Some(bound) = after {
         let rows = {
             // Collect only IDs here. Membership is checked using indexed reverse
             // ancestry in each node snapshot, before loading/scoring its body.
-            let mut q = db.connection.prepare_cached("SELECT rowid,id FROM node WHERE rowid>?1 AND rowid<=?2 AND payload_json IS NOT NULL AND deleted_reason IS NULL ORDER BY rowid LIMIT 32")?;
-            q.query_map(params![after, watermark], |r| {
+            let mut q = db.connection.prepare_cached(
+                "SELECT rowid,id FROM node WHERE rowid<=?1 ORDER BY rowid DESC LIMIT 32",
+            )?;
+            q.query_map([bound], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?
@@ -228,7 +236,11 @@ pub(super) fn keyword(path: &Path, query: &str, thread: Option<&str>) -> Result<
             break;
         }
         for (rowid, id) in rows {
-            after = rowid;
+            if scanned == KEYWORD_NODE_LIMIT {
+                return Ok((hits, true));
+            }
+            scanned += 1;
+            after = rowid.checked_sub(1);
             // A previous node releases its snapshot. Do not return a candidate
             // from an obsolete Thread path/replacement set in this new snapshot.
             validate_thread(&db.connection, thread)?;
@@ -289,7 +301,7 @@ pub(super) fn keyword(path: &Path, query: &str, thread: Option<&str>) -> Result<
             db.connection.execute_batch("ROLLBACK;BEGIN;")?;
         }
     }
-    Ok(hits)
+    Ok((hits, false))
 }
 pub(super) async fn semantic(
     context: &search::Context,
