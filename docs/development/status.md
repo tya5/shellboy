@@ -3911,3 +3911,17 @@ Message::render (a) entries were individually checked on main7f5f8897 after
 #157 and retain (a); only then were their hashes migrated. CI validates decision
 consistency without imposing the unresolved (c) zero gate. Local and CI evidence
 and untested cases are kept separately in acceptance.
+
+### #152 Product Batch5: Deletion Cleanup Storage Warning
+
+One generated Ja-only storage warning reached the already-localized deletion
+status. The leaf thread_deletion formatter now uses loaded UI language, preserving
+the exact original Ja sentence and the underlying error display. SaveFailed
+classification, irreversible Core deletion, rollback/tombstone observation,
+admission closure, cleanup/shutdown and limits remain unchanged.
+
+Fresh local macOS fmt/check/focused Clippy,10deletion tests and134Python tests
+passed. Actual fault injection covers both configured locales and final UI status;
+exact-tip CI is reported separately. No #150/#157 production range changes.
+Watch recovery projection now defers with #157; panic/queue messages requiring
+root edits remain pending. No manifest adoption or final Stage C gate is claimed.

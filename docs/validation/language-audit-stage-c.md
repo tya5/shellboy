@@ -374,3 +374,32 @@ correctness, completeness, protected-token provenance, terminal rendering or
 final Stage C acceptance. Concurrent branches adding decisions must rebase onto
 the migrated baseline and individually re-review their own entries; never refresh
 fingerprints mechanically to force CI green.
+
+## Product Review Batch5: Deletion Cleanup Storage Warning
+
+Producer/consumer inspection confirms one fixed-Ja application warning in
+frontend/thread_deletion.rs::finish_cleanup reaches DeletedWithWarning and the
+already-localized deletion status. Default En therefore mixed English status
+with Japanese application guidance. Localize only that complete wrapper using
+the loaded UI language, keeping the original Ja sentence and opaque underlying
+ApiError display unchanged. The existing SaveFailed classifier remains authoritative;
+IoFailed/InvalidArgument and other errors pass through without the storage wrapper.
+No code, hint/detail, confirmed deletion, tombstone, rollback, admission/cleanup,
+shutdown, limit or filesystem semantics change. This helper has only a TUI caller;
+there is no current CLI/wire boundary change.
+
+Only frontend/thread_deletion.rs changes in production. Actual #150/#157 diffs
+were checked, not just the stale ownership JSON. The planned Watch recovery
+projection is deferred because #157 now also edits ui/watch.rs. Root deletion
+panic/queue messages and other unresolved candidates remain separate; no blanket
+source translation, manifest reclassification, fingerprint refresh or protected
+adoption is made. This product work is after the 0.6.1 cutoff.
+
+Fresh local macOS fmt/check/focused Clippy and10deletion tests passed, plus134
+Python tooling tests (including13audit fixtures). New coverage checks exact En/Ja
+wrappers, Unicode/combining source text, code/hint/details and absent hints,
+non-storage pass-through, actual temporary DB cleanup failure after committed
+Core deletion, both loaded UI languages, final UI status, closed mutation
+admission and SaveFailed shutdown. Unchanged deletion regressions also pass.
+Exact-tip CI is reported separately; no whole-screen, physical-terminal,
+provider/clipboard, Windows-local or final combined Stage C acceptance is claimed.

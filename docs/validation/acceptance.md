@@ -8423,3 +8423,21 @@ were re-reviewed on main7f5f8897 after #157 and remain (a), before migration.
 CI runs consistency without `--check`; this does not establish language
 completeness or final Stage C, physical terminal, live provider or clipboard
 acceptance. Local tests and exact-tip CI results are reported separately.
+### #152 Batch5 Deletion Cleanup Storage Warning
+
+The generated storage-failure wrapper returned after confirmed deletion follows
+the loaded UI language; explicit Ja is byte-identical to the old sentence.
+Underlying ApiError display remains opaque and code/hint/details are unchanged.
+The same SaveFailed predicate controls wrapping; non-storage errors pass through.
+The existing DeletedWithWarning UI status already localizes its outer sentence.
+Only frontend/thread_deletion.rs production changes; #150/#157 remain untouched.
+
+Local fresh-library macOS fmt/check/focused Clippy and10deletion tests passed;
+134Python tooling tests (13audit fixtures) passed. Regressions cover exact both-
+language messages, verbatim Unicode source diagnostics, absent/present hints,
+classification-independent source words, real cleanup failure after Core commit,
+both configured UI locales/final status, admission closure and SaveFailed
+shutdown, plus existing descendant/stale-autosave/bounded-cleanup cases.
+Exact branch CI and later3OS integration are separate qualifications. No physical
+terminal, provider/clipboard, full-screen localization or final Stage C completion
+is inferred. After0.6.1 cutoff; no release tag/binary change is part of this batch.

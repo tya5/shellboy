@@ -1,6 +1,21 @@
 //! Bounded frontend deletion observations; Core remains the mutation authority.
 use super::*;
+use crate::config::UiLanguage;
 use futures_util::FutureExt;
+
+fn cleanup_warning(error: &ApiError, language: UiLanguage) -> String {
+    if !error.is_storage_failure() {
+        return error.to_string();
+    }
+    match language {
+        UiLanguage::En => format!(
+            "A primary database storage failure has stopped new runs; resources are being reclaimed: {error}"
+        ),
+        UiLanguage::Ja => {
+            format!("正本DBの保存障害により新規実行を停止し資源を回収しています: {error}")
+        }
+    }
+}
 
 /// Keep request ownership intact if the operation future panics. The existing
 /// worker still delivers a terminal reply and releases its admission permit;
@@ -149,11 +164,7 @@ pub(super) async fn finish_cleanup(
             deleted.push(root.to_owned());
             deleted.sort();
             deleted.dedup();
-            let warning = if error.is_storage_failure() {
-                format!("正本DBの保存障害により新規実行を停止し資源を回収しています: {error}")
-            } else {
-                error.to_string()
-            };
+            let warning = cleanup_warning(&error, control.store.config.ui.language);
             (deleted, vec![], Some(warning))
         }
     }
@@ -162,6 +173,48 @@ pub(super) async fn finish_cleanup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleanup_warning_localizes_only_its_wrapper_and_preserves_source_error() {
+        for code in [
+            ErrorCode::SaveFailed,
+            ErrorCode::IoFailed,
+            ErrorCode::InvalidArgument,
+        ] {
+            for hint in [None, Some("source hint 🦀 e\u{301}".to_owned())] {
+                let mut error = ApiError::new(code, "正本DB source reason 🦀 e\u{301}（verbatim）");
+                error.hint = hint;
+                error.details = Some(
+                    serde_json::json!({"raw":"保存済み source", "deletion_outcome_uncertain":true}),
+                );
+                let before = serde_json::to_value(&error).unwrap();
+                let source = error.to_string();
+                for (language, prefix) in [
+                    (
+                        UiLanguage::En,
+                        "A primary database storage failure has stopped new runs; resources are being reclaimed: ",
+                    ),
+                    (
+                        UiLanguage::Ja,
+                        "正本DBの保存障害により新規実行を停止し資源を回収しています: ",
+                    ),
+                ] {
+                    let actual = cleanup_warning(&error, language);
+                    if code == ErrorCode::SaveFailed {
+                        assert_eq!(actual, format!("{prefix}{source}"));
+                    } else {
+                        assert_eq!(
+                            actual, source,
+                            "classification must not depend on source words"
+                        );
+                    }
+                    assert_eq!(serde_json::to_value(&error).unwrap(), before);
+                    assert_eq!(error.hint.is_none(), before.get("hint").is_none());
+                }
+            }
+        }
+    }
+
     async fn accept_preview(
         sender: &crate::ui::actions::ActionSender,
         incoming: &std::sync::mpsc::Receiver<UiUpdate>,
@@ -644,58 +697,89 @@ mod tests {
     }
     #[tokio::test]
     async fn successful_core_delete_remains_success_when_saved_view_cleanup_fails() {
-        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
-        control
-            .store
-            .database
-            .call(|db| {
-                db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let args = ThreadDeleteArgs {
-            preview_marker: None,
-            thread_id: "thread".into(),
-            descendants: false,
-        };
-        assert!(matches!(
-            run(&control, args, true).await.unwrap(),
-            Outcome::Applied
-        ));
-        // A failure after Core commit must never become a deletion failure.
-        control.store.database.call(|db| {
+        for (language, prefix, status) in [
+            (
+                "en",
+                "A primary database storage failure has stopped new runs; resources are being reclaimed: ",
+                "Deleted, but cleanup failed: ",
+            ),
+            (
+                "ja",
+                "正本DBの保存障害により新規実行を停止し資源を回収しています: ",
+                "削除しました。後片付けに失敗しました: ",
+            ),
+        ] {
+            let (root, owner, control, server) =
+                crate::frontend::control_tests::fixture_with_language(language).await;
+            control
+                .store
+                .database
+                .call(|db| {
+                    db.execute("UPDATE run SET state='completed' WHERE id='target-run'", [])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let args = ThreadDeleteArgs {
+                preview_marker: None,
+                thread_id: "thread".into(),
+                descendants: false,
+            };
+            assert!(matches!(
+                run(&control, args, true).await.unwrap(),
+                Outcome::Applied
+            ));
+            // A failure after Core commit must never become a deletion failure.
+            control.store.database.call(|db| {
             db.execute_batch("CREATE TRIGGER fixture_cleanup_failure BEFORE DELETE ON view_state BEGIN SELECT RAISE(ABORT,'fixture cleanup failure'); END;")?;
             db.execute("INSERT OR IGNORE INTO view_state(thread_id,follow_tail) VALUES('thread',1)", [])?;
             Ok(())
         }).await.unwrap();
-        let (deleted, _, warning) = finish_cleanup(&control, "thread", vec!["thread".into()]).await;
-        assert_eq!(deleted, ["thread"]);
-        let warning = warning.unwrap();
-        assert!(warning.contains("fixture cleanup failure"));
-        assert!(warning.contains("新規実行を停止"));
-        assert!(
-            request(
-                &control,
-                Command::ThreadCreate(ThreadCreateArgs {
-                    agents: None,
-                    parent_id: None,
-                    cwd: None,
-                    connection: None,
-                    model: None,
-                    effort: None,
-                })
-            )
-            .await
-            .is_err(),
-            "stopped owner must reject new mutations"
-        );
-        server.shutdown().await.unwrap();
-        assert_eq!(
-            control.shutdown().await.unwrap_err().code,
-            ErrorCode::SaveFailed
-        );
-        owner.shutdown().await.unwrap();
+            let (deleted, _, warning) =
+                finish_cleanup(&control, "thread", vec!["thread".into()]).await;
+            assert_eq!(deleted, ["thread"]);
+            let warning = warning.unwrap();
+            assert!(warning.contains("fixture cleanup failure"));
+            assert!(warning.starts_with(prefix));
+            let mut ui = crate::ui::UiState::new(&control.store.config, root.path().into());
+            ui.apply(UiUpdate::ThreadDeletion {
+                request_id: 1,
+                args: ThreadDeleteArgs {
+                    preview_marker: None,
+                    thread_id: "thread".into(),
+                    descendants: false,
+                },
+                execute: true,
+                result: Ok(ThreadDeletionReply::DeletedWithWarning {
+                    ids: deleted,
+                    warning: warning.clone(),
+                }),
+            });
+            assert_eq!(ui.view().status, format!("{status}{warning}"));
+            assert!(ui.view().thread_id.is_none());
+            assert!(
+                request(
+                    &control,
+                    Command::ThreadCreate(ThreadCreateArgs {
+                        agents: None,
+                        parent_id: None,
+                        cwd: None,
+                        connection: None,
+                        model: None,
+                        effort: None,
+                    })
+                )
+                .await
+                .is_err(),
+                "stopped owner must reject new mutations"
+            );
+            server.shutdown().await.unwrap();
+            assert_eq!(
+                control.shutdown().await.unwrap_err().code,
+                ErrorCode::SaveFailed
+            );
+            owner.shutdown().await.unwrap();
+        }
     }
 
     #[tokio::test]

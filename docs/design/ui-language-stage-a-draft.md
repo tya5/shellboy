@@ -154,3 +154,18 @@ impl attributes, or behavior changed without local token changes. Fingerprints
 are re-review prompts, not proof; cross-item dependencies and duplicate literal
 ordinals require human inspection. The CI consistency check rejects stale or
 invalid reviewed decisions, not the current nonzero (c) inventory.
+
+## Deletion cleanup storage-warning boundary (#152)
+
+`frontend::thread_deletion::finish_cleanup` supplies a complete TUI warning after
+Core deletion has already succeeded. Only its application-generated storage-
+failure wrapper follows the immutable loaded UI language. Default En is English;
+explicit Ja retains the original sentence exactly. The underlying `ApiError`
+display is an opaque argument: preserve its message, code, hint/details and bytes.
+Other error kinds pass through unchanged. This is not a Core/CLI diagnostic change.
+
+The existing `DeletedWithWarning` UI consumer already localizes its outer status.
+Do not change confirmed deletion, tombstone observation, local rollback, admission
+closure/resource reclamation, ordering, limits or shutdown results. Panic/queue
+messages requiring deferred root changes are not part of this one-warning batch.
+Neither #150 nor #157 production ranges are edited.
