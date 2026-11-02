@@ -3555,7 +3555,7 @@ mod tests {
             view.thread_id = Some("thread".into());
             *view.nodes_mut_for_test() = vec![leading, rendered];
             view.total_nodes = 2;
-            view.navigation.set_follow(false);
+            view.navigation.select_reading();
             if !interruption {
                 let tool = view.nodes()[1].presentation.blocks[0]
                     .tool

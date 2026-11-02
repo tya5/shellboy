@@ -111,6 +111,10 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         total_nodes: 101,
     });
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    assert!(
+        !ui.view().navigation.follow(),
+        "history refresh must keep reading mode"
+    );
     assert_eq!(
         visible_history(&terminal),
         before,
@@ -134,6 +138,10 @@ fn completed_prose_stream_cannot_remain_in_the_selected_path_ordinal_cache() {
         anchor,
     });
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    assert!(
+        !ui.view().navigation.follow(),
+        "rebase completion must keep reading mode"
+    );
     assert_eq!(
         first_saved_row(&visible_history(&terminal)),
         first_saved_row(&before),
@@ -215,6 +223,10 @@ fn paused_new_streams_do_not_enter_the_ordered_history_cache() {
         presentation: Default::default(),
         ack: None,
     });
+    assert!(
+        !ui.view().navigation.follow(),
+        "stream append must keep reading mode"
+    );
     assert_eq!(ui.view().nodes().len(), 1);
     assert_eq!(ui.view().nodes()[0].node_id, "node-0");
     for (thread, old_generation, attempt) in [

@@ -2685,7 +2685,11 @@ mod tests {
         ui.view_mut().nodes_mut_for_test().push(latest);
         ui.view_mut().navigation.anchor.node_id = Some("source-node".into());
         for follow in [true, false] {
-            ui.view_mut().navigation.set_follow(follow);
+            if follow {
+                ui.view_mut().navigation.request_tail();
+            } else {
+                ui.view_mut().navigation.select_reading();
+            }
             let expected = if follow { "latest" } else { "source-node" };
             for links in [false, true] {
                 let mut details = Details::new(ui.view(), links);

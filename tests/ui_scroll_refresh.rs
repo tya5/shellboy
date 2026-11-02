@@ -83,7 +83,7 @@ fn transient_raw_preview_failure_does_not_jump_up_after_a_downward_wheel() {
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("prior".into()),
         char_offset: 65 * 5,
@@ -141,7 +141,7 @@ fn transient_neighbor_preview_failure_cannot_clamp_a_paused_history_refresh_upwa
         selection_revision: 1,
         total_nodes: 2,
     });
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("prior".into()),
         char_offset: 65 * 5,
@@ -192,7 +192,7 @@ fn paused_tool() -> UiState {
         selection_revision: 1,
         total_nodes: 1,
     });
-    ui.view_mut().navigation.set_follow(false);
+    ui.view_mut().navigation.select_reading();
     ui.view_mut().navigation.anchor = ViewAnchor {
         node_id: Some("tool".into()),
         char_offset: 0,
@@ -287,7 +287,7 @@ fn successful_changed_rendering_and_different_source_ranges_are_accepted() {
 #[test]
 fn following_keeps_paid_raw_after_transient_failure_until_new_successful_preview() {
     let mut ui = paused_tool();
-    ui.view_mut().navigation.set_follow(true);
+    ui.view_mut().navigation.request_tail();
     body_reply(&mut ui, tool_node(false));
     assert!(ui.view().navigation.follow());
     assert!(
@@ -321,4 +321,65 @@ fn following_keeps_paid_raw_after_transient_failure_until_new_successful_preview
             .iter()
             .any(|field| field.key == "/ui_raw_stream_preview_error")
     );
+}
+
+#[test]
+fn resize_and_shorter_history_do_not_resume_following_a_paused_reader() {
+    let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+    ui.select_thread("fixture".into());
+    let text = (0..80).map(|i| format!("P{i:03}\n")).collect::<String>();
+    let mut node = UiNode {
+        node_id: "prior".into(),
+        role: "assistant".into(),
+        text: text.clone(),
+        base_char_offset: 0,
+        total_chars: text.chars().count(),
+        reasoning_ranges: vec![],
+        presentation: Default::default(),
+    };
+    let generation = ui.view().generation;
+    ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
+        thread_id: "fixture".into(),
+        generation,
+        nodes: vec![node.clone()],
+        before_cursor: None,
+        append: false,
+        first_ordinal: 0,
+        selection_revision: 1,
+        total_nodes: 1,
+    });
+    let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    ui.event(Event::Mouse(MouseEvent {
+        kind: MouseEventKind::ScrollUp,
+        column: 10,
+        row: 5,
+        modifiers: KeyModifiers::NONE,
+    }));
+    assert!(!ui.view().navigation.follow());
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    let anchor = ui.view().navigation.anchor.clone();
+    terminal.backend_mut().resize(40, 36);
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    assert!(
+        !ui.view().navigation.follow(),
+        "resize must not resume following"
+    );
+    assert_eq!(ui.view().navigation.anchor, anchor);
+    node.text = (0..60).map(|i| format!("P{i:03}\n")).collect();
+    node.total_chars = node.text.chars().count();
+    ui.apply(UiUpdate::NodeWindow {
+        thread_id: "fixture".into(),
+        generation,
+        view_revision: ui.view().navigation.view_revision,
+        node,
+    });
+    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+    assert!(
+        !ui.view().navigation.follow(),
+        "shorter content must not resume following"
+    );
+    assert_eq!(ui.view().navigation.anchor, anchor);
 }
