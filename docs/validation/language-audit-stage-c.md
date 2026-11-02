@@ -439,3 +439,12 @@ help and confirmation tests exercise Ja/En under observed widths 1, 2, and
 unknown. The classification audit validates fingerprints but is not a zero gate:
 1,391 category (c) records remain on this base. Physical PTY and Windows
 integration remain separate checks.
+
+After rebase onto c1d61d19, macOS recompiled this worktree's library and passed
+`cargo fmt --all -- --check`, `cargo check --tests`, and the focused
+`reviewed_help_glyph_messages_follow_language_and_width`,
+`reviewed_confirmation_footers_follow_language_and_width`, and
+`guide_keys_follow_measured_width_in_both_languages` tests (one test each).
+The fingerprint audit still reports 1,391 category (c) records. The source
+diff does not include drain or index changes; integration CI and physical PTY
+validation remain separate.
