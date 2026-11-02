@@ -314,3 +314,50 @@ Fake-server tests covered all four clients, the three wire formats, model and
 endpoint guards, error and missing-usage stops, ratios and header presence;
 separate macOS sandbox probes checked selected TCP/Unix socket and file access.
 These checks do not prove the real provider's internal behavior.
+
+### Authorized continuation: OpenCode and jcode
+
+On 2026-11-02 the user authorized continuing with OpenCode and jcode, while
+holding Claude Code. The existing successful-response total of 156,411 and
+last reported input of 12,829 were carried into the same 1,500,000-token
+reported-usage budget. OpenCode 1.19.5 completed all five instructions in one
+new conversation using Chat Completions. It reported 14 API requests,
+95,220 input tokens, 85,504 cached input tokens and 451 output tokens. The
+cached/input ratio was 89.80% overall and 90.37% from the second API request
+onward. Successful reported input plus output across both runs was 252,082.
+The earlier failed request and LiteLLM internal retry usage remain unknown;
+the aggregate is not a guaranteed bound on actual provider consumption.
+
+| API request | OpenCode input / cached input / output | Client body bytes |
+| ---: | --- | ---: |
+| 1 | 2,165 / 1,408 / 8 | 2,543 |
+| 2 | 6,806 / 0 / 31 | 26,332 |
+| 3 | 6,892 / 6,656 / 5 | 26,785 |
+| 4 | 6,916 / 6,784 / 36 | 26,915 |
+| 5 | 6,987 / 6,784 / 101 | 27,349 |
+| 6 | 7,060 / 6,784 / 15 | 27,776 |
+| 7 | 7,102 / 6,912 / 36 | 27,983 |
+| 8 | 7,153 / 7,040 / 42 | 28,331 |
+| 9 | 7,217 / 7,040 / 35 | 28,696 |
+| 10 | 7,266 / 7,168 / 85 | 29,041 |
+| 11 | 7,364 / 7,168 / 5 | 29,536 |
+| 12 | 7,386 / 7,168 / 40 | 29,643 |
+| 13 | 7,443 / 7,296 / 7 | 29,998 |
+| 14 | 7,463 / 7,296 / 5 | 30,102 |
+
+OpenCode sent none of the three recorded session/trace headers on these 14
+requests; their values were not retained. Its separately named OpenCode session
+header was forwarded but was not one of the three counted headers. Notably,
+the first request already reported 1,408 cached input tokens: an earlier
+cross-client or provider cache is possible, but its source is not established.
+A fresh conversation does not guarantee a cold provider cache.
+
+jcode was not measured. Colima started successfully on Linux arm64 and a
+disposable container reached the host LiteLLM TCP port, but that default
+network also allowed direct access bypassing the accounting relay. A separate
+internal Docker network blocked the normal host name and its host-published
+control port could not be reached in the tested setup. The required monitored,
+fail-closed path was therefore not established; no jcode inference or model
+request was sent. Test containers used `--rm`, the temporary network was removed,
+no new image was built, and Colima was stopped afterward. Claude remains on
+hold. No retry or replacement inference was attempted.
