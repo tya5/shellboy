@@ -57,6 +57,8 @@ class ReportTests(unittest.TestCase):
             {'agent': 'fixture', 'status': 'complete', 'cases': [case]}]}
         table = render(report)
         self.assertIn('| fixture | 1 | unknown | unknown | unknown | 7 | 1 |', table)
+        case['storage']['bytes'] = None
+        self.assertIn('| fixture | 1 | unknown | unknown | unknown | unknown | 1 |', render(report))
         report['status'] = 'error'
         with self.assertRaises(ValueError):
             render(report)
