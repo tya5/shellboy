@@ -411,3 +411,34 @@ fn unknown_activity_is_not_displayed_as_known_idle() {
     assert!(footer(&ui).contains("入力できます"));
     assert!(!footer(&ui).contains("状態を確認中"));
 }
+
+#[test]
+fn noop_delete_during_send_preserves_revision_and_clears_after_commit() {
+    for (key, at_start) in [(KeyCode::Delete, false), (KeyCode::Backspace, true)] {
+        let mut ui = ui();
+        let (id, revision, _) = send(&mut ui, "synthetic queued input");
+        if at_start {
+            ui.active_view_mut().draft.cursor = 0;
+        }
+        ui.event(Event::Key(KeyEvent::new(key, KeyModifiers::NONE)));
+        assert_eq!(ui.view().draft.revision, revision);
+        assert_eq!(ui.view().draft.text, "synthetic queued input");
+        saved(&mut ui, &id, revision, "m1", 1, false);
+        assert_eq!(ui.view().pending_messages.total, 1);
+        assert!(ui.view().draft.text.is_empty());
+        assert!(ui.submit().is_empty());
+    }
+}
+
+#[test]
+fn effective_delete_during_send_preserves_user_edit_after_commit() {
+    let mut ui = ui();
+    let (id, revision, _) = send(&mut ui, "synthetic queued input");
+    ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Backspace,
+        KeyModifiers::NONE,
+    )));
+    assert!(ui.view().draft.revision > revision);
+    saved(&mut ui, &id, revision, "m1", 1, false);
+    assert_eq!(ui.view().draft.text, "synthetic queued inpu");
+}

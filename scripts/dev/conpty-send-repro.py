@@ -74,7 +74,12 @@ def run_case(binary, shell, mode, index):
                 process.write(marker)
             if not mode.endswith('-burst'):
                 until(lambda frame: marker in frame, 'draft typed')
-            process.write('\r\x1b[3~' if mode == 'typed-noop-delete' else '\r')
+            if mode == 'typed-noop-backspace':
+                process.write('\x1b[H')
+                time.sleep(.1)
+            sequence = {'typed-noop-delete': '\r\x1b[3~',
+                        'typed-noop-backspace': '\r\x7f'}.get(mode, '\r')
+            process.write(sequence)
             frame = until(lambda frame: ('Pending' in frame or 'Submitting' in frame)
                           and marker in frame, 'queue')
             time.sleep(1)
@@ -122,7 +127,7 @@ def main():
     os.environ['PYWINPTY_BACKEND'] = '0'
     binary = args.binary.resolve(strict=True)
     for shell in ('git-bash', 'powershell'):
-        for mode in ('typed-noop-delete', 'typed', 'paste', 'typed-burst', 'paste-burst'):
+        for mode in ('typed-noop-delete', 'typed-noop-backspace', 'typed', 'paste', 'typed-burst', 'paste-burst'):
             for index in range(args.repeat):
                 run_case(binary, shell, mode, index)
 

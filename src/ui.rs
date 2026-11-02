@@ -4198,6 +4198,10 @@ impl UiState {
         self.dirty = true;
     }
     fn delete(&mut self, backwards: bool) {
+        let draft = &self.view().draft;
+        if (backwards && draft.cursor == 0) || (!backwards && draft.cursor == draft.text.len()) {
+            return;
+        }
         self.begin_edit();
         let draft = &mut self.active_view_mut().draft;
         draft.delete_at_cursor(backwards);
