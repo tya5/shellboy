@@ -906,8 +906,13 @@ impl Page {
         ));
         page.note(local!(
             config.ui.language,
-            "⌕ 索引停止中は /index を開き T で再試行します。取りこぼしは preview / backfill で復旧します。",
-            "When ⌕ shows an index pause, open /index and press T to retry. Use preview / backfill to recover missed conversations."
+            "⌕ 索引停止中は /index を開き、T で再試行します。",
+            "When ⌕ shows an index pause, open /index and press T to retry."
+        ));
+        page.note(local!(
+            config.ui.language,
+            "取りこぼしの復旧には preview と backfill を使います。",
+            "Use preview and backfill to recover missed conversations."
         ));
 
         page.section(local!(
@@ -1193,6 +1198,11 @@ mod tests {
                     };
                     assert!(text.contains("preview"), "{policy:?} {language:?}: {text}");
                     assert!(text.contains("backfill"), "{policy:?} {language:?}: {text}");
+                    for line in lines.iter().map(ToString::to_string).filter(|line| {
+                        line.contains("preview") || (line.contains("⌕") && line.contains("/index"))
+                    }) {
+                        assert!(line.width() <= usize::from(width), "{policy:?} {language:?}: {line}");
+                    }
                     assert!(text.contains(chain), "{policy:?} {language:?}: {text}");
                     assert!(text.contains(arrows), "{policy:?} {language:?}: {text}");
                     assert!(footer(language).contains(arrows));
