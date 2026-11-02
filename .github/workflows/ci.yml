@@ -86,6 +86,8 @@ jobs:
           }
           "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
           "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+      - name: Check language classification consistency
+        run: python scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --summary
       - name: Check complete integration layout
         run: python scripts/check-test-layout.py
       - name: Check timing runner failure gates

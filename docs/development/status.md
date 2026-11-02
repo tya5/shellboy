@@ -3900,3 +3900,14 @@ Resolved localization and glyph conflicts together, preserving raw values and
 both English and Japanese. Public compatibility constants and API remain intact;
 the inventory is in `docs/development/glyphs-issue-157-inventory.md`.
 Exact restack task CI and Windows integration CI remain pending.
+
+### #152 Language Audit Fingerprint Scope And Consistency
+
+Review fingerprints now bind to enclosing functions or standalone const/static
+items, falling back to the full file for unrecognized contexts. This isolates
+sibling edits while retaining same-function predicates; external dependencies and
+duplicate ordinals remain a documented human-review obligation. The 25 prior
+Message::render (a) entries were individually checked on main7f5f8897 after
+#157 and retain (a); only then were their hashes migrated. CI validates decision
+consistency without imposing the unresolved (c) zero gate. Local and CI evidence
+and untested cases are kept separately in acceptance.

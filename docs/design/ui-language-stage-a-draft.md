@@ -142,3 +142,15 @@ Locale is deliberately excluded from the request, seen hash, watermark, sort key
 cursor encoding and selection sequence. Do not translate stored titles, source
 text or facts that happen to contain the same words as a notice. Bounds,
 continuation guards, cancellation and read-only snapshot behavior are unchanged.
+
+## Review Fingerprint Scope
+
+Reviewed language-audit literals bind to their enclosing function or standalone
+const/static item, including item attributes when recognized; unrecognized
+contexts fall back to the whole file. The full enclosing function deliberately
+includes language predicates and branches. This reduces invalidation by sibling
+items but does not track callers, helper/macro definitions, enclosing module or
+impl attributes, or behavior changed without local token changes. Fingerprints
+are re-review prompts, not proof; cross-item dependencies and duplicate literal
+ordinals require human inspection. The CI consistency check rejects stale or
+invalid reviewed decisions, not the current nonzero (c) inventory.

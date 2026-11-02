@@ -142,6 +142,67 @@ def ranges(items, pairs):
     return fixtures, localized, modules
 
 
+def item_ranges(items, pairs):
+    """Find conservative function/const/static item spans; unknown forms use the file."""
+    texts = [t.text for t in items]
+    reverse = {right: left for left, right in pairs.items()}
+    spans = []
+    for i, token in enumerate(items):
+        if token.text not in ('fn', 'const', 'static'):
+            continue
+        if i + 1 >= len(items) or items[i + 1].kind != 'word':
+            continue
+        if token.text == 'const' and texts[i + 1] == 'fn':
+            continue
+        start = i
+        # Include immediately attached attributes and visibility/async modifiers.
+        while start:
+            if texts[start - 1] in ('pub', 'async', 'unsafe', 'const', 'default'):
+                start -= 1
+            elif texts[start - 1] == ')' and start - 1 in reverse:
+                left = reverse[start - 1]
+                if left and texts[left - 1] == 'pub':
+                    start = left - 1
+                else:
+                    break
+            elif texts[start - 1] == ']' and start - 1 in reverse:
+                left = reverse[start - 1]
+                if left and texts[left - 1] == '#':
+                    start = left - 1
+                else:
+                    break
+            else:
+                break
+        j, has_initializer = i + 2, False
+        while j < len(items):
+            text = texts[j]
+            if token.text == 'fn' and text == '{':
+                spans.append((start, pairs[j] + 1))
+                break
+            if text == ';':
+                if token.text != 'fn' and has_initializer:
+                    spans.append((start, j + 1))
+                break
+            if token.text != 'fn' and text == '=':
+                has_initializer = True
+            if text == '}' or (token.text != 'fn' and not has_initializer and text in (',', '>')):
+                break
+            j = pairs[j] + 1 if j in pairs else j + 1
+    return spans
+
+
+def scope_fingerprint(items, spans, index, cache):
+    # Keep enclosing functions (rather than nested constants) so local language
+    # predicates cannot change without invalidating the reviewed decision.
+    enclosing = [(a, b) for a, b in spans if a <= index < b]
+    span = max(enclosing, key=lambda pair: pair[1] - pair[0]) if enclosing else (0, len(items))
+    if span not in cache:
+        a, b = span
+        data = [(t.kind, t.text) for t in items[a:b]]
+        cache[span] = hashlib.sha256(json.dumps(data).encode()).hexdigest()
+    return cache[span]
+
+
 def decoded(token):
     if token.kind == 'raw_string':
         return token.text
@@ -156,9 +217,10 @@ def inventory(root, classifications=None):
     for path in paths:
         source = path.read_text(encoding='utf-8')
         items = tokens(source)
-        fixture, localized, modules = ranges(items, groups(items))
-        fingerprint = hashlib.sha256(json.dumps([(t.kind, t.text) for t in items]).encode()).hexdigest()
-        prepared[path] = source, items, fixture, localized, fingerprint
+        pairs = groups(items)
+        fixture, localized, modules = ranges(items, pairs)
+        spans = item_ranges(items, pairs)
+        prepared[path] = source, items, fixture, localized, spans
         for module in modules:
             parent = path.parent if path.name in ('lib.rs', 'main.rs', 'mod.rs') else path.with_suffix('')
             fixture_paths.update([parent / (module + '.rs'), parent / module / 'mod.rs'])
@@ -166,11 +228,12 @@ def inventory(root, classifications=None):
         raise ValueError('reviewed decisions must be a JSON object')
     decisions = classifications or {}
     seen, records = set(), []
-    for path, (source, items, fixture, localized, fingerprint) in prepared.items():
-        occurrences = Counter()
-        for token in items:
+    for path, (source, items, fixture, localized, spans) in prepared.items():
+        occurrences, fingerprints = Counter(), {}
+        for index, token in enumerate(items):
             if token.kind not in ('string', 'raw_string') or not JAPANESE.search(decoded(token)):
                 continue
+            fingerprint = scope_fingerprint(items, spans, index, fingerprints)
             digest = hashlib.sha256(token.text.encode()).hexdigest()[:16]
             occurrences[digest] += 1
             relative = path.relative_to(root).as_posix()

@@ -335,3 +335,42 @@ confirmed on main79166408617e9f3acd71bdeff55930638fb62a3f with3-OS integration
 CI41380530706 success; #150 remains deferred. Watch-page notices are outside
 both current change sets. Dynamic Watch detail/recovery fallback provenance and
 synthetic root-generated draft rows remain separate pending review.
+
+## Scoped Review Fingerprints And CI Consistency
+
+On main `7f5f8897`, all 25 existing reviewed decisions concerned
+`src/presentation/messages.rs::Message::render`. Each ID was reread in its
+current enclosing branch and the #157 width-restoration diff. `en` remains
+`language == UiLanguage::En`: the 25 Japanese literals remain in `else` or
+`(false, ...)` paths, with separate English paths; added `glyphs::formatted!`
+arguments select glyph width within the same Japanese path. Interpolated source
+values are not evidence of generated origin. All 25 remain (a); none are newly
+classified protected. Their fingerprints were migrated only after this review.
+
+Reviewed decisions now hash token kinds/text of their enclosing function,
+including its signature and immediately attached attributes/modifiers; a
+nested constant uses the enclosing function, preserving language predicate
+coverage. A recognized standalone `const` or `static` uses the item. When no
+such item is recognized, the entire source file remains the conservative
+fallback. Sibling function edits no longer invalidate unrelated decisions;
+changing a predicate, branch, argument or other token in the same function does.
+Whitespace and comments do not affect the hash. This is a lexical heuristic,
+not a Rust AST or a proof of semantic correctness. Changes outside the selected
+item, including enclosing impl/module attributes, another function or macro
+implementation, global constants, type behavior, configuration and callers can
+change its meaning without changing the fingerprint. Generated macro contexts
+and unusual Rust syntax may cause a wider fallback or ambiguous scope. Duplicate
+literal ordinals are file-wide, so insertion/reordering of identical strings can
+change an ID or associate an ordinal with a different occurrence; inspect context,
+not just fingerprint, during review. Even within a function, language behavior
+can change via external helpers or macros without a token change in that function.
+Reviewers must re-evaluate such dependencies manually; a matching hash is not a
+semantic guarantee. Unresolved and uncertain literals remain (c).
+
+The GitHub CI consistency step runs the summary with reviewed decisions and
+without `--check`. A stale/malformed decision or source mismatch fails; a
+nonzero (c) count does not. It checks accounting consistency only, not language
+correctness, completeness, protected-token provenance, terminal rendering or
+final Stage C acceptance. Concurrent branches adding decisions must rebase onto
+the migrated baseline and individually re-review their own entries; never refresh
+fingerprints mechanically to force CI green.

@@ -8410,3 +8410,16 @@ because the shared target had another worktree's artifact; it is being rerun
 after refreshing the crate source mtime under the slot.
 The fresh-mtime rerun passed `cargo check --tests`, `cargo fmt --all -- --check`
 and the new localized-diagnostics regression (1 test), all in one slot.
+
+### #152 Audit Scope And Consistency Check
+
+The scoped lexical audit is expected to reject same-function predicate changes,
+stale IDs and malformed decisions while allowing sibling item edits and remaining
+(c) records. The selected item includes recognized attached attributes, with a
+whole-file fallback when no item is recognized. Scope is not semantic analysis;
+external callers/macros/configuration, enclosing module attributes and duplicate
+ordinal shifts require manual review. All 25 existing Message::render decisions
+were re-reviewed on main7f5f8897 after #157 and remain (a), before migration.
+CI runs consistency without `--check`; this does not establish language
+completeness or final Stage C, physical terminal, live provider or clipboard
+acceptance. Local tests and exact-tip CI results are reported separately.

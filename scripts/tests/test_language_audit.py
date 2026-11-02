@@ -92,6 +92,66 @@ class LanguageAuditTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
             AUDIT['inventory'](self.root, decision)
 
+    def test_scope_ignores_sibling_functions_and_constants_but_not_same_item(self):
+        path = self.source(f'fn reviewed() {{ let en = true; if !en {{ use_it("{JA}"); }} }}\n'
+                           'fn other() { let value = 1; }\nconst OTHER: usize = 1;')
+        row = self.records()[0]
+        decision = {row['id']: {'category': 'a', 'reason': 'reviewed Ja branch',
+                               'source_tokens_sha256': row['source_tokens_sha256']}}
+        value = path.read_text(encoding='utf-8').replace('value = 1', 'value = 2').replace('usize = 1', 'usize = 3')
+        path.write_text(value, encoding='utf-8')
+        self.assertEqual(AUDIT['inventory'](self.root, decision)['records'][0]['category'], 'a')
+        path.write_text(value.replace('!en', 'en'), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
+            AUDIT['inventory'](self.root, decision)
+
+    def test_const_scope_attributes_and_enclosing_function_are_hashed(self):
+        path = self.source(f'#[cfg(feature = "a")] const FIRST: &str = "{JA}";\n'
+                           'const SECOND: &str = "separate";\n'
+                           f'fn owner() {{ const INNER: &str = "{JA}x"; if true {{ use_it(INNER); }} }}')
+        rows = self.records()
+        decisions = {r['id']: {'category': 'a', 'reason': 'reviewed',
+                                'source_tokens_sha256': r['source_tokens_sha256']} for r in rows}
+        original = path.read_text(encoding='utf-8')
+        path.write_text(original.replace('"separate"', '"changed"'), encoding='utf-8')
+        AUDIT['inventory'](self.root, decisions)
+        for changed in [original.replace('feature = "a"', 'feature = "b"'),
+                        original.replace('if true', 'if false')]:
+            path.write_text(changed, encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
+                AUDIT['inventory'](self.root, decisions)
+
+    def test_unknown_item_falls_back_to_file_and_generic_const_does_not_swallow_siblings(self):
+        path = self.source(f'fn f<const N: usize>() {{ use_it("{JA}"); }}\nfn g() {{ let x = 1; }}')
+        row = self.records()[0]
+        decision = {row['id']: {'category': 'c', 'reason': 'pending review',
+                               'source_tokens_sha256': row['source_tokens_sha256']}}
+        path.write_text(path.read_text(encoding='utf-8').replace('let x = 1', 'let x = 2'), encoding='utf-8')
+        AUDIT['inventory'](self.root, decision)
+        path = self.source(f'macro_rules! x {{ () => {{ "{JA}" }} }}\nfn sibling() {{ let x = 1; }}')
+        row = self.records()[0]
+        decision = {row['id']: {'category': 'c', 'reason': 'pending review',
+                               'source_tokens_sha256': row['source_tokens_sha256']}}
+        path.write_text(path.read_text(encoding='utf-8').replace('let x = 1', 'let x = 2'), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'reviewed source changed'):
+            AUDIT['inventory'](self.root, decision)
+
+    def test_consistency_command_allows_c_but_rejects_stale_review(self):
+        path = self.source(f'fn f() {{ let en = true; if !en {{ use_it("{JA}"); }} }}\n'
+                           f'fn pending() {{ use_it("{JA} pending"); }}')
+        row = self.records()[0]
+        decisions = self.root / 'decisions.json'
+        decisions.write_text(json.dumps({row['id']: {'category': 'a', 'reason': 'reviewed',
+                                                     'source_tokens_sha256': row['source_tokens_sha256']}}))
+        command = [sys.executable, str(SCRIPT), '--repo', str(self.root), '--classifications', str(decisions), '--summary']
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreater(json.loads(result.stdout)['counts']['c'], 0)
+        path.write_text(path.read_text(encoding='utf-8').replace('!en', 'en'), encoding='utf-8')
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('reviewed source changed', result.stderr)
+
     def test_protected_tokens_require_both_evidence_fields_and_remain_distinct(self):
         self.source(f'fn compare(s: &str) -> bool {{ s == "{JA}" }}')
         row = self.records()[0]
