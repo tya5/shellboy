@@ -150,7 +150,7 @@ impl Context {
 impl OpKind {
     #[cfg(test)]
     pub fn label(self) -> String {
-        metadata::text(self.catalogue().label_text()).replace('·', "|")
+        metadata::display_label(self.catalogue(), UiLanguage::Ja)
     }
     #[cfg(test)]
     fn wire_name(self) -> String {
@@ -161,7 +161,7 @@ impl OpKind {
             .replace('-', "_")
     }
     fn label_for(self, language: UiLanguage) -> String {
-        metadata::text_for(self.catalogue().label_text(), language).replace('·', "|")
+        metadata::display_label(self.catalogue(), language)
     }
     fn shortcut_for(self, language: UiLanguage) -> Option<&'static str> {
         if self == Self::AttachmentAdd {
@@ -918,7 +918,7 @@ impl Operations {
                     List::new(items)
                         .style(popup::normal_style())
                         .highlight_style(popup::selected_style())
-                        .highlight_symbol("› "),
+                        .highlight_symbol(format!("{} ", crate::ui::text_width::glyphs::SELECTED)),
                     body,
                     &mut state,
                 );
@@ -2069,12 +2069,14 @@ mod tests {
     fn all_operation_ui_labels_use_width_invariant_symbols_without_changing_cli_labels() {
         use crate::ui::text_width::UnicodeWidthStr;
         for &kind in OpKind::ALL {
-            let label = kind.label();
             crate::ui::text_width::set_terminal_width(Some(1));
-            let narrow = label.as_str().width();
+            let narrow_label = kind.label();
+            let narrow = narrow_label.as_str().width();
             crate::ui::text_width::set_terminal_width(Some(2));
-            let wide = label.as_str().width_cjk();
-            assert_eq!(narrow, wide, "{}", label);
+            let wide_label = kind.label();
+            let wide = wide_label.as_str().width_cjk();
+            assert_eq!(narrow, wide, "{}", narrow_label);
+            assert_eq!(narrow_label.replace(" · ", " | "), wide_label);
         }
         crate::ui::text_width::clear_terminal_width();
         assert_eq!(OpKind::ThreadGet.label(), "会話 | 詳細");

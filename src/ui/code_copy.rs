@@ -6,23 +6,25 @@ pub(crate) fn caption(index: usize, syntax: &str) -> String {
     caption_in(index, syntax, UiLanguage::En)
 }
 pub(crate) fn caption_in(index: usize, syntax: &str, language: UiLanguage) -> String {
+    let sep = crate::ui::text_width::glyphs::separator();
     let key = key_hints::Action::Code.spec().0;
     let number = index + 1;
     match (language, syntax.is_empty()) {
-        (UiLanguage::Ja, true) => format!("[{number}] コピー | {key}で番号を選ぶ"),
-        (UiLanguage::Ja, false) => format!("[{number}] コピー | {key}で番号を選ぶ | {syntax}"),
-        (UiLanguage::En, true) => format!("[{number}] Copy | {key} Choose number"),
-        (UiLanguage::En, false) => format!("[{number}] Copy | {key} Choose number | {syntax}"),
+        (UiLanguage::Ja, true) => format!("[{number}] コピー{sep}{key}で番号を選ぶ"),
+        (UiLanguage::Ja, false) => format!("[{number}] コピー{sep}{key}で番号を選ぶ{sep}{syntax}"),
+        (UiLanguage::En, true) => format!("[{number}] Copy{sep}{key} Choose number"),
+        (UiLanguage::En, false) => format!("[{number}] Copy{sep}{key} Choose number{sep}{syntax}"),
     }
 }
 fn block_label(language: UiLanguage, block: &CopyBlock) -> String {
+    let sep = crate::ui::text_width::glyphs::separator();
     let number = block.index + 1;
     let chars = block.chars;
     let preview = &block.preview;
     match language {
-        UiLanguage::Ja => format!("[{number}] コピー | {chars}文字 | {preview}"),
-        UiLanguage::En if chars == 1 => format!("[{number}] Copy | 1 character | {preview}"),
-        UiLanguage::En => format!("[{number}] Copy | {chars} characters | {preview}"),
+        UiLanguage::Ja => format!("[{number}] コピー{sep}{chars}文字{sep}{preview}"),
+        UiLanguage::En if chars == 1 => format!("[{number}] Copy{sep}1 character{sep}{preview}"),
+        UiLanguage::En => format!("[{number}] Copy{sep}{chars} characters{sep}{preview}"),
     }
 }
 #[derive(Clone, Debug)]
@@ -499,19 +501,36 @@ mod language_tests {
             UiLanguage::En => &["No code blocks.", "0 Entire body", "Esc Back"],
             UiLanguage::Ja => &["コードの塊はありません。", "0 本文全体", "Esc 戻る"],
         });
-        i18n::verify_screen(listed, |language| match language {
-            UiLanguage::En => &[
-                "[3] Copy | 1 character | x",
-                "Enter/c Copy",
-                "1-9 Copy by number",
-                "0 Entire body",
-            ],
-            UiLanguage::Ja => &[
-                "[3] コピー | 1文字 | x",
-                "Enter/c コピー",
-                "1-9 番号でコピー",
-                "0 本文全体",
-            ],
+        i18n::verify_screen(listed, |language| {
+            match (
+                language,
+                crate::ui::text_width::terminal_width_observation(),
+            ) {
+                (UiLanguage::En, Some(1)) => &[
+                    "[3] Copy · 1 character · x",
+                    "Enter/c Copy",
+                    "1-9 Copy by number",
+                    "0 Entire body",
+                ],
+                (UiLanguage::Ja, Some(1)) => &[
+                    "[3] コピー · 1文字 · x",
+                    "Enter/c コピー",
+                    "1-9 番号でコピー",
+                    "0 本文全体",
+                ],
+                (UiLanguage::En, _) => &[
+                    "[3] Copy | 1 character | x",
+                    "Enter/c Copy",
+                    "1-9 Copy by number",
+                    "0 Entire body",
+                ],
+                (UiLanguage::Ja, _) => &[
+                    "[3] コピー | 1文字 | x",
+                    "Enter/c コピー",
+                    "1-9 番号でコピー",
+                    "0 本文全体",
+                ],
+            }
         });
         i18n::verify_screen(
             |ui| configure(ui, Some(Err("raw-provider-error".into()))),
@@ -520,6 +539,24 @@ mod language_tests {
                 UiLanguage::Ja => &["コードの塊をコピー", "raw-provider-error", "Esc 戻る"],
             },
         );
+    }
+    #[test]
+    fn copy_labels_use_width_policy_without_changing_raw_content() {
+        for (width, sep) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            crate::ui::text_width::set_terminal_width(width);
+            let block = CopyBlock {
+                index: 0,
+                chars: 1,
+                preview: "raw | text".into(),
+            };
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let label = block_label(language, &block);
+                assert!(label.contains(sep));
+                assert!(label.ends_with("raw | text"));
+                assert!(caption_in(0, "raw | syntax", language).ends_with("raw | syntax"));
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
     }
     #[test]
     fn complete_copy_labels_preserve_syntax_and_preview_and_pluralize_counts() {

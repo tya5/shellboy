@@ -364,7 +364,7 @@ pub(super) fn list(frame: &mut Frame<'_>, area: Rect, items: Vec<Item>, selected
         )
         .style(normal_style())
         .highlight_style(selected_style())
-        .highlight_symbol("› "),
+        .highlight_symbol(format!("{} ", crate::ui::text_width::glyphs::SELECTED)),
         content,
         &mut state,
     );

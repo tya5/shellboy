@@ -41,24 +41,27 @@ impl PendingMessage {
         }
     }
     fn label(&self, language: UiLanguage) -> String {
+        let sep = crate::ui::text_width::glyphs::separator();
         let sender = self.sender(language);
         let mut label = match (language, self.uncertain, self.held, self.now) {
-            (UiLanguage::Ja, true, _, false) => format!("{sender} | 反映状況不明"),
-            (UiLanguage::Ja, true, _, true) => format!("{sender} | 反映状況不明 | すぐ渡す"),
-            (UiLanguage::Ja, false, true, false) => format!("{sender} | 保留"),
-            (UiLanguage::Ja, false, true, true) => format!("{sender} | 保留 | すぐ渡す"),
-            (UiLanguage::Ja, false, false, false) => format!("{sender} | 反映待ち"),
-            (UiLanguage::Ja, false, false, true) => format!("{sender} | 反映待ち | すぐ渡す"),
-            (UiLanguage::En, true, _, false) => format!("{sender} | Delivery unknown"),
-            (UiLanguage::En, true, _, true) => format!("{sender} | Delivery unknown | Deliver now"),
-            (UiLanguage::En, false, true, false) => format!("{sender} | Held"),
-            (UiLanguage::En, false, true, true) => format!("{sender} | Held | Deliver now"),
-            (UiLanguage::En, false, false, false) => format!("{sender} | Pending"),
-            (UiLanguage::En, false, false, true) => format!("{sender} | Pending | Deliver now"),
+            (UiLanguage::Ja, true, _, false) => format!("{sender}{sep}反映状況不明"),
+            (UiLanguage::Ja, true, _, true) => format!("{sender}{sep}反映状況不明{sep}すぐ渡す"),
+            (UiLanguage::Ja, false, true, false) => format!("{sender}{sep}保留"),
+            (UiLanguage::Ja, false, true, true) => format!("{sender}{sep}保留{sep}すぐ渡す"),
+            (UiLanguage::Ja, false, false, false) => format!("{sender}{sep}反映待ち"),
+            (UiLanguage::Ja, false, false, true) => format!("{sender}{sep}反映待ち{sep}すぐ渡す"),
+            (UiLanguage::En, true, _, false) => format!("{sender}{sep}Delivery unknown"),
+            (UiLanguage::En, true, _, true) => {
+                format!("{sender}{sep}Delivery unknown{sep}Deliver now")
+            }
+            (UiLanguage::En, false, true, false) => format!("{sender}{sep}Held"),
+            (UiLanguage::En, false, true, true) => format!("{sender}{sep}Held{sep}Deliver now"),
+            (UiLanguage::En, false, false, false) => format!("{sender}{sep}Pending"),
+            (UiLanguage::En, false, false, true) => format!("{sender}{sep}Pending{sep}Deliver now"),
         };
         if let Some(reason) = &self.hold_reason {
             // A reason is an independent fact, not a grammatical message fragment.
-            label.push_str(" | ");
+            label.push_str(sep);
             label.push_str(match reason.as_str() {
                 "terminal_before_path_admission" => i18n::local!(
                     language,
@@ -284,7 +287,7 @@ fn accepting_excerpt(text: &str) -> String {
         .0
         .replace('\n', " ");
     if end < text.len() {
-        preview.push('.');
+        preview.push_str(crate::ui::text_width::glyphs::ellipsis());
     }
     preview
 }
@@ -308,7 +311,7 @@ fn compact_label(label: &str, width: usize) -> String {
         output.push_str(glyph);
         used += cells;
     }
-    output.push('.');
+    output.push_str(crate::ui::text_width::glyphs::ellipsis());
     output
 }
 pub(super) fn draw_compact(
@@ -1250,30 +1253,58 @@ mod language_tests {
                 ],
             },
         );
-        i18n::verify_screen(pending, |language| match language {
-            UiLanguage::En => &[
-                "Person | Held | Deliver now | Waiting for recovery",
-                "1 total / 1 shown",
-                "source-preview",
-            ],
-            UiLanguage::Ja => &[
-                "人 | 保留 | すぐ渡す | 復旧待ち",
-                "1件 / 表示1件",
-                "source-preview",
-            ],
+        i18n::verify_screen(pending, |language| {
+            match (
+                language,
+                crate::ui::text_width::terminal_width_observation(),
+            ) {
+                (UiLanguage::En, Some(1)) => &[
+                    "Person · Held · Deliver now · Waiting for recovery",
+                    "1 total / 1 shown",
+                    "source-preview",
+                ],
+                (UiLanguage::Ja, Some(1)) => &[
+                    "人 · 保留 · すぐ渡す · 復旧待ち",
+                    "1件 / 表示1件",
+                    "source-preview",
+                ],
+                (UiLanguage::En, _) => &[
+                    "Person | Held | Deliver now | Waiting for recovery",
+                    "1 total / 1 shown",
+                    "source-preview",
+                ],
+                (UiLanguage::Ja, _) => &[
+                    "人 | 保留 | すぐ渡す | 復旧待ち",
+                    "1件 / 表示1件",
+                    "source-preview",
+                ],
+            }
         });
         i18n::verify_screen(
             |ui| {
                 pending(ui);
                 ui.queue_popup.visible = false;
             },
-            |language| match language {
-                UiLanguage::En => &[
+            |language| match (
+                language,
+                crate::ui::text_width::terminal_width_observation(),
+            ) {
+                (UiLanguage::En, Some(1)) => &[
+                    "Person · Held · Deliver now · Waiting for recovery",
+                    "source-preview",
+                    "/queue | 1 saved input",
+                ],
+                (UiLanguage::Ja, Some(1)) => &[
+                    "人 · 保留 · すぐ渡す · 復旧待ち",
+                    "source-preview",
+                    "/queue | 保存済み1件",
+                ],
+                (UiLanguage::En, _) => &[
                     "Person | Held | Deliver now | Waiting for recovery",
                     "source-preview",
                     "/queue | 1 saved input",
                 ],
-                UiLanguage::Ja => &[
+                (UiLanguage::Ja, _) => &[
                     "人 | 保留 | すぐ渡す | 復旧待ち",
                     "source-preview",
                     "/queue | 保存済み1件",
@@ -1474,7 +1505,7 @@ mod language_tests {
                     let label = compact_label(&before.items[0].label(language), usize::from(width));
                     assert!(label.width() <= usize::from(width));
                     if before.items[0].label(language).width() > usize::from(width) {
-                        assert!(label.ends_with('.'));
+                        assert!(label.ends_with(crate::ui::text_width::glyphs::ellipsis()));
                     }
                 }
             }
@@ -1492,8 +1523,9 @@ mod language_tests {
                 let label = compact_label(source, width);
                 assert!(label.width() <= width);
                 if label != source && !label.is_empty() {
-                    assert!(label.ends_with('.'));
-                    let prefix = label.strip_suffix('.').unwrap();
+                    let ellipsis = crate::ui::text_width::glyphs::ellipsis();
+                    assert!(label.ends_with(ellipsis));
+                    let prefix = label.strip_suffix(ellipsis).unwrap();
                     let count = prefix.graphemes(true).count();
                     assert_eq!(
                         prefix,

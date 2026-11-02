@@ -358,7 +358,7 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
                 )
             })
             .collect::<Vec<_>>()
-            .join(" | ")
+            .join(crate::ui::text_width::glyphs::separator())
     } else {
         String::new()
     };
@@ -503,8 +503,14 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                 }
                 if suffix == "status" {
                     field.label = match (language, numbered) {
-                        (UiLanguage::Ja, true) => format!("回答 {ordinal} › 回答の状態"),
-                        (UiLanguage::En, true) => format!("Answer {ordinal} › Answer status"),
+                        (UiLanguage::Ja, true) => format!(
+                            "回答 {ordinal} {} 回答の状態",
+                            crate::ui::text_width::glyphs::SELECTED
+                        ),
+                        (UiLanguage::En, true) => format!(
+                            "Answer {ordinal} {} Answer status",
+                            crate::ui::text_width::glyphs::SELECTED
+                        ),
                         (_, false) => local!(language, "回答の状態", "Answer status").into(),
                     };
                 }
@@ -520,8 +526,14 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                 }
                 if suffix == "content" {
                     field.label = match (language, numbered) {
-                        (UiLanguage::Ja, true) => format!("回答 {ordinal} › 内容の数"),
-                        (UiLanguage::En, true) => format!("Answer {ordinal} › Content count"),
+                        (UiLanguage::Ja, true) => format!(
+                            "回答 {ordinal} {} 内容の数",
+                            crate::ui::text_width::glyphs::SELECTED
+                        ),
+                        (UiLanguage::En, true) => format!(
+                            "Answer {ordinal} {} Content count",
+                            crate::ui::text_width::glyphs::SELECTED
+                        ),
                         (_, false) => local!(language, "内容の数", "Content count").into(),
                     };
                 }
@@ -543,14 +555,26 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
                             let single = value(&format!("{prefix}/content")) == Some("1");
                             let part = index + 1;
                             field.label = match (language, numbered, single) {
-                                (UiLanguage::Ja, true, true) => format!("回答 {ordinal} › 本文"),
+                                (UiLanguage::Ja, true, true) => format!(
+                                    "回答 {ordinal} {} 本文",
+                                    crate::ui::text_width::glyphs::SELECTED
+                                ),
                                 (UiLanguage::Ja, true, false) => {
-                                    format!("回答 {ordinal} › 本文 {part}")
+                                    format!(
+                                        "回答 {ordinal} {} 本文 {part}",
+                                        crate::ui::text_width::glyphs::SELECTED
+                                    )
                                 }
                                 (UiLanguage::Ja, false, false) => format!("本文 {part}"),
-                                (UiLanguage::En, true, true) => format!("Answer {ordinal} › Text"),
+                                (UiLanguage::En, true, true) => format!(
+                                    "Answer {ordinal} {} Text",
+                                    crate::ui::text_width::glyphs::SELECTED
+                                ),
                                 (UiLanguage::En, true, false) => {
-                                    format!("Answer {ordinal} › Text {part}")
+                                    format!(
+                                        "Answer {ordinal} {} Text {part}",
+                                        crate::ui::text_width::glyphs::SELECTED
+                                    )
                                 }
                                 (UiLanguage::En, false, false) => format!("Text {part}"),
                                 (_, false, true) => local!(language, "本文", "Text").into(),
@@ -1459,8 +1483,10 @@ impl Details {
                 });
             }
             frame.render_widget(
-                ratatui::widgets::Paragraph::new(safe(&parts.join(" | ")))
-                    .style(Style::default().fg(theme::WARNING)),
+                ratatui::widgets::Paragraph::new(safe(
+                    &parts.join(crate::ui::text_width::glyphs::separator()),
+                ))
+                .style(Style::default().fg(theme::WARNING)),
                 Rect { height: 1, ..body },
             );
             body.y += 1;
