@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Observe synthetic send/draft state through Windows ConPTY, never user data."""
 import argparse
+from contextlib import closing
 import os
 from pathlib import Path
 import queue
@@ -92,7 +93,7 @@ def run_case(binary, shell, mode, index):
             print(final, flush=True)
             assert frame.count(marker) == 1 and final.count(marker) == 1, (shell, mode, index)
             db_path = root / 'data' / 'shellboy.db'
-            with sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True) as db:
+            with closing(sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True)) as db:
                 count = db.execute(
                     'SELECT count(*) FROM receipt r JOIN node n ON n.id=r.message_node_id '
                     'WHERE instr(n.payload_json, ?) > 0', (marker,)).fetchone()[0]
