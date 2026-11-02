@@ -59,8 +59,10 @@ impl WatchText {
     fn render(self, language: UiLanguage) -> &'static str {
         use UiLanguage::{En, Ja};
         match (language, self) {
-            (En, Self::Unread) => "Completed *",
-            (Ja, Self::Unread) => "完了 *",
+            (En, Self::Unread) => {
+                crate::ui::text_width::glyphs::select("Completed ●", "Completed *")
+            }
+            (Ja, Self::Unread) => crate::ui::text_width::glyphs::select("完了 ●", "完了 *"),
             (En, Self::HistoryUnavailable) => "Outside seen history",
             (Ja, Self::HistoryUnavailable) => "確認履歴の保持範囲外",
             (En, Self::Confirming) => "Confirming",
@@ -114,10 +116,24 @@ impl WatchMessage<'_> {
     fn render(self, language: UiLanguage) -> String {
         use UiLanguage::{En, Ja};
         match (language, self) {
-            (En, Self::Recovery(reason)) => format!("{reason} | Review recovery in details"),
-            (Ja, Self::Recovery(reason)) => format!("{reason} | 詳細で復旧を確認"),
-            (En, Self::FailureUnknown) => "Failure reason unavailable | Open details".into(),
-            (Ja, Self::FailureUnknown) => "失敗理由は未取得 | 詳細で確認".into(),
+            (En, Self::Recovery(reason)) => crate::ui::text_width::glyphs::formatted!(
+                "{reason} · Review recovery in details",
+                "{reason} | Review recovery in details"
+            ),
+            (Ja, Self::Recovery(reason)) => crate::ui::text_width::glyphs::formatted!(
+                "{reason} · 詳細で復旧を確認",
+                "{reason} | 詳細で復旧を確認"
+            ),
+            (En, Self::FailureUnknown) => crate::ui::text_width::glyphs::select(
+                "Failure reason unavailable · Open details",
+                "Failure reason unavailable | Open details",
+            )
+            .into(),
+            (Ja, Self::FailureUnknown) => crate::ui::text_width::glyphs::select(
+                "失敗理由は未取得 · 詳細で確認",
+                "失敗理由は未取得 | 詳細で確認",
+            )
+            .into(),
             (En, Self::AnswerUnknown) => "Answer excerpt unavailable".into(),
             (Ja, Self::AnswerUnknown) => "回答の抜粋は未取得".into(),
             (En, Self::WorkUnknown) => "Owned-work details unavailable".into(),
@@ -130,7 +146,8 @@ impl WatchMessage<'_> {
                     waits,
                     first,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "Shells: {shells} · Child runs: {children} · Waits: {} · {first}",
                 "Shells: {shells} | Child runs: {children} | Waits: {} | {first}",
                 waits.map_or_else(|| "unknown".into(), |n| n.to_string())
             ),
@@ -142,15 +159,25 @@ impl WatchMessage<'_> {
                     waits,
                     first,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "shell {shells} · 子 {children} · 待機 {} · {first}",
                 "shell {shells} | 子 {children} | 待機 {} | {first}",
                 waits.map_or_else(|| "未取得".into(), |n| n.to_string())
             ),
-            (En, Self::Pending { summary, count: 1 }) => format!("{summary} | 1 pending message"),
+            (En, Self::Pending { summary, count: 1 }) => crate::ui::text_width::glyphs::formatted!(
+                "{summary} · 1 pending message",
+                "{summary} | 1 pending message"
+            ),
             (En, Self::Pending { summary, count }) => {
-                format!("{summary} | {count} pending messages")
+                crate::ui::text_width::glyphs::formatted!(
+                    "{summary} · {count} pending messages",
+                    "{summary} | {count} pending messages"
+                )
             }
-            (Ja, Self::Pending { summary, count }) => format!("{summary} | 待ち {count}"),
+            (Ja, Self::Pending { summary, count }) => crate::ui::text_width::glyphs::formatted!(
+                "{summary} · 待ち {count}",
+                "{summary} | 待ち {count}"
+            ),
             (En, Self::UnknownTime) => "Time unknown".into(),
             (Ja, Self::UnknownTime) => "時刻不明".into(),
             (
@@ -225,10 +252,19 @@ impl WatchMessage<'_> {
                     lower,
                     cycle,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "Descendants · Active {}{active} · Recovery {}{recovery} · Cycle: {}",
                 "Descendants | Active {}{active} | Recovery {}{recovery} | Cycle: {}",
-                if lower { ">=" } else { "" },
-                if lower { ">=" } else { "" },
+                if lower {
+                    crate::ui::text_width::glyphs::select("≥", ">=")
+                } else {
+                    ""
+                },
+                if lower {
+                    crate::ui::text_width::glyphs::select("≥", ">=")
+                } else {
+                    ""
+                },
                 if cycle { "yes" } else { "no" }
             ),
             (
@@ -240,7 +276,11 @@ impl WatchMessage<'_> {
                     cycle,
                 },
             ) => {
-                let lower = if lower { ">=" } else { "" };
+                let lower = if lower {
+                    crate::ui::text_width::glyphs::select("≥", ">=")
+                } else {
+                    ""
+                };
                 let mut labels = Vec::new();
                 if active > 0 {
                     labels.push(format!("稼働{lower}{active}"));
@@ -250,15 +290,22 @@ impl WatchMessage<'_> {
                 }
                 format!(
                     "子孫 {}{}",
-                    labels.join(" | "),
-                    if cycle { " | 循環あり" } else { "" }
+                    labels.join(crate::ui::text_width::glyphs::separator()),
+                    if cycle {
+                        crate::ui::text_width::glyphs::select(" · 循環あり", " | 循環あり")
+                    } else {
+                        ""
+                    }
                 )
             }
             (En, Self::DescendantsUnknown) => "Descendant counts unavailable".into(),
             (Ja, Self::DescendantsUnknown) => "子孫数は未取得".into(),
             (En, Self::DescendantsUncertain) => "Descendant counts uncertain".into(),
             (Ja, Self::DescendantsUncertain) => "子孫数は未確定".into(),
-            (En, Self::StaleCount(label)) => format!("Refresh failed | {label} (previous)"),
+            (En, Self::StaleCount(label)) => crate::ui::text_width::glyphs::formatted!(
+                "Refresh failed · {label} (previous)",
+                "Refresh failed | {label} (previous)"
+            ),
             (Ja, Self::StaleCount(label)) => format!("{label}（前回の値・更新失敗）"),
             (En, Self::FailedCount) => "Descendant refresh failed; counts unconfirmed".into(),
             (Ja, Self::FailedCount) => "子孫数は更新失敗・未確認".into(),
@@ -464,7 +511,7 @@ impl WatchDetail {
             .as_ref()
             .and_then(crate::presentation::revisit_label)
         {
-            secondary.push_str(" | ");
+            secondary.push_str(crate::ui::text_width::glyphs::separator());
             secondary.push_str(&label);
         }
         let now = Instant::now();
@@ -1202,7 +1249,7 @@ fn secondary_age_label_in(
             labels.push(WatchMessage::Output(age.saturating_add(since).as_secs()).render(language));
         }
     }
-    labels.join(" | ")
+    labels.join(crate::ui::text_width::glyphs::separator())
 }
 
 /// Candidate-page provenance, distinct from later reactive per-row facts.

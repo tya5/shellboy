@@ -81,9 +81,9 @@ impl ActivityPhase {
             Self::Background | Self::Continuing | Self::Stopping => "◌",
             Self::Completed => "✓",
             Self::Recovery | Self::Failed => "!",
-            Self::Stopped => "#",
-            Self::Idle => "|",
-            _ => "*",
+            Self::Stopped => crate::ui::text_width::glyphs::select("■", "#"),
+            Self::Idle => crate::ui::text_width::glyphs::select("·", "|"),
+            _ => crate::ui::text_width::glyphs::select("●", "*"),
         }
     }
 }

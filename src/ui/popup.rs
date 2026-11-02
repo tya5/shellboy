@@ -150,8 +150,13 @@ impl Item {
                         break;
                     }
                 }
-                line.spans
-                    .insert(0, Span::styled(". ", Style::default().fg(theme::MUTED)));
+                line.spans.insert(
+                    0,
+                    Span::styled(
+                        crate::ui::text_width::glyphs::select("… ", ". "),
+                        Style::default().fg(theme::MUTED),
+                    ),
+                );
             }
             self.lines.extend(tail);
         }
@@ -301,7 +306,7 @@ fn panel_height(
     frame.render_widget(
         Block::default()
             .borders(Borders::ALL)
-            .border_set(ASCII_BORDER)
+            .border_set(crate::ui::text_width::glyphs::border(ASCII_BORDER))
             .border_style(Style::default().fg(theme::MUTED))
             .title(
                 Line::from(format!(" {title} ")).style(
@@ -334,8 +339,10 @@ fn panel_height(
 }
 pub(super) fn separator(frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(
-        Paragraph::new("-".repeat(usize::from(area.width)))
-            .style(Style::default().fg(theme::MUTED)),
+        Paragraph::new(
+            crate::ui::text_width::glyphs::select("─", "-").repeat(usize::from(area.width)),
+        )
+        .style(Style::default().fg(theme::MUTED)),
         area,
     );
 }
@@ -442,8 +449,8 @@ fn scrollbar(frame: &mut Frame<'_>, area: Rect, total: usize, position: usize) {
         Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(None)
             .end_symbol(None)
-            .track_symbol(Some("|"))
-            .thumb_symbol("#")
+            .track_symbol(Some(crate::ui::text_width::glyphs::vertical()))
+            .thumb_symbol(crate::ui::text_width::glyphs::select("█", "#"))
             .thumb_style(Style::default().fg(theme::ACCENT))
             .track_style(Style::default().fg(theme::MUTED)),
         area,
@@ -519,6 +526,38 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn scrollbar_uses_measured_glyphs_and_preserves_content() {
+        for policy in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(policy);
+            for width in [80, 120] {
+                let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        frame.render_widget(Paragraph::new("user · │ ┌─"), frame.area());
+                        scrollbar(frame, frame.area(), 100, 0);
+                    })
+                    .unwrap();
+                let b = terminal.backend().buffer();
+                let content = (0..14).map(|x| b[(x, 0)].symbol()).collect::<String>();
+                assert!(content.contains("user · │ ┌─"), "{content}");
+                let track = (0..8)
+                    .map(|y| b[(width - 1, y)].symbol())
+                    .collect::<String>();
+                let (thumb, rail) = if policy == Some(1) {
+                    ("█", "│")
+                } else {
+                    ("#", "|")
+                };
+                assert!(
+                    track.contains(thumb) && track.contains(rail),
+                    "{policy:?} {track}"
+                );
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn reader_end_and_scrollbar_end_agree_at_small_and_large_viewports() {
         for (width, height) in [(80, 24), (120, 40), (180, 65)] {

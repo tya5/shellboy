@@ -341,7 +341,8 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             if let Some(details) = error.as_ref().and_then(|e| e.details.as_ref()) {
                 let facts = &details["recovery"];
                 if facts.is_object() {
-                    stage.push_str(&format!(
+                    stage.push_str(&crate::ui::text_width::glyphs::formatted!(
+                        " · retry {}/{} · request {}B · tool {}B",
                         " | retry {}/{} | request {}B | tool {}B",
                         details["automatic_retries"],
                         details["retry_limit"],
@@ -349,7 +350,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                         facts["protected_latest_tool"]["bytes"]
                     ));
                     if let Some(actions) = facts["actions"].as_array() {
-                        message.push_str(" | ");
+                        message.push_str(crate::ui::text_width::glyphs::separator());
                         message.push_str(
                             &actions
                                 .iter()

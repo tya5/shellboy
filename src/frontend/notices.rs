@@ -181,7 +181,10 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
                     Some(false) => NoticeText::BackgroundNotRequested.text(),
                     None => NoticeText::BackgroundUnknown.text(),
                 };
-                format!("{command} | {background}")
+                crate::ui::text_width::glyphs::formatted!(
+                    "{command} · {background}",
+                    "{command} | {background}"
+                )
             }
         } else {
             if let Some(thread) = &fact.thread {
@@ -209,7 +212,11 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
         }
         fields.push(field(
             "title",
-            format!("{} | {caption}", node.presentation.title),
+            crate::ui::text_width::glyphs::formatted!(
+                "{} · {caption}",
+                "{} | {caption}",
+                node.presentation.title
+            ),
         ));
         let remaining = crate::presentation::MAX_FIELDS.saturating_sub(fields.len());
         if node.presentation.fields.len() > remaining {

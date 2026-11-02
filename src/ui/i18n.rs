@@ -77,13 +77,46 @@ mod tests {
                 std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, observed));
             assert!(rejected.is_err());
         }
-        buffer[(0, 0)].set_symbol("●");
+        buffer[(0, 0)].set_symbol("§");
         assert!(
             std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, Some(1)))
                 .is_err()
         );
         crate::ui::text_width::clear_terminal_width();
     }
+    #[test]
+    fn only_original_alert_icons_are_allowed_when_narrow() {
+        use ratatui::{buffer::Buffer, layout::Rect};
+        crate::ui::text_width::set_terminal_width(Some(1));
+        let icons = [
+            tui_markdown::AlertKind::Note,
+            tui_markdown::AlertKind::Tip,
+            tui_markdown::AlertKind::Important,
+            tui_markdown::AlertKind::Warning,
+            tui_markdown::AlertKind::Caution,
+        ]
+        .map(crate::ui::text_width::glyphs::alert_icon);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 1));
+        for icon in icons {
+            buffer[(0, 0)].set_symbol(icon);
+            super::assert_invariant_ui_symbols(&buffer, Some(1));
+            for observed in [Some(2), None] {
+                assert!(
+                    std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(
+                        &buffer, observed
+                    ))
+                    .is_err()
+                );
+            }
+        }
+        buffer[(0, 0)].set_symbol("😀");
+        assert!(
+            std::panic::catch_unwind(|| super::assert_invariant_ui_symbols(&buffer, Some(1)))
+                .is_err()
+        );
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn fixed_messages_select_the_explicit_language() {
         assert_eq!(local!(UiLanguage::Ja, "日本語", "English"), "日本語");
@@ -115,7 +148,22 @@ mod tests {
 #[cfg(test)]
 pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, policy: Option<u8>) {
     use unicode_width::UnicodeWidthChar;
+    // Only the five pre-#139 Markdown alert icons are accepted, and only
+    // under the measured-narrow policy. The renderer checks their real width.
+    crate::ui::text_width::set_terminal_width(Some(1));
+    let alerts = [
+        tui_markdown::AlertKind::Note,
+        tui_markdown::AlertKind::Tip,
+        tui_markdown::AlertKind::Important,
+        tui_markdown::AlertKind::Warning,
+        tui_markdown::AlertKind::Caution,
+    ]
+    .map(crate::ui::text_width::glyphs::alert_icon);
+    crate::ui::text_width::set_terminal_width(policy);
     for cell in &buffer.content {
+        if policy == Some(1) && alerts.contains(&cell.symbol()) {
+            continue;
+        }
         for value in cell.symbol().chars() {
             assert!(
                 !matches!(value, '\u{fe0f}' | '\u{200d}')
@@ -128,7 +176,8 @@ pub(super) fn assert_invariant_ui_symbols(buffer: &ratatui::buffer::Buffer, poli
             crate::ui::text_width::set_terminal_width(Some(2));
             let wide = value.width_cjk();
             assert!(
-                narrow == wide || (policy == Some(1) && "·├└─│→…".contains(value)),
+                narrow == wide
+                    || (policy == Some(1) && "·├└─│→…↑↓←┌┐┘┤┬┴┼●■█—–×≥┊".contains(value)),
                 "ambiguous UI symbol {value:?} under {policy:?}"
             );
         }
@@ -160,10 +209,14 @@ pub(super) fn verify_screen(
                 if let Some(bounds) = ui.aux_popup_paint.get() {
                     let bounds = bounds.outer;
                     for y in bounds.y + 1..bounds.bottom() - 1 {
-                        assert_eq!(buffer[(bounds.x, y)].symbol(), "|", "left border at {y}");
+                        assert_eq!(
+                            buffer[(bounds.x, y)].symbol(),
+                            crate::ui::text_width::glyphs::vertical(),
+                            "left border at {y}"
+                        );
                         assert_eq!(
                             buffer[(bounds.right() - 1, y)].symbol(),
-                            "|",
+                            crate::ui::text_width::glyphs::vertical(),
                             "right border at {y}"
                         );
                     }

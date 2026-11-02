@@ -510,7 +510,11 @@ impl UiState {
                 recall.ordinal = Some(ordinal);
                 recall.node_id = Some(node_id);
                 recall.shown_revision = view.draft.revision;
-                view.status = "入力履歴 | ^古い / v新しい・下書きへ".into();
+                view.status = crate::ui::text_width::glyphs::select(
+                    "入力履歴 · ↑古い / ↓新しい・下書きへ",
+                    "入力履歴 | ^古い / v新しい・下書きへ",
+                )
+                .into();
             }
             Ok(None) if !older => {
                 let queued = std::mem::take(&mut recall.queued);

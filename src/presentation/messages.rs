@@ -68,9 +68,11 @@ impl Text {
                 "入力範囲を縮小（原文は保持）",
                 "Input scope reduced (original retained)"
             ),
-            Self::MetadataLimited => crate::ui::i18n::local!(
+            Self::MetadataLimited => crate::ui::text_width::glyphs::localized!(
                 language,
+                "表示情報を制限 · 完全な情報はF6 原文",
                 "表示情報を制限 | 完全な情報はF6 原文",
+                "Display details limited · F6 Original for complete facts",
                 "Display details limited | F6 Original for complete facts"
             ),
             Self::NoticeSourceUnavailable => crate::ui::i18n::local!(
@@ -112,9 +114,11 @@ impl Text {
                 "前回処理の中断情報",
                 "Previous work was interrupted"
             ),
-            Self::Uncached => crate::ui::i18n::local!(
+            Self::Uncached => crate::ui::text_width::glyphs::localized!(
                 language,
+                "本文未キャッシュ · 詳細から原文を取得",
                 "本文未キャッシュ | 詳細から原文を取得",
+                "Body not cached · Open details to load the original",
                 "Body not cached | Open details to load the original"
             ),
             Self::Details => crate::ui::i18n::local!(
@@ -122,67 +126,91 @@ impl Text {
                 "詳細で内容・参照を確認",
                 "Review content and references in details"
             ),
-            Self::Collapsed => crate::ui::i18n::local!(
+            Self::Collapsed => crate::ui::text_width::glyphs::localized!(
                 language,
+                "… 本文を折りたたみ · Enterで開く",
                 ". 本文を折りたたみ | Enterで開く",
+                "… Body collapsed · Enter to open",
                 ". Body collapsed | Enter to open"
             ),
-            Self::StreamGap => crate::ui::i18n::local!(
+            Self::StreamGap => crate::ui::text_width::glyphs::localized!(
                 language,
+                "途中表示の更新欠落を検出。確定本文の保存後に再取得 · F6 詳細",
                 "途中表示の更新欠落を検出。確定本文の保存後に再取得 | F6 詳細",
+                "Live updates were missed. Reload after the final body is saved · F6 Details",
                 "Live updates were missed. Reload after the final body is saved | F6 Details"
             ),
-            Self::UnknownExtent => crate::ui::i18n::local!(
+            Self::UnknownExtent => crate::ui::text_width::glyphs::localized!(
                 language,
+                "出力の表示範囲・省略量は未確認 · F6 詳細",
                 "出力の表示範囲・省略量は未確認 | F6 詳細",
+                "Output extent and omitted amount are unknown · F6 Details",
                 "Output extent and omitted amount are unknown | F6 Details"
             ),
-            Self::CommandPreview => crate::ui::i18n::local!(
+            Self::CommandPreview => crate::ui::text_width::glyphs::localized!(
                 language,
+                "コマンド（プレビュー） · o コマンド原文（ページ表示）",
                 "コマンド（プレビュー） | o コマンド原文（ページ表示）",
+                "Command preview · o Original command (paged)",
                 "Command preview | o Original command (paged)"
             ),
             Self::OutputFailed => {
                 crate::ui::i18n::local!(language, "出力取得に失敗", "Output retrieval failed")
             }
-            Self::RefreshFailed => crate::ui::i18n::local!(
+            Self::RefreshFailed => crate::ui::text_width::glyphs::localized!(
                 language,
+                "更新失敗 · 前回の取得内容を表示",
                 "更新失敗 | 前回の取得内容を表示",
+                "Refresh failed · Showing the previous result",
                 "Refresh failed | Showing the previous result"
             ),
-            Self::Refreshing => crate::ui::i18n::local!(
+            Self::Refreshing => crate::ui::text_width::glyphs::localized!(
                 language,
+                "再取得中 · 前回の取得内容を表示",
                 "再取得中 | 前回の取得内容を表示",
+                "Refreshing · Showing the previous result",
                 "Refreshing | Showing the previous result"
             ),
-            Self::OutputRetry => crate::ui::i18n::local!(
+            Self::OutputRetry => crate::ui::text_width::glyphs::localized!(
                 language,
+                "出力取得に失敗 · 閉じて開くと再試行 · F6 原文",
                 "出力取得に失敗 | 閉じて開くと再試行 | F6 原文",
+                "Output retrieval failed · Close and reopen to retry · F6 Original",
                 "Output retrieval failed | Close and reopen to retry | F6 Original"
             ),
-            Self::OutputLoading => crate::ui::i18n::local!(
+            Self::OutputLoading => crate::ui::text_width::glyphs::localized!(
                 language,
+                "出力を取得中 · F6 原文",
                 "出力を取得中 | F6 原文",
+                "Loading output · F6 Original",
                 "Loading output | F6 Original"
             ),
-            Self::OutputUnavailable => crate::ui::i18n::local!(
+            Self::OutputUnavailable => crate::ui::text_width::glyphs::localized!(
                 language,
+                "出力を取得できませんでした · F6 原文",
                 "出力を取得できませんでした | F6 原文",
+                "Could not retrieve output · F6 Original",
                 "Could not retrieve output | F6 Original"
             ),
-            Self::OutputEvicted => crate::ui::i18n::local!(
+            Self::OutputEvicted => crate::ui::text_width::glyphs::localized!(
                 language,
+                "出力未保持 · 閉じて開くと再取得 · F6 原文",
                 "出力未保持 | 閉じて開くと再取得 | F6 原文",
+                "Output not retained · Close and reopen to reload · F6 Original",
                 "Output not retained | Close and reopen to reload | F6 Original"
             ),
-            Self::OutputOriginal => crate::ui::i18n::local!(
+            Self::OutputOriginal => crate::ui::text_width::glyphs::localized!(
                 language,
+                "出力は原文で確認 · F6 詳細",
                 "出力は原文で確認 | F6 詳細",
+                "Review output in the original · F6 Details",
                 "Review output in the original | F6 Details"
             ),
-            Self::SourceOutsideWindow => crate::ui::i18n::local!(
+            Self::SourceOutsideWindow => crate::ui::text_width::glyphs::localized!(
                 language,
+                "元のtool行は表示範囲外です · F6で保存済み参照を確認",
                 "元のtool行は表示範囲外です | F6で保存済み参照を確認",
+                "Source tool row is outside this window · F6 Saved reference",
                 "Source tool row is outside this window | F6 Saved reference"
             ),
             Self::ElapsedUnavailable => {
@@ -203,22 +231,28 @@ impl Text {
             Self::AwaitingRecovery => {
                 crate::ui::i18n::local!(language, "復旧待ち", "Awaiting recovery")
             }
-            Self::Delivered => crate::ui::i18n::local!(
+            Self::Delivered => crate::ui::text_width::glyphs::localized!(
                 language,
+                "モデルに渡した · Enter 参照先",
                 "モデルに渡した | Enter 参照先",
+                "Delivered to model · Enter Referenced target",
                 "Delivered to model | Enter Referenced target"
             ),
             Self::ResultUnknown => {
                 crate::ui::i18n::local!(language, "結果未記録", "Result not recorded")
             }
-            Self::IndexPaused => crate::ui::i18n::local!(
+            Self::IndexPaused => crate::ui::text_width::glyphs::localized!(
                 language,
+                "索引更新の停止記録です。現在の状態確認と再試行: /index → T。会話は続行できます。",
                 "索引更新の停止記録です。現在の状態確認と再試行: /index > T。会話は続行できます。",
+                "Index update pause recorded | /index → T to inspect and retry. Conversation can continue.",
                 "Index update pause recorded | /index > T to inspect and retry. Conversation can continue."
             ),
-            Self::ResultUncertain => crate::ui::i18n::local!(
+            Self::ResultUncertain => crate::ui::text_width::glyphs::localized!(
                 language,
+                "外部での実行結果は未確認 · F6で保存済みの対象を確認",
                 "外部での実行結果は未確認 | F6で保存済みの対象を確認",
+                "External execution results are unconfirmed · F6 Saved targets",
                 "External execution results are unconfirmed | F6 Saved targets"
             ),
             Self::NoReplay => crate::ui::i18n::local!(
@@ -236,9 +270,11 @@ impl Text {
                 "前回の待機観測は中断済み",
                 "Previous wait observation was interrupted"
             ),
-            Self::SavedObservation => crate::ui::i18n::local!(
+            Self::SavedObservation => crate::ui::text_width::glyphs::localized!(
                 language,
+                "観測の記録を保持 · F6 原文",
                 "観測の記録を保持 | F6 原文",
+                "Observation saved · F6 Original",
                 "Observation saved | F6 Original"
             ),
             Self::UnknownCount => crate::ui::i18n::local!(
@@ -371,9 +407,15 @@ impl Message {
                     "理由不明"
                 });
                 if en {
-                    format!("/index > T | Pause recorded at {at} | {reason}")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "/index → T · Pause recorded at {at} · {reason}",
+                        "/index > T | Pause recorded at {at} | {reason}"
+                    )
                 } else {
-                    format!("/index > T | 索引更新の停止記録 | {at} | {reason}")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "/index → T · 索引更新の停止記録 · {at} · {reason}",
+                        "/index > T | 索引更新の停止記録 | {at} | {reason}"
+                    )
                 }
             }
             Self::CommandNotice {
@@ -386,12 +428,30 @@ impl Message {
                     .map(|s| display_value(s, 120))
                     .unwrap_or_else(|| Text::NoticeCommandUnrecorded.render(language).into());
                 match (en, background) {
-                    (true, Some(true)) => format!("{command} | Background requested"),
-                    (true, Some(false)) => format!("{command} | Background not requested"),
-                    (true, None) => format!("{command} | Background request not recorded"),
-                    (false, Some(true)) => format!("{command} | 背景指定あり"),
-                    (false, Some(false)) => format!("{command} | 背景指定なし"),
-                    (false, None) => format!("{command} | 背景指定未記録"),
+                    (true, Some(true)) => crate::ui::text_width::glyphs::formatted!(
+                        "{command} · Background requested",
+                        "{command} | Background requested"
+                    ),
+                    (true, Some(false)) => crate::ui::text_width::glyphs::formatted!(
+                        "{command} · Background not requested",
+                        "{command} | Background not requested"
+                    ),
+                    (true, None) => crate::ui::text_width::glyphs::formatted!(
+                        "{command} · Background request not recorded",
+                        "{command} | Background request not recorded"
+                    ),
+                    (false, Some(true)) => crate::ui::text_width::glyphs::formatted!(
+                        "{command} · 背景指定あり",
+                        "{command} | 背景指定あり"
+                    ),
+                    (false, Some(false)) => crate::ui::text_width::glyphs::formatted!(
+                        "{command} · 背景指定なし",
+                        "{command} | 背景指定なし"
+                    ),
+                    (false, None) => crate::ui::text_width::glyphs::formatted!(
+                        "{command} · 背景指定未記録",
+                        "{command} | 背景指定未記録"
+                    ),
                 }
             }
             Self::ThreadNotice { title } => {
@@ -416,35 +476,78 @@ impl Message {
             }
             Self::Reclaimed { reason } => {
                 if en {
-                    format!("Original reclaimed | {reason}")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Original reclaimed · {reason}",
+                        "Original reclaimed | {reason}"
+                    )
                 } else {
-                    format!("原文回収済み | {reason}")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "原文回収済み · {reason}",
+                        "原文回収済み | {reason}"
+                    )
                 }
             }
             Self::Summary { count, replaced } => match (en, replaced) {
-                (true, true) if *count == 1 => {
-                    "Summary | 1 replaced | 1 source | F6>O Original".into()
-                }
-                (true, false) if *count == 1 => "Summary | 1 source | F6>O Original".into(),
+                (true, true) if *count == 1 => crate::ui::text_width::glyphs::select(
+                    "Summary · 1 replaced · 1 source · F6→O Original",
+                    "Summary | 1 replaced | 1 source | F6>O Original",
+                )
+                .into(),
+                (true, false) if *count == 1 => crate::ui::text_width::glyphs::select(
+                    "Summary · 1 source · F6→O Original",
+                    "Summary | 1 source | F6>O Original",
+                )
+                .into(),
                 (true, true) => {
-                    format!("Summary | {count} replaced | {count} sources | F6>O Original")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Summary · {count} replaced · {count} sources · F6→O Original",
+                        "Summary | {count} replaced | {count} sources | F6>O Original"
+                    )
                 }
-                (true, false) => format!("Summary | {count} sources | F6>O Original"),
-                (false, true) => format!("要約 | 置換{count}件 | 出典{count}件 | F6>O 原文"),
-                (false, false) => format!("要約 | 出典{count}件 | F6>O 原文"),
+                (true, false) => crate::ui::text_width::glyphs::formatted!(
+                    "Summary · {count} sources · F6→O Original",
+                    "Summary | {count} sources | F6>O Original"
+                ),
+                (false, true) => crate::ui::text_width::glyphs::formatted!(
+                    "要約 · 置換{count}件 · 出典{count}件 · F6→O 原文",
+                    "要約 | 置換{count}件 | 出典{count}件 | F6>O 原文"
+                ),
+                (false, false) => crate::ui::text_width::glyphs::formatted!(
+                    "要約 · 出典{count}件 · F6→O 原文",
+                    "要約 | 出典{count}件 | F6>O 原文"
+                ),
             },
             Self::SourceCount { count } => match (en, count) {
-                (true, 1) => "  1 original | F6 Details".into(),
-                (true, _) => format!("  {count} originals | F6 Details"),
-                (false, _) => format!("  原文{count}件 | F6 詳細"),
+                (true, 1) => crate::ui::text_width::glyphs::select(
+                    "  1 original · F6 Details",
+                    "  1 original | F6 Details",
+                )
+                .into(),
+                (true, _) => crate::ui::text_width::glyphs::formatted!(
+                    "  {count} originals · F6 Details",
+                    "  {count} originals | F6 Details"
+                ),
+                (false, _) => crate::ui::text_width::glyphs::formatted!(
+                    "  原文{count}件 · F6 詳細",
+                    "  原文{count}件 | F6 詳細"
+                ),
             },
             Self::Excerpt { rows, omitted } => {
                 if en && *rows == 1 {
-                    format!(". Output excerpt ({omitted} of 1 row omitted) | F6 Details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "… Output excerpt ({omitted} of 1 row omitted) · F6 Details",
+                        ". Output excerpt ({omitted} of 1 row omitted) | F6 Details"
+                    )
                 } else if en {
-                    format!(". Output excerpt ({omitted} of {rows} rows omitted) | F6 Details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "… Output excerpt ({omitted} of {rows} rows omitted) · F6 Details",
+                        ". Output excerpt ({omitted} of {rows} rows omitted) | F6 Details"
+                    )
                 } else {
-                    format!(". 出力抜粋（表示{rows}行中{omitted}行省略）| F6 詳細")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "… 出力抜粋（表示{rows}行中{omitted}行省略）· F6 詳細",
+                        ". 出力抜粋（表示{rows}行中{omitted}行省略）| F6 詳細"
+                    )
                 }
             }
             Self::SourceWindow {
@@ -454,36 +557,74 @@ impl Message {
                 live,
             } => match (en, live) {
                 (true, true) if *total == 1 => {
-                    format!("Live display window {start}-{end}/1 character | F6 Details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Live display window {start}-{end}/1 character · F6 Details",
+                        "Live display window {start}-{end}/1 character | F6 Details"
+                    )
                 }
                 (true, false) if *total == 1 => {
-                    format!("Original window {start}-{end}/1 character | F6 Details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Original window {start}-{end}/1 character · F6 Details",
+                        "Original window {start}-{end}/1 character | F6 Details"
+                    )
                 }
                 (true, true) => {
-                    format!("Live display window {start}-{end}/{total} characters | F6 Details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Live display window {start}-{end}/{total} characters · F6 Details",
+                        "Live display window {start}-{end}/{total} characters | F6 Details"
+                    )
                 }
                 (true, false) => {
-                    format!("Original window {start}-{end}/{total} characters | F6 Details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Original window {start}-{end}/{total} characters · F6 Details",
+                        "Original window {start}-{end}/{total} characters | F6 Details"
+                    )
                 }
-                (false, true) => format!("生成中の表示範囲 {start}-{end}/{total}文字 | F6 詳細"),
-                (false, false) => format!("原文の取得範囲 {start}-{end}/{total}文字 | F6 詳細"),
+                (false, true) => crate::ui::text_width::glyphs::formatted!(
+                    "生成中の表示範囲 {start}-{end}/{total}文字 · F6 詳細",
+                    "生成中の表示範囲 {start}-{end}/{total}文字 | F6 詳細"
+                ),
+                (false, false) => crate::ui::text_width::glyphs::formatted!(
+                    "原文の取得範囲 {start}-{end}/{total}文字 · F6 詳細",
+                    "原文の取得範囲 {start}-{end}/{total}文字 | F6 詳細"
+                ),
             },
             Self::BodyOmitted { count } => {
                 if en && *count == 1 {
-                    "1 body/output character omitted | F6 Details".into()
+                    crate::ui::text_width::glyphs::select(
+                        "1 body/output character omitted · F6 Details",
+                        "1 body/output character omitted | F6 Details",
+                    )
+                    .into()
                 } else if en {
-                    format!("{count} body/output characters omitted | F6 Details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "{count} body/output characters omitted · F6 Details",
+                        "{count} body/output characters omitted | F6 Details"
+                    )
                 } else {
-                    format!("本文・出力{count}文字省略 | F6 詳細")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "本文・出力{count}文字省略 · F6 詳細",
+                        "本文・出力{count}文字省略 | F6 詳細"
+                    )
                 }
             }
             Self::Reasoning { count } => {
                 if en && *count == 1 {
-                    "▸ Reasoning 1 character | Collapsed /reasoning".into()
+                    crate::ui::text_width::glyphs::select(
+                        "▸ Reasoning 1 character · Collapsed /reasoning",
+                        "▸ Reasoning 1 character | Collapsed /reasoning",
+                    )
+                    .into()
                 } else if en {
-                    format!("▸ Reasoning {count} characters | Collapsed /reasoning")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "▸ Reasoning {count} characters · Collapsed /reasoning",
+                        "▸ Reasoning {count} characters | Collapsed /reasoning"
+                    )
                 } else {
-                    format!("▸ 推論 {count}文字 | 折りたたみ /reasoning")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "▸ 推論 {count}文字 · 折りたたみ /reasoning",
+                        "▸ 推論 {count}文字 | 折りたたみ /reasoning"
+                    )
                 }
             }
             Self::Exit { code } => {
@@ -508,15 +649,20 @@ impl Message {
             Self::EventSummary { title, facts } => std::iter::once(title.render(language))
                 .chain(facts.iter().map(|fact| fact.render(language)))
                 .collect::<Vec<_>>()
-                .join(" | "),
+                .join(crate::ui::text_width::glyphs::separator()),
             Self::SectionTitle { section } => {
                 if en {
-                    format!(
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Previous saved record · {}",
                         "Previous saved record | {}",
                         section_label(section, language)
                     )
                 } else {
-                    format!("前回の保存記録 | {}", section_label(section, language))
+                    crate::ui::text_width::glyphs::formatted!(
+                        "前回の保存記録 · {}",
+                        "前回の保存記録 | {}",
+                        section_label(section, language)
+                    )
                 }
             }
             Self::SectionCount { section, count } => {
@@ -528,33 +674,63 @@ impl Message {
             }
             Self::DetailCount { count } => {
                 if en && *count == 1 {
-                    "1 item in this original | F6 Target details".into()
+                    crate::ui::text_width::glyphs::select(
+                        "1 item in this original · F6 Target details",
+                        "1 item in this original | F6 Target details",
+                    )
+                    .into()
                 } else if en {
-                    format!("{count} items in this original | F6 Target details")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "{count} items in this original · F6 Target details",
+                        "{count} items in this original | F6 Target details"
+                    )
                 } else {
-                    format!("この原文に{count}件 | 個別の対象はF6 詳細")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "この原文に{count}件 · 個別の対象はF6 詳細",
+                        "この原文に{count}件 | 個別の対象はF6 詳細"
+                    )
                 }
             }
             Self::WaitCount { count } => {
                 if en && *count == 1 {
-                    "1 wait condition | F6 Referenced targets for current state".into()
+                    crate::ui::text_width::glyphs::select(
+                        "1 wait condition · F6 Referenced targets for current state",
+                        "1 wait condition | F6 Referenced targets for current state",
+                    )
+                    .into()
                 } else if en {
-                    format!("{count} wait conditions | F6 Referenced targets for current state")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "{count} wait conditions · F6 Referenced targets for current state",
+                        "{count} wait conditions | F6 Referenced targets for current state"
+                    )
                 } else {
-                    format!("待機条件{count}件 | 対象の現在状態はF6の参照先で確認")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "待機条件{count}件 · 対象の現在状態はF6の参照先で確認",
+                        "待機条件{count}件 | 対象の現在状態はF6の参照先で確認"
+                    )
                 }
             }
             Self::RetryError { refresh, error } => match (en, refresh) {
-                (true, true) => format!(
+                (true, true) => crate::ui::text_width::glyphs::formatted!(
+                    "Refresh failed · Showing the previous result: {error} · Close and reopen to retry",
                     "Refresh failed | Showing the previous result: {error} | Close and reopen to retry"
                 ),
                 (true, false) => {
-                    format!("Output retrieval failed: {error} | Close and reopen to retry")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "Output retrieval failed: {error} · Close and reopen to retry",
+                        "Output retrieval failed: {error} | Close and reopen to retry"
+                    )
                 }
                 (false, true) => {
-                    format!("更新失敗 | 前回の取得内容を表示: {error} | 閉じて開くと再試行")
+                    crate::ui::text_width::glyphs::formatted!(
+                        "更新失敗 · 前回の取得内容を表示: {error} · 閉じて開くと再試行",
+                        "更新失敗 | 前回の取得内容を表示: {error} | 閉じて開くと再試行"
+                    )
                 }
-                (false, false) => format!("出力取得に失敗: {error} | 閉じて開くと再試行"),
+                (false, false) => crate::ui::text_width::glyphs::formatted!(
+                    "出力取得に失敗: {error} · 閉じて開くと再試行",
+                    "出力取得に失敗: {error} | 閉じて開くと再試行"
+                ),
             },
             Self::Raw { text } => text.clone(),
             Self::Hint { text } => {
@@ -590,13 +766,17 @@ impl Message {
                     .into_iter()
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
-                    .join(" | ")
+                    .join(crate::ui::text_width::glyphs::separator())
             }
             Self::Change {
                 field,
                 before,
                 after,
-            } => format!("{}: {before} > {after}", field_label(field, language)),
+            } => crate::ui::text_width::glyphs::formatted!(
+                "{}: {before} → {after}",
+                "{}: {before} > {after}",
+                field_label(field, language)
+            ),
         }
     }
     fn retained_bytes(&self) -> usize {
@@ -1223,6 +1403,44 @@ impl PresentationMessages {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_glyphs_follow_policy_without_rewriting_user_values() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let raw = "user | · > → │ content";
+        for (observed, separator, arrow, ellipsis) in [
+            (Some(1), " · ", " → ", "…"),
+            (Some(2), " | ", " > ", "."),
+            (None, " | ", " > ", "."),
+        ] {
+            text_width::set_terminal_width(observed);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let command = Message::CommandNotice {
+                    command: Some(raw.into()),
+                    background: Some(true),
+                }
+                .render(language);
+                assert!(
+                    command.contains(raw),
+                    "{observed:?} {language:?}: {command}"
+                );
+                assert!(command.contains(separator), "{command}");
+                let change = Message::Change {
+                    field: "model".into(),
+                    before: raw.into(),
+                    after: raw.into(),
+                }
+                .render(language);
+                assert_eq!(change.matches(raw).count(), 2, "{change}");
+                assert!(change.contains(arrow), "{change}");
+                assert_eq!(Message::Raw { text: raw.into() }.render(language), raw);
+                assert!(Text::Collapsed.render(language).starts_with(ellipsis));
+                assert!(Text::OutputRetry.render(language).contains(separator));
+                assert!(command.width() <= 120);
+            }
+        }
+        text_width::clear_terminal_width();
+    }
     #[test]
     fn complete_count_sentences_cover_zero_one_and_many() {
         for (count, expected) in [(0, "0 originals"), (1, "1 original"), (2, "2 originals")] {

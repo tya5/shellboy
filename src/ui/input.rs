@@ -21,12 +21,27 @@ pub(super) fn draft_display(draft: &DraftSnapshot) -> (String, usize) {
 }
 fn paste_chip(language: UiLanguage, id: u64, lines: usize, chars: usize) -> String {
     match language {
-        UiLanguage::Ja => format!("[貼付け{id} | {lines}行/{chars}字]"),
+        UiLanguage::Ja => crate::ui::text_width::glyphs::formatted!(
+            "[貼付け{id} · {lines}行/{chars}字]",
+            "[貼付け{id} | {lines}行/{chars}字]"
+        ),
         UiLanguage::En => match (lines == 1, chars == 1) {
-            (true, true) => format!("[Paste {id} | 1 line/1 char]"),
-            (true, false) => format!("[Paste {id} | 1 line/{chars} chars]"),
-            (false, true) => format!("[Paste {id} | {lines} lines/1 char]"),
-            (false, false) => format!("[Paste {id} | {lines} lines/{chars} chars]"),
+            (true, true) => crate::ui::text_width::glyphs::formatted!(
+                "[Paste {id} · 1 line/1 char]",
+                "[Paste {id} | 1 line/1 char]"
+            ),
+            (true, false) => crate::ui::text_width::glyphs::formatted!(
+                "[Paste {id} · 1 line/{chars} chars]",
+                "[Paste {id} | 1 line/{chars} chars]"
+            ),
+            (false, true) => crate::ui::text_width::glyphs::formatted!(
+                "[Paste {id} · {lines} lines/1 char]",
+                "[Paste {id} | {lines} lines/1 char]"
+            ),
+            (false, false) => crate::ui::text_width::glyphs::formatted!(
+                "[Paste {id} · {lines} lines/{chars} chars]",
+                "[Paste {id} | {lines} lines/{chars} chars]"
+            ),
         },
     }
 }
@@ -232,7 +247,10 @@ pub(super) fn hints(
     if action == "送信"
         && let Some(newline) = config.newline_keys.first()
     {
-        primary.push_str(&format!(" | {newline} 改行"));
+        primary.push_str(&format!(
+            "{}{newline} 改行",
+            crate::ui::text_width::glyphs::separator()
+        ));
     }
     let mut secondary = Vec::new();
     if phase.is_some_and(|phase| phase.is_active()) {
@@ -252,7 +270,10 @@ pub(super) fn hints(
     if folded {
         secondary.push("/paste 番号 show|edit|remove");
     }
-    (primary, secondary.join(" | "))
+    (
+        primary,
+        secondary.join(crate::ui::text_width::glyphs::separator()),
+    )
 }
 
 #[cfg(test)]
@@ -505,6 +526,39 @@ mod language_tests {
             UiLanguage::Ja => &["貼付け1", "40行/280字", "画像: picture.png"],
         });
     }
+    #[test]
+    fn paste_chip_uses_measured_separator_and_keeps_raw_draft() {
+        let raw = "user | · → │ data";
+        for observed in [Some(1), Some(2), None] {
+            crate::ui::text_width::set_terminal_width(observed);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let text = format!("A{raw}Z");
+                let draft = DraftSnapshot {
+                    text: text.clone(),
+                    cursor: 1 + raw.len(),
+                    folds: vec![PasteFold {
+                        id: 7,
+                        start: 1,
+                        end: 1 + raw.len(),
+                        expanded: false,
+                    }],
+                    ..Default::default()
+                };
+                let projected = display(&draft, language);
+                assert_eq!(draft.text, text);
+                assert!(
+                    projected
+                        .text
+                        .contains(crate::ui::text_width::glyphs::separator()),
+                    "{}",
+                    projected.text
+                );
+                assert!(projected.text.starts_with('A') && projected.text.ends_with('Z'));
+            }
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+
     #[test]
     fn paste_counts_are_complete_zero_one_and_many_messages() {
         for (lines, chars, en) in [

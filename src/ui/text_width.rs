@@ -179,12 +179,48 @@ pub(super) fn probe() -> Option<u8> {
 pub(crate) mod glyphs {
     use super::terminal_width_observation;
 
+    macro_rules! formatted {
+        ($narrow:literal, $fallback:literal $(, $($args:tt)*)?) => {{
+            if $crate::ui::text_width::glyphs::narrow() {
+                format!($narrow $(, $($args)*)?)
+            } else {
+                format!($fallback $(, $($args)*)?)
+            }
+        }};
+    }
+    pub(crate) use formatted;
+
+    macro_rules! localized {
+        ($language:expr, $ja_narrow:literal, $ja_fallback:literal, $en_narrow:literal, $en_fallback:literal) => {{
+            match $language {
+                $crate::config::UiLanguage::Ja => {
+                    $crate::ui::text_width::glyphs::select($ja_narrow, $ja_fallback)
+                }
+                $crate::config::UiLanguage::En => {
+                    $crate::ui::text_width::glyphs::select($en_narrow, $en_fallback)
+                }
+            }
+        }};
+    }
+    pub(crate) use localized;
+
+    pub(crate) fn narrow() -> bool {
+        terminal_width_observation() == Some(1)
+    }
+
     pub(crate) const HEADING: &str = "◉";
     pub(crate) const SELECTED: &str = "›";
     pub(crate) const SHELL: &str = "$";
     pub(crate) const CHILD: &str = "↳";
     pub(crate) const WAIT: &str = "⋯";
 
+    pub(crate) fn select(narrow: &'static str, fallback: &'static str) -> &'static str {
+        if terminal_width_observation() == Some(1) {
+            narrow
+        } else {
+            fallback
+        }
+    }
     pub(crate) fn separator() -> &'static str {
         if terminal_width_observation() == Some(1) {
             " · "
@@ -205,6 +241,37 @@ pub(crate) mod glyphs {
             "…"
         } else {
             "."
+        }
+    }
+    pub(crate) fn alert_icon(kind: tui_markdown::AlertKind) -> &'static str {
+        use tui_markdown::AlertKind;
+        let original = match kind {
+            AlertKind::Note => "\u{2139}\u{fe0f}",
+            AlertKind::Tip => "\u{1f4a1}",
+            AlertKind::Important => "\u{2757}",
+            AlertKind::Warning => "\u{26a0}\u{fe0f}",
+            AlertKind::Caution => "\u{1f534}",
+        };
+        select(original, "!")
+    }
+    pub(crate) fn border(
+        fallback: ratatui::symbols::border::Set<'static>,
+    ) -> ratatui::symbols::border::Set<'static> {
+        if narrow() {
+            ratatui::symbols::border::PLAIN
+        } else {
+            fallback
+        }
+    }
+    pub(crate) fn table_border(c: char) -> char {
+        if terminal_width_observation() == Some(1) {
+            return c;
+        }
+        match c {
+            '─' => '-',
+            '│' => '|',
+            '┌' | '┐' | '└' | '┘' | '├' | '┤' | '┬' | '┴' | '┼' => '+',
+            other => other,
         }
     }
     pub(crate) fn vertical() -> &'static str {
@@ -230,6 +297,17 @@ pub(crate) mod glyphs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn generated_formatting_keeps_user_data_unmodified() {
+        let value = "user | · → !";
+        for (observed, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
+            set_terminal_width(observed);
+            let shown = glyphs::formatted!("title · {value} · {}", "title | {value} | {}", 7);
+            assert_eq!(shown, format!("title{separator}{value}{separator}7"));
+        }
+        clear_terminal_width();
+    }
+
     #[test]
     fn glyph_separator_requires_a_measured_single_column() {
         for (observed, expected) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {

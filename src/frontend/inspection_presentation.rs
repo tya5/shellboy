@@ -87,7 +87,8 @@ pub(super) fn prepare_in(
             if field.key.is_empty() {
                 field.key = "/current_source".into();
             }
-            field.label = format!("現在 | {}", field.label);
+            field.label =
+                crate::ui::text_width::glyphs::formatted!("現在 · {}", "現在 | {}", field.label);
         }
     }
     // report.detail may be omitted by a tiny budget. Anchors still derive from

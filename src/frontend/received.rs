@@ -119,7 +119,8 @@ pub(super) fn project(
     } else {
         EventClass::Attention
     };
-    p.title = format!(
+    p.title = crate::ui::text_width::glyphs::formatted!(
+        "{} · /received 一覧",
         "{} | /received 一覧",
         if observation {
             "ストリーム差分 | 最終応答は確定済み"

@@ -368,7 +368,10 @@ No user width override or terminal-name/locale guess is used.
 Shellboy's own layout uses the observation; unknown reserves two cells for
 ambiguous characters, and emoji sequences reserve their component widths.
 Ratatui remains unmodified and uses its default widths, which can differ from
-Shellboy layout on some terminals. Generated application symbols use width-invariant forms; generated Markdown
-borders are marked separately before conversion, so user/model text is not
-rewritten. Source positions, copying and persisted values retain their original
+Shellboy layout on some terminals. Generated application decorations use their
+original glyphs only when ambiguous width is measured as one column; with two
+columns or an unknown observation they use width-invariant ASCII alternatives.
+Generated Markdown borders are marked separately before any fallback conversion,
+so user/model text is not rewritten. Emoji alert icons use conservatively
+computed Unicode widths. Source positions, copying and persisted values retain their original
 contents. See [the stage A design and stage B slices](ui-language-stage-a-draft.md).

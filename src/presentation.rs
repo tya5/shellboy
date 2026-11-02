@@ -51,7 +51,10 @@ pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String
     }
     let mut label = format!("Revisit {}", summary.consumed_count);
     if summary.pending {
-        label.push_str(" | next reserved");
+        label.push_str(crate::ui::text_width::glyphs::select(
+            " · next reserved",
+            " | next reserved",
+        ));
     }
     Some(label)
 }
@@ -229,7 +232,10 @@ impl ToolPresentation {
         } else {
             ""
         };
-        let mut heading = format!("{mark} {identity_command} | {observed}{state_text}");
+        let mut heading = crate::ui::text_width::glyphs::formatted!(
+            "{mark} {identity_command} · {observed}{state_text}",
+            "{mark} {identity_command} | {observed}{state_text}"
+        );
         if let Some(current) = current {
             let same_state = current == self.status
                 || (matches!(current, "running_current" | "background_current")
@@ -241,19 +247,32 @@ impl ToolPresentation {
                 && !(same_state && self.current_exit_code == self.exit_code)
             {
                 let returned = tool_state_text(&self.status, self.exit_code);
-                heading.push_str(&format!(
+                heading.push_str(&crate::ui::text_width::glyphs::formatted!(
+                    " · 返却時 {}",
                     " | 返却時 {}",
                     returned.strip_suffix("（返却時）").unwrap_or(&returned)
                 ));
             }
         } else if self.current_state.as_deref() == Some("observation_unavailable") {
-            heading.push_str(" | 現在状態は未確認");
+            heading.push_str(crate::ui::text_width::glyphs::select(
+                " · 現在状態は未確認",
+                " | 現在状態は未確認",
+            ));
         }
         if let Some(ms) = self.elapsed_ms {
-            heading.push_str(&format!(" | {}.{:01}秒", ms / 1000, (ms % 1000) / 100));
+            heading.push_str(&crate::ui::text_width::glyphs::formatted!(
+                " · {}.{:01}秒",
+                " | {}.{:01}秒",
+                ms / 1000,
+                (ms % 1000) / 100
+            ));
         }
         if let Some(id) = &self.execution_id {
-            heading.push_str(&format!(" | 実行 {} | F6", compact_tool_label(id, 8)));
+            heading.push_str(&crate::ui::text_width::glyphs::formatted!(
+                " · 実行 {} · F6",
+                " | 実行 {} | F6",
+                compact_tool_label(id, 8)
+            ));
         }
         heading
     }
@@ -285,7 +304,13 @@ impl ToolPresentation {
             )
         });
         let state = live
-            .map(|state| format!(" | {}", tool_state_text(state, None)))
+            .map(|state| {
+                crate::ui::text_width::glyphs::formatted!(
+                    " · {}",
+                    " | {}",
+                    tool_state_text(state, None)
+                )
+            })
             .unwrap_or_default();
         format!(
             "{} {}{state}",
@@ -458,8 +483,8 @@ impl tui_markdown::StyleSheet for ShellboyMarkdownStyle {
     fn blockquote(&self) -> Style {
         Style::default().fg(crate::ui::theme::TEXT)
     }
-    fn alert_icon(&self, _kind: tui_markdown::AlertKind) -> &str {
-        "!"
+    fn alert_icon(&self, kind: tui_markdown::AlertKind) -> &str {
+        crate::ui::text_width::glyphs::alert_icon(kind)
     }
     fn table_header(&self) -> Style {
         Style::default()
@@ -732,14 +757,7 @@ pub fn render_markdown(presentation: &mut NodePresentation, width: u16) {
                             // marker; model/user text and links are untouched.
                             text = text
                                 .chars()
-                                .map(|c| match c {
-                                    '─' => '-',
-                                    '│' => '|',
-                                    '┌' | '┐' | '└' | '┘' | '├' | '┤' | '┬' | '┴' | '┼' => {
-                                        '+'
-                                    }
-                                    other => other,
-                                })
+                                .map(crate::ui::text_width::glyphs::table_border)
                                 .collect();
                             style.underline_color = None;
                         }
@@ -989,7 +1007,10 @@ fn secret(key: &str) -> bool {
 fn short(text: &str, limit: usize) -> String {
     let mut out: String = text.chars().take(limit).collect();
     if out.len() < text.len() {
-        out.push_str(". [詳細は原文参照]");
+        out.push_str(crate::ui::text_width::glyphs::select(
+            "… [詳細は原文参照]",
+            ". [詳細は原文参照]",
+        ));
     }
     out
 }
@@ -1014,7 +1035,13 @@ fn parse_container_detail(text: &str) -> Option<Value> {
 pub fn safe_detail_value(value: Value) -> Value {
     fn safe(value: Value, depth: usize) -> Value {
         if depth > 32 {
-            return Value::String("[深い構造 | 詳細は元の参照先で確認]".into());
+            return Value::String(
+                crate::ui::text_width::glyphs::select(
+                    "[深い構造 · 詳細は元の参照先で確認]",
+                    "[深い構造 | 詳細は元の参照先で確認]",
+                )
+                .into(),
+            );
         }
         match value {
             Value::Object(object) => Value::Object(
@@ -1366,6 +1393,94 @@ pub(crate) fn project_stream_window(
 #[cfg(test)]
 mod stream_projection_tests {
     use super::*;
+
+    #[test]
+    fn markdown_alert_icons_use_measured_policy_without_touching_body() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let cases = [
+            ("NOTE", "\u{2139}\u{fe0f}"),
+            ("TIP", "\u{1f4a1}"),
+            ("IMPORTANT", "\u{2757}"),
+            ("WARNING", "\u{26a0}\u{fe0f}"),
+            ("CAUTION", "\u{1f534}"),
+        ];
+        for observed in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(observed);
+            for width in [80, 120] {
+                for (kind, icon) in cases {
+                    let raw = format!("> [!{kind}]\n> user · │ 💡 remains");
+                    let mut p = project(
+                        "assistant_response",
+                        &serde_json::json!({"text": raw}),
+                        &raw,
+                        0,
+                    );
+                    render_markdown(&mut p, width);
+                    assert_eq!(p.blocks[0].text, raw);
+                    let lines = &p.blocks[0].rendered.as_ref().unwrap().lines;
+                    let shown = lines
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    assert!(
+                        shown.contains(if observed == Some(1) { icon } else { "!" }),
+                        "{observed:?} {kind}: {shown}"
+                    );
+                    assert!(
+                        shown.contains("user · │ 💡 remains"),
+                        "{observed:?}: {shown}"
+                    );
+                    for line in lines {
+                        let cells: usize =
+                            line.spans.iter().map(|s| s.content.as_ref().width()).sum();
+                        assert!(cells <= usize::from(width), "{observed:?} {width}: {line}");
+                    }
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn markdown_table_border_policy_preserves_user_text() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        let raw = "| value | text |\n| --- | --- |\n| │ | A·B ┌─ |";
+        for observed in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(observed);
+            for width in [80, 120] {
+                let mut p = project(
+                    "assistant_response",
+                    &serde_json::json!({"text": raw}),
+                    raw,
+                    0,
+                );
+                render_markdown(&mut p, width);
+                assert_eq!(p.blocks[0].text, raw);
+                let lines = &p.blocks[0].rendered.as_ref().unwrap().lines;
+                let shown = lines.iter().map(ToString::to_string).collect::<Vec<_>>();
+                let expected_corner = if observed == Some(1) { '┌' } else { '+' };
+                assert!(
+                    shown.iter().any(|line| line.starts_with(expected_corner)),
+                    "{observed:?}: {shown:?}"
+                );
+                assert!(
+                    shown.iter().any(|line| line.contains("A·B ┌─")),
+                    "{observed:?}: {shown:?}"
+                );
+                for line in lines {
+                    let cells: usize = line.spans.iter().map(|s| s.content.as_ref().width()).sum();
+                    assert!(cells <= usize::from(width), "{observed:?} {width}: {line}");
+                    assert!(
+                        line.spans
+                            .iter()
+                            .all(|s| s.style.underline_color != Some(TABLE_BORDER_MARKER))
+                    );
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
 
     #[test]
     fn display_message_provenance_is_unserialized_and_charged_to_metadata() {

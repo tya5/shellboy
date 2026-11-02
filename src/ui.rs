@@ -6123,7 +6123,7 @@ fn draw_recovery(
             .block(
                 Block::default()
                     .borders(Borders::LEFT)
-                    .border_set(popup::ASCII_BORDER),
+                    .border_set(text_width::glyphs::border(popup::ASCII_BORDER)),
             ),
         area,
     );
@@ -6268,7 +6268,7 @@ fn draw_input(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_set(popup::ASCII_BORDER)
+                .border_set(text_width::glyphs::border(popup::ASCII_BORDER))
                 .border_style(Style::default().fg(state.palette.muted()))
                 .title_bottom(
                     if state.view().draft.text.is_empty() && input_area.width >= 60 {

@@ -94,11 +94,15 @@ impl DeletionDialog {
             });
         }
         match &self.phase {
-            Phase::Loading => text.push_str(local!(language,
+            Phase::Loading => text.push_str(crate::ui::text_width::glyphs::localized!(language,
+                "\n削除影響を確認中… Y はまだ使えません。",
                 "\n削除影響を確認中. Y はまだ使えません。",
+                "\nChecking deletion impact… Y is not available yet.",
                 "\nChecking deletion impact. Y is not available yet.")),
-            Phase::Executing => text.push_str(local!(language,
+            Phase::Executing => text.push_str(crate::ui::text_width::glyphs::localized!(language,
+                "\n削除を実行中… 閉じても受理済みの処理は継続します。",
                 "\n削除を実行中. 閉じても受理済みの処理は継続します。",
+                "\nDeleting… Closing this screen does not cancel accepted work.",
                 "\nDeleting. Closing this screen does not cancel accepted work.")),
             Phase::Failed(error) => {
                 text.push_str(&format!("\n{}\n{}", failure_text(error, language), local!(

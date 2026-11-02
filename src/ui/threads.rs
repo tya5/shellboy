@@ -124,7 +124,10 @@ impl BrowserText {
             (En, Self::ListCompactKeys) => {
                 "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info"
             }
-            (Ja, Self::ListCompactKeys) => "Esc戻る Enter切替 Ctrl+D削除\n^v選択 <>開閉 F1情報",
+            (Ja, Self::ListCompactKeys) => crate::ui::text_width::glyphs::select(
+                "Esc戻る Enter切替 Ctrl+D削除\n↑↓選択 ←→開閉 F1情報",
+                "Esc戻る Enter切替 Ctrl+D削除\n^v選択 <>開閉 F1情報",
+            ),
             (En, Self::ListSmallKeys) => "Esc Back | Enter Open\nCtrl+D Delete | F1 Info",
             (Ja, Self::ListSmallKeys) => "Esc戻る Enter切替\nCtrl+D削除 F1情報",
             (En, Self::Back) => "Esc Back",
@@ -132,9 +135,14 @@ impl BrowserText {
             (En, Self::MoreKey) => " | PgDn More",
             (Ja, Self::MoreKey) => " PgDn次頁",
             (En, Self::ReconfirmSelection) => " | Reconfirming selection",
-            (Ja, Self::ReconfirmSelection) => " | 選択先を再確認中",
+            (Ja, Self::ReconfirmSelection) => {
+                crate::ui::text_width::glyphs::select(" · 選択先を再確認中", " | 選択先を再確認中")
+            }
             (En, Self::ReconfirmRows) => " | Reconfirming previous rows",
-            (Ja, Self::ReconfirmRows) => " | 前回の行を再確認中",
+            (Ja, Self::ReconfirmRows) => crate::ui::text_width::glyphs::select(
+                " · 前回の行を再確認中",
+                " | 前回の行を再確認中",
+            ),
             (En, Self::Conversation) => "Conversation",
             (Ja, Self::Conversation) => "会話",
             (En, Self::Cwd) => "Working folder",
@@ -160,9 +168,14 @@ impl BrowserText {
                 "Tab 一覧 | Enter 開く | Ctrl+S 停止確認 | Alt+R 再試行確認\nAlt+O 出力詳細 | Ctrl+R 更新 | PgDn 続き | 詳細は表示128件まで"
             }
             (En, Self::MoreCandidates) => "More candidates available | PgDn to inspect",
-            (Ja, Self::MoreCandidates) => "続きの候補があります | PgDnで確認",
+            (Ja, Self::MoreCandidates) => crate::ui::text_width::glyphs::select(
+                "続きの候補があります · PgDnで確認",
+                "続きの候補があります | PgDnで確認",
+            ),
             (En, Self::LoadingWatch) => "Loading watched work.",
-            (Ja, Self::LoadingWatch) => "監視対象を取得中.",
+            (Ja, Self::LoadingWatch) => {
+                crate::ui::text_width::glyphs::select("監視対象を取得中…", "監視対象を取得中.")
+            }
             (En, Self::NoWork) => "No work to display",
             (Ja, Self::NoWork) => "現在表示する作業はありません",
             (En, Self::Empty) => "No conversations",
@@ -368,7 +381,10 @@ impl BrowserMessage<'_> {
             }
             (Ja, Self::PreviousExcerpt(text)) => format!("前回の表示（選択先を再確認中）\n{text}"),
             (En, Self::Excerpt { text: "", reason }) => format!("Excerpt unavailable | {reason}"),
-            (Ja, Self::Excerpt { text: "", reason }) => format!("抜粋は未取得 | {reason}"),
+            (Ja, Self::Excerpt { text: "", reason }) => crate::ui::text_width::glyphs::formatted!(
+                "抜粋は未取得 · {reason}",
+                "抜粋は未取得 | {reason}"
+            ),
             (En, Self::Excerpt { text, reason }) => {
                 format!("Previous excerpt (not updated) | {reason}\n{text}")
             }
@@ -445,7 +461,10 @@ impl BrowserMessage<'_> {
                     .revisit
                     .as_ref()
                     .and_then(crate::presentation::revisit_label)
-                    .map(|label| format!("{label} | "))
+                    .map(|label| crate::ui::text_width::glyphs::formatted!(
+                        "{label} · ",
+                        "{label} | "
+                    ))
                     .unwrap_or_default(),
                 one_line(&thread.thread_id),
                 thread
@@ -466,13 +485,17 @@ impl BrowserMessage<'_> {
                     thread,
                     interrupted,
                 },
-            ) => format!(
+            ) => crate::ui::text_width::glyphs::formatted!(
+                "{}ID {} · 親 {} · {}{}",
                 "{}ID {} | 親 {} | {}{}",
                 thread
                     .revisit
                     .as_ref()
                     .and_then(crate::presentation::revisit_label)
-                    .map(|label| format!("{label} | "))
+                    .map(|label| crate::ui::text_width::glyphs::formatted!(
+                        "{label} · ",
+                        "{label} | "
+                    ))
                     .unwrap_or_default(),
                 one_line(&thread.thread_id),
                 thread
@@ -2274,20 +2297,28 @@ impl ThreadBrowser {
         let mut label = format!(
             "{}{}",
             if selected { ">" } else { " " },
-            if current { "*" } else { " " }
+            if current {
+                crate::ui::text_width::glyphs::select("●", "*")
+            } else {
+                " "
+            }
         );
         // Reserve enough room for a title at narrow widths. The ellipsis marks
         // omitted ancestor indentation while the local branch stays visible.
         let depth_budget = width.saturating_sub(14).min(16) / 2;
         let take = row.ancestors.len().min(depth_budget);
         for &continues in row.ancestors.iter().take(take) {
-            label.push_str(if continues { "| " } else { "  " });
+            label.push_str(if continues {
+                crate::ui::text_width::glyphs::select("│ ", "| ")
+            } else {
+                "  "
+            });
         }
         if row.depth > take + 1 {
-            label.push_str(". ");
+            label.push_str(crate::ui::text_width::glyphs::select("… ", ". "));
         }
         if row.depth > 0 {
-            label.push_str(if row.last { "\\-" } else { "+-" });
+            label.push_str(crate::ui::text_width::glyphs::branch(row.last));
         }
         label.push_str(if row.children {
             if self.collapsed.contains(&thread.thread_id) {
@@ -2338,7 +2369,7 @@ impl ThreadBrowser {
             let reserve = revisit.width().saturating_add(3);
             if width > reserve + 4 && (!interrupted_by_app_exit(thread) || width >= 32) {
                 label = fit(&label, width - reserve);
-                label.push_str(" | ");
+                label.push_str(crate::ui::text_width::glyphs::separator());
                 label.push_str(&revisit);
             }
         }
@@ -2369,7 +2400,7 @@ impl ThreadBrowser {
                 .as_ref()
                 .and_then(|count| count.label_in(self.language))
         }) {
-            context.push_str(" | ");
+            context.push_str(crate::ui::text_width::glyphs::separator());
             context.push_str(&label);
         }
         let footer = BrowserText::WatchKeys.render(self.language);
@@ -2425,9 +2456,9 @@ impl ThreadBrowser {
                     let prefix = if chosen {
                         ">"
                     } else if current {
-                        "*"
+                        crate::ui::text_width::glyphs::select("●", "*")
                     } else {
-                        "|"
+                        crate::ui::text_width::glyphs::select("·", "|")
                     };
                     let pending = if self.preferred.as_deref() == Some(summary.thread_id.as_str())
                         || self.reconfirming_row.as_deref() == Some(summary.thread_id.as_str())
@@ -2517,7 +2548,7 @@ impl ThreadBrowser {
     fn draw_detail(&self, frame: &mut Frame<'_>, area: Rect, thread: Option<&ThreadSummary>) {
         let block = Block::default()
             .borders(Borders::TOP)
-            .border_set(popup::ASCII_BORDER);
+            .border_set(crate::ui::text_width::glyphs::border(popup::ASCII_BORDER));
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let Some(thread) = thread else {
@@ -2606,7 +2637,7 @@ fn watch_lines(
     let mut first = vec![
         Span::raw(marker),
         Span::styled(status, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(" | "),
+        Span::raw(crate::ui::text_width::glyphs::separator()),
         Span::raw(title),
     ];
     if !parent.is_empty() {
@@ -2628,7 +2659,7 @@ fn watch_lines(
     } else {
         let used = clocks.width() + 3;
         second.push(Span::styled(clocks, Style::default().fg(theme::MUTED)));
-        second.push(Span::raw(" | "));
+        second.push(Span::raw(crate::ui::text_width::glyphs::separator()));
         available.saturating_sub(used)
     };
     second.push(Span::styled(
@@ -2677,7 +2708,11 @@ fn tail_path(path: &str, width: usize) -> String {
         suffix.push(grapheme);
         used += cells;
     }
-    format!(".{}", suffix.into_iter().rev().collect::<String>())
+    format!(
+        "{}{}",
+        crate::ui::text_width::glyphs::ellipsis(),
+        suffix.into_iter().rev().collect::<String>()
+    )
 }
 
 fn activity_column_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
@@ -2760,7 +2795,7 @@ pub(super) fn plain_preview(text: &str, width: usize) -> String {
         preview.push_str(grapheme);
         cells += next;
     }
-    preview.push('.');
+    preview.push_str(crate::ui::text_width::glyphs::ellipsis());
     preview
 }
 
@@ -5659,14 +5694,24 @@ mod language_tests {
                             .unwrap();
                         let bounds = ui.thread_browser.paint_bounds().unwrap().outer;
                         let buffer = terminal.backend().buffer();
-                        for x in [bounds.x, bounds.right() - 1] {
-                            for y in [bounds.y, bounds.bottom() - 1] {
-                                assert_eq!(buffer[(x, y)].symbol(), "+");
+                        for (x, left) in [(bounds.x, true), (bounds.right() - 1, false)] {
+                            for (y, top) in [(bounds.y, true), (bounds.bottom() - 1, false)] {
+                                let corner = if policy == Some(1) {
+                                    match (left, top) {
+                                        (true, true) => "┌",
+                                        (false, true) => "┐",
+                                        (true, false) => "└",
+                                        (false, false) => "┘",
+                                    }
+                                } else {
+                                    "+"
+                                };
+                                assert_eq!(buffer[(x, y)].symbol(), corner);
                             }
                             for y in bounds.y + 1..bounds.bottom() - 1 {
                                 assert_eq!(
                                     buffer[(x, y)].symbol(),
-                                    "|",
+                                    crate::ui::text_width::glyphs::vertical(),
                                     "{policy:?} {width} {language:?}"
                                 );
                             }

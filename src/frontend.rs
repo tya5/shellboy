@@ -554,11 +554,15 @@ struct EditableRequest {
     attachments: Vec<UiAttachment>,
     run_id: Option<String>,
 }
+fn catalogue_title(label: &'static str) -> String {
+    label.replace(" · ", crate::ui::text_width::glyphs::separator())
+}
 fn command_title(command: &Command) -> String {
-    crate::operations::OperationId::from_owner_command(command)
-        .map(|id| id.label())
-        .unwrap_or("Owner shutdown")
-        .replace('·', "|")
+    catalogue_title(
+        crate::operations::OperationId::from_owner_command(command)
+            .map(|id| id.label())
+            .unwrap_or("Owner shutdown"),
+    )
 }
 // Report operation acceptance separately from presentation: a report-rendering
 // failure must not invite retrying an already-applied mutation.
@@ -1765,7 +1769,7 @@ async fn run_with_delivery(
                         }
                     }
                     UiAction::ClientOperation(operation) => {
-                        let title = operation.catalogue().spec().label.replace('·', "|");
+                        let title = catalogue_title(operation.catalogue().spec().label);
                         let mutation = operation.effect() != crate::operations::Effect::Inspect;
                         let notice_owner = management::NoticeOwner::capture(
                             context.as_ref(), submission.as_ref(),
@@ -4422,6 +4426,29 @@ mod notice_tests {
 
 #[cfg(test)]
 mod delivery_performance;
+
+#[cfg(test)]
+mod catalogue_glyph_tests {
+    use super::catalogue_title;
+    use crate::ui::text_width;
+
+    #[test]
+    fn catalogue_separator_requires_a_measured_single_column() {
+        for (observed, expected) in [
+            (Some(1), "shell · 一覧"),
+            (Some(2), "shell | 一覧"),
+            (None, "shell | 一覧"),
+        ] {
+            text_width::set_terminal_width(observed);
+            assert_eq!(
+                catalogue_title(crate::operations::OperationId::ShellList.label()),
+                expected
+            );
+            assert_eq!(catalogue_title("Owner shutdown"), "Owner shutdown");
+        }
+        text_width::clear_terminal_width();
+    }
+}
 
 #[cfg(test)]
 mod tool_preview_tests {

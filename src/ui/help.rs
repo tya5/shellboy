@@ -90,7 +90,8 @@ impl Page {
             "Copy an answer"
         ));
         page.entry(
-            &format!(
+            &crate::ui::text_width::glyphs::formatted!(
+                "{} → {}",
                 "{} > {}",
                 Action::History.binding(config),
                 Action::Copy.binding(config)
@@ -102,7 +103,8 @@ impl Page {
             ),
         );
         page.entry(
-            &format!(
+            &crate::ui::text_width::glyphs::formatted!(
+                "{} → {}",
                 "{} > {}",
                 Action::History.binding(config),
                 Action::Code.binding(config)

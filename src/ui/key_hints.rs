@@ -255,13 +255,14 @@ pub(super) fn detail_footer(context: Context) -> &'static str {
             vec![FirstPage, Original],
         ]
         .map(|actions| {
-            format!(
+            crate::ui::text_width::glyphs::formatted!(
+                "Esc 戻る · ↑↓/PgUp/PgDn 移動\n{}",
                 "Esc 戻る | ^v/PgUp/PgDn 移動\n{}",
                 actions
                     .iter()
                     .map(|a| a.label(&config))
                     .collect::<Vec<_>>()
-                    .join(" | ")
+                    .join(crate::ui::text_width::glyphs::separator())
             )
         })
     });
@@ -331,7 +332,7 @@ impl Cache {
                         .map(String::as_str)
                         .chain(["F1"])
                         .collect::<Vec<_>>()
-                        .join(" | ");
+                        .join(crate::ui::text_width::glyphs::separator());
                     if text.width() <= usize::from(width) {
                         break text;
                     }

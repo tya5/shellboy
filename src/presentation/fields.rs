@@ -388,7 +388,11 @@ pub fn fields_of_value(value: &Value) -> Vec<PresentationField> {
                 display: None,
                 key: path.into(),
                 label: short(path, 256),
-                value: "[深い構造 | 詳細は原文参照]".into(),
+                value: crate::ui::text_width::glyphs::select(
+                    "[深い構造 · 詳細は原文参照]",
+                    "[深い構造 | 詳細は原文参照]",
+                )
+                .into(),
             });
             return;
         }

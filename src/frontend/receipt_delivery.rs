@@ -114,8 +114,14 @@ impl Batch {
             if status != ReceiptStatus::Held {
                 pending.remove(&message);
             }
-            let hint = matches!(status, ReceiptStatus::Cancelled | ReceiptStatus::Failed)
-                .then(|| format!("依頼を保持しました | /restore {} で入力欄へ戻す", revision));
+            let hint =
+                matches!(status, ReceiptStatus::Cancelled | ReceiptStatus::Failed).then(|| {
+                    crate::ui::text_width::glyphs::formatted!(
+                        "依頼を保持しました · /restore {} で入力欄へ戻す",
+                        "依頼を保持しました | /restore {} で入力欄へ戻す",
+                        revision
+                    )
+                });
             // Main is the sole producer allowed into the last 32 slots. Its
             // synchronous capacity check + insertion cannot race another main
             // handler, and workers stop at 480. No await and no raw bypass.

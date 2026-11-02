@@ -410,7 +410,8 @@ impl ManagementPopup {
             return false;
         };
         let prefix = error.chars().take(512).collect::<String>();
-        let message = format!(
+        let message = crate::ui::text_width::glyphs::formatted!(
+            "{} · {}",
             "{} | {}",
             observed_at,
             crate::presentation::sanitize_plain(&prefix, 0).0
@@ -1572,8 +1573,11 @@ impl ManagementPopup {
                             .unwrap_or(("", field.label.as_str()));
                         if group != previous_group && !group.is_empty() {
                             items.push(popup::Item::new(
-                                Line::from(format!("-- {group} --"))
-                                    .style(Style::default().fg(theme::GROUP_HEADING)),
+                                Line::from(crate::ui::text_width::glyphs::formatted!(
+                                    "── {group} ──",
+                                    "-- {group} --"
+                                ))
+                                .style(Style::default().fg(theme::GROUP_HEADING)),
                             ));
                         }
                         previous_group = group;

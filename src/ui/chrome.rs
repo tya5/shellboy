@@ -1,6 +1,6 @@
 //! Pure projection of the current conversation into bounded screen chrome.
 use super::ThreadView;
-use crate::ui::text_width::UnicodeWidthStr;
+use crate::ui::text_width::{UnicodeWidthStr, glyphs};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Fixed header surface; metadata occupies a separate right-aligned region.
@@ -33,9 +33,9 @@ pub(super) fn header_line(
             super::activity::ActivityPhase::Recovery | super::activity::ActivityPhase::Failed => {
                 format!("! {}", phase.column_label())
             }
-            super::activity::ActivityPhase::Stopped => "#".into(),
+            super::activity::ActivityPhase::Stopped => glyphs::select("■", "#").into(),
             super::activity::ActivityPhase::Completed => "✓".into(),
-            super::activity::ActivityPhase::Idle => "|".into(),
+            super::activity::ActivityPhase::Idle => glyphs::select("·", "|").into(),
             _ => "◌".into(),
         }
     };
@@ -51,14 +51,18 @@ pub(super) fn header_line(
     if let Some(connection) = view.connection.as_deref() {
         let remaining = right_width.saturating_sub(right.width() + 3);
         if remaining >= 3 {
-            right = format!("{} | {right}", fit(connection, remaining.min(16), false));
+            right = format!(
+                "{}{sep}{right}",
+                fit(connection, remaining.min(16), false),
+                sep = glyphs::separator()
+            );
         }
     }
     let path_width = right_width.saturating_sub(right.width() + usize::from(!right.is_empty()) * 3);
     if path_width >= 5 && !view.cwd.as_os_str().is_empty() {
         let path = fit(&view.cwd.to_string_lossy(), path_width, true);
         if !right.is_empty() {
-            right.push_str(" | ");
+            right.push_str(glyphs::separator());
         }
         right.push_str(&path);
     }
@@ -93,16 +97,34 @@ fn frozen_header_label(width: u16, frozen_at: Option<&str>) -> String {
         .map(|time| format!("{time}Z"));
     let mut choices = Vec::new();
     if let Some(stamp) = frozen_at {
-        choices.push(format!("表示固定開始 {stamp} | F2/Esc解除 | Ctrl+L更新"));
+        choices.push(crate::ui::text_width::glyphs::formatted!(
+            "表示固定開始 {stamp} · F2/Esc解除 · Ctrl+L更新",
+            "表示固定開始 {stamp} | F2/Esc解除 | Ctrl+L更新"
+        ));
     }
     if let Some(time) = time {
-        choices.push(format!("表示固定開始 {time} | F2/Esc解除 | Ctrl+L更新"));
-        choices.push(format!("表示固定 {time} | F2/Esc解除"));
+        choices.push(crate::ui::text_width::glyphs::formatted!(
+            "表示固定開始 {time} · F2/Esc解除 · Ctrl+L更新",
+            "表示固定開始 {time} | F2/Esc解除 | Ctrl+L更新"
+        ));
+        choices.push(crate::ui::text_width::glyphs::formatted!(
+            "表示固定 {time} · F2/Esc解除",
+            "表示固定 {time} | F2/Esc解除"
+        ));
         choices.push(format!("表示固定 {time} F2"));
         choices.push(format!("表示固定 {time}"));
     } else {
-        choices.push("表示固定 | 時刻未記録 | F2/Esc解除 | Ctrl+L更新".into());
-        choices.push("表示固定 | F2/Esc解除".into());
+        choices.push(
+            crate::ui::text_width::glyphs::select(
+                "表示固定 · 時刻未記録 · F2/Esc解除 · Ctrl+L更新",
+                "表示固定 | 時刻未記録 | F2/Esc解除 | Ctrl+L更新",
+            )
+            .into(),
+        );
+        choices.push(
+            crate::ui::text_width::glyphs::select("表示固定 · F2/Esc解除", "表示固定 | F2/Esc解除")
+                .into(),
+        );
     }
     choices.push("表示固定".into());
     choices.push("固定".into());
@@ -166,16 +188,20 @@ impl ContextBar {
         let u = &self.usage;
         let mark = if plain && self.warn() { "!" } else { "" };
         if u.input_tokens.is_none() && u.output_tokens.is_none() && u.cached_tokens.is_none() {
-            return vec![format!("{mark}^-")];
+            return vec![format!(
+                "{mark}{}{}",
+                glyphs::select("↑", "^"),
+                glyphs::select("—", "-")
+            )];
         }
-        let show = |v: Option<u64>| v.map_or("-".to_owned(), compact_tokens);
-        let up = format!("{mark}^{}", show(u.input_tokens));
+        let show = |v: Option<u64>| v.map_or(glyphs::select("—", "-").to_owned(), compact_tokens);
+        let up = format!("{mark}{}{}", glyphs::select("↑", "^"), show(u.input_tokens));
         let up_limit = if self.auto_at > 0 {
             format!("{up}/{}", compact_tokens(self.auto_at))
         } else {
             up.clone()
         };
-        let down = format!("v{}", show(u.output_tokens));
+        let down = format!("{}{}", glyphs::select("↓", "v"), show(u.output_tokens));
         let cache = match (u.cached_tokens, u.input_tokens) {
             (Some(cached), Some(input)) if input > 0 => Some(format!(
                 "キャッシュ{}%",
@@ -249,9 +275,9 @@ pub(super) fn footer_lines(
     }
     if !view.navigation.follow() {
         facts.push(if view.navigation.unseen() {
-            "v new".into()
+            format!("{} new", glyphs::select("↓", "v"))
         } else {
-            "v".into()
+            glyphs::select("↓", "v").into()
         });
     }
     if matches!(
@@ -282,8 +308,9 @@ pub(super) fn footer_lines(
     let send = view.sending();
     if let Some((send_phase, count, started)) = send {
         facts.push(format!(
-            "{} {count} | {}",
+            "{} {count}{}{}",
             crate::presentation::messages::phase_label(send_phase, view.language),
+            glyphs::separator(),
             crate::presentation::messages::Message::Elapsed {
                 ms: started.elapsed().as_secs().saturating_mul(1000),
                 decimal: false,
@@ -327,7 +354,11 @@ pub(super) fn footer_lines(
         facts.push(format!("{} tools", view.tool_calls));
     }
     if view.cancelled_calls > 0 {
-        facts.push(format!("x {}", view.cancelled_calls));
+        facts.push(format!(
+            "{} {}",
+            glyphs::select("×", "x"),
+            view.cancelled_calls
+        ));
     }
     if let Some(snapshot) = view.activity.snapshot.as_ref() {
         if let Some(revisit) = snapshot.revisit.as_ref() {
@@ -346,10 +377,10 @@ pub(super) fn footer_lines(
         facts.push(gap);
     }
     if view.navigation.is_loading() {
-        facts.push(".".into());
+        facts.push(glyphs::ellipsis().into());
     }
     let facts = fit(
-        &facts.join(" | "),
+        &facts.join(glyphs::separator()),
         usize::from(width).saturating_sub(
             activity_spans
                 .iter()
@@ -361,7 +392,7 @@ pub(super) fn footer_lines(
     );
     if !facts.is_empty() {
         if !activity_spans.is_empty() {
-            activity_spans.push(Span::raw(" | "));
+            activity_spans.push(Span::raw(glyphs::separator()));
         }
         activity_spans.push(Span::styled(facts, Style::default().fg(palette.muted())));
     }
@@ -370,7 +401,7 @@ pub(super) fn footer_lines(
         let room = usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 });
         if let Some(text) = bar.text(room, palette.plain()) {
             if used > 0 {
-                activity_spans.push(Span::raw(" | "));
+                activity_spans.push(Span::raw(glyphs::separator()));
             }
             let style = if bar.warn() && !palette.plain() {
                 Style::default().fg(super::theme::ATTENTION)
@@ -383,7 +414,7 @@ pub(super) fn footer_lines(
     let (hint, error) = notice.unwrap_or((hints, false));
     let navigation_hint =
         (view.navigation.is_loading() && view.navigation.request().is_some() && !error)
-            .then(|| format!("履歴読込中 | {hint}"));
+            .then(|| format!("履歴読込中{}{hint}", glyphs::separator()));
     let hint = navigation_hint.as_deref().unwrap_or(hint);
     let notice_style = if error && !palette.plain() {
         Style::default().fg(super::theme::ATTENTION)
@@ -483,7 +514,7 @@ fn fit(text: &str, width: usize, tail: bool) -> String {
             result.insert_str(0, grapheme);
             cells += grapheme.width();
         }
-        format!(".{result}")
+        format!("{}{result}", glyphs::ellipsis())
     } else {
         for grapheme in graphemes {
             if cells + grapheme.width() > width {
@@ -492,7 +523,7 @@ fn fit(text: &str, width: usize, tail: bool) -> String {
             result.push_str(grapheme);
             cells += grapheme.width();
         }
-        format!("{result}.")
+        format!("{result}{}", glyphs::ellipsis())
     }
 }
 

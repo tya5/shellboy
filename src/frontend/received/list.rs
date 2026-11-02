@@ -41,7 +41,8 @@ pub(super) async fn read(
             } = row;
             fields.push(crate::presentation::PresentationField {
                 key: format!("/received/source/{id}"),
-                label: format!(
+                label: crate::ui::text_width::glyphs::formatted!(
+                    "{} · {} · Turn {}",
                     "{} | {} | Turn {}",
                     crate::presentation::fields::local_time(&at)
                         .unwrap_or_else(|| "時刻不明".into()),
@@ -62,7 +63,10 @@ pub(super) async fn read(
             });
         }
         (
-            format!("受信記録 | {total}件 | {page}ページ | Enter 原文 / Esc 閉じる"),
+            crate::ui::text_width::glyphs::formatted!(
+                "受信記録 · {total}件 · {page}ページ · Enter 原文 / Esc 閉じる",
+                "受信記録 | {total}件 | {page}ページ | Enter 原文 / Esc 閉じる"
+            ),
             fields,
         )
     })
@@ -149,7 +153,12 @@ fn display(request: &Option<String>, excerpt: Option<&str>) -> String {
     excerpt
         .map_or_else(
             || request.clone(),
-            |text| format!("{request} | 受信: {text}"),
+            |text| {
+                crate::ui::text_width::glyphs::formatted!(
+                    "{request} · 受信: {text}",
+                    "{request} | 受信: {text}"
+                )
+            },
         )
         .chars()
         .take(80)

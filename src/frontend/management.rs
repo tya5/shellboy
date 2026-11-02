@@ -71,9 +71,10 @@ pub(super) fn completion_text(
             UiLanguage::En => format!("Admission result: failed ({})", error.message),
         },
     };
+    let separator = crate::ui::text_width::glyphs::separator();
     match language {
-        UiLanguage::Ja => format!("{status} | {title} | 照会ID {id}"),
-        UiLanguage::En => format!("{status} | {title} | Request ID {id}"),
+        UiLanguage::Ja => format!("{status}{separator}{title}{separator}照会ID {id}"),
+        UiLanguage::En => format!("{status}{separator}{title}{separator}Request ID {id}"),
     }
 }
 pub(super) struct Report {
@@ -294,19 +295,20 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
                 })
                 .as_ref()
                 .and_then(presentation::revisit_label)
-                .map(|label| format!(" | {label}"))
+                .map(|label| crate::ui::text_width::glyphs::formatted!(" · {label}", " | {label}"))
                 .unwrap_or_default();
             let marker = match text(item, "state").as_str() {
-                "failed" | "incomplete" => "x",
+                "failed" | "incomplete" => crate::ui::text_width::glyphs::select("×", "x"),
                 "completed" | "exited" | "applied" => "✓",
                 "held" | "recovery_wait" => "◷",
-                _ => "*",
+                _ => crate::ui::text_width::glyphs::select("●", "*"),
             };
             fields.push(PresentationField {
                 value_omitted: false,
                 display: None,
                 key: format!("/items/{index}"),
-                label: format!(
+                label: crate::ui::text_width::glyphs::formatted!(
+                    "{marker} {} · {}",
                     "{marker} {} | {}",
                     match text(item, "kind").as_str() {
                         "message" => i18n::local!(language, "依頼", "Request"),
@@ -320,7 +322,8 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
                     },
                     presentation::fields::state_label(&text(item, "state"))
                 ),
-                value: format!(
+                value: crate::ui::text_width::glyphs::formatted!(
+                    "{title} · {short} · {}{revisit}",
                     "{title} | {short} | {}{revisit}",
                     presentation::fields::local_time(&text(item, "activity_at"))
                         .unwrap_or_else(|| text(item, "activity_at"))
@@ -594,11 +597,10 @@ fn index_preview_text_in(language: UiLanguage, value: &Value) -> String {
         lines.push(format!("{label}: {count}"));
     }
     lines.push(
-        i18n::local!(
-            language,
-            "API未送信 | 金額は未見積",
-            "No API request sent | Cost not estimated"
-        )
+        match language {
+            UiLanguage::Ja => crate::ui::text_width::glyphs::select("API未送信 · 金額は未見積", "API未送信 | 金額は未見積"),
+            UiLanguage::En => crate::ui::text_width::glyphs::select("No API request sent · Cost not estimated", "No API request sent | Cost not estimated"),
+        }
         .into(),
     );
     lines.join("\n")

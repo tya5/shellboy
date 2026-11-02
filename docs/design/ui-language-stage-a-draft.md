@@ -61,17 +61,20 @@ diagnostics explicitly record the mismatch.
 Shellboy layout uses the observation, with unknown conservatively reserving two
 cells for ambiguous characters and component widths for emoji sequences.
 Ratatui and upstream renderers retain their own default width behavior, so on a
-mismatching terminal their internal layout can differ from Shellboy's. The
-impact is limited to content rows; generated UI symbols remain width invariant.
+mismatching terminal their internal layout can differ from Shellboy's. Shellboy
+uses width-invariant ASCII decorations for a two-column or unknown observation;
+when one column is measured it restores the original application-owned glyphs.
 Raw content and copy/save paths do not change. A pluggable Ratatui width policy
 is separate follow-up work.
 
-Application-owned ambiguous symbols use ASCII alternatives. Existing semantic
-row marks/spinners remain only if their narrow and CJK widths agree. Markdown
-borders are renderer-generated decorations: they carry a private style marker
-and are converted to ASCII before drawing; a user-supplied identical character
-is not converted. Source anchor mapping removes the tagged output guide, rather
-than stripping ASCII pipes from user text.
+Application-owned ambiguous symbols and renderer-generated Markdown decorations
+use their original glyphs only after a one-column measurement; otherwise they
+use ASCII alternatives. Generated emoji alert icons use conservatively computed
+Unicode widths rather than being assumed to occupy one cell. Markdown table
+borders carry a private style marker, so fallback conversion affects only the
+renderer-generated border; a user-supplied identical character is not converted.
+Source anchor mapping removes the tagged output guide, rather than stripping
+ASCII pipes from user text.
 
 ## Stage B partition proposal
 
@@ -110,8 +113,9 @@ When space is constrained, preserve in order: the consequence/safety warning
 and destructive scope; explicit confirm/cancel controls; the selected item or
 identity; current state and failure/recovery facts; then secondary context,
 counts, timestamps, hints and decoration. Wrap or scroll the body before hiding
-an action. Truncation is display-only, on a grapheme boundary, with an ASCII
-`.` mark; retain the complete source/copy/execute value. For English text, wrap
+an action. Truncation is display-only, on a grapheme boundary, with `…` after a
+one-column measurement or ASCII `.` otherwise; retain the complete
+source/copy/execute value. For English text, wrap
 long words at grapheme boundaries if necessary; never cut a critical confirmation
 word when 80/120 columns are available. Status-bar and section rows use the same
 priority: keep state and action, drop decoration and optional detail first, and

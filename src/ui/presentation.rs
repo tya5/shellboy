@@ -89,7 +89,12 @@ fn label(language: UiLanguage, node: &UiNode) -> String {
         return title.value.clone();
     }
     if node.presentation.kind == PresentationKind::Event {
-        if let Some(fact) = node.presentation.title.strip_prefix("状態変更 | ") {
+        if let Some(fact) = node
+            .presentation
+            .title
+            .strip_prefix("状態変更 · ")
+            .or_else(|| node.presentation.title.strip_prefix("状態変更 | "))
+        {
             return fact.into();
         }
         if node.presentation.title == "状態変更" {
@@ -202,7 +207,8 @@ fn node_lines_inner(
                 format!("{} {}", RowKind::ToolCall.mark(), label(language, node))
             } else {
                 match node.presentation.kind {
-                    PresentationKind::Event => format!(
+                    PresentationKind::Event => crate::ui::text_width::glyphs::formatted!(
+                        "{} {} · {}",
                         "{} {} | {}",
                         RowKind::Notice.mark(),
                         row_label(RowKind::Notice, language),
@@ -297,7 +303,8 @@ fn node_lines_inner(
                 if !tool.reason.is_empty() {
                     out.extend(hanging_wrap(
                         vec![Line::from(Span::styled(
-                            format!(
+                            crate::ui::text_width::glyphs::formatted!(
+                                "  ┊ {}",
                                 "  | {}",
                                 crate::presentation::messages::tool_reason(tool, language)
                             ),
@@ -309,7 +316,9 @@ fn node_lines_inner(
             }
             previous_tool = Some(tool.call_id.clone());
             // Commands live in the call heading; do not print them a second time.
-            if block.kind == BlockKind::ToolCall || block.text == "実行結果 | 詳細" {
+            if block.kind == BlockKind::ToolCall
+                || matches!(block.text.as_str(), "実行結果 | 詳細" | "実行結果 · 詳細")
+            {
                 continue;
             }
         } else {
@@ -454,7 +463,7 @@ fn node_lines_inner(
                     line.spans.insert(
                         0,
                         Span::styled(
-                            "  | ",
+                            crate::ui::text_width::glyphs::select("  │ ", "  | "),
                             Style::default().fg(guide_color).underline_color(marker),
                         ),
                     );
@@ -526,7 +535,7 @@ fn omission_notices(language: UiLanguage, node: &UiNode) -> Vec<String> {
     if parts.is_empty() {
         parts
     } else {
-        vec![parts.join(" | ")]
+        vec![parts.join(crate::ui::text_width::glyphs::separator())]
     }
 }
 fn tool_header_lines(
@@ -781,11 +790,12 @@ fn event_group(language: UiLanguage, nodes: &[UiNode]) -> Vec<Line<'static>> {
         }
     }
     vec![Line::from(Span::styled(
-        format!(
+        crate::ui::text_width::glyphs::formatted!(
+            "{} {} · {}",
             "{} {} | {}",
             RowKind::Notice.mark(),
             row_label(RowKind::Notice, language),
-            facts.join(" | ")
+            facts.join(crate::ui::text_width::glyphs::separator())
         ),
         Style::default().fg(theme::MUTED),
     ))]
@@ -1359,7 +1369,7 @@ fn input_metadata(
     }
     (!parts.is_empty()).then(|| {
         Span::styled(
-            parts.join(" | "),
+            parts.join(crate::ui::text_width::glyphs::separator()),
             Style::default()
                 .fg(palette.muted())
                 .underline_color(INPUT_DECORATION_MARKER),
@@ -2379,7 +2389,7 @@ fn quiet_section_tails(
                         "{} {} | {}",
                         RowKind::Notice.mark(),
                         row_label(RowKind::Notice, language),
-                        labels.join(" | ")
+                        labels.join(crate::ui::text_width::glyphs::separator())
                     ),
                     Style::default().fg(view.palette.muted()),
                 ))],

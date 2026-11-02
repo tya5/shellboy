@@ -7,9 +7,11 @@ const MAX_ROWS: usize = 65_536;
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SOURCE_BYTES: usize = 256 * 1024;
 fn limit_notice(language: UiLanguage) -> Line<'static> {
-    Line::from(local!(
+    Line::from(crate::ui::text_width::glyphs::localized!(
         language,
+        "上限: 表示キャッシュ上限 · 原文のコピー・取得元から全文を確認",
         "上限: 表示キャッシュ上限 | 原文のコピー・取得元から全文を確認",
+        "Limit: Copy the original or inspect the source for full text",
         "Limit: Copy the original or inspect the source for full text"
     ))
     .style(Style::default().fg(theme::WARNING))

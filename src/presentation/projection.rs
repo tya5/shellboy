@@ -97,7 +97,10 @@ fn initial(kind: &str, payload: &Value) -> (NodePresentation, BlockKind) {
         p.ui_messages.title = Some(Message::Reclaimed {
             reason: short(reason, 256),
         });
-        p.title = format!("原文回収済み | {reason}");
+        p.title = crate::ui::text_width::glyphs::formatted!(
+            "原文回収済み · {reason}",
+            "原文回収済み | {reason}"
+        );
         p.kind = PresentationKind::Unknown;
     }
     if p.kind == PresentationKind::Unknown && payload.get("tombstone_reason").is_none() {
@@ -215,13 +218,18 @@ fn summary_projection<'a>(
             replaced: decoded_summary.is_some(),
         });
         p.title = if decoded_summary.is_some() {
-            format!(
+            crate::ui::text_width::glyphs::formatted!(
+                "要約 · 置換{}件 · 出典{}件 · F6→O 原文",
                 "要約 | 置換{}件 | 出典{}件 | F6>O 原文",
                 sources.len(),
                 sources.len()
             )
         } else {
-            format!("要約 | 出典{}件 | F6>O 原文", sources.len())
+            crate::ui::text_width::glyphs::formatted!(
+                "要約 · 出典{}件 · F6→O 原文",
+                "要約 | 出典{}件 | F6>O 原文",
+                sources.len()
+            )
         };
     }
     decoded_summary

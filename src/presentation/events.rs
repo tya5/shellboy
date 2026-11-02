@@ -65,12 +65,23 @@ pub(super) fn index_pause_notice(event: &serde_json::Value) -> Option<(String, V
     let reason = after["pause_kind"].as_str().unwrap_or("理由不明");
     let stopped = after["paused_at"].as_str().unwrap_or("時刻不明");
     let mut body = vec![
-        format!("停止記録: {stopped} | 理由: {reason}"),
-        "索引更新の停止記録です。現在の状態確認と再試行: /index > T。会話は続行できます。".into(),
+        crate::ui::text_width::glyphs::formatted!(
+            "停止記録: {stopped} · 理由: {reason}",
+            "停止記録: {stopped} | 理由: {reason}"
+        ),
+        crate::ui::text_width::glyphs::select(
+            "索引更新の停止記録です。現在の状態確認と再試行: /index → T。会話は続行できます。",
+            "索引更新の停止記録です。現在の状態確認と再試行: /index > T。会話は続行できます。",
+        )
+        .into(),
     ];
     body.extend(changes(event));
     Some((
-        format!("/index > T | 索引更新の停止記録 | {}", short(reason, 80)),
+        crate::ui::text_width::glyphs::formatted!(
+            "/index → T · 索引更新の停止記録 · {}",
+            "/index > T | 索引更新の停止記録 | {}",
+            short(reason, 80)
+        ),
         body,
     ))
 }
@@ -91,7 +102,10 @@ impl NoticeText {
             Self::ChildAnswer => "子の回答",
             Self::ChildEnded => "子の作業終了",
             Self::ChildReport => "子の途中報告",
-            Self::Delivered => "モデルに渡した | Enter 参照先",
+            Self::Delivered => crate::ui::text_width::glyphs::select(
+                "モデルに渡した · Enter 参照先",
+                "モデルに渡した | Enter 参照先",
+            ),
             Self::UnknownResult => "結果未記録",
         }
     }
@@ -114,7 +128,11 @@ fn continuation_title(kind: &str, event: &serde_json::Value) -> Option<String> {
         .and_then(serde_json::Value::as_str)
         .map(|id| super::sanitize_plain(&id.chars().take(16).collect::<String>(), 0).0)
         .unwrap_or_else(|| "対象未記録".into());
-    let mut parts = vec![format!("{} | {identity}", key.text())];
+    let mut parts = vec![crate::ui::text_width::glyphs::formatted!(
+        "{} · {identity}",
+        "{} | {identity}",
+        key.text()
+    )];
     if let Some(name) = payload.get("title").and_then(serde_json::Value::as_str) {
         parts.push(
             super::sanitize_plain(&short(name, 80), 0)
@@ -143,7 +161,7 @@ fn continuation_title(kind: &str, event: &serde_json::Value) -> Option<String> {
         parts.push(super::elapsed_text(ms, false));
     }
     parts.push(NoticeText::Delivered.text().into());
-    Some(parts.join(" | "))
+    Some(parts.join(crate::ui::text_width::glyphs::separator()))
 }
 
 pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
@@ -155,7 +173,12 @@ pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
         return event
             .pointer("/payload/consumed_count")
             .and_then(Value::as_u64)
-            .map(|count| format!("Revisit resumed | {count}"))
+            .map(|count| {
+                crate::ui::text_width::glyphs::formatted!(
+                    "Revisit resumed · {count}",
+                    "Revisit resumed | {count}"
+                )
+            })
             .unwrap_or_else(|| "Revisit resumed".into());
     }
     // Canonical Shellboy notification nodes are added when preparing continuation
@@ -170,7 +193,8 @@ pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
         return title;
     }
     if routine_index_ready(event) {
-        return "検索索引 | 利用可能".into();
+        return crate::ui::text_width::glyphs::select("検索索引 · 利用可能", "検索索引 | 利用可能")
+            .into();
     }
     let first = event.pointer("/change/before") == Some(&Value::Null);
     if first
@@ -182,7 +206,8 @@ pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
             .pointer("/change/after/present")
             .and_then(Value::as_bool)
     {
-        return format!(
+        return crate::ui::text_width::glyphs::formatted!(
+            "指示ファイル確認 · {}",
             "指示ファイル確認 | {}",
             if present { "あり" } else { "なし" }
         );
@@ -201,13 +226,22 @@ pub(super) fn title(kind: &str, event: &serde_json::Value) -> String {
             .iter()
             .all(|key| after.get(*key) == Some(&Value::Null))
         {
-            return "索引の状態 | 未設定".into();
+            return crate::ui::text_width::glyphs::select(
+                "索引の状態 · 未設定",
+                "索引の状態 | 未設定",
+            )
+            .into();
         }
     }
     let mut title = event_title(kind).to_owned();
     let changes = changes(event);
     if !changes.is_empty() {
-        title = format!("{} | {}", title, changes.join(" / "));
+        title = crate::ui::text_width::glyphs::formatted!(
+            "{} · {}",
+            "{} | {}",
+            title,
+            changes.join(" / ")
+        );
     }
     title
 }
@@ -359,7 +393,8 @@ pub(super) fn changes(value: &serde_json::Value) -> Vec<String> {
                 (new != Some(&Value::Bool(false)))
                     .then(|| format!("{label}: {}", describe(new.unwrap())))
             } else {
-                Some(format!(
+                Some(crate::ui::text_width::glyphs::formatted!(
+                    "{label}: {} → {}",
                     "{label}: {} > {}",
                     describe(old.unwrap_or(&Value::Null)),
                     describe(new.unwrap_or(&Value::Null))
@@ -380,8 +415,19 @@ pub(super) fn interruption(value: &serde_json::Value, kind: &str) -> (String, Ve
             "前回の待機観測は中断済み".into(),
             vec![
                 count
-                    .map(|n| format!("待機条件{n}件 | 対象の現在状態はF6の参照先で確認"))
-                    .unwrap_or_else(|| "観測の記録を保持 | F6 原文".into()),
+                    .map(|n| {
+                        crate::ui::text_width::glyphs::formatted!(
+                            "待機条件{n}件 · 対象の現在状態はF6の参照先で確認",
+                            "待機条件{n}件 | 対象の現在状態はF6の参照先で確認"
+                        )
+                    })
+                    .unwrap_or_else(|| {
+                        crate::ui::text_width::glyphs::select(
+                            "観測の記録を保持 · F6 原文",
+                            "観測の記録を保持 | F6 原文",
+                        )
+                        .into()
+                    }),
             ],
         );
     }
@@ -389,10 +435,18 @@ pub(super) fn interruption(value: &serde_json::Value, kind: &str) -> (String, Ve
         let name = section_label(section);
         let count = value.get("items").and_then(Value::as_array).map(Vec::len);
         return (
-            format!("前回の保存記録 | {name}"),
+            crate::ui::text_width::glyphs::formatted!(
+                "前回の保存記録 · {name}",
+                "前回の保存記録 | {name}"
+            ),
             vec![
                 count
-                    .map(|n| format!("この原文に{n}件 | 個別の対象はF6 詳細"))
+                    .map(|n| {
+                        crate::ui::text_width::glyphs::formatted!(
+                            "この原文に{n}件 · 個別の対象はF6 詳細",
+                            "この原文に{n}件 | 個別の対象はF6 詳細"
+                        )
+                    })
                     .unwrap_or_else(|| "件数は原文で確認".into()),
             ],
         );
@@ -420,7 +474,13 @@ pub(super) fn interruption(value: &serde_json::Value, kind: &str) -> (String, Ve
             }
         }
         if change.get("result_uncertain") == Some(&Value::Bool(true)) {
-            body.push("外部での実行結果は未確認 | F6で保存済みの対象を確認".into());
+            body.push(
+                crate::ui::text_width::glyphs::select(
+                    "外部での実行結果は未確認 · F6で保存済みの対象を確認",
+                    "外部での実行結果は未確認 | F6で保存済みの対象を確認",
+                )
+                .into(),
+            );
         }
         if change.get("automatic_replay") == Some(&Value::Bool(false)) {
             body.push("自動での再実行はしません".into());

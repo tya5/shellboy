@@ -46,6 +46,9 @@ pub(super) fn prepare(facts: Option<String>) -> Option<String> {
     facts
         .and_then(|body| serde_json::from_str::<[u64; 4]>(&body).ok())
         .map(|[before, after, spilled, omitted]| {
-            format!("自動縮小済み | spill {spilled}組 | 省略 {omitted}件 | {before}>{after} chars")
+            crate::ui::text_width::glyphs::formatted!(
+                "自動縮小済み · spill {spilled}組 · 省略 {omitted}件 · {before}→{after} chars",
+                "自動縮小済み | spill {spilled}組 | 省略 {omitted}件 | {before}>{after} chars"
+            )
         })
 }
