@@ -3011,11 +3011,11 @@ fn wheel_down_at_coalesced_event_tail_stays_at_the_true_end() {
     let mut ui = scroll_fixture(nodes, 0, 3);
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     let before = scroll_cells(&mut ui, &mut terminal);
-    assert!(before.iter().any(|line| line.contains("AGENTS.md none")));
     assert!(
         before
             .iter()
-            .any(|line| line.contains("index not configured"))
+            .any(|line| line.contains("⁂") && line.contains("◌") && line.contains('2')),
+        "the two unknown notifications are represented by one collapsed group: {before:?}"
     );
     for _ in 0..12 {
         assert!(scroll_wheel(&mut ui, false).is_empty());

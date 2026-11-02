@@ -320,9 +320,39 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
                 })
                 .await
                 .unwrap();
-                let history = screen(&mut ui);
-                assert!(history.contains(failure_note));
-                assert!(history.contains(last_reason));
+                let mut history = screen(&mut ui);
+                if !history.contains(failure_note) || !history.contains(last_reason) {
+                    deliver(
+                        &sender,
+                        ui.event(Event::Key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))),
+                    );
+                    for _ in 0..64 {
+                        // Space opens groups without following any source references.
+                        deliver(
+                            &sender,
+                            ui.event(Event::Key(KeyEvent::new(
+                                KeyCode::Char(' '),
+                                KeyModifiers::NONE,
+                            ))),
+                        );
+                        history = screen(&mut ui);
+                        if history.contains(failure_note) && history.contains(last_reason) {
+                            break;
+                        }
+                        deliver(
+                            &sender,
+                            ui.event(Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))),
+                        );
+                    }
+                }
+                assert!(
+                    history.contains(failure_note),
+                    "saved failure count missing: {history}"
+                );
+                assert!(
+                    history.contains(last_reason),
+                    "saved failure reason missing: {history}"
+                );
             }
         }
         deliver(&sender, vec![UiAction::Quit]);
