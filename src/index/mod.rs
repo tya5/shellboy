@@ -217,9 +217,9 @@ fn read_display_pause_tx(
     profile: Option<&str>,
     family: Option<&str>,
 ) -> Result<Option<PauseReason>, StorageError> {
-    let Some(key) = profile.or(family) else {
+    if profile.is_none() && family.is_none() {
         return Ok(None);
-    };
+    }
     for scope in family.into_iter().chain(profile) {
         let pause_key = IndexKeys::new(scope).pause();
         let size: Option<i64> = db
@@ -234,8 +234,10 @@ fn read_display_pause_tx(
         if size > MAX_DISPLAY_PAUSE_BYTES as i64 {
             return Ok(Some(PauseReason::Other));
         }
-        if pause_cleanup::pause_id(db, key, family)?.is_some() {
-            return Ok(meta(db, &pause_key)?.map(|value| pause_reason(&value)));
+        if let Some(value) = meta(db, &pause_key)? {
+            // Interpret the same saved fact without exposing its contents in the UI.
+            let _facts = pause::facts(&pause_key, &value);
+            return Ok(Some(pause_reason(&value)));
         }
         return Ok(None);
     }
@@ -243,7 +245,7 @@ fn read_display_pause_tx(
 }
 
 impl IndexService {
-    /// Read the same saved pause selected by cleanup in the caller's snapshot.
+    /// Read the saved pause fact in the caller's snapshot.
     pub(crate) fn read_display_pause(
         &self,
         db: &Connection,

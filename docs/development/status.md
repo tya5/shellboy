@@ -4009,7 +4009,8 @@ uses fixed bilingual classifications rather than provider prose. Pause-change
 notifications request a fresh snapshot without reading the database on render.
 `auto_history=false` alone does not create a badge; the current interpretation
 still shows a real persisted pause if one exists, pending reviewer confirmation.
-Focused macOS checks, including an isolated synthetic PTY, have passed on main
-99d10a78. Task CI and handoff remain pending; no post-integration behavior is
-claimed. The planned #173 removal of `pause_cleanup::pause_id` needs author
-rebase coordination.
+Focused macOS checks, including an isolated synthetic PTY, passed on main
+99d10a78 after the direct-fact-read change. Task CI and handoff remain pending;
+no post-integration behavior is claimed. Display reads `pause::facts` directly
+rather than depending on the #173-removed drain helper; author rebase and fresh
+verification remain required when main advances.

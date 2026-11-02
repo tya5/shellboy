@@ -8577,5 +8577,9 @@ and two-column ambiguous-width policies. A synthetic-schema SQLite 3.51.1
 EXPLAIN used the app_meta primary-key index for the bounded point read. The
 failed and interrupted attempts above were not counted as validation.
 
-Fresh exact-tip task CI is required. No physical terminal, live-provider,
-Windows-local, or post-integration behavior has been verified.
+After switching to direct `pause::facts` reads, a second fresh build on the same
+base passed `cargo check --tests`, all eight focused library tests, and the
+isolated CLI integration PTY test (1). The runner checked nonzero test counts.
+Exact-tip task CI and the requested 3 OS integration CI remain required. No
+physical terminal, live-provider, Windows-local, or post-integration behavior
+has been verified.
