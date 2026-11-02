@@ -1318,5 +1318,40 @@
     "category": "a",
     "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
     "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/projection.rs:32b419e292fc8db5:1": {
+    "category": "a",
+    "reason": "Japanese generated title retained in canonical projection; typed ui_messages.title selects the corresponding English message. Source kind/reason is preserved; covered by language_audit_tests.",
+    "source_tokens_sha256": "85e17634fbf7f99647a027f6d0e854d4926163c6523bd82ada320ad2cef0d62b"
+  },
+  "src/presentation/projection.rs:df0ef4ce4c344ba9:1": {
+    "category": "a",
+    "reason": "Japanese generated title retained in canonical projection; typed ui_messages.title selects the corresponding English message. Source kind/reason is preserved; covered by language_audit_tests.",
+    "source_tokens_sha256": "85e17634fbf7f99647a027f6d0e854d4926163c6523bd82ada320ad2cef0d62b"
+  },
+  "src/presentation/projection.rs:d668d550336840ac:1": {
+    "category": "a",
+    "reason": "Japanese generated title retained in canonical projection; typed ui_messages.title selects the corresponding English message. Source kind/reason is preserved; covered by language_audit_tests.",
+    "source_tokens_sha256": "85e17634fbf7f99647a027f6d0e854d4926163c6523bd82ada320ad2cef0d62b"
+  },
+  "src/presentation/projection.rs:814ad96fd3c6766f:1": {
+    "category": "a",
+    "reason": "Japanese generated title retained in canonical projection; typed ui_messages.title selects the corresponding English message. Source kind/reason is preserved; covered by language_audit_tests.",
+    "source_tokens_sha256": "85e17634fbf7f99647a027f6d0e854d4926163c6523bd82ada320ad2cef0d62b"
+  },
+  "src/presentation/projection.rs:d52f11044f4b193b:1": {
+    "category": "a",
+    "reason": "Japanese generated title retained in canonical projection; typed ui_messages.title selects the corresponding English message. Source kind/reason is preserved; covered by language_audit_tests.",
+    "source_tokens_sha256": "85e17634fbf7f99647a027f6d0e854d4926163c6523bd82ada320ad2cef0d62b"
+  },
+  "src/presentation/projection.rs:d1df57e28c5bfa57:1": {
+    "category": "a",
+    "reason": "Japanese generated title retained in canonical projection; typed ui_messages.title selects the corresponding English message. Source kind/reason is preserved; covered by language_audit_tests.",
+    "source_tokens_sha256": "85e17634fbf7f99647a027f6d0e854d4926163c6523bd82ada320ad2cef0d62b"
+  },
+  "src/presentation/projection.rs:58ada476462ef849:1": {
+    "category": "a",
+    "reason": "Japanese generated title retained in canonical projection; typed ui_messages.title selects the corresponding English message. Source kind/reason is preserved; covered by language_audit_tests.",
+    "source_tokens_sha256": "85e17634fbf7f99647a027f6d0e854d4926163c6523bd82ada320ad2cef0d62b"
   }
 }
