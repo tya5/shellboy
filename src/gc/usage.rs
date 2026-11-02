@@ -21,13 +21,15 @@ impl Logical {
     }
 }
 
+#[cfg(test)]
 fn sum(db: &Connection, sql: &str) -> Result<u64> {
     db.query_row(sql, [], |row| row.get::<_, i64>(0))
         .map(|value| value as u64)
         .map_err(sql_error)
 }
-// All payload measurements use narrow derived indexes. The explicit index
-// selection prevents a planner choice from reintroducing body-table scans.
+// Test oracle only: the O(rows) indexed sums that the schema21 counters
+// replace (#171). Runtime reads the trigger-maintained counters.
+#[cfg(test)]
 const HISTORY_QUERIES: [&str; 10] = [
     "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM node INDEXED BY gc_bytes_node",
     "SELECT COALESCE(SUM(octet_length(payload_json)),0) FROM output_item INDEXED BY gc_bytes_output_item",
@@ -40,33 +42,65 @@ const HISTORY_QUERIES: [&str; 10] = [
     "SELECT COALESCE(SUM(octet_length(arguments_json)),0) FROM tool_call INDEXED BY gc_bytes_tool_call",
     "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_history WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",
 ];
+#[cfg(test)]
 const RAW_QUERY: &str =
     "SELECT COALESCE(SUM(length(bytes)),0) FROM output_chunk INDEXED BY gc_bytes_output_chunk";
+#[cfg(test)]
 const MANAGED_QUERY: &str = "SELECT COALESCE(SUM(raw_size),0) FROM managed_file INDEXED BY gc_bytes_managed_file WHERE state<>'deleted'";
+#[cfg(test)]
 const INDEX_META_QUERY: &str = "SELECT COALESCE(SUM(octet_length(value)),0) FROM app_meta INDEXED BY gc_bytes_app_meta_index WHERE key LIKE 'index.%'";
-const VECTOR_QUERY: &str = "SELECT COALESCE(SUM(s.dimension*4),0) FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id";
 
+/// O(1): exact byte counters maintained by schema21 triggers in the same
+/// transaction as every counted write (storage design #171).
 pub(super) fn logical_usage(db: &Connection) -> Result<Logical> {
-    let history = HISTORY_QUERIES.iter().try_fold(0u64, |total, query| {
-        sum(db, query).map(|bytes| total.saturating_add(bytes))
-    })?;
-    let raw = sum(db, RAW_QUERY)?;
-    let managed = sum(db, MANAGED_QUERY)?;
-    let index = sum(db, VECTOR_QUERY)?.saturating_add(sum(db, INDEX_META_QUERY)?);
+    let mut counters = db
+        .prepare_cached("SELECT category,logical_bytes FROM quota_counter WHERE category IN ('logical.history','logical.raw','logical.managed','logical.index')")
+        .map_err(sql_error)?;
+    let mut logical = Logical::default();
+    let rows = counters
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(sql_error)?;
+    let mut seen = 0;
+    for row in rows {
+        let (category, bytes) = row.map_err(sql_error)?;
+        let bytes = u64::try_from(bytes).unwrap_or(0);
+        seen += 1;
+        match category.as_str() {
+            "logical.history" => logical.history = bytes,
+            "logical.raw" => logical.raw = bytes,
+            "logical.managed" => logical.managed = bytes,
+            _ => logical.index = bytes,
+        }
+    }
+    if seen != 4 {
+        return Err(ApiError::new(
+            ErrorCode::SaveFailed,
+            "Logical usage counters are missing; the schema21 migration did not complete",
+        ));
+    }
     let free: u64 = db
         .query_row("PRAGMA freelist_count", [], |row| row.get::<_, i64>(0))
         .map_err(sql_error)? as u64;
     let page: u64 = db
         .query_row("PRAGMA page_size", [], |row| row.get::<_, i64>(0))
         .map_err(sql_error)? as u64;
-    Ok(Logical {
-        history,
-        raw,
-        index,
-        managed,
-        reusable: free.saturating_mul(page),
-    })
+    logical.reusable = free.saturating_mul(page);
+    Ok(logical)
 }
+
+/// The raw output total alone, for capacity-driven raw retention.
+pub(super) fn raw_total(db: &Connection) -> Result<u64> {
+    db.query_row(
+        "SELECT logical_bytes FROM quota_counter WHERE category='logical.raw'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .map(|bytes| u64::try_from(bytes).unwrap_or(0))
+    .map_err(sql_error)
+}
+
 pub(super) fn physical_usage(directory: &Path) -> Result<(u64, u64, u64, u64, Option<u64>)> {
     fn size(path: &Path) -> Result<u64> {
         match std::fs::symlink_metadata(path) {
