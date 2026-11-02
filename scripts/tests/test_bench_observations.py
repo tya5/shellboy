@@ -74,7 +74,8 @@ class StorageTests(unittest.TestCase):
             (root / 'link').symlink_to('/a/long/external/path')
             result = storage([root, root / 'nested'])
             self.assertEqual(result['files'], 2)
-            self.assertEqual(result['bytes'], 4 + len('/a/long/external/path'))
+            # Symlink lstat size is platform-specific (Windows may report 0).
+            self.assertEqual(result['bytes'], 4 + (root / 'link').lstat().st_size)
 
     def test_missing_root_is_error_not_zero(self):
         with tempfile.TemporaryDirectory() as tmp:
