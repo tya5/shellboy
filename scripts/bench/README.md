@@ -293,8 +293,8 @@ process churn failures and sampling intervals are recorded, and unavailable
 values are not converted to zero. Previously published after-round samples
 remain after-round snapshots, not these observed maxima.
 
-For Shellboy, `baseline_one_tui` adds one ready PTY TUI to the existing owner
-and N threads before the exchange. Its two separate process-tree samples are
-sequential, not atomic; it is not an in-flight measurement. The ordinary
-in-flight result remains owner-only without that TUI. Repetitions use the same
-fake-model workload, with no real provider or token usage claims.
+For Shellboy, `baseline_one_tui` is a separate fresh PTY case in which the TUI
+itself hosts the owner and N threads. A second owner cannot attach to `serve`.
+It is not an in-flight measurement; the ordinary in-flight result remains a
+separate owner-only case without a TUI. Repetitions use the same fake-model
+workload, with no real provider or token usage claims.
