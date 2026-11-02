@@ -3757,4 +3757,4 @@ Two additional confirmed untranslated production strings are the temporary IPC
 namespace failure message/hint in `src/ipc/server/endpoint/namespace.rs`. This
 independent batch changes only their language and adds a pure preservation test.
 The six copy-worker literals are in a separate batch. No B5/B6/W8 source is
-changed. This batch is excluded from0.6.0; CI evidence is reported separately.
+changed. This batch is excluded from 0.6.0; CI evidence is reported separately.

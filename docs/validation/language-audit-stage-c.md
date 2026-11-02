@@ -208,7 +208,7 @@ full Stage C CI result is claimed by the inventory commit.
 ## Product Copy Review, Batch 2 (Next Release Only)
 
 Confirmed production literals, excluding tests/fixtures and intentional Japanese
-resources. Batch 1 is a separate copy-worker branch; neither batch is for0.6.0.
+resources. Batch 1 is a separate copy-worker branch; neither batch is for 0.6.0.
 B-5/#149 and B-6/#150 owner files remain deferred until they land.
 
 | Production Source | Confirmed Untranslated Literals | Disposition |

@@ -230,12 +230,18 @@ mod tests {
         let error = runtime_error(reason);
         assert_eq!(error.code, crate::protocol::ErrorCode::IoFailed);
         assert_eq!(error.message, "Cannot create the temporary IPC directory");
-        assert_eq!(error.hint.as_deref(), Some(
-            "Check free space and write permissions in the OS temporary directory, then restart Shellboy"
-        ));
-        assert_eq!(error.details, Some(serde_json::json!({
-            "component": "local_ipc", "reason": reason
-        })));
+        assert_eq!(
+            error.hint.as_deref(),
+            Some(
+                "Check free space and write permissions in the OS temporary directory, then restart Shellboy"
+            )
+        );
+        assert_eq!(
+            error.details,
+            Some(serde_json::json!({
+                "component": "local_ipc", "reason": reason
+            }))
+        );
     }
     #[cfg(target_os = "linux")]
     #[test]

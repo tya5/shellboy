@@ -8134,4 +8134,4 @@ no filesystem or OS clipboard operations. Namespace selection, ownership, path
 bounds and lease logic are untouched; the existing namespace tests remain the
 platform-specific guard checks. Local macOS and branch Linux/macOS CI results
 are reported separately; no Windows-local or physical-terminal claim is made.
-This product batch is not part of0.6.0.
+This product batch is not part of 0.6.0.
