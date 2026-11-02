@@ -244,6 +244,21 @@ Clippy. Final exact-source standard/native3OS CI remains pending. No real
 provider/user data is used, and no full local standard suite is claimed.
 
 
+## #172: asynchronous receipt pressure (in progress)
+
+The user rejected temporary `storage_limit` on a partial cleanup. Admission now
+waits outside the writer for bounded background receipt windows and retries
+after each; only an exhausted pass that still lacks capacity returns the
+existing error. Concurrent writes restart an exhausted pass. The existing
+accepting UI status is retained. On macOS against the pre-landing #171 branch,
+`cargo check --tests`, 10 receipt unit tests (one ignored), eight waiting and
+fingerprint tests, five run-action tests, six AGENTS/reference tests, one
+accepting-footer test, 170 Python tests, test layout, formatting and five
+focused integration tests passed, as did two draft and first-send tests and one
+attachment-plan test. The exact usage sum and elapsed time remain unbounded.
+Rebased onto #171 landing `c090fa799`; the activity migration is 23. Combined
+post-rebase validation, write-step remeasurement and three-OS CI are pending.
+
 ## v0.5.0 release preparation
 
 Preparation is rebased without conflicts onto main `a3e00bed` with #101, #117,

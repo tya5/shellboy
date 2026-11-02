@@ -1,5 +1,23 @@
 # Validation record
 
+## Asynchronous receipt pressure (#172, in progress)
+
+The previous temporary-refusal implementation was rejected in review. Its
+partial-cleanup tests and foreground progress-hook measurements do not validate
+this revision. On macOS against the pre-landing #171 branch, `cargo check
+--tests` and formatting passed through `rust-slot`; receipt unit tests passed
+10 (one ignored), waiting and fingerprint-cache tests passed 8, run-action
+tests passed 5, AGENTS/reference tests passed 6, and the existing accepting
+footer test passed 1. These cover waiting outside the writer, later-window
+admission, stable-pass refusal, validation-byte continuation, concurrent updates,
+requester fairness and canonical fingerprint reuse. Five focused capacity,
+replay and stop integration tests passed, as did two first-send/draft tests and
+one attachment-plan test. The Python suite passed 170 and the corrected
+test-layout/watchdog check passed. The activity branch is now rebased onto #171
+landing `c090fa799` with migration 23; combined validation and three-OS CI are
+pending. SQLite JSON work, exact usage accounting and elapsed time
+have no wall-clock bound. No user database was opened for synthetic preparation.
+
 ## DB writer occupancy (#171, 2026-11-03)
 
 macOS (development Mac), rust-slot, debug builds, temporary databases only; the

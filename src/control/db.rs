@@ -134,6 +134,7 @@ pub struct Store {
     background: Arc<tokio::sync::Mutex<crate::storage::BackgroundRequester>>,
 }
 
+#[derive(Clone)]
 struct AgentsPlan {
     command: Command,
     source: Option<(String, i64)>,
@@ -192,12 +193,15 @@ impl Store {
     /// at which a seen terminal result becomes collectable by age: the
     /// requester waits for it instead of repeating on a timer.
     pub async fn collect_receipts(&self) -> Result<ReceiptPass> {
-        let mut requester = self.background.lock().await;
         let mut pass = ReceiptPass::default();
         let mut after = 0;
         loop {
             let instance = self.instance_id.clone();
-            let window = requester
+            // Waiting admissions can interleave between maintenance windows.
+            let window = self
+                .background
+                .lock()
+                .await
                 .unit(super::receipt::COLLECT_WINDOW, move |db, window| {
                     let tx = db.transaction()?;
                     let result =
@@ -225,6 +229,111 @@ impl Store {
                 None => return Ok(pass),
             }
             tokio::task::yield_now().await;
+        }
+    }
+
+    async fn receipt_attempt<T, F>(&self, kind: Option<execute_kind::Kind>, attempt: F) -> Result<(Result<T>, bool, u64)>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection, &mut bool) -> std::result::Result<Result<T>, StorageError> + Send + 'static,
+    {
+        let job = move |db: &mut Connection| {
+            let mut pressure = false;
+            let result = attempt(db, &mut pressure)?;
+            Ok((result, pressure, db.total_changes()))
+        };
+        match kind {
+            Some(kind) => execute_kind::call(&self.database, kind, job).await,
+            None => self.database.call(job).await,
+        }.map_err(storage_error)
+    }
+
+    /// Retry admission outside the writer between bounded background windows.
+    /// Concurrent writes invalidate an exhausted scan, so refusal is based on
+    /// a complete pass with no intervening changes outside our own windows.
+    async fn receipt_job<T, F>(&self, kind: Option<execute_kind::Kind>, operation: F) -> Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection, &mut bool) -> std::result::Result<Result<T>, StorageError>
+            + Clone
+            + Send
+            + 'static,
+    {
+        let mut after = Some(0i64);
+        // All writes share this connection; total_changes also counts triggers
+        // and conservatively detects changes even if their transaction rolls back.
+        let mut observed = None;
+        let mut dirty = false;
+        loop {
+            let attempt = operation.clone();
+            let (result, pressure, changes) = self.receipt_attempt(kind, attempt).await?;
+            if !pressure {
+                return result;
+            }
+            if observed.is_some_and(|previous| previous != changes) {
+                dirty = true;
+            }
+            if after.is_none() {
+                if !dirty {
+                    return result;
+                }
+                after = Some(0);
+                dirty = false;
+            }
+            observed = Some(changes);
+            loop {
+                let mut requester = self.background.lock().await;
+                let current = self
+                    .database
+                    .call(|db| Ok(db.total_changes()))
+                    .await
+                    .map_err(storage_error)?;
+                if observed.is_some_and(|previous| previous != current) {
+                    // Another unit may have freed enough room while this
+                    // requester waited for the background lane.
+                    dirty = true;
+                    let attempt = operation.clone();
+                    let (result, pressure, changes) = self.receipt_attempt(kind, attempt).await?;
+                    if !pressure {
+                        return result;
+                    }
+                    observed = Some(changes);
+                }
+                let instance = self.instance_id.clone();
+                let cursor = after.expect("unfinished pass");
+                let unit = requester
+                    .unit(super::receipt::COLLECT_WINDOW, move |db, window| {
+                        let before = db.total_changes();
+                        let result = {
+                            let tx = db.transaction()?;
+                            match super::receipt::collect_window(
+                                &tx, &instance, true, cursor, window,
+                            ) {
+                                Ok(window) => {
+                                    tx.commit()?;
+                                    Ok(window)
+                                }
+                                Err(error) => Err(error),
+                            }
+                        };
+                        Ok(result.map(|window| (window, before, db.total_changes())))
+                    })
+                    .await
+                    .map_err(storage_error)?;
+                drop(requester);
+                match unit {
+                    crate::storage::Background::Done(window) => {
+                        let (window, before, after_changes) = window?;
+                        if observed.is_some_and(|previous| previous != before) {
+                            dirty = true;
+                        }
+                        observed = Some(after_changes);
+                        after = window.next;
+                        break;
+                    }
+                    crate::storage::Background::Deferred => tokio::task::yield_now().await,
+                }
+            }
         }
     }
 
@@ -343,11 +452,13 @@ impl Store {
             })
             .await?;
         }
-        let plan = self.prepare_agents(&request, &caller).await?;
+        let plan = Arc::new(self.prepare_agents(&request, &caller).await?);
+        let request = Arc::new(request);
+        let fingerprint = Arc::new(std::sync::OnceLock::new());
         let mut store = self.clone();
         store.usage_context = crate::usage_totals::read_context();
         let kind = execute_kind::Kind::of(&request.command);
-        execute_kind::call(&self.database, kind, move |connection| {
+        self.receipt_job(Some(kind), move |connection, pressure| {
             if !request.command.requires_receipt() {
                 // Use the canonical query projections without reserving,
                 // replaying, or collecting immutable mutation receipts.
@@ -362,10 +473,16 @@ impl Store {
                 tx.commit()?;
                 return Ok(result);
             }
-            Ok(store.execute_transaction(connection, &request, caller.as_ref(), plan.as_ref()))
+            Ok(store.execute_transaction(
+                connection,
+                &request,
+                caller.as_ref(),
+                plan.as_ref().as_ref(),
+                &fingerprint,
+                pressure,
+            ))
         })
         .await
-        .map_err(storage_error)?
     }
 
     pub async fn execute_with_plan(
@@ -375,19 +492,22 @@ impl Store {
         plan: crate::attachments::AddPlan,
     ) -> Result<MutationResult> {
         request.validate()?;
+        let request = Arc::new(request);
+        let plan = Arc::new(plan);
+        let fingerprint = Arc::new(std::sync::OnceLock::new());
         let store = self.clone();
-        self.database
-            .call(move |db| {
-                let fingerprint = hash(
-                    serde_json::to_vec(&json!({"command":request.command,"caller":caller}))
-                        .unwrap(),
-                );
+        self.receipt_job(None, move |db, pressure| {
+                let fingerprint = match request_fingerprint(&fingerprint, &request, caller.as_ref()) {
+                    Ok(fingerprint) => fingerprint,
+                    Err(error) => return Ok(Err(error)),
+                };
                 Ok(store.transact(
                     db,
                     &request.operation_id,
-                    &fingerprint,
+                    fingerprint,
                     caller.as_ref(),
                     Admission::Normal,
+                    pressure,
                     |tx, now| {
                         let target_id = target(
                             match &request.command {
@@ -431,7 +551,6 @@ impl Store {
                 ))
             })
             .await
-            .map_err(storage_error)?
     }
 
     /// Draft text and its references are accepted in the same transaction.
@@ -541,91 +660,95 @@ impl Store {
             .request_fingerprint
             .clone()
             .unwrap_or_else(|| hash(serde_json::to_vec(&intent).unwrap()));
+        drop(intent);
         let store = self.clone();
-        self.database
-            .call(move |db| {
-                Ok(store.transact(
-                    db,
-                    &operation_id,
-                    &fingerprint,
-                    None,
-                    Admission::Normal,
-                    |tx, now| {
-                        let target = if let Some(thread) = thread_id {
-                            thread
-                        } else {
-                            store.create_thread(tx, &args, now)?
-                        };
-                        let revision: i64 =
-                            history::selection_revision(tx, &target, history::ThreadScope::Any)
-                                .map_err(sql_error)?;
-                        if options
-                            .expected_selection_revision
-                            .is_some_and(|value| value != revision)
-                        {
-                            return Err(error(
-                                ErrorCode::InvalidState,
-                                "Draft attachment selection changed; retry from the retained draft",
-                            ));
-                        }
-                        let result = store.send_content(
+        let args = Arc::new(args);
+        let options = Arc::new(options);
+        let content = Arc::new(content);
+        let files = Arc::new(files);
+        self.receipt_job(None, move |db, pressure| {
+            Ok(store.transact(
+                db,
+                &operation_id,
+                &fingerprint,
+                None,
+                Admission::Normal,
+                pressure,
+                |tx, now| {
+                    let target = if let Some(thread) = thread_id {
+                        thread
+                    } else {
+                        store.create_thread(tx, &args, now)?
+                    };
+                    let revision: i64 =
+                        history::selection_revision(tx, &target, history::ThreadScope::Any)
+                            .map_err(sql_error)?;
+                    if options
+                        .expected_selection_revision
+                        .is_some_and(|value| value != revision)
+                    {
+                        return Err(error(
+                            ErrorCode::InvalidState,
+                            "Draft attachment selection changed; retry from the retained draft",
+                        ));
+                    }
+                    let result = store.send_content(
+                        tx,
+                        &MessageSendArgs {
+                            sender_label: None,
+                            thread_id: Some(target),
+                            text: content.text.clone(),
+                            now: options.now,
+                        },
+                        None,
+                        &operation_id,
+                        now,
+                        SendContent {
+                            elements: content.new_source_elements(files.len())?,
+                            sender: MessageSender::recorded(None, None, true),
+                        },
+                    )?;
+                    let node = result
+                        .result
+                        .get("message_id")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            error(ErrorCode::InvalidState, "Accepted draft has no source node")
+                        })?;
+                    // The caller's pre-send CAS was checked above. Recovery
+                    // may legitimately adopt older input in this same tx;
+                    // registration must use the resulting local revision.
+                    let registration_revision = history::selection_revision(
+                        tx,
+                        result.result["thread_id"].as_str().unwrap(),
+                        history::ThreadScope::Live,
+                    )
+                    .map_err(sql_error)?;
+                    crate::attachments::add_tx(
+                        tx,
+                        &crate::attachments::AddPlan {
+                            thread_id: result.result["thread_id"].as_str().unwrap().into(),
+                            selection_revision: registration_revision,
+                            files: files.as_ref().clone(),
+                        },
+                        Some(node),
+                    )?;
+                    if let Some(submission) = &options.submission {
+                        super::pending_messages::submit_draft_tx(
                             tx,
-                            &MessageSendArgs {
-                                sender_label: None,
-                                thread_id: Some(target),
-                                text: content.text.clone(),
-                                now: options.now,
-                            },
-                            None,
                             &operation_id,
+                            submission,
+                            &result.result,
                             now,
-                            SendContent {
-                                elements: content.new_source_elements(files.len())?,
-                                sender: MessageSender::recorded(None, None, true),
-                            },
-                        )?;
-                        let node = result
-                            .result
-                            .get("message_id")
-                            .and_then(Value::as_str)
-                            .ok_or_else(|| {
-                                error(ErrorCode::InvalidState, "Accepted draft has no source node")
-                            })?;
-                        // The caller's pre-send CAS was checked above. Recovery
-                        // may legitimately adopt older input in this same tx;
-                        // registration must use the resulting local revision.
-                        let registration_revision = history::selection_revision(
-                            tx,
-                            result.result["thread_id"].as_str().unwrap(),
-                            history::ThreadScope::Live,
+                            &store.config,
                         )
-                        .map_err(sql_error)?;
-                        crate::attachments::add_tx(
-                            tx,
-                            &crate::attachments::AddPlan {
-                                thread_id: result.result["thread_id"].as_str().unwrap().into(),
-                                selection_revision: registration_revision,
-                                files,
-                            },
-                            Some(node),
-                        )?;
-                        if let Some(submission) = &options.submission {
-                            super::pending_messages::submit_draft_tx(
-                                tx,
-                                &operation_id,
-                                submission,
-                                &result.result,
-                                now,
-                                &store.config,
-                            )
-                            .map_err(storage_error)?;
-                        }
-                        Ok(result)
-                    },
-                ))
-            })
-            .await
-            .map_err(storage_error)?
+                        .map_err(storage_error)?;
+                    }
+                    Ok(result)
+                },
+            ))
+        })
+        .await
     }
 
     /// Read a committed receipt before mutable filesystem/target preflight.
@@ -691,7 +814,7 @@ impl Store {
         admission: Admission,
     ) -> Result<RuntimeReservation> {
         let instance_id = self.instance_id.clone();
-        self.database.call(move|db| {
+        self.receipt_job(None, move|db,pressure| {
             let tx=db.transaction()?;
             let saved:Option<(String,Option<String>)>=tx.query_row("SELECT request_hash,result_ref_json FROM operation_receipt WHERE operation_id=?1",[&operation_id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
             if let Some((previous,body))=saved {
@@ -711,12 +834,12 @@ impl Store {
             if !valid {return Ok(Err(error(ErrorCode::OperationExpired,"unknown operation from an earlier instance cannot execute")));}
             if let Some(error)=preflight {return Ok(Err(error));}
             if let Err(error)=super::receipt::reserve(&tx,&instance_id,&operation_id,&serde_json::to_string(&caller.as_ref().map(|origin|origin.identity())).unwrap(),&fingerprint,&chrono::Utc::now().to_rfc3339(),admission) {
-                if error.code==ErrorCode::StorageLimit {tx.commit()?;}
+                if error.code==ErrorCode::StorageLimit {tx.commit()?; *pressure=true;}
                 return Ok(Err(error));
             }
             tx.commit()?;
             Ok(Ok(RuntimeReservation::New))
-        }).await.map_err(storage_error)?
+        }).await
     }
 
     pub async fn finalize_runtime(
@@ -904,17 +1027,17 @@ impl Store {
         request: &Request,
         caller: Option<&Origin>,
         plan: Option<&AgentsPlan>,
+        fingerprint: &std::sync::OnceLock<Result<String>>,
+        pressure: &mut bool,
     ) -> Result<MutationResult> {
-        let fingerprint = hash(
-            serde_json::to_vec(&json!({"command":request.command,"caller":caller}))
-                .map_err(|_| error(ErrorCode::InvalidArgument, "invalid request encoding"))?,
-        );
+        let fingerprint = request_fingerprint(fingerprint, request, caller)?;
         self.transact(
             connection,
             &request.operation_id,
-            &fingerprint,
+            fingerprint,
             caller,
             Admission::for_command(&request.command),
+            pressure,
             |tx, now| {
                 if let Some(plan) = plan {
                     if let Some((thread, expected)) = &plan.source {
@@ -950,37 +1073,38 @@ impl Store {
             .map_err(|_| error(ErrorCode::InvalidArgument, "invalid first-send encoding"))?,
         );
         let store = self.clone();
-        self.database
-            .call(move |connection| {
-                Ok(store.transact(
-                    connection,
-                    &operation_id,
-                    &fingerprint,
-                    None,
-                    Admission::Normal,
-                    |tx, now| {
-                        let thread_id = store.create_thread(tx, &args, now)?;
-                        store.send_content(
-                            tx,
-                            &MessageSendArgs {
-                                sender_label: None,
-                                thread_id: Some(thread_id),
-                                text: text.clone(),
-                                now: false,
-                            },
-                            None,
-                            &operation_id,
-                            now,
-                            SendContent {
-                                elements: vec![json!({"type":"input_text","text":text})],
-                                sender: MessageSender::recorded(None, None, true),
-                            },
-                        )
-                    },
-                ))
-            })
-            .await
-            .map_err(storage_error)?
+        let args = Arc::new(args);
+        let text = Arc::new(text);
+        self.receipt_job(None, move |connection, pressure| {
+            Ok(store.transact(
+                connection,
+                &operation_id,
+                &fingerprint,
+                None,
+                Admission::Normal,
+                pressure,
+                |tx, now| {
+                    let thread_id = store.create_thread(tx, &args, now)?;
+                    store.send_content(
+                        tx,
+                        &MessageSendArgs {
+                            sender_label: None,
+                            thread_id: Some(thread_id),
+                            text: text.as_ref().clone(),
+                            now: false,
+                        },
+                        None,
+                        &operation_id,
+                        now,
+                        SendContent {
+                            elements: vec![json!({"type":"input_text","text":text.as_str()})],
+                            sender: MessageSender::recorded(None, None, true),
+                        },
+                    )
+                },
+            ))
+        })
+        .await
     }
 
     fn transact(
@@ -990,6 +1114,7 @@ impl Store {
         fingerprint: &str,
         caller: Option<&Origin>,
         admission: Admission,
+        pressure: &mut bool,
         operation: impl FnOnce(&Transaction<'_>, &str) -> Result<MutationResult>,
     ) -> Result<MutationResult> {
         let tx = connection.transaction().map_err(sql_error)?;
@@ -1020,6 +1145,7 @@ impl Store {
         ) {
             if error.code == ErrorCode::StorageLimit {
                 tx.commit().map_err(sql_error)?;
+                *pressure = true;
             }
             return Err(error);
         }
@@ -2513,6 +2639,22 @@ pub(crate) fn operation_details(
     Ok(value)
 }
 
+fn request_fingerprint<'a>(
+    cached: &'a std::sync::OnceLock<Result<String>>,
+    request: &Request,
+    caller: Option<&Origin>,
+) -> Result<&'a str> {
+    cached
+        .get_or_init(|| {
+            serde_json::to_vec(&json!({"command":request.command,"caller":caller}))
+                .map(hash)
+                .map_err(|_| error(ErrorCode::InvalidArgument, "invalid request encoding"))
+        })
+        .as_ref()
+        .map(String::as_str)
+        .map_err(Clone::clone)
+}
+
 fn saved_operation(
     db: &Connection,
     operation_id: &str,
@@ -2709,6 +2851,432 @@ mod activity_list_tests {
                 .filter(|t| t.thread_id.starts_with("bulk-"))
                 .all(|t| t.activity == ActivityPhase::Idle)
         );
+    }
+}
+
+#[cfg(test)]
+mod receipt_wait_tests {
+    use super::*;
+    use crate::control::receipt::MAX_OUTCOME_BYTES;
+
+    async fn fixture() -> (tempfile::TempDir, DbWorker, Store) {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open(root.path().join("receipt.db"))
+            .await
+            .unwrap();
+        let config = Config::parse("default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+        let store = Store::new(
+            db.clone(),
+            Arc::new(config),
+            root.path().into(),
+            "current".into(),
+        );
+        (root, db, store)
+    }
+
+    async fn seed_pending(db: &DbWorker, old_rows: u32, last_reserved: u64) {
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            for i in 0..old_rows {
+                tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES(?1,'old','null','hash','pending','2000-01-01',0)", [format!("old:pending:{i}")])?;
+            }
+            for i in 0..30 {
+                tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES(?1,'current','null','hash','pending','2000-01-01',?2)", params![format!("current:pending:{i}"), MAX_OUTCOME_BYTES as i64])?;
+            }
+            tx.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes) VALUES('current:last','current','null','hash','pending','2000-01-01',?1)", [last_reserved as i64])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+    }
+
+    #[test]
+    fn request_fingerprint_is_canonical_and_reused() {
+        let request = Request::new(
+            "current:hash",
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            }),
+        );
+        let expected =
+            hash(serde_json::to_vec(&json!({"command":request.command,"caller":null})).unwrap());
+        let cache = std::sync::OnceLock::new();
+        let first = request_fingerprint(&cache, &request, None).unwrap();
+        let second = request_fingerprint(&cache, &request, None).unwrap();
+        assert_eq!(first, expected);
+        assert_eq!(
+            first.as_ptr(),
+            second.as_ptr(),
+            "retries reuse the stored digest"
+        );
+    }
+
+    #[tokio::test]
+    async fn waits_outside_writer_until_a_later_window_reclaims_space() {
+        let (_root, db, store) = fixture().await;
+        seed_pending(&db, 1024, 6 * 1024 * 1024).await;
+        db.call(|db| {
+            let body = json!({"result":"x".repeat(4 * 1024 * 1024)}).to_string();
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('old:done','old','null','hash','completed','2000-01-01',?1,0)", [body])?;
+            Ok(())
+        }).await.unwrap();
+        db.take_background_steps();
+        let background = store.background.lock().await;
+        let waiting_store = store.clone();
+        let task = tokio::spawn(async move {
+            waiting_store
+                .reserve_internal("current:new".into(), json!({"test":1}))
+                .await
+        });
+        tokio::task::yield_now().await;
+        let present = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id='current:new'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(present, 0);
+        assert!(
+            !task.is_finished(),
+            "the request must wait instead of returning storage_limit"
+        );
+        db.call(|db| {
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES('writer-responsive','yes')",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        drop(background);
+        let result = crate::test_watchdog::watchdog("receipt admission completes", task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(matches!(result, RuntimeReservation::New));
+        assert!(matches!(
+            store
+                .reserve_internal("current:new".into(), json!({"test":1}))
+                .await
+                .unwrap(),
+            RuntimeReservation::Pending
+        ));
+        let rows = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id='old:done'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
+        assert!(
+            db.take_background_steps().len() >= 2,
+            "the later row requires multiple background windows"
+        );
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn space_freed_while_waiting_is_rechecked_before_more_reclamation() {
+        let (_root, db, store) = fixture().await;
+        seed_pending(&db, 0, 5 * 1024 * 1024).await;
+        db.call(|db| {
+            let body = json!({"result":"x".repeat(2 * 1024 * 1024)}).to_string();
+            for i in 0..2 {
+                db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'old','null','hash','completed','2000-01-01',?2,0)", params![format!("old:done:{i}"), &body])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        db.take_background_steps();
+        let background = store.background.lock().await;
+        let waiting_store = store.clone();
+        let pressure_seen = Arc::new(tokio::sync::Notify::new());
+        let notify = pressure_seen.clone();
+        let task = tokio::spawn(async move {
+            waiting_store
+                .receipt_job(None, move |db, pressure| {
+                    let tx = db.transaction()?;
+                    match super::super::receipt::reserve(
+                        &tx,
+                        "current",
+                        "current:new",
+                        "null",
+                        "hash",
+                        "now",
+                        Admission::Normal,
+                    ) {
+                        Ok(()) => {
+                            tx.commit()?;
+                            Ok(Ok(()))
+                        }
+                        Err(error) if error.code == ErrorCode::StorageLimit => {
+                            tx.commit()?;
+                            *pressure = true;
+                            notify.notify_one();
+                            Ok(Err(error))
+                        }
+                        Err(error) => Ok(Err(error)),
+                    }
+                })
+                .await
+        });
+        crate::test_watchdog::watchdog("first capacity check", pressure_seen.notified())
+            .await
+            .unwrap();
+        db.call(|db| {
+            db.execute(
+                "DELETE FROM operation_receipt WHERE operation_id='old:done:0'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        drop(background);
+        crate::test_watchdog::watchdog("admission after another cleanup", task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let remaining = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id='old:done:1'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(remaining, 1, "no additional receipt needs to expire");
+        assert!(db.take_background_steps().is_empty());
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn execute_waits_for_a_later_window_and_applies_only_once() {
+        let (_root, db, store) = fixture().await;
+        seed_pending(&db, 1024, 6 * 1024 * 1024).await;
+        db.call(|db| {
+            let body = json!({"result":"x".repeat(4 * 1024 * 1024)}).to_string();
+            db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('old:done','old','null','hash','completed','2000-01-01',?1,0)", [body])?;
+            Ok(())
+        }).await.unwrap();
+        let request = Request::new(
+            "current:execute",
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            }),
+        );
+        let background = store.background.lock().await;
+        let waiting_store = store.clone();
+        let waiting_request = request.clone();
+        let task = tokio::spawn(async move { waiting_store.execute(waiting_request, None).await });
+        tokio::task::yield_now().await;
+        let threads = db
+            .call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM thread", [], |row| {
+                    row.get::<_, i64>(0)
+                })?)
+            })
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+        assert_eq!(threads, 0);
+        assert!(
+            !task.is_finished(),
+            "ordinary admission must wait, not reject"
+        );
+        drop(background);
+        let result = crate::test_watchdog::watchdog("receipt admission completes", task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let replay = store.execute(request, None).await.unwrap();
+        assert_eq!(result.result, replay.result);
+        let threads = db
+            .call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM thread", [], |row| {
+                    row.get::<_, i64>(0)
+                })?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(threads, 1, "same-ID replay must not repeat the mutation");
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ordinary_maintenance_releases_the_requester_between_windows() {
+        let (_root, db, store) = fixture().await;
+        seed_pending(&db, 2048, MAX_OUTCOME_BYTES).await;
+        let initial = store.background.lock().await;
+        let (collector_started_tx, collector_started_rx) = tokio::sync::oneshot::channel();
+        let collecting_store = store.clone();
+        let collector = tokio::spawn(async move {
+            collector_started_tx.send(()).unwrap();
+            collecting_store.collect_receipts().await
+        });
+        crate::test_watchdog::watchdog("collector queued", collector_started_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let (observer_started_tx, observer_started_rx) = tokio::sync::oneshot::channel();
+        let (acquired_tx, acquired_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let observer_store = store.clone();
+        let observer = tokio::spawn(async move {
+            observer_started_tx.send(()).unwrap();
+            let _guard = observer_store.background.lock().await;
+            acquired_tx.send(()).unwrap();
+            let _ = release_rx.await;
+        });
+        crate::test_watchdog::watchdog("observer queued", observer_started_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(initial);
+        crate::test_watchdog::watchdog("requester released", acquired_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !collector.is_finished(),
+            "maintenance has more windows while another requester holds the lane"
+        );
+        release_tx.send(()).unwrap();
+        let pass = crate::test_watchdog::watchdog("maintenance completed", collector)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(!pass.deferred);
+        crate::test_watchdog::watchdog("observer completed", observer)
+            .await
+            .unwrap()
+            .unwrap();
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn exhausted_background_pass_returns_the_original_capacity_error() {
+        let (_root, db, store) = fixture().await;
+        seed_pending(&db, 0, MAX_OUTCOME_BYTES).await;
+        db.take_background_steps();
+        let error = crate::test_watchdog::watchdog(
+            "receipt admission completes",
+            store.reserve_internal("current:new".into(), json!({"test":2})),
+        )
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::StorageLimit);
+        assert!(
+            !db.take_background_steps().is_empty(),
+            "refusal follows a background pass"
+        );
+        let rows = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id='current:new'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn validation_byte_limit_resumes_before_the_unexamined_candidate() {
+        let (_root, db, store) = fixture().await;
+        seed_pending(&db, 0, 5 * 1024 * 1024).await;
+        db.call(|db| {
+            let body = json!({"result":"x".repeat(6 * 1024 * 1024)}).to_string();
+            for i in 0..2 {
+                db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES(?1,'current','null','hash','completed','2000-01-01',?2,0)", params![format!("current:done:{i}"), &body])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        db.take_background_steps();
+        let result = crate::test_watchdog::watchdog(
+            "receipt admission completes",
+            store.reserve_internal("current:new".into(), json!({"test":3})),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(matches!(result, RuntimeReservation::New));
+        let expired = db.call(|db| Ok(db.query_row("SELECT count(*) FROM operation_receipt WHERE operation_id LIKE 'current:done:%' AND result_ref_json='0'", [], |row| row.get::<_, i64>(0))?)).await.unwrap();
+        assert_eq!(
+            expired, 2,
+            "both individually valid bodies must be reclaimed"
+        );
+        assert!(db.take_background_steps().len() >= 2);
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_change_behind_cursor_restarts_an_exhausted_pass() {
+        let (_root, db, store) = fixture().await;
+        seed_pending(&db, 1024, 6 * 1024 * 1024).await;
+        db.call(|db| {
+            let body = json!({"result":"x".repeat(4 * 1024 * 1024)}).to_string();
+            db.execute("UPDATE operation_receipt SET result_ref_json=?1 WHERE operation_id='old:pending:0'", [body])?;
+            Ok(())
+        }).await.unwrap();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        let result = crate::test_watchdog::watchdog("receipt admission completes", store.receipt_job(None, move |db, pressure| {
+            if observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+                db.execute("UPDATE operation_receipt SET state='completed' WHERE operation_id='old:pending:0'", [])?;
+            }
+            let tx = db.transaction()?;
+            let result = super::super::receipt::reserve(&tx, "current", "current:new", "null", "hash", "now", Admission::Normal);
+            match result {
+                Ok(()) => { tx.commit()?; Ok(Ok(())) }
+                Err(error) if error.code == ErrorCode::StorageLimit => { tx.commit()?; *pressure = true; Ok(Err(error)) }
+                Err(error) => Ok(Err(error)),
+            }
+        })).await.unwrap();
+        result.unwrap();
+        assert!(calls.load(std::sync::atomic::Ordering::SeqCst) >= 4);
+        let remaining = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM operation_receipt WHERE operation_id='old:pending:0'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
+        db.shutdown().await.unwrap();
     }
 }
 
@@ -3063,7 +3631,16 @@ mod agents_reference_tests {
         let cloned = store.clone();
         let conflict = store
             .database
-            .call(move |db| Ok(cloned.execute_transaction(db, &request, None, Some(&plan))))
+            .call(move |db| {
+                Ok(cloned.execute_transaction(
+                    db,
+                    &request,
+                    None,
+                    Some(&plan),
+                    &std::sync::OnceLock::new(),
+                    &mut false,
+                ))
+            })
             .await
             .unwrap()
             .unwrap_err();

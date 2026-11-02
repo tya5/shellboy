@@ -47,8 +47,8 @@ observation lookup indexes (16), the F parent lookup index (17), summary usage
 metadata accounting (18), the completed-attempt scope index (19), index-source
 GC lookup indexes (20, #164), event-retention lookup indexes (21), and
 trigger-maintained logical usage counters plus the pending attachment-delivery
-operation index (22, #171; see [storage](storage.md)). Version
-19 was reused without schema changes for
+operation index (22, #171; see [storage](storage.md)), and bounded activity
+indexes (23, #172). Version 19 was reused without schema changes for
 [opt-in Responses cache diagnostics](cache-diagnostics.md); standalone
 RAG remains schema3. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;

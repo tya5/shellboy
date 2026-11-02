@@ -70,13 +70,22 @@ DB側は同ID再送でMutationResultのeffectsを復元せず、wake/停止等�
 
 保存outcomeは1件8MiB、通常receipt予算256MiB、停止専用の固定余白を同じ表・counterへ算入する。ID/origin/hash/時刻/本文と512bytesの管理費、current pendingの未使用予約を計上する。これはSQLite物理サイズの上限ではない。変更操作とwaitは実行前に8MiBの最大結果とmetadataを予約するため、短いackでも同時pendingは空fixtureで最大31件であり、既存結果/metadataで減る。観測はこの予約を消費しない。
 
-現instanceのcompleted/failed結果は、created_atから24時間経過後の既存GC保守、又は予算圧迫時に古いものから回収対象とする。24時間は完了後の保証期間ではなく、長時間pendingを解放した直後に対象となる場合もある。pending、accepted/held message、未反映attachment、queued/inflight compactから参照される結果は保護する。時刻/圧迫だけで未確定の副作用を失効させない。
+現instanceのcompleted/failed結果は、created_atから24時間経過後の既存GC保守、又は予算圧迫時に回収対象とする。24時間は完了後の保証期間ではなく、長時間pendingを解放した直後に対象となる場合もある。pending、accepted/held message、未反映attachment、queued/inflight compactから参照される結果は保護する。時刻/圧迫だけで未確定の副作用を失効させない。
 
 結果回収は既存rowのresult_ref_jsonをJSON scalar `0`へ縮退する。NULLはpendingとして維持し、通常のSavedOutcome objectと区別する。state/operation_id/request_hash/origin/created_atは保持するため、同ID再送をoperation_expired、別要求をoperation_conflictとして拒否できる。operation.get/statusはresult_expiredとreplay_policyで結果失効を示す。変更を新IDで自動再発行せず、対象状態と履歴を調べる。cursorやdownstreamの寿命を延長しない。
 
 現在instanceのID墓標を丸ごと削除すると未知IDとして変更が再実行できるため削除しない。墓標のmetadataも同じ有限予算へ算入する。極端に多数の変更や保護対象のみで予算を埋めた場合は依然storage_limitとなり、無制限の稼働を保証しない。明示owner再起動後は旧prefixの未記録IDをoperation_expiredで拒否できるため、旧instanceの参照なしterminalは従来の7日/圧迫時回収でrow自体を削除できる。旧pendingは保護し、不必要になった予約だけを外す。
 
-保守は1回最大128rowと検証本文累積8MiB以内で、削除と結果縮退を合わせた処理件数を返す。予約前の圧迫回収が不足しても、回収済みbatchはStorageLimit拒否前にcommitし、新要求の副作用/receiptは作らない。結果とcompact.resultの回収は同じtransactionにし、失敗時はcounter/companionともrollbackする。通常の内部GC（起動時と60秒ごと）を再利用し、worker・表・queue・依存・migrationは追加しない。全履歴の無制限scanを導入しない。
+保守は1回最大128rowと検証本文累積8MiB以内で、削除と結果縮退を合わせた処理件数を返す。予約前の圧迫回収が不足しても、回収済みbatchはStorageLimit拒否前にcommitし、新要求の副作用/receiptは作らない。結果とcompact.resultの回収は同じtransactionにし、失敗時はcounter/companionともrollbackする。
+
+Receipt maintenance uses bounded rowid windows, not globally oldest-first
+ordering. When capacity is insufficient, admission waits asynchronously while
+the background requester reclaims one window at a time and retries after each
+window. It returns `storage_limit` only after an exhausted pass still cannot
+make room; concurrent writes invalidate that pass and cause a rescan. Existing
+accepting/sending UI status remains visible during the wait. Startup and
+age-deadline triggers replace the former 60-second sweep. See
+[storage](storage.md#asynchronous-receipt-pressure-172) for bounds and limits.
 
 receipt-freeのstatus、operation.get、storage.status、同ID再送、TUI停止は容量回復の観測経路として残る。storage.collect自体は変更操作なので新規予約を要する。budgetのretention/expired表示は現在の方針を説明するもので、任意要求の受付を保証しない。実装と回帰は `src/control/receipt.rs`、`tests/operation_contract.rs`、`tests/control_db.rs` に置き、実行結果は [公開検証](../validation/acceptance.md) に区別して記録する。
 

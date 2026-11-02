@@ -17,7 +17,7 @@ impl Store {
         )
         .expect("Typed Run intent serializes");
         let store = self.clone();
-        self.database.call(move |db|Ok(store.transact(db,&operation_id,&fingerprint,None,Admission::for_command(&command),|tx,now| {
+        self.receipt_job(None, move |db,pressure|Ok(store.transact(db,&operation_id,&fingerprint,None,Admission::for_command(&command),pressure,|tx,now| {
             let actual:Option<(String,Option<String>,Option<i64>)>=tx.query_row(
                 "SELECT r.id,u.id,u.generation FROM thread t JOIN run r ON r.id=(SELECT id FROM run WHERE thread_id=t.id ORDER BY created_at DESC,id DESC LIMIT 1) LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1) WHERE t.id=?1 AND t.deleted_at IS NULL",
                 [&expected.thread_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
@@ -26,7 +26,7 @@ impl Store {
                 return Err(error(ErrorCode::InvalidState,"The displayed Run/Turn changed; refresh the Watch target before acting"));
             }
             store.dispatch(tx,&command,None,&operation_id,now)
-        }))).await.map_err(storage_error)?
+        }))).await
     }
 }
 

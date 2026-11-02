@@ -68,11 +68,12 @@ The guarantee covers only waiting that background work causes:
 
 Steps are the bound. No wall-clock duration is promised, and measured times are
 recorded only as facts. Foreground jobs are outside this guarantee and must be
-bounded individually. The writer-side foreground jobs that are too heavy today
-are listed in the separate issue the coordinator filed (`control.db.Store.execute`,
+bounded individually. At adoption, the writer-side foreground jobs needing work
+were listed in the separate issue (`control.db.Store.execute`,
 `frontend.activity.read`, startup `recover_inflight`, `require_capacity`, the
-receipt collection inside `reserve_with_limit`, `gc.GcService.details`).
-Contract rule 4 below says where those jobs should run instead.
+receipt collection inside `reserve_with_limit`, `gc.GcService.details`). #172
+bounds the receipt collection as described below; the other work has separate
+scope. Contract rule 4 below says where those jobs should run instead.
 
 ### Requester contract (primary)
 
@@ -122,7 +123,7 @@ Contract rule 4 below says where those jobs should run instead.
 
 | Requester (kind) | Bounded unit | Trigger after `Idle` | UX impact of the constraint | Mitigation |
 |---|---|---|---|---|
-| Receipt collection (`Store::collect_receipts`) | rowid window of 1024 receipts, at most 128 changed; the `app_meta` `json_each` check uses a key range instead of `LIKE` (seekable) | (a) deadline: the oldest eligible result is 24 h old (current instance) or 7 days old (old instances); (b) pressure signal from `reserve` near the limit | Results expire later than the exact 24 h, up to one window pass after the deadline | Windows run back to back while `Advanced`; foreground `reserve` still collects inline under pressure (foreground issue) |
+| Receipt collection (`Store::collect_receipts`) | rowid window of 1024 receipts, at most 128 changed; the `app_meta` `json_each` check uses a key range instead of `LIKE` (seekable) | (a) deadline: oldest eligible result is 24 h old (current instance) or 7 days old (old instances); (b) admission needs space | Admission can wait while background windows reclaim capacity | Retry admission after each window; reject only after an exhausted stable pass |
 | GC raw retention (`collect_raw`: `raw_stats`, `raw_batch`, `begin_raw`, `raw_step`) | 128 executions on `shell_terminal_time` / 1 MiB of chunks per step; **`raw_stats` removed from the unit**: the total comes from an incrementally maintained raw-bytes counter | (a) capacity: shell output committed past the cap (producer: output save); (b) deadline: oldest terminal execution's `ended_at + tool_raw_days` | Reclaim starts after a trigger instead of within 60 s | Output producers signal only when the counter crosses the cap; work runs during idle gaps |
 | GC history (`start_history`, `history_step`) | 128 rowids per stage (existing) | Thread deletion commit | Deleted Threads' space is reclaimed after the deletion signal, not on the next 60 s tick | Deletion signals immediately; steps run back to back |
 | GC submitted drafts (`submission_retention::collect_batch`) | 128 drafts, `ORDER BY updated_at,id` on the submitted-state index | Draft submission admitted or cancelled (commit) | None visible | — |
@@ -139,6 +140,31 @@ Contract rule 4 below says where those jobs should run instead.
 
 `raw_stats`, the 60 s maintenance timer and the 30 s paused-index poll are
 removed. The only remaining timers are data-derived deadlines.
+
+### Asynchronous receipt pressure (#172)
+
+If admission exceeds its budget, it does not collect receipts inside the
+foreground transaction and does not immediately reject. The requester waits
+asynchronously outside the SQLite worker while the existing receipt background
+requester runs one bounded rowid window (1,024 visited rows, at most 128 changed
+receipts, and at most 8 MiB of current result bodies validated). Admission is
+retried after each completed window and succeeds as soon as capacity permits.
+If another writer changes the database while the requester waits for the lane,
+admission is retried before collecting further receipts. Regular receipt
+maintenance releases the requester between windows so these retries can proceed.
+Large request data is shared across attempts, and the request fingerprint is
+computed once rather than reserialized and rehashed by every admission probe.
+Deferred windows are retried without holding the writer. Pending and protected
+receipts and malformed results retain their existing protection; a validation
+byte-budget boundary resumes before the first unexamined candidate.
+
+Only an exhausted pass followed by a still-failing admission returns
+`storage_limit`. Concurrent writer changes invalidate an exhausted pass, which
+then restarts before refusal. Under continuous writes or repeatedly deferred
+windows, admission can wait longer; there is no wall-clock bound. Exact usage
+accounting, per-candidate SQLite/JSON work, migration and writes still cost time.
+The UI retains its existing accepting/sending state until admission completes;
+no new indicator or protocol status is introduced.
 
 ### Backend (secondary): keep the constraints cheap, catch violations
 
@@ -187,10 +213,10 @@ removed. The only remaining timers are data-derived deadlines.
 
 ### Classification rule
 
-A request is background only when both of these hold:
-
-1. No request is waiting for its result.
-2. Rolling it back only delays the work.
+A unit is background when rolling it back only delays independent maintenance.
+A capacity-constrained admission may await such receipt reclamation outside the
+writer; it does not depend on any particular window result and retries admission
+after each one. Settlement of an external effect is never background.
 
 Settlement of an external effect that has already happened is foreground, even
 when a background requester issues it. An example is adopting or failing
@@ -253,8 +279,8 @@ the `db_job_slow` names.
   explicit `storage collect` cover a forgotten signal. Storage growth itself is
   the backstop: `require_capacity` gates every model, shell, child, summary and
   index start, and when it observes the logical cap it marks every storage kind;
-  receipt reservations collect inline under pressure. A forgotten signal can
-  therefore delay reclaim, but cannot let storage grow past the cap unnoticed.
+  receipt reservations directly request bounded background windows on pressure.
+  A forgotten signal can delay reclaim, but cannot bypass the storage cap.
   Each producer has a test that it emits its signal.
 - **Deadlines.** Receipt windows return the earliest future age eligibility of
   their rows; managed retention reads one `MIN(created_at)` seek on

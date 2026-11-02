@@ -158,6 +158,21 @@ fn preparing(ui: &mut UiState) {
 }
 
 #[test]
+fn capacity_wait_keeps_the_existing_accepting_status() {
+    let mut ui = ui_in(crate::config::UiLanguage::Ja);
+    let (_, revision, _) = send(&mut ui, "waiting for receipt capacity");
+    let start = Instant::now();
+    for seconds in [0, 5, 30] {
+        ui.animation_tick(start + std::time::Duration::from_secs(seconds));
+        assert_eq!(
+            ui.view().pending[&revision].status,
+            ReceiptStatus::Accepting
+        );
+        assert!(footer(&ui).contains("送信受付中"));
+    }
+}
+
+#[test]
 fn enter_draws_and_animates_before_frontend_then_hands_off_only_after_matching_history() {
     let mut ui = ui_in(crate::config::UiLanguage::Ja);
     let (id, rev, _) = send(&mut ui, "first request");

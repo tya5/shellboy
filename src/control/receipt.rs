@@ -108,6 +108,7 @@ pub(super) fn usage(db: &Connection, instance: &str) -> Result<u64> {
 /// Protected intent is never removed. Current identities keep an expired-result
 /// marker; only old-instance identities may be deleted. All call sites own a
 /// transaction, and one pass touches at most CLEANUP_BATCH rows.
+#[cfg(test)]
 pub(super) fn collect(db: &Connection, instance: &str, pressure: bool) -> Result<u64> {
     collect_range(db, instance, pressure, None).map(|(collected, _)| collected)
 }
@@ -184,7 +185,7 @@ fn collect_range(
         None => ("AND ?6 IS NULL AND ?7 IS NULL", "created_at,operation_id"),
     };
     let (low, high) = range.map_or((None, None), |(low, high)| (Some(low), Some(high)));
-    let rows=db.prepare(&format!("SELECT operation_id,(instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':'),COALESCE(octet_length(result_ref_json),0),o.rowid FROM operation_receipt o
+    let mut statement=db.prepare(&format!("SELECT operation_id,(instance_id=?1 OR substr(operation_id,1,length(?1)+1)=?1||':'),COALESCE(octet_length(result_ref_json),0),o.rowid FROM operation_receipt o
         WHERE state IN ('completed','failed') {bounds}
         AND NOT EXISTS(SELECT 1 FROM receipt r WHERE r.client_operation_id=o.operation_id AND r.state IN ('accepted','held'))
         AND NOT EXISTS(SELECT 1 FROM attachment_delivery d WHERE d.operation_id=o.operation_id AND d.status IN ('accepted','held'))
@@ -194,20 +195,47 @@ fn collect_range(
             AND (?2 OR julianday(created_at)<=julianday('now',?5)))
           OR (instance_id<>?1 AND substr(operation_id,1,length(?1)+1)<>?1||':'
             AND (?2 OR julianday(created_at)<=julianday('now','-7 days'))))
-        ORDER BY {order} LIMIT ?3")).map_err(sql)?.query_map(params![instance, pressure, CLEANUP_BATCH as i64, EXPIRED_OUTCOME, format!("-{RESULT_RETENTION_SECONDS} seconds"), low, high], |r|Ok((r.get::<_,String>(0)?,r.get::<_,bool>(1)?,r.get::<_,i64>(2)?,r.get::<_,i64>(3)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
-    let last = (rows.len() == CLEANUP_BATCH)
+        ORDER BY {order} LIMIT ?3")).map_err(sql)?;
+    let rows = statement
+        .query_map(
+            params![
+                instance,
+                pressure,
+                CLEANUP_BATCH as i64,
+                EXPIRED_OUTCOME,
+                format!("-{RESULT_RETENTION_SECONDS} seconds"),
+                low,
+                high
+            ],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, bool>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .map_err(sql)?;
+    let rows = rows.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
+    let mut last = (rows.len() == CLEANUP_BATCH)
         .then(|| rows.last().map(|row| row.3))
         .flatten();
+    let mut visited = None;
     let mut collected = 0;
     // Preserve malformed durable envelopes. Parse one body at a time and cap
     // aggregate validation bytes as well as row count on this DB-worker pass.
     let mut examined_bytes = 0u64;
-    for (id, current, body_bytes, _) in &rows {
+    for (id, current, body_bytes, rowid) in &rows {
         if *current {
             let bytes = u64::try_from(*body_bytes).unwrap_or(u64::MAX);
-            if bytes > MAX_OUTCOME_BYTES || examined_bytes.saturating_add(bytes) > MAX_OUTCOME_BYTES
-            {
+            if bytes > MAX_OUTCOME_BYTES {
+                visited = Some(*rowid);
                 continue;
+            }
+            if examined_bytes.saturating_add(bytes) > MAX_OUTCOME_BYTES {
+                last = visited;
+                break;
             }
             examined_bytes += bytes;
             let body: String = db
@@ -218,9 +246,11 @@ fn collect_range(
                 )
                 .map_err(sql)?;
             if !super::db::valid_saved_outcome(&body) {
+                visited = Some(*rowid);
                 continue;
             }
         }
+        visited = Some(*rowid);
         db.execute(
             "DELETE FROM app_meta WHERE key=?1",
             [crate::compaction::CompactionKeys::result(id)],
@@ -237,6 +267,7 @@ fn collect_range(
     Ok((collected, last))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn reserve(
     db: &Connection,
     instance: &str,
@@ -256,6 +287,7 @@ pub(super) fn reserve(
         admission.limit(),
     )
 }
+#[allow(clippy::too_many_arguments)]
 fn reserve_with_limit(
     db: &Connection,
     instance: &str,
@@ -272,11 +304,6 @@ fn reserve_with_limit(
         + size(fingerprint)
         + size(now)
         + MAX_OUTCOME_BYTES;
-    if usage(db, instance)?.saturating_add(required) > total {
-        // Each batch stays bounded; refusal can be retried while maintenance
-        // continues rather than doing unbounded cleanup inside admission.
-        collect(db, instance, true)?;
-    }
     if usage(db, instance)?.saturating_add(required) > total {
         let mut error = ApiError::new(
             ErrorCode::StorageLimit,
@@ -385,7 +412,7 @@ mod tests {
                 "null",
                 "hash",
                 "now",
-                Admission::Normal
+                Admission::Normal,
             )
             .unwrap_err()
             .code,
@@ -436,6 +463,7 @@ mod tests {
         )
         .unwrap();
         let before = usage(&db, "current").unwrap();
+        assert_eq!(collect(&db, "current", true).unwrap(), 1);
         reserve_with_limit(
             &db,
             "current",
@@ -603,8 +631,8 @@ mod tests {
         db.execute(r#"INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:c','current','null','hash','completed','2000-01-01','{"result":{}}',0)"#,[]).unwrap();
         assert_eq!(
             collect(&db, "current", true).unwrap(),
-            2,
-            "one large outcome plus a small outcome fit; two large do not"
+            1,
+            "the next large outcome is preserved as the resume boundary"
         );
         assert!(
             !db.query_row(
@@ -614,7 +642,7 @@ mod tests {
             )
             .unwrap()
         );
-        assert_eq!(collect(&db, "current", true).unwrap(), 1);
+        assert_eq!(collect(&db, "current", true).unwrap(), 2);
         // An out-of-contract oversized legacy envelope is never materialized or
         // overwritten, and does not prevent a subsequent small row's progress.
         db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,result_ref_json,reserved_bytes) VALUES('current:oversized','current','null','hash','completed','2000-01-01',?1,0)",[serde_json::to_string(&"x".repeat(MAX_OUTCOME_BYTES as usize-1)).unwrap()]).unwrap();
