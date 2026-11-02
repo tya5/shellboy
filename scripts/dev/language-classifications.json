@@ -4,6 +4,31 @@
     "reason": "App-authored browser resync notice. Browser::changed sends complete Japanese and English sentences together; ThreadBrowser::notice_for_language selects the current UI language. Tests preserve Japanese, require ASCII English, and keep raw notices untranslated.",
     "source_tokens_sha256": "43bd8e377b6ef65d54fff8ee6346db3b632b71572c46f3021ac9ed2f326b1349"
   },
+  "src/frontend/usage.rs:45a465a705d11a62:1": {
+    "category": "a",
+    "reason": "Generated UI-only label for the cached-token field. The field key and numeric value remain unchanged across languages.",
+    "source_tokens_sha256": "c4b247e9715fb8296433114cc3aa4762db600660b59e1967953830e1666c223e"
+  },
+  "src/frontend/usage.rs:51eba1b77a09b117:1": {
+    "category": "a",
+    "reason": "Generated UI-only status for a missing saved request record. The English and Japanese branches preserve the absence of provenance.",
+    "source_tokens_sha256": "c4b247e9715fb8296433114cc3aa4762db600660b59e1967953830e1666c223e"
+  },
+  "src/frontend/usage.rs:5a10256cf4874f84:1": {
+    "category": "a",
+    "reason": "Generated UI-only status for ambiguous saved request provenance. The language-specific text does not select or invent an attempt ID.",
+    "source_tokens_sha256": "c4b247e9715fb8296433114cc3aa4762db600660b59e1967953830e1666c223e"
+  },
+  "src/frontend/usage.rs:5e1a861526b1fe5b:1": {
+    "category": "a",
+    "reason": "Generated UI-only fallback for a missing cached-token count. Language selection never changes numeric values or converts missing usage to zero.",
+    "source_tokens_sha256": "ad28c0d54c88d189f84478553ad8486d1fb0dfe515a00829f39ea882f3ccdfbc"
+  },
+  "src/frontend/usage.rs:98180f4181b919e3:1": {
+    "category": "a",
+    "reason": "Generated UI-only label for cached-attempt provenance. The field key and attempt ID remain unchanged across languages.",
+    "source_tokens_sha256": "c4b247e9715fb8296433114cc3aa4762db600660b59e1967953830e1666c223e"
+  },
   "src/presentation/events.rs:0116f480c5739a86:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",

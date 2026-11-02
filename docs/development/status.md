@@ -3951,3 +3951,9 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+
+### #152 Product Batch7: Saved Attempt-Usage Fields
+
+This Stage C batch localizes the generated cached-token labels and unavailable/ambiguous statuses in `src/frontend/usage.rs`, forwarding the loaded `UiLanguage` through refresh projection and asynchronous enrichment. The Japanese strings remain byte-for-byte unchanged. Numeric counts, saved attempt IDs, field keys, owner selection, source `usage_json`, and raw provider diagnostics are untouched; missing counts are not converted to zero, and missing/ambiguous provenance still yields no attempt ID.
+
+Five reviewed usage literals now classify as `(a)` with current scope fingerprints. The audit leaves 166 `(c)` candidates across 18 nested `src/frontend/` files; no zero-candidate Stage C gate or final localization acceptance is claimed. Local macOS `cargo fmt --all`, `cargo fmt --all -- --check`, `cargo check --tests`, focused Clippy, focused Rust regression tests, and Python developer-tool tests passed. Exact-tip branch CI and integration status are recorded separately; no live provider, physical-terminal, clipboard, or full Stage C acceptance is inferred.

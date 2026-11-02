@@ -8,9 +8,17 @@ use serde_json::json;
 
 #[test]
 fn cached_usage_never_turns_missing_or_invalid_counts_into_zero() {
-    assert_eq!(cached_tokens(None), "未報告");
+    assert_eq!(cached_tokens(None, UiLanguage::Ja), "未報告");
+    assert_eq!(cached_tokens(None, UiLanguage::En), "Unreported");
     for count in [0, 12345, i64::MAX as u64] {
-        assert_eq!(cached_tokens(Some(count)), count.to_string());
+        assert_eq!(
+            cached_tokens(Some(count), UiLanguage::Ja),
+            count.to_string()
+        );
+        assert_eq!(
+            cached_tokens(Some(count), UiLanguage::En),
+            count.to_string()
+        );
     }
 }
 
@@ -32,6 +40,84 @@ fn field<'a>(node: &'a UiNode, key: &str) -> Option<&'a str> {
         .iter()
         .find(|field| field.key == key)
         .map(|field| field.value.as_str())
+}
+fn field_label<'a>(node: &'a UiNode, key: &str) -> Option<&'a str> {
+    node.presentation
+        .fields
+        .iter()
+        .find(|field| field.key == key)
+        .map(|field| field.label.as_str())
+}
+
+#[test]
+fn generated_usage_fields_follow_language_without_changing_provenance_or_counts() {
+    let mut nodes = [
+        node("known"),
+        node("missing"),
+        node("unmatched"),
+        node("ambiguous"),
+    ];
+    let observations = || {
+        vec![
+            Observation {
+                index: 0,
+                sources: vec![("attempt-1".into(), Some(17))],
+            },
+            Observation {
+                index: 1,
+                sources: vec![("attempt-2".into(), None)],
+            },
+            Observation {
+                index: 2,
+                sources: Vec::new(),
+            },
+            Observation {
+                index: 3,
+                sources: vec![("attempt-3".into(), Some(1)), ("attempt-4".into(), Some(2))],
+            },
+        ]
+    };
+
+    apply(&mut nodes, observations(), UiLanguage::Ja);
+    assert_eq!(field(&nodes[0], FIELD), Some("17"));
+    assert_eq!(field(&nodes[0], ATTEMPT), Some("attempt-1"));
+    assert_eq!(
+        field_label(&nodes[0], FIELD),
+        Some("入力キャッシュ（cached_tokens）")
+    );
+    assert_eq!(
+        field_label(&nodes[0], ATTEMPT),
+        Some("モデル要求ID（使用量の記録元）")
+    );
+    assert_eq!(field(&nodes[1], FIELD), Some("未報告"));
+    assert_eq!(field(&nodes[2], FIELD), Some("未報告（要求の記録なし）"));
+    assert_eq!(
+        field(&nodes[3], FIELD),
+        Some("未報告（要求との対応が一意でない）")
+    );
+    assert_eq!(field(&nodes[3], ATTEMPT), None);
+
+    apply(&mut nodes, observations(), UiLanguage::En);
+    assert_eq!(field(&nodes[0], FIELD), Some("17"));
+    assert_eq!(field(&nodes[0], ATTEMPT), Some("attempt-1"));
+    assert_eq!(
+        field_label(&nodes[0], FIELD),
+        Some("Cached input tokens (cached_tokens)")
+    );
+    assert_eq!(
+        field_label(&nodes[0], ATTEMPT),
+        Some("Model request ID (usage source)")
+    );
+    assert_eq!(field(&nodes[1], FIELD), Some("Unreported"));
+    assert_eq!(
+        field(&nodes[2], FIELD),
+        Some("Unreported (no request record)")
+    );
+    assert_eq!(
+        field(&nodes[3], FIELD),
+        Some("Unreported (ambiguous request match)")
+    );
+    assert_eq!(field(&nodes[3], ATTEMPT), None);
 }
 
 #[tokio::test]
@@ -96,7 +182,7 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
     assert_eq!(observations[0].sources, vec![("old".into(), Some(16000))]);
     assert_eq!(observations[5].sources.len(), 2);
     assert!(observations[6].sources.is_empty());
-    apply(&mut nodes, observations);
+    apply(&mut nodes, observations, UiLanguage::Ja);
     assert_eq!(field(&nodes[0], FIELD), Some("16000"));
     assert_eq!(
         field(&nodes[0], ATTEMPT),
@@ -114,6 +200,16 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
     assert_eq!(field(&nodes[5], ATTEMPT), None);
     assert_eq!(field(&nodes[6], FIELD), Some("未報告（要求の記録なし）"));
     enrich(&control, &mut nodes).await.unwrap();
+    assert_eq!(field(&nodes[0], FIELD), Some("16000"));
+    assert_eq!(field(&nodes[2], FIELD), Some("Unreported"));
+    assert_eq!(
+        field(&nodes[5], FIELD),
+        Some("Unreported (ambiguous request match)")
+    );
+    assert_eq!(
+        field_label(&nodes[0], FIELD),
+        Some("Cached input tokens (cached_tokens)")
+    );
     assert_eq!(
         nodes[0]
             .presentation
