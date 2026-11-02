@@ -221,18 +221,23 @@ impl Form {
     pub(super) fn field_hint(&self) -> String {
         use crate::config::UiLanguage;
         let language = self.language;
+        let sep = crate::ui::text_width::glyphs::separator();
         let Some(field) = self.fields.get(self.selected) else {
             return String::new();
         };
         if field.name == "db" {
-            return local!(language,
+            return crate::ui::text_width::glyphs::decorate(local!(
+                language,
                 "空欄は起動時data-dir/rag.db | 相対パスは起動場所が基準 | F1で説明",
-                "Empty uses the launch data-dir/rag.db; relative paths use the launch directory. F1 opens details.").into();
+                "Empty uses the launch data-dir/rag.db; relative paths use the launch directory. F1 opens details."
+            ));
         }
         if field.name == "input_mode" {
-            return local!(language,
+            return crate::ui::text_width::glyphs::decorate(local!(
+                language,
                 "fileは本文ファイル、inlineは本文入力。CLI stdin相当でも端末stdinは読みません | F1で説明",
-                "file uses a text file; inline uses this form. The TUI does not read terminal stdin. F1 opens details.").into();
+                "file uses a text file; inline uses this form. The TUI does not read terminal stdin. F1 opens details."
+            ));
         }
         let Some(metadata) = self.selected_metadata() else {
             return local!(
@@ -243,18 +248,17 @@ impl Form {
             .into();
         };
         if field.value != field.initial_value {
-            return local!(
+            return crate::ui::text_width::glyphs::decorate(local!(
                 language,
                 "編集した値 | F1で入力条件とIDの探し方",
                 "Edited value. F1 shows input requirements and where to find IDs."
-            )
-            .into();
+            ));
         }
         let discovery = metadata.field.discovery;
         if field.value.is_empty() && discovery != Discovery::None {
             let help = text_for(discovery.text(), language);
             return match language {
-                UiLanguage::Ja => format!("未入力 | {help}"),
+                UiLanguage::Ja => format!("未入力{sep}{help}"),
                 UiLanguage::En => format!("No value entered. {help}"),
             };
         }
@@ -266,7 +270,7 @@ impl Form {
             self.origin(metadata.default_origin)
         };
         match language {
-            UiLanguage::Ja => format!("初期値: {origin} | F1で入力条件とIDの探し方"),
+            UiLanguage::Ja => format!("初期値: {origin}{sep}F1で入力条件とIDの探し方"),
             UiLanguage::En => format!(
                 "Initial value: {origin}. F1 shows input requirements and where to find IDs."
             ),
@@ -277,6 +281,7 @@ impl Form {
         use crate::config::UiLanguage;
         use crate::operations::{Confirmation, IdKind, RequestIdPolicy, Route};
         let language = self.language;
+        let sep = crate::ui::text_width::glyphs::separator();
         let id = self.operation.catalogue();
         let spec = id.spec();
         let mut lines = vec![
@@ -292,8 +297,8 @@ impl Form {
         {
             let argument = crate::operations::RAG_DB_ARGUMENT;
             lines.push(Line::from(match language {
-                UiLanguage::Ja => format!("{} | {}", argument.label, argument.meaning),
-                UiLanguage::En => "Independent RAG database | An explicit path, or resolved DATA_DIR/rag.db when omitted. This is separate from the owner's conversation database.".into(),
+                UiLanguage::Ja => format!("{}{sep}{}", argument.label, argument.meaning),
+                UiLanguage::En => crate::ui::text_width::glyphs::decorate("Independent RAG database | An explicit path, or resolved DATA_DIR/rag.db when omitted. This is separate from the owner's conversation database."),
             }));
             lines.push(Line::from(local!(language,
                 "空欄は起動時data-dir/rag.db。相対パスはTUI起動場所が基準です。会話履歴DBとは別です。",
@@ -458,15 +463,15 @@ impl Form {
                 argument.default.as_deref(),
             ) {
                 (UiLanguage::Ja, true, _, Some(default)) => {
-                    format!("{spelling}（繰り返し指定） | 既定 {default}")
+                    format!("{spelling}（繰り返し指定）{sep}既定 {default}")
                 }
                 (UiLanguage::Ja, true, _, None) => format!("{spelling}（繰り返し指定）"),
                 (UiLanguage::Ja, false, true, Some(default)) => {
-                    format!("{spelling} 値 | 既定 {default}")
+                    format!("{spelling} 値{sep}既定 {default}")
                 }
                 (UiLanguage::Ja, false, true, None) => format!("{spelling} 値"),
                 (UiLanguage::Ja, false, false, Some(default)) => {
-                    format!("{spelling}（フラグ） | 既定 {default}")
+                    format!("{spelling}（フラグ）{sep}既定 {default}")
                 }
                 (UiLanguage::Ja, false, false, None) => format!("{spelling}（フラグ）"),
                 (UiLanguage::En, true, _, Some(default)) => {
@@ -1724,16 +1729,19 @@ fn global_argument_text(
         _ => None,
     };
     match rendered {
-        Some(message) => message.to_owned(),
-        None => match language {
-            crate::config::UiLanguage::Ja => format!(
-                "{} | {}: {}",
-                argument.spelling, argument.label, argument.meaning
-            ),
-            crate::config::UiLanguage::En => {
-                format!("{} | See CLI help for this option", argument.spelling)
+        Some(message) => crate::ui::text_width::glyphs::decorate(message),
+        None => {
+            let sep = crate::ui::text_width::glyphs::separator();
+            match language {
+                crate::config::UiLanguage::Ja => format!(
+                    "{}{sep}{}: {}",
+                    argument.spelling, argument.label, argument.meaning
+                ),
+                crate::config::UiLanguage::En => {
+                    format!("{}{sep}See CLI help for this option", argument.spelling)
+                }
             }
-        },
+        }
     }
 }
 
