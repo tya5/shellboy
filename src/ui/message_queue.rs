@@ -87,30 +87,34 @@ impl PendingMessage {
     }
 }
 fn archive_count(language: UiLanguage, count: usize) -> String {
+    let sep = crate::ui::text_width::glyphs::separator();
     match language {
-        UiLanguage::Ja => format!("{count}件 | /restore draft ID"),
-        UiLanguage::En if count == 1 => "1 draft | /restore draft ID".into(),
-        UiLanguage::En => format!("{count} drafts | /restore draft ID"),
+        UiLanguage::Ja => format!("{count}件{sep}/restore draft ID"),
+        UiLanguage::En if count == 1 => format!("1 draft{sep}/restore draft ID"),
+        UiLanguage::En => format!("{count} drafts{sep}/restore draft ID"),
     }
 }
 fn queue_context(language: UiLanguage, total: u64, shown: usize) -> String {
+    let sep = crate::ui::text_width::glyphs::separator();
     match language {
-        UiLanguage::Ja => format!("{total}件 / 表示{shown}件 | 保存済みの入力"),
+        UiLanguage::Ja => format!("{total}件 / 表示{shown}件{sep}保存済みの入力"),
         UiLanguage::En => format!("Saved input: {total} total / {shown} shown"),
     }
 }
 fn compact_count(language: UiLanguage, count: u64) -> String {
+    let sep = crate::ui::text_width::glyphs::separator();
     match language {
-        UiLanguage::Ja => format!("/queue | 保存済み{count}件"),
-        UiLanguage::En if count == 1 => "/queue | 1 saved input".into(),
-        UiLanguage::En => format!("/queue | {count} saved inputs"),
+        UiLanguage::Ja => format!("/queue{sep}保存済み{count}件"),
+        UiLanguage::En if count == 1 => format!("/queue{sep}1 saved input"),
+        UiLanguage::En => format!("/queue{sep}{count} saved inputs"),
     }
 }
 fn archive_error(language: UiLanguage, error: &str) -> String {
+    let sep = crate::ui::text_width::glyphs::separator();
     let error = crate::presentation::sanitize_plain(error, 0).0;
     match language {
-        UiLanguage::Ja => format!("取得できません: {error} | Rで再取得"),
-        UiLanguage::En => format!("Could not load: {error} | R Retry"),
+        UiLanguage::Ja => format!("取得できません: {error}{sep}Rで再取得"),
+        UiLanguage::En => format!("Could not load: {error}{sep}R Retry"),
     }
 }
 fn sender_count(language: UiLanguage, sender: Option<&str>, count: usize) -> String {
@@ -1292,12 +1296,12 @@ mod language_tests {
                 (UiLanguage::En, Some(1)) => &[
                     "Person · Held · Deliver now · Waiting for recovery",
                     "source-preview",
-                    "/queue | 1 saved input",
+                    "/queue · 1 saved input",
                 ],
                 (UiLanguage::Ja, Some(1)) => &[
                     "人 · 保留 · すぐ渡す · 復旧待ち",
                     "source-preview",
-                    "/queue | 保存済み1件",
+                    "/queue · 保存済み1件",
                 ],
                 (UiLanguage::En, _) => &[
                     "Person | Held | Deliver now | Waiting for recovery",
@@ -1342,9 +1346,14 @@ mod language_tests {
                 archives(ui);
                 ui.queue_popup.archive_error = Some("raw-load-error".into());
             },
-            |language| match language {
-                UiLanguage::En => &["Could not load: raw-load-error | R Retry"],
-                UiLanguage::Ja => &["取得できません: raw-load-error | Rで再取得"],
+            |language| match (
+                language,
+                crate::ui::text_width::terminal_width_observation(),
+            ) {
+                (UiLanguage::En, Some(1)) => &["Could not load: raw-load-error · R Retry"],
+                (UiLanguage::Ja, Some(1)) => &["取得できません: raw-load-error · Rで再取得"],
+                (UiLanguage::En, _) => &["Could not load: raw-load-error | R Retry"],
+                (UiLanguage::Ja, _) => &["取得できません: raw-load-error | Rで再取得"],
             },
         );
         i18n::verify_screen(
@@ -1352,9 +1361,18 @@ mod language_tests {
                 archives(ui);
                 ui.queue_popup.archives = Some(vec![("draft-id".into(), "source-title".into())]);
             },
-            |language| match language {
-                UiLanguage::En => &["1 draft | /restore draft ID", "source-title", "draft-id"],
-                UiLanguage::Ja => &["1件 | /restore draft ID", "source-title", "draft-id"],
+            |language| match (
+                language,
+                crate::ui::text_width::terminal_width_observation(),
+            ) {
+                (UiLanguage::En, Some(1)) => {
+                    &["1 draft · /restore draft ID", "source-title", "draft-id"]
+                }
+                (UiLanguage::Ja, Some(1)) => {
+                    &["1件 · /restore draft ID", "source-title", "draft-id"]
+                }
+                (UiLanguage::En, _) => &["1 draft | /restore draft ID", "source-title", "draft-id"],
+                (UiLanguage::Ja, _) => &["1件 | /restore draft ID", "source-title", "draft-id"],
             },
         );
     }

@@ -115,12 +115,12 @@ impl ManagementPopup {
             reader.clear();
         }
     }
-    fn detail_footer(&self) -> &'static str {
-        local!(
+    fn detail_footer(&self) -> String {
+        crate::ui::text_width::glyphs::decorate(local!(
             self.language,
             "Esc 戻る | ^v/PgUp/PgDn 閲覧\nN 次page | P 先頭 | C このpageをコピー",
             "Esc Back | ^v/PgUp/PgDn Scroll\nN Next page | P First page | C Copy this page"
-        )
+        ))
     }
     pub(super) fn start_inspection(&mut self, target: InspectionTarget, title: String) {
         // Pending cost intents belong to their exact Index selection. Admitted
@@ -176,10 +176,11 @@ impl ManagementPopup {
         let mut inspection = inspection::State::new(target);
         let mut fields = state.fields.clone();
         fields.truncate(256);
+        let sep = crate::ui::text_width::glyphs::separator();
         for field in &mut fields {
             field.label = match self.language {
-                UiLanguage::En => format!("At capture | {}", field.label),
-                UiLanguage::Ja => format!("取得時 | {}", field.label),
+                UiLanguage::En => format!("At capture{sep}{}", field.label),
+                UiLanguage::Ja => format!("取得時{sep}{}", field.label),
             };
         }
         inspection.anchors = fields
@@ -843,9 +844,16 @@ impl ManagementPopup {
                 text.as_str(),
             ),
         };
-        let mut lines =
-            vec![Line::from(title.to_owned()).style(Style::default().fg(theme::EMPHASIS))];
-        let safe: String = crate::presentation::sanitize_plain(text, 0)
+        let mut lines = vec![
+            Line::from(crate::ui::text_width::glyphs::decorate(title))
+                .style(Style::default().fg(theme::EMPHASIS)),
+        ];
+        let text = if matches!(self.preview, IndexPreviewState::Loading(_)) {
+            crate::ui::text_width::glyphs::decorate(text)
+        } else {
+            text.to_owned()
+        };
+        let safe: String = crate::presentation::sanitize_plain(&text, 0)
             .0
             .chars()
             .take(4096)
@@ -860,15 +868,15 @@ impl ManagementPopup {
             let error = safe.replace('\n', " ");
             let short: String = error.chars().take(160).collect();
             lines.push(Line::from(if error.chars().count() > 160 {
-                format!("{short}.")
+                format!("{short}{}", crate::ui::text_width::glyphs::ellipsis())
             } else {
                 short
             }));
-            lines.push(Line::from(local!(
+            lines.push(Line::from(crate::ui::text_width::glyphs::decorate(local!(
                 self.language,
                 "前回の結果 | 古い情報（再確認が必要）",
                 "Previous result | Stale (review again)"
-            )));
+            ))));
             let safe: String = crate::presentation::sanitize_plain(previous, 0)
                 .0
                 .chars()
@@ -949,12 +957,12 @@ impl ManagementPopup {
                 })
             })
     }
-    fn hints(&self) -> &'static str {
+    fn hints(&self) -> String {
         use super::i18n::local;
         let list_mode = self
             .structured()
             .is_some_and(|value| value.detail.is_none());
-        match self.mode {
+        crate::ui::text_width::glyphs::decorate(match self.mode {
             ManagementMode::Index if self.has_next_inspection_window() => local!(
                 self.language,
                 "Esc 戻る | ^v/PgUp/PgDn 閲覧 | Ctrl+R 更新 | N 次window\nS 状態 | P 費用preview | B backfill | T retry | R rebuild",
@@ -995,7 +1003,7 @@ impl ManagementPopup {
                 "Esc 戻る | ^v/PgUp/PgDn 閲覧\nW 明示waitの観測取消 | A 操作",
                 "Esc Back | ^v/PgUp/PgDn Scroll\nW Stop observing explicit wait | A Actions"
             ),
-        }
+        })
     }
     pub(super) fn page(&self, viewport: Rect, status: &str) -> u16 {
         let detailed = self
@@ -1011,7 +1019,7 @@ impl ManagementPopup {
         } else {
             self.hints()
         };
-        let body = popup::body_area(viewport, context, footer, None);
+        let body = popup::body_area(viewport, context, &footer, None);
         body.height
             .saturating_sub(self.preview_height(body))
             .saturating_sub(1)
@@ -1446,6 +1454,7 @@ impl ManagementPopup {
         language: crate::config::UiLanguage,
     ) {
         self.set_language(language);
+        let sep = crate::ui::text_width::glyphs::separator();
         if let Some(content) = &self.frame {
             let view = &content.view;
             let hints = self.hints();
@@ -1453,29 +1462,29 @@ impl ManagementPopup {
             if let Some(structured) = &content.structured {
                 if let Some(page) = &structured.detail {
                     let title = match self.language {
-                        UiLanguage::En => format!("{} | Details", view.title),
-                        UiLanguage::Ja => format!("{} | 詳細", view.title),
+                        UiLanguage::En => format!("{}{sep}Details", view.title),
+                        UiLanguage::Ja => format!("{}{sep}詳細", view.title),
                     };
                     let pointer = &page.pointer;
                     let observed_at = &page.observed_at;
                     let context = match (self.language, &page.stale) {
                         (UiLanguage::En, Some(reason)) => format!(
-                            "Reference {pointer} | Captured {observed_at} | Stale: {reason}"
+                            "Reference {pointer}{sep}Captured {observed_at}{sep}Stale: {reason}"
                         ),
                         (UiLanguage::En, None) => {
-                            format!("Reference {pointer} | Captured {observed_at}")
+                            format!("Reference {pointer}{sep}Captured {observed_at}")
                         }
                         (UiLanguage::Ja, Some(reason)) => {
-                            format!("参照 {pointer} | 取得 {observed_at} | 旧内容: {reason}")
+                            format!("参照 {pointer}{sep}取得 {observed_at}{sep}旧内容: {reason}")
                         }
-                        (UiLanguage::Ja, None) => format!("参照 {pointer} | 取得 {observed_at}"),
+                        (UiLanguage::Ja, None) => format!("参照 {pointer}{sep}取得 {observed_at}"),
                     };
                     let body = popup::panel_recorded(
                         frame,
                         area,
                         &title,
                         &context,
-                        self.detail_footer(),
+                        &self.detail_footer(),
                         &self.paint,
                     );
                     reader_scroll = Some(self.reader_cache.borrow_mut().render(
@@ -1504,31 +1513,33 @@ impl ManagementPopup {
                     };
                     let context = match (self.language, structured.omitted, count) {
                         (UiLanguage::En, true, 1) => {
-                            format!("{selected} / 1 field | View all details | {status}")
+                            format!("{selected} / 1 field{sep}View all details{sep}{status}")
                         }
-                        (UiLanguage::En, false, 1) => format!("{selected} / 1 field | {status}"),
+                        (UiLanguage::En, false, 1) => format!("{selected} / 1 field{sep}{status}"),
                         (UiLanguage::En, true, _) => {
-                            format!("{selected} / {count} fields | View all details | {status}")
+                            format!("{selected} / {count} fields{sep}View all details{sep}{status}")
                         }
                         (UiLanguage::En, false, _) => {
-                            format!("{selected} / {count} fields | {status}")
+                            format!("{selected} / {count} fields{sep}{status}")
                         }
                         (UiLanguage::Ja, true, _) => {
-                            format!("{selected} / {count}項目 | すべての詳細を見る | {status}")
+                            format!("{selected} / {count}項目{sep}すべての詳細を見る{sep}{status}")
                         }
                         (UiLanguage::Ja, false, _) => {
-                            format!("{selected} / {count}項目 | {status}")
+                            format!("{selected} / {count}項目{sep}{status}")
                         }
                     };
                     let context = if let Some(inspection) = &self.inspection {
-                        format!("{} | {context}", inspection.label_for(self.language))
+                        format!("{}{sep}{context}", inspection.label_for(self.language))
                     } else {
                         context
                     };
                     let context = if let Some(error) = &structured.detail_error {
                         match self.language {
-                            UiLanguage::En => format!("Details not refreshed: {error} | {context}"),
-                            UiLanguage::Ja => format!("詳細未更新: {error} | {context}"),
+                            UiLanguage::En => {
+                                format!("Details not refreshed: {error}{sep}{context}")
+                            }
+                            UiLanguage::Ja => format!("詳細未更新: {error}{sep}{context}"),
                         }
                     } else {
                         context
@@ -1538,7 +1549,7 @@ impl ManagementPopup {
                         area,
                         &view.title,
                         &context,
-                        hints,
+                        &hints,
                         &self.paint,
                     );
                     let body = self.draw_preview(frame, body);
@@ -1598,13 +1609,13 @@ impl ManagementPopup {
             } else {
                 let context = match self.mode {
                     ManagementMode::Index => match self.language {
-                        UiLanguage::En => format!("Target {} | {status}", self.index_label()),
-                        UiLanguage::Ja => format!("対象 {} | {status}", self.index_label()),
+                        UiLanguage::En => format!("Target {}{sep}{status}", self.index_label()),
+                        UiLanguage::Ja => format!("対象 {}{sep}{status}", self.index_label()),
                     },
                     _ => status.to_owned(),
                 };
                 let body =
-                    popup::panel_recorded(frame, area, &view.title, &context, hints, &self.paint);
+                    popup::panel_recorded(frame, area, &view.title, &context, &hints, &self.paint);
                 let body = self.draw_preview(frame, body);
                 reader_scroll = Some(self.reader_cache.borrow_mut().render(
                     frame,

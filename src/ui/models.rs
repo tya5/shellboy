@@ -32,16 +32,17 @@ fn notice_height(body_height: u16) -> u16 {
     body_height.saturating_sub(2).min(3)
 }
 impl ModelPicker {
-    fn footer(&self) -> &'static str {
-        local!(
+    fn footer(&self) -> String {
+        crate::ui::text_width::glyphs::decorate(local!(
             self.language,
             "Esc 戻る | Enter 変更\n^v 選択 | Ctrl+R 再取得 | Ctrl+Y コピー",
             "Esc Back | Enter Change\n^v Select | Ctrl+R Refresh | Ctrl+Y Copy"
-        )
+        ))
     }
     fn notice_text(&self, notice: &super::observation_notice::ObservationNotice) -> String {
         use super::observation_notice::{Freshness, NextAction, ObservationKind};
         let language = self.language;
+        let sep = crate::ui::text_width::glyphs::separator();
         let state = match (notice.kind, notice.freshness) {
             (ObservationKind::Models, Freshness::Captured) => local!(
                 language,
@@ -89,7 +90,7 @@ impl ModelPicker {
         };
         let timing = match (language, notice.captured_at, notice.last_attempt_at) {
             (UiLanguage::Ja, Some(captured), Some(attempted)) => format!(
-                "取得 UTC {} | 最終要求 UTC {}。",
+                "取得 UTC {}{sep}最終要求 UTC {}。",
                 time(captured),
                 time(attempted)
             ),
@@ -101,7 +102,7 @@ impl ModelPicker {
             (UiLanguage::Ja, Some(captured), None) => format!("取得 UTC {}。", time(captured)),
             (UiLanguage::En, Some(captured), None) => format!("Captured at {}.", time(captured)),
             (UiLanguage::Ja, None, Some(attempted)) => {
-                format!("取得時刻なし | 最終要求 UTC {}。", time(attempted))
+                format!("取得時刻なし{sep}最終要求 UTC {}。", time(attempted))
             }
             (UiLanguage::En, None, Some(attempted)) => format!(
                 "Capture time unavailable; last requested at {}.",
@@ -127,7 +128,7 @@ impl ModelPicker {
     }
     fn key(&mut self, key: KeyEvent, area: Rect) -> Outcome {
         let title = local!(self.language, "モデル一覧", "Models");
-        let body_height = popup::body_area(area, title, self.footer(), None).height;
+        let body_height = popup::body_area(area, title, &self.footer(), None).height;
         let page = usize::from(body_height.saturating_sub(notice_height(body_height)))
             .saturating_sub(1)
             .max(1);
@@ -270,6 +271,7 @@ impl ModelPicker {
         self.rebuild_filter();
     }
     pub(super) fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        let sep = crate::ui::text_width::glyphs::separator();
         let filtered = self.filtered();
         let notice = super::observation_notice::ObservationNotice {
             kind: super::observation_notice::ObservationKind::Models,
@@ -299,32 +301,32 @@ impl ModelPicker {
         let count = filtered.len();
         let context = match (self.language, count) {
             (UiLanguage::En, 1) => format!(
-                "{} | Filter: {} | {position} / 1 model",
+                "{}{sep}Filter: {}{sep}{position} / 1 model",
                 self.connection, self.query
             ),
             (UiLanguage::En, _) => format!(
-                "{} | Filter: {} | {position} / {count} models",
+                "{}{sep}Filter: {}{sep}{position} / {count} models",
                 self.connection, self.query
             ),
             (UiLanguage::Ja, _) => format!(
-                "{} | 絞込み: {} | {position} / {count}件",
+                "{}{sep}絞込み: {}{sep}{position} / {count}件",
                 self.connection, self.query
             ),
         };
         use super::text_width::UnicodeWidthStr;
-        let available = popup::body_area(area, &context, self.footer(), None).width as usize;
+        let available = popup::body_area(area, &context, &self.footer(), None).width as usize;
         let context = if context.as_str().width() > available {
             match (self.language, count) {
                 (UiLanguage::En, 1) => format!(
-                    "{position} / 1 model | {} | Filter: {}",
+                    "{position} / 1 model{sep}{}{sep}Filter: {}",
                     self.connection, self.query
                 ),
                 (UiLanguage::En, _) => format!(
-                    "{position} / {count} models | {} | Filter: {}",
+                    "{position} / {count} models{sep}{}{sep}Filter: {}",
                     self.connection, self.query
                 ),
                 (UiLanguage::Ja, _) => format!(
-                    "{position} / {count}件 | {} | 絞込み: {}",
+                    "{position} / {count}件{sep}{}{sep}絞込み: {}",
                     self.connection, self.query
                 ),
             }
@@ -332,7 +334,7 @@ impl ModelPicker {
             context
         };
         let title = local!(self.language, "Ctrl+T 情報", "Ctrl+T Details");
-        let body = popup::panel_recorded(frame, area, title, &context, self.footer(), &self.paint);
+        let body = popup::panel_recorded(frame, area, title, &context, &self.footer(), &self.paint);
         let notice_text = self.notice_text(&notice);
         if let Some(scroll) = self.notice_scroll {
             let captured = self.captured_at.map_or_else(

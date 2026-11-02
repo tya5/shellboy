@@ -127,6 +127,7 @@ impl State {
     pub(super) fn label_for(&self, language: crate::config::UiLanguage) -> String {
         use super::i18n::local;
         use crate::config::UiLanguage;
+        let sep = crate::ui::text_width::glyphs::separator();
         let mut messages = Vec::new();
         if self.has_snapshot {
             let at = &self.metadata_observed_at;
@@ -142,7 +143,9 @@ impl State {
             InspectionTarget::RetainedSources(scope) => {
                 let at = &scope.captured_at;
                 messages.push(match language {
-                    UiLanguage::Ja => format!("取得済み結果 {at} を保持 | 再実行は a から明示操作"),
+                    UiLanguage::Ja => {
+                        format!("取得済み結果 {at} を保持{sep}再実行は a から明示操作")
+                    }
                     UiLanguage::En => {
                         format!("Results captured at {at} are retained. Use a to rerun explicitly.")
                     }
@@ -151,14 +154,14 @@ impl State {
             InspectionTarget::HistorySources(scope) => {
                 let at = &scope.captured_at;
                 messages.push(match language {
-                    UiLanguage::Ja => format!("取得時の結果 {at} を保持 | 再取得:aから同じ履歴照会"),
+                    UiLanguage::Ja => format!("取得時の結果 {at} を保持{sep}再取得:aから同じ履歴照会"),
                     UiLanguage::En => format!("History results captured at {at} are retained. Use a to repeat the same query."),
                 });
             }
             InspectionTarget::Lists(scope) => {
                 let at = &scope.captured_at;
                 messages.push(match language {
-                    UiLanguage::Ja => format!("取得時の一覧 {at} を保持 | 新しい行はaから再取得"),
+                    UiLanguage::Ja => format!("取得時の一覧 {at} を保持{sep}新しい行はaから再取得"),
                     UiLanguage::En => {
                         format!("The list captured at {at} is retained. Use a to fetch new rows.")
                     }
@@ -200,7 +203,7 @@ impl State {
                 );
             }
         }
-        messages.join(" | ")
+        messages.join(crate::ui::text_width::glyphs::separator())
     }
 }
 impl UiState {

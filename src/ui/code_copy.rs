@@ -185,28 +185,30 @@ impl Choices {
         paint: &std::cell::Cell<Option<popup::PaintBounds>>,
         language: UiLanguage,
     ) {
+        let context = crate::ui::text_width::glyphs::decorate(i18n::local!(
+            language,
+            "保存された原文から取得 | 表示の折返しはコピーしません",
+            "From saved source | Display wrapping is not copied"
+        ));
+        let footer = crate::ui::text_width::glyphs::decorate(match self.hint_context() {
+            key_hints::Context::CodePending => i18n::local!(language, "Esc 戻る", "Esc Back"),
+            key_hints::Context::CodeBody => i18n::local!(
+                language,
+                "0 本文全体 | Esc 戻る",
+                "0 Entire body | Esc Back"
+            ),
+            _ => i18n::local!(
+                language,
+                "^v 選択 | Enter/c コピー | 1-9 番号でコピー\n0 本文全体 | Esc 戻る",
+                "^v Select | Enter/c Copy | 1-9 Copy by number\n0 Entire body | Esc Back"
+            ),
+        });
         let body = popup::panel_recorded(
             frame,
             area,
             i18n::local!(language, "コードの塊をコピー", "Copy code block"),
-            i18n::local!(
-                language,
-                "保存された原文から取得 | 表示の折返しはコピーしません",
-                "From saved source | Display wrapping is not copied"
-            ),
-            match self.hint_context() {
-                key_hints::Context::CodePending => i18n::local!(language, "Esc 戻る", "Esc Back"),
-                key_hints::Context::CodeBody => i18n::local!(
-                    language,
-                    "0 本文全体 | Esc 戻る",
-                    "0 Entire body | Esc Back"
-                ),
-                _ => i18n::local!(
-                    language,
-                    "^v 選択 | Enter/c コピー | 1-9 番号でコピー\n0 本文全体 | Esc 戻る",
-                    "^v Select | Enter/c Copy | 1-9 Copy by number\n0 Entire body | Esc Back"
-                ),
-            },
+            &context,
+            &footer,
             paint,
         );
         if let Some(error) = &self.error {

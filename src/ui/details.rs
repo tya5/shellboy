@@ -44,8 +44,11 @@ enum DetailNotice {
     Raw(String),
 }
 impl DetailNotice {
-    fn text(&self, language: UiLanguage) -> &str {
-        match self {
+    fn text(&self, language: UiLanguage) -> String {
+        if let Self::Raw(value) = self {
+            return value.clone();
+        }
+        crate::ui::text_width::glyphs::decorate(match self {
             Self::CheckingSource => {
                 local!(language, "参照元の更新を確認中", "Checking source updates")
             }
@@ -67,8 +70,8 @@ impl DetailNotice {
             Self::CheckingChange => {
                 local!(language, "参照元の変更を確認中", "Checking source changes")
             }
-            Self::Raw(value) => value,
-        }
+            Self::Raw(_) => unreachable!(),
+        })
     }
 }
 #[derive(Clone, Copy)]
@@ -130,9 +133,10 @@ pub(super) fn original_page_lines_for(
 ) -> Vec<Line<'static>> {
     #[cfg(test)]
     ORIGINAL_PREPARATIONS.with(|count| count.set(count.get() + 1));
+    let sep = crate::ui::text_width::glyphs::separator();
     let mut lines = Vec::new();
     lines.push(Line::from(format!(
-        "{} | {}",
+        "{}{sep}{}",
         safe(&body.kind),
         safe(&body.node_id)
     )));
@@ -261,6 +265,7 @@ fn entry(node: &super::UiNode, width: usize) -> (String, String) {
 }
 fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (String, String) {
     use crate::presentation::{BlockKind, PresentationKind};
+    let sep = crate::ui::text_width::glyphs::separator();
     let has_call = node
         .presentation
         .blocks
@@ -268,9 +273,11 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
         .any(|b| b.kind == BlockKind::ToolCall);
     let label = match node.presentation.kind {
         PresentationKind::User => local!(language, "あなた", "You").to_owned(),
-        PresentationKind::Assistant if has_call => {
-            local!(language, "モデル | shell呼出し", "Model | shell call").into()
-        }
+        PresentationKind::Assistant if has_call => crate::ui::text_width::glyphs::decorate(local!(
+            language,
+            "モデル | shell呼出し",
+            "Model | shell call"
+        )),
         PresentationKind::Assistant
             if node
                 .presentation
@@ -283,17 +290,21 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
                     .iter()
                     .any(|b| b.kind == BlockKind::Prose) =>
         {
-            local!(language, "モデル | 推論", "Model | reasoning").into()
+            crate::ui::text_width::glyphs::decorate(local!(
+                language,
+                "モデル | 推論",
+                "Model | reasoning"
+            ))
         }
         PresentationKind::Assistant => local!(language, "モデルの回答", "Model answer").into(),
         PresentationKind::ToolCall => local!(language, "shell呼出し", "shell call").into(),
         PresentationKind::ToolResult => match language {
-            UiLanguage::Ja => format!("shell結果 | {}", safe(&node.presentation.title)),
-            UiLanguage::En => format!("shell result | {}", safe(&node.presentation.title)),
+            UiLanguage::Ja => format!("shell結果{sep}{}", safe(&node.presentation.title)),
+            UiLanguage::En => format!("shell result{sep}{}", safe(&node.presentation.title)),
         },
         PresentationKind::Event => match language {
-            UiLanguage::Ja => format!("状態変更 | {}", safe(&node.presentation.title)),
-            UiLanguage::En => format!("State change | {}", safe(&node.presentation.title)),
+            UiLanguage::Ja => format!("状態変更{sep}{}", safe(&node.presentation.title)),
+            UiLanguage::En => format!("State change{sep}{}", safe(&node.presentation.title)),
         },
         PresentationKind::Summary => local!(language, "会話の要約", "Conversation summary").into(),
         PresentationKind::Spill
@@ -372,15 +383,14 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
         && matches!(node.role.as_str(), "tool" | "developer" | "system")
         && bounded.trim_start().starts_with('{')
     {
-        preview = local!(
+        preview = crate::ui::text_width::glyphs::decorate(local!(
             language,
             "構造化データ | Enterで詳細を確認",
             "Structured data | Enter opens details"
-        )
-        .into();
+        ));
     }
     if preview.is_empty() {
-        preview = if node.total_chars > 0 {
+        preview = crate::ui::text_width::glyphs::decorate(if node.total_chars > 0 {
             local!(
                 language,
                 "本文未読込 | Oで原文を確認",
@@ -392,8 +402,7 @@ fn entry_for(node: &super::UiNode, width: usize, language: UiLanguage) -> (Strin
                 "本文なし | Enterで詳細を確認",
                 "No text | Enter opens details"
             )
-        }
-        .into();
+        });
     }
     (label, preview)
 }
@@ -1026,6 +1035,7 @@ impl Details {
         view: &ThreadView,
         language: UiLanguage,
     ) -> Option<String> {
+        let sep = crate::ui::text_width::glyphs::separator();
         if !view.describe_calls {
             return None;
         }
@@ -1050,8 +1060,12 @@ impl Details {
                 let call_id = safe(&tool.call_id.chars().take(48).collect::<String>());
                 let command = safe(&tool.command);
                 match language {
-                    UiLanguage::Ja => format!("shell | call {call_id} | コマンドpreview {command}"),
-                    UiLanguage::En => format!("shell | call {call_id} | Command preview {command}"),
+                    UiLanguage::Ja => {
+                        format!("shell{sep}call {call_id}{sep}コマンドpreview {command}")
+                    }
+                    UiLanguage::En => {
+                        format!("shell{sep}call {call_id}{sep}Command preview {command}")
+                    }
                 }
             })
     }
@@ -1357,6 +1371,7 @@ impl Details {
         view: &ThreadView,
         language: crate::config::UiLanguage,
     ) -> Vec<crate::terminal_links::LinkRegion> {
+        let sep = crate::ui::text_width::glyphs::separator();
         self.language.set(language);
         self.reader_cache.borrow_mut().set_language(language);
         if let Some(choices) = &self.copy_choices {
@@ -1382,13 +1397,13 @@ impl Details {
             let selected = self.selected.saturating_add(1).min(count);
             match (language, count) {
                 (UiLanguage::Ja, _) => {
-                    format!("{selected} / {count}件 | 内容を選んでEnterで詳細を表示")
+                    format!("{selected} / {count}件{sep}内容を選んでEnterで詳細を表示")
                 }
                 (UiLanguage::En, 1) => {
-                    format!("{selected} / 1 item | Select an item and press Enter for details")
+                    format!("{selected} / 1 item{sep}Select an item and press Enter for details")
                 }
                 (UiLanguage::En, _) => format!(
-                    "{selected} / {count} items | Select an item and press Enter for details"
+                    "{selected} / {count} items{sep}Select an item and press Enter for details"
                 ),
             }
         } else if matches!(self.mode, Mode::Fields) {
@@ -1403,7 +1418,7 @@ impl Details {
                                 usize::from(area.width.saturating_sub(16)),
                                 language,
                             );
-                            format!("{label} | {preview}")
+                            format!("{label}{sep}{preview}")
                         })
                         .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
                 })
@@ -1415,10 +1430,10 @@ impl Details {
                     let observed = self.original_observed_at.as_deref()
                         .unwrap_or(local!(language, "未確認", "unknown"));
                     match (language, self.described_command_context_for(view, language)) {
-                        (UiLanguage::Ja, Some(command)) => format!("共有assistant原文（隣接callを含む） | {command} | 保存 {saved} | 表示受信 {observed}"),
-                        (UiLanguage::Ja, None) => format!("保存 {saved} | 表示受信 {observed}"),
-                        (UiLanguage::En, Some(command)) => format!("Shared assistant original (including adjacent calls) | {command} | Saved {saved} | Display received {observed}"),
-                        (UiLanguage::En, None) => format!("Saved {saved} | Display received {observed}"),
+                        (UiLanguage::Ja, Some(command)) => format!("共有assistant原文（隣接callを含む）{sep}{command}{sep}保存 {saved}{sep}表示受信 {observed}"),
+                        (UiLanguage::Ja, None) => format!("保存 {saved}{sep}表示受信 {observed}"),
+                        (UiLanguage::En, Some(command)) => format!("Shared assistant original (including adjacent calls){sep}{command}{sep}Saved {saved}{sep}Display received {observed}"),
+                        (UiLanguage::En, None) => format!("Saved {saved}{sep}Display received {observed}"),
                     }
                 })
                 .unwrap_or_else(|| format!("node {}", safe(&self.node_id)))
@@ -1426,9 +1441,9 @@ impl Details {
             let selected = self.selected.saturating_add(1).min(count);
             let node = safe(&self.node_id);
             match (language, count) {
-                (UiLanguage::Ja, _) => format!("{selected} / {count}件 | node {node}"),
-                (UiLanguage::En, 1) => format!("{selected} / 1 item | node {node}"),
-                (UiLanguage::En, _) => format!("{selected} / {count} items | node {node}"),
+                (UiLanguage::Ja, _) => format!("{selected} / {count}件{sep}node {node}"),
+                (UiLanguage::En, 1) => format!("{selected} / 1 item{sep}node {node}"),
+                (UiLanguage::En, _) => format!("{selected} / {count} items{sep}node {node}"),
             }
         };
         let footer = super::key_hints::detail_footer_for(self.hint_context(), language);
@@ -1468,18 +1483,15 @@ impl Details {
                     .iter()
                     .any(|source| source.unavailable_reason.is_some())
                 {
-                    parts.push(
-                        local!(
-                            language,
-                            "参照元が利用不可 | 原文の表示済みコピーとは別",
-                            "Source unavailable | This is separate from the displayed original copy"
-                        )
-                        .into(),
-                    );
+                    parts.push(crate::ui::text_width::glyphs::decorate(local!(
+                        language,
+                        "参照元が利用不可 | 原文の表示済みコピーとは別",
+                        "Source unavailable | This is separate from the displayed original copy"
+                    )));
                 }
                 parts.push(match language {
-                    UiLanguage::Ja => format!("観測 {} | R再取得", snapshot.observed_at),
-                    UiLanguage::En => format!("Observed {} | R Refresh", snapshot.observed_at),
+                    UiLanguage::Ja => format!("観測 {}{sep}R再取得", snapshot.observed_at),
+                    UiLanguage::En => format!("Observed {}{sep}R Refresh", snapshot.observed_at),
                 });
             }
             frame.render_widget(
@@ -1502,24 +1514,21 @@ impl Details {
                     let count = p.fields.len();
                     Some(match (language, count) {
                         (UiLanguage::Ja, _) => {
-                            format!("詳細{count}項目を保持・上限あり | A 対象を照会")
+                            format!("詳細{count}項目を保持・上限あり{sep}A 対象を照会")
                         }
                         (UiLanguage::En, 1) => {
-                            "1 detail field retained; limit reached | A Inspect target".into()
+                            format!("1 detail field retained; limit reached{sep}A Inspect target")
                         }
                         (UiLanguage::En, _) => format!(
-                            "{count} detail fields retained; limit reached | A Inspect target"
+                            "{count} detail fields retained; limit reached{sep}A Inspect target"
                         ),
                     })
                 } else if p.details_omitted && p.body_omitted_chars == 0 && !p.body_extent_unknown {
-                    Some(
-                        local!(
-                            language,
-                            "表示情報の保持範囲は未確認 | A 対象を照会",
-                            "Retained display extent is unknown | A Inspect target"
-                        )
-                        .into(),
-                    )
+                    Some(crate::ui::text_width::glyphs::decorate(local!(
+                        language,
+                        "表示情報の保持範囲は未確認 | A 対象を照会",
+                        "Retained display extent is unknown | A Inspect target"
+                    )))
                 } else {
                     None
                 }
@@ -1547,7 +1556,10 @@ impl Details {
                 .map(|(index, node)| {
                     let (label, preview) =
                         entry_for(node, usize::from(body.width.saturating_sub(5)), language);
-                    popup::item(&format!("{} | {label}\n  {preview}", index + 1), body.width)
+                    popup::item(
+                        &format!("{}{sep}{label}\n  {preview}", index + 1),
+                        body.width,
+                    )
                 })
                 .collect(),
             Mode::Fields => {

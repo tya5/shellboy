@@ -652,24 +652,25 @@ impl Operations {
         true
     }
     pub fn draw(&self, frame: &mut Frame<'_>, area: Rect) {
+        let sep = crate::ui::text_width::glyphs::separator();
         if let Some(form) = &self.form {
             if let Some(operation) = &form.client_confirmation {
                 let label = form.operation.label_for(form.language);
                 let title = match form.language {
-                    UiLanguage::En => format!("{label} | Confirm"),
-                    UiLanguage::Ja => format!("{label} | 確認"),
+                    UiLanguage::En => format!("{label}{sep}Confirm"),
+                    UiLanguage::Ja => format!("{label}{sep}確認"),
                 };
-                let footer = local!(
+                let footer = crate::ui::text_width::glyphs::decorate(local!(
                     form.language,
                     "Y 実行 | N/Esc 入力欄へ | ^v/PgUp/PgDn 説明を読む",
                     "Y Run | N/Esc Back to form | ^v/PgUp/PgDn Scroll"
-                );
+                ));
                 let body = popup::panel_recorded(
                     frame,
                     area,
                     &title,
                     &form.operation.cli(),
-                    footer,
+                    &footer,
                     &self.paint,
                 );
                 form.help_page.set(body.height.max(1));
@@ -685,20 +686,20 @@ impl Operations {
             if form.help {
                 let label = form.operation.label_for(form.language);
                 let title = match form.language {
-                    UiLanguage::En => format!("{label} | Guide"),
-                    UiLanguage::Ja => format!("{label} | 使い方"),
+                    UiLanguage::En => format!("{label}{sep}Guide"),
+                    UiLanguage::Ja => format!("{label}{sep}使い方"),
                 };
-                let footer = local!(
+                let footer = crate::ui::text_width::glyphs::decorate(local!(
                     form.language,
                     "Esc/F1 入力欄へ | ^v/PgUp/PgDn 説明を読む",
                     "Esc/F1 Back to form | ^v/PgUp/PgDn Scroll"
-                );
+                ));
                 let body = popup::panel_recorded(
                     frame,
                     area,
                     &title,
                     &form.operation.cli(),
-                    footer,
+                    &footer,
                     &self.paint,
                 );
                 form.help_page.set(body.height.max(1));
@@ -725,15 +726,15 @@ impl Operations {
             let conditions = form.conditions.len();
             let context = match (form.language, form.operation == OpKind::Wait, conditions) {
                 (UiLanguage::En, true, 1) => {
-                    format!("{effect} | {field_context} | 1 observation condition")
+                    format!("{effect}{sep}{field_context}{sep}1 observation condition")
                 }
                 (UiLanguage::En, true, _) => {
-                    format!("{effect} | {field_context} | {conditions} observation conditions")
+                    format!("{effect}{sep}{field_context}{sep}{conditions} observation conditions")
                 }
                 (UiLanguage::Ja, true, _) => {
-                    format!("{effect} | {field_context} | 観測条件 {conditions}件")
+                    format!("{effect}{sep}{field_context}{sep}観測条件 {conditions}件")
                 }
-                (_, false, _) => format!("{effect} | {field_context}"),
+                (_, false, _) => format!("{effect}{sep}{field_context}"),
             };
             let verb = metadata::text_for(
                 form.operation.catalogue().enter_verb(form.effect()).text(),
@@ -741,16 +742,16 @@ impl Operations {
             );
             let footer = match (form.language, form.operation == OpKind::Wait) {
                 (UiLanguage::En, true) => format!(
-                    "Esc List | Enter {verb} | F1 Guide and IDs\nTab/^v/PgUp/PgDn Select | F9 Add condition | F10 Remove"
+                    "Esc List{sep}Enter {verb}{sep}F1 Guide and IDs\nTab/^v/PgUp/PgDn Select{sep}F9 Add condition{sep}F10 Remove"
                 ),
                 (UiLanguage::En, false) => format!(
-                    "Esc List | Enter {verb} | F1 Guide and IDs\nTab/^v/PgUp/PgDn Select | <> Change choice | Ctrl+U Clear"
+                    "Esc List{sep}Enter {verb}{sep}F1 Guide and IDs\nTab/^v/PgUp/PgDn Select{sep}<> Change choice{sep}Ctrl+U Clear"
                 ),
                 (UiLanguage::Ja, true) => format!(
-                    "Esc 一覧 | Enter {verb} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | F9条件追加 | F10削除"
+                    "Esc 一覧{sep}Enter {verb}{sep}F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択{sep}F9条件追加{sep}F10削除"
                 ),
                 (UiLanguage::Ja, false) => format!(
-                    "Esc 一覧 | Enter {verb} | F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択 | <>選択値 | Ctrl+U消去"
+                    "Esc 一覧{sep}Enter {verb}{sep}F1 説明とIDの探し方\nTab/^v/PgUp/PgDn 選択{sep}<>選択値{sep}Ctrl+U消去"
                 ),
             };
             let height = form
@@ -848,27 +849,29 @@ impl Operations {
             let count = rows.len();
             let context = match (self.language, self.filter.is_empty()) {
                 (UiLanguage::En, true) => {
-                    format!("{cli} | {position}/{count} | CLI actions | {source} | Filter: none")
+                    format!(
+                        "{cli}{sep}{position}/{count}{sep}CLI actions{sep}{source}{sep}Filter: none"
+                    )
                 }
                 (UiLanguage::En, false) => format!(
-                    "{cli} | {position}/{count} | CLI actions | {source} | Filter: {}",
+                    "{cli}{sep}{position}/{count}{sep}CLI actions{sep}{source}{sep}Filter: {}",
                     self.filter
                 ),
                 (UiLanguage::Ja, true) => format!(
-                    "{cli} | {position}/{count}件 | CLIと同じ操作 | {source} | 絞込み: 未指定"
+                    "{cli}{sep}{position}/{count}件{sep}CLIと同じ操作{sep}{source}{sep}絞込み: 未指定"
                 ),
                 (UiLanguage::Ja, false) => format!(
-                    "{cli} | {position}/{count}件 | CLIと同じ操作 | {source} | 絞込み: {}",
+                    "{cli}{sep}{position}/{count}件{sep}CLIと同じ操作{sep}{source}{sep}絞込み: {}",
                     self.filter
                 ),
             };
             let title = local!(self.language, "操作", "Actions");
-            let footer = local!(
+            let footer = crate::ui::text_width::glyphs::decorate(local!(
                 self.language,
                 "絞込み | ^v/PgUp/PgDn | Ctrl+U解除 | Esc戻る/F8閉\nEnter 入力フォーム | [変更]保存 [制御]処理",
                 "Filter | ^v/PgUp/PgDn | Ctrl+U Clear | Esc Back/F8 Close\nEnter Form | [Change] Saved data [Control] Work"
-            );
-            let body = popup::panel_recorded(frame, area, title, &context, footer, &self.paint);
+            ));
+            let body = popup::panel_recorded(frame, area, title, &context, &footer, &self.paint);
             self.page
                 .set(usize::from(body.height).saturating_sub(1).max(1));
             if rows.is_empty() {
@@ -908,7 +911,10 @@ impl Operations {
                         ),
                         kind.label_for(self.language),
                         kind.shortcut_for(self.language)
-                            .map(|shortcut| format!("  {shortcut}"))
+                            .map(|shortcut| format!(
+                                "  {}",
+                                crate::ui::text_width::glyphs::decorate(shortcut)
+                            ))
                             .unwrap_or_default()
                     );
                     items.push(ListItem::new(label));
