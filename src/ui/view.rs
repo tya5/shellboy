@@ -322,7 +322,7 @@ impl ThreadView {
                 .as_ref()
                 .and_then(|name| config.connections.get(name))
                 .and_then(|c| c.default_effort.clone()),
-            title: "新しい会話".into(),
+            title: super::i18n::local!(config.ui.language, "新しい会話", "New conversation").into(),
             state: "idle".into(),
             draft: DraftSnapshot::default(),
             generation: 0,
@@ -2330,14 +2330,20 @@ impl ThreadView {
             node.presentation.kind = crate::presentation::PresentationKind::Event;
             node.presentation.event_class = crate::presentation::EventClass::Change;
             node.presentation.title = if kind == "model_stream_observation" {
-                crate::ui::text_width::glyphs::select(
+                crate::ui::text_width::glyphs::localized!(
+                    self.language,
                     "ストリーム差分 · 最終応答は確定済み",
                     "ストリーム差分 | 最終応答は確定済み",
+                    "Stream delta · Final response is already confirmed",
+                    "Stream delta | Final response is already confirmed"
                 )
             } else {
-                crate::ui::text_width::glyphs::select(
+                crate::ui::text_width::glyphs::localized!(
+                    self.language,
                     "途中で切れた応答（保存済み・会話には含めない） · /received 一覧",
                     "途中で切れた応答（保存済み・会話には含めない） | /received 一覧",
+                    "Interrupted response (saved; not part of the conversation) · /received List",
+                    "Interrupted response (saved; not part of the conversation) | /received List"
                 )
             }
             .into();
@@ -2771,8 +2777,74 @@ mod received_tests {
         assert_eq!(ui.view().received_window_revision, Some(6));
     }
     #[test]
+    fn unsaved_conversation_title_follows_language_without_creating_a_thread() {
+        for (language, title) in [
+            (crate::config::UiLanguage::Ja, "新しい会話"),
+            (crate::config::UiLanguage::En, "New conversation"),
+        ] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let ui = UiState::new(&config, std::env::temp_dir());
+            assert_eq!(ui.view().title, title);
+            assert!(ui.view().thread_id.is_none());
+        }
+    }
+
+    #[test]
+    fn settled_stream_titles_are_localized_without_changing_raw_text_or_identity() {
+        use crate::config::UiLanguage::{En, Ja};
+        use crate::ui::text_width;
+        for language in [Ja, En] {
+            for policy in [Some(1), Some(2), None] {
+                text_width::set_terminal_width(policy);
+                for (kind, ja, en) in [
+                    ("model_stream_observation", "ストリーム差分", "Stream delta"),
+                    (
+                        "incomplete_response",
+                        "途中で切れた応答",
+                        "Interrupted response",
+                    ),
+                ] {
+                    let mut config = Config::default();
+                    config.ui.language = language;
+                    let mut ui = UiState::new(&config, std::env::temp_dir());
+                    ui.view_mut().nodes.push(UiNode {
+                        node_id: "attempt-raw".into(),
+                        role: "assistant".into(),
+                        text: "raw 日本語".into(),
+                        total_chars: 7,
+                        ..Default::default()
+                    });
+                    ui.view_mut().provisional_nodes.insert("attempt-raw".into());
+                    ui.view_mut().retain_incomplete_stream(
+                        "attempt-raw",
+                        "source-raw".into(),
+                        kind,
+                    );
+                    let node = &ui.view().nodes()[0];
+                    assert_eq!(node.node_id, "source-raw");
+                    assert_eq!(node.role, "received_response");
+                    assert_eq!(node.text, "raw 日本語");
+                    assert!(
+                        node.presentation
+                            .title
+                            .contains(if language == Ja { ja } else { en })
+                    );
+                    assert_eq!(node.presentation.title.contains('·'), policy == Some(1));
+                    if kind == "incomplete_response" {
+                        assert!(node.presentation.title.contains("/received"));
+                    }
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
         ui.apply(UiUpdate::Stream {

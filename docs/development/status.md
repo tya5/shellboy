@@ -3938,3 +3938,9 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #152 stage C: Stream and unsaved-view titles (2026-11-02)
+
+Localized the transient unsaved-conversation title and the two retained stream
+presentation titles. Japanese, selected glyph alternatives, `/received`, source
+IDs, stream text, metadata and stored records remain unchanged. Receipt, recovery
+and other view candidates are tracked separately.

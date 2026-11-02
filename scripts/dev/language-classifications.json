@@ -123,5 +123,30 @@
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/ui/view.rs:60af710535490150:1": {
+    "category": "a",
+    "reason": "Reviewed retain_incomplete_stream: this Japanese glyph alternative has a complete English counterpart; source IDs, stored kind, raw text and command remain unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
+  },
+  "src/ui/view.rs:8e576edeef0007f7:1": {
+    "category": "a",
+    "reason": "Reviewed retain_incomplete_stream: this Japanese glyph alternative has a complete English counterpart; source IDs, stored kind, raw text and command remain unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
+  },
+  "src/ui/view.rs:d6ef98bf224a5d78:1": {
+    "category": "a",
+    "reason": "Reviewed ThreadView::new: the unsaved UI-only title has separate Japanese and English resources and does not create or persist a thread.",
+    "source_tokens_sha256": "017965d3d55050258ff5a600aa7d90672015abc24ca491793173142000e72ac5"
+  },
+  "src/ui/view.rs:ed7a81dfa0b66587:1": {
+    "category": "a",
+    "reason": "Reviewed retain_incomplete_stream: this Japanese glyph alternative has a complete English counterpart; source IDs, stored kind, raw text and command remain unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
+  },
+  "src/ui/view.rs:fe262706c7063e66:1": {
+    "category": "a",
+    "reason": "Reviewed retain_incomplete_stream: this Japanese glyph alternative has a complete English counterpart; source IDs, stored kind, raw text and command remain unchanged.",
+    "source_tokens_sha256": "93223fc08a556d476da41b4b6b0e84e3ed96d48aaede9250b8b25e4e360d61f8"
   }
 }

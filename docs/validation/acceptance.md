@@ -8457,3 +8457,13 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+
+### #152 stage C: Stream and unsaved-view titles (2026-11-02)
+
+Reviewed five Japanese resources with their English variants; the complete
+classification manifest validates on main 74d27461 and Python audit tests pass
+18/18. On macOS, rust-slot `cargo check --tests`, eight received-window unit
+tests and 86 UI integration tests passed (one ignored). Tests cover Ja/En and
+all three width policies, preserved raw stream text/source IDs and no implicit
+thread creation. This is a partial view batch; physical terminal testing, exact
+task CI and three-OS integration CI remain pending.
