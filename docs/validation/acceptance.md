@@ -8924,3 +8924,11 @@ Physical terminal verification is UNVERIFIED. No real terminal emulator or physi
 ## Usage-limit retry cutoff (#188, local validation passed; CI pending)
 
 Synthetic HTTP responses establish: a long explicit reset is not resent and is shown with the existing reason/kind/time; a short reset follows the normal retry schedule while bypassing only its matching shared local guard; missing reset data retains the ordinary policy. The retry bypass is cleared only on success when the shared fact is unchanged. Post-rebase formatting, `cargo check --tests`, focused long/short-reset integration tests, retry-window/bypass/cache unit tests, and Python checks passed. Exact-tip three-OS task CI must pass before handoff; record its run URL there. Synthetic cases do not establish provider-specific behavior, live billing, or real-backlog performance.
+### #151 Resource Evidence (Validation Pending)
+
+The guide's repeated PSS table is sourced from run 41405053536 and its
+artifact, with three independent cases per N and approximately 100 ms sampling;
+it does not establish true peaks. The original startup code and evidence were
+inspected to distinguish owner startup and spawn-to-echo from typing latency.
+No new real-provider request or Linux measurement was performed for this doc
+change. Exact-tip CI and post-integration validation remain pending.

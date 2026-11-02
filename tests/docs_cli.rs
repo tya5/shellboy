@@ -263,14 +263,27 @@ async fn bundled_agent_guide_explains_thread_wait_continuation_without_an_owner(
 #[test]
 fn resource_usage_guide_is_bundled_searchable_and_offline() {
     let root = tempfile::tempdir().unwrap();
-    let (success, page) = call(
-        root.path(),
-        &["docs", "get", "--id", "shellboy/resource-usage"],
-    );
-    assert!(success && page["ok"] == true, "{page}");
-    let text = page["result"]["text"].as_str().unwrap();
+    let mut cursor: Option<String> = None;
+    let mut text = String::new();
+    for page_number in 0..100 {
+        let mut args = vec!["docs", "get", "--id", "shellboy/resource-usage"];
+        if let Some(value) = &cursor {
+            args.extend(["--cursor", value]);
+        }
+        let (success, page) = call(root.path(), &args);
+        assert!(success && page["ok"] == true, "{page}");
+        text.push_str(page["result"]["text"].as_str().unwrap());
+        match page["result"].get("next_cursor") {
+            None => break,
+            Some(Value::String(value)) => cursor = Some(value.clone()),
+            Some(other) => panic!("terminal cursor must be omitted: {other}"),
+        }
+        assert!(page_number < 99, "document pagination did not terminate");
+    }
     for required in [
         "workflow run 41307629104",
+        "Workflow run 41405053536",
+        "spawn-to-echo, not keystroke-to-echo latency",
         "5a2e8474a52928eaafd35d64c3eb29dfd6c34626",
         "Stage 1: Shellboy alone",
         "Stage 2: same-run agent comparison",
@@ -286,7 +299,6 @@ fn resource_usage_guide_is_bundled_searchable_and_offline() {
     ] {
         assert!(text.contains(required), "resource guide missing {required}");
     }
-    assert!(page["result"].get("next_cursor").is_none());
     let (success, search) = call(
         root.path(),
         &[
