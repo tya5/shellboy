@@ -78,7 +78,7 @@ pub(super) fn prepare_in(
     }
     let mut fields = std::mem::take(&mut report.fields);
     if matches!(ticket.target, crate::ui::InspectionTarget::Index(_)) {
-        fields = prioritize_index(&source, fields, &mut report.omitted);
+        fields = prioritize_index(language, &source, fields, &mut report.omitted);
     }
     if ticket.target.retains_history() {
         report.omitted |= fields.len() > 128;
@@ -144,19 +144,27 @@ fn merge_previous_coverage(value: &mut Value, last: Option<&super::inspection_st
         }
     }
 }
-fn atomic_count(value: &Value) -> String {
+fn atomic_count(language: crate::config::UiLanguage, value: &Value) -> String {
     let number = value.get("value").and_then(Value::as_u64);
     match (
         number,
         value.get("complete").and_then(Value::as_bool),
         value.get("relation").and_then(Value::as_str),
     ) {
-        (Some(n), Some(true), Some("exact")) => format!("{n}（確認済み）"),
-        (Some(n), _, Some("lower_bound")) => format!("{n}以上（下限・未確認あり）"),
-        _ => "不明（未確認）".into(),
+        (Some(n), Some(true), Some("exact")) => match language {
+            crate::config::UiLanguage::Ja => format!("{n}（確認済み）"),
+            crate::config::UiLanguage::En => format!("{n} (confirmed)"),
+        },
+        (Some(n), _, Some("lower_bound")) => match language {
+            crate::config::UiLanguage::Ja => format!("{n}以上（下限・未確認あり）"),
+            crate::config::UiLanguage::En => {
+                format!("at least {n} (lower bound; unconfirmed items)")
+            }
+        },
+        _ => crate::ui::i18n::local!(language, "不明（未確認）", "Unknown (unconfirmed)").into(),
     }
 }
-fn compact_value(value: &Value) -> (String, bool) {
+fn compact_value(language: crate::config::UiLanguage, value: &Value) -> (String, bool) {
     let message = value
         .get("message")
         .or_else(|| value.pointer("/error/message"))
@@ -174,7 +182,7 @@ fn compact_value(value: &Value) -> (String, bool) {
                     .unwrap_or(text)
                     .to_owned()
             }
-            Value::Null => "未確認".into(),
+            Value::Null => crate::ui::i18n::local!(language, "未確認", "Unconfirmed").into(),
             other => other.to_string(),
         }
     };
@@ -183,96 +191,203 @@ fn compact_value(value: &Value) -> (String, bool) {
     (crate::presentation::sanitize_plain(&text, 0).0, omitted)
 }
 fn prioritize_index(
+    language: crate::config::UiLanguage,
     source: &Value,
     old: Vec<PresentationField>,
     omitted: &mut bool,
 ) -> Vec<PresentationField> {
-    const CURRENT: &[(&str, &str)] = &[
-        ("/management/auto_history", "索引 › 履歴の自動索引"),
+    let current: &[(&str, &str)] = &[
+        (
+            "/management/auto_history",
+            crate::ui::i18n::local!(
+                language,
+                "索引 › 履歴の自動索引",
+                "Index > Automatic history indexing"
+            ),
+        ),
         (
             "/management/automatic_history_reason",
-            "索引 › 自動索引の方針",
+            crate::ui::i18n::local!(
+                language,
+                "索引 › 自動索引の方針",
+                "Index > Automatic indexing policy"
+            ),
         ),
-        ("/management/status/paused", "索引 › 一時停止"),
-        ("/management/status/pause_known", "索引 › 停止状態の確認"),
-        ("/management/status/reason", "索引 › 現在の理由"),
-        ("/management/status/paused_at", "索引 › 停止日時"),
-        ("/management/status/pause_id", "索引 › 停止記録"),
-        ("/management/complete", "観測 › 全体の確認"),
+        (
+            "/management/status/paused",
+            crate::ui::i18n::local!(language, "索引 › 一時停止", "Index > Paused"),
+        ),
+        (
+            "/management/status/pause_known",
+            crate::ui::i18n::local!(
+                language,
+                "索引 › 停止状態の確認",
+                "Index > Pause status known"
+            ),
+        ),
+        (
+            "/management/status/reason",
+            crate::ui::i18n::local!(language, "索引 › 現在の理由", "Index > Current reason"),
+        ),
+        (
+            "/management/status/paused_at",
+            crate::ui::i18n::local!(language, "索引 › 停止日時", "Index > Paused at"),
+        ),
+        (
+            "/management/status/pause_id",
+            crate::ui::i18n::local!(language, "索引 › 停止記録", "Index > Pause record"),
+        ),
+        (
+            "/management/complete",
+            crate::ui::i18n::local!(language, "観測 › 全体の確認", "Observation > Complete"),
+        ),
         (
             "/management/metadata_limited",
-            "観測 › 保存メタデータの制限",
+            crate::ui::i18n::local!(
+                language,
+                "観測 › 保存メタデータの制限",
+                "Observation > Saved metadata limit"
+            ),
         ),
-        ("/unknown_work_records", "観測 › 未確認の処理記録"),
+        (
+            "/unknown_work_records",
+            crate::ui::i18n::local!(
+                language,
+                "観測 › 未確認の処理記録",
+                "Observation > Unconfirmed work records"
+            ),
+        ),
         (
             "/management/coverage_window/available",
-            "coverage › 今回の取得",
+            crate::ui::i18n::local!(language, "coverage › 今回の取得", "Coverage > Current read"),
         ),
         (
             "/management/coverage_window/current",
-            "coverage › 現在の値か",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 現在の値か",
+                "Coverage > Current value"
+            ),
         ),
-        ("/management/coverage_window/kind", "coverage › 観測種別"),
-        ("/management/coverage_window/error", "coverage › 更新結果"),
+        (
+            "/management/coverage_window/kind",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 観測種別",
+                "Coverage > Observation kind"
+            ),
+        ),
+        (
+            "/management/coverage_window/error",
+            crate::ui::i18n::local!(language, "coverage › 更新結果", "Coverage > Update result"),
+        ),
         (
             "/management/coverage_window/evaluated_sources",
-            "coverage › 今回確認した資料数",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 今回確認した資料数",
+                "Coverage > Sources evaluated"
+            ),
         ),
         (
             "/management/coverage_window/inspected_memberships",
-            "coverage › 今回調べた対象数",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 今回調べた対象数",
+                "Coverage > Memberships inspected"
+            ),
         ),
         (
             "/management/coverage_window/window_complete",
-            "coverage › このwindowの確認",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › このwindowの確認",
+                "Coverage > Window complete"
+            ),
         ),
         (
             "/management/coverage_window/scope_exhausted",
-            "coverage › 対象範囲の末尾",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 対象範囲の末尾",
+                "Coverage > Scope exhausted"
+            ),
         ),
         (
             "/management/coverage_window/read_at",
-            "coverage › 今回の観測日時",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 今回の観測日時",
+                "Coverage > Observed at"
+            ),
         ),
-        ("/management/coverage_window/stale", "coverage › 以前の観測"),
+        (
+            "/management/coverage_window/stale",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 以前の観測",
+                "Coverage > Previous observation"
+            ),
+        ),
         (
             "/management/coverage_window/last_observed_at",
-            "coverage › 以前の観測日時",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 以前の観測日時",
+                "Coverage > Previously observed at"
+            ),
         ),
         (
             "/management/coverage_window/last_read_sequence",
-            "coverage › 以前の読取番号",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 以前の読取番号",
+                "Coverage > Previous read sequence"
+            ),
         ),
         (
             "/management/coverage_window/last_observation",
-            "coverage › 以前の内容（現在ではない）",
+            crate::ui::i18n::local!(
+                language,
+                "coverage › 以前の内容（現在ではない）",
+                "Coverage > Previous details (not current)"
+            ),
         ),
     ];
     let mut fields = Vec::new();
-    if let Some(full) = old
-        .iter()
-        .find(|field| field.key.is_empty() && field.label == "すべての詳細を見る")
-    {
-        fields.push(full.clone());
-    }
-    fields.extend(
-        old.iter()
-            .filter(|field| field.key.is_empty() && field.label != "すべての詳細を見る")
-            .cloned(),
-    );
+    fields.extend(old.iter().filter(|field| field.key.is_empty()).cloned());
     for (state, label) in [
-        ("held_auto_history", "索引 › 自動索引無効による保留"),
-        ("pending", "索引 › 順番待ち"),
-        ("running", "索引 › 実行中"),
-        ("done", "索引 › 完了"),
-        ("failed", "索引 › 失敗"),
+        (
+            "held_auto_history",
+            crate::ui::i18n::local!(
+                language,
+                "索引 › 自動索引無効による保留",
+                "Index > Held while automatic indexing disabled"
+            ),
+        ),
+        (
+            "pending",
+            crate::ui::i18n::local!(language, "索引 › 順番待ち", "Index > Pending"),
+        ),
+        (
+            "running",
+            crate::ui::i18n::local!(language, "索引 › 実行中", "Index > Running"),
+        ),
+        (
+            "done",
+            crate::ui::i18n::local!(language, "索引 › 完了", "Index > Done"),
+        ),
+        (
+            "failed",
+            crate::ui::i18n::local!(language, "索引 › 失敗", "Index > Failed"),
+        ),
     ] {
         let key = format!("/management/status/counts/{state}");
         if let Some(value) = source.pointer(&key) {
             fields.push(PresentationField {
                 key,
                 label: label.into(),
-                value: atomic_count(value),
+                value: atomic_count(language, value),
                 value_omitted: true,
                 display: None,
             });
@@ -281,18 +396,27 @@ fn prioritize_index(
     if let Some(value) = source.pointer("/management/spaces_count") {
         fields.push(PresentationField {
             key: "/management/spaces_count".into(),
-            label: "索引空間の確認数".into(),
-            value: atomic_count(value),
+            label: crate::ui::i18n::local!(language, "索引空間の確認数", "Index spaces observed")
+                .into(),
+            value: atomic_count(language, value),
             value_omitted: true,
             display: None,
         });
     }
-    for (key, label) in CURRENT {
+    for (key, label) in current {
         if let Some(value) = source.pointer(key) {
             let (text, short) = if *key == "/management/coverage_window/last_observation" {
-                ("以前の観測の詳細（現在の値ではありません）".into(), true)
+                (
+                    crate::ui::i18n::local!(
+                        language,
+                        "以前の観測の詳細（現在の値ではありません）",
+                        "Previous observation details (not current)"
+                    )
+                    .into(),
+                    true,
+                )
             } else {
-                compact_value(value)
+                compact_value(language, value)
             };
             let display = key
                 .ends_with("_at")
@@ -314,8 +438,14 @@ fn prioritize_index(
     {
         fields.push(PresentationField {
             key: "/management/coverage_window/next_cursor".into(),
-            label: "次のcoverage window".into(),
-            value: "次のwindowあり（n）".into(),
+            label: crate::ui::i18n::local!(language, "次のcoverage window", "Next coverage window")
+                .into(),
+            value: crate::ui::i18n::local!(
+                language,
+                "次のwindowあり（n）",
+                "Next window available (n)"
+            )
+            .into(),
             value_omitted: true,
             display: None,
         });
@@ -550,6 +680,146 @@ mod tests {
         assert!(!result[1].stable);
     }
     #[test]
+    fn index_preserves_all_empty_key_fields_without_label_identity() {
+        let mut a = field("");
+        a.label = "caller custom".into();
+        let mut b = field("");
+        b.label = "すべての詳細を見る".into();
+        let mut c = field("");
+        c.label = "View all details".into();
+        let mut omitted = false;
+        let fields = prioritize_index(
+            crate::config::UiLanguage::En,
+            &serde_json::json!({}),
+            vec![a, b, c],
+            &mut omitted,
+        );
+        assert_eq!(
+            fields.iter().map(|f| f.label.as_str()).collect::<Vec<_>>(),
+            ["caller custom", "すべての詳細を見る", "View all details"]
+        );
+    }
+    #[test]
+    fn index_observation_passes_selected_language_to_projection() {
+        use crate::config::UiLanguage::{En, Ja};
+        use crate::frontend::inspection_read::{Dependencies, PreparedInspection};
+        use crate::frontend::inspection_state::{Completion, Observation};
+        use crate::ui::{InspectionTarget, ManagementContext};
+        let source = serde_json::json!({"management":{"status":{"counts":{"pending":{"value":2,"complete":true,"relation":"exact"}},"reason":"provider 原文"},"coverage_window":{"next_cursor":"OPAQUE"}}});
+        let target = InspectionTarget::Index(crate::protocol::IndexArgs::default());
+        let context = ManagementContext {
+            epoch: 1,
+            owner_draft: "draft".into(),
+            owner_thread: None,
+        };
+        let mut state = Observation::default();
+        state.install(1, context.clone(), target.clone(), None);
+        state.observe(&context, &target, true);
+        let ticket = state.take_metadata(tokio::time::Instant::now()).unwrap();
+        assert!(matches!(
+            state.complete_metadata(
+                &ticket,
+                1,
+                Ok(PreparedInspection {
+                    target,
+                    dependencies: Dependencies {
+                        thread: String::new(),
+                        parent_thread: None
+                    },
+                    value: source.clone(),
+                    observed_at: "now".into(),
+                    limited_fields: vec![]
+                })
+            ),
+            Completion::Updated
+        ));
+        let ticket = state.take_presentation().unwrap();
+        let en = prepare_in(En, &ticket, usize::MAX).unwrap();
+        let ja = prepare_in(Ja, &ticket, usize::MAX).unwrap();
+        assert_eq!(en.report.detail, ja.report.detail);
+        assert_eq!(ticket.metadata.value.as_ref(), &source);
+        let get = |p: &Prepared| {
+            p.snapshot
+                .fields
+                .iter()
+                .find(|f| f.key == "/management/status/counts/pending")
+                .unwrap()
+                .value
+                .clone()
+        };
+        assert_eq!(get(&en), "2 (confirmed)");
+        assert_eq!(get(&ja), "2（確認済み）");
+        assert_eq!(en.snapshot.anchors, ja.snapshot.anchors);
+    }
+    #[test]
+    fn index_localizes_generated_copy_without_translating_source() {
+        use crate::config::UiLanguage::{En, Ja};
+        for n in [0, 1, 2, 123] {
+            let exact = serde_json::json!({"value": n, "complete": true, "relation": "exact"});
+            let lower =
+                serde_json::json!({"value": n, "complete": false, "relation": "lower_bound"});
+            let unknown =
+                serde_json::json!({"value": null, "complete": false, "relation": "unknown"});
+            assert_eq!(atomic_count(En, &exact), format!("{n} (confirmed)"));
+            assert_eq!(atomic_count(Ja, &exact), format!("{n}（確認済み）"));
+            assert_eq!(
+                atomic_count(En, &lower),
+                format!("at least {n} (lower bound; unconfirmed items)")
+            );
+            assert_eq!(
+                atomic_count(Ja, &lower),
+                format!("{n}以上（下限・未確認あり）")
+            );
+            assert_eq!(atomic_count(En, &unknown), "Unknown (unconfirmed)");
+            assert_eq!(atomic_count(Ja, &unknown), "不明（未確認）");
+        }
+        let source = serde_json::json!({"management":{"status":{"reason":"provider 原文", "counts":{"pending":{"value":2,"complete":true,"relation":"exact"}}},"coverage_window":{"next_cursor":"SECRET_CURSOR", "error":null,"last_observation":{"value":"old"}}}});
+        let mut results = Vec::new();
+        for language in [En, Ja] {
+            let mut report = management::report_in(language, source.clone(), usize::MAX);
+            let fields = prioritize_index(
+                language,
+                &source,
+                std::mem::take(&mut report.fields),
+                &mut report.omitted,
+            );
+            let find = |key: &str| fields.iter().find(|f| f.key == key).unwrap();
+            assert_eq!(find("/management/status/reason").value, "provider 原文");
+            assert!(
+                !find("/management/coverage_window/next_cursor")
+                    .value
+                    .contains("SECRET_CURSOR")
+            );
+            assert_eq!(report.detail.as_ref().unwrap(), &source);
+            assert_eq!(
+                find("/management/coverage_window/error").value,
+                if matches!(language, En) {
+                    "Unconfirmed"
+                } else {
+                    "未確認"
+                }
+            );
+            assert!(
+                find("/management/coverage_window/last_observation")
+                    .value
+                    .contains(if matches!(language, En) {
+                        "not current"
+                    } else {
+                        "現在の値ではありません"
+                    })
+            );
+            assert_eq!(fields.iter().filter(|f| f.key.is_empty()).count(), 1);
+            results.push((
+                fields
+                    .iter()
+                    .map(|f| (f.key.clone(), f.value_omitted))
+                    .collect::<Vec<_>>(),
+                report.omitted,
+            ));
+        }
+        assert_eq!(results[0], results[1]);
+    }
+    #[test]
     fn index_current_facts_and_atomic_counts_survive_large_collections() {
         let probes=(0..32).map(|n|serde_json::json!({"connection":"c","model":"m","requested_dimensions":n,"dimension":n,"checked_at":"now","success":true,"error":null})).collect::<Vec<_>>();
         let spaces=(0..200).map(|n|serde_json::json!({"id":format!("space-{n}"),"model":"m","state":"active","segments":{"value":10,"complete":true,"relation":"exact"}})).collect::<Vec<_>>();
@@ -564,6 +834,7 @@ mod tests {
         let source = serde_json::json!({"management":management});
         let mut report = management::report(source.clone(), usize::MAX);
         let fields = prioritize_index(
+            crate::config::UiLanguage::Ja,
             &source,
             std::mem::take(&mut report.fields),
             &mut report.omitted,
@@ -673,6 +944,7 @@ mod tests {
         );
         let mut report = management::report(source.clone(), usize::MAX);
         let fields = prioritize_index(
+            crate::config::UiLanguage::Ja,
             &source,
             std::mem::take(&mut report.fields),
             &mut report.omitted,

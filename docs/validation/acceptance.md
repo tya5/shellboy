@@ -8652,3 +8652,15 @@ Stage C slice, not final #152 acceptance. On macOS arm64 / Rust 1.99.1,
 `cargo check --tests`, the focused regression and all ten lifecycle tests passed.
 The language audit's 18 Python tests and test layout check passed. Exact-tip
 3-OS CI is pending; physical-terminal and post-integration behavior are untested.
+
+### #152 Index Observation Copy (Validation Pending)
+
+Index prioritization selects generated labels, count confidence and coverage
+hints in the current UI language. The targeted regression covers English and
+Japanese counts 0/1/2/123, unknown and lower-bound states, raw provider reason,
+opaque cursor, details and identical field keys. Existing stale-window and large
+collection tests remain relevant. On macOS arm64 / Rust 1.99.1, `cargo check
+--tests` and all nine `frontend::inspection_presentation::tests` passed; the
+language audit's 18 Python tests and test layout check also passed. Exact-tip
+3-OS CI is pending; terminal and integration behavior are untested. This is one
+Stage C slice, not final #152 acceptance.

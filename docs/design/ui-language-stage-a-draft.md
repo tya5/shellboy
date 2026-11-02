@@ -193,3 +193,13 @@ loaded UI language. Japanese retains the existing sentence. Ordinary saved
 reasons, source bytes, limits, context values and CLI/wire responses are not
 translated or rewritten. The language is captured with the private observation;
 this does not alter recovery or loading behavior.
+
+## Index Observation Copy (#152)
+
+Index observation prioritization follows the selected UI language for its
+application-generated labels, count confidence, null fallback and coverage
+navigation text. Counts retain their exact / lower-bound / unknown distinction.
+Provider reasons and other source strings are not translated. Pointers, opaque
+cursors, underlying values, anchor derivation and the existing bounded projection
+remain unchanged. Empty-key details are retained by key, not inferred from a
+translated or caller-supplied label.
