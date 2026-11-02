@@ -579,7 +579,7 @@ pub(super) fn welcome(
     );
     if !setup.missing.is_empty() {
         return setup
-            .japanese(true)
+            .render(view.language, true)
             .lines()
             .map(|line| Line::from(crate::presentation::sanitize_plain(line, 0).0))
             .collect();
