@@ -674,7 +674,7 @@ UTC timestamps outside the period appear in `outside_period_count`.
 `elapsed_ms` is an observation, not a pass/fail
 threshold. Summary/embedding usage and monetary cost are not inferred.
 
-## Compaction forecast (`compact --dry-run`, unreleased)
+## Compaction forecast (`compact --dry-run`, v0.6.0)
 
 Use a matching current owner and CLI; published v0.5.0 does not expose this
 additive command. Preview before changing a valuable conversation:

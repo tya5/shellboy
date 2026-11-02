@@ -431,7 +431,7 @@ with `/model`; do not automatically switch cost or behavior. Expiry permits a
 new explicit request, not automatic resumption. Memory is discarded on owner
 restart. See the CLI reference for the exact supported provider error shapes.
 
-## Terminal-free startup (#5, unreleased)
+## Terminal-free startup (#5, v0.5.0)
 
 `serve --data-dir DIR --config FILE` can start a separate owner from a background
 shell without a TUI. Use a disposable explicit directory and wait for its stdout
