@@ -3967,6 +3967,13 @@ passed. Actual fault injection covers both configured locales and final UI statu
 exact-tip CI is reported separately. No #150/#157 production range changes.
 Watch recovery projection now defers with #157; panic/queue messages requiring
 root edits remain pending. No manifest adoption or final Stage C gate is claimed.
+### #152 Time Display Compatibility Candidate
+
+Locale-aware elapsed and end-time helpers preserve the legacy Japanese APIs.
+Existing message-specific English minute and hour formatting remains unchanged;
+the footer uses the localized end-time helper. The Japanese compatibility
+constants remain in the Stage C inventory pending an accepted classification.
+
 ### #152 Product Batch6: Draft Worker Notice
 
 Following #150 landing at89c570a1 and exact3OS CI41399417402, review of the
