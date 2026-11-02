@@ -566,7 +566,7 @@ mod tests {
         assert!(nodes[0].1.presentation.title.contains("途中で切れた応答"));
         assert!(nodes[1].1.presentation.title.contains("確定済み"));
         let (title, first) = list(&control, "t".into(), 1).await.unwrap();
-        assert!(title.contains("35件"));
+        assert!(title.contains("35 records"));
         assert_eq!(
             first
                 .iter()
