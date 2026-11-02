@@ -599,7 +599,7 @@ mod tests {
         let projection = prepare(raw);
         assert_eq!(projection.snapshot.run_id.as_deref(), Some("r"));
         assert_eq!(projection.snapshot.attempt_id.as_deref(), Some("a"));
-        assert_eq!(projection.snapshot.revisit.as_deref(), Some("Revisit 3"));
+        assert_eq!(projection.snapshot.revisit.as_deref(), Some("↻3"));
         assert_eq!(
             projection.snapshot.context_reduction.as_deref(),
             Some("自動縮小済み | spill 3組 | 省略 7件 | 90000>40000 chars")

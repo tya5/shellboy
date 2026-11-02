@@ -7417,7 +7417,7 @@ mod layout_cache_tests {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
-        for (epoch, label) in [(1, Some("Revisit 5 | next reserved".to_owned())), (2, None)] {
+        for (epoch, label) in [(1, Some("↻5+".to_owned())), (2, None)] {
             ui.apply(UiUpdate::Activity {
                 thread_id: "t".into(),
                 generation,
@@ -7440,7 +7440,7 @@ mod layout_cache_tests {
                 .iter()
                 .map(|c| c.symbol())
                 .collect::<String>();
-            assert_eq!(shown.contains("Revisit 5 | next reserved"), epoch == 1);
+            assert_eq!(shown.contains("↻5+"), epoch == 1);
         }
     }
 
