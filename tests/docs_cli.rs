@@ -263,12 +263,26 @@ async fn bundled_agent_guide_explains_thread_wait_continuation_without_an_owner(
 #[test]
 fn resource_usage_guide_is_bundled_searchable_and_offline() {
     let root = tempfile::tempdir().unwrap();
-    let (success, page) = call(
-        root.path(),
-        &["docs", "get", "--id", "shellboy/resource-usage"],
-    );
-    assert!(success && page["ok"] == true, "{page}");
-    let text = page["result"]["text"].as_str().unwrap();
+    let mut cursor = None::<String>;
+    let mut text = String::new();
+    loop {
+        let mut args = vec!["docs", "get", "--id", "shellboy/resource-usage"];
+        if let Some(value) = cursor.as_deref() {
+            args.extend(["--cursor", value]);
+        }
+        let (success, page) = call(root.path(), &args);
+        assert!(success && page["ok"] == true, "{page}");
+        text.push_str(page["result"]["text"].as_str().unwrap());
+        let next = page["result"].get("next_cursor");
+        match next {
+            None => break,
+            Some(value) => {
+                let value = value.as_str().expect("cursor must be a string");
+                assert_ne!(cursor.as_deref(), Some(value), "cursor did not advance");
+                cursor = Some(value.to_owned());
+            }
+        }
+    }
     for required in [
         "workflow run 41307629104",
         "5a2e8474a52928eaafd35d64c3eb29dfd6c34626",
@@ -286,7 +300,6 @@ fn resource_usage_guide_is_bundled_searchable_and_offline() {
     ] {
         assert!(text.contains(required), "resource guide missing {required}");
     }
-    assert!(page["result"].get("next_cursor").is_none());
     let (success, search) = call(
         root.path(),
         &[
