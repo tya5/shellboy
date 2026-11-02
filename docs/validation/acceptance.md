@@ -8464,3 +8464,9 @@ A scoped manifest of the 79 reviewed thread-browser decisions yields
 `src/presentation/messages.rs` fingerprint on main 2607218b. This is not a
 whole-repository acceptance result. Python `test_language_audit.py` passed 13
 tests on macOS; exact task CI and three-OS integration validation remain pending.
+
+After W1 landed on main 74d27461 (three-OS CI 41415178623), re-reviewed the
+79 Japanese browser resources against their English variants. The source is
+unchanged from 2607218b; each original decision and literal matches. Updated
+only these 79 scope fingerprints, preserving all main decisions. The complete
+classification manifest now validates. Rebased task CI is pending.
