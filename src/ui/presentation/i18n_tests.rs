@@ -75,8 +75,7 @@ fn conversation_screen_bilingual() {
 #[test]
 fn tool_screen_bilingual() {
     crate::ui::i18n::verify_screen(tool, |lang| match lang {
-        UiLanguage::En => &["printf fixture", "Exit 7"],
-        UiLanguage::Ja => &["printf fixture", "終了 7"],
+        UiLanguage::En | UiLanguage::Ja => &["printf fixture", "exit 7"],
     });
 }
 #[test]

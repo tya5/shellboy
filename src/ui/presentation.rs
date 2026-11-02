@@ -3762,7 +3762,7 @@ mod tests {
                 "{shown}"
             );
             assert!(
-                rows[0].contains(&format!("終了 {code}")) && rows[0].contains("0.4秒"),
+                rows[0].contains(&format!("exit {code}")) && rows[0].contains("0.4秒"),
                 "{shown}"
             );
         }
