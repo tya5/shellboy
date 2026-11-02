@@ -71,10 +71,10 @@ pub(super) fn copied(
             "OSC52: 原文の現在ページ（続きあり）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
         ),
         (UiLanguage::En, CopyScope::OriginalPage { has_more: true }, true, 1) => format!(
-            "OSC52: completion unconfirmed for copying the current original page (more available) ({characters} character; request sent)"
+            "OSC52: completion unconfirmed for copying the current original page (more available) ({characters} character). Request sent."
         ),
         (UiLanguage::En, CopyScope::OriginalPage { has_more: true }, true, _) => format!(
-            "OSC52: completion unconfirmed for copying the current original page (more available) ({characters} characters; request sent)"
+            "OSC52: completion unconfirmed for copying the current original page (more available) ({characters} characters). Request sent."
         ),
         (UiLanguage::Ja, CopyScope::OriginalPage { has_more: false }, false, _) => {
             format!("原文の現在ページ（このページのみ）をコピーしました（{characters}文字）")
@@ -89,10 +89,10 @@ pub(super) fn copied(
             "OSC52: 原文の現在ページ（このページのみ）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
         ),
         (UiLanguage::En, CopyScope::OriginalPage { has_more: false }, true, 1) => format!(
-            "OSC52: completion unconfirmed for copying the current original page (this page only) ({characters} character; request sent)"
+            "OSC52: completion unconfirmed for copying the current original page (this page only) ({characters} character). Request sent."
         ),
         (UiLanguage::En, CopyScope::OriginalPage { has_more: false }, true, _) => format!(
-            "OSC52: completion unconfirmed for copying the current original page (this page only) ({characters} characters; request sent)"
+            "OSC52: completion unconfirmed for copying the current original page (this page only) ({characters} characters). Request sent."
         ),
         (UiLanguage::Ja, CopyScope::ManagementPage { has_more: true }, false, _) => {
             format!("管理詳細の現在ページ（続きあり）をコピーしました（{characters}文字）")
@@ -107,10 +107,10 @@ pub(super) fn copied(
             "OSC52: 管理詳細の現在ページ（続きあり）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
         ),
         (UiLanguage::En, CopyScope::ManagementPage { has_more: true }, true, 1) => format!(
-            "OSC52: completion unconfirmed for copying the current management-detail page (more available) ({characters} character; request sent)"
+            "OSC52: completion unconfirmed for copying the current management-detail page (more available) ({characters} character). Request sent."
         ),
         (UiLanguage::En, CopyScope::ManagementPage { has_more: true }, true, _) => format!(
-            "OSC52: completion unconfirmed for copying the current management-detail page (more available) ({characters} characters; request sent)"
+            "OSC52: completion unconfirmed for copying the current management-detail page (more available) ({characters} characters). Request sent."
         ),
         (UiLanguage::Ja, CopyScope::ManagementPage { has_more: false }, false, _) => {
             format!("管理詳細の現在ページ（このページのみ）をコピーしました（{characters}文字）")
@@ -125,10 +125,10 @@ pub(super) fn copied(
             "OSC52: 管理詳細の現在ページ（このページのみ）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
         ),
         (UiLanguage::En, CopyScope::ManagementPage { has_more: false }, true, 1) => format!(
-            "OSC52: completion unconfirmed for copying the current management-detail page (this page only) ({characters} character; request sent)"
+            "OSC52: completion unconfirmed for copying the current management-detail page (this page only) ({characters} character). Request sent."
         ),
         (UiLanguage::En, CopyScope::ManagementPage { has_more: false }, true, _) => format!(
-            "OSC52: completion unconfirmed for copying the current management-detail page (this page only) ({characters} characters; request sent)"
+            "OSC52: completion unconfirmed for copying the current management-detail page (this page only) ({characters} characters). Request sent."
         ),
         (UiLanguage::Ja, CopyScope::Value, false, _) => {
             format!("項目の完全な値をコピーしました（{characters}文字）")
@@ -143,10 +143,10 @@ pub(super) fn copied(
             "OSC52: 項目の完全な値のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
         ),
         (UiLanguage::En, CopyScope::Value, true, 1) => format!(
-            "OSC52: completion unconfirmed for copying the complete field value ({characters} character; request sent)"
+            "OSC52: completion unconfirmed for copying the complete field value ({characters} character). Request sent."
         ),
         (UiLanguage::En, CopyScope::Value, true, _) => format!(
-            "OSC52: completion unconfirmed for copying the complete field value ({characters} characters; request sent)"
+            "OSC52: completion unconfirmed for copying the complete field value ({characters} characters). Request sent."
         ),
         (UiLanguage::Ja, CopyScope::Body, false, _) => {
             format!("本文全体をコピーしました（{characters}文字）")
@@ -161,10 +161,10 @@ pub(super) fn copied(
             format!("OSC52: 本文全体のコピー要求を端末へ送りました（{characters}文字・完了未確認）")
         }
         (UiLanguage::En, CopyScope::Body, true, 1) => format!(
-            "OSC52: completion unconfirmed for copying the complete body ({characters} character; request sent)"
+            "OSC52: completion unconfirmed for copying the complete body ({characters} character). Request sent."
         ),
         (UiLanguage::En, CopyScope::Body, true, _) => format!(
-            "OSC52: completion unconfirmed for copying the complete body ({characters} characters; request sent)"
+            "OSC52: completion unconfirmed for copying the complete body ({characters} characters). Request sent."
         ),
         (UiLanguage::Ja, CopyScope::CodeBlock { index }, false, _) => format!(
             "コードの塊 {index}をコピーしました（{characters}文字）",
@@ -183,11 +183,11 @@ pub(super) fn copied(
             index = index.saturating_add(1)
         ),
         (UiLanguage::En, CopyScope::CodeBlock { index }, true, 1) => format!(
-            "OSC52: completion unconfirmed for copying code block {index} ({characters} character; request sent)",
+            "OSC52: completion unconfirmed for copying code block {index} ({characters} character). Request sent.",
             index = index.saturating_add(1)
         ),
         (UiLanguage::En, CopyScope::CodeBlock { index }, true, _) => format!(
-            "OSC52: completion unconfirmed for copying code block {index} ({characters} characters; request sent)",
+            "OSC52: completion unconfirmed for copying code block {index} ({characters} characters). Request sent.",
             index = index.saturating_add(1)
         ),
     }
@@ -356,7 +356,7 @@ mod review_tests {
                 for terminal in [false, true] {
                     let english = copied(UiLanguage::En, scope, count, terminal);
                     assert!(english.is_ascii(), "{english}");
-                    assert_eq!(english.contains("request sent"), terminal);
+                    assert_eq!(english.contains("Request sent."), terminal);
                     assert_eq!(english.contains("completion unconfirmed"), terminal);
                 }
             }
@@ -365,7 +365,7 @@ mod review_tests {
             (
                 UiLanguage::En,
                 "Copied the complete body (12 characters)",
-                "OSC52: completion unconfirmed for copying the complete body (12 characters; request sent)",
+                "OSC52: completion unconfirmed for copying the complete body (12 characters). Request sent.",
             ),
             (
                 UiLanguage::Ja,
@@ -392,7 +392,7 @@ mod review_tests {
         );
         assert_eq!(
             copied(UiLanguage::En, CopyScope::CodeBlock { index: 0 }, 1, true),
-            "OSC52: completion unconfirmed for copying code block 1 (1 character; request sent)"
+            "OSC52: completion unconfirmed for copying code block 1 (1 character). Request sent."
         );
     }
 

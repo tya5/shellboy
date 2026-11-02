@@ -37,7 +37,7 @@ protocol の状態、モデルに送る指示も変わりません。そのた�
 - **OSC52 のコピー要求**: 端末へコピー要求を送ったことと OS の clipboard 更新完了は別です。
   本文全体が12文字の場合、実際の表示は
   `OSC52: 本文全体のコピー要求を端末へ送りました（12文字・完了未確認）`、英語では
-  `OSC52: completion unconfirmed for copying the complete body (12 characters; request sent)` です。
+  `OSC52: completion unconfirmed for copying the complete body (12 characters). Request sent.` です。
   コピー範囲と原文は表示言語に依存しません。
 - **強制終了 / Force quit**: 待機継続と強制終了は別の選択です。強制終了では未保存の
   データや未回収の所有プロセスが残る可能性があるため、再起動して中断作業を確認します。

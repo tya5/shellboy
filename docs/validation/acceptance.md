@@ -8316,7 +8316,7 @@ previously accepted glyph handling, untranslated data, behavior and settings.
 Copy notices now select complete Japanese/English sentences for all seven scope
 forms, OS-completed versus terminal-request outcomes, and counts 0/1/2/1,000,000;
 code-block numbering still saturates. The Japanese visible text is unchanged.
-English uses ASCII parentheses and `; request sent`, not Japanese punctuation.
+English uses ASCII parentheses and `. Request sent.`, not Japanese punctuation.
 Preview notices join complete English sentences as `. ` (without inserting a
 Japanese stop), while the Japanese join is unchanged. Failed admission keeps the
 raw error but uses ASCII parentheses in English.
@@ -8329,7 +8329,7 @@ locale and existing control, cancellation and cleanup ordering.
 
 Both guides quote `Refresh failed; previous captured result` /
 `再取得に失敗・以前の取得結果`. For a 12-character full-body OSC52 request, they quote
-`OSC52: completion unconfirmed for copying the complete body (12 characters; request sent)`
+`OSC52: completion unconfirmed for copying the complete body (12 characters). Request sent.`
 and `OSC52: 本文全体のコピー要求を端末へ送りました（12文字・完了未確認）` exactly.
 Guide-quote regression checks compare those strings with the actual formatter.
 Remaining Japanese state words in fields::state_label / management reports are

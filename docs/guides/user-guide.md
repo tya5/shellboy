@@ -40,7 +40,7 @@ same in both languages; language selection never authorizes an operation.
   then use the displayed explicit refresh/reconfirmation action.
 - **OSC52 copy request**: sending a terminal copy request does not prove that the
   OS clipboard was updated. For a complete-body copy of 12 characters, the exact
-  notices are `OSC52: completion unconfirmed for copying the complete body (12 characters; request sent)`
+  notices are `OSC52: completion unconfirmed for copying the complete body (12 characters). Request sent.`
   and `OSC52: 本文全体のコピー要求を端末へ送りました（12文字・完了未確認）`.
   Copy scope and original payload are independent of the display language.
 - **Force quit / 強制終了**: waiting and forced exit remain separate choices.
