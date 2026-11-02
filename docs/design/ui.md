@@ -180,3 +180,14 @@ Preserve each error code, source reason, key action,
 limit, pagination/hash guard and copied bytes. An untranslated generated prefix
 must not be used as a comparison token or bundled with source bytes. Stage C
 product changes are excluded from0.6.0; this applies to the next release only.
+
+### #174 Owned-work footer deduplication
+
+Show the saved oldest-work and last-output ages in the owned-work heading,
+including when folded, with the existing localized text and separators. When the
+owned-work region has positive height, do not repeat its summary in the status
+bar. When its height is zero, preserve the existing status summary as a
+fallback. Compute this from the current frame's region, including after resize;
+do not add I/O or persisted state. Other status fields, glyphs, wording and
+order are unchanged. Update the bilingual help and cover the visible, folded,
+height-zero and resized cases with rendered-frame tests.
