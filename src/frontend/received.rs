@@ -629,9 +629,9 @@ mod tests {
         assert_eq!(nodes[0].0, "anchor");
         assert_eq!(nodes[0].1.node_id, "n34");
         let (title, latest) = list(&control, "t".into(), 1).await.unwrap();
-        assert!(title.contains("36件"));
+        assert!(title.contains("36 records"));
         let empty = latest.iter().find(|field| field.value == "empty").unwrap();
-        assert_eq!(empty.displayed(), "依頼本文なし");
+        assert_eq!(empty.displayed(), "No request text");
         refresh(
             &control,
             &tx,
