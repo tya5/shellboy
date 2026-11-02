@@ -84,19 +84,50 @@ pub(super) fn overflow_prefix(s: &Snapshot, completed: usize) -> usize {
     }
     count
 }
+fn turn_user(group: &Group, id: &str) -> bool {
+    group.sources.iter().any(|n| {
+        n.turn.as_deref() == Some(id)
+            && (n.payload["role"] == "user"
+                || n.payload.pointer("/item/role").is_some_and(|r| r == "user"))
+    })
+}
 pub(super) fn request_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize> {
     let id = turn?;
     // A marker authored during this Turn must not displace its selected user request.
-    if let Some(index) = s.groups.iter().position(|g| {
-        g.sources.iter().any(|n| {
-            n.turn.as_deref() == Some(id)
-                && (n.payload["role"] == "user"
-                    || n.payload.pointer("/item/role").is_some_and(|r| r == "user"))
-        })
-    }) {
+    if let Some(index) = s.groups.iter().position(|g| turn_user(g, id)) {
         return Some(index);
     }
     turn_boundary(s, turn)
+}
+/// Active-Turn middle segment (#181): the oldest run of whole groups after the
+/// current request and before the latest complete tool group, which starts the
+/// retained recent working suffix. Incomplete or protected groups and every
+/// user message of the active Turn are fences. A run qualifies only if it holds
+/// a tool group or spill marker, so a previous summary alone is never a target
+/// and an unchanged long Turn does not re-fire (#180).
+pub(super) fn active_turn_range(s: &Snapshot) -> Option<Range<usize>> {
+    let turn = s.current_turn.as_deref()?;
+    let request = request_boundary(s, Some(turn))?;
+    let latest = s.groups.iter().rposition(|g| g.complete && g.tool)?;
+    let fence = |i: usize| !range::group_is_safe(s, i) || turn_user(&s.groups[i], turn);
+    let mut start = request + 1;
+    while start < latest {
+        if fence(start) {
+            start += 1;
+            continue;
+        }
+        let end = (start..latest).find(|&i| fence(i)).unwrap_or(latest);
+        if s.groups[start..end].iter().any(|g| {
+            g.tool
+                || g.sources
+                    .iter()
+                    .any(|n| n.payload.get("spill_version").is_some())
+        }) {
+            return Some(start..end);
+        }
+        start = end;
+    }
+    None
 }
 pub(super) fn turn_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize> {
     let turn = turn?;
@@ -156,6 +187,39 @@ mod tests {
         s.groups[3].sources[0].payload = json!({"spill_version":1,"text":"omitted output"});
         assert_eq!(summary_range(&s, false), Some(0..1));
         assert!(spill_ranges(&s, false).is_empty());
+    }
+
+    #[test]
+    fn active_turn_range_keeps_request_user_messages_and_working_suffix() {
+        let mut s = staged_snapshot();
+        // request "current"(2), old tool group(3), spill(4), latest tool(5)
+        assert_eq!(active_turn_range(&s), Some(3..5));
+        // A later user message of the active Turn is a fence.
+        s.groups[2].sources[0].payload = json!({"role":"user","content":"request"});
+        assert_eq!(active_turn_range(&s), Some(3..5));
+        s.groups[4].sources[0].turn = Some("current".into());
+        s.groups[4].sources[0].payload = json!({"role":"user","content":"more"});
+        assert_eq!(active_turn_range(&s), Some(3..4));
+        // Incomplete groups are fences; a run without any tool group or
+        // spill marker (e.g. a previous summary alone) is no target.
+        let mut s = staged_snapshot();
+        s.groups[3].complete = false;
+        assert_eq!(active_turn_range(&s), None);
+        s.groups[4].sources[0].payload = json!({"spill_version":1,"output":[]});
+        assert_eq!(active_turn_range(&s), Some(4..5));
+        s.groups[4].sources[0].payload = json!({"item":{"role":"developer","content":[]}});
+        assert_eq!(active_turn_range(&s), None);
+        let mut s = staged_snapshot();
+        s.protected.insert("a-result".into());
+        assert_eq!(active_turn_range(&s), None);
+        // The latest complete tool group is never covered; no active Turn or
+        // no complete tool group after the request means no target.
+        let mut s = staged_snapshot();
+        s.groups.truncate(4);
+        assert_eq!(active_turn_range(&s), None);
+        let mut s = staged_snapshot();
+        s.current_turn = None;
+        assert_eq!(active_turn_range(&s), None);
     }
 
     #[test]

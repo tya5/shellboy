@@ -99,6 +99,7 @@ pub(super) async fn maybe_compact(
     control.changed(&snapshot.thread);
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
+    let mut midturn = Value::Null;
     let result: Result<Value, ApiError> = async {
     let spill = control
         .compactor
@@ -107,10 +108,7 @@ pub(super) async fn maybe_compact(
     let observation = match spill {
         Err(error) if error.is_storage_failure() => return Err(error),
         Err(error) => json!({"outcome":"rejected","error":error}),
-        Ok(spill) => match control
-            .compactor
-            .summarize(&snapshot.thread, false, slot.stop.clone())
-            .await
+        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, &mut midturn).await
         {
             Ok(mut summary) => {
                 summary.spilled_groups += spill.spilled_groups;
@@ -169,6 +167,9 @@ pub(super) async fn maybe_compact(
     let summary_rejected = observation.get("summary_error").is_some();
     budget.last_non_adopted_input = (!adopted || summary_rejected).then_some(evidence.input_tokens);
     observation["reason"] = json!(REASON);
+    if !midturn.is_null() {
+        observation["midturn"] = midturn;
+    }
     observation["trigger"] = json!({
         "auto_at_tokens": threshold,
         "input_tokens": evidence.input_tokens,
@@ -192,6 +193,29 @@ pub(super) async fn maybe_compact(
         .map_err(storage_error)?;
     control.changed(&snapshot.thread);
     Ok(true)
+}
+
+/// One summary operation per attempt (#181): the active-Turn middle segment
+/// when it has a target, otherwise the ordinary prefix summary as before.
+async fn summarize_once(
+    control: &Arc<Control>,
+    thread: &str,
+    slot: &DriverSlot,
+    midturn: &mut Value,
+) -> Result<crate::compaction::CompactResult, ApiError> {
+    let active = control
+        .compactor
+        .summarize_active_turn(thread, slot.stop.clone())
+        .await;
+    if matches!(&active, Ok(result) if result.no_target) {
+        *midturn = json!({"skipped":"no_target"});
+        return control
+            .compactor
+            .summarize(thread, false, slot.stop.clone())
+            .await;
+    }
+    *midturn = json!({"scope":"active_turn"});
+    active
 }
 
 #[cfg(test)]

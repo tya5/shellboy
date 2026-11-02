@@ -12,12 +12,15 @@ cached/input ratio of 84.34% excluding the first request, against 49.76% on main
 conditions) awaits the user's approval.
 ## Mid-Turn summary design (#181, awaiting review)
 ## Mid-Turn summary design (#181, implementation on hold)
+## Mid-Turn active-Turn summary (#181, branch CI pending)
 
-The [midturn-compaction](../design/midturn-compaction.md) memo was reviewed. The
-drop-reasoning default (new epoch at adoption) applies to all adapters; Claude
-is supported by documentation but not live-validated. The paid GPT-route check
-of the B request shape passed (see acceptance). Next: implement only after the
-coordinator confirms; #182 tracks the existing edits on Claude 5.1+ with thinking.
+Proactive compaction now replaces the oldest eligible run of whole groups inside
+a long active Turn with one developer summary instead of the ordinary summary,
+keeping the request, later user messages and the latest complete tool group
+onward. Adoption starts a new reasoning epoch. See
+[compaction](../design/compaction.md#active-turn-middle-summary-181). No
+migration or setting. Next: 3-OS CI, then merge sequencing with
+issue-183/append-context and #180 (coordinator). #182 is separate.
 
 ## Paused index consumption (#173)
 

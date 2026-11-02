@@ -2,9 +2,9 @@
 
 Status: **A adopted; B's real-data condition was met on 2026-11-03 and the user
 approved pursuing it (#181).** The concrete B design is in
-[midturn-compaction.md](midturn-compaction.md): it was reviewed and decided with a
-drop-reasoning default, and its implementation is on hold until the coordinator
-confirms. Until it ships, A remains the behaviour. C and D are not adopted. No new mid-Turn summarization or configuration is authorized. The
+[midturn-compaction.md](midturn-compaction.md): it was reviewed, decided with a
+drop-reasoning default, and implemented (B adopted, replacing A's "no mid-Turn
+reduction"). C and D are not adopted. No new mid-Turn summarization or configuration is authorized. The
 existing spill placeholder is simplified separately: it no longer duplicates
 call arguments, which remain on the call item; it retains the original result
 reference and reports the UTF-8 byte length of the original serialized tool-result output.

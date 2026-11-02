@@ -380,6 +380,34 @@ is reused; no extra source lookup or raw error parsing is introduced (#132).
 A second Run triggered by the
 same measurement overwrites the earlier record on that attempt.
 
+## Active-Turn middle summary (#181)
+
+Adopted design and evidence: [midturn-compaction](midturn-compaction.md). In the
+#125 proactive attempt, after the unchanged spill, `Compactor::summarize_active_turn`
+runs instead of the ordinary prefix summary whenever it has a target; with no
+target, the ordinary summary runs exactly as before. One summary operation per
+attempt. The attempt record adds `midturn: {"scope":"active_turn"}` or
+`{"skipped":"no_target"}`. Manual `/compact` and explicit edits are unchanged.
+
+Target (`policy::active_turn_range`, pure): the oldest run of whole groups
+after the current request and before the latest complete tool group. Fences are
+incomplete or protected groups and every user message of the active Turn; the
+latest complete tool group onward is the retained working suffix. A run
+qualifies only if it contains a tool group or spill marker, so an unchanged
+long Turn whose only candidate is the previous summary has no target (#180).
+
+Summary: the existing bounded map/reduce, limits, refusal/empty/shrink
+rejections and cache keys. The adopted developer item starts with a fixed
+notice (covered tools already ran; inspect before repeating; originals via
+history get), and the payload has out-of-band `summary_scope: "active_turn"`.
+Adoption is the existing `SummaryAdoption` transaction with the full snapshot
+fence. It additionally advances `thread.reasoning_epoch`, so no reasoning or
+opaque block saved before the adoption is replayed on any adapter (this is an
+explicit exception to "do not re-assign the epoch" above, for this operation
+only). Responses after it carry the new epoch. No schema change, migration or
+setting. A rejected candidate leaves the path and epoch unchanged and uses the
+#153 retry gate like any non-adopted outcome.
+
 ## Summary request usage (#133 / D-020)
 
 Every summary request (map and reduce, from explicit `--summary`, argument-free

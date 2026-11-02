@@ -1,7 +1,10 @@
 # Mid-Turn Middle-Segment Summary (#181, option B)
 
-Status: **Reviewed 2026-11-03 with decisions (below); implementation on hold**
-until the coordinator confirms after a competitor/provider-feature survey.
+Status: **Adopted and implemented (2026-11-03)** after review, the survey and the
+GPT-route validation. Adopted contract summary: [compaction](compaction.md#active-turn-middle-summary-181).
+Implementation differences from this memo: the readback `compact list` metric
+for the scope is not added (the `midturn` object is in the saved attempt record),
+and the function is named `active_turn_range`/`summarize_active_turn`.
 This memo makes the prerequisites of option B in
 [midturn-compaction-options.md](midturn-compaction-options.md) concrete. It does
 not change any adopted contract until approved. Baseline: [compaction](compaction.md)
@@ -21,7 +24,7 @@ code was changed; sources were read at `origin/main` 777c100d.
 3. Paid validation only through the user's GPT subscription route (`litellm`).
    No Claude or OpenRouter request; Claude is recorded as not validated
    (section 9).
-4. Implementation waits for the coordinator's confirmation (status above).
+4. Implementation was confirmed after the survey and landed on this branch.
 5. Survey (2026-11-03): Codex, OpenCode and Goose compact mid-Turn and carry no
    reasoning across it. In Codex (OpenAI's client, `openai/codex` at 40cf1685),
    `codex-rs/core/src/session/turn.rs` (around L688-735) runs auto compaction
@@ -372,7 +375,7 @@ worker or dependency.
 
 ## Open questions
 
-1. Implementation waits for the coordinator's confirmation after the survey.
+1. Implemented; 3-OS CI is recorded in acceptance.
 2. Cache effect of an adoption (section 8) is unmeasured; measure with the
    implemented B through Shellboy's own requests (with its routing headers).
 3. Thread-wide epoch drop also discards earlier-Turn reasoning. A positional

@@ -7,6 +7,9 @@ pub(super) struct SummaryAdoption {
     pub(super) start: usize,
     pub(super) count: usize,
     pub(super) result: CompactResult,
+    /// #181: an active-Turn replacement starts a new reasoning epoch, so no
+    /// reasoning or opaque block saved before it is replayed afterwards.
+    pub(super) new_epoch: bool,
 }
 impl SummaryAdoption {
     pub(super) fn adopt_tx(
@@ -38,6 +41,12 @@ impl SummaryAdoption {
             &path,
             &timestamp(),
         )?;
+        if self.new_epoch {
+            tx.execute(
+                "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",
+                [&self.snapshot.thread],
+            )?;
+        }
         self.result.summary_node_id = Some(node);
         Ok(self.result)
     }

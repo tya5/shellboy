@@ -3537,6 +3537,77 @@ async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
     }).await.unwrap();
 }
 
+/// #181: in a long Turn, proactive compaction replaces the old middle segment
+/// with one developer summary, keeps the request and the latest tool group, and
+/// starts a new reasoning epoch, so no earlier reasoning is replayed.
+#[tokio::test]
+async fn proactive_active_turn_summary_replaces_middle_and_drops_reasoning() {
+    crate::test_watchdog::watchdog("proactive active-Turn summary", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        send(&control, &target, "long current turn").await;
+        for (index, tokens) in [(0, 100), (1, 100), (2, 250)] {
+            let current = incoming(&control, &mut receive).await;
+            current.reply.send((200, json!({"id":format!("step-{index}"),"status":"completed",
+                "usage":{"input_tokens":tokens,"output_tokens":1},
+                "output":[
+                    {"type":"reasoning","id":format!("rs-{index}"),"summary":[],"encrypted_content":"E".repeat(4_000)},
+                    {"type":"function_call","call_id":format!("step-{index}"),"name":"shell",
+                     "arguments":json!({"command":format!("echo STEP{index}")}).to_string()}
+                ]}))).unwrap();
+        }
+        let summary = incoming(&control, &mut receive).await;
+        assert_eq!(summary.body["tools"], json!([]), "the attempt must summarize before continuing");
+        let material = summary.body["input"].to_string();
+        assert!(material.contains("step-0") && material.contains("step-1"), "covered groups are summary input");
+        assert!(!material.contains("step-2"), "the latest tool group stays verbatim");
+        assert!(!material.contains("EEEE"), "encrypted reasoning is never summary material");
+        let mut reply = answer("## Goal\nRun steps\n## Current state\nSTEP0 and STEP1 ran");
+        reply["usage"] = json!({"input_tokens":50,"output_tokens":5});
+        summary.reply.send((200, reply)).unwrap();
+        let after = incoming(&control, &mut receive).await;
+        assert_ne!(after.body["tools"], json!([]));
+        let input = after.body["input"].as_array().unwrap();
+        assert!(input.iter().all(|item| item["type"] != "reasoning"), "no reasoning from before the adoption: {input:?}");
+        assert!(input.iter().all(|item| item["call_id"] != "step-0" && item["call_id"] != "step-1"));
+        assert!(input.iter().any(|item| item["type"] == "function_call" && item["call_id"] == "step-2"));
+        assert!(input.iter().any(|item| item["type"] == "function_call_output" && item["call_id"] == "step-2"));
+        let request = input.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
+        let notice = input.iter().position(|item| item.to_string().contains("summary of earlier work in the active Turn")).unwrap();
+        let latest = input.iter().position(|item| item["call_id"] == "step-2").unwrap();
+        assert!(request < notice && notice < latest, "request, summary, then the retained suffix");
+        assert_eq!(input[notice]["role"], "developer");
+        // A response after the adoption carries the new epoch and is replayed.
+        after.reply.send((200, json!({"id":"step-3","status":"completed","usage":{"input_tokens":120,"output_tokens":1},
+            "output":[{"type":"reasoning","id":"rs-3","summary":[],"encrypted_content":"NEW"},
+                {"type":"function_call","call_id":"step-3","name":"shell","arguments":json!({"command":"echo STEP3"}).to_string()}]}))).unwrap();
+        let next = incoming(&control, &mut receive).await;
+        assert_ne!(next.body["tools"], json!([]), "below the threshold: no further summary");
+        let reasoning: Vec<_> = next.body["input"].as_array().unwrap().iter().filter(|item| item["type"] == "reasoning").collect();
+        assert_eq!(reasoning.len(), 1);
+        assert_eq!(reasoning[0]["encrypted_content"], "NEW");
+        next.reply.send((200, answer("finished"))).unwrap();
+        settled(&control, &target).await;
+        let events = proactive_events(&control, &target).await;
+        assert_eq!(events.len(), 1, "{events:#?}");
+        assert_eq!(events[0]["state"], "adopted");
+        let attempt_id = events[0]["attempt_id"].as_str().unwrap().to_owned();
+        let (saved, epoch, executions): (String, i64, i64) = control.store.database.call(move |db| Ok((
+            db.query_row("SELECT error_json FROM model_attempt WHERE id=?1", [attempt_id], |r| r.get(0))?,
+            db.query_row("SELECT reasoning_epoch FROM thread", [], |r| r.get(0))?,
+            db.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get(0))?,
+        ))).await.unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["automatic_trim_attempt"]["midturn"]["scope"], "active_turn");
+        assert_eq!(epoch, 1);
+        assert_eq!(executions, 4, "no saved tool is executed again");
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+    }).await.unwrap();
+}
+
 /// Two completed Turns (input 50 then `second`), then a third request. Returns
 /// how many summary (tool-free) requests preceded the third ordinary request.
 async fn proactive_third_turn(
