@@ -8224,3 +8224,30 @@ warning regression. A self-review regression keeps JSON-looking provider string
 values opaque before generic safe-detail expansion. Python checks pass (134).
 Exact candidate branch CI remains pending; evidence is reported separately.
 Windows, physical terminal/IME and real Azure/provider behavior remain unverified.
+
+### #159 restack after #160 main landing (2026-11-02)
+
+Base b0265deb615ce157e0c9acfa57224be307aa0786 is the confirmed #160 main,
+with exact three-OS CI41388835583 success. The four #159 feature patches reapply
+without conflict and range-diff marks every patch equal. Existing main acceptance,
+status and decision records remain intact; record-delta against b0265deb reports
+zero removed lines. This restack adds evidence instead of replacing either side's
+prior records. #160's attachment selection, both test files and recovery guide
+are byte-identical to the landed base.
+
+Fresh native macOS validation, shared rust-slot, locked dependencies, build/test
+threads2 and refreshed source mtimes: fmt --check, check --tests and all-target
+Clippy -D warnings succeed; all ten filter unit tests and both filter integration
+tests pass. The landed #160 regression
+`issue_160_auto_compaction_detached_attachment_and_retry` passes (one test), as
+ does `detached_excluded_tombstones_do_not_hide_active_or_live_source_errors`
+(one test). These are actual mock compaction/send/retry and active/live-source
+protection checks in the combined tree. An initial `excluded_attachment` filter
+matched zero tests and is not counted as coverage; the two explicit names were
+then run and each reported one pass. Layout102 and watchdog policy pass.
+
+No feature code, retry policy, attachment rule, config, glyph or existing assertion
+changed during restack. New exact task CI is pending; its SHA and outcome are
+reported in the formal handoff. Windows for this new candidate, physical terminal,
+IME, real provider and OS clipboard remain unverified. No real user data, provider
+API, installation, release or main push is involved.

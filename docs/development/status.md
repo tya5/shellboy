@@ -3815,3 +3815,13 @@ integrated mock tests (JSON/SSE, both languages, absent verdicts, Turn/Run readb
 the generic safe-detail viewer independently expands container-like strings.
 Layout/watchdog checks and 134 Python checks pass. Branch CI is pending.
 No real API, clipboard, installation or release used.
+
+### #159 after landed #160 (2026-11-02)
+
+Rebased the four approved filter commits onto confirmed main b0265deb (#160),
+all patches equal and no conflicts. Main records and all #160 source/test/guide
+changes remain intact. Fresh shared-slot locked/two-thread macOS fmt/check/Clippy,
+ten filter unit and two filter integration tests pass. Both named #160 attachment
+regressions also pass (one each); zero-test selectors are not accepted as evidence.
+Task CI and formal exact-SHA handoff are pending; no runtime/policy/config change
+is introduced by this documentation-only restack evidence.
