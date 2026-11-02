@@ -126,6 +126,8 @@ class Screen:
 
     def csi(self, sequence):
         command, raw = sequence[-1], sequence[:-1]
+        if raw == '?' and command == 'u':
+            return  # Keyboard enhancement capability query; it does not paint cells.
         if raw.startswith('?') and command in 'hl':
             modes = [int(part) for part in raw[1:].split(';')]
             if set(modes) - {1, 7, 12, 25, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1049, 2004, 2026}:
