@@ -2,7 +2,8 @@
 
 [Guide index](README.md) - [Configuration](configuration.md) - [Search and indexing](rag.md)
 
-These are observations of a **fake-model workload**, not product rankings or
+Except for the explicitly identified real-model token observation at the end,
+these are observations of a **fake-model workload**, not product rankings or
 predictions for a real model. They describe sampled process memory and observed
 terminal startup, not response quality, capability, token costs or peak memory.
 Only compare agents **within the same comparison run and artifact**. Even two
@@ -239,3 +240,72 @@ launchd hotkey agent outside temporary HOME. See the source checkout's
 snapshot retries and workload provenance. Inspect `status`, `smoke`, source
 SHA, versions, `machine`, `config`, `processes` and request/answer counts before
 using a JSON result; do not replace errors with zero or compare partial cases.
+
+## Real-model token observation (partial, 2026-11-02)
+
+One explicitly approved local run used `gpt-6.1-terra` through a pre-existing
+LiteLLM proxy on macOS arm64, with one fresh conversation per agent and the same
+five synthetic workspace instructions as the fake-model workload. This is a
+single partial observation, not a ranking, a repeated experiment, or evidence
+of model quality. Shellboy 0.6.1 (source base `45c34c75`), Codex CLI 0.165.0,
+Claude Code 2.1.316 and OpenCode 1.19.5 were selected. Shellboy and Codex used
+Responses; Claude used the proxy's Messages compatibility endpoint. OpenCode's
+planned route was Chat Completions. Shellboy had `response_max_retries=0`;
+Codex's custom provider had request and stream retries disabled, and its
+`incremental_tools` and `code_mode_host` flags set to false. Claude's
+`CLAUDE_CODE_MAX_RETRIES` was zero. Codex nevertheless used its `additional_tools`
+custom-tool form. Such settings and versions affect request size and comparison
+with earlier fake-model runs. The proxy may transform usage, so these numbers
+cannot be independently distinguished from raw provider usage.
+
+Shellboy and Codex completed five prompts; on Claude's first API request the
+relay received an upstream error and stopped the entire experiment as planned.
+The error response contained no usable usage counters; the reason and HTTP
+status were not retained. OpenCode was not started. jcode was not measured
+because no local Linux environment was available. No retry or replacement run
+was attempted. The pre-existing proxy's accepted configuration could perform
+up to two internal retries on errors; **usage from internal retries is unknown**,
+including any work associated with the failed request. Consequently, the sum of
+reported successful responses below is not a guaranteed total consumption.
+
+| Agent | Completed API requests with usage | Input | Cached input | Output | Cached / input, all | Cached / input, after first API request |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Shellboy | 10 | 42,433 | 17,920 | 224 | 42.23% (10 requests) | 45.35% (9 requests) |
+| Codex CLI | 9 | 113,394 | 49,408 | 360 | 43.57% (9 requests) | 48.89% (8 requests) |
+| Claude Code | 0 | unknown | unknown | unknown | unknown | unknown |
+| OpenCode | 0 | not measured | not measured | not measured | not measured | not measured |
+
+Each row below is one successful API response, in its agent's request order;
+the three numbers are input / cached input / output tokens. Cached input is a
+subset of input, not an additional charge or input count.
+
+| API request | Shellboy | Codex CLI |
+| ---: | --- | --- |
+| 1 | 2,917 / 0 / 32 | 12,338 / 0 / 51 |
+| 2 | 3,191 / 1,792 / 5 | 12,404 / 0 / 45 |
+| 3 | 3,486 / 0 / 37 | 12,468 / 0 / 69 |
+| 4 | 3,760 / 1,792 / 15 | 12,552 / 12,288 / 19 |
+| 5 | 4,101 / 1,792 / 38 | 12,598 / 12,416 / 73 |
+| 6 | 4,399 / 0 / 42 | 12,686 / 12,416 / 17 |
+| 7 | 4,695 / 1,792 / 8 | 12,720 / 0 / 64 |
+| 8 | 5,013 / 1,792 / 29 | 12,799 / 0 / 17 |
+| 9 | 5,283 / 4,480 / 13 | 12,829 / 12,288 / 5 |
+| 10 | 5,588 / 4,480 / 5 | not applicable |
+
+Of observed requests, `x-litellm-session-id` was present on 10/10 Shellboy,
+0/9 Codex, and 0/1 Claude requests; `x-litellm-trace-id` was present on 0/10,
+0/9 and 0/1 respectively; `X-Shellboy-Session-Id` was present on 10/10, 0/9
+and 0/1 respectively. Header values were not retained. OpenCode headers were
+not measured. Presence does not establish the cause of a cache hit.
+
+The relay serialized requests, fixed the output limit at 2,048, and stopped on
+an error or missing/invalid usage. Its aggregate reported input-plus-output
+budget was 1,500,000; before each request it reserved `ceil(previous input *
+1.5) + 2,048`, or 102,048 before the first request. This is a reserve, not a
+hard bound on the next input: an in-flight spike can exceed the budget.
+Reported successful-response usage was 156,411 input plus output tokens at the
+stop, excluding the unknown failed request and any unobserved internal retries.
+Fake-server tests covered all four clients, the three wire formats, model and
+endpoint guards, error and missing-usage stops, ratios and header presence;
+separate macOS sandbox probes checked selected TCP/Unix socket and file access.
+These checks do not prove the real provider's internal behavior.

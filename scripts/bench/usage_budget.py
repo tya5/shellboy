@@ -3,7 +3,6 @@
 This module does not perform network I/O or launch agents.
 """
 from dataclasses import dataclass, field
-import math
 
 
 class StopExperiment(RuntimeError):
@@ -31,7 +30,7 @@ class Budget:
             raise StopExperiment(self.stopped)
         if self.pending:
             self.stop('concurrent requests are forbidden')
-        reserve = self.first_input_reserve if self.last_input is None else math.ceil(self.last_input * 1.5)
+        reserve = self.first_input_reserve if self.last_input is None else (3 * self.last_input + 1) // 2
         if self.total >= self.limit or self.limit - self.total < reserve + self.max_output:
             self.stop('reported usage budget exhausted or insufficient reserve')
         self.pending = True
@@ -150,6 +149,7 @@ def validate_request(path, body):
         raise StopExperiment('missing or excessive output limit')
     if body.get('stream') is not True:
         raise StopExperiment('streaming usage is required')
-    if body.get('models') or body.get('fallbacks') or body.get('route'):
-        raise StopExperiment('fallback routing is forbidden')
+    if any(key in body for key in ('models', 'fallbacks', 'route', 'api_base', 'base_url',
+                                   'api_key', 'custom_llm_provider', 'litellm_params')):
+        raise StopExperiment('fallback or route overrides are forbidden')
     return wire
