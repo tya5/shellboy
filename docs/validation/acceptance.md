@@ -27,6 +27,23 @@ off-by-one raw counter. Local full runs share a build directory with other
 worktrees; unrelated failures traced to that sharing (a stale RAG `--cursor`
 binary, a missing `shellboy` binary) passed after a rebuild. Branch CI on three
 OSes is the acceptance gate; Windows and Linux are not verified locally.
+## Recovery trim keeps active-Turn inputs (#185, 2026-11-03)
+
+Commits 112764cf + 0049e9bf (format) on `issue-185/keep-turn-inputs`, stacked on
+#181. New pure planner test `turn_input_tests::recovery_trim_retains_request_and_midturn_messages`
+and end-to-end `response_retries::overflow_trim_keeps_every_user_input_of_the_active_turn`.
+The end-to-end test runs a real Driver Turn with three tool rounds, each with
+about 20K characters of output, and delivers three leader messages into the
+same Turn. An explicit context-overflow response then triggers the automatic
+maximum omission. The test asserts that the next request still contains the
+request and all three messages in order around the omission notice, that the
+earliest tool output was omitted, and that there were 3 shell executions and
+1 trim marker. GitHub Actions run 41542350310 (`all_oses=true`) passed on
+ubuntu, macOS and Windows. The first run, 41541837127, failed only `cargo fmt
+--check`, which was fixed in 0049e9bf. The local rust-slot run did not execute
+because the shared slot was held by another job; CI is the evidence. Synthetic
+mocks only; the private W2 conversation was not replayed.
+
 ## Active-Turn middle summary implementation (#181, 2026-11-03)
 
 Commit d8a45ca9. Native macOS through rust-slot with a forced rebuild (the
