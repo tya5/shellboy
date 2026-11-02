@@ -470,3 +470,38 @@ The [adopted cache diagnostic contract](cache-diagnostics.md) adds an opt-in
 Responses comparison identity and a separate bounded provider-fact whitelist.
 It preserves terminal validation, usage normalization, cancellation and adoption
 CAS. No sticky response/request headers are captured or forwarded.
+
+## Bounded content-filter recovery facts (#159)
+
+Incomplete Responses retain the original provider response in the existing attempt
+failure/audit record. Recovery additionally projects `incomplete_details.reason`
+and provider filter verdicts into `ApiError.details.content_filter` so the existing
+Turn/Run recovery hint exposes them without reading unbounded original output.
+This is a factual projection, not a new provider error classification or lifecycle.
+Unknown or absent reason/verdict fields remain unknown, not inferred from status,
+category spelling, output, or free-form messages. Provider keys and JSON values
+are opaque; names such as `protected_material_code` do not establish why a match
+occurred. Terminal incomplete JSON and typed SSE responses retain the existing
+no-automatic-retry boundary. Interrupted transports retain their existing policy.
+No retry policy, setting, schema, dependency, worker or queue is added.
+
+The projection visits only bounded filter containers in the response envelope and
+output items, never arbitrary text fields. It preserves provider field paths and
+JSON scalar values with explicit truncation/omission facts. Limits apply to visited
+items, nesting, number of facts, key/value characters and total display length;
+missing `filtered`, `detected` and `severity` values are explicit unknowns. Original
+saved JSON remains unchanged and is still available through existing raw reads.
+Human-facing generated labels and actions follow the configured UI language;
+provider keys and values, including unknown enum strings, are not translated.
+
+For the exact reason `content_filter`, show the provider-filter stop fact and
+available actions without promising success: explicit retry (verdicts may differ),
+rephrase and resume, remove relevant tool output or attachments (`/detach` for
+attachments). When copying existing files is the task, shell `cp` or `curl` can
+copy them without having the model emit their body. This is optional task guidance,
+not a claim about the filter category or automatic tool execution. Machine facts
+use stable action identifiers; localized prose is a UI/readback projection.
+
+Source: issue #159 and its protected-material example comment (2026-11-02).
+Verification is recorded separately in acceptance; mock evidence does not establish
+behavior of a real Azure/OpenAI deployment.

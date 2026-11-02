@@ -3889,3 +3889,44 @@ async fn proactive_no_safe_reduction_retries_only_after_growth() {
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn content_filter_terminal_preserves_facts_without_automatic_retry() {
+    for streaming in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy_with_sse(streaming).await;
+        let owner = owner_with_retries(root.path(), &url, 8).await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        send(&control, &target, "synthetic content filter fixture").await;
+        let response = json!({
+            "id": "filtered-fixture",
+            "status": "incomplete",
+            "incomplete_details": {"reason": "content_filter"},
+            "content_filter_results": {
+                "protected_material_code": {"filtered": true, "detected": true},
+                "violence": {"filtered": false, "severity": "safe"}
+            },
+            "output": []
+        });
+        incoming(&control, &mut receive).await.reply.send((200, response.clone())).unwrap();
+        settled(&control, &target).await;
+        control.store.database.call(move |db| {
+            let (state, attempts, error): (String, i64, String) = db.query_row(
+                "SELECT t.state,(SELECT count(*) FROM model_attempt WHERE turn_id=t.id),a.error_json FROM turn t JOIN model_attempt a ON a.turn_id=t.id WHERE t.thread_id=?1",
+                [target], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            assert_eq!(state, "recovery_wait");
+            assert_eq!(attempts, 1, "terminal incomplete is not an interrupted transport");
+            let error: Value = serde_json::from_str(&error).unwrap();
+            assert_eq!(error["raw_response"], response);
+            assert!(error.get("automatic_retry").is_none());
+            assert!(error.get("automatic_retry_exhausted").is_none());
+            Ok(())
+        }).await.unwrap();
+        assert!(receive.try_recv().is_err(), "no second POST with retry budget enabled");
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }
+}
