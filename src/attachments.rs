@@ -931,9 +931,9 @@ fn mime_type(bytes: &[u8]) -> &'static str {
     } else {
         match std::str::from_utf8(bytes) {
             Ok(text)
-                if text
-                    .chars()
-                    .all(|ch| !ch.is_control() || matches!(ch, '\n' | '\r' | '\t' | '\x0c')) =>
+                if text.chars().all(|ch| {
+                    !ch.is_control() || matches!(ch, '\n' | '\r' | '\t' | '\x0c' | '\x1b')
+                }) =>
             {
                 "text/plain"
             }
@@ -1218,6 +1218,7 @@ mod mime_tests {
             "\u{65e5}\u{672c}\u{8a9e}\ttext\r\n",
             "",
             "#!/bin/sh\necho ok\n",
+            "\x1b[31mcolored log\x1b[0m\n",
         ] {
             assert_eq!(mime_type(text.as_bytes()), "text/plain");
         }

@@ -8184,9 +8184,13 @@ v0.6.0 run explicitly removed the attachment before retry and completed while
 keeping the synthetic file. No real provider or user file was accessed.
 
 On macOS, `cargo fmt`, `cargo check --tests`, the focused MIME unit test,
-three `issue_158_` loopback integration tests, all 11 attachment provenance
+focused `issue_158_` loopback integration tests, all 11 attachment provenance
 tests and all 25 attachment service tests passed after the approved change.
 They cover UTF-8 files with five unknown/no extensions, unknown binary replaced
 with an unavailable notice, conversion and later replay, and both removal and
 moving of a rejected protected attachment before retry. Native Linux/Windows and
 actual provider compatibility remain untested locally; branch CI is pending.
+On macOS, the latest revision also passed focused tests for colored UTF-8
+logs, unknown image-kind binary, localized warning rendering and bounded lookup,
+and an octet-rejecting mock. Four `issue_158_` loopback tests passed. These are
+synthetic tests, not verification against a real provider.

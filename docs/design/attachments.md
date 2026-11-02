@@ -100,7 +100,8 @@ worker, queue, DB connection or cache is created for the file phase.
 Request preparation determines MIME from the bytes actually read, never from a
 filename extension. Existing PNG, JPEG, GIF, WebP and PDF signatures take
 precedence. Other contents are text/plain when they are valid UTF-8 text and
-contain no non-whitespace control characters; otherwise they are unknown binary.
+contain no controls other than tab, line endings, form feed and terminal escape;
+otherwise they are unknown binary. Terminal escapes allow colored UTF-8 logs.
 Recognized signatures and text are independent of extension. A known extension
 must not cause invalid UTF-8 or arbitrary binary to be declared text or an image.
 This classification does not prove that a provider accepts a recognized format.

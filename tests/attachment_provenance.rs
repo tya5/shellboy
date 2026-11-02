@@ -16,6 +16,15 @@ async fn proxy() -> (
     mpsc::Receiver<Incoming>,
     tokio::task::JoinHandle<()>,
 ) {
+    proxy_with_octet_rejection(false).await
+}
+async fn proxy_with_octet_rejection(
+    reject_octet: bool,
+) -> (
+    String,
+    mpsc::Receiver<Incoming>,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (send, receive) = mpsc::channel(8);
@@ -26,7 +35,7 @@ async fn proxy() -> (
             tokio::spawn(async move {
                 let mut bytes = Vec::new();
                 let mut chunk = [0; 8192];
-                let body = loop {
+                let body: Value = loop {
                     let n = stream.read(&mut chunk).await.unwrap();
                     if n == 0 {
                         return;
@@ -47,11 +56,22 @@ async fn proxy() -> (
                         }
                     }
                 };
+                let rejected = reject_octet
+                    && body
+                        .to_string()
+                        .contains("data:application/octet-stream;base64,");
                 let (reply, result) = oneshot::channel();
                 if send.send(Incoming { body, reply }).await.is_err() {
                     return;
                 }
-                let Ok((status, body)) = result.await else {
+                let (status, body) = if rejected {
+                    (
+                        400,
+                        json!({"error":{"message":"synthetic unsupported MIME application/octet-stream"}}),
+                    )
+                } else if let Ok(response) = result.await {
+                    response
+                } else {
                     return;
                 };
                 let body = body.to_string();
@@ -1226,7 +1246,7 @@ async fn unavailable_new_attachment_is_consumed_by_success_without_a_fabricated_
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn issue_158_utf8_unknown_extensions_send_as_text() {
     let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
+    let (url, mut receive, server) = proxy_with_octet_rejection(true).await;
     let owner = owner(root.path(), &url).await;
     let control = Control::new(&owner, root.path().into());
     let mut inputs = Vec::new();
@@ -1238,7 +1258,12 @@ async fn issue_158_utf8_unknown_extensions_send_as_text() {
         "no-extension",
     ] {
         let path = root.path().join(name);
-        std::fs::write(&path, "synthetic text\n").unwrap();
+        let content = if name == "sample.log" {
+            "\x1b[31msynthetic text\x1b[0m\n"
+        } else {
+            "synthetic text\n"
+        };
+        std::fs::write(&path, content).unwrap();
         inputs.push(AttachmentInput {
             path,
             kind: AttachmentKind::File,
@@ -1278,6 +1303,19 @@ async fn issue_158_utf8_unknown_extensions_send_as_text() {
             .all(|item| item["mime_type"] == "text/plain")
     );
     finish(&control, thread, incoming).await;
+    let turn = accepted["turn_id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        control
+            .store
+            .database
+            .call(move |db| db
+                .query_row("SELECT state FROM turn WHERE id=?1", [turn], |r| r
+                    .get::<_, String>(0))
+                .map_err(Into::into))
+            .await
+            .unwrap(),
+        "completed"
+    );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -1450,6 +1488,44 @@ async fn issue_158_unknown_binary_is_unavailable_not_sent_and_can_be_converted()
     assert!(entry["previous_hash"].is_null());
     assert!(second.body.to_string().contains("data:text/plain;base64,"));
     finish(&control, &thread, second).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn issue_158_unknown_binary_image_is_not_sent() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let path = root.path().join("misleading.png");
+    std::fs::write(&path, b"\0\xffnot-an-image").unwrap();
+    let accepted = control
+        .send_draft(
+            operation(&control),
+            defaults(),
+            None,
+            "inspect image".into(),
+            vec![AttachmentInput {
+                path: path.clone(),
+                kind: AttachmentKind::Image,
+            }],
+        )
+        .await
+        .unwrap();
+    let thread = accepted["thread_id"].as_str().unwrap().to_owned();
+    let first = incoming(&control, &thread, &mut receive).await;
+    let recorded = manifest(&control, &thread).await;
+    let entry = &attachments(&recorded)[0];
+    assert_eq!(entry["state"], "unavailable");
+    assert_position(&first.body, entry, "inspect image", None, "input_text");
+    let wire = first.body.to_string();
+    assert!(wire.contains("Unsupported attachment format"));
+    assert!(!wire.contains("input_image"));
+    assert!(!wire.contains("application/octet-stream"));
+    finish(&control, &thread, first).await;
+    assert_eq!(std::fs::read(path).unwrap(), b"\0\xffnot-an-image");
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
