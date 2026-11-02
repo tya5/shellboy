@@ -589,7 +589,7 @@ QUERIES = ((b'\x1b[6n', b'\x1b[1;1R'), (b'\x1b[c', b'\x1b[?62;22c'), (b'\x1b[0c'
 PROBE = 'zqxjvk'
 
 
-def measure_startup(argv, cwd, env, timeout=60):
+def measure_startup(argv, cwd, env, timeout=60, probe_interval=.05):
     """Spawn->first visible text, and spawn->echo of typed probe text (no submission)."""
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', ROWS, COLS, 0, 0))
@@ -604,6 +604,7 @@ def measure_startup(argv, cwd, env, timeout=60):
     raw, text, since_probe = b'', '', ''
     first, ready, probes, last_probe = None, None, 0, 0.0
     excerpt, detector = '', None
+    write_times = []
     decoder = codecs.getincrementaldecoder('utf-8')('replace')
     # Shellboy's strict cell decoder sees probes split across frames; it gives
     # up (None) on sequences it does not model, leaving the escape-stripped stream.
@@ -644,15 +645,16 @@ def measure_startup(argv, cwd, env, timeout=60):
             if process.poll() is not None:
                 raise RuntimeError('TUI exited before input probe: ' + text[-500:])
             now = time.monotonic()
-            # Type the probe at first visible text; retype every 50 ms until echoed
-            # (agents may discard input typed before they are ready).
-            if first is not None and (not probes or now - last_probe >= .05) and probes < 600:
+            # Vary the harness retry interval to expose measurement bias.
+            if first is not None and (not probes or now - last_probe >= probe_interval) and probes < 600:
                 os.write(master, PROBE.encode())
+                write_times.append((time.perf_counter_ns() - start) / 1e6)
                 probes += 1
                 last_probe = now
         if ready is None:
             raise TimeoutError('PTY startup/input watchdog: ' + text[-800:])
         return {'first_visible_ms': first, 'input_echo_ms': ready, 'probe_writes': probes,
+                'probe_write_ms': write_times, 'probe_interval_ms': probe_interval * 1000,
                 'echo_detector': detector, 'first_visible_excerpt': excerpt}
     finally:
         kill_group(process)
