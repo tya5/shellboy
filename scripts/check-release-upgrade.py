@@ -22,7 +22,7 @@ import time
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17, 18, 19, 20, 21)}
+           for version in (15, 16, 17, 18, 19, 20, 21, 22)}
 PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19}
 
 
@@ -88,6 +88,11 @@ def check_migration(db, before, start, target):
             assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
                 f'{name} differs from migration 21'
 
+    if target >= 22:
+        row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='jobs_running_recovery'").fetchone()
+        assert row and "ON embedding_job(id) WHERE state='running'" in row[0], \
+            'jobs_running_recovery differs from migration 22'
+
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
@@ -108,8 +113,8 @@ def parse_args(argv=None):
     parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default='0.5.0')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21), default=21,
-                        help='21 for the current candidate; 14/15/17/18/19/20 retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22), default=22,
+                        help='22 for the current candidate; 14/15/17/18/19/20/21 retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

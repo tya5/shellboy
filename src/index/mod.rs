@@ -266,12 +266,19 @@ impl IndexService {
         }).await.map_err(db_error)?;
         // Inflight calls from a prior owner may already have incurred billing.
         // Keep them failed for explicit retry rather than silently replaying.
-        let changed = self
-            .database
-            .call(queue::recover_inflight)
-            .await
-            .map_err(db_error)?;
-        self.publish_saved(changed);
+        let mut cursor = None;
+        loop {
+            let (changed, next, done) = self
+                .database
+                .call(move |db| queue::recover_inflight_page(db, cursor))
+                .await
+                .map_err(db_error)?;
+            self.publish_saved(changed);
+            if done {
+                break;
+            }
+            cursor = next;
+        }
         let (recovered, changed) = self
             .database
             .call(|db| Ok(queue::recover_authorization_progress(db)))

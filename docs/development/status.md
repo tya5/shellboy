@@ -3998,3 +3998,5 @@ The same private-mode, owner, protected-ancestor, non-symlink, path-length and
 identity/lease checks apply; endpoint publication and cleanup retain their
 ordering. Windows named pipes and configuration are unchanged. Validation
 results and untested environments are reported separately in acceptance.
+
+- #172: startup index recovery uses bounded indexed pages before workers start; a single oversized bootstrap record runs alone.

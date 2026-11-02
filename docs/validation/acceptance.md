@@ -8554,3 +8554,9 @@ Stale cleanup, owner/mode/symlink protections and existing cleanup behavior
 remain required. Windows named-pipe behavior is outside the changed path.
 Exact commands, platform and CI results are reported in the task handoff; no
 live-provider or actual sandbox-exec observation is inferred.
+
+Startup index recovery (#172): local synthetic tests exercise row and byte
+batching, restart, oversized single records, and index query plans. Python
+upgrade fixtures cover schema 21 to 22. Paused-consumer integration and 3-OS
+CI are not yet established by these focused tests; actual provider behavior
+and billing are not tested.

@@ -429,3 +429,8 @@ CREATE INDEX node_event_retention ON node(CAST(json_extract(payload_json,'$.even
 CREATE INDEX delivery_event_state ON delivery(event_id,state);
 INSERT INTO schema_migration(version,name) VALUES(21,'0021_event_retention');
 PRAGMA user_version=21;
+
+-- Seek interrupted jobs during bounded startup recovery.
+CREATE INDEX jobs_running_recovery ON embedding_job(id) WHERE state='running';
+INSERT INTO schema_migration(version,name) VALUES(22,'0022_index_recovery');
+PRAGMA user_version=22;
