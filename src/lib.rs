@@ -23,6 +23,7 @@ mod input_path;
 pub mod instructions;
 pub mod ipc;
 mod json_pointer;
+pub mod maintenance;
 pub mod memory;
 pub mod model;
 mod operations;

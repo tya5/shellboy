@@ -30,6 +30,8 @@ pub enum DiagnosticEvent {
     IndexPaused,
     UsageTotalsSlow,
     DbJobSlow,
+    DbJobBudget,
+    DbJobNoProgress,
     LineageQuerySlow,
     IndexAutoDiscarded,
     UiHistory,
@@ -97,11 +99,38 @@ fn slow_usage_trace(
     })
 }
 
+fn millis(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct DbJobSlowTrace {
     kind: String,
     queue_ms: u64,
     run_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DbJobBudgetTrace {
+    kind: String,
+    steps: u64,
+    queue_ms: u64,
+    run_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DbJobNoProgressTrace {
+    kind: String,
+    deferrals: u32,
+}
+
+/// Fixed DB-worker observations; the variant name is the JSON field name.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum DbJobTrace {
+    DbJobSlow(DbJobSlowTrace),
+    DbJobBudget(DbJobBudgetTrace),
+    DbJobNoProgress(DbJobNoProgressTrace),
 }
 
 /// Aggregate descendant-query observation, with no descendant or content strings.
@@ -242,8 +271,8 @@ struct Entry {
     ui_history: Option<UiHistoryTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     lineage_slow: Option<LineageSlowTrace>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    db_job_slow: Option<DbJobSlowTrace>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    db_job: Option<DbJobTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     index_discard: Option<IndexDiscardTrace>,
 }
@@ -324,7 +353,7 @@ struct Record {
     usage_slow: Option<UsageSlowTrace>,
     ui_history: Option<UiHistoryTrace>,
     lineage_slow: Option<LineageSlowTrace>,
-    db_job_slow: Option<DbJobSlowTrace>,
+    db_job: Option<DbJobTrace>,
     index_discard: Option<IndexDiscardTrace>,
 }
 struct Health {
@@ -365,7 +394,7 @@ impl Diagnostics {
                     usage_slow,
                     ui_history,
                     lineage_slow,
-                    db_job_slow,
+                    db_job,
                     index_discard,
                 }) = receiver.recv()
                 {
@@ -383,7 +412,7 @@ impl Diagnostics {
                         usage_slow,
                         ui_history,
                         lineage_slow,
-                        db_job_slow,
+                        db_job,
                         index_discard,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
@@ -555,7 +584,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: Some(trace),
             lineage_slow: None,
-            db_job_slow: None,
+            db_job: None,
             index_discard: None,
         });
     }
@@ -576,7 +605,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: None,
             lineage_slow: None,
-            db_job_slow: None,
+            db_job: None,
             index_discard: None,
         });
     }
@@ -601,7 +630,7 @@ impl Diagnostics {
             usage_slow: Some(usage_slow),
             ui_history: None,
             lineage_slow: None,
-            db_job_slow: None,
+            db_job: None,
             index_discard: None,
         });
     }
@@ -625,11 +654,56 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: None,
             lineage_slow: None,
-            db_job_slow: Some(DbJobSlowTrace {
+            db_job: Some(DbJobTrace::DbJobSlow(DbJobSlowTrace {
                 kind: kind.chars().take(160).collect(),
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
+            })),
+            index_discard: None,
+        });
+    }
+    /// A background job was interrupted at its step budget while foreground
+    /// work waited. Fixed fields only; the caller rate-limits emission.
+    pub(crate) fn record_db_budget(
+        &self,
+        kind: &str,
+        steps: u64,
+        queue: std::time::Duration,
+        run: std::time::Duration,
+    ) {
+        self.record_db_trace(
+            DiagnosticEvent::DbJobBudget,
+            DbJobTrace::DbJobBudget(DbJobBudgetTrace {
+                kind: kind.chars().take(160).collect(),
+                steps,
+                queue_ms: millis(queue),
+                run_ms: millis(run),
             }),
+        );
+    }
+    /// A background kind was deferred repeatedly without a completed job.
+    pub(crate) fn record_db_no_progress(&self, kind: &str, deferrals: u32) {
+        self.record_db_trace(
+            DiagnosticEvent::DbJobNoProgress,
+            DbJobTrace::DbJobNoProgress(DbJobNoProgressTrace {
+                kind: kind.chars().take(160).collect(),
+                deferrals,
+            }),
+        );
+    }
+    fn record_db_trace(&self, event: DiagnosticEvent, trace: DbJobTrace) {
+        self.enqueue_record(Record {
+            event,
+            ids: DiagnosticIds::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: Some(trace),
             index_discard: None,
         });
     }
@@ -655,7 +729,7 @@ impl Diagnostics {
             tool_repair: None,
             usage_slow: None,
             ui_history: None,
-            db_job_slow: None,
+            db_job: None,
             lineage_slow: Some(LineageSlowTrace {
                 elapsed_us: u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
                 roots: roots.min(2) as u8,
@@ -741,7 +815,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: None,
             lineage_slow: None,
-            db_job_slow: None,
+            db_job: None,
             index_discard: None,
         });
     }
@@ -757,7 +831,7 @@ impl Diagnostics {
             usage_slow,
             ui_history,
             lineage_slow,
-            db_job_slow,
+            db_job,
             index_discard,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
@@ -789,7 +863,7 @@ impl Diagnostics {
                     usage_slow,
                     ui_history,
                     lineage_slow,
-                    db_job_slow,
+                    db_job,
                     index_discard,
                 })
                 .is_err()
