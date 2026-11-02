@@ -47,7 +47,7 @@ pub(super) struct Browser {
     inflight: Option<(u64, Vec<String>, Vec<String>)>,
     serial: u64,
     next: Option<tokio::time::Instant>,
-    resync: Option<(u64, String)>,
+    resync: Option<(u64, String, Option<String>)>,
 }
 impl Drop for Browser {
     fn drop(&mut self) {
@@ -379,20 +379,27 @@ impl Browser {
             return;
         }
         if id.is_empty() || id.len() > 256 || self.dirty.len() == LIMIT {
-            self.request_resync(
+            self.request_resync_localized(
                 "会話一覧の変更対象を保持できませんでした。最新のページから再取得します",
+                "The change to the conversation list could not be retained. The latest page will be reloaded.",
             );
             return;
         }
         self.dirty.insert(id.into());
     }
     pub fn request_resync(&mut self, reason: &str) {
+        self.request_resync_with_english(reason, None);
+    }
+    pub fn request_resync_localized(&mut self, japanese: &str, english: &str) {
+        self.request_resync_with_english(japanese, Some(english));
+    }
+    fn request_resync_with_english(&mut self, reason: &str, reason_en: Option<&str>) {
         self.output.clear();
         if self.resync.is_some() {
             return;
         }
         if let Some(s) = &self.scope {
-            self.resync = Some((s.generation, reason.into()));
+            self.resync = Some((s.generation, reason.into(), reason_en.map(str::to_owned)));
             s.stop.cancel();
             s.detail_stop.cancel();
             self.dirty.clear();
@@ -400,7 +407,7 @@ impl Browser {
             self.inflight = None;
         }
     }
-    pub fn take_resync(&mut self) -> Option<(u64, String)> {
+    pub fn take_resync(&mut self) -> Option<(u64, String, Option<String>)> {
         if !self.scope.as_ref().is_some_and(|s| s.visible) {
             return None;
         }
