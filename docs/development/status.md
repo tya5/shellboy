@@ -4132,3 +4132,10 @@ integration handoff, and three-OS integration CI remain pending.
 ## Usage-limit retry cutoff (#188, local checks passed; CI pending)
 
 Issue #188 compares explicit provider resets with remaining automatic retry waits. Long resets go directly to existing recovery wait; short resets allow only budgeted retries through the matching shared local guard. No guessed reset or new setting. Post-rebase `cargo fmt --all -- --check`, `cargo check --tests`, the short- and long-reset integration tests, the retry-window, bypass-lifecycle and shared-cache unit tests, and Python checks passed. Run three-OS CI on the pushed exact tip and record its result in the handoff; see [model HTTP](../design/model-http.md).
+### #151 Resource Evidence (In Progress)
+
+The resource guide records the previously completed three-repeat in-flight PSS
+observations and clarifies that cold interactive startup includes owner startup.
+These are historical fake-model measurements, not new provider measurements.
+The historical sampler is not yet integrated into main; the guide identifies
+its exact source and workflow. Review and integration CI remain pending.

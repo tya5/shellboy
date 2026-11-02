@@ -4,7 +4,7 @@
 
 These are observations of a **fake-model workload**, not product rankings or
 predictions for a real model. They describe sampled process memory and observed
-terminal startup, not response quality, capability, token costs or peak memory.
+terminal startup, not response quality, capability, token costs or true peak memory.
 Only compare agents **within the same comparison run and artifact**. Even two
 jobs of one workflow are separate runners; do not combine their measurements.
 
@@ -111,6 +111,65 @@ to about 50 ms by the repeated probe. Echo detection uses the output stream or
 the cell decoder recorded in JSON. F's completed-frame/paste method and C's
 generic typed-probe method are different: their Shellboy startup figures are
 not interchangeable. Neither establishes physical-terminal or IME behavior.
+
+Both F (`footprint.py`) and C (`compare.py`) launch Shellboy's interactive
+binary with a fresh temporary data directory; neither prestarts a separate
+`serve` process for startup samples. At the measured SHA, the interactive
+process initializes the owner, control and endpoint before entering the
+conversation UI. The spawn-to-composer-echo observations therefore include
+owner startup; first visible text can instead be the startup screen and does not
+prove that owner initialization has completed. This differs from the memory
+workload, which explicitly starts `serve` before creating Threads.
+
+The C input-echo figure is spawn-to-echo, not keystroke-to-echo latency. The
+harness retypes the probe every 50 ms; in Shellboy's five samples it wrote the
+probe twice. At the measured SHA ordinary input is ignored on the startup screen.
+The saved artifact does not record each probe write time or the composer-ready
+time, so neither the pure typing latency nor an exact breakdown of 65 ms can be
+inferred. The retry interval may affect the observation.
+
+## Repeated in-flight observations (#151)
+
+[Workflow run 41405053536](https://github.com/tya5/shellboy/actions/runs/41405053536)
+completed with [comparison artifact 13123328064](https://github.com/tya5/shellboy/actions/runs/41405053536/artifacts/13123328064)
+at source `96f06c1c4e964096ac259ddc0e5a5c6b8e6cf558`. This is a separate run
+from F, C and stage 4: compare only values within this artifact. The compare job
+ran on GitHub Ubuntu 24.04.5, Linux x86_64, EPYC 7763, 4 CPUs and 16367524 KiB
+RAM. All six configurations completed the same loopback fake-model workload.
+Versions: Shellboy 0.6.1, Codex CLI 0.166.0, Claude Code 2.1.316, opencode
+1.19.5 and jcode v0.99.1 (`7206efd0c`). Executable hashes, process settings
+and individual samples are in JSON.
+
+For each N, three independent cases use fresh processes and data. The observer
+samples the process-tree PSS approximately every 100 ms during the five rounds.
+Each cell is **minimum / median / maximum** across the three case-level observed
+maxima, in KiB. These are sampled maxima, not estimates of true peak memory:
+short peaks can be missed; sampling adds overhead, and machine load can vary.
+They are not comparable to the after-round snapshots in the earlier tables.
+
+| Agent / topology | N=1 | N=5 | N=10 | N=20 |
+| --- | ---: | ---: | ---: | ---: |
+| shellboy | 26399/26519/26944 | 28221/28512/28900 | 28219/30039/30159 | 33226/33523/35054 |
+| codex-shared | 165860/167012/167148 | 193056/194448/195476 | 213112/214656/215372 | 244960/246248/262262 |
+| claude-code | 196437/196618/196624 | 630980/633328/640023 | 1116269/1118952/1123489 | 2100471/2113556/2120364 |
+| codex | 165460/167280/167600 | 316069/317004/317161 | 467407/468459/481157 | 804845/805362/807729 |
+| opencode | 834220/879671/899910 | 1088791/1190083/1208550 | 1464859/1528562/1612290 | 1800306/1866010/2001567 |
+| jcode | 23465/24158/24477 | 32732/32834/33258 | 41392/41678/41840 | 60490/61504/61614 |
+
+`codex-shared` is one app-server hosting N independent Threads; `codex` is N
+app-servers with one Thread each. These are different process topologies, not
+proof of equivalent isolation or features. Other configuration caveats below
+still apply. Three repeats on shared CI hardware do not establish a ranking.
+
+The measured implementation and detailed procedure are preserved at the exact
+source SHA, including [the benchmark README](https://github.com/tya5/shellboy/blob/96f06c1c4e964096ac259ddc0e5a5c6b8e6cf558/scripts/bench/README.md)
+and [workflow](https://github.com/tya5/shellboy/blob/96f06c1c4e964096ac259ddc0e5a5c6b8e6cf558/.github/workflows/ci.yml).
+That revision runs `compare.py --repeats 3` with both Codex topologies; the
+current main script does not necessarily have this option. To reproduce, use a
+disposable Linux environment and the pinned historical revision and its
+workflow; the fake-model run uses no provider credentials, although installing
+pinned agents requires network access. The artifact preserves the raw samples,
+churn counts, fixture outcomes and provenance; retention is finite.
 
 ## Stage 4: Request bytes and storage
 
