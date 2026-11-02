@@ -1950,11 +1950,9 @@ async fn f8_history_repeat_hint_uses_service_language_and_renders_at_80_columns(
                     }
                     screen.push('\n');
                 }
-                let words = screen.split_whitespace().collect::<Vec<_>>().join(" ");
-                assert!(screen.contains("/current_source/repeat_result"), "{screen}");
-                assert!(words.contains("Use a to enter the same"), "{screen}");
-                assert!(words.contains("query/args;"), "{screen}");
-                assert!(words.contains("refresh does not rerun."), "{screen}");
+                let interior = screen.replace(['|', '│', '┃', '#'], " ");
+                let words = interior.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(words.contains(&format!("repeat_result: {en}")), "{screen}");
             }
             sender.try_send(UiAction::Quit).unwrap();
             super::control_tests::finish_bridge(bridge, &incoming).await;
