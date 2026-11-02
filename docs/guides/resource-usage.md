@@ -298,6 +298,11 @@ Of observed requests, `x-litellm-session-id` was present on 10/10 Shellboy,
 and 0/1 respectively. Header values were not retained. OpenCode headers were
 not measured. Presence does not establish the cause of a cache hit.
 
+The original client request-body lengths in bytes, before the relay fixed the
+output cap, were Shellboy `5477, 6412, 7578, 8556, 9805, 10799, 11796, 12953,
+13887, 15043`, Codex `55564, 56056, 58590, 59369, 59883, 60654, 61117, 61859,
+62306`, and Claude's failed request `45825`. Lengths are not token counts.
+
 The relay serialized requests, fixed the output limit at 2,048, and stopped on
 an error or missing/invalid usage. Its aggregate reported input-plus-output
 budget was 1,500,000; before each request it reserved `ceil(previous input *
