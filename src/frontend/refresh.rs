@@ -138,7 +138,7 @@ fn project(
         mut tool_scope,
         observed_at,
     } = raw;
-    let (mut nodes, info, _) = history.project_page(width, None);
+    let (mut nodes, info, _) = history.project_page(width, language, None);
     message_metadata::apply(&mut nodes, &sources);
     tools::apply(&mut nodes, &tools, language);
     recovery::apply(&mut nodes, recovery);

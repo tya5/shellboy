@@ -8572,9 +8572,11 @@ English and checks that source facts remain intact.
 
 Build-free validation passed: `python3 -m unittest discover -s scripts/tests` (168
 tests), `python3 scripts/check-test-layout.py` (102 suites), language audit
-(`received.rs`: a=6, b=31, c=0), and `git diff --check`. The local Rust
-format/check/focused-test/Clippy command remains queued behind the shared slot; a
-first compile attempt found and corrected a missing UI-language argument.
+(`received.rs`: a=6, b=31, c=0), and `git diff --check`. The local Rust format/check/focused-test/Clippy command remains queued behind the
+shared slot. Initial exact-tip CI run `41504566436` failed on Linux and macOS with
+E0061 at `src/frontend/refresh.rs:141`; the follow-up passes `UiLanguage` to the
+history projection. Final exact-tip CI and three-OS integration are reported
+separately.
 
 Exact-tip task CI and three-OS integration validation are reported separately;
 overall Stage C acceptance remains open.

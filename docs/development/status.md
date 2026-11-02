@@ -25,7 +25,8 @@ The saved-response and stream-observation titles plus the saved-source field
 label now follow `UiLanguage`. Display separators continue to use the shared
 `glyphs::formatted!` `·`/`|` variants. Source IDs, status classes, saved payloads,
 partial response text/reasoning, and replay/path semantics are unchanged. Build-free
-checks pass; the local Rust command is queued behind the shared slot. See acceptance.
+checks pass; the local Rust command is queued behind the shared slot. The initial
+CI found a missing language argument; its follow-up is recorded in acceptance.
 
 ## Index-source GC scan (#164, branch CI pending)
 
