@@ -287,6 +287,8 @@ def main():
     formats.add_argument('--table', action='store_true', help='Print reproducible per-file Markdown counts')
     parser.add_argument('--ownership', type=Path, help='Optional path -> owner label JSON map for --table')
     parser.add_argument('--check', action='store_true', help='Fail if any category c remains')
+    parser.add_argument('--ui-pending', action='store_true',
+                        help='Report all pending literals in src/ui.rs and src/ui/** (not just status surfaces)')
     args = parser.parse_args()
     try:
         root = args.repo.resolve(strict=True)
@@ -294,6 +296,10 @@ def main():
             raise ValueError('repository src/ directory not found')
         decisions = json.loads(args.classifications.read_text(encoding='utf-8')) if args.classifications else None
         report = inventory(root, decisions)
+        if args.ui_pending:
+            report['records'] = [r for r in report['records'] if r['category'] == 'c'
+                                 and (r['path'] == 'src/ui.rs' or r['path'].startswith('src/ui/'))]
+            report['counts'] = dict(Counter(r['category'] for r in report['records']))
         pending = report['counts'].get('c', 0)
         if args.table:
             owners = json.loads(args.ownership.read_text(encoding='utf-8')) if args.ownership else {}

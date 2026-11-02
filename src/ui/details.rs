@@ -1881,8 +1881,8 @@ mod tests {
                     kind: PresentationKind::User,
                     fields: vec![PresentationField {
                         key: "/state".into(),
-                        label: "State".into(),
-                        value: "RAW-STATE".into(),
+                        label: "実行中".into(),
+                        value: "実行中".into(),
                         ..Default::default()
                     }],
                     ..Default::default()
@@ -1891,12 +1891,20 @@ mod tests {
             }];
             let mut details = Details::new(ui.view(), false);
             details.mode = Mode::Fields;
+            let fields = details.fields(ui.view());
+            details.selected = fields.iter().position(|field| field.key == "/state").unwrap();
+            assert_eq!(fields[details.selected].label, "実行中");
+            assert_eq!(fields[details.selected].value, "実行中");
+            let mut next = 0;
+            assert!(
+                matches!(details.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), ui.view(), &mut next), Outcome::Action(action) if matches!(*action, UiAction::CopyText { ref text, .. } if text == "実行中"))
+            );
             ui.details = Some(details);
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["-- Key facts --", "RAW-STATE"],
-                UiLanguage::Ja => &["要点", "RAW-STATE"],
+                UiLanguage::En => &["-- Key facts --", "実行中"],
+                UiLanguage::Ja => &["要点", "実行中"],
             }
         }
         super::super::i18n::verify_screen(configure, expected);

@@ -28,6 +28,17 @@ class LanguageAuditTests(unittest.TestCase):
     def records(self):
         return AUDIT['inventory'](self.root)['records']
 
+    def test_ui_pending_reports_root_and_nested_without_exempting_width_glyphs(self):
+        self.source(f'fn f() {{ glyphs::select("{JA} · test", "{JA} | test"); }}', 'ui.rs')
+        self.source(f'fn f() {{ format!("{JA}{{}}", 1); }}', 'ui/chrome.rs')
+        self.source(f'fn f() {{ use_it("{JA}"); }}', 'outside.rs')
+        result = subprocess.run([sys.executable, str(SCRIPT), '--repo', str(self.root), '--ui-pending'],
+                                text=True, capture_output=True, check=True)
+        rows = json.loads(result.stdout)['records']
+        self.assertEqual(len(rows), 3)
+        self.assertEqual({r['path'] for r in rows}, {'src/ui.rs', 'src/ui/chrome.rs'})
+        self.assertTrue(all(r['category'] == 'c' for r in rows))
+
     def test_comments_nested_comments_characters_and_lifetimes_are_not_strings(self):
         self.source(f'// "{JA}"\n/* nested /* "{JA}" */ */\n'
                     f"fn f<'a>(x: &'a str) {{ let c = '\u65e5'; let s = \"{JA}\"; }}")

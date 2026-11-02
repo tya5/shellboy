@@ -42,11 +42,31 @@ canonical labels, saved values, user/provider/shell text or selected symbols may
 be rewritten as a shortcut. #149/#150 owned ranges remain deferred until their
 exact changes land. Stage C and combined three-OS acceptance remain incomplete.
 
+## UI Status And Detail Follow-Up
+
+The reported cache, attachment hint/status and `/attach` footer literals were
+already inventoried as `(c)`, not excluded by the scanner. The consistency check
+validates reviewed fingerprints but intentionally does not enforce a zero-`(c)`
+gate, so successful CI did not establish English UI completeness. A disposable
+English PTY reproduced `/attach パス` on the input border and Japanese welcome
+copy. These are renderer-owned messages; user/provider text and saved titles are
+not evidence for translation.
+
+On base `f1a87139`, `--ui-pending` enumerates every remaining `(c)` record in
+`src/ui.rs` and `src/ui/**`, with paths, lines, IDs and fingerprints. After this
+batch the inventory reports 475 candidates in 21 files, including frozen-header
+labels (`src/ui/chrome.rs`), draft/recovery notices (`src/ui/view.rs`) and
+command/operation surfaces. The list is conservative and includes canonical,
+source-owned or already localized cases; each needs provenance review. It is not
+a defect count or permission to rewrite values. The flag makes pending UI work
+visible without silently turning the separate Stage C zero gate on.
+
 ## Reproduce
 
 ```sh
 python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json > inventory.json
 python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --summary
+python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --ui-pending > ui-pending.json
 python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --check --summary
 python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --table --ownership scripts/dev/language-ownership.json
 python3 -m unittest discover -s scripts/tests -p test_language_audit.py

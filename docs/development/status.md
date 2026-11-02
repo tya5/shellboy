@@ -117,6 +117,15 @@ separate unresolved limitation, not a new design decision. Updated tests and CI
 results are recorded separately in acceptance.
 See acceptance for evidence and untested cases.
 
+## #152 Status Surfaces And Detail Headings
+
+Application-owned cache percentages, attachment hints/status, empty-conversation
+prompts and F6 field-group headings follow UI language. User/provider labels and
+values, attachment identifiers/paths, copied values, Japanese messages and glyph
+width fallbacks remain unchanged. The UI audit queue is separately enumerable;
+its pending count is not a Stage C zero gate. See validation for evidence and
+remaining checks.
+
 ## Request inspection (#137)
 
 Branch issue-137/request-inspect adds `shellboy thread request`, a standalone

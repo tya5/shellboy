@@ -1327,7 +1327,8 @@ impl ThreadView {
             self.status = match self.language {
                 crate::config::UiLanguage::Ja => "画像を添付しました",
                 crate::config::UiLanguage::En => "Image attached",
-            }.into();
+            }
+            .into();
             true
         }
     }

@@ -204,7 +204,9 @@ impl ContextBar {
         let down = format!("{}{}", glyphs::select("↓", "v"), show(u.output_tokens));
         let cache = match (u.cached_tokens, u.input_tokens) {
             (Some(cached), Some(input)) if input > 0 => {
-                let percent = ((u128::from(cached) * 100 + u128::from(input) / 2) / u128::from(input)).min(100);
+                let percent = ((u128::from(cached) * 100 + u128::from(input) / 2)
+                    / u128::from(input))
+                .min(100);
                 Some(match language {
                     crate::config::UiLanguage::Ja => format!("キャッシュ{percent}%"),
                     crate::config::UiLanguage::En => format!("Cache {percent}%"),
@@ -227,7 +229,12 @@ impl ContextBar {
     pub(super) fn text(&self, width: usize, plain: bool) -> Option<String> {
         self.text_for(width, plain, crate::config::UiLanguage::Ja)
     }
-    fn text_for(&self, width: usize, plain: bool, language: crate::config::UiLanguage) -> Option<String> {
+    fn text_for(
+        &self,
+        width: usize,
+        plain: bool,
+        language: crate::config::UiLanguage,
+    ) -> Option<String> {
         self.variants(plain, language)
             .into_iter()
             .find(|text| text.width() <= width)
@@ -506,27 +513,40 @@ pub(super) fn welcome(
             .map(|line| Line::from(crate::presentation::sanitize_plain(line, 0).0))
             .collect();
     }
+    let (cwd_label, waiting, prompt) = match config.ui.language {
+        crate::config::UiLanguage::Ja => ("作業場所: ", "取得待ち", "依頼を入力してください"),
+        crate::config::UiLanguage::En => ("Working directory: ", "Waiting", "Enter a request"),
+    };
     let cwd = if view.cwd.as_os_str().is_empty() {
-        "取得待ち".to_owned()
+        waiting.to_owned()
     } else {
         fit(
             &view.cwd.to_string_lossy(),
-            usize::from(width).saturating_sub("作業場所: ".width()),
+            usize::from(width).saturating_sub(cwd_label.width()),
             true,
         )
     };
-    vec![
-        Line::from(Span::styled(
-            "依頼を入力してください",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(glyphs::formatted!(
+    let bindings = match config.ui.language {
+        crate::config::UiLanguage::Ja => glyphs::formatted!(
             "送信: {} · 改行: {}",
             "送信: {} | 改行: {}",
             config.ui.send_key,
             config.ui.newline_keys.join(" / ")
+        ),
+        crate::config::UiLanguage::En => glyphs::formatted!(
+            "Send: {} · Newline: {}",
+            "Send: {} | Newline: {}",
+            config.ui.send_key,
+            config.ui.newline_keys.join(" / ")
+        ),
+    };
+    vec![
+        Line::from(Span::styled(
+            prompt,
+            Style::default().add_modifier(Modifier::BOLD),
         )),
-        Line::from(format!("作業場所: {cwd}")),
+        Line::from(bindings),
+        Line::from(format!("{cwd_label}{cwd}")),
         Line::from(format!(
             "AGENTS: {}",
             fit(
@@ -540,12 +560,16 @@ pub(super) fn welcome(
                 "/ コマンド · /image 画像を添付 · F1 操作ガイド",
                 "/ コマンド | /image 画像を添付 | F1 操作ガイド",
             ),
-            (crate::config::UiLanguage::Ja, false) => glyphs::select("/ コマンド · F1 操作ガイド", "/ コマンド | F1 操作ガイド"),
+            (crate::config::UiLanguage::Ja, false) => {
+                glyphs::select("/ コマンド · F1 操作ガイド", "/ コマンド | F1 操作ガイド")
+            }
             (crate::config::UiLanguage::En, true) => glyphs::select(
                 "/ Commands · /image Attach image · F1 Guide",
                 "/ Commands | /image Attach image | F1 Guide",
             ),
-            (crate::config::UiLanguage::En, false) => glyphs::select("/ Commands · F1 Guide", "/ Commands | F1 Guide"),
+            (crate::config::UiLanguage::En, false) => {
+                glyphs::select("/ Commands · F1 Guide", "/ Commands | F1 Guide")
+            }
         }),
     ]
 }
@@ -835,6 +859,115 @@ mod tests {
         text
     }
     #[test]
+    fn localized_status_surfaces_preserve_width_policies_and_attachment_data() {
+        use crate::config::UiLanguage;
+        use crate::ui::{UiAttachment, text_width};
+        for (language, image, footer, cache) in [
+            (
+                UiLanguage::Ja,
+                "画像を添付しました",
+                "/image 画像を添付",
+                "キャッシュ86%",
+            ),
+            (
+                UiLanguage::En,
+                "Image attached",
+                "/image Attach image",
+                "Cache 86%",
+            ),
+        ] {
+            for policy in [Some(1), Some(2), None] {
+                text_width::set_terminal_width(policy);
+                let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+                config.ui.language = language;
+                let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+                let shown = frame_text(&mut ui, 120, 24);
+                assert!(shown.contains(footer), "{language:?} {policy:?}: {shown}");
+                if language == UiLanguage::En {
+                    assert!(shown.contains("Enter a request"));
+                    assert!(shown.contains("Send: Enter"));
+                    assert!(shown.contains("Working directory: "));
+                } else {
+                    assert!(shown.contains("依頼を入力してください"));
+                    assert!(shown.contains("送信: Enter"));
+                    assert!(shown.contains("作業場所: "));
+                }
+                let separator = if policy == Some(1) { " · " } else { " | " };
+                let expected = match language {
+                    UiLanguage::Ja => format!("/image 画像を添付{separator}/attach パス"),
+                    UiLanguage::En => format!("/image Attach image{separator}/attach PATH"),
+                };
+                assert!(
+                    shown.contains(&expected),
+                    "{language:?} {policy:?}: {shown}"
+                );
+                let bar = ContextBar {
+                    usage: crate::ui::ContextUsage {
+                        input_tokens: Some(140_000),
+                        output_tokens: Some(20_000),
+                        cached_tokens: Some(120_400),
+                    },
+                    auto_at: 200_000,
+                };
+                assert!(bar.text_for(80, false, language).unwrap().contains(cache));
+                assert!(!bar.text_for(18, false, language).unwrap().contains(cache));
+                let attachment = UiAttachment {
+                    id: "synthetic-id".into(),
+                    path: "/synthetic/image.png".into(),
+                    kind: "image".into(),
+                    state: "ready".into(),
+                    position: None,
+                };
+                assert!(
+                    ui.view_mut()
+                        .on_clipboard_attachment(attachment.clone(), 1024)
+                );
+                assert_eq!(ui.view().status, image);
+                assert_eq!(ui.view().draft.attachments[0].id, attachment.id);
+                assert_eq!(ui.view().draft.attachments[0].path, attachment.path);
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn localized_welcome_hints_cover_long_and_short_widths() {
+        use crate::config::UiLanguage;
+        use crate::ui::text_width;
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            for policy in [Some(1), Some(2), None] {
+                text_width::set_terminal_width(policy);
+                let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+                config.ui.language = language;
+                let ui = UiState::new(&config, PathBuf::from("/synthetic"));
+                for width in [54, 80] {
+                    let lines = welcome(ui.view(), &config, width);
+                    let hint = lines
+                        .last()
+                        .unwrap()
+                        .spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>();
+                    let separator = if policy == Some(1) { " · " } else { " | " };
+                    let expected = match (language, width >= 55) {
+                        (UiLanguage::Ja, true) => format!(
+                            "/ コマンド{separator}/image 画像を添付{separator}F1 操作ガイド"
+                        ),
+                        (UiLanguage::Ja, false) => format!("/ コマンド{separator}F1 操作ガイド"),
+                        (UiLanguage::En, true) => {
+                            format!("/ Commands{separator}/image Attach image{separator}F1 Guide")
+                        }
+                        (UiLanguage::En, false) => format!("/ Commands{separator}F1 Guide"),
+                    };
+                    assert_eq!(hint, expected);
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn frozen_banner_identifies_entry_and_resume_without_inventing_a_time() {
         let at = "2026-10-30T12:34:56Z";
         let wide = frozen_header_label(100, Some(at));
@@ -852,6 +985,7 @@ mod tests {
     fn empty_conversation_uses_measured_separators_without_changing_bindings() {
         use crate::ui::text_width;
         let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        config.ui.language = crate::config::UiLanguage::Ja;
         config.ui.send_key = "Ctrl+Enter".into();
         config.ui.newline_keys = vec!["Enter".into()];
         for (policy, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
@@ -876,6 +1010,7 @@ mod tests {
     #[test]
     fn empty_conversation_explains_actual_bindings_cwd_and_unobserved_agents() {
         let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        config.ui.language = crate::config::UiLanguage::Ja;
         config.ui.send_key = "Ctrl+Enter".into();
         config.ui.newline_keys = vec!["Enter".into()];
         let cwd = PathBuf::from("/synthetic/missing-workspace");

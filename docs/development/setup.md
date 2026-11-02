@@ -364,6 +364,9 @@ opencode and jcode on the same fake model; the same `footprint` input runs its
 
 ### Stage C language inventory
 
+`python3 scripts/dev/language-audit.py --repo . --ui-pending` lists all pending
+`src/ui.rs` and `src/ui/**` records, including glyph-width alternatives; it is a
+review queue, not proof that a string is generated or should be translated.
 `python3 scripts/dev/language-audit.py --repo . --summary` reads Japanese Rust
 string literals without changing files or contacting providers. Use the full
 JSON output for literal IDs/lines and the `--classifications` reviewed JSON map

@@ -347,6 +347,24 @@ Earlier successful startup-only runs do not replace these post-stop results.
 Corrected-source focused9 and full Python95 tests pass (executionbda9f9bf,
 exit0/cleanup), with layout95/watchdog and diff checks successful. Full Rust
 standard/native3OS CI and exact final-candidate upgrade runs remain pending.
+## #152 Status Surfaces And Detail Headings
+
+A disposable English PTY reproduced the `/attach パス` input-border hint and
+Japanese empty-conversation prompts. This batch localizes those renderer-owned
+surfaces, cache percentage and successful image-attachment notice. F6 groups map
+`要点`/`Key facts`, `実行`/`Execution`, `出力`/`Output`, `参照`/`References`, and
+`その他`/`Other`. Group identity is derived from field keys; labels, values,
+copy targets and attachment data are not translated.
+
+macOS rust-slot focused tests: `ui::chrome::tests` (12),
+`field_group_headings_are_bilingual` (1), and
+`group_labels_follow_language_without_changing_group_identity` (1) passed.
+They cover both languages, narrow/full welcome hints, width policies 1/2/unknown,
+cache rounding/fallback, attachment identity, and original F6 copy text. Python
+language-audit tests (19) passed. Three-OS branch CI, current-main integration,
+physical PTY and OS clipboard verification are separate checks. See
+`docs/validation/language-audit-stage-c.md` for the conservative UI queue.
+
 ## #108 current-main preflight (Rust unrun)
 
 Task branch rebases without conflicts onto maincdcb70da; original G delivery base
