@@ -814,6 +814,17 @@ mod tests {
         assert!(
             matches!(options.command,RagCommand::Search{scope,mode:SearchMode::Hybrid,limit:17, cursor: None,..}if scope==["docs","history:thread","source:folder name"])
         );
+        let mut continuation = fixture(OpKind::RagSearch);
+        set(&mut continuation, "query", "previous query");
+        set(&mut continuation, "rag_scopes", "history:thread");
+        set(&mut continuation, "search_mode", "keyword");
+        set(&mut continuation, "cursor", "cursor-token");
+        let ClientOperation::Rag { options, .. } = client(&continuation) else {
+            panic!()
+        };
+        assert!(
+            matches!(options.command, RagCommand::Search { cursor: Some(cursor), .. } if cursor == "cursor-token")
+        );
         let mut index = fixture(OpKind::RagIndex);
         set(&mut index, "dry_run", "true");
         set(&mut index, "search_mode", "semantic");

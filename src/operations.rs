@@ -1697,6 +1697,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::RagScopes,
             FieldId::SearchMode,
             FieldId::Limit,
+            FieldId::Cursor,
         ],
     },
     OperationSpec {

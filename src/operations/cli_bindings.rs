@@ -559,6 +559,7 @@ const MEANINGS: &[Meaning] = &[
             ("scope", FieldId::RagScopes),
             ("mode", FieldId::SearchMode),
             ("limit", FieldId::Limit),
+            ("cursor", FieldId::Cursor),
         ],
         None,
     ),
