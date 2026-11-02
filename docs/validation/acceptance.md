@@ -8580,6 +8580,21 @@ failed and interrupted attempts above were not counted as validation.
 After switching to direct `pause::facts` reads, a second fresh build on the same
 base passed `cargo check --tests`, all eight focused library tests, and the
 isolated CLI integration PTY test (1). The runner checked nonzero test counts.
-Exact-tip task CI and the requested 3 OS integration CI remain required. No
-physical terminal, live-provider, Windows-local, or post-integration behavior
+The superseded task CI 41488297242 failed Linux and macOS clippy on three
+`let_unit_value` bindings in a test; those bindings were removed. After #165
+landed on 4b9c665e, the author rebased and passed `cargo check --tests`, ten
+focused library tests including a coexistence test, and one isolated CLI PTY on
+macOS 26.3.1 arm64 / Rust 1.99.1. The initial coexistence test used empty phase
+spans. The first stronger check using actual phase and context spans failed to
+compile due to an unqualified `Style` type; that test-only error was corrected.
+A static 80-column width check showed that placing the compaction fact first
+could cut off the index-pause label, so the saved pause is now placed first using
+the existing fit rule. A subsequent fresh macOS check passed
+`cargo check --tests`, ten focused library tests, and one isolated CLI PTY.
+The stronger coexistence test verified both labels and the fixed reason at
+80/120 columns, in
+both languages, with default, one-column, and two-column ambiguous-width
+policies, actual phase and context spans, and either fact clearing independently.
+Exact-tip task CI and the requested 3 OS integration CI remain required.
+No physical terminal, live-provider, Windows-local, or post-integration behavior
 has been verified.

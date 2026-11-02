@@ -243,14 +243,6 @@ pub(super) fn footer_lines(
     };
     let phase = view.footer_phase();
     let mut facts = Vec::new();
-    if let Some(auto) = view
-        .activity
-        .snapshot
-        .as_ref()
-        .and_then(|s| s.automatic_compaction.as_ref())
-    {
-        facts.push(auto.label_localized(view.language));
-    }
     if let Some(reason) = view.activity.snapshot.as_ref().and_then(|s| s.index_pause) {
         use crate::{config::UiLanguage, index::PauseReason};
         let reason = match (view.language, reason) {
@@ -276,6 +268,14 @@ pub(super) fn footer_lines(
             glyphs::INDEX,
             glyphs::separator()
         ));
+    }
+    if let Some(auto) = view
+        .activity
+        .snapshot
+        .as_ref()
+        .and_then(|s| s.automatic_compaction.as_ref())
+    {
+        facts.push(auto.label_localized(view.language));
     }
     if let Some(retry) = view
         .activity
@@ -579,23 +579,137 @@ mod tests {
             std::path::PathBuf::from("/synthetic"),
         );
         assert!(ui.view().activity.snapshot.is_none());
-        let _ = ui.apply(UiUpdate::DraftIndexPause {
+        ui.apply(UiUpdate::DraftIndexPause {
             pause: Some(PauseReason::Transport),
         });
         assert_eq!(
             ui.view().activity.snapshot.as_ref().unwrap().index_pause,
             Some(PauseReason::Transport)
         );
-        let _ = ui.apply(UiUpdate::DraftIndexPause { pause: None });
+        ui.apply(UiUpdate::DraftIndexPause { pause: None });
         assert_eq!(
             ui.view().activity.snapshot.as_ref().unwrap().index_pause,
             None
         );
         let _ = ui.select_thread("selected".into());
-        let _ = ui.apply(UiUpdate::DraftIndexPause {
+        ui.apply(UiUpdate::DraftIndexPause {
             pause: Some(PauseReason::Transport),
         });
         assert!(ui.view().activity.snapshot.is_none());
+    }
+
+    #[test]
+    fn index_pause_and_automatic_compaction_coexist_in_the_footer() {
+        use crate::{
+            config::UiLanguage,
+            index::PauseReason,
+            ui::{
+                UiState,
+                activity::{ActivityPhase, ActivitySnapshot, AutomaticCompactionSnapshot},
+            },
+        };
+        use std::path::PathBuf;
+        for (language, paused, compacting, reason) in [
+            (UiLanguage::Ja, "索引停止中", "自動圧縮中", "通信失敗"),
+            (
+                UiLanguage::En,
+                "Index paused",
+                "Auto-compacting",
+                "transport failure",
+            ),
+        ] {
+            for ambiguous in [None, Some(1), Some(2)] {
+                crate::ui::text_width::set_terminal_width(ambiguous);
+                let mut config = crate::config::Config::default();
+                config.ui.language = language;
+                let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+                let palette = super::super::theme::Palette::from_capabilities(
+                    crate::config::PaletteMode::Dark,
+                    false,
+                    true,
+                );
+                let auto = AutomaticCompactionSnapshot {
+                    input_tokens: 190_000,
+                    threshold: 200_000,
+                    started_at: "2026-01-01T00:00:00Z".into(),
+                };
+                let snapshot = ActivitySnapshot {
+                    phase: ActivityPhase::Preparing,
+                    turn_in_progress: true,
+                    run_id: Some("synthetic-run".into()),
+                    automatic_compaction: Some(auto.clone()),
+                    index_pause: Some(PauseReason::Transport),
+                    ..Default::default()
+                };
+                ui.view_mut().activity.accept(1, snapshot);
+                for width in [80, 120] {
+                    let activity = ui.animation.spans_localized(
+                        ui.view().footer_phase(),
+                        ratatui::style::Style::default(),
+                        std::time::Instant::now(),
+                        language,
+                    );
+                    let context = Some(ContextBar {
+                        usage: crate::ui::ContextUsage {
+                            input_tokens: Some(190_000),
+                            output_tokens: Some(100),
+                            ..Default::default()
+                        },
+                        auto_at: 200_000,
+                    });
+                    let rows = footer_lines(ui.view(), width, "", palette, activity, None, context);
+                    let text = rows[0]
+                        .spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>();
+                    assert!(
+                        text.contains(compacting) && text.contains(paused),
+                        "{language:?} {ambiguous:?} {width}: {text}"
+                    );
+                    assert!(
+                        text.contains(reason),
+                        "{language:?} {ambiguous:?} {width}: {text}"
+                    );
+                    assert!(text.width() <= usize::from(width));
+                }
+                ui.view_mut().activity.accept(
+                    2,
+                    ActivitySnapshot {
+                        automatic_compaction: Some(auto),
+                        ..Default::default()
+                    },
+                );
+                let rows = footer_lines(ui.view(), 120, "", palette, vec![], None, None);
+                let text = rows[0]
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>();
+                assert!(
+                    text.contains(compacting) && !text.contains(paused),
+                    "{text}"
+                );
+                ui.view_mut().activity.accept(
+                    3,
+                    ActivitySnapshot {
+                        index_pause: Some(PauseReason::Transport),
+                        ..Default::default()
+                    },
+                );
+                let rows = footer_lines(ui.view(), 120, "", palette, vec![], None, None);
+                let text = rows[0]
+                    .spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>();
+                assert!(
+                    text.contains(paused) && !text.contains(compacting),
+                    "{text}"
+                );
+            }
+            crate::ui::text_width::clear_terminal_width();
+        }
     }
 
     #[test]

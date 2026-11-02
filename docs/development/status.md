@@ -4010,7 +4010,10 @@ notifications request a fresh snapshot without reading the database on render.
 `auto_history=false` alone does not create a badge; the current interpretation
 still shows a real persisted pause if one exists, pending reviewer confirmation.
 Focused macOS checks, including an isolated synthetic PTY, passed on main
-99d10a78 after the direct-fact-read change. Task CI and handoff remain pending;
-no post-integration behavior is claimed. Display reads `pause::facts` directly
-rather than depending on the #173-removed drain helper; author rebase and fresh
-verification remain required when main advances.
+99d10a78 after the direct-fact-read change. After #165 landed on 4b9c665e, the
+author rebased while preserving automatic-compaction and index-pause facts; ten
+focused library tests and an isolated PTY passed, including coexistence with
+actual phase and context spans. The superseded task CI failed Linux and macOS
+clippy on three unit-valued test bindings, now corrected.
+Display reads `pause::facts` directly rather than depending on the #173-removed
+drain helper. Task CI, handoff, and post-integration behavior remain pending.
