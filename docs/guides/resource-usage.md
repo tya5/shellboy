@@ -362,3 +362,21 @@ fail-closed path was therefore not established; no jcode inference or model
 request was sent. Test containers used `--rm`, the temporary network was removed,
 no new image was built, and Colima was stopped afterward. Claude remains on
 hold. No retry or replacement inference was attempted.
+
+A later authorized jcode attempt used separate internal-only and external
+Docker networks, with a dual-homed metering relay. Preflight showed the client
+could reach the relay but not the host LiteLLM or an external address; the
+relay could reach the host port. With a fake model, the fixed v0.99.1 Linux
+x86-64 client completed all five instructions and nine chat requests through
+the relay. `JCODE_MAX_RETRIES=1` selected one transport attempt. The relay
+served the fixed-model `/v1/models` discovery response locally.
+
+The live attempt stopped before the client started: the controller checked the
+relay TCP port before it was ready and received connection refused. The relay
+started shortly afterward, but the error-stop rule was followed and no inference
+request was sent. jcode's real-model token usage and session headers therefore
+remain **unmeasured**; no zero values or cache ratios are implied. The previously
+reported 252,082 input-plus-output tokens are unchanged, while earlier failed
+and LiteLLM internal-retry usage remains unknown. The temporary containers and
+networks were removed and Colima stopped; no image was built. A pre-existing
+Python image was pulled for the x86-64 container architecture.
