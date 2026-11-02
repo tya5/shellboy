@@ -8950,7 +8950,7 @@ restart) and `tui_recovery::multiple_calls...` still fail locally and are not
 shown to relate to this change. 3-OS CI run 41560295018 on f575c68b passed
 (ubuntu, macOS, Windows), including both of those tests. No real API was
 called; real-model Revisit behaviour and physical terminals are untested.
-Rebased onto fd23d321 (#171 schema 22, #181/#183/#185); the migration became 24 (after #171's 22 and #172's 23)
+Rebased onto 4a302c9d (#187 schema 24); #172 startup recovery is migration 25
 and the inert `revisit.%` accounting pattern was kept for the #171 counters.
 After the rebase, `tests/revisit.rs`, the compaction tests (including a new
 released-Revisit current-request test), storage/gc tests and the Python script
@@ -9086,3 +9086,8 @@ defaults to target schema 24; the Python test covers the argument defaults.
 This is a source comparison, not an executed upgrade test. Run the disposable
 synthetic upgrade test on the candidate; no candidate, tag, publication or
 installed-binary change is claimed by this preparation.
+Startup index recovery (#172): local synthetic tests exercise row and byte
+batching, restart, oversized single records, and index query plans. Python
+upgrade fixtures cover schema 24 to 25. Paused-consumer integration and 3-OS
+CI are not yet established by these focused tests; actual provider behavior
+and billing are not tested.
