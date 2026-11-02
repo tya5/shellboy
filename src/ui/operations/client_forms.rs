@@ -404,6 +404,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     Choice(&["keyword", "semantic", "hybrid"]),
                 ),
                 limit("10"),
+                cursor(),
             ],
             |form, _| {
                 let mode = match form.value("search_mode")? {
@@ -435,6 +436,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                         scope: lines(form, "rag_scopes")?,
                         mode,
                         limit,
+                        cursor: form.optional("cursor")?,
                     },
                     None,
                 )
@@ -810,7 +812,7 @@ mod tests {
             panic!()
         };
         assert!(
-            matches!(options.command,RagCommand::Search{scope,mode:SearchMode::Hybrid,limit:17,..}if scope==["docs","history:thread","source:folder name"])
+            matches!(options.command,RagCommand::Search{scope,mode:SearchMode::Hybrid,limit:17, cursor: None,..}if scope==["docs","history:thread","source:folder name"])
         );
         let mut index = fixture(OpKind::RagIndex);
         set(&mut index, "dry_run", "true");

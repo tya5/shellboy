@@ -1671,6 +1671,7 @@ async fn search_scope_is_selected_path_plus_transitive_completed_replacement_sou
                 scope: vec!["history:fork".into()],
                 mode: shellboy::rag::SearchMode::Keyword,
                 limit: 100,
+                cursor: None,
             },
         },
         Some(f._temp.path().join("absent-config.toml")),
@@ -3215,11 +3216,11 @@ async fn automatic_history_off_keeps_vectors_and_explicit_work_and_standalone_ra
         assert_eq!(call(RagCommand::Source {command:SourceCommand::Add {path:root.join("notes.md"),name:"notes".into(),exclude:vec![],clear_excludes:false}}).await["ok"], true);
         let indexed = call(RagCommand::Index {source:Some("notes".into()),dry_run:false,mode:IndexMode::Semantic}).await;
         assert_eq!(indexed["ok"], true, "{indexed}");
-        let result = call(RagCommand::Search {query:"cat".into(),scope:vec!["source:notes".into()],mode:SearchMode::Semantic,limit:5}).await;
+        let result = call(RagCommand::Search {query:"cat".into(),scope:vec!["source:notes".into()],mode:SearchMode::Semantic,limit:5,cursor:None}).await;
         assert_eq!(result["ok"], true, "{result}");
         assert_eq!(result["result"]["degraded"], false);
         assert!(!result["result"]["items"].as_array().unwrap().is_empty());
-        let history = call(RagCommand::Search {query:"cat".into(),scope:vec!["history".into()],mode:SearchMode::Hybrid,limit:5}).await;
+        let history = call(RagCommand::Search {query:"cat".into(),scope:vec!["history".into()],mode:SearchMode::Hybrid,limit:5,cursor:None}).await;
         assert_eq!(history["ok"], true,"{history}");
         assert_eq!(history["result"]["degraded"], true);
         assert_eq!(history["result"]["scope_status"][0]["reason"], "auto_history_disabled");

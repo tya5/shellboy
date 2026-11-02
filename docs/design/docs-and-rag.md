@@ -227,7 +227,57 @@ A writer migrates schema 1-3 transactionally, validating old chunk text before
 dropping it. Read-only commands require migration first. Freed SQLite pages may
 be reused; the database file does not necessarily shrink.
 
-History keyword search examines at most the most recently inserted 10,000 nodes per
-scope, before Thread-membership checks. When older nodes exist, keyword status
-is `partial` and `history_keyword_limit` marks degraded results. There is no
-continuation cursor; searches may omit older or Thread-scoped matches.
+History keyword search bounds the number of examined nodes per call before Thread
+membership checks. A partial scope has a `next_cursor`; use the same query and
+that one history scope in keyword mode with `--cursor` until it is null. The cursor
+records the last examined rowid and the initial high-water position; it is bound
+to the history database, exact query and Thread. Newer inserts do not move the
+boundary. Pages are independently ranked and can be empty. The result limit and
+128 KiB hit budget can also end a page: if one node has multiple hits, the cursor
+records a verified within-node position. A changed/deleted node invalidates that
+position with `cursor_expired`, rather than silently omitting hits. One result
+that cannot fit the page produces `output_limit`.
+
+With multiple scopes or hybrid mode, each history scope with hits provides a
+cursor to replay that scope from its initial boundary in keyword-only mode, since
+fusion may have removed keyword hits. This can repeat initial results; clients
+should deduplicate by reference. A single history keyword scope also exposes the
+cursor as top-level `result.next_cursor`. Cursors do not freeze a database snapshot
+across calls: deletions and changing Thread membership are observed on subsequent
+pages, and new records inserted at or below the saved boundary may be observed.
+
+### History keyword node budget
+
+The per-call node budget is 2,000. The selection target for the measured baseline
+was at most about 500,000 SQLite VM steps and 250 ms per call; among the tested
+sizes, 2,000 is the largest meeting both targets in all measured baseline cases.
+A limit of 5,000 missed the time target in every case, and in the unlinked-node
+case also missed the step target. This is a workload-based budget, not a claim
+that arbitrary calls have a fixed VM or time ceiling.
+
+On macOS 15.7.2 arm64, unoptimized Rust test build, a disposable SQLite database
+with synthetic short Japanese-containing user payloads, a no-match query, and no
+conversation content or identifiers produced these single-run measurements:
+
+| Nodes | Unlinked global steps / ms | Linked global steps / ms | Linked Thread steps / ms |
+| ---: | ---: | ---: | ---: |
+| 1,000 | 220,000 / 104 | 74,000 / 90 | 67,000 / 86 |
+| 2,000 | 439,000 / 193 | 147,000 / 174 | 133,000 / 170 |
+| 5,000 | 1,097,000 / 487 | 367,000 / 433 | 332,000 / 424 |
+| 10,000 | 2,193,000 / 965 | 733,000 / 863 | 663,000 / 843 |
+
+The linked measurements exercise the current cursor scanner; the preliminary
+unlinked measurements used the immediately preceding bounded scanner, before
+cursor bookkeeping. SQLite's progress handler samples at 1,000 VM instructions,
+so counts are approximate. The timings include opening and querying the disposable
+history DB but exclude fixture creation; they are not production latency or
+percentiles. Long raw bodies, many references, deep replacement graphs, busy I/O,
+other scopes and ranking can exceed the target even within 2,000 nodes. Calls may
+also stop earlier at the caller's result limit or the 128 KiB hit-output budget;
+the latter reserves space within the existing 512 KiB response cap. All these
+boundaries return a continuation cursor rather than silently dropping later hits.
+
+Reproduce the linked global and Thread samples with:
+`cargo test --lib rag::history::measurement::history_keyword_work_budget -- --ignored --nocapture`.
+The test generates a disposable on-disk database and uses a test-only SQLite
+progress handler; it does not inspect the real owner or database.

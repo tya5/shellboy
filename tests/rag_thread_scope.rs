@@ -33,6 +33,7 @@ async fn search(root: &Path, scopes: &[&str]) -> Value {
                 scope: scopes.iter().map(|scope| (*scope).into()).collect(),
                 mode: SearchMode::Keyword,
                 limit: 100,
+                cursor: None,
             },
         },
         Some(root.join("missing-config.toml")),

@@ -73,6 +73,9 @@ pub enum RagCommand {
         mode: SearchMode,
         #[arg(long, default_value_t = 10)]
         limit: u32,
+        /// Resume a history keyword scan from a previous result.
+        #[arg(long)]
+        cursor: Option<String>,
     },
     Get {
         #[arg(long = "ref")]
@@ -412,7 +415,8 @@ async fn run(
             scope,
             mode,
             limit,
-        } => return search::search(&context, &query, &scope, mode, limit).await,
+            cursor,
+        } => return search::search(&context, &query, &scope, mode, limit, cursor.as_deref()).await,
         RagCommand::Get {
             reference,
             limit_bytes,

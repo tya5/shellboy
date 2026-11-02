@@ -390,3 +390,41 @@ fn bundled_guide_index_has_an_explicit_cost_preview_without_configuration() {
     );
     assert!(!root.join("data/shellboy.db").exists());
 }
+
+#[tokio::test]
+async fn history_keyword_cursor_round_trips_through_cli() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("data")).unwrap();
+    let db = shellboy::storage::DbWorker::open(root.join("data/shellboy.db"))
+        .await
+        .unwrap();
+    db.call(|c| {
+        let payload = serde_json::json!({"role":"user","content":[{"type":"input_text","text":"CLI復旧"}]}).to_string();
+        for n in 0..3 {
+            c.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES(?1,'user','now',?2,100)", rusqlite::params![format!("cli-{n}"), payload])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    let first = call(
+        root,
+        &[
+            "search", "--scope", "history", "--mode", "keyword", "--query", "復旧", "--limit", "1",
+        ],
+        true,
+    );
+    let cursor = first["result"]["next_cursor"].as_str().unwrap();
+    let second = call(
+        root,
+        &[
+            "search", "--scope", "history", "--mode", "keyword", "--query", "復旧", "--limit", "1",
+            "--cursor", cursor,
+        ],
+        true,
+    );
+    assert_ne!(
+        first["result"]["items"][0]["reference"],
+        second["result"]["items"][0]["reference"]
+    );
+    db.shutdown().await.unwrap();
+}

@@ -67,6 +67,7 @@ async fn search(root: &Path, scopes: &[&str], mode: SearchMode) -> Value {
             scope: scopes.iter().map(|s| (*s).into()).collect(),
             mode,
             limit: 100,
+            cursor: None,
         },
     )
     .await

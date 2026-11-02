@@ -156,4 +156,17 @@ History-scoped semantic/hybrid queries still search retained vectors, but report
 `degraded=true` and `scope_status.reason=auto_history_disabled` because newer
 conversation nodes may be absent. Keyword history retrieval remains available, subject to the limit below.
 
-History keyword search examines at most the most recently inserted 10,000 nodes per scope. If more nodes exist, `scope_status.keyword` is `partial` and a `history_keyword_limit` warning marks results as incomplete; older matches and matches in a Thread may be omitted. There is currently no continuation cursor.
+History keyword search processes a bounded number of nodes per call. If a scope is
+`partial`, repeat the same query and one history scope in keyword mode with the
+scope's `next_cursor`; a single-scope result also has `result.next_cursor`:
+
+```sh
+shellboy rag search --scope history:THREAD_ID --mode keyword --query 'earlier decisions' --cursor "$CURSOR"
+```
+
+Continue until the cursor is null. A page can be empty; result-count or byte
+budgets can also end a page. Pages are ranked independently. With hybrid or mixed
+scopes, the cursor restarts that history keyword stream from its initial boundary,
+so deduplicate repeated references. The cursor is bound to the database, query,
+and Thread. If an in-progress node changes, `cursor_expired` requires restarting;
+changes between calls are not a frozen snapshot.

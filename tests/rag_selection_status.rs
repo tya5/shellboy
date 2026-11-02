@@ -741,6 +741,7 @@ async fn readonly_history_rejects_older_conversation_schema_without_migrating() 
             scope: vec!["history".into()],
             mode: SearchMode::Keyword,
             limit: 10,
+            cursor: None,
         },
     )
     .await;
@@ -759,6 +760,7 @@ async fn readonly_history_rejects_older_conversation_schema_without_migrating() 
             scope: vec!["history".into()],
             mode: SearchMode::Keyword,
             limit: 10,
+            cursor: None,
         },
     )
     .await;

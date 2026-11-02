@@ -226,7 +226,7 @@ impl Hit {
             .then_with(|| a.reference.id.cmp(&b.reference.id))
     }
 
-    fn value(&self) -> Value {
+    pub(super) fn value(&self) -> Value {
         let mut value = json!({"reference":encode(&self.reference),"revision":self.reference.revision,"hash":self.reference.hash,"title":self.title,"excerpt":self.excerpt,"kind":self.kind,"location":self.location,"provenance":self.provenance,"scopes":self.scopes,"score":self.score,"distance":self.distance,"embedding_space":self.space,"method":self.method});
         if self.thread_scopes.len() == 1 {
             value["thread_scope"] = json!(self.thread_scopes[0]);
@@ -584,6 +584,7 @@ pub(super) async fn search(
     scopes: &[String],
     mode: SearchMode,
     limit: u32,
+    cursor: Option<&str>,
 ) -> Result<Value> {
     if query.trim().is_empty()
         || query.len() > 16384
@@ -593,6 +594,14 @@ pub(super) async fn search(
         return Err(err(
             "invalid_argument",
             "Provide query (1..=16384 bytes), limit 1..=100, and at most 200 scopes",
+        ));
+    }
+    if cursor.is_some()
+        && (mode != SearchMode::Keyword || scopes.len() != 1 || history_scope(&scopes[0]).is_none())
+    {
+        return Err(err(
+            "invalid_argument",
+            "A history cursor requires keyword mode and exactly its original history scope",
         ));
     }
     let mut scopes = scopes.to_vec();
@@ -641,6 +650,7 @@ pub(super) async fn search(
         };
         let mut source_id = None;
         let mut duplicate = false;
+        let mut next_cursor = None;
         let result: Result<()> = async {
             if scope == "docs" {
                 if mode != SearchMode::Semantic {
@@ -666,13 +676,23 @@ pub(super) async fn search(
                 }
                 if mode != SearchMode::Semantic {
                     keyword = "error";
-                    let (hits, truncated) = history::keyword(&context.history, query, thread)?;
-                    lists.push(hits);
-                    keyword = if truncated { "partial" } else { "ok" };
-                    if truncated {
+                    let page = history::keyword(&context.history, query, thread, limit as usize, cursor)?;
+                    let has_hits = !page.hits.is_empty();
+                    lists.push(page.hits);
+                    keyword = if page.next.is_some() { "partial" } else { "ok" };
+                    if page.next.is_some() || (has_hits && (scopes.len() != 1 || mode != SearchMode::Keyword)) {
+                        // Mixed scopes or hybrid fusion can discard keyword hits; restart the
+                        // focused keyword stream so the cursor never silently skips them.
+                        next_cursor = if scopes.len() != 1 || mode != SearchMode::Keyword {
+                            Some(page.restart)
+                        } else {
+                            page.next
+                        };
+                    }
+                    if keyword == "partial" {
                         let warning = warnings.entry("history_keyword_limit".into()).or_insert_with(|| json!({
                             "code":"history_keyword_limit", "scopes":[],
-                            "message":"History keyword search scanned only the most recently inserted 10000 nodes; older results may be missing"}));
+                            "message":"History keyword results are partial; continue with the scope cursor in keyword mode"}));
                         warning["scopes"].as_array_mut().expect("warning scopes").push(json!(scope));
                     }
                 }
@@ -726,8 +746,7 @@ pub(super) async fn search(
             Ok(())
         }
         .await;
-        let mut status =
-            json!({"scope":scope,"source":source_id,"keyword":keyword,"semantic":semantic});
+        let mut status = json!({"scope":scope,"source":source_id,"keyword":keyword,"semantic":semantic,"next_cursor":next_cursor});
         if history_scope(scope).is_some()
             && mode != SearchMode::Keyword
             && semantic == "ok"
@@ -786,7 +805,16 @@ pub(super) async fn search(
     hits.sort_by(Hit::compare);
     hits.truncate(limit as usize);
     let mut result = json!({"items":hits.iter().map(Hit::value).collect::<Vec<_>>(),"scopes":scopes,"mode":match mode{SearchMode::Keyword=>"keyword",SearchMode::Semantic=>"semantic",SearchMode::Hybrid=>"hybrid"},"rank_fusion":"rrf_k60","snapshot":"independent_sources_history_watermark_per_node_witness","scope_errors":failures,"scope_status":statuses,"degraded":!warnings.is_empty(),"warnings":warnings.into_values().collect::<Vec<_>>()});
+    if scopes.len() == 1 && history_scope(&scopes[0]).is_some() {
+        result["next_cursor"] = result["scope_status"][0]["next_cursor"].clone();
+    }
     while serde_json::to_vec(&result).expect("result JSON").len() > 512 * 1024 {
+        if scopes.len() == 1 && history_scope(&scopes[0]).is_some() && mode == SearchMode::Keyword {
+            return Err(err(
+                "output_limit",
+                "History search response exceeds its output budget",
+            ));
+        }
         if result["items"]
             .as_array_mut()
             .expect("items")

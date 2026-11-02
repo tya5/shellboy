@@ -64,6 +64,26 @@ async fn search(root: &Path, scope: &str, query: &str, mode: SearchMode) -> Valu
             scope: vec![scope.into()],
             mode,
             limit: 10,
+            cursor: None,
+        },
+    )
+    .await
+}
+async fn history_page(
+    root: &Path,
+    scope: &str,
+    query: &str,
+    limit: u32,
+    cursor: Option<String>,
+) -> Value {
+    call(
+        root,
+        RagCommand::Search {
+            query: query.into(),
+            scope: vec![scope.into()],
+            mode: SearchMode::Keyword,
+            limit,
+            cursor,
         },
     )
     .await
@@ -1156,6 +1176,22 @@ async fn history_keyword_warns_when_node_limit_truncates_search() {
         "{scoped}"
     );
     assert!(scoped["result"]["items"].as_array().unwrap().is_empty());
+    let mut token = scoped["result"]["next_cursor"].as_str().unwrap().to_owned();
+    let mut pages = 0;
+    loop {
+        let page = history_page(root, "history:old-thread", "OLDER_MATCH", 10, Some(token)).await;
+        assert_eq!(page["ok"], true, "{page}");
+        pages += 1;
+        if let Some(item) = page["result"]["items"].as_array().unwrap().first() {
+            assert_eq!(item["location"]["node_id"], "limit-0");
+            break;
+        }
+        token = page["result"]["next_cursor"]
+            .as_str()
+            .expect("older match remains reachable")
+            .to_owned();
+        assert!(pages < 100);
+    }
     db.call(|c| {
         c.execute("DELETE FROM thread_path WHERE thread_id='old-thread'", [])?;
         c.execute("DELETE FROM node WHERE id='limit-0'", [])?;
@@ -1164,11 +1200,208 @@ async fn history_keyword_warns_when_node_limit_truncates_search() {
     .await
     .unwrap();
     let exact = search(root, "history", "LATEST_LIMIT_MATCH", SearchMode::Keyword).await;
+    assert_eq!(exact["ok"], true, "{exact}");
+    db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn history_cursor_pages_dense_matches_and_checks_scope_query_and_watermark() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("data")).unwrap();
+    let db = shellboy::storage::DbWorker::open(root.join("data/shellboy.db"))
+        .await
+        .unwrap();
+    db.call(|c| {
+        let tx = c.transaction()?;
+        for n in 0..25 {
+            let payload = json!({"role":"user","content":[{"type":"input_text","text":"復旧識別"}]}).to_string();
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES(?1,'user','now',?2,100)", rusqlite::params![format!("dense-{n}"), payload])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let mut page = history_page(root, "history", "復旧識別", 3, None).await;
+    let first_cursor = page["result"]["next_cursor"].as_str().unwrap().to_owned();
+    let mixed = call(
+        root,
+        RagCommand::Search {
+            query: "復旧識別".into(),
+            scope: vec!["docs".into(), "history".into()],
+            mode: SearchMode::Keyword,
+            limit: 3,
+            cursor: None,
+        },
+    )
+    .await;
+    let restart = mixed["result"]["scope_status"][1]["next_cursor"]
+        .as_str()
+        .expect("mixed results provide a focused replay cursor");
+    let replay = history_page(root, "history", "復旧識別", 3, Some(restart.into())).await;
     assert_eq!(
-        exact["result"]["scope_status"][0]["keyword"], "ok",
-        "{exact}"
+        replay["result"]["items"][0]["reference"],
+        page["result"]["items"][0]["reference"]
     );
-    assert_eq!(exact["result"]["degraded"], false);
+    use base64::Engine;
+    let decoded: Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(&first_cursor)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        decoded["bound"], 23,
+        "cursor records the last examined rowid"
+    );
+    assert_eq!(decoded["inclusive"], false);
+    let invalid = history_page(root, "history", "DIFFERENT", 3, Some(first_cursor.clone())).await;
+    assert_eq!(
+        invalid["result"]["scope_errors"][0]["code"], "cursor_expired",
+        "{invalid}"
+    );
+    let malformed = history_page(root, "history", "復旧識別", 3, Some("not-a-cursor".into())).await;
+    assert_eq!(
+        malformed["result"]["scope_errors"][0]["code"], "cursor_expired",
+        "{malformed}"
+    );
+    db.call(|c| {
+        c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('different-thread','/','/agents','p','m','now')", [])?;
+        Ok(())
+    }).await.unwrap();
+    let wrong_scope = history_page(
+        root,
+        "history:different-thread",
+        "復旧識別",
+        3,
+        Some(first_cursor.clone()),
+    )
+    .await;
+    assert_eq!(
+        wrong_scope["result"]["scope_errors"][0]["code"], "cursor_expired",
+        "{wrong_scope}"
+    );
+    db.call(|c| {
+        let payload = json!({"role":"user","content":[{"type":"input_text","text":"復旧識別"}]}).to_string();
+        c.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('newer','user','now',?1,100)", [&payload])?;
+        Ok(())
+    }).await.unwrap();
+    let mut ids = std::collections::BTreeSet::new();
+    for _ in 0..20 {
+        assert_eq!(page["ok"], true, "{page}");
+        for item in page["result"]["items"].as_array().unwrap() {
+            assert!(
+                ids.insert(item["location"]["node_id"].as_str().unwrap().to_owned()),
+                "duplicate page hit"
+            );
+        }
+        match page["result"]["next_cursor"].as_str() {
+            Some(cursor) => {
+                page = history_page(root, "history", "復旧識別", 3, Some(cursor.into())).await
+            }
+            None => break,
+        }
+    }
+    assert_eq!(ids.len(), 25, "{ids:?}");
+    assert!(!ids.contains("newer"));
+    let other = tempfile::tempdir().unwrap();
+    std::fs::create_dir(other.path().join("data")).unwrap();
+    let other_db = shellboy::storage::DbWorker::open(other.path().join("data/shellboy.db"))
+        .await
+        .unwrap();
+    let wrong_store =
+        history_page(other.path(), "history", "復旧識別", 3, Some(first_cursor)).await;
+    assert_eq!(
+        wrong_store["result"]["scope_errors"][0]["code"], "cursor_expired",
+        "{wrong_store}"
+    );
+    other_db.shutdown().await.unwrap();
+    db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn history_cursor_preserves_hit_at_output_byte_boundary() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("data")).unwrap();
+    let db = shellboy::storage::DbWorker::open(root.join("data/shellboy.db"))
+        .await
+        .unwrap();
+    db.call(|c| {
+        let tx = c.transaction()?;
+        let payload = json!({"role":"user","content":[{"type":"input_text","text":"SIZE_NEEDLE"}]}).to_string();
+        for id in ["byte-0", "byte-1"] {
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES(?1,'user','now',?2,100)", rusqlite::params![id, payload])?;
+        }
+        for n in 0..100 {
+            let id = format!("{n:03}-{}", "x".repeat(900));
+            tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'/','/agents','p','m','now')", [&id])?;
+            for (ordinal, node) in ["byte-0", "byte-1"].into_iter().enumerate() {
+                tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES(?1,?2,?3)", rusqlite::params![id, ordinal as i64, node])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let first = history_page(root, "history", "SIZE_NEEDLE", 100, None).await;
+    assert_eq!(first["ok"], true, "{first}");
+    assert_eq!(first["result"]["items"].as_array().unwrap().len(), 1);
+    let token = first["result"]["next_cursor"].as_str().unwrap();
+    use base64::Engine;
+    let decoded: Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(token)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(decoded["inclusive"], true);
+    assert_eq!(decoded["skip"], 0);
+    let second = history_page(root, "history", "SIZE_NEEDLE", 100, Some(token.into())).await;
+    assert_eq!(second["ok"], true, "{second}");
+    assert_eq!(second["result"]["items"].as_array().unwrap().len(), 1);
+    assert_ne!(
+        first["result"]["items"][0]["reference"],
+        second["result"]["items"][0]["reference"]
+    );
+    assert!(second["result"]["next_cursor"].is_null());
+    db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn history_cursor_resumes_within_node_and_expires_if_body_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    std::fs::create_dir(root.join("data")).unwrap();
+    let db = shellboy::storage::DbWorker::open(root.join("data/shellboy.db"))
+        .await
+        .unwrap();
+    db.call(|c| {
+        let payload = json!({"output":[
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"MULTI_NEEDLE first"}]},
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"MULTI_NEEDLE second"}]}
+        ]}).to_string();
+        c.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('multi','assistant_response','now',?1,100)", [&payload])?;
+        Ok(())
+    }).await.unwrap();
+    let first = history_page(root, "history", "MULTI_NEEDLE", 1, None).await;
+    assert_eq!(first["ok"], true, "{first}");
+    let token = first["result"]["next_cursor"].as_str().unwrap().to_owned();
+    let second = history_page(root, "history", "MULTI_NEEDLE", 1, Some(token.clone())).await;
+    assert_eq!(second["ok"], true, "{second}");
+    assert_ne!(
+        first["result"]["items"][0]["reference"],
+        second["result"]["items"][0]["reference"]
+    );
+    db.call(|c| {
+        c.execute("UPDATE node SET payload_json='{}' WHERE id='multi'", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let expired = history_page(root, "history", "MULTI_NEEDLE", 1, Some(token)).await;
+    assert_eq!(
+        expired["result"]["scope_errors"][0]["code"], "cursor_expired",
+        "{expired}"
+    );
     db.shutdown().await.unwrap();
 }
 
@@ -1243,6 +1476,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
             scope: vec![],
             mode: SearchMode::Hybrid,
             limit: 10,
+            cursor: None,
         },
     )
     .await;
@@ -1461,6 +1695,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
             scope: vec![],
             mode: SearchMode::Semantic,
             limit: 10,
+            cursor: None,
         },
     )
     .await;
@@ -1485,6 +1720,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
             scope: vec![],
             mode: SearchMode::Semantic,
             limit: 10,
+            cursor: None,
         },
     )
     .await;
@@ -1519,6 +1755,7 @@ async fn docs_semantic_requires_explicit_index_and_search_never_prepares_guides(
             scope: vec![],
             mode: SearchMode::Keyword,
             limit: 10,
+            cursor: None,
         },
     )
     .await;
@@ -1562,6 +1799,7 @@ async fn successful_semantic_scope_breaks_provider_failure_streak_without_extra_
             scope: scopes.clone(),
             mode: SearchMode::Semantic,
             limit: 10,
+            cursor: None,
         },
     )
     .await;
@@ -1583,6 +1821,7 @@ async fn successful_semantic_scope_breaks_provider_failure_streak_without_extra_
             scope: scopes,
             mode: SearchMode::Semantic,
             limit: 10,
+            cursor: None,
         },
     )
     .await;

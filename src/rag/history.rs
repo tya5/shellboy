@@ -16,6 +16,16 @@ fn open_connection(path: &Path) -> Result<Connection> {
         .map_err(|_| err("history_unavailable", "Cannot initialize sqlite-vec"))?;
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     db.busy_timeout(Duration::from_secs(2))?;
+    #[cfg(test)]
+    if BENCH_STEPS_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        db.progress_handler(
+            1000,
+            Some(|| {
+                BENCH_STEPS.fetch_add(1000, std::sync::atomic::Ordering::Relaxed);
+                false
+            }),
+        )?;
+    }
     db.execute_batch("PRAGMA query_only=ON;BEGIN;")?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version != crate::storage::SCHEMA_VERSION {
@@ -199,12 +209,42 @@ fn validate_thread(db: &Connection, thread: Option<&str>) -> Result<()> {
     }
     Ok(())
 }
-const KEYWORD_NODE_LIMIT: usize = 10_000;
+const KEYWORD_NODE_LIMIT: usize = 2_000;
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KeywordCursor {
+    version: u32,
+    store: String,
+    query_hash: String,
+    thread_hash: Option<String>,
+    bound: i64,
+    inclusive: bool,
+    skip: usize,
+    node_hash: Option<String>,
+    signature: Option<String>,
+}
+pub(super) struct KeywordPage {
+    pub hits: Vec<search::Hit>,
+    pub next: Option<String>,
+    pub restart: String,
+}
 pub(super) fn keyword(
     path: &Path,
     query: &str,
     thread: Option<&str>,
-) -> Result<(Vec<search::Hit>, bool)> {
+    limit: usize,
+    cursor: Option<&str>,
+) -> Result<KeywordPage> {
+    keyword_with_budget(path, query, thread, limit, cursor, KEYWORD_NODE_LIMIT)
+}
+fn keyword_with_budget(
+    path: &Path,
+    query: &str,
+    thread: Option<&str>,
+    limit: usize,
+    cursor: Option<&str>,
+    node_budget: usize,
+) -> Result<KeywordPage> {
     if query.trim().is_empty() {
         return Err(err("invalid_argument", "Provide a nonempty keyword query"));
     }
@@ -218,35 +258,104 @@ pub(super) fn keyword(
             .query_row("SELECT COALESCE(MAX(rowid),0) FROM node", [], |r| {
                 r.get::<_, i64>(0)
             })?;
-    let mut after = Some(watermark);
+    let query_hash = hash(query.as_bytes());
+    let make_cursor = |bound, inclusive, skip, node, signature| {
+        encode(&KeywordCursor {
+            version: 1,
+            store: db.store_id.clone(),
+            query_hash: query_hash.clone(),
+            thread_hash: thread.map(|id| hash(id.as_bytes())),
+            bound,
+            inclusive,
+            skip,
+            node_hash: node,
+            signature,
+        })
+    };
+    let restart = make_cursor(watermark, true, 0, None, None);
+    let position = if let Some(token) = cursor {
+        let c: KeywordCursor =
+            decode(token).map_err(|_| err("cursor_expired", "Invalid history search cursor"))?;
+        if c.version != 1
+            || c.store != db.store_id
+            || c.query_hash != query_hash
+            || c.thread_hash != thread.map(|id| hash(id.as_bytes()))
+            || (c.skip == 0) != (c.node_hash.is_none() && c.signature.is_none())
+            || (c.skip > 0 && (!c.inclusive || c.node_hash.is_none() || c.signature.is_none()))
+        {
+            return Err(err(
+                "cursor_expired",
+                "History cursor does not match this search",
+            ));
+        }
+        Some(c)
+    } else {
+        None
+    };
+    let mut after = Some(
+        position
+            .as_ref()
+            .map_or((watermark, true), |c| (c.bound, c.inclusive)),
+    );
+    let mut resume = position.filter(|c| c.skip > 0);
     let mut hits = Vec::new();
-    while let Some(bound) = after {
+    let mut hit_bytes = 0usize;
+    while let Some((bound, inclusive)) = after {
         let rows = {
             // Collect only IDs here. Membership is checked using indexed reverse
             // ancestry in each node snapshot, before loading/scoring its body.
-            let mut q = db.connection.prepare_cached(
-                "SELECT rowid,id FROM node WHERE rowid<=?1 ORDER BY rowid DESC LIMIT 32",
-            )?;
+            let sql = if inclusive {
+                "SELECT rowid,id FROM node WHERE rowid<=?1 ORDER BY rowid DESC LIMIT 32"
+            } else {
+                "SELECT rowid,id FROM node WHERE rowid<?1 ORDER BY rowid DESC LIMIT 32"
+            };
+            let mut q = db.connection.prepare_cached(sql)?;
             q.query_map([bound], |r| {
                 Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?
         };
         if rows.is_empty() {
+            if resume.is_some() {
+                return Err(err(
+                    "cursor_expired",
+                    "History cursor node no longer exists",
+                ));
+            }
             break;
         }
         for (rowid, id) in rows {
-            if scanned == KEYWORD_NODE_LIMIT {
-                return Ok((hits, true));
+            if scanned == node_budget {
+                let (last, inclusive) =
+                    after.expect("a scanned node supplies the continuation position");
+                return Ok(KeywordPage {
+                    hits,
+                    next: Some(make_cursor(last, inclusive, 0, None, None)),
+                    restart,
+                });
+            }
+            if resume.as_ref().is_some_and(|c| {
+                c.bound != rowid || c.node_hash.as_deref() != Some(hash(id.as_bytes()).as_str())
+            }) {
+                return Err(err(
+                    "cursor_expired",
+                    "History cursor node no longer exists",
+                ));
             }
             scanned += 1;
-            after = rowid.checked_sub(1);
+            after = Some((rowid, false));
             // A previous node releases its snapshot. Do not return a candidate
             // from an obsolete Thread path/replacement set in this new snapshot.
             validate_thread(&db.connection, thread)?;
             if let Some(thread) = thread
                 && !crate::history::search_scope::contains(&db.connection, thread, &id)?
             {
+                if resume.is_some() {
+                    return Err(err(
+                        "cursor_expired",
+                        "History cursor node is no longer visible",
+                    ));
+                }
                 db.connection.execute_batch("ROLLBACK;BEGIN;")?;
                 continue;
             }
@@ -254,20 +363,33 @@ pub(super) fn keyword(
             // snapshot, which is a visibility root. Global reads still need
             // the general deleted-owner test rather than a duplicate walk.
             if thread.is_none() && !crate::history::reachability::searchable(&db.connection, &id)? {
+                if resume.is_some() {
+                    return Err(err(
+                        "cursor_expired",
+                        "History cursor node is no longer visible",
+                    ));
+                }
                 db.connection.execute_batch("ROLLBACK;BEGIN;")?;
                 continue;
             }
             let (kind, _, payload, _) = match node(&db.connection, &id) {
                 Ok(node) => node,
                 Err(error) if error.code == "revision_unavailable" => {
+                    if resume.is_some() {
+                        return Err(err(
+                            "cursor_expired",
+                            "History cursor node is no longer available",
+                        ));
+                    }
                     db.connection.execute_batch("ROLLBACK;BEGIN;")?;
                     continue;
                 }
                 Err(error) => return Err(error),
             };
+            let mut node_hits = Vec::new();
             for body in bodies(&db.connection, &id, &kind, &payload)? {
                 if let Some(score) = search::keyword_score(&body.text, query) {
-                    hits.push(make_hit(&db, &id, body, (score, None, None), thread)?);
+                    node_hits.push(make_hit(&db, &id, body, (score, None, None), thread)?);
                 }
             }
             if let Some(witness) = raw_witness(&db.connection, &id)? {
@@ -288,20 +410,81 @@ pub(super) fn keyword(
                         if !range.is_null() {
                             hit.location["range"] = range;
                         }
-                        hits.push(hit);
+                        node_hits.push(hit);
                     }
                     Ok(None) => {}
                     Err(error) if error.code == "revision_unavailable" => {}
                     Err(error) => return Err(error),
                 }
             }
-            // Bound accumulated candidates even within one snapshot.
-            hits.sort_by(search::Hit::compare);
-            hits.truncate(100);
+            let signature = hash(
+                serde_json::to_string(&node_hits.iter().map(|h| &h.reference).collect::<Vec<_>>())
+                    .expect("references serialize")
+                    .as_bytes(),
+            );
+            let skip = if let Some(previous) = resume.take() {
+                if previous.signature.as_deref() != Some(signature.as_str())
+                    || previous.skip > node_hits.len()
+                {
+                    return Err(err("cursor_expired", "History cursor node changed"));
+                }
+                previous.skip
+            } else {
+                0
+            };
+            let remaining = node_hits.len() - skip;
+            let mut take = 0usize;
+            for hit in node_hits.into_iter().skip(skip) {
+                if hits.len() == limit {
+                    break;
+                }
+                let size = serde_json::to_vec(&hit.value())
+                    .expect("hit serializes")
+                    .len()
+                    + 1;
+                if hit_bytes + size > 128 * 1024 {
+                    if hits.is_empty() {
+                        return Err(err(
+                            "output_limit",
+                            "A history result exceeds the page budget",
+                        ));
+                    }
+                    break;
+                }
+                hit_bytes += size;
+                hits.push(hit);
+                take += 1;
+            }
+            let next = if take < remaining && skip + take == 0 {
+                Some(make_cursor(rowid, true, 0, None, None))
+            } else if take < remaining {
+                Some(make_cursor(
+                    rowid,
+                    true,
+                    skip + take,
+                    Some(hash(id.as_bytes())),
+                    Some(signature),
+                ))
+            } else if hits.len() == limit {
+                after.map(|(bound, inclusive)| make_cursor(bound, inclusive, 0, None, None))
+            } else {
+                None
+            };
             db.connection.execute_batch("ROLLBACK;BEGIN;")?;
+            if next.is_some() {
+                return Ok(KeywordPage {
+                    hits,
+                    next,
+                    restart,
+                });
+            }
         }
     }
-    Ok((hits, false))
+    Ok(KeywordPage {
+        hits,
+        next: None,
+        restart,
+    })
 }
 pub(super) async fn semantic(
     context: &search::Context,
@@ -499,4 +682,81 @@ pub(super) fn get(path: &Path, reference: &Reference) -> Result<(String, Value)>
         return Err(err("revision_unavailable", "History text content changed"));
     }
     Ok((text, provenance(db, &reference.id)?))
+}
+
+#[cfg(test)]
+static BENCH_STEPS_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+static BENCH_STEPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(test)]
+mod measurement {
+    use super::*;
+    use std::sync::atomic::Ordering;
+    #[tokio::test]
+    #[ignore = "Synthetic per-call history keyword VM steps and timing"]
+    async fn history_keyword_work_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shellboy.db");
+        let db = crate::storage::DbWorker::open(path.clone()).await.unwrap();
+        db.call(|c| {
+            c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('bench','/','/agents','p','m','now')", [])?;
+            Ok(())
+        }).await.unwrap();
+        for total in [250_i64, 500, 1000, 2000, 5000, 10000] {
+            db.call(move |c| {
+                c.execute_batch("DELETE FROM thread_path; DELETE FROM node;")?;
+                let tx = c.transaction()?;
+                {
+                    let mut q = tx.prepare("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES(?1,'user','now',?2,100)")?;
+                    let mut path = tx.prepare("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('bench',?1,?2)")?;
+                    for n in 0..total {
+                        let id = format!("synthetic-{n}");
+                        q.execute(params![id, r#"{"role":"user","content":[{"type":"input_text","text":"ordinary synthetic Japanese 文書"}]}"#])?;
+                        path.execute(params![n, id])?;
+                    }
+                }
+                tx.commit()?;
+                Ok(())
+            }).await.unwrap();
+            for thread in [None, Some("bench")] {
+                BENCH_STEPS.store(0, Ordering::SeqCst);
+                BENCH_STEPS_ENABLED.store(true, Ordering::SeqCst);
+                let start = std::time::Instant::now();
+                let result =
+                    keyword_with_budget(&path, "absent", thread, 100, None, total as usize)
+                        .unwrap();
+                let elapsed = start.elapsed();
+                BENCH_STEPS_ENABLED.store(false, Ordering::SeqCst);
+                assert!(result.hits.is_empty());
+                println!(
+                    "RAG_BUDGET rows={total} scope={} vm_steps_approx={} elapsed_ms={:.2}",
+                    if thread.is_some() { "thread" } else { "global" },
+                    BENCH_STEPS.load(Ordering::SeqCst),
+                    elapsed.as_secs_f64() * 1000.0
+                );
+            }
+            db.call(|c| {
+                c.execute("DELETE FROM thread_path", [])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+            BENCH_STEPS.store(0, Ordering::SeqCst);
+            BENCH_STEPS_ENABLED.store(true, Ordering::SeqCst);
+            let start = std::time::Instant::now();
+            let result =
+                keyword_with_budget(&path, "absent", None, 100, None, total as usize).unwrap();
+            let elapsed = start.elapsed();
+            BENCH_STEPS_ENABLED.store(false, Ordering::SeqCst);
+            assert!(result.hits.is_empty());
+            println!(
+                "RAG_BUDGET rows={total} scope=unlinked vm_steps_approx={} elapsed_ms={:.2}",
+                BENCH_STEPS.load(Ordering::SeqCst),
+                elapsed.as_secs_f64() * 1000.0
+            );
+        }
+        db.shutdown().await.unwrap();
+    }
 }
