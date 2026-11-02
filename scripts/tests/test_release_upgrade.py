@@ -121,6 +121,15 @@ class ReleaseUpgradeTests(unittest.TestCase):
                 with closing(sqlite3.connect(uri, uri=True)) as reader:
                     self.assertEqual(reader.execute('SELECT * FROM sample').fetchall(), [(17,)])
 
+    def test_public_schema19_noop_preserves_records_and_ledger(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 19)
+        before, records = checks.ledger(db), checks.snapshot(db)
+        checks.prepare_schema(db, 19)
+        self.assertEqual(checks.ledger(db), before)
+        self.assertEqual(checks.snapshot(db), records)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (19,))
+
     def test_public_schema17_to18_preserves_records_and_extends_index(self):
         db = self.fixture(17)
         db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.synthetic', '{\"tokens\":7}')")
