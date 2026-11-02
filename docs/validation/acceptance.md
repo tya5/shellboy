@@ -8464,3 +8464,9 @@ The existing full manifest fails a stale `src/presentation/messages.rs`
 fingerprint on main 2607218b, so this is not whole-repository acceptance.
 Python `test_language_audit.py` passed 13 tests on macOS. Exact task CI and
 three-OS integration validation remain pending.
+
+After W1 landed on main 74d27461 (three-OS CI 41415178623), re-reviewed all
+17 live-work Japanese resources against their English variants. Their source
+is unchanged from 2607218b; each original decision and literal matches. Only
+these scope fingerprints changed; all main decisions remain. The complete
+classification manifest now validates. Rebased task CI is pending.
