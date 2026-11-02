@@ -1,9 +1,11 @@
 //! Watch discovery pages: finite retained witnesses on a read-only WAL snapshot.
 use crate::{
+    config::UiLanguage,
     control::{Control, db::thread_summary},
     protocol::{ApiError, ErrorCode, Page, ThreadSummary},
     ui::{
         ThreadDisplayTime,
+        i18n::local,
         watch::{CompletionIdentity, WatchSummary},
     },
 };
@@ -193,6 +195,7 @@ pub(super) async fn read(
         permit = progress_slots.acquire_owned() => permit.map_err(|_| ApiError::new(ErrorCode::InvalidState, "Watch page admission is closed"))?,
     };
     let path = control.store.database.path().to_path_buf();
+    let language = control.store.config.ui.language;
     super::presentation_work(move || {
         if stop.is_cancelled() {
             return Err(ApiError::new(
@@ -208,7 +211,7 @@ pub(super) async fn read(
         db.busy_timeout(std::time::Duration::from_millis(250))
             .and_then(|_| db.pragma_update(None, "query_only", true))
             .map_err(storage)?;
-        let page = collect_observed(&db, &request, sequence, Some(&diagnostics))?;
+        let page = collect_observed(&db, &request, sequence, Some(&diagnostics), language)?;
         if stop.is_cancelled() {
             return Err(ApiError::new(
                 ErrorCode::InvalidState,
@@ -221,13 +224,14 @@ pub(super) async fn read(
 }
 #[cfg(test)]
 fn collect(db: &Connection, request: &Request, sequence: u64) -> Result<PreparedPage, ApiError> {
-    collect_observed(db, request, sequence, None)
+    collect_observed(db, request, sequence, None, UiLanguage::default())
 }
 fn collect_observed(
     db: &Connection,
     request: &Request,
     sequence: u64,
     diagnostics: Option<&crate::diagnostics::Diagnostics>,
+    language: UiLanguage,
 ) -> Result<PreparedPage, ApiError> {
     let (seen_json, seen_hash) = seen(request)?;
     let cursor = decode(request, &seen_hash)?;
@@ -272,7 +276,14 @@ fn collect_observed(
             scope,
             read_at,
             continuation_limited: false,
-            notice: Some("子孫の範囲を取得できませんでした".into()),
+            notice: Some(
+                local!(
+                    language,
+                    "子孫の範囲を取得できませんでした",
+                    "Cannot retrieve the descendant scope"
+                )
+                .into(),
+            ),
         });
     }
     let scoped_ids = serde_json::to_string(
@@ -416,7 +427,14 @@ fn collect_observed(
         scope,
         read_at,
         continuation_limited,
-        notice: continuation_limited.then(|| "取得範囲の続きをPageDownで確認できます".into()),
+        notice: continuation_limited.then(|| {
+            local!(
+                language,
+                "取得範囲の続きをPageDownで確認できます",
+                "Press PageDown to continue through the bounded search range"
+            )
+            .into()
+        }),
     })
 }
 
@@ -461,6 +479,110 @@ mod tests {
         thread(db, id, None, id, "now");
         run(db, id, state, turn, answer);
     }
+    #[tokio::test]
+    async fn page_read_uses_default_en_and_explicit_ja_for_unavailable_scope() {
+        for (settings, expected) in [
+            ("", "Cannot retrieve the descendant scope"),
+            ("[ui]\nlanguage='ja'\n", "子孫の範囲を取得できませんでした"),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let config = root.path().join("config.toml");
+            std::fs::write(&config, format!("default_connection='fixture'\ndefault_model='fixture-model'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n{settings}")).unwrap();
+            let owner = crate::app::DataOwner::start(
+                Some(config),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            let mut query = request();
+            query.descendant_root = Some("absent-root".into());
+            let page = read(
+                &control,
+                query,
+                tokio_util::sync::CancellationToken::new(),
+                std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+                owner.diagnostics.clone(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(page.notice.as_deref(), Some(expected));
+            assert!(page.page.items.is_empty());
+            assert!(page.page.next_cursor.is_none());
+            assert!(!page.scope.unwrap().available);
+            assert!(!page.continuation_limited);
+            drop(control);
+            owner.shutdown().await.unwrap();
+        }
+    }
+
+    #[test]
+    fn localized_continuation_preserves_cursor_and_saved_titles_at_all_counts() {
+        for count in [0, 1, 2, 10] {
+            let db = fixture();
+            let source_title = "取得範囲の続きをPageDownで確認できます e\u{301} 🦀";
+            for index in 0..count {
+                let id = format!("thread-{index}");
+                thread(&db, &id, None, source_title, "now");
+                run(&db, &id, "live", "running", false);
+            }
+            let english = collect_observed(&db, &request(), 73, None, UiLanguage::En).unwrap();
+            let japanese = collect_observed(&db, &request(), 73, None, UiLanguage::Ja).unwrap();
+            assert_eq!(english.page.items.len(), count);
+            assert!(
+                english
+                    .page
+                    .items
+                    .iter()
+                    .all(|row| row.title == source_title)
+            );
+            assert_eq!(
+                serde_json::to_value(&english.page).unwrap(),
+                serde_json::to_value(&japanese.page).unwrap()
+            );
+            assert!(english.notice.is_none() && japanese.notice.is_none());
+            assert_eq!(english.read_sequence, japanese.read_sequence);
+            assert_eq!(english.limited_titles, japanese.limited_titles);
+        }
+        let mut db = fixture();
+        let tx = db.transaction().unwrap();
+        for index in 0..129 {
+            let id = format!("untitled-{index:03}");
+            thread(&tx, &id, None, "", "now");
+            run(&tx, &id, "live", "running", false);
+        }
+        tx.commit().unwrap();
+        let mut query = request();
+        query.filter = "absent".into();
+        let english = collect_observed(&db, &query, 74, None, UiLanguage::En).unwrap();
+        let japanese = collect_observed(&db, &query, 74, None, UiLanguage::Ja).unwrap();
+        assert_eq!(
+            english.notice.as_deref(),
+            Some("Press PageDown to continue through the bounded search range")
+        );
+        assert_eq!(
+            japanese.notice.as_deref(),
+            Some("取得範囲の続きをPageDownで確認できます")
+        );
+        assert!(english.continuation_limited && japanese.continuation_limited);
+        assert!(english.page.next_cursor.is_some());
+        assert_eq!(
+            serde_json::to_value(&english.page).unwrap(),
+            serde_json::to_value(&japanese.page).unwrap()
+        );
+        assert_eq!(english.read_sequence, 74);
+        assert_eq!(english.read_sequence, japanese.read_sequence);
+        query.cursor = english.page.next_cursor;
+        let tail = collect_observed(&db, &query, 75, None, UiLanguage::Ja).unwrap();
+        assert!(tail.page.next_cursor.is_none());
+        assert!(!tail.continuation_limited);
+        assert!(
+            tail.notice.is_none(),
+            "an En cursor must remain valid with Ja rendering"
+        );
+    }
+
     #[test]
     fn global_watch_discovers_old_active_rows_outside_first_list_page_and_prioritizes_states() {
         let mut db = fixture();

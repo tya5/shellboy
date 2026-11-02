@@ -124,3 +124,17 @@ width invariance, emoji characters using the test-only Unicode emoji property de
 popup borders and essential phrases. Fixtures containing user
 or model data need separate source/copy-preservation assertions; never sanitize
 that data merely to satisfy a symbol test.
+
+## Watch page notice boundary (#152)
+
+The Watch discovery worker owns two complete UI notices: unavailable descendant
+scope and a bounded-search continuation hint. Capture the loaded UI language in
+`watch_page::read` and pass it only to notice rendering during collection.
+Default En uses English; explicit Ja preserves both pre-batch sentences exactly.
+The supplied notice travels through `UiUpdate::Threads` to the browser's existing
+localized filter/status line. No CLI/wire error or saved value is localized here.
+
+Locale is deliberately excluded from the request, seen hash, watermark, sort key,
+cursor encoding and selection sequence. Do not translate stored titles, source
+text or facts that happen to contain the same words as a notice. Bounds,
+continuation guards, cancellation and read-only snapshot behavior are unchanged.

@@ -3835,3 +3835,16 @@ comparison artifact is 13113493939, measured source 8d3201e3. Attempt 1's Codex
 PSS sample failed on changing process membership; the same SHA's comparison was
 rerun without changing the measurement guard. Real-provider tokens, repeated-run
 variance and physical-terminal behavior remain unverified.
+### #152 Product Batch4: Watch Page Notices
+
+Read-only producer/consumer review confirms2generated Watch discovery notices
+were fixed Japanese in default En. The leaf watch_page module now captures the
+loaded UI language and localizes those complete messages, preserving original
+Ja plus source/page/cursor/bound/hash/sequence behavior. New regressions cover
+the real read entry, both locales,0/1/2/10source rows and bounded continuation.
+Focused local checks and exact-tip CI are reported separately.
+
+#149 landing is confirmed at79166408 with3-OS integration CI41380530706. #150
+remains deferred, including draft_saver omitted from the old ownership table;
+the unpublished overlapping prototype is not an integration candidate. Final
+Stage C coverage, dynamic/source provenance and remaining(c)review are pending.

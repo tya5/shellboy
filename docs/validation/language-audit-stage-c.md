@@ -308,3 +308,30 @@ dynamic `reason`, namespace candidates, permissions, leases, filesystem actions
 and all UI symbols stay unchanged. A pure unit test verifies exact English text
 and preserves Japanese/Unicode in the injected reason. Unknown (c) candidates
 remain unreviewed; this table is not a claim that they are all defects.
+
+## Product Review Batch4: Watch Page Notices
+
+The2Japanese notice literals in frontend/watch_page.rs are generated UI text,
+not saved titles or canonical values. One reports unavailable descendant scope;
+the other explains PageDown continuation through a bounded search range (not a
+guarantee of matching rows). Producer/consumer tracing reaches
+UiUpdate::Threads.notice and the existing localized browser filter/status line.
+They formerly remained Japanese in default En. Both now use the loaded UI
+language, retaining the exact original Ja sentences. Only this leaf production
+module changes; no lookup-by-source-string translation is introduced.
+
+Regressions exercise the real temp-config/DB read entry in default En and
+explicit Ja,0/1/2/10saved rows with Japanese/combining/emoji titles, and a129row
+witness-cap continuation. Tests compare source pages and encoded cursors across
+locales and consume an En-created cursor with Ja rendering. Notice selection is
+separate from bounds, hashes, pagination, IDs and read-sequence behavior.
+Focused local and exact-tip CI results are reported separately. No zero-c,
+complete-Watch, physical-terminal or final Stage C acceptance is claimed.
+
+Scope correction: the old ownership table omitted draft_saver.rs, but actual
+#150 source diff includes its queue-warning path. The unpublished draft-save
+prototype is deferred, not pushed or a CI/integration candidate. #149 is now
+confirmed on main79166408617e9f3acd71bdeff55930638fb62a3f with3-OS integration
+CI41380530706 success; #150 remains deferred. Watch-page notices are outside
+both current change sets. Dynamic Watch detail/recovery fallback provenance and
+synthetic root-generated draft rows remain separate pending review.

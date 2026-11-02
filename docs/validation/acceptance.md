@@ -8273,3 +8273,18 @@ sampling method is unchanged. Local macOS `cargo check --locked --tests` and the
 focused Python tests passed before the measurement. The measurement is one
 fake-model run, not a repeatability study, peak usage or real-provider token-cost
 claim. jcode was run only in Linux CI; no real model or paid provider was used.
+### #152 Batch4 Watch Discovery Notice Language
+
+The2generated scope-unavailable / bounded-search continuation notices follow
+the loaded UI language. Explicit Ja retains both original sentences; default
+En is English and preserves the PageDown key. No Core/wire error, stored title,
+source byte, seen-hash/cursor/watermark/sort key, limit or read sequence changes.
+Production changes are confined to frontend/watch_page.rs, outside the current
+#149/#150 change sets. Draft-save work overlapping #150 is explicitly deferred.
+
+New focused tests cover actual temp-config/DB read entry for default En and
+explicit Ja,0/1/2/10source rows, Unicode saved-title preservation, a129row
+witness-cap notice and an En-created cursor consumed under Ja. Exact source
+pages/cursors match across locales. Local checks and exact-tip CI results are
+reported separately, not inferred as physical-terminal, Windows-local,
+OS-clipboard, live-provider or complete Stage C acceptance.
