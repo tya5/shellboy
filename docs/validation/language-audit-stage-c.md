@@ -241,12 +241,28 @@ and `ui::code_copy::Picker` retains/displays it without a language projection;
 copy failures from `copying::text` likewise retain the worker's message. All six
 original literals have no other production references/recognition branches.
 
-Batch 1 changes only those complete diagnostics, keeping each ErrorCode, existing
-keys `o`/`n`/`b`, bounds, hash checks, source pagination/copy bytes and the original
-full-width parenthesis marks. A typed private error boundary tests all six
-messages and preserves an injected Japanese/Unicode source reason verbatim.
-The existing Markdown-order/Unicode source-summary and injected clipboard tests
-remain the source-preservation checks; no OS clipboard is used.
+The English-only candidate `6335def7` was returned by review and is withdrawn:
+these errors contain TUI key guidance and must retain Japanese when Ja is
+selected. The corrected batch uses `i18n::local!` / typed language arms, captures
+the loaded UI language at each worker entry, and carries it through bounded
+source and presentation work. All six Ja messages exactly match their pre-batch
+sentences. English uses ASCII parentheses; Ja retains the original full-width
+parentheses. Each ErrorCode, key `o`/`n`/`b`, bound, hash/pagination guard and copied
+byte is unchanged. Source reasons remain verbatim in both locales.
+
+The [copy UI boundary design](../design/ui-language-stage-a-draft.md#copy-worker-ui-boundary-152-review-correction)
+records inspected callers: these CopyError values reach TUI updates, not CLI or
+wire dispatch. The public Rust copy_source helper shares this TUI worker and is
+used by injected tests. Future CLI/wire callers need an explicit English boundary,
+not localized TUI key guidance. Underlying History/API errors remain unchanged.
+
+Local macOS fmt/check passed, all four copy unit tests passed, and the injected
+clipboard/original-body integration passed. Tests compare both languages for all
+six errors and exercise real worker entries with omitted language (default En)
+and explicit Ja, retrieval/code limits, hash-change notices and Unicode source
+copying. CI qualification of the corrected tip is separate from the withdrawn
+candidate's CI. No OS clipboard, physical-terminal or live-provider acceptance
+is claimed.
 
 Review is partial: no missing-copy count has been asserted for deferred owner
 files or for other unreviewed (c) literals. In particular, named Japanese setup

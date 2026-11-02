@@ -3779,8 +3779,14 @@ Stage C mixed-language/three-OS acceptance remain pending.
 The user excluded Stage C product changes from0.6.0 while approving the inventory
 tooling. On its approved checkpoint, first production review confirms6 raw copy
 worker diagnostic literals in `src/frontend/copying.rs` reach the copy picker or
-failure notices without English projection. Batch1 uses complete English errors
-and keeps codes, guards, limits, key hints, source reasons/copy bytes and symbols.
+failure notices without English projection. Review returned the English-only
+6335def7 candidate because the key hints are UI messages, not Core diagnostics.
+Corrected batch1 uses the loaded UI language, restores all six pre-batch Japanese
+sentences for Ja and uses ASCII parentheses in En. The caller/language boundary
+is documented in the UI language design; no CLI/wire route uses this worker.
+Codes, guards, limits, key hints and source reasons/copy bytes stay unchanged.
+Local fmt/check, four copy unit tests and the injected original-body integration
+passed. Corrected-tip CI/review, not the withdrawn candidate's CI, qualifies it.
 B5/B6 files remain deferred until landing; W8's separator work is untouched.
 Focused tests and exact branch CI evidence are recorded in acceptance; the rest
 of c1888 is not a confirmed-defect count or a StageC completion claim.

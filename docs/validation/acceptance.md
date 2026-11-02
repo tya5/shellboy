@@ -8158,9 +8158,16 @@ The confirmed-leak table is in
 [Stage C audit](language-audit-stage-c.md#product-copy-review-batch-1-next-release-not-060).
 The six literals in `src/frontend/copying.rs` are generated worker errors, not
 saved comparison tokens or source/provider text. No B5/B6/W8 source is changed.
-The new private typed error boundary tests exact English messages, unchanged
-ErrorCodes/hints/details and a verbatim Japanese/Unicode source reason. Existing
-Unicode block summaries and injected clipboard/source-copy tests cover original
-bytes/order/bounds without accessing the OS clipboard. Local checks and exact
-branch CI results will be reported separately; no physical terminal, OS clipboard
-or live-provider acceptance is inferred. This product change is not for0.6.0.
+Review returned the English-only tip6335def7: TUI action guidance must honor Ja.
+The corrected private error boundary uses the loaded UI language, tests all six
+exact pre-batch Japanese messages plus English (ASCII parentheses), unchanged
+ErrorCodes/hints/details and a verbatim Japanese/Unicode source reason. An async
+temp-DB fixture tests real worker entries with default En and explicit Ja,
+bounded source/code retrieval and hash-change errors, plus Unicode copy bytes.
+No CLI/wire dispatcher calls this worker; its public Rust copy_source helper is
+used by injected tests. The language/caller boundary is documented in the UI
+language design before the correction; underlying API errors are not translated.
+Local macOS fmt/check and4 copy tests plus1 injected original-body integration
+passed. Exact corrected-tip CI is reported separately; old-tip CI does not
+qualify this correction. No physical terminal, OS clipboard or live-provider
+acceptance is inferred. This product change is not for0.6.0.

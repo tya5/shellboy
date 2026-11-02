@@ -20,6 +20,28 @@ parameters. It makes translators touch code and requires explicit plural rules;
 re-evaluate a structured catalogue such as Fluent before adding many locales or
 complex plural/gender rules. Do not add an ambient-locale fallback.
 
+## Copy worker UI boundary (#152 review correction)
+
+The bounded copy worker's `CopyError` messages include TUI actions (`o`, `n`,
+`b`); they are complete UI messages, not locale-independent Core diagnostics.
+Resolve them using the immutable startup `control.store.config.ui.language`,
+the same loaded `[ui] language` used to create `UiState`, and carry that value
+through source pagination and presentation work. Default En uses English with
+ASCII parentheses; explicit Ja retains the pre-#152 Japanese sentences exactly,
+including their full-width parentheses. Source reasons remain verbatim typed
+arguments. Do not localize error codes, hints/details from another subsystem,
+source hashes, copied bytes, code indices, pagination or limits.
+
+Current production entry points are TUI `LoadCopyChoices` and `CopyOriginal`;
+they deliver errors through `UiUpdate` / `BackgroundResult` and the session-only
+command outcome. The public Rust `frontend::copy_source` helper shares the TUI
+worker and is currently used by injected frontend tests, not by CLI dispatch or
+IPC/wire routes. Repository call-site inspection found no CLI/wire exposure of
+these `CopyError` values. No CLI locale behavior is changed by this correction.
+If a CLI/wire copy route is added, give it an explicit English non-TUI diagnostic
+boundary instead of reusing localized key guidance. Underlying History/API
+errors continue to propagate unchanged; do not translate their source text.
+
 ## Terminal width
 
 After raw mode and the alternate screen are active, an isolated helper process
