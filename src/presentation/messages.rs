@@ -1410,24 +1410,64 @@ mod tests {
         for policy in [Some(1), Some(2), None] {
             text_width::set_terminal_width(policy);
             for (text, japanese, english) in [
-                (Text::MetadataLimited, "表示情報を制限", "Display details limited"),
+                (
+                    Text::MetadataLimited,
+                    "表示情報を制限",
+                    "Display details limited",
+                ),
                 (Text::Uncached, "本文未キャッシュ", "Body not cached"),
                 (Text::Collapsed, "本文を折りたたみ", "Body collapsed"),
-                (Text::StreamGap, "途中表示の更新欠落", "Live updates were missed"),
+                (
+                    Text::StreamGap,
+                    "途中表示の更新欠落",
+                    "Live updates were missed",
+                ),
                 (Text::UnknownExtent, "出力の表示範囲", "Output extent"),
-                (Text::CommandPreview, "コマンド（プレビュー）", "Command preview"),
+                (
+                    Text::CommandPreview,
+                    "コマンド（プレビュー）",
+                    "Command preview",
+                ),
                 (Text::RefreshFailed, "更新失敗", "Refresh failed"),
                 (Text::Refreshing, "再取得中", "Refreshing"),
-                (Text::OutputRetry, "出力取得に失敗", "Output retrieval failed"),
+                (
+                    Text::OutputRetry,
+                    "出力取得に失敗",
+                    "Output retrieval failed",
+                ),
                 (Text::OutputLoading, "出力を取得中", "Loading output"),
-                (Text::OutputUnavailable, "出力を取得できませんでした", "Could not retrieve output"),
+                (
+                    Text::OutputUnavailable,
+                    "出力を取得できませんでした",
+                    "Could not retrieve output",
+                ),
                 (Text::OutputEvicted, "出力未保持", "Output not retained"),
-                (Text::OutputOriginal, "出力は原文で確認", "Review output in the original"),
-                (Text::SourceOutsideWindow, "元のtool行は表示範囲外", "Source tool row is outside"),
+                (
+                    Text::OutputOriginal,
+                    "出力は原文で確認",
+                    "Review output in the original",
+                ),
+                (
+                    Text::SourceOutsideWindow,
+                    "元のtool行は表示範囲外",
+                    "Source tool row is outside",
+                ),
                 (Text::Delivered, "モデルに渡した", "Delivered to model"),
-                (Text::IndexPaused, "索引更新の停止記録", "Index update pause recorded"),
-                (Text::ResultUncertain, "外部での実行結果は未確認", "External execution results are unconfirmed"),
-                (Text::SavedObservation, "観測の記録を保持", "Observation saved"),
+                (
+                    Text::IndexPaused,
+                    "索引更新の停止記録",
+                    "Index update pause recorded",
+                ),
+                (
+                    Text::ResultUncertain,
+                    "外部での実行結果は未確認",
+                    "External execution results are unconfirmed",
+                ),
+                (
+                    Text::SavedObservation,
+                    "観測の記録を保持",
+                    "Observation saved",
+                ),
             ] {
                 assert!(text.render(UiLanguage::Ja).contains(japanese), "{text:?}");
                 let translated = text.render(UiLanguage::En);
