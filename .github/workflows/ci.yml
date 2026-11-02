@@ -4,6 +4,10 @@ on:
     branches: ["main"]
   workflow_dispatch:
     inputs:
+      conpty_repro:
+        description: Observe synthetic Windows ConPTY send behavior
+        type: boolean
+        default: false
       diagnostics:
         description: Repeat native overflow, proxy and attachment observations
         type: boolean
@@ -88,6 +92,16 @@ jobs:
           "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Check language classification consistency
         run: python scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --summary
+      - name: Synthetic Windows ConPTY send observation
+        if: runner.os == 'Windows' && inputs.conpty_repro == true
+        shell: pwsh
+        run: |
+          python -m pip install pywinpty==2.0.15 pyte==0.8.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --locked --bin shellboy
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/dev/conpty-send-repro.py --binary target/debug/shellboy.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Check complete integration layout
         run: python scripts/check-test-layout.py
       - name: Check timing runner failure gates
