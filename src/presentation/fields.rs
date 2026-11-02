@@ -235,7 +235,10 @@ pub(crate) fn human_label(pointer: &str, root: &Value) -> String {
 }
 
 /// Stable semantic sections; presentation labels are never parsed as machine keys.
-pub(crate) fn group_label(pointer: &str, language: crate::config::UiLanguage) -> (u8, &'static str) {
+pub(crate) fn group_label(
+    pointer: &str,
+    language: crate::config::UiLanguage,
+) -> (u8, &'static str) {
     let (id, japanese) = group(pointer);
     let label = match language {
         crate::config::UiLanguage::Ja => japanese,
