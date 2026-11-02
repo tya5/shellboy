@@ -8526,6 +8526,22 @@ shutdown, plus existing descendant/stale-autosave/bounded-cleanup cases.
 Exact branch CI and later3OS integration are separate qualifications. No physical
 terminal, provider/clipboard, full-screen localization or final Stage C completion
 is inferred. After0.6.1 cutoff; no release tag/binary change is part of this batch.
+### #152 Composer Paste Safety And Completion Footer
+
+On base f1a87139, the application-owned literal-paste safety warning and the
+completion footer have English messages; Japanese messages and width fallbacks
+remain unchanged. The warning says pasted text is sent rather than executed and
+instructs the user to remove and retype `/command`. Language selection does not
+inspect or change the draft, typed prefix, command identifier, or submitted value.
+Command descriptions in the completion list remain outside this batch.
+
+On macOS through rust-slot, `cargo fmt --all`, `cargo test --lib
+ui::composer::contract_tests` (18 passed), and `cargo check --tests` passed.
+Synthetic tests exercise Ja/En, widths 1/2/unknown, 42-column warning and footer,
+empty paste, a pasted `/quit`, and typed `/switch` with pasted arguments; no
+returned action is dispatched. Branch CI, Windows integration, physical PTY,
+and OS clipboard testing remain separate checks.
+
 ### #152 Batch6 Draft Worker Stopped Notice
 
 The generated stopped-worker notice delivered through DraftSaveFailed follows

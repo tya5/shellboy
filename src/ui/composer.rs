@@ -12,8 +12,12 @@ enum ComposerText {
 impl ComposerText {
     fn text(self, language: UiLanguage) -> &'static str {
         match (language, self) {
-            (UiLanguage::Ja, Self::LiteralPasteWarning) => "貼り付けた文として送ります（コマンドは実行しません）",
-            (UiLanguage::Ja, Self::RetypeCommandHint) => "実行するには先頭の /コマンド名 を消して手で入力してください",
+            (UiLanguage::Ja, Self::LiteralPasteWarning) => {
+                "貼り付けた文として送ります（コマンドは実行しません）"
+            }
+            (UiLanguage::Ja, Self::RetypeCommandHint) => {
+                "実行するには先頭の /コマンド名 を消して手で入力してください"
+            }
             (UiLanguage::En, Self::LiteralPasteWarning) => "Pasted text is sent, not executed.",
             (UiLanguage::En, Self::RetypeCommandHint) => "To run, delete /command and retype it.",
         }
@@ -26,7 +30,7 @@ fn completion_footer(language: UiLanguage) -> &'static str {
             "↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる",
             "^v 選択 | Tab/Enter 補完 | Esc 閉じる",
         ),
-        UiLanguage::En => "Esc Close | Up/Down Select | Tab/Enter Complete",
+        UiLanguage::En => "Up/Down Pick|Tab/Enter Fill|Esc Close",
     }
 }
 
@@ -641,7 +645,7 @@ impl UiState {
             .collect::<Vec<_>>();
         lines.push(
             Line::from(completion_footer(self.config.ui.language))
-            .style(Style::default().fg(theme::MUTED)),
+                .style(Style::default().fg(theme::MUTED)),
         );
         frame.render_widget(Paragraph::new(lines), popup);
     }
@@ -659,32 +663,58 @@ mod contract_tests {
     #[test]
     fn localized_composer_safety_and_footer_preserve_japanese() {
         use crate::ui::text_width;
-        assert_eq!(ComposerText::LiteralPasteWarning.text(UiLanguage::Ja), "貼り付けた文として送ります（コマンドは実行しません）");
-        assert_eq!(ComposerText::RetypeCommandHint.text(UiLanguage::Ja), "実行するには先頭の /コマンド名 を消して手で入力してください");
-        assert_eq!(ComposerText::LiteralPasteWarning.text(UiLanguage::En), "Pasted text is sent, not executed.");
-        assert_eq!(ComposerText::RetypeCommandHint.text(UiLanguage::En), "To run, delete /command and retype it.");
+        assert_eq!(
+            ComposerText::LiteralPasteWarning.text(UiLanguage::Ja),
+            "貼り付けた文として送ります（コマンドは実行しません）"
+        );
+        assert_eq!(
+            ComposerText::RetypeCommandHint.text(UiLanguage::Ja),
+            "実行するには先頭の /コマンド名 を消して手で入力してください"
+        );
+        assert_eq!(
+            ComposerText::LiteralPasteWarning.text(UiLanguage::En),
+            "Pasted text is sent, not executed."
+        );
+        assert_eq!(
+            ComposerText::RetypeCommandHint.text(UiLanguage::En),
+            "To run, delete /command and retype it."
+        );
         for policy in [Some(1), Some(2), None] {
             text_width::set_terminal_width(policy);
-            let ja = if policy == Some(1) { "↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる" } else { "^v 選択 | Tab/Enter 補完 | Esc 閉じる" };
+            let ja = if policy == Some(1) {
+                "↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる"
+            } else {
+                "^v 選択 | Tab/Enter 補完 | Esc 閉じる"
+            };
             assert_eq!(completion_footer(UiLanguage::Ja), ja);
-            assert_eq!(completion_footer(UiLanguage::En), "Esc Close | Up/Down Select | Tab/Enter Complete");
+            assert_eq!(
+                completion_footer(UiLanguage::En),
+                "Up/Down Pick|Tab/Enter Fill|Esc Close"
+            );
             assert!(completion_footer(UiLanguage::En).is_ascii());
         }
         text_width::clear_terminal_width();
     }
 
-    fn pasted_warning_fixture(ui: &mut UiState) { ui.insert("/quit", true); }
-    fn completion_fixture(ui: &mut UiState) { ui.insert("/", false); }
+    fn pasted_warning_fixture(ui: &mut UiState) {
+        ui.insert("/quit", true);
+    }
+    fn completion_fixture(ui: &mut UiState) {
+        ui.insert("/", false);
+    }
 
     #[test]
     fn localized_composer_warning_and_footer_render_on_screen() {
         crate::ui::i18n::verify_screen(pasted_warning_fixture, |language| match language {
             UiLanguage::Ja => &["貼り付けた文として送ります", "実行するには先頭の"],
-            UiLanguage::En => &["Pasted text is sent, not executed.", "To run, delete /command and retype it."],
+            UiLanguage::En => &[
+                "Pasted text is sent, not executed.",
+                "To run, delete /command and retype it.",
+            ],
         });
         crate::ui::i18n::verify_screen(completion_fixture, |language| match language {
             UiLanguage::Ja => &["Tab/Enter"],
-            UiLanguage::En => &["Esc Close | Up/Down Select | Tab/Enter Complete"],
+            UiLanguage::En => &["Up/Down Pick|Tab/Enter Fill|Esc Close"],
         });
     }
 
@@ -692,7 +722,7 @@ mod contract_tests {
     fn english_paste_warning_fits_narrow_screen_and_preserves_send_value() {
         use crate::ui::text_width;
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-        use ratatui::{backend::TestBackend, Terminal};
+        use ratatui::{Terminal, backend::TestBackend};
         for policy in [Some(1), Some(2), None] {
             text_width::set_terminal_width(policy);
             for width in [42, 80] {
@@ -704,14 +734,74 @@ mod contract_tests {
                 assert_eq!(ui.view().draft.text, raw);
                 assert!(!ui.view().draft.command_is_typed());
                 let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
-                terminal.draw(|frame| crate::ui::draw(frame, &mut ui)).unwrap();
-                let screen = (0..24).map(|y| (0..width).filter_map(|x| terminal.backend().buffer().cell((x, y)).map(|c| c.symbol())).collect::<String>()).collect::<Vec<_>>().join("\n");
-                assert!(screen.contains("Pasted text is sent, not executed."), "width {width} policy {policy:?}");
-                assert!(screen.contains("To run, delete /command and retype it."), "width {width} policy {policy:?}");
-                let actions = ui.event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-                assert!(actions.iter().any(|action| matches!(action, UiAction::Send { text, .. } if text == raw)));
-                assert!(!actions.iter().any(|action| matches!(action, UiAction::Quit | UiAction::Command(_))));
+                terminal
+                    .draw(|frame| crate::ui::draw(frame, &mut ui))
+                    .unwrap();
+                let screen = (0..24)
+                    .map(|y| {
+                        (0..width)
+                            .filter_map(|x| {
+                                terminal.backend().buffer().cell((x, y)).map(|c| c.symbol())
+                            })
+                            .collect::<String>()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(
+                    screen.contains("Pasted text is sent, not executed."),
+                    "width {width} policy {policy:?}"
+                );
+                assert!(
+                    screen.contains("To run, delete /command and retype it."),
+                    "width {width} policy {policy:?}"
+                );
+                let actions = ui.event(Event::Key(KeyEvent::new(
+                    KeyCode::Enter,
+                    KeyModifiers::NONE,
+                )));
+                assert!(
+                    actions
+                        .iter()
+                        .any(|action| matches!(action, UiAction::Send { text, .. } if text == raw))
+                );
+                assert!(
+                    !actions
+                        .iter()
+                        .any(|action| matches!(action, UiAction::Quit | UiAction::Command(_)))
+                );
             }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
+    fn english_completion_footer_fits_narrow_screen() {
+        use crate::ui::text_width;
+        use ratatui::{Terminal, backend::TestBackend};
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            let mut config = Config::default();
+            config.ui.language = UiLanguage::En;
+            let mut ui = UiState::new(&config, std::env::temp_dir());
+            ui.insert("/", false);
+            let mut terminal = Terminal::new(TestBackend::new(42, 24)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut ui))
+                .unwrap();
+            let screen = (0..24)
+                .map(|y| {
+                    (0..42)
+                        .filter_map(|x| {
+                            terminal.backend().buffer().cell((x, y)).map(|c| c.symbol())
+                        })
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                screen.contains("Up/Down Pick|Tab/Enter Fill|Esc Close"),
+                "policy {policy:?}"
+            );
         }
         text_width::clear_terminal_width();
     }
@@ -725,20 +815,37 @@ mod contract_tests {
             let mut empty = UiState::new(&config, std::env::temp_dir());
             empty.insert("", true);
             assert_eq!(empty.view().draft.text, "");
-            assert!(!empty.take_deferred_actions().iter().any(|action| matches!(action, UiAction::Quit | UiAction::Command(_) | UiAction::Send { .. })));
+            assert!(!empty.take_deferred_actions().iter().any(|action| matches!(
+                action,
+                UiAction::Quit | UiAction::Command(_) | UiAction::Send { .. }
+            )));
             let mut pasted = UiState::new(&config, std::env::temp_dir());
             pasted.insert("/", false);
             pasted.insert("quit", true);
             assert_eq!(pasted.view().draft.text, "/quit");
             assert!(!pasted.view().draft.command_is_typed());
-            let actions = pasted.event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
-            assert!(actions.iter().any(|action| matches!(action, UiAction::Send { text, .. } if text == "/quit")));
-            assert!(!actions.iter().any(|action| matches!(action, UiAction::Quit | UiAction::Command(_))));
+            let actions = pasted.event(Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            )));
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::Send { text, .. } if text == "/quit"))
+            );
+            assert!(
+                !actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::Quit | UiAction::Command(_)))
+            );
             let mut typed = UiState::new(&config, std::env::temp_dir());
             typed.insert("/switch ", false);
             typed.insert("thread-日本語", true);
             assert!(typed.view().draft.command_is_typed());
-            let actions = typed.event(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)));
+            let actions = typed.event(Event::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            )));
             assert!(actions.iter().any(|action| matches!(action, UiAction::SelectThread { thread_id, .. } if thread_id == "thread-日本語")));
         }
     }

@@ -3962,6 +3962,14 @@ Message::render (a) entries were individually checked on main7f5f8897 after
 consistency without imposing the unresolved (c) zero gate. Local and CI evidence
 and untested cases are kept separately in acceptance.
 
+### #152 Composer Paste Safety And Completion Footer
+
+The composer shows application-owned literal-paste safety guidance and completion
+key hints in the configured UI language. Japanese wording and width fallback are
+unchanged. This batch does not translate command descriptions or alter draft
+content, command names, typed-prefix provenance, actions, or persisted values.
+Local verification and outstanding OS/terminal checks are recorded in acceptance.
+
 ### #152 Product Batch5: Deletion Cleanup Storage Warning
 
 One generated Ja-only storage warning reached the already-localized deletion
