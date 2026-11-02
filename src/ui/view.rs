@@ -1901,6 +1901,44 @@ mod completion_notice_tests {
         }
     }
     #[test]
+    fn attachment_feedback_is_localized_without_changing_draft_metadata() {
+        for language in [crate::config::UiLanguage::Ja, crate::config::UiLanguage::En] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut view = ThreadView::new(&config, std::env::temp_dir());
+            let attachment = UiAttachment {
+                id: "id".into(),
+                path: PathBuf::from("/synthetic/画像.png"),
+                kind: "image".into(),
+                state: "ready".into(),
+                position: None,
+            };
+            assert!(view.on_clipboard_attachment(attachment.clone(), 100));
+            assert_eq!(view.draft.attachments[0].path, attachment.path);
+            assert_eq!(view.draft.attachments[0].kind, attachment.kind);
+            assert_eq!(
+                view.status,
+                if language == crate::config::UiLanguage::Ja {
+                    "画像を添付しました"
+                } else {
+                    "Image attached"
+                }
+            );
+            let draft = view.draft.clone();
+            assert!(!view.on_clipboard_attachment(attachment, 0));
+            assert_eq!(view.draft, draft);
+            assert!(
+                view.status
+                    .contains(if language == crate::config::UiLanguage::Ja {
+                        "採用していません"
+                    } else {
+                        "not attached"
+                    })
+            );
+        }
+    }
+
+    #[test]
     fn completion_notice_requires_the_accepted_owner_revision_anchor_and_paused_view() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("thread".into());
@@ -2849,7 +2887,9 @@ mod received_tests {
     }
     #[test]
     fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
         ui.apply(UiUpdate::Stream {

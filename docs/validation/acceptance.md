@@ -8469,3 +8469,14 @@ manifest validates and Python audit tests pass 18/18. Scoped view audit reports
 recovery integration fixture expected Japanese in the English-default UI; it now
 explicitly selects Japanese and passes. Exact task CI and three-OS integration
 CI remain pending; physical-terminal and OS-clipboard tests were not performed.
+
+Task CI 41435396097 failed on the existing stream-retention test because it
+asserted a Japanese title under the English default. The test now explicitly
+selects Japanese; the raw retained text and source identity remain unchanged.
+A new attachment-feedback test covers both languages and draft metadata; it is
+included in the next CI run.
+
+After the CI failure, the stream-retention test now explicitly selects Japanese
+and the added attachment test verifies Ja/En feedback plus unchanged draft
+metadata. On macOS, `cargo check --tests`, the recovery, stream-retention and
+attachment focused unit tests, and the recovery integration test pass.
