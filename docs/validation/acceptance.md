@@ -8251,3 +8251,24 @@ changed during restack. New exact task CI is pending; its SHA and outcome are
 reported in the formal handoff. Windows for this new candidate, physical terminal,
 IME, real provider and OS clipboard remain unverified. No real user data, provider
 API, installation, release or main push is involved.
+## Resource Benchmark Stage 4 (#116)
+
+Scope: synthetic Linux comparison instrumentation and documentation. Measured
+source `8d3201e398c0fcb21d53eb6fc8e54424da6b7c04` in workflow run 41381063988:
+attempt 1 compare failed because Codex N=20 process trees changed during every
+PSS snapshot; attempt 2 compare succeeded and produced artifact 13113493939.
+All five agents completed N=1, 5, 10 and 20 with zero unattributed requests. The
+artifact's per-request byte lengths sum exactly to the per-conversation totals;
+first/last match each conversation's recorded receipt order. Temporary storage
+is sampled after round five, including HOME and agent data roots, without following
+symlinks; missing/unreadable roots fail rather than yielding zero. Shellboy DB and
+WAL are included; workspace and externally installed executable are excluded.
+
+Portable tests cover UTF-8 HTTP lengths, session ID and workspace-path association,
+ambiguous/missing attribution, missing roots, symlink and hard-link behavior,
+thread-level Shellboy traffic, and table rendering of unknowns. The existing
+startup probe now recognizes the same ready indicator in either language; its
+sampling method is unchanged. Local macOS `cargo check --locked --tests` and the
+focused Python tests passed before the measurement. The measurement is one
+fake-model run, not a repeatability study, peak usage or real-provider token-cost
+claim. jcode was run only in Linux CI; no real model or paid provider was used.

@@ -3825,3 +3825,13 @@ ten filter unit and two filter integration tests pass. Both named #160 attachmen
 regressions also pass (one each); zero-test selectors are not accepted as evidence.
 Task CI and formal exact-SHA handoff are pending; no runtime/policy/config change
 is introduced by this documentation-only restack evidence.
+### Resource benchmark request bytes and storage (#116 stage 4)
+
+The comparison records each fake-provider HTTP body length and per-conversation
+summary, plus the after-fifth-round temporary data footprint. The generated table
+and source/runner/measurement limitations are in `docs/guides/resource-usage.md`.
+Run 41381063988 attempt 2 completed all five agents and all four N values; its
+comparison artifact is 13113493939, measured source 8d3201e3. Attempt 1's Codex
+PSS sample failed on changing process membership; the same SHA's comparison was
+rerun without changing the measurement guard. Real-provider tokens, repeated-run
+variance and physical-terminal behavior remain unverified.

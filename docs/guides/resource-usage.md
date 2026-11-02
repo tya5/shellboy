@@ -10,7 +10,8 @@ jobs of one workflow are separate runners; do not combine their measurements.
 
 ## Sources and runners
 
-Results below are from [workflow run 41307629104](https://github.com/tya5/shellboy/actions/runs/41307629104),
+Except where another source is explicitly identified, memory and startup results
+below are from [workflow run 41307629104](https://github.com/tya5/shellboy/actions/runs/41307629104),
 2026-11-01 UTC, measured source commit
 `5a2e8474a52928eaafd35d64c3eb29dfd6c34626`. The later comparison-branch revision
 `4d6f128a` corrects documentation, not these measurements. Shellboy reports
@@ -110,6 +111,67 @@ to about 50 ms by the repeated probe. Echo detection uses the output stream or
 the cell decoder recorded in JSON. F's completed-frame/paste method and C's
 generic typed-probe method are different: their Shellboy startup figures are
 not interchangeable. Neither establishes physical-terminal or IME behavior.
+
+## Stage 4: Request bytes and storage
+
+These observations come from [workflow run 41381063988, attempt 2](https://github.com/tya5/shellboy/actions/runs/41381063988/attempts/2),
+[comparison artifact 13113493939](https://github.com/tya5/shellboy/actions/runs/41381063988/artifacts/13113493939),
+measured source SHA `8d3201e398c0fcb21d53eb6fc8e54424da6b7c04`. The compare job ran
+2026-11-02 03:21:16-03:24:44 UTC on GitHub Ubuntu 24.04.5, Linux x86_64,
+AMD EPYC 7763, 4 CPUs and 16367512 KiB RAM (image `ubuntu24/20261026.354.1`).
+Versions are Shellboy 0.6.0, Claude Code 2.1.316, Codex CLI 0.166.0, opencode
+1.19.5 and jcode v0.99.1 (`7206efd0c`). The Shellboy executable SHA-256 is
+`5cf95a24c9b7b21e20673db92b0f0467f5321d26af097da60e6eaf07996ed986`;
+other executable hashes, settings and installation sources are in the artifact.
+The first attempt did not complete: Codex N=20 encountered changing process
+membership during all PSS snapshots. The second attempt reran the compare job on
+the same source SHA and completed; the two attempts used separate runners.
+
+The loopback server records the actual HTTP POST body bytes, including auxiliary
+requests; no request content is retained. Total, first and last refer to each
+conversation's requests in receipt order. The table reports the median across N
+conversations **within this one run**, not repeated-run variability; an even-N
+median can be a half byte. The artifact has every request and conversation.
+Session identity comes from Shellboy's Thread context, opencode's session ID
+header, or an unambiguous fixture workspace path for the other agents. Every
+request in this run was attributed; unassignable requests are `unknown`, never
+zero or an estimated allocation. These are bytes, not provider tokens. Fake-model
+usage is synthetic, and real-model token usage and run-to-run variability remain
+unverified (#151). Compare rows only within this artifact, not against the older
+F/C measurements above.
+
+Storage is the logical size and count of files under each agent's temporary
+HOME/XDG and explicit data/runtime directories immediately after round five,
+before shutdown. Shellboy includes its data directory (DB and WAL); workspace
+files and externally installed executables are excluded. Hard-linked files are
+counted once; symlinks are counted without following their targets. Temporary
+configuration and caches are included. Background writes can occur during the
+walk, so this is not an atomic or peak observation. Missing or unreadable roots
+are errors, not zero. The N=1 and N=5 Codex and opencode results also show why a
+single observation does not establish a smooth trend or product ranking.
+
+| Agent | N | Total per conversation, median bytes | First, median bytes | Last, median bytes | Storage bytes | Files |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| shellboy | 1 | 85130 | 5501 | 13439 | 4931854 | 6 |
+| shellboy | 5 | 85150 | 5501 | 13443 | 5263678 | 6 |
+| shellboy | 10 | 85145 | 5501 | 13442 | 5878270 | 6 |
+| shellboy | 20 | 85168.5 | 5502.5 | 13445.5 | 6967830 | 6 |
+| claude-code | 1 | 421354 | 45847 | 47692 | 164209 | 7 |
+| claude-code | 5 | 421378 | 45847 | 47698 | 816647 | 23 |
+| claude-code | 10 | 421378 | 45847 | 47698 | 1632189 | 43 |
+| claude-code | 20 | 421399 | 45848 | 47702 | 3263816 | 84 |
+| codex | 1 | 367778 | 39401 | 42242 | 5984035 | 98 |
+| codex | 5 | 367823 | 39401 | 42254 | 94545903 | 5539 |
+| codex | 10 | 367830 | 39401 | 42255 | 95400101 | 5569 |
+| codex | 20 | 367864 | 39402 | 42263 | 106890235 | 5629 |
+| opencode | 1 | 300796 | 2540 | 33817 | 120000617 | 1098 |
+| opencode | 5 | 300820 | 2540 | 33823 | 154520962 | 2604 |
+| opencode | 10 | 300836 | 2540 | 33825 | 154622723 | 2535 |
+| opencode | 20 | 300852.5 | 2540 | 33829.5 | 149552318 | 1932 |
+| jcode | 1 | 470072 | 51123 | 53188 | 301658 | 20 |
+| jcode | 5 | 470096 | 51123 | 53194 | 1220443 | 44 |
+| jcode | 10 | 470096 | 51123 | 53194 | 2367736 | 74 |
+| jcode | 20 | 470116 | 51123.5 | 53198 | 4667735 | 134 |
 
 ## Process and feature differences
 
