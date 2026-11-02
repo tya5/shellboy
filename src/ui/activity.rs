@@ -264,6 +264,33 @@ impl AutomaticRetrySnapshot {
         }
     }
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ContextReductionSummary {
+    pub before_characters: u64,
+    pub after_characters: u64,
+    pub spilled_groups: u64,
+    pub omitted_items: u64,
+}
+impl ContextReductionSummary {
+    pub fn localized(self, language: UiLanguage) -> String {
+        let Self {
+            before_characters,
+            after_characters,
+            spilled_groups,
+            omitted_items,
+        } = self;
+        match language {
+            UiLanguage::En => format!(
+                "Context was auto-compacted from {before_characters} to {after_characters} characters after spilling {spilled_groups} groups and omitting {omitted_items} items."
+            ),
+            UiLanguage::Ja => crate::ui::text_width::glyphs::formatted!(
+                "自動縮小済み · spill {spilled_groups}組 · 省略 {omitted_items}件 · {before_characters}→{after_characters} chars",
+                "自動縮小済み | spill {spilled_groups}組 | 省略 {omitted_items}件 | {before_characters}>{after_characters} chars"
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ActivitySnapshot {
     pub timing: SavedTiming,
@@ -271,7 +298,7 @@ pub struct ActivitySnapshot {
     /// Saved live-Run Revisit count/reservation, projected by the reader.
     pub revisit: Option<String>,
     /// Saved automatic-trim facts for this Turn/generation, if observed.
-    pub context_reduction: Option<String>,
+    pub context_reduction: Option<ContextReductionSummary>,
     /// Last admitted request contained at least one unavailable attachment.
     pub attachment_unavailable: bool,
     /// At least one unavailable attachment had an unrecognized binary format.
