@@ -601,3 +601,8 @@ CREATE INDEX receipt_reply_pending ON receipt(target_thread_id)
   WHERE json_extract(result_json,'$.reply.state')='pending';
 INSERT INTO schema_migration(version,name) VALUES(26,'0026_reply_expected');
 PRAGMA user_version=26;
+
+-- Seek interrupted jobs during bounded startup recovery (#172).
+CREATE INDEX jobs_running_recovery ON embedding_job(id) WHERE state='running';
+INSERT INTO schema_migration(version,name) VALUES(27,'0027_index_recovery');
+PRAGMA user_version=27;

@@ -4389,3 +4389,4 @@ until the reviewed chain is on main.
 The target uses paired provider usage and request-character measurements;
 verification, loop regression and three-OS CI results are pending. It is not
 approved or integrated.
+- #172: startup index recovery uses bounded indexed pages before workers start; a single oversized bootstrap record runs alone.
