@@ -33,6 +33,212 @@ async fn bind_error(owner: &DataOwner) -> ApiError {
     }
 }
 
+fn deny_temporary_mkdir(folder: &Path, kind: &'static str) -> io::Result<()> {
+    if kind == "data" {
+        create_namespace(folder, kind)
+    } else {
+        Err(io::Error::from_raw_os_error(libc::EPERM))
+    }
+}
+
+#[tokio::test]
+async fn denied_temporary_bases_use_data_directory_and_cli_locator() {
+    use crate::protocol::{Command, Response, ThreadListArgs};
+    let root = tempfile::Builder::new()
+        .prefix("i")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let owner = owner(root.path()).await;
+    let bases: Vec<_> = ["xdg", "os", "sys"]
+        .into_iter()
+        .map(|name| {
+            let path = root.path().join(name);
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&path)
+                .unwrap();
+            path
+        })
+        .collect();
+    let plan = namespace::plan_with(
+        current_uid(),
+        Some(bases[0].clone()),
+        Some(bases[1].clone()),
+        bases[2].clone(),
+        owner.loaded.data_dir.clone(),
+    );
+    assert_eq!(plan.folders.len(), 32);
+    let (listener, bound_endpoint, socket) = bind_unix_with(
+        &owner,
+        owner.instance_id.clone(),
+        Some(plan),
+        deny_temporary_mkdir,
+    )
+    .await
+    .unwrap();
+    let expected_parent = std::fs::canonicalize(&owner.loaded.data_dir).unwrap();
+    let address = PathBuf::from(&bound_endpoint.address);
+    assert_eq!(
+        address.parent().unwrap().parent(),
+        Some(expected_parent.as_path())
+    );
+    assert_eq!(endpoint(&owner).address, bound_endpoint.address);
+    let (send, mut receive) = mpsc::channel(8);
+    let files = EndpointFiles {
+        metadata: owner.loaded.data_dir.join("endpoint.json"),
+        instance: owner.instance_id.clone(),
+        socket,
+    };
+    let server = LocalServer::start(listener, owner.instance_id.clone(), send, files);
+    let data_dir = owner.loaded.data_dir.clone();
+    let client = tokio::spawn(async move {
+        if let Some(binary) = std::env::var_os("SHELLBOY_TEST_CLI_BINARY") {
+            let output = tokio::process::Command::new(binary)
+                .arg("--data-dir")
+                .arg(&data_dir)
+                .args(["thread", "list"])
+                .env_remove("SHELLBOY_DATA_DIR")
+                .env_remove("SHELLBOY_SOCKET")
+                .env_remove("SHELLBOY_INSTANCE_ID")
+                .output()
+                .await
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(result["ok"], true);
+        } else {
+            assert!(
+                crate::ipc::call(
+                    &data_dir,
+                    Command::ThreadList(ThreadListArgs::default()),
+                    None,
+                    None
+                )
+                .await
+                .unwrap()
+                .ok
+            );
+        }
+    });
+    let request = tokio::time::timeout(std::time::Duration::from_secs(20), receive.recv())
+        .await
+        .expect("CLI did not deliver a request")
+        .expect("listener closed");
+    request
+        .reply
+        .send(Response::success(
+            request.request.operation_id,
+            serde_json::json!({"items":[]}),
+        ))
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(20), client)
+        .await
+        .expect("CLI did not finish")
+        .unwrap();
+    server.shutdown().await.unwrap();
+    assert!(!address.exists());
+    assert!(!address.parent().unwrap().exists());
+    owner.shutdown().await.unwrap();
+}
+
+fn deny_all_mkdir(_folder: &Path, _kind: &'static str) -> io::Result<()> {
+    Err(io::Error::from_raw_os_error(libc::EPERM))
+}
+
+#[tokio::test]
+async fn exhausted_bases_report_counted_denial_without_leaking_paths() {
+    let root = tempfile::Builder::new()
+        .prefix("i")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let owner = owner(root.path()).await;
+    let bases: Vec<_> = ["x", "o", "s"]
+        .into_iter()
+        .map(|name| {
+            let path = root.path().join(name);
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&path)
+                .unwrap();
+            path
+        })
+        .collect();
+    let plan = namespace::plan_with(
+        current_uid(),
+        Some(bases[0].clone()),
+        Some(bases[1].clone()),
+        bases[2].clone(),
+        owner.loaded.data_dir.clone(),
+    );
+    let error = match bind_unix_with(
+        &owner,
+        owner.instance_id.clone(),
+        Some(plan),
+        deny_all_mkdir,
+    )
+    .await
+    {
+        Ok(_) => panic!("all candidates must be rejected"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, ErrorCode::IoFailed);
+    assert!(error.hint.unwrap().contains("sandbox"));
+    let details = error.details.unwrap();
+    for kind in ["xdg", "os", "system", "data"] {
+        assert!(
+            details["candidates"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["candidate"] == kind
+                    && v["reason"] == "mkdir_failed"
+                    && v["errno"] == libc::EPERM
+                    && v["count"] == 8)
+        );
+    }
+    assert!(!details.to_string().contains(root.path().to_str().unwrap()));
+    assert!(!owner.loaded.data_dir.join("endpoint.json").exists());
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn data_directory_locator_is_reclaimed_only_after_identity_validation() {
+    let root = tempfile::Builder::new()
+        .prefix("i")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let owner = owner(root.path()).await;
+    let base = std::fs::canonicalize(&owner.loaded.data_dir).unwrap();
+    let folder = base.join(format!(
+        "sb-{}-{}",
+        current_uid(),
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&folder)
+        .unwrap();
+    let socket = folder.join("s");
+    drop(tokio::net::UnixListener::bind(&socket).unwrap());
+    owner
+        .publish_endpoint(Endpoint {
+            protocol_version: crate::protocol::PROTOCOL_VERSION,
+            instance_id: owner.instance_id.clone(),
+            transport: "unix".into(),
+            address: socket.to_str().unwrap().into(),
+        })
+        .await
+        .unwrap();
+    let previous = previous_namespace(&owner.loaded.data_dir).unwrap().unwrap();
+    previous.remove().unwrap();
+    assert!(!folder.exists());
+    owner.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn cleanup_succeeds_if_the_os_already_removed_the_temporary_namespace() {
     let root = tempfile::tempdir().unwrap();

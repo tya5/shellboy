@@ -187,7 +187,7 @@ fn previous_namespace(data_dir: &Path) -> Result<Option<PreviousNamespace>, ApiE
         return Ok(None);
     };
     if path.file_name().is_none_or(|name| name != "s")
-        || !namespace::recognized_folder(folder, current_uid())?
+        || !namespace::recognized_folder(folder, current_uid(), Some(data_dir))?
         || validate_folder(folder, current_uid()).is_err()
     {
         return Ok(None);
@@ -226,6 +226,22 @@ pub(super) async fn bind_unix(
     owner: &crate::app::DataOwner,
     instance: String,
 ) -> Result<(tokio::net::UnixListener, Endpoint, Option<SocketFile>), ApiError> {
+    bind_unix_with(owner, instance, None, create_namespace).await
+}
+
+#[cfg(unix)]
+fn create_namespace(folder: &Path, _kind: &'static str) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().mode(0o700).create(folder)
+}
+
+#[cfg(unix)]
+async fn bind_unix_with(
+    owner: &crate::app::DataOwner,
+    instance: String,
+    plan: Option<namespace::Plan>,
+    mkdir: fn(&Path, &'static str) -> io::Result<()>,
+) -> Result<(tokio::net::UnixListener, Endpoint, Option<SocketFile>), ApiError> {
     let data_dir = owner.loaded.data_dir.clone();
     let previous = tokio::task::spawn_blocking(move || previous_namespace(&data_dir))
         .await
@@ -262,10 +278,17 @@ pub(super) async fn bind_unix(
             .await
             .map_err(|error| server_error("socket cleanup worker failed", error))??;
     }
-    let candidates = tokio::task::spawn_blocking(|| namespace::folder_candidates(current_uid()))
-        .await
-        .map_err(|error| server_error("directory worker failed", error))??;
-    for folder in candidates {
+    let plan = match plan {
+        Some(plan) => plan,
+        None => {
+            let data_dir = owner.loaded.data_dir.clone();
+            tokio::task::spawn_blocking(move || namespace::plan(current_uid(), &data_dir))
+                .await
+                .map_err(|error| server_error("directory worker failed", error))?
+        }
+    };
+    let mut diagnostics = plan.diagnostics;
+    for (kind, folder) in plan.folders {
         let endpoint = Endpoint {
             protocol_version: crate::protocol::PROTOCOL_VERSION,
             instance_id: instance.clone(),
@@ -288,13 +311,11 @@ pub(super) async fn bind_unix(
             return Err(error);
         }
         let candidate = folder.clone();
-        let created = tokio::task::spawn_blocking(move || {
-            use std::os::unix::fs::DirBuilderExt;
-            std::fs::DirBuilder::new().mode(0o700).create(&candidate)
-        })
-        .await
-        .map_err(|error| server_error("directory worker failed", error))?;
-        if created.is_err() {
+        let created = tokio::task::spawn_blocking(move || mkdir(&candidate, kind))
+            .await
+            .map_err(|error| server_error("directory worker failed", error))?;
+        if let Err(error) = created {
+            diagnostics.mkdir_failed(kind, &error);
             // mkdir failure grants no ownership of an existing path.
             let _ = files.cleanup().await;
             continue;
@@ -359,9 +380,7 @@ pub(super) async fn bind_unix(
         .map_err(|error| server_error("socket metadata worker failed", error))??;
         return Ok((listener, endpoint, Some(socket)));
     }
-    Err(namespace::runtime_error(
-        "private_runtime_directory_unavailable",
-    ))
+    Err(diagnostics.into_error())
 }
 
 pub(super) struct EndpointFiles {

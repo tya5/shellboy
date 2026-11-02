@@ -124,6 +124,12 @@ jobs:
         run: '"RUST_TEST_THREADS=$env:SELECTED_TEST_THREADS" >> $env:GITHUB_ENV'
       - name: Tests
         run: python scripts/test-timings.py --output .local/ci-timings
+      - name: Verify real CLI against fallback Unix namespace
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo build --locked --bin shellboy
+          SHELLBOY_TEST_CLI_BINARY="$PWD/target/debug/shellboy" cargo test --locked --lib ipc::server::endpoint::tests::denied_temporary_bases_use_data_directory_and_cli_locator -- --exact
       - name: Observe closed-proxy retry phases and timings
         if: inputs.diagnostics == true
         run: cargo test --locked --test integration response_upload_recovery::refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_listens -- --exact --nocapture

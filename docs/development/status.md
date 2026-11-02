@@ -3968,3 +3968,13 @@ coverage adds real default/En/Ja config,0/1/2/10 retained drafts, ordered full
 outbox release, once-per-Thread notification, Unicode snapshots and shutdown.
 Final extended-test and exact-tip CI evidence are reported separately. Python
 146/tooling audit passed; no final Stage C acceptance is claimed.
+### #163 Unix IPC Namespace Failure And Fallback
+
+Unix startup aggregates bounded, path-free candidate rejection reasons and
+counts (with errno/error kind where available), and gives actionable permission
+or length guidance. After the existing temporary candidates fail, a random
+namespace directly under the validated data directory is the final candidate.
+The same private-mode, owner, protected-ancestor, non-symlink, path-length and
+identity/lease checks apply; endpoint publication and cleanup retain their
+ordering. Windows named pipes and configuration are unchanged. Validation
+results and untested environments are reported separately in acceptance.

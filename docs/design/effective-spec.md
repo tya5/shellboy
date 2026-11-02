@@ -118,7 +118,7 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | 再試行 | Failure-driven: no pre-POST estimate. First transient failure retries unchanged; eligible second failure reduces maximally. Explicit context overflow reduces immediately. All resends share the configured consecutive budget (default eight); success resets it. | [failure-driven reduction](failure-driven-reduction.md) |
 | HTTP期限 | 接続確立は固定30秒。Responsesは要求開始からheader受領まで接続別120000ms（正整数）、header後の受信停滞600000ms（0で無効）、embeddingは全体60000ms、モデル一覧は全体設定と20000msの短い方 | [model HTTP](model-http.md)、[config](config.md)。timeoutは索引の既存retry/pauseへ渡す。生成全体期限は追加しない。会話の停滞timeoutは再試行条件に従う。要約/索引/RAGの再試行は変更しない |
 | ストリーム完了 | 検証済み最終responseを採用。途中との差分は診断・保存だけとし、差分だけで復旧待ちにしない | [model HTTP](model-http.md)。ツールは最終responseの採用成功後だけ実行し、失敗時の受信本文も保存・参照可能にする |
-| Unix IPC | XDGが利用不能でも専用0700一時領域を自動用意。接続両側でpeer uidを照合 | [protocol](protocol.md)。モデルshellはSHELLBOY_SOCKET、人CLIはendpoint.jsonで接続し、保存先祖先をsocket配置条件にしない |
+| Unix IPC | XDGが利用不能でも専用0700一時領域を自動用意。接続両側でpeer uidを照合 | [protocol](protocol.md)。モデルshellはSHELLBOY_SOCKET、人CLIはendpoint.jsonで接続。通常の一時候補は保存先祖先に依存せず、最後の保存先候補は保護された祖先を要する |
 | origin | 発行元の誤識別防止。OSユーザー隔離やpermission engineではない | [control](control.md)、[operation](operation-observability.md)。tokenを表示/モデル入力/保存結果へ複製しない |
 | receipt | 観測はreceipt不要で再観測。変更/waitの同ID/同要求は保全中結果、異要求はconflict。24時間経過保守/圧迫で結果だけを回収し同IDを期限切れにする。pending/参照保護を維持 | [operation](operation-observability.md)。保存outcome8MiB/operation receipt256MiB、事前予約・旧terminal回収・receipt不要status照会 |
 | AGENTS読込 | 新Turnごとに有限file workerで本文を読み直す。同Turn retryは保存済みsnapshotを維持。送信時だけ実snapshot pathを安全に示す1行を本文先頭へ付け、本文/hash保存・優先順位は変えない | [control](control.md)。mtime/size一致の内容変更も反映する。ファイルの原子的snapshotは保証しない |
@@ -376,3 +376,8 @@ Generated Markdown borders are marked separately before any fallback conversion,
 so user/model text is not rewritten. Emoji alert icons use conservatively
 computed Unicode widths. Source positions, copying and persisted values retain their original
 contents. See [the stage A design and stage B slices](ui-language-stage-a-draft.md).
+
+Unix IPC namespace selection (#163) retains the existing protected temporary
+bases first and may use the validated private data directory as the final base.
+Failure exposes bounded reason/count/errno summaries without filesystem paths;
+see [protocol](protocol.md). Windows named-pipe selection is unchanged.

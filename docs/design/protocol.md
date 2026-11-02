@@ -484,3 +484,25 @@ original saved response/audit data is not changed. The response/protocol version
 Turn/Run state, saved IDs, retry admission and explicit resume semantics do not
 change. Human UI projections translate only generated labels and guidance; copied
 hint bytes and raw detail JSON remain canonical, not translated prose.
+
+## Unix Namespace Diagnostics And Last-Resort Data Directory (#163)
+
+After the existing XDG, OS user temporary and system temporary bases are
+exhausted, the owner may use a fresh random `sb-<uid>-<random>` namespace
+directly under its data directory. This avoids creating a persistent shared
+`ipc` directory. The data-directory base must pass the same absolute-path,
+owned-0700, canonical ancestor and socket UTF-8/103-byte checks as a private
+runtime base; OwnerLock validation alone is not sufficient. Existing ordering,
+locator-before-mkdir, eight attempts per distinct base, socket ownership,
+identity-aware cleanup, Linux lease and live-socket preservation remain.
+Restart cleanup recognizes only the exact current data-directory base under the
+same validation, not an arbitrary locator path. Windows named pipes are unchanged.
+
+If all bases fail, startup returns bounded aggregates of candidate type, fixed
+reason code, optional numeric OS errno and count; paths, generated names, raw
+OS error text and environment contents are omitted. Hint text prioritizes
+permission/sandbox denial and path length, otherwise advises checking the
+specific summarized conditions and using a short private XDG_RUNTIME_DIR.
+All startup-generated text is English. No setting, transport or endpoint JSON
+schema changes. Actual lower-level syscall failures remain distinct from a
+candidate rejected before mkdir; aggregation must not grant deletion authority.

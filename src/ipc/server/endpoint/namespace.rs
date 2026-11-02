@@ -1,5 +1,7 @@
-//! Short, random Unix endpoint directories independent of the data directory.
-use super::{ApiError, Path, PathBuf, validate_folder};
+//! Short, random Unix endpoint directories, preferring temporary bases.
+#[cfg(any(test, target_os = "linux"))]
+use super::validate_folder;
+use super::{ApiError, Path, PathBuf};
 use std::os::unix::fs::MetadataExt;
 
 // Only Linux's cooperating tmpfiles ageing has a documented lock exclusion.
@@ -84,13 +86,198 @@ fn runtime_bases_with(
 }
 
 fn private_runtime_base(uid: u32, candidate: PathBuf) -> Option<PathBuf> {
-    let candidate: PathBuf = candidate.components().collect();
-    if !candidate.is_absolute() || validate_folder(&candidate, uid).is_err() {
-        return None;
+    checked_private_base(uid, candidate).ok()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Rejection {
+    reason: &'static str,
+    errno: Option<i32>,
+    error_kind: Option<&'static str>,
+}
+impl Rejection {
+    fn plain(reason: &'static str) -> Self {
+        Self {
+            reason,
+            errno: None,
+            error_kind: None,
+        }
     }
-    let base = std::fs::canonicalize(candidate).ok()?;
-    (protected_ancestors(&base, uid) && usable_socket_path(&base.join(namespace_name(uid))))
-        .then_some(base)
+    fn io(reason: &'static str, error: &std::io::Error) -> Self {
+        let kind = match error.kind() {
+            std::io::ErrorKind::PermissionDenied => "permission_denied",
+            std::io::ErrorKind::NotFound => "not_found",
+            std::io::ErrorKind::AlreadyExists => "already_exists",
+            std::io::ErrorKind::OutOfMemory => "out_of_memory",
+            std::io::ErrorKind::Interrupted => "interrupted",
+            _ => "other",
+        };
+        Self {
+            reason,
+            errno: error.raw_os_error(),
+            error_kind: Some(kind),
+        }
+    }
+}
+
+fn checked_private_base(uid: u32, candidate: PathBuf) -> Result<PathBuf, Rejection> {
+    let candidate: PathBuf = candidate.components().collect();
+    if !candidate.is_absolute() {
+        return Err(Rejection::plain("relative_path"));
+    }
+    let metadata = std::fs::symlink_metadata(&candidate)
+        .map_err(|error| Rejection::io("metadata_failed", &error))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(Rejection::plain("not_real_directory"));
+    }
+    if metadata.uid() != uid {
+        return Err(Rejection::plain("wrong_owner"));
+    }
+    if metadata.mode() & 0o7777 != 0o700 {
+        return Err(Rejection::plain("unsafe_mode"));
+    }
+    let base = std::fs::canonicalize(candidate)
+        .map_err(|error| Rejection::io("canonicalize_failed", &error))?;
+    if !protected_ancestors(&base, uid) {
+        return Err(Rejection::plain("unsafe_ancestor"));
+    }
+    check_socket_path(&base.join(namespace_name(uid)))?;
+    Ok(base)
+}
+
+fn check_socket_path(folder: &Path) -> Result<(), Rejection> {
+    let socket = folder.join("s");
+    if socket.to_str().is_none() {
+        return Err(Rejection::plain("non_utf8"));
+    }
+    if socket.as_os_str().len() > MAX_SOCKET_PATH {
+        return Err(Rejection::plain("path_too_long"));
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+pub(super) struct Diagnostics {
+    entries: Vec<Diagnostic>,
+    omitted: u32,
+}
+#[derive(serde::Serialize)]
+struct Diagnostic {
+    candidate: &'static str,
+    reason: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    errno: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_kind: Option<&'static str>,
+    count: u32,
+}
+impl Diagnostics {
+    fn record(&mut self, candidate: &'static str, rejection: Rejection) {
+        if let Some(entry) = self.entries.iter_mut().find(|entry| {
+            entry.candidate == candidate
+                && entry.reason == rejection.reason
+                && entry.errno == rejection.errno
+                && entry.error_kind == rejection.error_kind
+        }) {
+            entry.count = entry.count.saturating_add(1);
+        } else if self.entries.len() < 40 {
+            self.entries.push(Diagnostic {
+                candidate,
+                reason: rejection.reason,
+                errno: rejection.errno,
+                error_kind: rejection.error_kind,
+                count: 1,
+            });
+        } else {
+            self.omitted = self.omitted.saturating_add(1);
+        }
+    }
+    pub(super) fn mkdir_failed(&mut self, candidate: &'static str, error: &std::io::Error) {
+        self.record(candidate, Rejection::io("mkdir_failed", error));
+    }
+    pub(super) fn into_error(self) -> ApiError {
+        let denied = self.entries.iter().any(|entry| {
+            matches!(entry.errno, Some(libc::EACCES | libc::EPERM))
+                || entry.error_kind == Some("permission_denied")
+        });
+        let long = self.entries.iter().any(|entry| {
+            entry.reason == "path_too_long" || entry.errno == Some(libc::ENAMETOOLONG)
+        });
+        let hint = match (denied, long) {
+            (true, true) => {
+                "Check whether a sandbox or security software blocks directory creation and use a short private XDG_RUNTIME_DIR; the data directory or another candidate is also too long."
+            }
+            (true, false) => {
+                "Check whether a sandbox or security software blocks directory creation, and set XDG_RUNTIME_DIR to a short private directory you own."
+            }
+            (false, true) => {
+                "Use a shorter data directory or a short private XDG_RUNTIME_DIR you own, then restart Shellboy."
+            }
+            (false, false) => {
+                "Check the candidate reasons, permissions and free space, or set XDG_RUNTIME_DIR to a short private directory you own, then restart Shellboy."
+            }
+        };
+        ApiError::new(crate::protocol::ErrorCode::IoFailed, "Cannot create the temporary IPC directory")
+            .hint(hint)
+            .details(serde_json::json!({"component":"local_ipc", "reason":"private_runtime_directory_unavailable", "candidates":self.entries, "omitted":self.omitted}))
+    }
+}
+
+pub(super) struct Plan {
+    pub(super) folders: Vec<(&'static str, PathBuf)>,
+    pub(super) diagnostics: Diagnostics,
+}
+
+pub(super) fn plan(uid: u32, data_dir: &Path) -> Plan {
+    plan_with(
+        uid,
+        std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from),
+        os_user_tmp(),
+        PathBuf::from("/tmp"),
+        data_dir.to_path_buf(),
+    )
+}
+
+pub(super) fn plan_with(
+    uid: u32,
+    xdg: Option<PathBuf>,
+    user: Option<PathBuf>,
+    system: PathBuf,
+    data: PathBuf,
+) -> Plan {
+    let mut diagnostics = Diagnostics::default();
+    let mut bases = Vec::new();
+    for (kind, candidate) in [
+        ("xdg", xdg),
+        ("os", user),
+        ("system", Some(system)),
+        ("data", Some(data)),
+    ] {
+        let Some(candidate) = candidate else {
+            diagnostics.record(kind, Rejection::plain("unavailable"));
+            continue;
+        };
+        let result = if kind == "system" {
+            checked_system_base(uid, &candidate)
+        } else {
+            checked_private_base(uid, candidate)
+        };
+        match result {
+            Ok(base) if !bases.iter().any(|(_, prior)| prior == &base) => bases.push((kind, base)),
+            Ok(_) => diagnostics.record(kind, Rejection::plain("duplicate")),
+            Err(rejection) => diagnostics.record(kind, rejection),
+        }
+    }
+    let mut folders = Vec::with_capacity(32);
+    for (kind, base) in bases {
+        for _ in 0..8 {
+            folders.push((kind, base.join(namespace_name(uid))));
+        }
+    }
+    Plan {
+        folders,
+        diagnostics,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -133,23 +320,31 @@ pub(super) fn runtime_error(reason: &str) -> ApiError {
 }
 
 fn system_tmp(uid: u32) -> Result<PathBuf, ApiError> {
-    // /tmp is a symlink on macOS; resolve the system-selected base, then
-    // require an owned private or root-owned sticky directory and safe parents.
-    let fallback = std::fs::canonicalize("/tmp")
-        .map_err(|_| runtime_error("system_temporary_directory_unavailable"))?;
+    checked_system_base(uid, Path::new("/tmp"))
+        .map_err(|_| runtime_error("system_temporary_directory_unavailable"))
+}
+
+fn checked_system_base(uid: u32, path: &Path) -> Result<PathBuf, Rejection> {
+    let fallback = std::fs::canonicalize(path)
+        .map_err(|error| Rejection::io("canonicalize_failed", &error))?;
     let metadata = std::fs::symlink_metadata(&fallback)
-        .map_err(|_| runtime_error("system_temporary_directory_metadata_unavailable"))?;
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || !((metadata.uid() == 0 && metadata.mode() & 0o1000 != 0)
-            || (metadata.uid() == uid && metadata.mode() & 0o077 == 0))
-        || !protected_ancestors(&fallback, uid)
-    {
-        return Err(runtime_error("system_temporary_directory_unsafe"));
+        .map_err(|error| Rejection::io("metadata_failed", &error))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(Rejection::plain("not_real_directory"));
     }
+    if !((metadata.uid() == 0 && metadata.mode() & 0o1000 != 0)
+        || (metadata.uid() == uid && metadata.mode() & 0o077 == 0))
+    {
+        return Err(Rejection::plain("unsafe_owner_or_mode"));
+    }
+    if !protected_ancestors(&fallback, uid) {
+        return Err(Rejection::plain("unsafe_ancestor"));
+    }
+    check_socket_path(&fallback.join(namespace_name(uid)))?;
     Ok(fallback)
 }
 
+#[cfg(test)]
 pub(super) fn folder_candidates(uid: u32) -> Result<Vec<PathBuf>, ApiError> {
     let mut folders = Vec::with_capacity(24);
     for base in runtime_bases(uid)? {
@@ -178,7 +373,11 @@ pub(super) fn create_folder(uid: u32) -> Result<PathBuf, ApiError> {
     Err(runtime_error("private_runtime_directory_unavailable"))
 }
 
-pub(super) fn recognized_folder(folder: &Path, uid: u32) -> Result<bool, ApiError> {
+pub(super) fn recognized_folder(
+    folder: &Path,
+    uid: u32,
+    data_dir: Option<&Path>,
+) -> Result<bool, ApiError> {
     let Some(name) = folder.file_name().and_then(|name| name.to_str()) else {
         return Ok(false);
     };
@@ -198,7 +397,14 @@ pub(super) fn recognized_folder(folder: &Path, uid: u32) -> Result<bool, ApiErro
     };
     // Exact canonical paths only: locator aliases and symlink components never
     // grant cleanup authority. Do not canonicalize the untrusted locator.
-    Ok(runtime_bases(uid)?.iter().any(|base| parent == base))
+    if data_dir
+        .and_then(|data| private_runtime_base(uid, data.to_path_buf()))
+        .as_deref()
+        == Some(parent)
+    {
+        return Ok(true);
+    }
+    Ok(runtime_bases(uid).is_ok_and(|bases| bases.iter().any(|base| parent == base)))
 }
 
 fn protected_ancestors(path: &Path, uid: u32) -> bool {
@@ -214,15 +420,103 @@ fn protected_ancestors(path: &Path, uid: u32) -> bool {
 fn namespace_name(uid: u32) -> String {
     format!("sb-{uid}-{}", uuid::Uuid::new_v4().simple())
 }
+#[cfg(test)]
 fn usable_socket_path(folder: &Path) -> bool {
-    let socket = folder.join("s");
-    socket.to_str().is_some() && socket.as_os_str().len() <= MAX_SOCKET_PATH
+    check_socket_path(folder).is_ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::os::unix::fs::{PermissionsExt, symlink};
+
+    #[test]
+    fn candidate_reasons_are_bounded_private_and_actionable() {
+        use std::os::unix::ffi::OsStringExt;
+        let root = tempfile::Builder::new()
+            .prefix("i")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let uid = super::super::current_uid();
+        let missing = root.path().join("private-missing-name");
+        let long = root.path().join("x".repeat(90));
+        std::fs::create_dir(&long).unwrap();
+        std::fs::set_permissions(&long, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let mut plan = plan_with(
+            uid,
+            Some(PathBuf::from("relative-private-name")),
+            Some(missing),
+            root.path().join("missing-system"),
+            long,
+        );
+        for _ in 0..8 {
+            plan.diagnostics
+                .mkdir_failed("xdg", &std::io::Error::from_raw_os_error(libc::EPERM));
+        }
+        let error = plan.diagnostics.into_error();
+        let details = error.details.unwrap();
+        let entries = details["candidates"].as_array().unwrap();
+        assert!(
+            entries
+                .iter()
+                .any(|v| v["candidate"] == "xdg" && v["reason"] == "relative_path")
+        );
+        assert!(entries.iter().any(|v| v["candidate"] == "os"
+            && v["reason"] == "metadata_failed"
+            && v["errno"] == libc::ENOENT));
+        assert!(
+            entries
+                .iter()
+                .any(|v| v["candidate"] == "data" && v["reason"] == "path_too_long")
+        );
+        assert!(entries.iter().any(|v| v["candidate"] == "xdg"
+            && v["reason"] == "mkdir_failed"
+            && v["errno"] == libc::EPERM
+            && v["count"] == 8));
+        assert!(error.hint.unwrap().contains("sandbox"));
+        assert!(!details.to_string().contains("private-missing-name"));
+        assert!(!details.to_string().contains("relative-private-name"));
+        let mut diagnostics = Diagnostics::default();
+        for errno in 1..=200 {
+            diagnostics.mkdir_failed("data", &std::io::Error::from_raw_os_error(errno));
+        }
+        let bounded = diagnostics.into_error().details.unwrap();
+        assert_eq!(bounded["candidates"].as_array().unwrap().len(), 40);
+        assert_eq!(bounded["omitted"], 160);
+        let mut non_utf8 = root.path().as_os_str().as_encoded_bytes().to_vec();
+        non_utf8.extend_from_slice(b"/\xff");
+        let path = PathBuf::from(std::ffi::OsString::from_vec(non_utf8));
+        assert_eq!(check_socket_path(&path).unwrap_err().reason, "non_utf8");
+    }
+
+    #[test]
+    fn data_base_rejects_unsafe_mode_symlink_and_wrong_owner() {
+        let root = tempfile::Builder::new()
+            .prefix("i")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let uid = super::super::current_uid();
+        let data = root.path().join("data");
+        std::fs::create_dir(&data).unwrap();
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            checked_private_base(uid, data.clone()).unwrap_err().reason,
+            "unsafe_mode"
+        );
+        std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            checked_private_base(uid.wrapping_add(1), data.clone())
+                .unwrap_err()
+                .reason,
+            "wrong_owner"
+        );
+        let link = root.path().join("link");
+        symlink(&data, &link).unwrap();
+        assert_eq!(
+            checked_private_base(uid, link).unwrap_err().reason,
+            "not_real_directory"
+        );
+    }
 
     #[test]
     fn runtime_error_uses_english_without_changing_code_or_source_details() {
@@ -283,7 +577,7 @@ mod tests {
             let folder = base.join(namespace_name(uid));
             assert!(usable_socket_path(&folder));
             assert!(
-                recognized_folder(&folder, uid).unwrap(),
+                recognized_folder(&folder, uid, None).unwrap(),
                 "restart cleanup recognizes each base"
             );
         }
@@ -373,7 +667,7 @@ mod tests {
         let user = os_user_tmp().expect("Darwin supplies its per-user temporary directory");
         if let Some(canonical) = private_runtime_base(uid, user) {
             assert_eq!(runtime_bases_from(uid, None).unwrap()[0], canonical);
-            assert!(recognized_folder(&canonical.join(namespace_name(uid)), uid).unwrap());
+            assert!(recognized_folder(&canonical.join(namespace_name(uid)), uid, None).unwrap());
         } else {
             assert_eq!(
                 runtime_bases_from(uid, None).unwrap(),

@@ -8498,3 +8498,15 @@ revision/cursor/anchor and active UI text, no phantom DB save, and failed join.
 Final extended-test result and exact-tip CI are separate evidence. Python tooling
 ran146 tests including13 audit fixtures; no final Stage C, provider/clipboard or
 physical-terminal acceptance is implied.
+### #163 Unix IPC Namespace Failure And Fallback
+
+Synthetic Unix fixtures exercise private base validation, counted and bounded
+reasons, redaction, path length, permission denial and data-directory fallback.
+The fallback test injects rejected mkdir calls for all three temporary kinds,
+then uses the real listener and endpoint.json. Unix CI additionally reruns the
+same synthetic denial case with a freshly built CLI process, with socket override
+variables removed; this is not a real sandbox policy or physical terminal test.
+Stale cleanup, owner/mode/symlink protections and existing cleanup behavior
+remain required. Windows named-pipe behavior is outside the changed path.
+Exact commands, platform and CI results are reported in the task handoff; no
+live-provider or actual sandbox-exec observation is inferred.
