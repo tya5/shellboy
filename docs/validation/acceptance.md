@@ -8529,7 +8529,7 @@ is inferred. After0.6.1 cutoff; no release tag/binary change is part of this bat
 ### #152 Time Display Compatibility Candidate
 
 On macOS, `cargo fmt --all -- --check`, `cargo check --tests`, Clippy with
-`-D warnings`, and 32 focused time, message, activity and chrome tests passed.
+`-D warnings`, and 33 focused time, message, activity and chrome tests passed.
 The tests cover both UI languages, minute/hour boundaries, unknown end time,
 unchanged legacy Japanese APIs and preserved timestamps. Exact-tip Ubuntu/macOS
 CI and the Windows integration run are separate; no physical terminal test or
