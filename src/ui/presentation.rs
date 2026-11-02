@@ -858,9 +858,9 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
         .ui_messages
         .title
         .as_ref()
-        .and_then(|m| match m {
-            Message::EventSummary { title, .. } => Some(title.as_ref()),
-            _ => Some(m),
+        .map(|m| match m {
+            Message::EventSummary { title, .. } => title.as_ref(),
+            _ => m,
         })
     {
         format!(
