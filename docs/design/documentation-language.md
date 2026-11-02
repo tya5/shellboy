@@ -67,3 +67,20 @@ Do not translate stored conversations, model replies, shell output, source text,
 ## Verification for this change
 
 Check complete English guide coverage, exactly one Japanese User Guide, absence of other Japanese translations and a Japanese Agent Guide, relative links and heading fragments, offline catalogue content and metadata, literal search, cursor/UTF-8 behavior, and bundled-doc RAG version/readiness behavior. Confirm that no runtime UI/configuration behavior changed; a UI-module regression test alone does not implement language selection. Record commands and observations in [acceptance](../validation/acceptance.md), separately from the future UI checklist above.
+
+## #150 review boundary: complete UI messages and post-TUI stderr
+
+Copy notifications select complete messages per CopyScope, backend outcome and
+character count, rather than assembling a sentence from a translated scope label.
+The scope enum stays language-neutral. English copy/preview/completion prose uses
+ASCII punctuation; Japanese copy text and punctuation remain unchanged. Tool
+preview notices are complete English sentences joined with spaces, preserving
+the periods (and the Japanese join rule remains unchanged).
+
+Terminal, shutdown, runtime-adapter and forced-exit diagnostics printed to stderr
+after restoring the terminal are English-only. They do not consult the configured
+TUI locale or introduce Japanese alternatives. This does not change the language
+of the live startup, failure, stopping or Closing screens. Raw error payloads and
+clipboard bytes remain untouched. The remaining Japanese display-state projection
+in presentation::fields::state_label and management reports is deferred to #152,
+not silently claimed complete by this review fix.

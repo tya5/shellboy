@@ -3863,3 +3863,21 @@ The subsequently selected v0.6.1 source cutoff is
 The user subsequently moved the v0.6.1 source cutoff to
 `2b366e32ce70ceb76984a0e53cab2f26451107d5`, including #116 Stage 4 and #152
 batch 4. The draft records both additions.
+## #150 review follow-up (2026-11-02, validation in progress)
+
+Review of ed93ee18 requested English ASCII punctuation, full copy messages per
+scope/outcome, English-only post-TUI stderr and exact guide quotations. The fix
+keeps Japanese notices, raw payloads, clipboard behavior, glyph selection, config
+and admission/shutdown guards unchanged. CopyScope no longer owns a duplicate
+Japanese label map; complete messages live in frontend::ui_diagnostics. Both user
+guides quote the exact freshness label and 12-character OSC52 example. New tests
+cover copy plural/count/outcome variants, ASCII English, preview sentence joins,
+raw error preservation and guide quotations. Fresh native macOS shared-slot
+validation passes: check, strict all-target Clippy, diagnostics4, mock clipboard1,
+startup5, management15, owner-session5 and integration UI86 (one preexisting
+ignored). Layout/watchdog checks and Python134 pass; exact candidate CI is pending.
+The first Clippy run caught a production import used only by tests; it is now
+scoped to the test module, without suppressing any lint.
+State-label/report localization is explicitly deferred by review instruction:
+https://github.com/tya5/shellboy/issues/152#issuecomment-6569021575 .
+No real provider API, clipboard, user data, installed binary or release modified.

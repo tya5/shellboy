@@ -305,32 +305,18 @@ fn wait_inner<T>(
     }
 }
 
-/// Human-facing TUI adapter failures; shared ApiError values remain untouched.
-pub fn terminal_error(language: UiLanguage, error: impl std::fmt::Display) -> String {
-    match language {
-        UiLanguage::Ja => format!("端末エラー: {error}"),
-        UiLanguage::En => format!("Terminal error: {error}"),
-    }
+/// Post-TUI stderr diagnostics stay English regardless of the configured UI locale.
+pub fn terminal_error(error: impl std::fmt::Display) -> String {
+    format!("Terminal error: {error}")
 }
-pub fn shutdown_error(language: UiLanguage, error: impl std::fmt::Display) -> String {
-    match language {
-        UiLanguage::Ja => format!("終了処理エラー: {error}"),
-        UiLanguage::En => format!("Shutdown error: {error}"),
-    }
+pub fn shutdown_error(error: impl std::fmt::Display) -> String {
+    format!("Shutdown error: {error}")
 }
-pub fn runtime_adapter_failed(language: UiLanguage) -> &'static str {
-    i18n::local!(
-        language,
-        "実行環境との接続に失敗しました",
-        "Runtime adapter failed"
-    )
+pub fn runtime_adapter_failed() -> &'static str {
+    "Runtime adapter failed"
 }
-pub fn forced_exit_notice(language: UiLanguage) -> &'static str {
-    i18n::local!(
-        language,
-        "強制終了: 会話の保存や所有プロセスの回収が未完了の可能性があります。再起動して中断した作業を確認してください。",
-        "Forced exit: conversation saving and owned process cleanup may be incomplete. Restart to inspect interrupted work."
-    )
+pub fn forced_exit_notice() -> &'static str {
+    "Forced exit: conversation saving and owned process cleanup may be incomplete. Restart to inspect interrupted work."
 }
 
 #[cfg(test)]
@@ -516,5 +502,22 @@ mod tests {
             assert!(cells(&terminal).contains("起動できませんでした"));
             assert!(cells(&terminal).contains("SYNTHETIC_FAILURE"));
         }
+    }
+}
+
+#[cfg(test)]
+mod stderr_review_tests {
+    use super::*;
+    #[test]
+    fn post_tui_stderr_diagnostics_are_english_and_keep_raw_errors() {
+        let raw = "RAW provider error 原文";
+        assert_eq!(terminal_error(raw), format!("Terminal error: {raw}"));
+        assert_eq!(shutdown_error(raw), format!("Shutdown error: {raw}"));
+        assert_eq!(runtime_adapter_failed(), "Runtime adapter failed");
+        assert_eq!(
+            forced_exit_notice(),
+            "Forced exit: conversation saving and owned process cleanup may be incomplete. Restart to inspect interrupted work."
+        );
+        assert!(forced_exit_notice().is_ascii());
     }
 }

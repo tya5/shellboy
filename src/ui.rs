@@ -496,21 +496,6 @@ pub enum CopyScope {
     Body,
     CodeBlock { index: usize },
 }
-impl CopyScope {
-    pub(crate) fn label(self) -> String {
-        match self {
-            Self::OriginalPage { has_more: true } => "原文の現在ページ（続きあり）".into(),
-            Self::OriginalPage { has_more: false } => "原文の現在ページ（このページのみ）".into(),
-            Self::ManagementPage { has_more: true } => "管理詳細の現在ページ（続きあり）".into(),
-            Self::ManagementPage { has_more: false } => {
-                "管理詳細の現在ページ（このページのみ）".into()
-            }
-            Self::Value => "項目の完全な値".into(),
-            Self::Body => "本文全体".into(),
-            Self::CodeBlock { index } => format!("コードの塊 {}", index.saturating_add(1)),
-        }
-    }
-}
 #[derive(Clone, Debug)]
 pub struct ToolObservation {
     pub revision: u64,

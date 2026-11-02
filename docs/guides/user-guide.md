@@ -34,12 +34,15 @@ same in both languages; language selection never authorizes an operation.
   target and saved-input state before trying again; do not infer acceptance or
   completion from an error message alone. Composer text is retained where the
   notice says it was kept.
-- **Refresh failed / 更新失敗**: a previous observation is not a claim about the
+- **Refresh failed; previous captured result / 再取得に失敗・以前の取得結果**:
+  a previous observation is not a claim about the
   current external state. Check the captured UTC time and last-request time,
   then use the displayed explicit refresh/reconfirmation action.
-- **OSC52 completion unconfirmed / 完了未確認**: sending a terminal copy request
-  does not prove that the OS clipboard was updated. Copy scope and original
-  payload are independent of the display language.
+- **OSC52 copy request**: sending a terminal copy request does not prove that the
+  OS clipboard was updated. For a complete-body copy of 12 characters, the exact
+  notices are `OSC52: completion unconfirmed for copying the complete body (12 characters; request sent)`
+  and `OSC52: 本文全体のコピー要求を端末へ送りました（12文字・完了未確認）`.
+  Copy scope and original payload are independent of the display language.
 - **Force quit / 強制終了**: waiting and forced exit remain separate choices.
   Forced exit may leave unsaved data or uncollected owned processes. Restart
   and inspect interrupted work rather than assuming shutdown completed.

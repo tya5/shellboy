@@ -4116,21 +4116,21 @@ fn tool_preview_at(
         notices.push(i18n::local!(
             language,
             "前方を省略した末尾抜粋です。全文は原文から取得できます",
-            "Tail excerpt; earlier output is omitted. Read the original for full text"
+            "Tail excerpt; earlier output is omitted. Read the original for full text."
         ));
     }
     if page.decode_uncertain {
         notices.push(i18n::local!(
             language,
             "末尾からの文字変換は不確実です。原文を参照してください",
-            "Tail decoding is uncertain. Consult the original"
+            "Tail decoding is uncertain. Consult the original."
         ));
     }
     if page.decode_errors {
         notices.push(i18n::local!(
             language,
             "文字変換エラーがあります",
-            "Decoding errors are present"
+            "Decoding errors are present."
         ));
     }
     if !page.output_complete {
@@ -4138,13 +4138,13 @@ fn tool_preview_at(
             i18n::local!(
                 language,
                 "未回収の出力があります",
-                "Some output is uncollected"
+                "Some output is uncollected."
             )
         } else {
             i18n::local!(
                 language,
                 "実行中の出力スナップショットです",
-                "Output snapshot of a running process"
+                "Output snapshot of a running process."
             )
         });
     }

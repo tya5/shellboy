@@ -68,7 +68,7 @@ pub(super) fn completion_text(
         Ok(()) => i18n::local!(language, "受付結果: 成功", "Admission result: success").to_owned(),
         Err(error) => match language {
             UiLanguage::Ja => format!("受付結果: 失敗（{}）", error.message),
-            UiLanguage::En => format!("Admission result: failed（{}）", error.message),
+            UiLanguage::En => format!("Admission result: failed ({})", error.message),
         },
     };
     match language {
@@ -1186,5 +1186,19 @@ mod opaque_filter_string_tests {
                 presentation::safe_detail_value(source.clone())
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod completion_review_tests {
+    use super::*;
+    #[test]
+    fn failed_admission_has_ascii_english_punctuation_and_unchanged_japanese() {
+        let response = Err(ApiError::new(ErrorCode::IoFailed, "raw error"));
+        let english = completion_text(UiLanguage::En, "fixture", false, &response);
+        assert!(english.contains("Admission result: failed (raw error)"));
+        assert!(english.is_ascii());
+        let japanese = completion_text(UiLanguage::Ja, "fixture", false, &response);
+        assert!(japanese.contains("受付結果: 失敗（raw error）"));
     }
 }

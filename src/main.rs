@@ -458,10 +458,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
                         let _ = prepared.shutdown().await;
                     }
                 });
-                eprintln!(
-                    "{}",
-                    shellboy::ui::startup::terminal_error(stages.borrow().language, error)
-                );
+                eprintln!("{}", shellboy::ui::startup::terminal_error(error));
                 runtime.shutdown_background();
                 return ExitCode::FAILURE;
             }
@@ -514,10 +511,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     drop(session);
     if matches!(&terminal_result, Ok(shellboy::ui::UiExitReason::Forced)) {
         termination.force_cleanup();
-        eprintln!(
-            "{}",
-            shellboy::ui::startup::forced_exit_notice(stages.borrow().language)
-        );
+        eprintln!("{}", shellboy::ui::startup::forced_exit_notice());
         std::process::exit(1);
     }
     if terminal_result.is_err() {
@@ -526,27 +520,18 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     let result = runtime.block_on(bridge);
     termination.complete();
     if let Err(error) = terminal_result {
-        eprintln!(
-            "{}",
-            shellboy::ui::startup::terminal_error(stages.borrow().language, error)
-        );
+        eprintln!("{}", shellboy::ui::startup::terminal_error(error));
         runtime.shutdown_background();
         return ExitCode::FAILURE;
     }
     let exit_code = match result {
         Ok(Ok(())) => ExitCode::SUCCESS,
         Ok(Err(error)) => {
-            eprintln!(
-                "{}",
-                shellboy::ui::startup::shutdown_error(stages.borrow().language, error)
-            );
+            eprintln!("{}", shellboy::ui::startup::shutdown_error(error));
             ExitCode::FAILURE
         }
         Err(_) => {
-            eprintln!(
-                "{}",
-                shellboy::ui::startup::runtime_adapter_failed(stages.borrow().language)
-            );
+            eprintln!("{}", shellboy::ui::startup::runtime_adapter_failed());
             ExitCode::FAILURE
         }
     };

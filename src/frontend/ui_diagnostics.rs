@@ -1,8 +1,5 @@
 //! Complete UI messages, separate from CLI JSON and model/provider payloads.
-use crate::{
-    config::UiLanguage,
-    ui::{CopyScope, i18n},
-};
+use crate::{config::UiLanguage, ui::CopyScope};
 use std::fmt::Display;
 pub(super) fn cli_stopped(language: UiLanguage, error: impl Display) -> String {
     match language {
@@ -60,67 +57,142 @@ pub(super) fn copied(
     characters: usize,
     terminal_request: bool,
 ) -> String {
-    let scope = if language == UiLanguage::Ja {
-        scope.label()
-    } else {
-        match scope {
-            CopyScope::OriginalPage { has_more: true } => i18n::local!(
-                language,
-                "原文の現在ページ（続きあり）",
-                "the current original page（more available）"
-            )
-            .into(),
-            CopyScope::OriginalPage { has_more: false } => i18n::local!(
-                language,
-                "原文の現在ページ（このページのみ）",
-                "the current original page（this page only）"
-            )
-            .into(),
-            CopyScope::ManagementPage { has_more: true } => i18n::local!(
-                language,
-                "管理詳細の現在ページ（続きあり）",
-                "the current management-detail page（more available）"
-            )
-            .into(),
-            CopyScope::ManagementPage { has_more: false } => i18n::local!(
-                language,
-                "管理詳細の現在ページ（このページのみ）",
-                "the current management-detail page（this page only）"
-            )
-            .into(),
-            CopyScope::Value => {
-                i18n::local!(language, "項目の完全な値", "the complete field value").into()
-            }
-            CopyScope::Body => i18n::local!(language, "本文全体", "the complete body").into(),
-            CopyScope::CodeBlock { index } => match language {
-                UiLanguage::Ja => format!("コードの塊 {}", index.saturating_add(1)),
-                UiLanguage::En => format!("code block {}", index.saturating_add(1)),
-            },
+    match (language, scope, terminal_request, characters) {
+        (UiLanguage::Ja, CopyScope::OriginalPage { has_more: true }, false, _) => {
+            format!("原文の現在ページ（続きあり）をコピーしました（{characters}文字）")
         }
-    };
-    match (language, terminal_request) {
-        (UiLanguage::Ja, false) => format!("{scope}をコピーしました（{characters}文字）"),
-        (UiLanguage::Ja, true) => {
-            format!("OSC52: {scope}のコピー要求を端末へ送りました（{characters}文字・完了未確認）")
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: true }, false, 1) => {
+            format!("Copied the current original page (more available) ({characters} character)")
         }
-        (UiLanguage::En, false) => format!(
-            "Copied {scope}（{characters} {}）",
-            if characters == 1 {
-                "character"
-            } else {
-                "characters"
-            }
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: true }, false, _) => {
+            format!("Copied the current original page (more available) ({characters} characters)")
+        }
+        (UiLanguage::Ja, CopyScope::OriginalPage { has_more: true }, true, _) => format!(
+            "OSC52: 原文の現在ページ（続きあり）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
         ),
-        (UiLanguage::En, true) => format!(
-            "OSC52: completion unconfirmed for copying {scope}（{characters} {}・request sent）",
-            if characters == 1 {
-                "character"
-            } else {
-                "characters"
-            }
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: true }, true, 1) => format!(
+            "OSC52: completion unconfirmed for copying the current original page (more available) ({characters} character; request sent)"
+        ),
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: true }, true, _) => format!(
+            "OSC52: completion unconfirmed for copying the current original page (more available) ({characters} characters; request sent)"
+        ),
+        (UiLanguage::Ja, CopyScope::OriginalPage { has_more: false }, false, _) => {
+            format!("原文の現在ページ（このページのみ）をコピーしました（{characters}文字）")
+        }
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: false }, false, 1) => {
+            format!("Copied the current original page (this page only) ({characters} character)")
+        }
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: false }, false, _) => {
+            format!("Copied the current original page (this page only) ({characters} characters)")
+        }
+        (UiLanguage::Ja, CopyScope::OriginalPage { has_more: false }, true, _) => format!(
+            "OSC52: 原文の現在ページ（このページのみ）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
+        ),
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: false }, true, 1) => format!(
+            "OSC52: completion unconfirmed for copying the current original page (this page only) ({characters} character; request sent)"
+        ),
+        (UiLanguage::En, CopyScope::OriginalPage { has_more: false }, true, _) => format!(
+            "OSC52: completion unconfirmed for copying the current original page (this page only) ({characters} characters; request sent)"
+        ),
+        (UiLanguage::Ja, CopyScope::ManagementPage { has_more: true }, false, _) => {
+            format!("管理詳細の現在ページ（続きあり）をコピーしました（{characters}文字）")
+        }
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: true }, false, 1) => format!(
+            "Copied the current management-detail page (more available) ({characters} character)"
+        ),
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: true }, false, _) => format!(
+            "Copied the current management-detail page (more available) ({characters} characters)"
+        ),
+        (UiLanguage::Ja, CopyScope::ManagementPage { has_more: true }, true, _) => format!(
+            "OSC52: 管理詳細の現在ページ（続きあり）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
+        ),
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: true }, true, 1) => format!(
+            "OSC52: completion unconfirmed for copying the current management-detail page (more available) ({characters} character; request sent)"
+        ),
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: true }, true, _) => format!(
+            "OSC52: completion unconfirmed for copying the current management-detail page (more available) ({characters} characters; request sent)"
+        ),
+        (UiLanguage::Ja, CopyScope::ManagementPage { has_more: false }, false, _) => {
+            format!("管理詳細の現在ページ（このページのみ）をコピーしました（{characters}文字）")
+        }
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: false }, false, 1) => format!(
+            "Copied the current management-detail page (this page only) ({characters} character)"
+        ),
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: false }, false, _) => format!(
+            "Copied the current management-detail page (this page only) ({characters} characters)"
+        ),
+        (UiLanguage::Ja, CopyScope::ManagementPage { has_more: false }, true, _) => format!(
+            "OSC52: 管理詳細の現在ページ（このページのみ）のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
+        ),
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: false }, true, 1) => format!(
+            "OSC52: completion unconfirmed for copying the current management-detail page (this page only) ({characters} character; request sent)"
+        ),
+        (UiLanguage::En, CopyScope::ManagementPage { has_more: false }, true, _) => format!(
+            "OSC52: completion unconfirmed for copying the current management-detail page (this page only) ({characters} characters; request sent)"
+        ),
+        (UiLanguage::Ja, CopyScope::Value, false, _) => {
+            format!("項目の完全な値をコピーしました（{characters}文字）")
+        }
+        (UiLanguage::En, CopyScope::Value, false, 1) => {
+            format!("Copied the complete field value ({characters} character)")
+        }
+        (UiLanguage::En, CopyScope::Value, false, _) => {
+            format!("Copied the complete field value ({characters} characters)")
+        }
+        (UiLanguage::Ja, CopyScope::Value, true, _) => format!(
+            "OSC52: 項目の完全な値のコピー要求を端末へ送りました（{characters}文字・完了未確認）"
+        ),
+        (UiLanguage::En, CopyScope::Value, true, 1) => format!(
+            "OSC52: completion unconfirmed for copying the complete field value ({characters} character; request sent)"
+        ),
+        (UiLanguage::En, CopyScope::Value, true, _) => format!(
+            "OSC52: completion unconfirmed for copying the complete field value ({characters} characters; request sent)"
+        ),
+        (UiLanguage::Ja, CopyScope::Body, false, _) => {
+            format!("本文全体をコピーしました（{characters}文字）")
+        }
+        (UiLanguage::En, CopyScope::Body, false, 1) => {
+            format!("Copied the complete body ({characters} character)")
+        }
+        (UiLanguage::En, CopyScope::Body, false, _) => {
+            format!("Copied the complete body ({characters} characters)")
+        }
+        (UiLanguage::Ja, CopyScope::Body, true, _) => {
+            format!("OSC52: 本文全体のコピー要求を端末へ送りました（{characters}文字・完了未確認）")
+        }
+        (UiLanguage::En, CopyScope::Body, true, 1) => format!(
+            "OSC52: completion unconfirmed for copying the complete body ({characters} character; request sent)"
+        ),
+        (UiLanguage::En, CopyScope::Body, true, _) => format!(
+            "OSC52: completion unconfirmed for copying the complete body ({characters} characters; request sent)"
+        ),
+        (UiLanguage::Ja, CopyScope::CodeBlock { index }, false, _) => format!(
+            "コードの塊 {index}をコピーしました（{characters}文字）",
+            index = index.saturating_add(1)
+        ),
+        (UiLanguage::En, CopyScope::CodeBlock { index }, false, 1) => format!(
+            "Copied code block {index} ({characters} character)",
+            index = index.saturating_add(1)
+        ),
+        (UiLanguage::En, CopyScope::CodeBlock { index }, false, _) => format!(
+            "Copied code block {index} ({characters} characters)",
+            index = index.saturating_add(1)
+        ),
+        (UiLanguage::Ja, CopyScope::CodeBlock { index }, true, _) => format!(
+            "OSC52: コードの塊 {index}のコピー要求を端末へ送りました（{characters}文字・完了未確認）",
+            index = index.saturating_add(1)
+        ),
+        (UiLanguage::En, CopyScope::CodeBlock { index }, true, 1) => format!(
+            "OSC52: completion unconfirmed for copying code block {index} ({characters} character; request sent)",
+            index = index.saturating_add(1)
+        ),
+        (UiLanguage::En, CopyScope::CodeBlock { index }, true, _) => format!(
+            "OSC52: completion unconfirmed for copying code block {index} ({characters} characters; request sent)",
+            index = index.saturating_add(1)
         ),
     }
 }
+
 pub(super) fn preview_notice(
     language: UiLanguage,
     observed_at: chrono::DateTime<chrono::Utc>,
@@ -130,17 +202,22 @@ pub(super) fn preview_notice(
     let extra = if notices.is_empty() {
         String::new()
     } else {
-        format!(" | {}", notices.join("。"))
+        let separator = match language {
+            UiLanguage::Ja => "。",
+            UiLanguage::En => " ",
+        };
+        format!(" | {}", notices.join(separator))
     };
     match language {
         UiLanguage::Ja => format!("取得 {time} UTC | 閉じて開くと再取得{extra}"),
-        UiLanguage::En => format!("Captured {time} UTC | Close and reopen to refresh{extra}"),
+        UiLanguage::En => format!("Captured {time} UTC | Close and reopen to refresh.{extra}"),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::i18n;
     #[test]
     fn frontend_copy_and_settings_diagnostics_render_in_the_selected_language() {
         use crate::ui::{
@@ -235,9 +312,9 @@ mod tests {
                     assert!(!os.contains("OSC52"));
                     if language == UiLanguage::En {
                         assert!(os.contains(if count == 1 {
-                            "（1 character）"
+                            "(1 character)"
                         } else {
-                            "characters）"
+                            "characters)"
                         }));
                     }
                 }
@@ -256,5 +333,87 @@ mod tests {
                 }));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+
+    #[test]
+    fn copy_notifications_use_ascii_english_complete_sentences_and_exact_japanese() {
+        for scope in [
+            CopyScope::OriginalPage { has_more: true },
+            CopyScope::OriginalPage { has_more: false },
+            CopyScope::ManagementPage { has_more: true },
+            CopyScope::ManagementPage { has_more: false },
+            CopyScope::Body,
+            CopyScope::Value,
+            CopyScope::CodeBlock { index: 0 },
+            CopyScope::CodeBlock { index: usize::MAX },
+        ] {
+            for count in [0, 1, 2, 1_000_000] {
+                for terminal in [false, true] {
+                    let english = copied(UiLanguage::En, scope, count, terminal);
+                    assert!(english.is_ascii(), "{english}");
+                    assert_eq!(english.contains("request sent"), terminal);
+                    assert_eq!(english.contains("completion unconfirmed"), terminal);
+                }
+            }
+        }
+        for (language, os, terminal) in [
+            (
+                UiLanguage::En,
+                "Copied the complete body (12 characters)",
+                "OSC52: completion unconfirmed for copying the complete body (12 characters; request sent)",
+            ),
+            (
+                UiLanguage::Ja,
+                "本文全体をコピーしました（12文字）",
+                "OSC52: 本文全体のコピー要求を端末へ送りました（12文字・完了未確認）",
+            ),
+        ] {
+            assert_eq!(copied(language, CopyScope::Body, 12, false), os);
+            assert_eq!(copied(language, CopyScope::Body, 12, true), terminal);
+            let guide = match language {
+                UiLanguage::En => include_str!("../../docs/guides/user-guide.md"),
+                UiLanguage::Ja => include_str!("../../docs/guides/user-guide.ja.md"),
+            };
+            assert!(guide.contains(terminal));
+        }
+        assert_eq!(
+            copied(
+                UiLanguage::En,
+                CopyScope::OriginalPage { has_more: true },
+                1,
+                false
+            ),
+            "Copied the current original page (more available) (1 character)"
+        );
+        assert_eq!(
+            copied(UiLanguage::En, CopyScope::CodeBlock { index: 0 }, 1, true),
+            "OSC52: completion unconfirmed for copying code block 1 (1 character; request sent)"
+        );
+    }
+
+    #[test]
+    fn preview_joins_complete_english_sentences_without_translating_raw_text() {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-02T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(
+            preview_notice(
+                UiLanguage::En,
+                at,
+                &["First complete sentence.", "Second complete sentence."]
+            ),
+            "Captured 2026-11-02 00:00:00 UTC | Close and reopen to refresh. | First complete sentence. Second complete sentence."
+        );
+        assert_eq!(
+            preview_notice(UiLanguage::Ja, at, &["既存の文", "次の文"]),
+            "取得 2026-11-02 00:00:00 UTC | 閉じて開くと再取得 | 既存の文。次の文"
+        );
+        let raw = "RAW 原文 provider text";
+        assert!(preview_notice(UiLanguage::En, at, &[raw]).ends_with(raw));
     }
 }

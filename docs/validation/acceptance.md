@@ -8306,3 +8306,63 @@ schema sources. Candidate upgrade verification remains outstanding.
 The revised v0.6.1 cutoff `2b366e32ce70ceb76984a0e53cab2f26451107d5`
 includes #116 Stage 4 and #152 batch 4. Schema, migration and RAG schema sources
 remain unchanged from `v0.6.0`; candidate upgrade verification is still pending.
+
+## #150 review acceptance / レビュー受け入れ (2026-11-02)
+
+### English
+
+Review baseline: ed93ee18, following landed #149/#158. Review fixes keep the
+previously accepted glyph handling, untranslated data, behavior and settings.
+Copy notices now select complete Japanese/English sentences for all seven scope
+forms, OS-completed versus terminal-request outcomes, and counts 0/1/2/1,000,000;
+code-block numbering still saturates. The Japanese visible text is unchanged.
+English uses ASCII parentheses and `; request sent`, not Japanese punctuation.
+Preview notices join complete English sentences as `. ` (without inserting a
+Japanese stop), while the Japanese join is unchanged. Failed admission keeps the
+raw error but uses ASCII parentheses in English.
+
+The four diagnostics printed to stderr after TUI restoration are English-only:
+`Terminal error: ...`, `Shutdown error: ...`, `Runtime adapter failed`, and the
+existing full `Forced exit: ...` notice. No Japanese alternatives or locale lookup
+remain for those diagnostics. Live startup/Closing screens keep the configured
+locale and existing control, cancellation and cleanup ordering.
+
+Both guides quote `Refresh failed; previous captured result` /
+`再取得に失敗・以前の取得結果`. For a 12-character full-body OSC52 request, they quote
+`OSC52: completion unconfirmed for copying the complete body (12 characters; request sent)`
+and `OSC52: 本文全体のコピー要求を端末へ送りました（12文字・完了未確認）` exactly.
+Guide-quote regression checks compare those strings with the actual formatter.
+Remaining Japanese state words in fields::state_label / management reports are
+not fixed here; they are recorded for #152 in issuecomment-6569021575.
+
+Native macOS verification uses shared rust-slot, locked dependencies, two build
+jobs and two test threads, temporary data and mock clipboard only. Fresh check
+and strict all-target Clippy pass. Focused results: diagnostics4, mock clipboard1,
+startup5, management15, owner-session5 and integration UI86 (one preexisting
+ignored). Layout/watchdog checks and Python134 pass. The initial Clippy warning
+was a test-only import left in production scope, fixed by moving the import;
+no lint/guard/assertion was suppressed. Exact-SHA CI is reported separately.
+Windows, physical terminal/IME, real OS clipboard and
+provider behavior remain unverified; no release/install/main-push operation.
+
+### 日本語
+
+ed93ee18 のレビュー差し戻しに対応しました。受け入れ済みの記号処理、翻訳しない
+データ、挙動、設定は変更しません。コピー通知は7種類の範囲、OSコピー完了と端末への
+要求送信、文字数0・1・2・1,000,000ごとに完成した文を選びます。コード番号の飽和処理と
+日本語の表示文はそのままです。英語の括弧と句読点だけをASCIIにし、previewの英語は
+完成した文を `. ` の形で連結します。日本語の連結と原文エラーは変更しません。
+
+TUI復帰後のstderr診断4種類は英語固定です。日本語の候補や設定言語の参照は追加せず、
+稼働中の起動・失敗・停止・Closing画面の言語と終了順序は保持します。両ガイドは実際の
+「再取得に失敗・以前の取得結果」と `Refresh failed; previous captured result`、および
+本文全体12文字を対象とするOSC52の完成文をそのまま引用し、formatterとの一致を試験します。
+状態語とmanagement reportの日本語残存は今回変更せず、指定どおり#152へコメント済みです。
+
+検証環境はnative macOS、共有rust-slot、locked依存、build/test各2並列、一時DBとmock
+clipboardです。新しいcheckと全targetのstrict Clippyは成功しました。重点試験はdiagnostics4、
+mock clipboard1、startup5、management15、owner-session5、integration UI86が成功し、
+既存のignoredは1件です。layout/watchdogとPython134も成功しました。初回Clippyで検出された
+試験専用importはtest moduleへ移動し、lint・guard・assertionは抑制していません。
+確定SHAのCI結果は別に報告します。Windows・実端末/IME・OS clipboard・実providerは未検証で、
+ユーザーデータ、インストール済みバイナリ、リリース、mainへのpushは操作していません。

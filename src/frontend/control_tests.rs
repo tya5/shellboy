@@ -1444,14 +1444,26 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
         std::sync::Arc::new(tokio::sync::Semaphore::new(2)),
     ));
     let raw = "raw\u{1b}[31m 日本語\n";
-    for scope in [
-        CopyScope::OriginalPage { has_more: true },
-        CopyScope::OriginalPage { has_more: false },
-        CopyScope::ManagementPage { has_more: true },
-        CopyScope::ManagementPage { has_more: false },
-        CopyScope::Value,
-        CopyScope::Body,
-        CopyScope::CodeBlock { index: 0 },
+    for (scope, scope_label) in [
+        (
+            CopyScope::OriginalPage { has_more: true },
+            "原文の現在ページ（続きあり）",
+        ),
+        (
+            CopyScope::OriginalPage { has_more: false },
+            "原文の現在ページ（このページのみ）",
+        ),
+        (
+            CopyScope::ManagementPage { has_more: true },
+            "管理詳細の現在ページ（続きあり）",
+        ),
+        (
+            CopyScope::ManagementPage { has_more: false },
+            "管理詳細の現在ページ（このページのみ）",
+        ),
+        (CopyScope::Value, "項目の完全な値"),
+        (CopyScope::Body, "本文全体"),
+        (CopyScope::CodeBlock { index: 0 }, "コードの塊 1"),
     ] {
         for outcome in 0..3 {
             sender
@@ -1482,7 +1494,7 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
                         text,
                         format!(
                             "{}をコピーしました（{}文字）",
-                            scope.label(),
+                            scope_label,
                             raw.chars().count()
                         )
                     );
@@ -1493,7 +1505,7 @@ async fn copy_worker_preserves_raw_scope_budget_and_distinguishes_os_completion_
                         text,
                         format!(
                             "OSC52: {}のコピー要求を端末へ送りました（{}文字・完了未確認）",
-                            scope.label(),
+                            scope_label,
                             raw.chars().count()
                         )
                     );
