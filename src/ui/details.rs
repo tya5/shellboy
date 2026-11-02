@@ -3576,6 +3576,9 @@ mod description_context_tests {
     use super::*;
     #[test]
     fn flat_detail_label_is_bilingual_and_copy_keeps_the_value() {
+        use crate::ui::UiState;
+        use crossterm::event::KeyModifiers;
+
         fn configure(ui: &mut UiState) {
             ui.select_thread("thread-fixture".into());
             let payload = serde_json::json!({"command":"RAW-COMMAND"});
