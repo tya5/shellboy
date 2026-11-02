@@ -1637,8 +1637,7 @@ impl Details {
                             )
                         };
                         rows.push(popup::Item::new(
-                            Line::from(heading)
-                            .style(Style::default().fg(theme::GROUP_HEADING)),
+                            Line::from(heading).style(Style::default().fg(theme::GROUP_HEADING)),
                         ));
                         previous = Some(group.0);
                     }
