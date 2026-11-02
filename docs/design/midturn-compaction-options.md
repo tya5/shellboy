@@ -1,15 +1,26 @@
 # Mid-Turn Summarization: Options for Decision
 
-Status: **draft for user decision**, not an adopted design or authorization to
-implement. This compares proactive reduction within a single long Turn after
-#153; it does not alter explicit overflow recovery, existing settings, UI, or
-provider behavior. The user decides whether and which option to adopt.
+Status: **A adopted; B deferred pending real-world evidence.** C and D are not
+adopted. No new mid-Turn summarization or configuration is authorized. The
+existing spill placeholder is simplified separately: it no longer duplicates
+call arguments, which remain on the call item; it retains the original result
+reference and reports the UTF-8 byte length of the original serialized tool-result output.
+Prior placeholders did not carry a size; already-saved spills are not rewritten.
+
+The user chose the simplest policy: B adds a replacement operation and its
+reasoning replay contract cannot be established with mocks. The only real case
+so far is one W3 conversation from before the #153 fix. The user will check
+post-0.6.0 worker conversations twice daily, tracking reported `input_tokens`
+within a Turn and what remains after spill. Reconsider B only if a real example
+continues growing substantially beyond the threshold. Synthetic bytes are not
+provider token or cost measurements.
 
 ## Evidence And Problem
 
 On the selected replay path, spill replaces eligible tool **results**, not the
 assistant messages, opaque reasoning, tool-call arguments, or all short results.
-It can also leave per-result placeholders containing copied arguments. The
+Earlier per-result placeholders also contained copied arguments; new spills omit
+that duplicate. Existing saved spills are not rewritten. The
 current automatic summary protects the current Turn and the most recent
 completed Turn. Consequently, spill plus ordinary summary need not bound the
 input of a single ongoing Turn. Explicit overflow recovery is a separate,
@@ -35,7 +46,7 @@ Sources at the researched revision `21b83fbf854d2065450e07c1ebb5553925beb0e1`:
 `src/control/replay.rs`, `docs/design/compaction.md`,
 `docs/design/replay-cache.md`, and `docs/design/model-http.md`. Current main's
 `docs/design/compaction.md` sections on #125 and #153 are the adopted baseline;
-this document is only a possible extension.
+the other options in this document remain unadopted possibilities.
 
 ## Non-Negotiable Trigger And Boundary
 
@@ -130,7 +141,7 @@ must not blindly repeat a possibly executed command. Missing provider usage
 still cannot trigger automatic reduction, and none of these actions gives a
 fixed safe maximum or guarantees avoidance of context overflow.
 
-### B. Replace An Old Middle Segment, Preserve Current User Request (Recommended For Further Design)
+### B. Replace An Old Middle Segment, Preserve Current User Request (Deferred)
 
 After the normal trigger and safe boundary, choose an **old contiguous segment
 inside the current Turn** ending at a complete safe group boundary; keep the
@@ -225,22 +236,12 @@ a full cache miss or predict a number of billed tokens. Frequency follows actual
 eligible reported usage and successful boundary decisions, not an invented timer
 or an assumed per-N-attempt schedule.
 
-## Recommendation, Open Decisions And Acceptance
+## Decision And Future Acceptance
 
-Recommend **B for further design**, with A as the fail-closed fallback when no
-proven safe range or compatible provider sequence exists. It best preserves the
-original live request while targeting the demonstrated residual growth. This is
-not a recommendation to implement before the user decides or before the adapter
-contract and loss risks are resolved. No option guarantees bounded context, zero
-information loss, a provider cache hit, or successful overflow recovery.
-
-Decisions for the user: whether automatic mid-Turn loss is acceptable at all;
-whether to preserve the initial user message and which latest working suffix;
-how to handle unsupported/unknown reasoning dependencies; and whether the
-expected cache and summary costs are acceptable. Provider/adapter validation,
-summary fidelity, information retained verbatim, failure visibility, and the
-coordination of existing retry/adoption accounting require a follow-up design.
-No new setting or default is proposed.
+A is adopted; B is deferred under the real-data condition above. C and D are
+not adopted. The following are safeguards for any separately authorized future
+design, not permission to implement one. No option guarantees bounded context,
+zero information loss, a provider cache hit, or successful overflow recovery.
 
 Before any future implementation, acceptance must cover synthetic multiple and
 parallel calls; orphan/missing outputs and incomplete groups; protected latest

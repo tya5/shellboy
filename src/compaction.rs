@@ -737,15 +737,8 @@ fn spill_payload(group: &Group) -> Option<Value> {
                     .and_then(Value::as_str)
                     .and_then(|s| serde_json::from_str::<Value>(s).ok())
                     .unwrap_or(Value::Null);
-                let command = group
-                    .sources
-                    .iter()
-                    .filter_map(|s| s.payload.get("output").and_then(Value::as_array))
-                    .flatten()
-                    .find(|v| v.get("call_id").and_then(Value::as_str) == Some(call))
-                    .and_then(|v| v.get("arguments"))
-                    .cloned();
-                let omitted = json!({"omitted":true,"call_id":call,"command_arguments":command,"status":body.get("status"),"execution_id":body.get("execution_id"),"exit_code":body.get("exit_code"),"original_node_id":source.id,"retrieve":"shellboy history get --node <original_node_id>"});
+                let output_bytes = item.get("output").and_then(Value::as_str).map(str::len);
+                let omitted = json!({"omitted":true,"call_id":call,"output_bytes":output_bytes,"status":body.get("status"),"execution_id":body.get("execution_id"),"exit_code":body.get("exit_code"),"original_node_id":source.id,"retrieve":"shellboy history get --node <original_node_id>"});
                 output.push(json!({"type":"function_call_output","call_id":call,"output":omitted.to_string()}));
             } else {
                 output.push(item.clone());
@@ -1388,6 +1381,58 @@ mod tests {
         assert_eq!(segments(&groups, 0).unwrap(), vec![(0, 1, 0), (1, 3, 0)]);
         assert!(segments(&[group("huge", 64_001)], 0).is_err());
     }
+    #[test]
+    fn spill_placeholder_avoids_repeated_arguments_and_reduces_synthetic_growth() {
+        let mut current = Vec::new();
+        let mut previous = Vec::new();
+        for i in 0..100 {
+            let arguments = json!({"command": format!("{}-{i}", "x".repeat(1000))}).to_string();
+            let result = json!({"status":"exited","execution_id":"e","exit_code":0,"stdout":"あ".repeat(1000)}).to_string();
+            let group = Group {
+                sources: vec![
+                    source(
+                        &format!("call-{i}"),
+                        None,
+                        json!({"output":[{"type":"function_call","call_id":format!("c-{i}"),"arguments":arguments}]}),
+                    ),
+                    source(
+                        &format!("result-{i}"),
+                        None,
+                        json!({"item":{"type":"function_call_output","call_id":format!("c-{i}"),"output":result}}),
+                    ),
+                ],
+                complete: true,
+                tool: true,
+            };
+            let payload = spill_payload(&group).unwrap();
+            let output = payload["output"].as_array().unwrap();
+            assert_eq!(output[0]["arguments"], arguments);
+            let mut placeholder: Value =
+                serde_json::from_str(output[1]["output"].as_str().unwrap()).unwrap();
+            assert_eq!(placeholder["omitted"], true);
+            assert_eq!(placeholder["original_node_id"], format!("result-{i}"));
+            assert_eq!(
+                placeholder["retrieve"],
+                "shellboy history get --node <original_node_id>"
+            );
+            assert_eq!(placeholder["output_bytes"], result.len());
+            assert!(placeholder.get("command_arguments").is_none());
+            current.extend(output.iter().cloned());
+            placeholder.as_object_mut().unwrap().remove("output_bytes");
+            placeholder["command_arguments"] = json!(arguments);
+            previous.push(output[0].clone());
+            previous.push(json!({"type":"function_call_output","call_id":format!("c-{i}"),"output":placeholder.to_string()}));
+        }
+        let old_bytes = serde_json::to_vec(&previous).unwrap().len();
+        let new_bytes = serde_json::to_vec(&current).unwrap().len();
+        println!(
+            "100 spilled groups: old={old_bytes} bytes, new={new_bytes} bytes, saved={} bytes",
+            old_bytes - new_bytes
+        );
+        assert!(new_bytes < old_bytes);
+        assert!(old_bytes - new_bytes > 100_000);
+    }
+
     async fn database() -> (tempfile::TempDir, DbWorker) {
         let root = tempfile::tempdir().unwrap();
         let db = DbWorker::open(root.path().join("test.db")).await.unwrap();
