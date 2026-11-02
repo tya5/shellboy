@@ -470,3 +470,17 @@ are English before any interactive locale is available. Keep `io_failed`, the
 `local_ipc` component, the original reason, and all existing directory/lease/
 permission/path guards unchanged. Source details are not translated. This copy
 change is for the release after 0.6.0, not the 0.6.0 integration batch.
+
+## Content-filter recovery facts (#159)
+
+`turn get` and `run get` keep the existing `recovery_hint` JSON string. For an
+incomplete conversation attempt its saved ApiError details additionally contain
+`content_filter`: `reason`, `reason_recorded`, bounded `facts` (each has `path`,
+`value`, `recorded`), `limited`, and stable `next_actions`. `recorded=false` is
+unknown evidence, not a provider-returned false/null; `recorded=true,value=null`
+is a returned JSON null. Provider path components are JSON-pointer escaped, not
+renamed or translated. `limited=true` explicitly marks omitted/truncated facts;
+original saved response/audit data is not changed. The response/protocol version,
+Turn/Run state, saved IDs, retry admission and explicit resume semantics do not
+change. Human UI projections translate only generated labels and guidance; copied
+hint bytes and raw detail JSON remain canonical, not translated prose.

@@ -376,3 +376,20 @@ large backlogs skip to a marked tail and uncertain decoding remains explicit.
 Closed/covered views and conversation switching stop that preview subscription.
 F2 keeps its existing frozen-screen behavior. Use `/status` or F8 when more than
 the configured row limit or full saved facts are needed.
+
+### Provider content filters and incomplete responses
+
+When a response is incomplete, recovery displays the saved
+`incomplete_details.reason` and bounded provider filter verdicts, including names
+such as `protected_material_code`, exactly as returned. Missing verdict fields
+are **Unknown**; category names do not establish the cause of a match. Details,
+`turn get`, and `run get` retain the recorded facts; a display limit is explicit,
+and the original saved response remains available through the existing raw reads.
+
+For `content_filter`, you can explicitly retry (the verdict may differ), rephrase
+your instructions and resume, or remove relevant tool output or attachments
+(`/detach` removes an attachment). If your task is to copy an existing file,
+shell `cp` or `curl` can copy it without having the model emit its body. These
+options do not promise success or authorize new side effects. A received terminal
+incomplete response does not trigger an automatic retry; an interrupted transport
+retains the normal connection retry policy. No new filter/retry setting is added.

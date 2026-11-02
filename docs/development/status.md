@@ -3800,3 +3800,14 @@ passed. Corrected-tip CI/review, not the withdrawn candidate's CI, qualifies it.
 B5/B6 files remain deferred until landing; W8's separator work is untouched.
 Focused tests and exact branch CI evidence are recorded in acceptance; the rest
 of the unresolved inventory is not a confirmed-defect count or a StageC completion claim.
+
+## #159: bounded content-filter recovery facts (in progress)
+
+Implementation projects provider verdict names/values into the existing saved
+recovery reason and preserves original attempt/audit response JSON. Missing facts
+stay unknown; UI guidance is bilingual and raw Turn/Run hints/copy values remain
+unchanged by display projection. No new setting or automatic retry policy change.
+A local loopback mock baseline with retry budget 8 verifies one attempt for
+terminal incomplete JSON/SSE, not repeated POSTs. Focused extraction/message tests
+passed before the latest readback acceptance additions; fresh end-to-end checks
+and branch CI are pending. No real API, clipboard, installation or release used.

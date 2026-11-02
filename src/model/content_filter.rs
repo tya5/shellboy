@@ -246,3 +246,56 @@ mod tests {
 }
 
 pub const NEXT_ACTIONS_HINT: &str = "The provider filter stopped the response. Retry may receive a different verdict; rephrase and resume; remove relevant tool output or detach attachments with /detach. When copying existing files, shell cp or curl can copy them without having the model emit their body.";
+
+#[cfg(test)]
+mod bounds_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn provider_null_and_missing_are_distinct_after_saved_json_roundtrip() {
+        let source = json!({"incomplete_details":{"reason":null},"content_filter_results":{
+            "provider_category":{"detected":null,"filtered":false}
+        }});
+        let facts = ContentFilterFacts::from_response(&source);
+        let saved = serde_json::to_value(&facts).unwrap();
+        let facts: ContentFilterFacts = serde_json::from_value(saved).unwrap();
+        assert!(facts.reason_recorded);
+        let detected = facts
+            .facts
+            .iter()
+            .find(|f| f.path.ends_with("/detected"))
+            .unwrap();
+        let severity = facts
+            .facts
+            .iter()
+            .find(|f| f.path.ends_with("/severity"))
+            .unwrap();
+        assert!(detected.recorded);
+        assert!(!severity.recorded);
+        assert!(!facts.is_content_filter());
+        assert!(facts.next_actions.is_empty());
+    }
+
+    #[test]
+    fn large_untrusted_containers_have_bounded_work_and_output() {
+        let mut categories = serde_json::Map::new();
+        for index in 0..1000 {
+            categories.insert(
+                format!("{index:04}{}", "x".repeat(500)),
+                json!({"filtered":true,"extension":"\u{0001}".repeat(1000)}),
+            );
+        }
+        let facts =
+            ContentFilterFacts::from_response(&json!({"content_filter_results":categories}));
+        assert!(facts.limited);
+        assert!(facts.facts.len() <= MAX_FACTS);
+        assert!(
+            facts
+                .facts
+                .iter()
+                .all(|f| f.path.chars().count() <= MAX_PATH)
+        );
+        assert!(serde_json::to_string(&facts).unwrap().len() < 64 * 1024);
+    }
+}

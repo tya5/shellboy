@@ -3941,3 +3941,146 @@ async fn content_filter_terminal_preserves_facts_without_automatic_retry() {
         server.abort();
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unknowns() {
+    use ratatui::{Terminal, backend::TestBackend};
+    use shellboy::config::UiLanguage;
+    use shellboy::ui::UiState;
+    for (language, name) in [(UiLanguage::En, "en"), (UiLanguage::Ja, "ja")] {
+        for streaming in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let (url, mut receive, server) = proxy_with_sse(streaming).await;
+            let config = root.path().join("config.toml");
+            std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=8\nresponse_retry_max_delay_ms=10\n[ui]\nlanguage={name:?}\n")).unwrap();
+            let owner = DataOwner::start(
+                Some(config),
+                Some(root.path().join("data")),
+                root.path().into(),
+            )
+            .await
+            .unwrap();
+            let control = Control::new(&owner, root.path().into());
+            for verdicts in [true, false] {
+                let target = thread(&control).await;
+                let accepted: MessageAccepted = serde_json::from_value(
+                    request(
+                        &control,
+                        Command::MessageSend(MessageSendArgs {
+                            sender_label: None,
+                            now: false,
+                            thread_id: Some(target.clone()),
+                            text: "synthetic filter recovery".into(),
+                        }),
+                    )
+                    .await,
+                )
+                .unwrap();
+                let mut response = json!({"id":"filtered-fixture","status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[]});
+                if verdicts {
+                    response["content_filter_results"] = json!({"protected_material_code":{"filtered":true,"detected":true},"provider_future_category":{"filtered":false,"severity":"future-value"}});
+                }
+                incoming(&control, &mut receive)
+                    .await
+                    .reply
+                    .send((200, response))
+                    .unwrap();
+                settled(&control, &target).await;
+                let turn_id = accepted.turn_id.unwrap();
+                let run_id = accepted.run_id.unwrap();
+                let turn = request(&control, Command::TurnGet(TurnTarget { turn_id })).await;
+                let run = request(&control, Command::RunGet(RunTarget { run_id })).await;
+                assert_eq!(turn["state"], "recovery_wait");
+                assert_eq!(turn["recovery_hint"], run["recovery_hint"]);
+                for readback in [turn, run] {
+                    let hint = readback["recovery_hint"].as_str().unwrap();
+                    let error: ApiError = serde_json::from_str(hint).unwrap();
+                    let facts: shellboy::model::content_filter::ContentFilterFacts =
+                        serde_json::from_value(error.details.unwrap()["content_filter"].clone())
+                            .unwrap();
+                    assert!(facts.is_content_filter());
+                    assert_eq!(facts.facts.is_empty(), !verdicts);
+                    let text = shellboy::presentation::content_filter::details(&facts, language)
+                        .join("\n");
+                    if verdicts {
+                        assert!(text.contains("protected_material_code/filtered=true"));
+                        assert!(
+                            text.contains("provider_future_category/severity=\"future-value\"")
+                        );
+                    }
+                    assert!(text.contains(match language {
+                        UiLanguage::Ja => "不明",
+                        UiLanguage::En => "Unknown",
+                    }));
+                    for next in ["/retry", "/detach", "cp", "curl"] {
+                        assert!(text.contains(next));
+                        assert!(hint.contains(next));
+                    }
+                }
+                let projection = shellboy::frontend::activity::read(&control, &target)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    projection.snapshot.phase,
+                    shellboy::activity::ActivityPhase::Recovery
+                );
+                assert!(
+                    projection
+                        .snapshot
+                        .recovery
+                        .as_ref()
+                        .unwrap()
+                        .content_filter
+                        .is_some()
+                );
+                for width in [80, 120] {
+                    let mut ui = UiState::new(&control.store.config, root.path().into());
+                    ui.select_thread(target.clone());
+                    ui.apply(shellboy::ui::UiUpdate::Activity {
+                        thread_id: target.clone(),
+                        generation: ui.view().generation,
+                        epoch: 1,
+                        observed_at: projection.observed_at,
+                        snapshot: projection.snapshot.clone(),
+                    });
+                    let mut terminal = Terminal::new(TestBackend::new(width, 28)).unwrap();
+                    terminal
+                        .draw(|frame| shellboy::ui::draw(frame, &mut ui))
+                        .unwrap();
+                    let screen: String = terminal
+                        .backend()
+                        .buffer()
+                        .content
+                        .iter()
+                        .map(|cell| cell.symbol())
+                        .collect();
+                    let compact: String = screen.chars().filter(|ch| !ch.is_whitespace()).collect();
+                    for expected in ["content_filter", "/retry", "/detach", "cp", "curl"] {
+                        assert!(
+                            compact.contains(expected),
+                            "{name}/{streaming}/{width}: {screen}"
+                        );
+                    }
+                    if verdicts {
+                        assert!(compact.contains("protected_material_code"));
+                    } else {
+                        assert!(
+                            compact.contains(match language {
+                                UiLanguage::Ja => "不明",
+                                UiLanguage::En => "Unknown",
+                            }),
+                            "{name}/{streaming}/{width}: {screen}"
+                        );
+                    }
+                }
+                assert!(
+                    receive.try_recv().is_err(),
+                    "no automatic retry for terminal content_filter"
+                );
+            }
+            control.shutdown().await.unwrap();
+            owner.shutdown().await.unwrap();
+            server.abort();
+        }
+    }
+}

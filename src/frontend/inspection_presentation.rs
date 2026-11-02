@@ -10,7 +10,15 @@ pub(super) struct Prepared {
     pub report: management::Report,
     pub snapshot: InspectionSnapshot,
 }
+#[cfg(test)]
 pub(super) fn prepare(ticket: &Presentation, budget: usize) -> Result<Prepared, ApiError> {
+    prepare_in(crate::config::UiLanguage::Ja, ticket, budget)
+}
+pub(super) fn prepare_in(
+    language: crate::config::UiLanguage,
+    ticket: &Presentation,
+    budget: usize,
+) -> Result<Prepared, ApiError> {
     let mut value = (*ticket.metadata.value).clone();
     if let Some(physical) = &ticket.physical {
         value["physical_observation"] = (**physical).clone();
@@ -62,7 +70,7 @@ pub(super) fn prepare(ticket: &Presentation, budget: usize) -> Result<Prepared, 
     if let Some(cursor) = &current_cursor {
         source["management"]["coverage_window"]["next_cursor"] = Value::String(cursor.clone());
     }
-    let mut report = management::report(source.clone(), budget);
+    let mut report = management::report_in(language, source.clone(), budget);
     if let Some(detail) = &mut report.detail
         && let Some(cursor) = &current_cursor
     {

@@ -5330,24 +5330,6 @@ pub(super) fn recovery_lines(
         (false, false) => "入力で新しい作業 | F8 作業/応答処理の詳細",
     };
     let mut essential = vec![Line::from(title)];
-    if let Some(facts) = &recovery.content_filter {
-        let summary = crate::presentation::content_filter::summary(facts, language);
-        essential.extend(
-            hanging_wrap(vec![Line::from(summary)], width.max(1))
-                .into_iter()
-                .take(2),
-        );
-        if current && facts.is_content_filter() {
-            essential.extend(hanging_wrap(
-                vec![Line::from(
-                    crate::presentation::content_filter::compact_actions(language),
-                )],
-                width.max(1),
-            ));
-            essential.truncate(usize::from(height));
-            return essential;
-        }
-    }
     essential.push(Line::from(if en {
         format!(
             "{} live shells | {} uncollected | Review side effects in details",
@@ -5359,6 +5341,24 @@ pub(super) fn recovery_lines(
             recovery.live_shells, recovery.uncollected_shells
         )
     }));
+    if let Some(facts) = &recovery.content_filter {
+        let summary = crate::presentation::content_filter::summary(facts, language);
+        essential.extend(
+            hanging_wrap(vec![Line::from(summary)], width.max(1))
+                .into_iter()
+                .take(2),
+        );
+    }
+    let actions = if current
+        && recovery
+            .content_filter
+            .as_ref()
+            .is_some_and(|facts| facts.is_content_filter())
+    {
+        crate::presentation::content_filter::compact_actions(language)
+    } else {
+        actions
+    };
     // Never let optional provider/context/count detail displace recovery actions.
     essential.extend(hanging_wrap(vec![Line::from(actions)], width.max(1)));
     // A long retry footer must not conceal a saved quota/reset deadline.

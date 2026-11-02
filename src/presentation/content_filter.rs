@@ -18,17 +18,33 @@ fn fact_value(fact: &crate::model::content_filter::FilterFact, language: UiLangu
 
 pub fn summary(facts: &ContentFilterFacts, language: UiLanguage) -> String {
     let reason = if facts.reason_recorded {
-        facts.reason.as_ref().unwrap_or(&serde_json::Value::Null).to_string()
+        facts
+            .reason
+            .as_ref()
+            .unwrap_or(&serde_json::Value::Null)
+            .to_string()
     } else {
         unknown(language).into()
     };
     let verdicts = if facts.facts.is_empty() {
         unknown(language).to_owned()
     } else {
-        facts
+        let filtered: Vec<_> = facts
             .facts
             .iter()
-            .take(2)
+            .filter(|fact| {
+                fact.recorded
+                    && fact.path.ends_with("/filtered")
+                    && fact.value.as_ref().and_then(serde_json::Value::as_bool) == Some(true)
+            })
+            .collect();
+        let selected: Vec<_> = if filtered.is_empty() {
+            facts.facts.iter().take(2).collect()
+        } else {
+            filtered.into_iter().take(2).collect()
+        };
+        selected
+            .into_iter()
             .map(|fact| {
                 // A shortened path here is display-only; full paths remain in details.
                 let path = fact.path.rsplitn(3, '/').take(2).collect::<Vec<_>>();
@@ -48,7 +64,7 @@ pub fn summary(facts: &ContentFilterFacts, language: UiLanguage) -> String {
 pub fn compact_actions(language: UiLanguage) -> &'static str {
     i18n::local!(
         language,
-        "/retry（判定は変わる可能性） | 指示を言い換える | /detach | 既存ファイルはshell cp / curl | Ctrl+C 停止 | F8 詳細",
+        "/retry（判定は変わる可能性） | 言い換えて再開 | /detach | 既存ファイル: shell cp / curl | Ctrl+C 停止 | F8 詳細",
         "/retry (verdict may differ) | Rephrase | /detach | Existing files: shell cp / curl | Ctrl+C Stop | F8 Details"
     )
 }
@@ -126,14 +142,35 @@ pub(crate) fn append_fields(
     root: &serde_json::Value,
     language: UiLanguage,
 ) {
-    let Some(reason) = root.get("recovery_hint").and_then(serde_json::Value::as_str) else { return; };
-    let Ok(error) = serde_json::from_str::<crate::protocol::ApiError>(reason) else { return; };
-    let Some(facts) = error.details.as_ref().and_then(|d| d.get("content_filter"))
-        .and_then(|v| serde_json::from_value::<ContentFilterFacts>(v.clone()).ok()) else { return; };
-    if let Some(field) = fields.iter_mut().find(|field| field.key == "/recovery_hint") {
-        field.label = i18n::local!(language, "providerの判定と次の手", "Provider verdicts and next steps").into();
-        field.display = Some(details(&facts, language).join("\n"));
-    }
+    let Some(reason) = root.get("recovery_hint") else {
+        return;
+    };
+    let error = match reason.as_str() {
+        Some(text) => serde_json::from_str::<crate::protocol::ApiError>(text),
+        None => serde_json::from_value::<crate::protocol::ApiError>(reason.clone()),
+    };
+    let Ok(error) = error else {
+        return;
+    };
+    let Some(facts) = error
+        .details
+        .as_ref()
+        .and_then(|d| d.get("content_filter"))
+        .and_then(|v| serde_json::from_value::<ContentFilterFacts>(v.clone()).ok())
+    else {
+        return;
+    };
+    fields.push(super::PresentationField {
+        key: String::new(),
+        label: i18n::local!(
+            language,
+            "providerの判定と次の手",
+            "Provider verdicts and next steps"
+        )
+        .into(),
+        value: details(&facts, language).join("\n"),
+        ..Default::default()
+    });
 }
 
 #[cfg(test)]
@@ -147,23 +184,63 @@ mod readback_tests {
             "incomplete_details":{"reason":"content_filter"},
             "content_filter_results":{"protected_material_code":{"filtered":true}}
         }));
-        let hint = serde_json::to_string(&crate::protocol::ApiError::new(
-            crate::protocol::ErrorCode::IoFailed, "unchanged provider diagnostic",
-        ).details(json!({"content_filter":facts}))).unwrap();
+        let hint = serde_json::to_string(
+            &crate::protocol::ApiError::new(
+                crate::protocol::ErrorCode::IoFailed,
+                "unchanged provider diagnostic",
+            )
+            .details(json!({"content_filter":facts})),
+        )
+        .unwrap();
         let source = json!({"recovery_hint":hint});
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let mut fields = vec![super::super::PresentationField {
-                key:"/recovery_hint".into(), value:hint.clone(), ..Default::default()
+                key: "/recovery_hint".into(),
+                value: hint.clone(),
+                ..Default::default()
             }];
             append_fields(&mut fields, &source, language);
-            assert_eq!(fields.len(),1);
-            assert_eq!(fields[0].key,"/recovery_hint");
-            assert_eq!(fields[0].value.as_bytes(),hint.as_bytes());
-            assert!(fields[0].displayed().contains("protected_material_code/filtered=true"));
-            assert!(fields[0].displayed().contains(unknown(language)));
-            for expected in ["/retry","/detach","cp","curl"] {
-                assert!(fields[0].displayed().contains(expected));
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].key, "/recovery_hint");
+            assert_eq!(fields[0].value.as_bytes(), hint.as_bytes());
+            assert!(
+                fields[1].key.is_empty(),
+                "generated advice is not a raw JSON pointer"
+            );
+            assert!(
+                fields[1]
+                    .displayed()
+                    .contains("protected_material_code/filtered=true")
+            );
+            assert!(fields[1].displayed().contains(unknown(language)));
+            for expected in ["/retry", "/detach", "cp", "curl"] {
+                assert!(fields[1].displayed().contains(expected));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn explicitly_filtered_category_precedes_unfiltered_opaque_verdicts() {
+        let facts = ContentFilterFacts::from_response(
+            &json!({"incomplete_details":{"reason":"content_filter"},"content_filter_results":{
+                "aaa_unfiltered":{"filtered":false,"severity":"future-low"},
+                "protected_material_code":{"filtered":true,"detected":true}
+            }}),
+        );
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            let text = summary(&facts, language);
+            assert!(text.contains("protected_material_code/filtered=true"));
+            assert!(!text.contains("aaa_unfiltered"));
+            assert!(
+                details(&facts, language)
+                    .join("\n")
+                    .contains("aaa_unfiltered/severity=\"future-low\"")
+            );
         }
     }
 }

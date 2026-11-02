@@ -83,6 +83,13 @@ fn heap_bytes(value: &Value) -> usize {
     })
 }
 pub(super) fn report(value: Value, budget: usize) -> Report {
+    report_in(crate::config::UiLanguage::Ja, value, budget)
+}
+pub(super) fn report_in(
+    language: crate::config::UiLanguage,
+    value: Value,
+    budget: usize,
+) -> Report {
     let safe = presentation::safe_detail_value(value);
     if safe.get("filters").is_some() && safe.get("items").is_some() {
         return work_report(safe, budget);
@@ -127,7 +134,7 @@ pub(super) fn report(value: Value, budget: usize) -> Report {
         ],
     );
     presentation::fields::decorate(&mut fields, &safe);
-    presentation::content_filter::append_fields(&mut fields, &safe, crate::config::UiLanguage::Ja);
+    presentation::content_filter::append_fields(&mut fields, &safe, language);
     fn order(pointer: &str) -> (String, u8, String) {
         let (parent, key) = pointer.rsplit_once('/').unwrap_or(("", pointer));
         let parent = parent
@@ -965,5 +972,52 @@ mod saved_review_field_tests {
         }
         assert!(report.omitted);
         assert_eq!(report.detail, Some(value));
+    }
+}
+
+#[cfg(test)]
+mod content_filter_tests {
+    use super::*;
+    #[test]
+    fn turn_and_run_recovery_details_keep_raw_hint_and_localize_only_generated_advice() {
+        use crate::{config::UiLanguage, model::content_filter::ContentFilterFacts};
+        let facts = ContentFilterFacts::from_response(&serde_json::json!({
+            "incomplete_details":{"reason":"content_filter"},
+            "content_filter_results":{"protected_material_code":{"filtered":true,"detected":true}}
+        }));
+        let hint = serde_json::to_string(
+            &ApiError::new(ErrorCode::IoFailed, "raw provider reason")
+                .details(serde_json::json!({"content_filter":facts})),
+        )
+        .unwrap();
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let source = serde_json::json!({"run_id":"saved-run","turn_id":"saved-turn","recovery_hint":hint});
+            let report = report_in(language, source.clone(), 1024 * 1024);
+            let field = report
+                .fields
+                .iter()
+                .find(|f| {
+                    f.key.is_empty() && f.value.contains("protected_material_code/filtered=true")
+                })
+                .unwrap();
+            let text = field.displayed();
+            for expected in [
+                "protected_material_code/filtered=true",
+                "/retry",
+                "/detach",
+                "cp",
+                "curl",
+            ] {
+                assert!(text.contains(expected), "{text}");
+            }
+            assert!(text.contains(match language {
+                UiLanguage::Ja => "不明",
+                UiLanguage::En => "Unknown",
+            }));
+            assert_eq!(
+                report.detail.unwrap(),
+                presentation::safe_detail_value(source)
+            );
+        }
     }
 }

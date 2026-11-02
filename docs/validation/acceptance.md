@@ -8194,3 +8194,30 @@ On macOS, the latest revision also passed focused tests for colored UTF-8
 logs, unknown image-kind binary, localized warning rendering and bounded lookup,
 and an octet-rejecting mock. Four `issue_158_` loopback tests passed. These are
 synthetic tests, not verification against a real provider.
+## Content-filter recovery facts (#159, 2026-11-02)
+
+Local native macOS, temporary databases and loopback HTTP mocks only. Before the
+implementation, `content_filter_terminal_preserves_facts_without_automatic_retry`
+passes with retry budget 8: terminal incomplete JSON and typed SSE preserve the
+original response and enter recovery after one attempt, without another POST or
+an `automatic_retry` record. The implementation does not change retry policy.
+
+Fresh source-mtime validation through the shared Rust slot, locked dependencies,
+CARGO_BUILD_JOBS=2 and RUST_TEST_THREADS=2: cargo check --locked --tests and strict
+all-target Clippy (-D warnings) pass; nine focused unit tests and two integration
+tests pass. Coverage includes bounded nested verdicts, unknown enum strings,
+missing versus returned null after JSON roundtrip, 1,000 overlong synthetic
+categories, explicitly filtered category display priority, raw hint/pointer/copy
+preservation, both languages, and actual TestBackend screens at 80/120 columns.
+The integrated loopback fixture exercises JSON/SSE, present/missing verdicts,
+Turn/Run readback and the saved activity projection into the real UI.
+Layout/watchdog policy check passes: 102 suites registered once, no new guard.
+
+The fresh-run progression caught a test API-name compile error, an incorrect
+assumption about existing safe-detail JSON-string expansion, and Japanese
+wide-cell reconstruction in a new screen assertion. Corrections retain raw
+wire/hint data, keep generated advice separate from real JSON pointers, and do
+not weaken existing watchdogs, guards or assertions. No provider API, OS clipboard,
+user data, installation or release operation was used. These local results precede
+the latest-main rebase; exact candidate CI and rebase validation remain pending.
+Windows, physical terminal/IME and real Azure/provider behavior remain unverified.

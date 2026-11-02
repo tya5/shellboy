@@ -979,6 +979,7 @@ async fn run_with_delivery(
             .await;
         }
         if let Some(ticket) = management.inspection.take_presentation() {
+            let language = control.store.config.ui.language;
             let present = ticket.clone();
             let sender = background_tx.clone();
             let budget = control
@@ -989,10 +990,11 @@ async fn run_with_delivery(
                 .min(MAX_FRAME_BYTES as u64) as usize;
             if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                 let prepare = present.clone();
-                let result =
-                    presentation_work(move || inspection_presentation::prepare(&prepare, budget))
-                        .await
-                        .and_then(|value| value);
+                let result = presentation_work(move || {
+                    inspection_presentation::prepare_in(language, &prepare, budget)
+                })
+                .await
+                .and_then(|value| value);
                 let _ = sender
                     .send(BackgroundResult::InspectionPresented {
                         ticket: present,
