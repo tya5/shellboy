@@ -1405,6 +1405,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn localized_notice_texts_keep_complete_bilingual_width_variants() {
+        use crate::ui::text_width;
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for (text, japanese, english) in [
+                (Text::MetadataLimited, "表示情報を制限", "Display details limited"),
+                (Text::Uncached, "本文未キャッシュ", "Body not cached"),
+                (Text::Collapsed, "本文を折りたたみ", "Body collapsed"),
+                (Text::StreamGap, "途中表示の更新欠落", "Live updates were missed"),
+                (Text::UnknownExtent, "出力の表示範囲", "Output extent"),
+                (Text::CommandPreview, "コマンド（プレビュー）", "Command preview"),
+                (Text::RefreshFailed, "更新失敗", "Refresh failed"),
+                (Text::Refreshing, "再取得中", "Refreshing"),
+                (Text::OutputRetry, "出力取得に失敗", "Output retrieval failed"),
+                (Text::OutputLoading, "出力を取得中", "Loading output"),
+                (Text::OutputUnavailable, "出力を取得できませんでした", "Could not retrieve output"),
+                (Text::OutputEvicted, "出力未保持", "Output not retained"),
+                (Text::OutputOriginal, "出力は原文で確認", "Review output in the original"),
+                (Text::SourceOutsideWindow, "元のtool行は表示範囲外", "Source tool row is outside"),
+                (Text::Delivered, "モデルに渡した", "Delivered to model"),
+                (Text::IndexPaused, "索引更新の停止記録", "Index update pause recorded"),
+                (Text::ResultUncertain, "外部での実行結果は未確認", "External execution results are unconfirmed"),
+                (Text::SavedObservation, "観測の記録を保持", "Observation saved"),
+            ] {
+                assert!(text.render(UiLanguage::Ja).contains(japanese), "{text:?}");
+                let translated = text.render(UiLanguage::En);
+                assert!(translated.contains(english), "{text:?}: {translated}");
+                if policy != Some(1) {
+                    assert!(translated.is_ascii(), "{text:?}: {translated}");
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn display_clipping_uses_measured_ellipsis_without_changing_source() {
         use crate::ui::text_width::{self, UnicodeWidthStr};
         let raw = "user | · → │ e\u{301} data";
