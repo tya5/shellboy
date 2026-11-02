@@ -23,6 +23,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dev.pty_capture import Frames  # noqa: E402
+from peak import PeakSampler  # noqa: E402
 
 PROMPTS = (
     'Use a tool to list the files in the current directory, then reply with just the number of entries.',
@@ -265,7 +266,53 @@ def finish_round(binary, root, env, thread, sent, prompt, expected):
     return {'run_id': sent['run_id'], 'turn_id': sent['turn_id'], 'state': turn['state']}
 
 
-def measure_case(binary, sessions, observe_io=False):
+def sample_with_one_tui(binary, root, env, config, owner):
+    import fcntl
+    import pty
+    import struct
+    import termios
+
+    master, slave = pty.openpty()
+    process = None
+    try:
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 100, 0, 0))
+        process = subprocess.Popen([str(binary), '--config', str(config), '--data-dir', str(root / 'data')],
+                                   cwd=root, env=env, stdin=slave, stdout=slave, stderr=slave,
+                                   start_new_session=True)
+        os.close(slave)
+        slave = None
+        frames = Frames(100, 36)
+        deadline = time.monotonic() + TIMEOUT
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError('TUI exited before ready')
+            if select.select([master], [], [], .05)[0]:
+                if any(input_ready(text) for text in frames.feed(os.read(master, 65536))):
+                    break
+        else:
+            raise TimeoutError('TUI ready watchdog')
+        # Separate root trees; these are sequential, not an atomic OS snapshot.
+        owner_sample = sample_pss(owner.pid)
+        tui_sample = sample_pss(process.pid)
+        if {row['pid'] for row in owner_sample['processes']} & {row['pid'] for row in tui_sample['processes']}:
+            raise RuntimeError('TUI and owner process trees overlap')
+        return {'pss_kib': owner_sample['pss_kib'] + tui_sample['pss_kib'],
+                'owner': owner_sample, 'tui': tui_sample,
+                'coverage': 'one_ready_tui_plus_owner_trees_sequential'}
+    finally:
+        if slave is not None:
+            os.close(slave)
+        if process is not None and process.poll() is None:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=10)
+        os.close(master)
+
+
+def measure_case(binary, sessions, observe_io=False, one_tui=False):
     if observe_io:
         from observations import RequestLog, storage
     with tempfile.TemporaryDirectory(prefix='shellboy-bench-') as scratch:
@@ -296,7 +343,9 @@ def measure_case(binary, sessions, observe_io=False):
                 model.allowed_threads.add(thread['thread_id'])
                 model.traffic_threads[thread['thread_id']] = index
             result = {'n': sessions, 'baseline': sample_pss(owner.pid), 'rounds': []}
-            with ThreadPoolExecutor(max_workers=sessions) as pool:
+            if one_tui:
+                result['baseline_one_tui'] = sample_with_one_tui(binary, root, env, config, owner)
+            with PeakSampler(lambda: sample_pss(owner.pid)) as peak, ThreadPoolExecutor(max_workers=sessions) as pool:
                 for index, prompt in enumerate(PROMPTS):
                     barrier = threading.Barrier(sessions)
 
@@ -311,6 +360,7 @@ def measure_case(binary, sessions, observe_io=False):
                                  for thread, message in zip(threads, sent)]
                     result['rounds'].append({'round': index + 1, 'prompt': prompt,
                                              **sample_pss(owner.pid), 'completed': completed})
+            result['in_flight_pss'] = peak.result()
             if model.errors or model.requests != sessions * 9 or model.tools != [sessions] * 4 + [0]:
                 raise RuntimeError(f'Unexpected fake model work: {model.errors}, {model.tools}')
             result['model_requests'] = model.requests

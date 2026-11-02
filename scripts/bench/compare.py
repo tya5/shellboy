@@ -27,6 +27,7 @@ import re
 import select
 import shutil
 import signal
+import statistics
 import socket
 import struct
 import subprocess
@@ -40,6 +41,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import footprint  # noqa: E402
 from observations import storage  # noqa: E402
+from peak import PeakSampler  # noqa: E402
 from fake_model import MODEL, FakeModel  # noqa: E402
 from dev.vt_screen import Screen  # noqa: E402  (footprint put scripts/ on sys.path)
 
@@ -671,7 +673,7 @@ def measure_case(agent, sessions, sampler):
                 # first turn; let every agent settle for the same 3 s (as jcode's script).
                 time.sleep(3)
                 result = {'n': sessions, 'baseline': sampler(roots), 'rounds': []}
-                with ThreadPoolExecutor(max_workers=sessions) as pool:
+                with PeakSampler(lambda: sampler(roots)) as peak, ThreadPoolExecutor(max_workers=sessions) as pool:
                     for index, prompt in enumerate(PROMPTS):
                         barrier = threading.Barrier(sessions)
 
@@ -686,6 +688,7 @@ def measure_case(agent, sessions, sampler):
                         result['rounds'].append({'round': index + 1, **sampler(roots)})
                         log(f'{agent.name} n={sessions} round {index + 1} '
                             f'pss_kib={result["rounds"][-1]["pss_kib"]}')
+                result['in_flight_pss'] = peak.result()
                 files = [(path / 'hello.txt').read_text() if (path / 'hello.txt').exists() else None
                          for path in workspaces]
                 result['model'] = model.stats()
@@ -827,10 +830,11 @@ class Shellboy(Agent):
 def shellboy_case(agent, sessions, sampler):
     if sampler is no_pss:
         raise RuntimeError('Shellboy smoke runs need Linux /proc (use footprint.py tests instead)')
-    case = footprint.measure_case(agent.binary, sessions, observe_io=True)
+    case = footprint.measure_case(agent.binary, sessions, observe_io=True, one_tui=True)
     rounds = [{'round': row['round'], 'pss_kib': row['pss_kib'], 'process_count': len(row['processes']),
                'processes': row['processes']} for row in case['rounds']]
     return {'n': sessions, 'baseline': case['baseline'], 'rounds': rounds,
+            'in_flight_pss': case['in_flight_pss'], 'baseline_one_tui': case['baseline_one_tui'],
             'model': {'requests': case['model_requests'], 'tool_calls': case['tool_calls'],
                       'requests_by_wire': {'responses': case['model_requests']}, 'auxiliary_requests': 0},
             'traffic': case['traffic'], 'storage': case['storage']}
@@ -844,7 +848,27 @@ def sha256(path):
     return digest.hexdigest()
 
 
-def run_agent(agent, sessions, startup_runs, sampler):
+def summarize_repeats(cases):
+    summaries = []
+    for n in dict.fromkeys(case['n'] for case in cases):
+        group = [case for case in cases if case['n'] == n]
+        metrics = {}
+        for name, extract in (
+            ('baseline_pss_kib', lambda case: case['baseline']['pss_kib']),
+            ('observed_in_flight_max_pss_kib', lambda case: case['in_flight_pss']['observed_max_pss_kib']),
+        ):
+            values = [extract(case) for case in group]
+            metrics[name] = (None if any(value is None for value in values) else
+                             {'min': min(values), 'median': statistics.median(values), 'max': max(values)})
+        if all('baseline_one_tui' in case for case in group):
+            values = [case['baseline_one_tui']['pss_kib'] for case in group]
+            metrics['baseline_one_tui_pss_kib'] = {
+                'min': min(values), 'median': statistics.median(values), 'max': max(values)}
+        summaries.append({'n': n, 'repeats': len(group), **metrics})
+    return summaries
+
+
+def run_agent(agent, sessions, startup_runs, sampler, repeats=1):
     with tempfile.TemporaryDirectory(prefix='bench-version-') as scratch:
         env = agent.prepare(Path(scratch), 'http://127.0.0.1:9', [])
         resolved = Path(agent.binary).resolve(strict=True)
@@ -858,7 +882,11 @@ def run_agent(agent, sessions, startup_runs, sampler):
         entry['startup'] = measure_startups(agent, startup_runs)
         for n in sessions:
             measure = shellboy_case if isinstance(agent, Shellboy) else measure_case
-            entry['cases'].append(measure(agent, n, sampler))
+            for repeat in range(1, repeats + 1):
+                case = measure(agent, n, sampler)
+                case['repeat'] = repeat
+                entry['cases'].append(case)
+        entry['repeat_summary'] = summarize_repeats(entry['cases'])
         entry['status'] = 'complete'
     except Exception as error:  # one agent's failure must not hide the others
         entry.update(status='error', error=f'{type(error).__name__}: {error}'[:6000])
@@ -872,6 +900,7 @@ def main():
                         help=f'Agent executable; NAME in shellboy, {", ".join(ADAPTERS)}')
     parser.add_argument('--sessions', type=int, nargs='+', default=[1, 5, 10, 20])
     parser.add_argument('--startup-runs', type=int, default=5)
+    parser.add_argument('--repeats', type=int, default=1, help='Fresh cases per session count (1..10)')
     parser.add_argument('--provenance', type=Path, help='JSON describing how each agent was installed')
     parser.add_argument('--smoke', action='store_true',
                         help='Protocol check without PSS (any OS); output is not a measurement')
@@ -881,6 +910,8 @@ def main():
         parser.error('PSS measurement requires Linux /proc/<pid>/smaps_rollup (or pass --smoke)')
     if any(not 1 <= n <= 20 for n in args.sessions) or len(args.sessions) > 4:
         parser.error('Use at most four session counts, each in 1..20')
+    if not 1 <= args.repeats <= 10:
+        parser.error('--repeats must be 1..10')
     if not 1 <= args.startup_runs <= 20:
         parser.error('--startup-runs must be 1..20')
     if args.out.exists():
@@ -918,12 +949,12 @@ def main():
                            'answers': list(ANSWERS)},
               'pss_unit': 'KiB', 'startup': {'cols': COLS, 'rows': ROWS, 'probe': PROBE,
                                              'runs_per_agent': args.startup_runs},
-              'sessions': args.sessions,
+              'sessions': args.sessions, 'repeats': args.repeats,
               'provenance': json.loads(args.provenance.read_text()) if args.provenance else None,
               'agents': []}
     sampler = no_pss if args.smoke else sample_trees
     for agent in agents:
-        result['agents'].append(run_agent(agent, args.sessions, args.startup_runs, sampler))
+        result['agents'].append(run_agent(agent, args.sessions, args.startup_runs, sampler, args.repeats))
     result['finished_at'] = datetime.now(timezone.utc).isoformat()
     failed = [entry['agent'] for entry in result['agents'] if entry['status'] != 'complete']
     result['status'] = 'error' if failed else 'complete'

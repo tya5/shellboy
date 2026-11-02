@@ -281,3 +281,20 @@ The comparison workflow passes both variants on the same runner. This does not
 establish equivalent products or represent real-provider tokens; server-side
 features, per-session isolation and memory overhead may differ by topology.
 Unexpected server-initiated requests or mismatched turn IDs fail the run.
+
+### Repeated and in-flight observations (#151)
+
+`compare.py --repeats 3` creates three independent fresh cases for every N.
+Each case keeps its individual observations; `repeat_summary` reports the
+minimum, median and maximum of baseline PSS and observed in-flight maxima.
+The latter is the maximum of samples taken approximately every 100 ms during
+round execution, not a guaranteed true peak. Sampling itself adds overhead;
+process churn failures and sampling intervals are recorded, and unavailable
+values are not converted to zero. Previously published after-round samples
+remain after-round snapshots, not these observed maxima.
+
+For Shellboy, `baseline_one_tui` adds one ready PTY TUI to the existing owner
+and N threads before the exchange. Its two separate process-tree samples are
+sequential, not atomic; it is not an in-flight measurement. The ordinary
+in-flight result remains owner-only without that TUI. Repetitions use the same
+fake-model workload, with no real provider or token usage claims.
