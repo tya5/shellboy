@@ -3709,12 +3709,19 @@ mod description_context_tests {
             },
             ..Default::default()
         }];
-        let mut details = Details::for_node(&view, "shared".into(), false).with_item_key(
-            super::super::ItemKey::Tool {
-                group_id: "g".into(),
-                call_id: "b".into(),
-            },
+        let key = super::super::ItemKey::Tool {
+            group_id: "g".into(),
+            call_id: "b".into(),
+        };
+        let outcome = super::super::presentation::tool_outcome(
+            view.nodes()[0].presentation.blocks[1]
+                .tool
+                .as_ref()
+                .unwrap(),
         );
+        view.items.toggle(key.clone(), false, &outcome);
+        let mut details =
+            Details::for_node(&view, "shared".into(), false).with_item_key(key);
         for mode in [Mode::Fields, Mode::Original] {
             details.mode = mode;
             let context = details.described_command_context(&view).unwrap();
