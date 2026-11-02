@@ -41,7 +41,7 @@ Issue #170 adds schema21 derived event-retention lookup indexes and bounded
 maintenance of terminal-Run pending deliveries and unreferenced shell
 completion events. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
 
-Conversation schema22 records selected-path admission (13), Turn interruption
+Conversation schema23 records selected-path admission (13), Turn interruption
 and draft indexes (14), derived readback indexes (15), bounded Thread
 observation lookup indexes (16), the F parent lookup index (17), summary usage
 metadata accounting (18), the completed-attempt scope index (19), index-source
