@@ -8584,6 +8584,7 @@ CI run `41504566436` failed on Linux and macOS with E0061 at
 history projection. Run `41505546494` compiled but both platforms failed the
 saved-preview locale assertion and guide-caption source-literal check. This
 follow-up accepts either configured title language and retains the observation
-caption literal in the `glyphs::formatted!` pair. The final exact-tip CI and
-three-OS integration are reported separately; overall Stage C acceptance remains
-open.
+caption literal in the `glyphs::formatted!` pair. Run `41509227853` failed both
+platforms at `Format` on a rustfmt line-wrap difference in the mixed-separator
+assertion; the current follow-up matches rustfmt. Final exact-tip CI and three-OS
+integration are reported separately; overall Stage C acceptance remains open.

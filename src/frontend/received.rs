@@ -452,9 +452,7 @@ mod tests {
             };
             let title = node.presentation.title.as_str();
             assert!(
-                title == dot_title
-                    || title == bar_title
-                    || mixed_titles.contains(&title),
+                title == dot_title || title == bar_title || mixed_titles.contains(&title),
                 "unexpected title for {language:?}: {title}"
             );
             assert_eq!(node.presentation.kind, expected_kind);

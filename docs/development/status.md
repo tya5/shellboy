@@ -27,7 +27,8 @@ label now follow `UiLanguage`. Display separators continue to use the shared
 partial response text/reasoning, and replay/path semantics are unchanged.
 Build-free checks pass; the local Rust recheck is queued behind the shared slot.
 CI run 415045 found a missing language argument; run 415055 exposed stale
-locale/caption expectations, corrected in this follow-up.
+locale/caption expectations; run 415092 found one rustfmt line-wrap difference.
+All are corrected in this follow-up; final exact-tip CI is pending.
 
 ## Index-source GC scan (#164, branch CI pending)
 
