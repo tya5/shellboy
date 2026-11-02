@@ -1683,16 +1683,16 @@ impl Confirmation {
     }
     fn footer(&self, language: crate::config::UiLanguage) -> String {
         if let Some(footer) = overlay::confirmation_footer(self, language) {
-            return footer.into();
+            return text_width::glyphs::decorate(footer);
         }
         if matches!(self, Self::ForceQuit) {
-            i18n::Message::ForceQuitFooter.render(language)
+            text_width::glyphs::decorate(&i18n::Message::ForceQuitFooter.render(language))
         } else if let Self::ThreadDeletion(dialog) = self {
-            dialog.footer().into()
+            dialog.footer()
         } else if matches!(self, Self::StaleIndex { .. }) {
-            "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧".into()
+            text_width::glyphs::decorate("N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧")
         } else {
-            CONFIRMATION_FOOTER.into()
+            text_width::glyphs::decorate(CONFIRMATION_FOOTER)
         }
     }
     fn context(&self, language: crate::config::UiLanguage) -> String {
@@ -5609,12 +5609,13 @@ impl UiState {
             } else {
                 overlay::shutdown_starting(language).into()
             };
+            let footer = text_width::glyphs::decorate(overlay::shutdown_footer(language));
             let body = popup::compact_recorded(
                 frame,
                 area,
                 overlay::shutdown_title(language),
                 overlay::shutdown_context(language),
-                overlay::shutdown_footer(language),
+                &footer,
                 12,
                 &self.aux_popup_paint,
             );

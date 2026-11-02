@@ -1537,9 +1537,10 @@ pub(super) fn confirmation_text(
                 Command::IndexRebuild(_) => "rebuild",
                 _ => local!(language, "索引操作", "index"),
             };
+            let sep = crate::ui::text_width::glyphs::separator();
             Some(match language {
-                UiLanguage::Ja => format!("索引処理の実行確認 | {action}\n{detail}"),
-                UiLanguage::En => format!("Confirm index operation | {action}\n{detail}"),
+                UiLanguage::Ja => format!("索引処理の実行確認{sep}{action}\n{detail}"),
+                UiLanguage::En => format!("Confirm index operation{sep}{action}\n{detail}"),
             })
         }
         Confirmation::StaleIndex { detail } => Some(match language {
@@ -1582,7 +1583,7 @@ mod confirmation_language_tests {
             ui.apply(UiUpdate::IndexPreviewReady {
                 args: args.clone(),
                 attempt,
-                text: "OPAQUE-PREVIEW: ABC / 123".into(),
+                text: "OPAQUE-PREVIEW: ABC | 123".into(),
             });
             let Some(Confirmation::Index {
                 command, detail, ..
@@ -1594,20 +1595,20 @@ mod confirmation_language_tests {
             assert!(
                 detail
                     .lines()
-                    .any(|line| line == "OPAQUE-PREVIEW: ABC / 123")
+                    .any(|line| line == "OPAQUE-PREVIEW: ABC | 123")
             );
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
                 UiLanguage::En => &[
                     "Confirm index operation",
-                    "OPAQUE-PREVIEW: ABC / 123",
+                    "OPAQUE-PREVIEW: ABC | 123",
                     "embedding API charges",
                     "Y Execute",
                 ],
                 UiLanguage::Ja => &[
                     "索引処理の実行確認",
-                    "OPAQUE-PREVIEW: ABC / 123",
+                    "OPAQUE-PREVIEW: ABC | 123",
                     "embedding APIの費用",
                     "Y 実行",
                 ],

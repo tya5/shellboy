@@ -36,8 +36,8 @@ pub(super) struct DeletionDialog {
     phase: Phase,
 }
 impl DeletionDialog {
-    pub(super) fn footer(&self) -> &'static str {
-        if self.can_execute() {
+    pub(super) fn footer(&self) -> String {
+        crate::ui::text_width::glyphs::decorate(if self.can_execute() {
             local!(
                 self.language,
                 "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 削除 | ^v/PgUp/PgDn 閲覧",
@@ -49,7 +49,7 @@ impl DeletionDialog {
                 "D / Space 子の会話も削除を切替 | N / Esc 戻る\nY 使用不可 | ^v/PgUp/PgDn 閲覧",
                 "D / Space Toggle descendants | N / Esc Back\nY disabled | ^v/PgUp/PgDn Scroll"
             )
-        }
+        })
     }
     fn matches(&self, request_id: u64, args: &ThreadDeleteArgs) -> bool {
         self.request_id == request_id
@@ -69,6 +69,7 @@ impl DeletionDialog {
     }
     pub(super) fn text(&self) -> String {
         let language = self.language;
+        let sep = crate::ui::text_width::glyphs::separator();
         let title = &self.title;
         let thread = &self.args.thread_id;
         let mut text = match (language, self.args.descendants) {
@@ -136,16 +137,16 @@ impl DeletionDialog {
                 let sources = number("/references/completed_replacement_source_nodes");
                 let attachments = number("/references/attachment_reference_count");
                 text.push_str(&match language {
-                    UiLanguage::Ja => format!("\n対象会話: {selected} | 子の会話: {descendants}\n動作中: {running} | 停止中: {stopping}\n共有されている履歴: {shared}\n置換の出典: {sources} | 添付参照: {attachments}"),
-                    UiLanguage::En => format!("\nSelected conversations: {selected} | Descendants: {descendants}\nRunning: {running} | Stopping: {stopping}\nShared history: {shared}\nReplacement sources: {sources} | Attachment references: {attachments}"),
+                    UiLanguage::Ja => format!("\n対象会話: {selected}{sep}子の会話: {descendants}\n動作中: {running}{sep}停止中: {stopping}\n共有されている履歴: {shared}\n置換の出典: {sources}{sep}添付参照: {attachments}"),
+                    UiLanguage::En => format!("\nSelected conversations: {selected}{sep}Descendants: {descendants}\nRunning: {running}{sep}Stopping: {stopping}\nShared history: {shared}\nReplacement sources: {sources}{sep}Attachment references: {attachments}"),
                 });
                 if let Some(runs) = value.pointer("/blockers/runs").and_then(Value::as_array) {
                     for run in runs.iter().take(50) {
                         if let Some(id) = run.get("id").and_then(Value::as_str) {
                             let state = run.get("state").and_then(Value::as_str).unwrap_or(local!(language, "不明", "unknown"));
                             text.push_str(&match language {
-                                UiLanguage::Ja => format!("\n  作業 {id} | {state}"),
-                                UiLanguage::En => format!("\n  Run {id} | {state}"),
+                                UiLanguage::Ja => format!("\n  作業 {id}{sep}{state}"),
+                                UiLanguage::En => format!("\n  Run {id}{sep}{state}"),
                             });
                         }
                     }

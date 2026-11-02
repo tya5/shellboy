@@ -1446,8 +1446,11 @@ impl Details {
                 (UiLanguage::En, _) => format!("{selected} / {count} items{sep}node {node}"),
             }
         };
-        let footer = super::key_hints::detail_footer_for(self.hint_context(), language);
-        let mut body = popup::panel_recorded(frame, area, mode, &context, footer, &self.paint);
+        let footer = crate::ui::text_width::glyphs::decorate(super::key_hints::detail_footer_for(
+            self.hint_context(),
+            language,
+        ));
+        let mut body = popup::panel_recorded(frame, area, mode, &context, &footer, &self.paint);
         if self.revision != source_revision(view, &self.node_id) && body.height > 1 {
             frame.render_widget(
                 ratatui::widgets::Paragraph::new(local!(

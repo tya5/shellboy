@@ -576,8 +576,9 @@ pub(super) fn confirmation_lines_for(
             };
             let repairs = options.max_repairs;
             let timeout = options.timeout_ms;
+            let sep = crate::ui::text_width::glyphs::separator();
             let limits = match language {
-                UiLanguage::Ja => format!("追加修復: 最大{repairs}回 | 全体期限{timeout}ms"),
+                UiLanguage::Ja => format!("追加修復: 最大{repairs}回{sep}全体期限{timeout}ms"),
                 UiLanguage::En => format!("Additional repairs: at most {repairs}; total deadline: {timeout} ms"),
             };
             lines.extend([
