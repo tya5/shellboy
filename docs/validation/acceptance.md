@@ -8465,3 +8465,10 @@ A scoped manifest containing the 33 reviewed Watch decisions yields Watch
 whole-repository acceptance result. Python `test_language_audit.py` passed 13
 tests and JSON parsing passed on macOS. No product code or symbols changed.
 Exact task CI and three-OS integration validation remain pending.
+
+After W1 landed on main 74d27461 (three-OS CI 41415178623), re-reviewed
+Watch's 33 Japanese literals against their English arms. The Watch source is
+unchanged from 2607218b; each original decision and source literal matches.
+Recomputed only those 33 scope fingerprints and preserved all main decisions.
+The complete classification manifest now validates successfully. Task CI for
+the rebased commit is pending.
