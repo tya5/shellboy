@@ -234,6 +234,33 @@ pub struct StreamObservation {
     pub partial_reasoning: String,
     pub completed_items: BTreeMap<u64, Value>,
 }
+const SHELL_ARGUMENTS: [&str; 7] = [
+    "command", "description", "background", "stdin_open", "initial_stdin", "input_encoding", "output_encoding",
+];
+
+fn parse_shell_arguments(raw: &str) -> Result<ShellToolArgs, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|_| "Shell arguments must be a JSON object".to_owned())?;
+    let object = value.as_object().ok_or_else(|| "Shell arguments must be a JSON object".to_owned())?;
+    for (name, value) in object {
+        let valid = match name.as_str() {
+            "command" | "input_encoding" | "output_encoding" => value.is_string(),
+            "description" | "initial_stdin" => value.is_string() || value.is_null(),
+            "background" | "stdin_open" => value.is_boolean(),
+            _ => return Err(format!("Unknown shell parameter: {name}. Accepted: {}.", SHELL_ARGUMENTS.join(", "))),
+        };
+        if !valid {
+            let expected = if matches!(name.as_str(), "background" | "stdin_open") { "boolean" } else { "string" };
+            return Err(format!("Invalid shell parameter {name}: expected {expected}"));
+        }
+    }
+    if !object.contains_key("command") {
+        return Err("Missing shell parameter command: expected non-empty string".into());
+    }
+    let args: ShellToolArgs = serde_json::from_value(value).map_err(|_| "Invalid shell argument object".to_owned())?;
+    args.validate().map_err(|error| error.message)?;
+    Ok(args)
+}
+
 impl ModelResponse {
     pub fn completed(mut raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
         crate::usage::normalize_response(&mut raw);
@@ -322,15 +349,7 @@ impl ModelResponse {
                     let args = if item.get("name").and_then(Value::as_str) != Some("shell") {
                         Err("Unknown tool; only shell is available".into())
                     } else {
-                        serde_json::from_str::<ShellToolArgs>(arguments)
-                            .map_err(|_| {
-                                "Invalid shell arguments; no calls in this group may execute"
-                                    .to_owned()
-                            })
-                            .and_then(|args| {
-                                args.validate().map_err(|error| error.message)?;
-                                Ok(args)
-                            })
+                        parse_shell_arguments(arguments)
                     };
                     calls.push(ToolCall {
                         call_id: id.into(),
