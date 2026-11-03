@@ -1,5 +1,19 @@
 # Validation record
 
+## End-message rename (#194 step 1)
+
+Branch `issue-194/step1-end-message`, code at `de9b618f` (tip `bc7175af` adds
+only design text). macOS through `rust-slot`: `cargo fmt --check`, clippy
+`-D warnings`, script tests and the integration layout check passed; the lib
+suite passed except two shell timing tests that passed on rerun; focused
+integration groups (recovery_paths, exec_client, thread_observation,
+work_status, history, docs_cli, docs_proxy, operation_contract, control_db,
+message_recovery, thread_browser, ui_thread_deletion, frontend) passed 201.
+Shell-spawning runtime/shell integration tests failed nondeterministically on
+this Mac, and the same subset also failed on unmodified `origin/main`
+`9e822267`, so they are not evidence either way here. CI run 41586592079
+(`all_oses=true`) passed on ubuntu, macOS and Windows at `bc7175af`.
+
 ## Asynchronous receipt pressure (#172, in progress)
 
 The previous temporary-refusal implementation was rejected in review. Its
