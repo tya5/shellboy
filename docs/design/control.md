@@ -560,3 +560,27 @@ finish event; an interrupted instance removes leftover witnesses during recovery
 Selected-view activity reads validate ownership against the latest live Run and
 preparing/running Turn. This is not the receipt-backed explicit context-edit
 wait, and does not add a table, queue, worker, setting or new lifecycle phase.
+
+## Explicit replies at Run completion and deletion (#194 step 3, #197)
+
+The idle completion transaction checks unfinished Turns, owned work, pending
+notices, then --deliver complete messages before applied pending replies. Each
+previously reminded duty becomes ignored; each remaining unreminded duty gets
+one reminder, atomically creating a continuation Turn with a reply_reminder
+notice listing message IDs and verified sender facts. A second normal completion
+without a reply terminalizes it; no response text is guessed. Esc follows normal
+completion, whereas stop, recovery wait and shutdown preserve pending duties.
+
+reply_reminder wakes its existing Run. reply_outcome notifies a live model
+sender's Run, or is saved as a context_changed notice for its next actual Turn
+when no Run is live; it never starts an idle sender. External senders observe
+terminal receipt facts with message get / wait reply_received, not an inbox.
+
+Deletion transitions pending recipient duties to recipient_deleted, and pending
+duties sent by a deleted model Thread to cancelled with cancelled_by and
+cancel_reason=sender_deleted. These CAS transitions, sender/recipient notices,
+and deletion are one transaction; recipient deletion wins if both ends are
+selected. No pending-reply receipt is collected. The history-GC owner reclaims
+eligible deleted-target terminal receipts in batches of 128, preserving those
+still owned by a live sender. Receipts targeting live recipients remain rooted
+even if the sender was deleted. See gc.md and storage.md.
