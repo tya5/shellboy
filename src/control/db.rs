@@ -364,7 +364,7 @@ impl Store {
             }
             let instance = self.instance_id.clone();
             let path = self.database.path().to_path_buf();
-            return crate::presentation::work(move || {
+            return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
                 let tx = db.transaction().map_err(sql_error)?;
                 let result = crate::status::snapshot(&tx, &args, &instance)?;
@@ -378,7 +378,7 @@ impl Store {
             let args = args.clone();
             let config = self.config.clone();
             let path = self.database.path().to_path_buf();
-            return crate::presentation::work(move || {
+            return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
                 let tx = db.transaction().map_err(sql_error)?;
                 let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
@@ -392,7 +392,7 @@ impl Store {
         if let Command::AttachmentList(args) = &request.command {
             let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
             let path = self.database.path().to_path_buf();
-            let mut items = crate::presentation::work(move || {
+            let mut items = inspection_work(move || {
                 let mut db = open_inspection(&path)?;
                 let tx = db.transaction().map_err(sql_error)?;
                 let items = crate::attachments::list_tx(&tx, &thread)?;
@@ -414,7 +414,7 @@ impl Store {
             let mut store = self.clone();
             store.usage_context = crate::usage_totals::read_context();
             let path = self.database.path().to_path_buf();
-            return crate::presentation::work(move || {
+            return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
                 let tx = db.transaction().map_err(sql_error)?;
                 let value = store.dispatch(
@@ -4776,6 +4776,25 @@ mod browser_creation_notification_tests {
     }
 }
 
+async fn inspection_work<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T> {
+    static SLOTS: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+        std::sync::OnceLock::new();
+    let permit = SLOTS
+        .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(2)))
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| error(ErrorCode::InvalidState, "Inspection workers closed"))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await
+    .map_err(|_| error(ErrorCode::IoFailed, "Inspection worker failed"))
+}
+
 fn open_inspection(path: &std::path::Path) -> Result<rusqlite::Connection> {
     let db =
         rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -4899,6 +4918,40 @@ mod inspection_isolation_tests {
             "old={old} elapsed={elapsed:?} max_write={max_write:?} writes={writes} wal_start={initial} wal_max={maximum} wal_end={final_size} checkpoint={checkpoint:?}"
         );
         writer.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn held_inspections_do_not_block_presentation() {
+        let (ready_tx, ready_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let release_rx = std::sync::Arc::new(std::sync::Mutex::new(release_rx));
+        let mut reads = Vec::new();
+        for _ in 0..2 {
+            let ready = ready_tx.clone();
+            let release = release_rx.clone();
+            reads.push(tokio::spawn(inspection_work(move || {
+                ready.send(()).unwrap();
+                release.lock().unwrap().recv().unwrap();
+            })));
+        }
+        let mut ready_rx = ready_rx;
+        crate::test_watchdog::watchdog("two inspections start", async {
+            ready_rx.recv().await;
+            ready_rx.recv().await
+        })
+        .await
+        .unwrap();
+        let projection = crate::test_watchdog::watchdog(
+            "presentation during inspections",
+            crate::presentation::work(|| 42),
+        )
+        .await;
+        release_tx.send(()).unwrap();
+        release_tx.send(()).unwrap();
+        for read in reads {
+            read.await.unwrap().unwrap();
+        }
+        assert_eq!(projection.unwrap().unwrap(), 42);
     }
 
     #[tokio::test]

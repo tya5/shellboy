@@ -1,5 +1,5 @@
 //! Bounded, immutable display projection. Canonical history and raw bytes stay untouched.
-/// Shared finite blocking admission for display projections and read-only CLI facts.
+/// Finite blocking admission for display projections.
 pub(crate) async fn work<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, crate::protocol::ApiError> {
