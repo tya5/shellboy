@@ -466,7 +466,10 @@ async fn summarize_once(
     ordinary_new: bool,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     if middle_new {
-        let active = control.compactor.summarize_active_turn(thread, slot.stop.clone()).await;
+        let active = control
+            .compactor
+            .summarize_active_turn(thread, slot.stop.clone())
+            .await;
         if !matches!(&active, Ok(result) if result.no_target) {
             *midturn = json!({"scope":"active_turn"});
             return active;
@@ -476,8 +479,14 @@ async fn summarize_once(
         *midturn = json!({"skipped":"no_new_target"});
     }
     if ordinary_new {
-        control.compactor.summarize(thread, false, slot.stop.clone()).await
+        control
+            .compactor
+            .summarize(thread, false, slot.stop.clone())
+            .await
     } else {
-        Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
+        Ok(crate::compaction::CompactResult {
+            no_target: true,
+            ..Default::default()
+        })
     }
 }

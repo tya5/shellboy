@@ -520,7 +520,7 @@ impl Diagnostics {
             usage_slow: None,
             ui_history: None,
             lineage_slow: None,
-            db_job_slow: None,
+            db_job: None,
             index_discard: None,
             automatic_compaction_counts: Some(AutomaticCompactionCounts {
                 invalid_state_rejections,
@@ -708,6 +708,7 @@ impl Diagnostics {
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
             })),
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
     /// A background job was interrupted at its step budget while foreground
