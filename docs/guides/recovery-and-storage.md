@@ -78,7 +78,7 @@ shellboy run get --run RUN_ID
 | Run `live` | Execution lifetime continues | Includes waiting for owned background work after answering |
 | Turn `recovery_wait` | Failure reason saved, awaiting an explicit decision | Time or configuration changes alone do not resume it |
 
-When `end_message_node_id` is returned, retrieve it with `shellboy history get --node NODE_ID`. Follow `next_cursor` for long bodies. Terminal `failed` / `stopped` states are not successful end messages.
+For a reply-expected request, inspect `message get` and retrieve `reply.node_id` when `reply.state` is `replied`. For a Turn or Run end message use its `end_message_node_id`. Follow `next_cursor` for long bodies. A stopped or Esc-ended Turn may have no end message; do not invent a result. A stopped Run leaves an outstanding reply pending until a reply, cancellation, or another terminal reply state.
 
 In the TUI, start via F8 `待機 | 条件を観測` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
 

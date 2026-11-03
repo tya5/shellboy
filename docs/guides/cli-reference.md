@@ -63,7 +63,7 @@ Without an explicit ID, the CLI generates an instance-specific operation ID. For
 
 For important changes, explicitly retain an ID in the already known same-instance form `INSTANCE:YOUR_UNIQUE_NONCE` so acceptance can be investigated after disconnection. The instance component matches an operation_id returned by that owner. Do not reuse Run/Turn/message/node IDs as operation IDs.
 
-`message send` `delivery_status=accepted|held|applied|cancelled` describes acceptance/application. `assignment=new_run|new_turn|existing_turn` includes both run_id and turn_id; saved assignment never changes. `assignment=pending` has neither; query `message get` later for initial assignment. Successful send does not mean the assigned Turn has completed. Use `end_message_node_id` for source retrieval when available. For explicit replies, inspect `reply.state` and read `reply.node_id` when replied.
+`message send` `delivery_status=accepted|held|applied|cancelled` describes acceptance/application. `assignment=new_run|new_turn|existing_turn` includes both run_id and turn_id; saved assignment never changes. `assignment=pending` has neither; query `message get` later for initial assignment. A successful send does not mean the recipient has replied. For reply-expected messages inspect `reply.state` and retrieve `reply.node_id` when replied; acceptance is not a reply. For non-reply completion observations, `end_message_node_id` remains available for source retrieval when present.
 
 ### Saved execution context
 
@@ -138,8 +138,8 @@ Connection precedence: explicit `--connection` > explicit Thread > authenticated
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `thread list [--limit N] [--cursor C] [--query TEXT]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/updated_at/excerpt), optional `next_cursor`; default 50, range 1–200. Query filters ID/title/cwd |
-| `thread get [--thread THREAD]` | thread_id/title/cwd/connection/model/effort/parent_id, current run_id/turn_id, children_count/shells_count, recovery_reason |
+| `thread list [--limit N] [--cursor C] [--query TEXT]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/updated_at/excerpt/`last_end_message`/`last_input`), optional `next_cursor`; default 50, range 1–200. Query filters ID/title/cwd |
+| `thread get [--thread THREAD]` | thread_id/title/cwd/connection/model/effort/parent_id, current run_id/turn_id, children_count/shells_count, recovery_reason, `last_end_message`, `last_input`, and `awaiting_reply` (up to 128 pending items, oldest first) |
 | `thread create [--cwd PATH] [--connection NAME] [--model ID] [--effort VALUE] [--parent THREAD]` | New Thread details, without starting instructions or a Run. Parent establishes ancestry; execution ownership is assigned when the parent Run sends. Normally inherits parent settings |
 | `thread fork --thread THREAD --node NODE [--cwd PATH]` | New Thread sharing the selected path through NODE inclusive, without changing the original; invalid boundaries such as incomplete tool groups rejected |
 | `thread delete-preview --thread THREAD [--descendants]` | Read-only impact: deletable_now, blocking Run count/details (max 50), target/descendant counts, direct sharing/replacement-source/attachment-reference counts, update time; reclaimable_bytes null with reason. Rechecked on deletion |
@@ -157,11 +157,20 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
-| `message reply --message MESSAGE (--text TEXT | --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns reply_to/message_id and optional delivery |
-| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and optional expect_reply/reply/reply_to facts, and end_message_node_id when available |
-| `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns reply_cancelled without removing history. Other outcomes are cancelled/already_cancelled/already_admitted/not_found/forbidden/unavailable. Does not wake the model |
+| `message send [--thread THREAD] [--deliver now\|complete] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. `--expect-reply` is rejected for a model sending to its own Thread or when the recipient already has 128 pending reply duties (`input_limit`). Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
+| `message reply --message MESSAGE (--text TEXT | --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
+| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
+| `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns `reply_cancelled` without removing history. Other outcomes are `cancelled`/`already_cancelled`/`already_admitted`/`not_found`/`forbidden`/`unavailable`. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
+
+When an expected-reply message is admitted, the recipient gets a `reply_expected` notice with its message ID and the `shellboy message reply --message ID` command. A reply is announced with a `reply` notice and its `reply_to` ID. The Run-end reminder lists pending IDs. A model sender receives a `reply_outcome` notice if the recipient ignores the request or its Thread is deleted; without a live Run it is seen at the next Turn and does not start a Run.
+
+
+`--deliver complete` waits while the recipient Run is live. At normal completion,
+waiting messages are delivered together in send order as one new Turn. If that Run
+stops, is shut down, or enters recovery wait instead, each waiting message is
+released as ordinary held input and follows the usual resume/retry rules. Later
+default or `--deliver now` messages overtake waiting `complete` messages.
 
 `message get` returns `sender.kind`: `model` with verified credential-free
 instance/thread/run/turn/execution IDs, `external_cli` for a new external CLI
@@ -333,7 +342,29 @@ after_characters and changed_suffix_characters (replay JSON Unicode scalars).
 No target_tokens field remains. thread get context_usage reports only the last
 successful measured usage, start/end time and next_request_pending after an edit.
 
-## Noninteractive work with a JSON answer
+## Reply-expected delegation
+
+Send with `shellboy message send --thread THREAD --expect-reply --text 'Task'`;
+the receipt's `message_id` identifies the duty, independently of assignment or
+`--deliver now|complete`. The recipient replies after application with
+`shellboy message reply --message MESSAGE_ID --text 'Result'`. A model may not
+send an expected reply to its own Thread; only the recipient Thread's model (or
+a human) can reply. Ordinary progress messages create no reply duty.
+
+```sh
+shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
+shellboy message get --message MESSAGE_ID
+shellboy history get --node REPLY_NODE_ID
+```
+
+The reply arrives in a model sender's conversation, or external senders read
+`reply.node_id`. `satisfied` includes `replied`, `ignored`, `cancelled`, and
+`recipient_deleted`; inspect the snapshot. Timeouts do not cancel the request.
+An unanswered applied request gets one Run-end reminder, then `ignored` if still
+unanswered. Stop/recovery leaves it pending; combine a reply wait with
+`thread_settled` to detect stalls. See [Delegation](delegation.md).
+
+## Noninteractive work with a JSON result
 
 An owner must already be running. `exec` saves ordinary conversation history and
 allows normal model tool use; it is not a tool-free transform or a sandbox.
@@ -344,20 +375,34 @@ shellboy exec --schema result.schema.json --thread THREAD --max-repairs 0 "Repor
 cat request.txt | shellboy exec --schema result.schema.json --text-stdin
 ```
 
+`--result reply|turn-end|run-end` selects a saved result; default `reply` sends
+an expected-reply message, waits for `reply_received` and the assigned Run to
+end, and reads the reply node. `turn-end` sends an ordinary message and waits
+for the assigned Turn; `run-end` sends an ordinary message and waits for the
+assigned Run, reading its last Turn's end message. An existing Turn can handle
+other input; a Run can continue into later Turns and wait for owned work. Neither
+end mode creates a reply duty. Repairs use the same mode.
+
+An empty end message is a successful empty result (exit 0 and an empty stdout
+line), even with a Schema; it is not validated and never triggers repair. An
+Esc-ended Turn has no end message (`end_message_node_id: null`), not an empty
+one: the end modes exit 4. In reply mode an Esc-ended Turn alone does not end
+the wait; the Run-end reminder can lead to `ignored` and exit 4. A deleted node
+is also unavailable, not an empty result.
+
 Without --thread it creates a new saved conversation (caller cwd by default).
 New conversations accept --cwd/--agents/--connection/--model/--effort/--parent;
 these conflict with --thread. Existing Thread settings/AGENTS are not changed.
 --sender-label defaults to `shellboy exec`, a self-asserted name only. Single-RPC
 --operation-id is rejected; the stderr diagnostic reports known per-step IDs.
 
-stdout is the validated raw JSON value (outer whitespace trimmed) plus newline; stderr is a JSON
-metadata/error object with Thread, message, Run, Turn, answer-node, operation IDs
-and repair count, plus saved Turn-scoped usage (unknown stays null). These are
+stdout is the validated raw JSON value (outer whitespace trimmed) plus newline, or an empty line for an empty end message; stderr is a JSON
+metadata/error object with Thread, message, Run, Turn, result mode, reply or end-message node, operation IDs and repair count. Turn-end reports Turn usage; reply and run-end report assigned Run usage (reply mode may be a live snapshot; unknown stays null). These are
 owner facts, not a per-exec bill; an existing active Turn can include other input.
 Exit codes are0 success,2 invalid input/unsupported Schema,
 3 JSON/Schema mismatch after repairs,4 recovery/held/stopped/failed/unavailable
-answer,5 timeout,6 owner/transport/protocol/output failure. Schema mismatch after the repair cap includes the raw answer and bounded
-validation errors. Output-size/page limits exit6 with answer IDs for inspection,
+result,5 timeout,6 owner/transport/protocol/output failure. Schema mismatch after the repair cap includes the raw result and bounded
+validation errors. Output-size/page limits exit6 with result node IDs for inspection,
 not a silently truncated successful result. Inspect saved targets before
 resending an uncertain mutation. `--timeout-ms` defaults300000 (1..86400000),
 starts after input reads and covers all RPCs/repairs; timeout never stops work.
@@ -377,7 +422,7 @@ large integer literals keep their spelling.
 All unlisted keywords/shapes reject before owner contact, including $ref/$defs,
 oneOf/anyOf/allOf, enum/const, pattern/format, numeric bounds, union types, tuple
 items and schema-valued additionalProperties. Do not assume full draft support.
-Schema64KiB/depth32/nodes2048, composed request128KiB, answer1MiB and100000
+Schema64KiB/depth32/nodes2048, composed request128KiB, result1MiB and100000
 validation steps are bounded; excess is explicit failure, not accepted truncation.
 
 To inspect exactly what was validated, use `history get --node END_MESSAGE_NODE_ID
@@ -401,9 +446,12 @@ Turn: existing wait-cycle protection can reject that wait after message acceptan
 Inspect the reported message/operation IDs rather than resending. Prefer the new
 saved Thread default or a separate conversation. A timeout is not cancellation.
 
-Completion means a saved end message for the assigned Turn, not proof that all
-background shells/child Runs have drained. Inspect run get/status for continuing
-work. Schema validation guarantees supported shape only, not factual correctness.
+In `turn-end` mode, a saved Turn end message does not prove that all
+background shells or child Runs have drained. `run-end` waits for the assigned
+Run; `reply` normally waits for both the reply and that Run, although a committed
+reply remains the result if the Run stops later. Inspect run get/status for
+continuing work. Schema validation guarantees supported shape only, not factual
+correctness.
 
 
 JSON instance indexing is limited to100000 nodes/depth128. Numeric parsing uses
@@ -415,11 +463,11 @@ the existing serde_json supported range; out-of-range numeric inputs fail explic
 Before Thread creation/message send, exec makes a read-only end_message_only
 probe with a random missing node. A current owner decodes the argument and reports
 target_unavailable; old-style argument rejection exits6 before work. A refusal
-at answer read also exits6 (owner_version_mismatch), retaining known answer IDs
+at end-message read also exits6 (owner_version_mismatch), retaining known node IDs
 and recommending ordinary history get --node END_MESSAGE_NODE_ID without the new flag.
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
-not an old-Core format shim or automatic answer/protocol downgrade.
+not an old-Core format shim or automatic legacy-protocol downgrade.
 
 
 `index status` and `config check` include `auto_history` (default true). Setting
@@ -544,7 +592,7 @@ model waits remain cycle checked. Human wait observation does not scan the model
 ownership graph. No-after reports current settled states, not arbitrary history.
 
 `thread list/get` keep `excerpt` and add `last_end_message` and `last_input` objects
-(or null when absent). The answer includes `node_id`, `turn_id`, `at`, `excerpt`
+(or null when absent). The end message includes `node_id`, `turn_id`, `at`, `excerpt`
 and `body_available`; the input includes `message_id`, `node_id`, `at`, `state`,
 `sender`, `excerpt`, `body_available`. Excerpts include at most512 characters
 from at most64 natural-text fragments, excluding tools/reasoning/opaque bodies.

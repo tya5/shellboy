@@ -300,8 +300,8 @@ Simply saying "use subagents" does not guarantee that the model understands Shel
 First read shellboy docs get --id shellboy/agent-guide and
 shellboy docs get --id shellboy/delegation using shell.
 Follow those procedures to create an owned child Thread and delegate research only.
-After sending its request, check assignment and completion, retrieve the original
-answer, and summarize the results.
+Send each request with `message send --expect-reply`, wait for `reply_received`,
+check the reply state, retrieve the original reply, and summarize the results.
 ```
 
 [Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
