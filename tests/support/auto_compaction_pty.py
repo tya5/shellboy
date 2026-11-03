@@ -116,7 +116,11 @@ def main():
             recorded = [entry for entry in entries if entry['event'].startswith('automatic_compaction_')]
             events = [entry['event'] for entry in recorded]
             if not args.baseline:
-                assert events == ['automatic_compaction_below_threshold', 'automatic_compaction_started', 'automatic_compaction_finished'], events
+                assert events[:3] == ['automatic_compaction_below_threshold', 'automatic_compaction_started', 'automatic_compaction_finished'], events
+                if args.summary_error:
+                    assert events[3:] == ['automatic_compaction_rejected_other', 'automatic_compaction_skipped_no_new_target'], events
+                else:
+                    assert events[3:] == [], events
                 assert recorded[1]['ids'] == recorded[2]['ids'], recorded
                 assert all(recorded[1]['ids'].get(key) for key in ('thread_id', 'run_id', 'turn_id')), recorded
                 assert all('synthetic context' not in json.dumps(entry) for entry in recorded), recorded
