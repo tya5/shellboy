@@ -123,7 +123,9 @@ impl Guard {
 
     #[cfg(test)]
     fn has_new_targets(&self, marks: Option<&[String]>) -> bool {
-        self.has_new_kind(marks, "spill:") || self.has_new_kind(marks, "summary:") || self.has_new_kind(marks, "middle:")
+        self.has_new_kind(marks, "spill:")
+            || self.has_new_kind(marks, "summary:")
+            || self.has_new_kind(marks, "middle:")
     }
 
     pub(super) fn set_reason(&mut self, reason: Reason) {
