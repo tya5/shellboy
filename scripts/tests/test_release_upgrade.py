@@ -199,6 +199,18 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'receipt_run_completion'):
             checks.check_migration(db, before, 23, 24)
 
+    def test_schema24_to25_adds_partial_reply_index_without_rewriting_rows(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 24)
+        before, records = self.upgrade(db, 24, 25)
+        self.assertEqual(checks.ledger(db), before + [(25, '0025_reply_expected')])
+        self.assertEqual(checks.snapshot(db), records)
+        plan = db.execute("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id=? AND json_extract(result_json,'$.reply.state')='pending'", ('parent',)).fetchall()
+        self.assertTrue(any('receipt_reply_pending' in row[3] for row in plan))
+        db.executescript('DROP INDEX receipt_reply_pending; CREATE INDEX receipt_reply_pending ON receipt(target_thread_id);')
+        with self.assertRaisesRegex(AssertionError, 'receipt_reply_pending'):
+            checks.check_migration(db, before, 24, 25)
+
     def test_schema18_rejects_old_history_index_and_parent_index(self):
         db = self.fixture(17)
         before, _ = self.upgrade(db, 17, 18)

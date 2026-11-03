@@ -106,6 +106,10 @@ def check_migration(db, before, start, target):
             assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
                 f'{name} differs from migration 23'
 
+    if target >= 25:
+        expected_index = DERIVED[25].read_text(encoding='utf-8').split(';')[0]
+        actual = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='receipt_reply_pending'").fetchone()
+        assert actual and ' '.join(actual[0].split()) == ' '.join(expected_index.split()), 'receipt_reply_pending missing or changed'
     if target >= 24:
         assert db.execute("SELECT count(*) FROM app_meta WHERE key GLOB 'revisit.*'").fetchone() == (0,), \
             'Revisit metadata remains after migration 24'
