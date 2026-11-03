@@ -111,9 +111,11 @@ pub(super) async fn maybe_compact(
                         let insufficient = target::verify(target, input_tokens) == target::Verification::Insufficient;
                         let outcome = if insufficient {"insufficient"} else {"met"};
                         let verification = json!({"attempt_id":attempt,"input_tokens":input_tokens,"target_tokens":target,"outcome":outcome}).to_string();
-                        db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.target_verification',json(?1)) WHERE id=?2 AND json_valid(error_json)", params![verification,previous])?;
                         pending["verified"] = json!(outcome);
-                        db.execute("UPDATE app_meta SET value=?2 WHERE key=?1", params![target_key,pending.to_string()])?;
+                        let tx = db.transaction()?;
+                        tx.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.target_verification',json(?1)) WHERE id=?2 AND json_valid(error_json)", params![verification,previous])?;
+                        tx.execute("UPDATE app_meta SET value=?2 WHERE key=?1", params![target_key,pending.to_string()])?;
+                        tx.commit()?;
                     }
                     if pending["verified"] == "met" {
                         db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
