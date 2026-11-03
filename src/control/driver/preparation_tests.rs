@@ -1681,16 +1681,24 @@ async fn unknown_arguments_and_invalid_calls_are_isolated_per_policy() {
         control.store.database.call(move |db| {
             db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('policy-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
             db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('policy-group','policy-attempt',?1,'running','now')", [&turn])?;
-            for (i, name) in ["bad", "combined", "unknown", "valid"].iter().enumerate() {
+            for (i, name) in ["bad", "combined", "duplicate", "encoding", "unknown", "valid"].iter().enumerate() {
                 db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('policy-group',?1,?2,'shell','{}','pending')", params![name,i as i64])?;
             }
             Ok(())
         }).await.unwrap();
         let marker = root.path().join("ran");
         let command = format!("printf yes > '{}'", marker.display());
+        let duplicate_marker = root.path().join("duplicate-ran");
+        let duplicate_command = format!("printf bad > '{}'", duplicate_marker.display());
+        let duplicate_args = format!(
+            r#"{{"command":"true","command":{}}}"#,
+            json!(duplicate_command)
+        );
         let response = model::ModelResponse::completed(json!({"status":"completed","output":[
             {"type":"function_call","name":"shell","call_id":"bad","arguments":"{\"command\":1}"},
             {"type":"function_call","name":"shell","call_id":"combined","arguments":"{\"command\":1,\"timeout\":2}"},
+            {"type":"function_call","name":"shell","call_id":"duplicate","arguments":duplicate_args},
+            {"type":"function_call","name":"shell","call_id":"encoding","arguments":json!({"command":"true","timeout":2,"input_encoding":"unsupported-encoding","initial_stdin":"x"}).to_string()},
             {"type":"function_call","name":"shell","call_id":"unknown","arguments":json!({"command":"true","timeout":2}).to_string()},
             {"type":"function_call","name":"shell","call_id":"valid","arguments":json!({"command":command}).to_string()}
         ]}),true).unwrap();
@@ -1698,24 +1706,31 @@ async fn unknown_arguments_and_invalid_calls_are_isolated_per_policy() {
             .await
             .unwrap();
         assert!(marker.exists(), "valid call did not run in {policy}");
+        assert!(!duplicate_marker.exists(), "duplicate call ran in {policy}");
         let rows = control.store.database.call(|db| {
             let mut q = db.prepare("SELECT r.call_id, r.status, n.payload_json FROM tool_result r JOIN node n ON n.id=r.node_id WHERE r.group_id='policy-group' ORDER BY r.call_id")?;
             let rows = q.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         }).await.unwrap();
-        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.len(), 6);
         assert_eq!(rows[0].1, "error");
         assert!(rows[0].2.contains("command"));
         assert_eq!(rows[1].1, "error");
         assert!(rows[1].2.contains("command"));
         assert!(rows[1].2.contains("timeout"));
-        assert!(rows[2].2.contains("timeout"));
-        if policy == "strict" {
-            assert_eq!(rows[2].1, "error");
-        } else {
-            assert!(rows[2].2.contains("Ignored unknown"));
+        assert_eq!(rows[2].1, "error");
+        assert!(rows[2].2.contains("Duplicate shell parameter command"));
+        assert_eq!(rows[3].1, "error");
+        for field in ["timeout", "input_encoding", "initial_stdin"] {
+            assert!(rows[3].2.contains(field), "missing {field}: {}", rows[3].2);
         }
-        assert_ne!(rows[3].1, "error");
+        assert!(rows[4].2.contains("timeout"));
+        if policy == "strict" {
+            assert_eq!(rows[4].1, "error");
+        } else {
+            assert!(rows[4].2.contains("Ignored unknown"));
+        }
+        assert_ne!(rows[5].1, "error");
         drop(snapshot);
         close(control, owner).await;
     }

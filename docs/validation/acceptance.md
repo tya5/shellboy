@@ -9162,4 +9162,4 @@ interactive/production cases remain outstanding.
 
 ## Shell unknown argument policy
 
-Coverage includes both policies, valid calls alongside invalid calls, unknown keys with invalid known types, configuration validation and the argument byte limit. Local focused tests and three-OS CI results must be reported for the final tip; real provider behavior has not been tested.
+Coverage includes both policies, valid calls alongside invalid calls, unknown keys with invalid known types, configuration validation, duplicate-key isolation, combined unknown-key/encoding/stdin failures and the argument byte limit. Local focused tests and three-OS CI results must be reported for the final tip; real provider behavior has not been tested.

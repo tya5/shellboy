@@ -10,6 +10,19 @@ pub(super) async fn run_tool_group(
     let turn_binding = slot.bind_turn(control, &snapshot.turn).await?;
     let mut cancelled: Option<Value> = None;
     let mut validation_errors = std::collections::HashMap::new();
+    fn add_error(
+        errors: &mut std::collections::HashMap<String, String>,
+        id: &str,
+        message: String,
+    ) {
+        errors
+            .entry(id.to_owned())
+            .and_modify(|existing| {
+                existing.push(' ');
+                existing.push_str(&message);
+            })
+            .or_insert(message);
+    }
     // Validate every encoding and initial input before the first OS spawn.
     for call in &calls {
         if !call.unknown_arguments.is_empty() {
@@ -46,20 +59,11 @@ pub(super) async fn run_tool_group(
                     model::SHELL_ARGUMENTS.join(", ")
                 ),
             );
-            if let Err(error) = &call.args {
-                validation_errors
-                    .entry(call.call_id.clone())
-                    .and_modify(|message| {
-                        message.push(' ');
-                        message.push_str(error);
-                    });
-            }
-            continue;
         }
         let args = match &call.args {
             Ok(args) => args,
             Err(error) => {
-                validation_errors.insert(call.call_id.clone(), error.clone());
+                add_error(&mut validation_errors, &call.call_id, error.clone());
                 continue;
             }
         };
@@ -72,8 +76,9 @@ pub(super) async fn run_tool_group(
                 encoding,
                 control.store.config.limits.shell_stdin_bytes,
             ) {
-                validation_errors.insert(
-                    call.call_id.clone(),
+                add_error(
+                    &mut validation_errors,
+                    &call.call_id,
                     format!(
                         "Invalid shell parameter {parameter}: expected supported encoding; {error}"
                     ),
@@ -87,7 +92,13 @@ pub(super) async fn run_tool_group(
                 control.store.config.limits.shell_stdin_bytes,
             )
         {
-            validation_errors.insert(call.call_id.clone(), format!("Invalid shell parameter initial_stdin: expected valid input within the configured byte limit; {error}"));
+            add_error(
+                &mut validation_errors,
+                &call.call_id,
+                format!(
+                    "Invalid shell parameter initial_stdin: expected valid input within the configured byte limit; {error}"
+                ),
+            );
         }
     }
     let mut cancelled_count = 0usize;

@@ -245,11 +245,42 @@ pub(crate) const SHELL_ARGUMENTS: [&str; 7] = [
     "output_encoding",
 ];
 
+struct UniqueShellObject(serde_json::Map<String, Value>);
+
+impl<'de> serde::Deserialize<'de> for UniqueShellObject {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ObjectVisitor;
+        impl<'de> serde::de::Visitor<'de> for ObjectVisitor {
+            type Value = UniqueShellObject;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a JSON object with unique parameter names")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut object = serde_json::Map::new();
+                while let Some(name) = map.next_key::<String>()? {
+                    if object.contains_key(&name) {
+                        return Err(serde::de::Error::custom(format!(
+                            "Duplicate shell parameter {name}"
+                        )));
+                    }
+                    object.insert(name, map.next_value()?);
+                }
+                Ok(UniqueShellObject(object))
+            }
+        }
+        deserializer.deserialize_map(ObjectVisitor)
+    }
+}
+
 fn parse_shell_arguments(raw: &str) -> (Result<ShellToolArgs, String>, Vec<String>) {
     let mut unknown = Vec::new();
     let result = (|| {
-        let mut value: Value = serde_json::from_str(raw)
-            .map_err(|_| "Shell arguments must be a JSON object".to_owned())?;
+        let UniqueShellObject(object) = serde_json::from_str(raw)
+            .map_err(|error| format!("Invalid shell arguments: {error}"))?;
+        let mut value = Value::Object(object);
         let object = value
             .as_object_mut()
             .ok_or_else(|| "Shell arguments must be a JSON object".to_owned())?;
@@ -795,6 +826,18 @@ mod shell_argument_policy_tests {
                     .unwrap_err()
                     .contains("command")
             );
+        }
+    }
+    #[test]
+    fn duplicate_known_and_unknown_keys_are_rejected() {
+        for (raw, name) in [
+            (r#"{"command":"first","command":"second"}"#, "command"),
+            (r#"{"command":"true","timeout":1,"timeout":2}"#, "timeout"),
+            (r#"{"command":"true","\u0063ommand":"false"}"#, "command"),
+        ] {
+            let error = parse_shell_arguments(raw).0.unwrap_err();
+            assert!(error.contains("Duplicate shell parameter"), "{error}");
+            assert!(error.contains(name), "{error}");
         }
     }
     #[test]
