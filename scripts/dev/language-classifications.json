@@ -3073,5 +3073,45 @@
     "category": "a",
     "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
     "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/activity.rs:32c52d0b16cae6db:1": {
+    "category": "a",
+    "reason": "FooterText::Observed is the Japanese rendering of a UI-only status label; FooterText::localized(UiLanguage::En) supplies \"Observed \". Timing tests assert the Japanese legacy text and the English projection.",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:4a171d5ec3d217ca:1": {
+    "category": "a",
+    "reason": "FooterText::UnknownAge is a generated UI status label; FooterText::localized(UiLanguage::En) supplies \"Elapsed time unavailable\". phase_time_note_localized selects it by UI language; persisted timestamps are not changed.",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:cfe0839bf60e7117:1": {
+    "category": "a",
+    "reason": "FooterText::UsageLimit is a generated UI label; FooterText::localized(UiLanguage::En) supplies \"Usage limit\". RecoverySnapshot::limit_summary_localized selects this by language and formats saved reset facts without rewriting them.",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:bb0524ec3b5a1bd1:1": {
+    "category": "a",
+    "reason": "FooterText::RateLimit is a generated UI label; FooterText::localized(UiLanguage::En) supplies \"Rate limit\". RecoverySnapshot::limit_summary_localized selects this by language and preserves the saved reset facts.",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:73ce111205a015c4:1": {
+    "category": "a",
+    "reason": "FooterText::RecoveryActions is generated UI guidance; FooterText::localized(UiLanguage::En) supplies English retry/switch guidance. It is not provider content or a persisted value.",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:ead7b657f2117d7e:1": {
+    "category": "a",
+    "reason": "Japanese window suffix used only by the legacy Japanese RecoverySnapshot::limit_summary; the selected-language path limit_summary_localized renders the same saved duration as an English \"{n}-minute window\". The legacy API remains Japanese-compatible.",
+    "source_tokens_sha256": "e7304a7c4c3db8da2dd9c8e3debcdf8c5771dcbc1ba9808f8056fa0578171711"
+  },
+  "src/ui/activity.rs:2580e1f7e13cf307:1": {
+    "category": "a",
+    "reason": "ASCII separator variant paired with the legacy Japanese minute-window suffix; both are selected by terminal width in the Japanese-compatible helper. The UI-language-specific English helper emits \"{n}-minute window\". No saved limit value is localized or rewritten.",
+    "source_tokens_sha256": "e7304a7c4c3db8da2dd9c8e3debcdf8c5771dcbc1ba9808f8056fa0578171711"
+  },
+  "src/ui/activity.rs:c6f792a1a40e17de:1": {
+    "category": "a",
+    "reason": "AutomaticCompactionSkip::label_localized has an explicit English arm for the same RejectedInvalidState | RejectedOther pattern (\"Auto-compaction deferred (previous attempt rejected)\"). The saved enum/state is unchanged.",
+    "source_tokens_sha256": "7b3a66f4adfea458be0918e9343396f06bb85d719bcb3a976a798cb68f3d45ac"
   }
 }
