@@ -721,6 +721,17 @@ mod tests {
     fn key(ui: &mut UiState, code: KeyCode) -> Vec<UiAction> {
         ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)))
     }
+    fn screen_text(terminal: &Terminal<TestBackend>) -> String {
+        let buffer = terminal.backend().buffer();
+        (buffer.area.y..buffer.area.bottom())
+            .map(|y| {
+                (buffer.area.x..buffer.area.right())
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
     #[test]
     fn notification_enter_follows_exact_loaded_tool_without_fetching_output() {
         let mut ui = fixture();
@@ -1234,8 +1245,21 @@ mod tests {
         }
         let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
         terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let collapsed = screen_text(&terminal);
+        assert!(collapsed.contains("Inspect repository"), "{collapsed}");
+        assert!(!collapsed.contains("printf synthetic"), "{collapsed}");
         click_item_row(&mut ui, &tool_key);
         assert!(ui.view().items.is_open(&tool_key, false, &tool_outcome));
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let expanded = screen_text(&terminal);
+        assert!(expanded.contains("Inspect repository"), "{expanded}");
+        assert!(expanded.contains("printf synthetic"), "{expanded}");
+        click_item_row(&mut ui, &tool_key);
+        assert!(!ui.view().items.is_open(&tool_key, false, &tool_outcome));
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let collapsed = screen_text(&terminal);
+        assert!(collapsed.contains("Inspect repository"), "{collapsed}");
+        assert!(!collapsed.contains("printf synthetic"), "{collapsed}");
 
         let local_tool = crate::presentation::ToolPresentation {
             command: "printf local".into(),
@@ -1285,8 +1309,55 @@ mod tests {
         ui.view_mut().total_nodes = 1;
         terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
         let notice_key = ItemKey::Node("single-notice".into());
+        assert!(ui.view().items.is_open(&notice_key, true, ""));
         click_item_row(&mut ui, &notice_key);
-        assert!(ui.view().items.is_open(&notice_key, false, ""));
+        assert!(!ui.view().items.is_open(&notice_key, true, ""));
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        click_item_row(&mut ui, &notice_key);
+        assert!(ui.view().items.is_open(&notice_key, true, ""));
+    }
+
+    #[test]
+    fn keyboard_toggles_tool_command_preview_with_its_row() {
+        let mut ui = fixture();
+        let tool = crate::presentation::ToolPresentation {
+            group_id: Some("group".into()),
+            call_id: "call".into(),
+            command: "printf keyboard".into(),
+            description: Some("Inspect repository".into()),
+            status: "completed".into(),
+            call_node_id: Some("source".into()),
+            ..Default::default()
+        };
+        let tool_key = ItemKey::tool(&tool, "source", 0);
+        let outcome = super::presentation::tool_outcome(&tool);
+        ui.view_mut().nodes_mut_for_test()[0].presentation.blocks =
+            vec![crate::presentation::PresentationBlock {
+                kind: crate::presentation::BlockKind::ToolCall,
+                tool: Some(tool),
+                ..Default::default()
+            }];
+        let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let collapsed = screen_text(&terminal);
+        assert!(collapsed.contains("Inspect repository"), "{collapsed}");
+        assert!(!collapsed.contains("printf keyboard"), "{collapsed}");
+
+        key(&mut ui, KeyCode::Tab);
+        assert_eq!(ui.view().items.focus, Some(tool_key.clone()));
+        key(&mut ui, KeyCode::Char(' '));
+        assert!(ui.view().items.is_open(&tool_key, false, &outcome));
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let expanded = screen_text(&terminal);
+        assert!(expanded.contains("Inspect repository"), "{expanded}");
+        assert!(expanded.contains("printf keyboard"), "{expanded}");
+
+        key(&mut ui, KeyCode::Char(' '));
+        assert!(!ui.view().items.is_open(&tool_key, false, &outcome));
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let collapsed = screen_text(&terminal);
+        assert!(collapsed.contains("Inspect repository"), "{collapsed}");
+        assert!(!collapsed.contains("printf keyboard"), "{collapsed}");
     }
 
     #[test]

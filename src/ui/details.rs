@@ -3720,8 +3720,7 @@ mod description_context_tests {
                 .unwrap(),
         );
         view.items.toggle(key.clone(), false, &outcome);
-        let mut details =
-            Details::for_node(&view, "shared".into(), false).with_item_key(key);
+        let mut details = Details::for_node(&view, "shared".into(), false).with_item_key(key);
         for mode in [Mode::Fields, Mode::Original] {
             details.mode = mode;
             let context = details.described_command_context(&view).unwrap();
