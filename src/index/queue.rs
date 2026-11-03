@@ -1,5 +1,6 @@
 //! Authorized fixed-input job admission and durable queue keys.
 use super::*;
+use std::io::{self, Write};
 
 pub(super) fn bootstrap_key(keys: IndexKeys<'_>, work: &Work) -> String {
     let digest = hash(
@@ -143,9 +144,10 @@ impl IndexService {
                         inserted += queue_job(&tx, &space, &work)? as usize;
                     } else {
                         let bootstrap = bootstrap_key(IndexKeys::new(&key), &work);
+                        let value = encode_bootstrap_work(&work)?;
                         inserted += tx.execute(
                             "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
-                            params![bootstrap, encode_json(&work)?],
+                            params![bootstrap, value],
                         )?;
                         if !work.authorization.starts_with("new-finalized")
                             && let Some(mut prior) = json_meta::<Work>(&tx, &bootstrap)?
@@ -168,7 +170,47 @@ impl IndexService {
 }
 
 const RECOVERY_ROWS: i64 = 128;
+// A work record must fit one bounded recovery page, including its JSON metadata.
 const RECOVERY_BYTES: i64 = 1024 * 1024;
+const MAX_BOOTSTRAP_RECORD_BYTES: usize = RECOVERY_BYTES as usize;
+const BOOTSTRAP_RECOVERY_ERRORS: &str = "index.bootstrap_error.";
+
+struct BoundedJson(Vec<u8>, bool);
+
+impl Write for BoundedJson {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.0.len().saturating_add(bytes.len()) > MAX_BOOTSTRAP_RECORD_BYTES {
+            self.1 = true;
+            return Err(io::Error::other("bootstrap JSON limit exceeded"));
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn encode_bootstrap_work(work: &Work) -> Result<String, StorageError> {
+    if work.segment.text.len() > MAX_BOOTSTRAP_RECORD_BYTES {
+        return Err(StorageError::Operation(Box::new(err(
+            ErrorCode::InvalidArgument,
+            format!("bootstrap segment exceeds {MAX_BOOTSTRAP_RECORD_BYTES} bytes"),
+        ))));
+    }
+    let mut output = BoundedJson(Vec::with_capacity(4096), false);
+    if let Err(error) = serde_json::to_writer(&mut output, work) {
+        if output.1 {
+            return Err(StorageError::Operation(Box::new(err(
+                ErrorCode::InvalidArgument,
+                format!("bootstrap work record exceeds {MAX_BOOTSTRAP_RECORD_BYTES} bytes"),
+            ))));
+        }
+        return Err(StorageError::InvalidInput(error.to_string()));
+    }
+    String::from_utf8(output.0).map_err(|error| StorageError::InvalidInput(error.to_string()))
+}
 
 /// One transaction per page. The in-memory cursor may be discarded on restart:
 /// already converted jobs and bootstrap records are safe to visit again.
@@ -199,6 +241,22 @@ pub(super) fn recover_inflight_page(
             tx.commit()?;
             return Ok((modified, None, true));
         };
+        if size > RECOVERY_BYTES {
+            let reason = json!({
+                "kind": "oversized_legacy_bootstrap",
+                "message": "Legacy bootstrap work record exceeded the bounded recovery unit and was skipped",
+                "observed_bytes": size,
+                "limit_bytes": RECOVERY_BYTES,
+            });
+            tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
+            let error_key = format!("{BOOTSTRAP_RECOVERY_ERRORS}{}", hash(key.as_bytes()));
+            tx.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![error_key, reason.to_string()],
+            )?;
+            tx.commit()?;
+            return Ok((true, Some(key), false));
+        }
         if count == RECOVERY_ROWS || (count > 0 && size > RECOVERY_BYTES.saturating_sub(bytes)) {
             tx.commit()?;
             return Ok((modified, Some(last), false));
@@ -443,9 +501,13 @@ mod metadata_tests {
     }
 
     #[test]
-    fn recovery_processes_oversized_bootstrap_alone() {
+    fn recovery_skips_oversized_legacy_bootstrap_without_decoding_it() {
         let mut db = recovery_db();
-        let mut work = Work::pending(
+        let key = "index.bootstrap.a";
+        let value = "not JSON".to_owned() + &"x".repeat(RECOVERY_BYTES as usize + 1);
+        db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, value])
+            .unwrap();
+        let ordinary = Work::pending(
             Witness {
                 node_id: "n".into(),
                 revision: 1,
@@ -456,51 +518,91 @@ mod metadata_tests {
             Segment {
                 start: 0,
                 end: 1,
-                text: "x".repeat(RECOVERY_BYTES as usize + 1),
+                text: "x".into(),
             },
             "g",
             "test",
         );
-        work.state = "running".into();
-        let value = encode_json(&work).unwrap();
-        for key in ["index.bootstrap.a", "index.bootstrap.b"] {
-            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, value])
-                .unwrap();
-        }
+        db.execute(
+            "INSERT INTO app_meta VALUES('index.bootstrap.b',?1)",
+            [encode_json(&ordinary).unwrap()],
+        )
+        .unwrap();
+
         let (changed, cursor, done) = recover_inflight_page(&mut db, None).unwrap();
         assert!(changed && !done);
-        assert_eq!(cursor.as_deref(), Some("index.bootstrap.a"));
+        assert_eq!(cursor.as_deref(), Some(key));
         assert_eq!(
-            json_meta::<Work>(&db, "index.bootstrap.a")
-                .unwrap()
-                .unwrap()
-                .state,
-            "failed"
+            db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [key], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0
         );
+        let failure: Value = json_meta(
+            &db,
+            &format!("{BOOTSTRAP_RECOVERY_ERRORS}{}", hash(key.as_bytes())),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(failure["kind"], "oversized_legacy_bootstrap");
+        assert_eq!(failure["observed_bytes"], RECOVERY_BYTES + 9);
+        assert_eq!(failure["limit_bytes"], RECOVERY_BYTES);
+
+        // The oversized row is gone; the next legacy row is visited normally.
+        let (changed, _, done) = recover_inflight_page(&mut db, cursor).unwrap();
+        assert!(!changed && done);
         assert_eq!(
-            json_meta::<Work>(&db, "index.bootstrap.b")
-                .unwrap()
-                .unwrap()
-                .state,
-            "running"
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key='index.bootstrap_error.' || ?1",
+                [hash(key.as_bytes())],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
         );
-        // A new owner starts over without a cursor; the oversized failed row
-        // remains intact and the other row is eventually recovered.
-        let mut cursor = None;
-        loop {
-            let (_, next, done) = recover_inflight_page(&mut db, cursor).unwrap();
-            if done {
-                break;
-            }
-            cursor = next;
-        }
-        assert_eq!(
-            json_meta::<Work>(&db, "index.bootstrap.b")
-                .unwrap()
-                .unwrap()
-                .state,
-            "failed"
+    }
+
+    #[test]
+    fn bootstrap_writer_rejects_oversized_segments_and_serialized_metadata() {
+        let work = Work::pending(
+            Witness {
+                node_id: "n".into(),
+                revision: 1,
+                body_hash: None,
+                raw: None,
+            },
+            "text".into(),
+            Segment {
+                start: 0,
+                end: MAX_BOOTSTRAP_RECORD_BYTES + 1,
+                text: "x".repeat(MAX_BOOTSTRAP_RECORD_BYTES + 1),
+            },
+            "g",
+            "test",
         );
+        let error = encode_bootstrap_work(&work).unwrap_err();
+        assert!(error.to_string().contains("bootstrap segment exceeds"));
+
+        let work = Work::pending(
+            Witness {
+                node_id: "n".repeat(MAX_BOOTSTRAP_RECORD_BYTES),
+                revision: 1,
+                body_hash: None,
+                raw: None,
+            },
+            "text".into(),
+            Segment {
+                start: 0,
+                end: 1,
+                text: "x".into(),
+            },
+            "g",
+            "test",
+        );
+        let error = encode_bootstrap_work(&work).unwrap_err();
+        assert!(error.to_string().contains("bootstrap work record exceeds"));
     }
 
     #[test]
