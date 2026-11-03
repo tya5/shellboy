@@ -194,6 +194,36 @@ impl super::db::Store {
             .thread_id
             .as_deref()
             .filter(|_| sender.kind == SenderKind::Model);
+        if let Some(sender_thread) = target
+            && tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NOT NULL)",
+                    [sender_thread],
+                    |r| r.get::<_, bool>(0),
+                )
+                .map_err(sql)?
+        {
+            let receipt: String = tx
+                .query_row(
+                    "SELECT id FROM receipt WHERE message_node_id=?1",
+                    [&args.message_id],
+                    |r| r.get(0),
+                )
+                .map_err(sql)?;
+            deleted_sender_receipt_tx(tx, &receipt, at).map_err(sql)?;
+            tx.execute(
+                "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
+                [],
+            )
+            .map_err(sql)?;
+            return Ok(super::db::MutationResult {
+                committed_error: Some(
+                    ApiError::new(ErrorCode::InvalidState, "reply sender Thread was deleted")
+                        .details(json!({"reason":"sender_deleted","reply_state":"cancelled"})),
+                ),
+                ..Default::default()
+            });
+        }
         let target = match target {
             Some(target)
                 if tx

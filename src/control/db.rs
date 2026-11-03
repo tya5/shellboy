@@ -82,6 +82,8 @@ pub(crate) fn draft_send_fingerprint(
 
 #[derive(Debug, Clone, Default)]
 pub struct MutationResult {
+    /// A committed lifecycle transition that rejects the requested action.
+    pub(super) committed_error: Option<ApiError>,
     pub owner_shutdown: bool,
     pub result: Value,
     pub wake_threads: Vec<String>,
@@ -1162,10 +1164,11 @@ impl Store {
         tx.execute_batch("SAVEPOINT operation_mutation")
             .map_err(sql_error)?;
         let mut outcome = operation(&tx, &now);
-        let projected = outcome
-            .as_ref()
-            .map(|r| r.result.clone())
-            .map_err(Clone::clone);
+        let projected = outcome.as_ref().map_err(Clone::clone).and_then(|r| {
+            r.committed_error
+                .clone()
+                .map_or_else(|| Ok(r.result.clone()), Err)
+        });
         if let Err(error) = super::receipt::encode(operation_id, &projected) {
             outcome = Err(error);
         }
@@ -1176,6 +1179,10 @@ impl Store {
         tx.execute_batch("RELEASE operation_mutation")
             .map_err(sql_error)?;
         let saved = match &outcome {
+            Ok(result) if result.committed_error.is_some() => SavedOutcome {
+                result: None,
+                error: result.committed_error.clone(),
+            },
             Ok(result) => SavedOutcome {
                 result: Some(result.result.clone()),
                 error: None,
@@ -1185,9 +1192,12 @@ impl Store {
                 error: Some(error.clone()),
             },
         };
-        tx.execute("UPDATE operation_receipt SET state=?2,result_ref_json=?3,reserved_bytes=0 WHERE operation_id=?1",params![operation_id,if outcome.is_ok(){"completed"}else{"failed"},serde_json::to_string(&saved).unwrap()]).map_err(sql_error)?;
+        tx.execute("UPDATE operation_receipt SET state=?2,result_ref_json=?3,reserved_bytes=0 WHERE operation_id=?1",params![operation_id,if saved.error.is_none(){"completed"}else{"failed"},serde_json::to_string(&saved).unwrap()]).map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
-        outcome
+        outcome.and_then(|result| match result.committed_error.clone() {
+            Some(error) => Err(error),
+            None => Ok(result),
+        })
     }
 
     fn dispatch(
@@ -2418,6 +2428,7 @@ fn retry_run(
     )
     .map_err(sql_error)?;
     Ok(MutationResult {
+        committed_error: None,
         owner_shutdown: false,
         result: serde_json::to_value(run_details(tx, id)?).unwrap(),
         wake_threads: vec![],
