@@ -126,6 +126,8 @@ def check_migration(db, before, start, target):
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
+    if start == target:
+        return
     assert start in (14, 17, 19) and target in (14, 16, 17, 19) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):

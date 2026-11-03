@@ -130,6 +130,15 @@ class ReleaseUpgradeTests(unittest.TestCase):
         self.assertEqual(checks.snapshot(db), records)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (19,))
 
+    def test_public_schema24_noop_preserves_records_and_ledger(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 24)
+        before, records = checks.ledger(db), checks.snapshot(db)
+        checks.prepare_schema(db, 24)
+        self.assertEqual(checks.ledger(db), before)
+        self.assertEqual(checks.snapshot(db), records)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (24,))
+
     def test_public_schema17_to18_preserves_records_and_extends_index(self):
         db = self.fixture(17)
         db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.synthetic', '{\"tokens\":7}')")
