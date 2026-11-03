@@ -4598,3 +4598,213 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn proactive_target_escalates_before_threshold_recrossing() {
+    crate::test_watchdog::watchdog("proactive calibrated shortfall", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner =
+            proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        for n in 0..2 {
+            send(&control, &target, &format!("old-{n} {}", "a".repeat(4000))).await;
+            incoming(&control, &mut receive)
+                .await
+                .reply
+                .send((200, answer_with_usage("old answer", 50_000)))
+                .unwrap();
+            settled(&control, &target).await;
+        }
+        send(&control, &target, "current work").await;
+        let step = |n: u32, usage: u64| {
+            json!({"id":format!("step-{n}"),"status":"completed",
+            "usage":{"input_tokens":usage,"output_tokens":1},"output":[
+                {"type":"function_call","call_id":format!("step-{n}"),"name":"shell",
+                 "arguments":json!({"command":format!("echo STEP{n}")}).to_string()}
+            ]})
+        };
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, step(0, 201_061)))
+            .unwrap();
+        let prefix = incoming(&control, &mut receive).await;
+        assert_eq!(prefix.body["tools"], json!([]));
+        prefix
+            .reply
+            .send((200, answer("## Goal\nOld work retained")))
+            .unwrap();
+        let first_after = incoming(&control, &mut receive).await;
+        assert_ne!(first_after.body["tools"], json!([]));
+        first_after.reply.send((200, step(1, 184_622))).unwrap();
+        let widened = incoming(&control, &mut receive).await;
+        assert_eq!(
+            widened.body["tools"],
+            json!([]),
+            "shortfall must widen before 200K is recrossed"
+        );
+        assert!(widened.body["input"].to_string().contains("STEP0"));
+        widened
+            .reply
+            .send((200, answer("## Goal\nWork completed")))
+            .unwrap();
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("done", 140_000)))
+            .unwrap();
+        settled(&control, &target).await;
+        let events = proactive_events(&control, &target).await;
+        assert_eq!(events.len(), 2, "{events:#?}");
+        let ids: Vec<String> = events
+            .iter()
+            .map(|e| e["attempt_id"].as_str().unwrap().to_owned())
+            .collect();
+        let records: Vec<String> = control
+            .store
+            .database
+            .call(move |db| {
+                ids.iter()
+                    .map(|id| {
+                        db.query_row(
+                            "SELECT error_json FROM model_attempt WHERE id=?1",
+                            [id],
+                            |r| r.get(0),
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(Into::into)
+            })
+            .await
+            .unwrap();
+        assert!(records.iter().any(|record| {
+            let v: Value = serde_json::from_str(record).unwrap();
+            v["automatic_trim_attempt"]["target_verification"]["outcome"] == "insufficient"
+                && v["automatic_trim_attempt"]["target_verification"]["input_tokens"] == 184_622
+        }));
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn proactive_prefix_shortfall_reconsiders_older_turn() {
+    crate::test_watchdog::watchdog("proactive prefix shortfall across turns", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        for n in 0..2 {
+            send(&control, &target, &format!("old-{n} {}", "a".repeat(4000))).await;
+            incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("old answer", 50_000))).unwrap();
+            settled(&control, &target).await;
+        }
+        send(&control, &target, &format!("TURN_A_MARKER {}", "b".repeat(4000))).await;
+        incoming(&control, &mut receive).await.reply.send((200, json!({"id":"step-a","status":"completed", "usage":{"input_tokens":201_061,"output_tokens":1},"output":[{"type":"function_call","call_id":"step-a","name":"shell","arguments":json!({"command":"echo A"}).to_string()}]}))).unwrap();
+        let prefix = incoming(&control, &mut receive).await;
+        assert_eq!(prefix.body["tools"], json!([]));
+        prefix.reply.send((200, answer("## Goal\nOld work retained"))).unwrap();
+        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("turn A finished", 184_622))).unwrap();
+        settled(&control, &target).await;
+        send(&control, &target, "TURN_B_MARKER").await;
+        let mut saw_new_older = false;
+        let mut next = incoming(&control, &mut receive).await;
+        assert_eq!(next.body["tools"], json!([]), "newly eligible older context must be summarized despite the prior shortfall");
+        for _ in 0..20 {
+            if next.body["tools"] != json!([]) {
+                break;
+            }
+            saw_new_older |= next.body["input"].to_string().contains("old-1");
+            next.reply.send((200, answer("## Goal\nOlder work retained"))).unwrap();
+            next = incoming(&control, &mut receive).await;
+        }
+        assert!(saw_new_older, "summary must include the newly eligible older Turn");
+        assert_ne!(next.body["tools"], json!([]), "summary requests must terminate");
+        next.reply.send((200, answer_with_usage("turn B finished", 140_000))).unwrap();
+        settled(&control, &target).await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn proactive_target_widens_in_one_attempt_and_keeps_usage() {
+    crate::test_watchdog::watchdog("proactive target same-attempt widening", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner =
+            proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        for n in 0..2 {
+            send(&control, &target, &format!("old-{n} {}", "a".repeat(4000))).await;
+            incoming(&control, &mut receive)
+                .await
+                .reply
+                .send((200, answer_with_usage("old answer", 50_000)))
+                .unwrap();
+            settled(&control, &target).await;
+        }
+        send(
+            &control,
+            &target,
+            &format!("current {}", "b".repeat(40_000)),
+        )
+        .await;
+        for (n, tokens) in [(0, 50_000), (1, 50_000), (2, 201_061)] {
+            let response = json!({"id":format!("widen-{n}"),"status":"completed",
+            "usage":{"input_tokens":tokens,"output_tokens":1},"output":[
+                {"type":"function_call","call_id":format!("widen-{n}"),"name":"shell",
+                 "arguments":json!({"command":format!("echo WIDEN{n}")}).to_string()}
+            ]});
+            incoming(&control, &mut receive)
+                .await
+                .reply
+                .send((200, response))
+                .unwrap();
+        }
+        let prefix = incoming(&control, &mut receive).await;
+        assert_eq!(prefix.body["tools"], json!([]));
+        prefix
+            .reply
+            .send((200, answer_with_usage("## Goal\nOld work", 11)))
+            .unwrap();
+        let middle = incoming(&control, &mut receive).await;
+        assert_eq!(
+            middle.body["tools"],
+            json!([]),
+            "widen before the next ordinary request"
+        );
+        assert!(middle.body["input"].to_string().contains("WIDEN0"));
+        middle
+            .reply
+            .send((200, answer_with_usage("## Goal\nWork done", 13)))
+            .unwrap();
+        let after = incoming(&control, &mut receive).await;
+        assert_ne!(after.body["tools"], json!([]));
+        after
+            .reply
+            .send((200, answer_with_usage("done", 100_000)))
+            .unwrap();
+        settled(&control, &target).await;
+        let events = proactive_events(&control, &target).await;
+        assert_eq!(events.len(), 1, "{events:#?}");
+        assert_eq!(events[0]["metrics"]["summary_usage"]["requests"], 2);
+        assert_eq!(
+            events[0]["metrics"]["summary_usage"]["input_tokens"]["known_sum"],
+            24
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
+}

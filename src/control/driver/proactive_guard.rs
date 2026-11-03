@@ -207,6 +207,21 @@ impl Guard {
     }
 }
 
+pub(super) fn has_new_marks(previous: &[String], current: &[String], kind: &str) -> bool {
+    current
+        .iter()
+        .filter(|mark| mark.starts_with(kind))
+        .any(|mark| {
+            let Some((key, chars)) = parse_mark(mark) else {
+                return false;
+            };
+            match previous.binary_search_by(|old| mark_key(old).cmp(key)) {
+                Ok(index) => parse_mark(&previous[index]).is_some_and(|(_, old)| chars > old),
+                Err(_) => true,
+            }
+        })
+}
+
 fn hex_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -511,6 +526,20 @@ mod tests {
             saved.has_new_targets(None),
             "incomplete evidence must not be mistaken for no targets"
         );
+    }
+
+    #[test]
+    fn active_shortfall_requires_a_new_or_larger_middle() {
+        let before = vec![mark("middle", 1, 100)];
+        assert!(!has_new_marks(&before, &before, "middle:"));
+        assert!(!has_new_marks(&before, &[mark("middle", 1, 99)], "middle:"));
+        assert!(has_new_marks(&before, &[mark("middle", 1, 101)], "middle:"));
+        assert!(has_new_marks(&before, &[mark("middle", 2, 1)], "middle:"));
+        assert!(!has_new_marks(
+            &before,
+            &[mark("spill", 2, 1000)],
+            "middle:"
+        ));
     }
 
     #[test]

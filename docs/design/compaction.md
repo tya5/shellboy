@@ -313,7 +313,9 @@ the read snapshot closes, with current capture revisions and explicit limits.
 Positioning: in normal operation the conversation stays at a low token count.
 A momentarily huge input is never blocked or pre-checked; it is sent. Only after
 its response reports input tokens at or above the threshold does the Driver
-compact, at the next safe request boundary (one step late is accepted). The
+start proactive compaction, at the next safe request boundary (one step late is
+accepted). A measured #209 target shortfall can continue at a subsequent safe
+boundary below the threshold. The
 existing explicit-overflow reduction (#50) remains the last-resort fallback, so
 the conversation always continues. Users who want a persistently large context
 opt out with `auto_at_tokens = 0`.
@@ -351,8 +353,8 @@ propagate; cancellation keeps its existing error behavior. Manual compact keeps
 its existing contract. Replay character reduction is not a guarantee of provider
 token reduction.
 
-Progress gate (#180): crossing the provider threshold is necessary but not
-sufficient. Before starting, a bounded read-only forecast applies the same
+Progress gate (#180): crossing the provider threshold, or verifying a #209
+target shortfall, is necessary but not sufficient. Before starting, a bounded read-only forecast applies the same
 ordinary Turn/tool fences, protection checks and reducing-spill projection. If
 there are no eligible sources, no compaction is started, no summary request is
 sent and no `no_safe_reduction` attempt is written. If an attempt or its summary
@@ -456,12 +458,11 @@ The #182 shape below supersedes its sections 1-4 and 7.
 Order (user decision 2026-11-03, reverses #181's "instead of"): in the #125
 proactive attempt the ordinary summary of earlier Turns runs first, as usual,
 because recent context contributes more to quality. The active-Turn summary
-runs only when that prefix holds nothing but earlier summaries
-(`policy::unsummarized_prefix`), or when the previous attempt in the same Run
-adopted the prefix summary and a fresh measurement is still at or above the
-threshold (ephemeral per-`drive` flag; a fresh measurement below the threshold
-clears it). Still one summary operation per attempt; the #180 progress gate and
-the fresh-measurement rule are unchanged. The attempt record has
+runs when the prefix holds nothing but earlier summaries, or when a previous
+prefix summary remains above the measured #209 target. With a calibrated plan,
+a prefix and an active-Turn summary may also run in the same attempt if their
+measured replay-character reduction is short of the planned reduction. The
+#180 progress gate and the fresh-measurement rule remain in force. The attempt record has
 `midturn: {"skipped":"prefix_first"}` when the prefix summary ran,
 `{"scope":"active_turn"}` when the active-Turn summary ran,
 `{"skipped":"no_target"}` when it had no target and `{"skipped":"no_new_target"}`
@@ -605,3 +606,54 @@ selected Thread list). Turn/Run scopes keep records whose snapshot saw that
 Turn/Run as current; a period selects by first-request time. `model_attempts`
 remains conversation requests only. Coverage `summary` is `recorded`. Grouped
 `usage get --group-by` stays attempt-only (`coverage.summary: ungrouped_only`).
+
+## Calibrated proactive target (#209)
+
+The target is 80% of `auto_at_tokens`. In the #208 observations at the
+200,000-token threshold, W7 had five post-compaction inputs in the 120,000 to
+159,999 range, followed by a median 39 requests to the next marker; W3 had
+four followed by a median 39.5. W7's five inputs at or above 180,000 were
+followed by a median 9 requests, versus W4's 17 with median 6. These are
+nearest-request observations, not proof of causal intervals or of what each
+summary retained. The 160,000 target is the upper bound of the observed
+120,000-159,999 band and retains more context than the 8,000-14,000 outcomes.
+
+The #153 token-growth retry gate was replaced by #180's eligible-source witness:
+current `proactive.rs` clears that witness on a successful adoption. An adopted
+200K-to-190K reduction is therefore not a no-progress outcome; the next fresh
+report below 200K returns normally, and 10K of subsequent growth can cross the
+threshold again in a few requests. Neither gate required a useful post-adoption
+target.
+
+Calibrate the character-reduction plan from input tokens and serialized input
+characters recorded for the same completed request on the same connection and
+model. Use integer arithmetic and round the required reduction upward. This is a
+prediction, not a tokenizer or a guaranteed bound: fixed instructions,
+attachments, model changes and differing text can change the ratio. When the
+pair is unavailable, preserve the existing behavior; never invent a ratio.
+
+An adopted proactive attempt waits for fresh provider-reported usage. Record
+whether it reached the target on the triggering attempt's existing observation.
+Above target, an eligible next attempt must escalate its source scope, older
+Turns first, then the active-Turn middle, rather than repeat the shallow plan.
+Do not treat unknown or stale usage as success or failure. Respect existing
+atomic adoption, cancellation, protected groups, bounded work and no-progress
+fences. If no wider safe source exists, defer rather than repeatedly summarize
+identical sources. A provider that never reports usage retains the existing
+behavior; unmeasurable target achievement is not represented as success.
+
+The outstanding target is one bounded Thread-owned `app_meta` value
+(`compact.automatic_target.<thread>`; at most 1 MiB), not a new worker or
+queue. It stores the triggering attempt, target, scope, Turn and bounded
+post-adoption candidate witness; it is removed on Thread deletion, target
+success or connection/model change, and replaced by the next adopted target
+attempt. Fresh verification is also attached to the triggering attempt's
+existing `automatic_trim_attempt` record. For an insufficient active-Turn
+summary, only growth of eligible middle candidates permits another attempt in
+the same Turn; incomplete candidate evidence does not establish growth. A new
+Turn restores ordinary prefix selection, including after an insufficient prefix;
+the outstanding shortfall remains eligible below the threshold, but must not
+force active-Turn-first ordering across that boundary. Spill-only shortfalls
+retain their separate escalation policy. Local replay-character changes guide
+whether to widen in the same attempt; only the next provider report verifies
+the outcome. No independent token or output-size guarantee is implied.

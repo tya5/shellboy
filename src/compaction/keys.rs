@@ -16,6 +16,9 @@ impl<'a> CompactionKeys<'a> {
     pub(crate) fn automatic_guard(self) -> String {
         format!("compact.automatic_guard.{}", self.0)
     }
+    pub(crate) fn automatic_target(self) -> String {
+        format!("compact.automatic_target.{}", self.0)
+    }
     pub(crate) fn automatic_status(self) -> String {
         format!("compact.automatic_status.{}", self.0)
     }

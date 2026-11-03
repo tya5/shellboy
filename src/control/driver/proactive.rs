@@ -2,6 +2,8 @@
 //! Uses ordinary safe boundaries, recording partial spill adoption separately.
 use super::*;
 
+mod target;
+
 pub(super) const REASON: &str = "proactive_threshold";
 
 /// Loaded lazily from durable Thread metadata; unlike token growth, the
@@ -26,6 +28,12 @@ enum Measurement {
 struct Evidence {
     attempt: String,
     input_tokens: u64,
+    input_characters: Option<u64>,
+    insufficient_prefix: bool,
+    prior_turn_prefix: bool,
+    insufficient_spill: bool,
+    exhausted_active: bool,
+    baseline_marks: Option<Vec<String>>,
 }
 
 /// Called at the request boundary while the Thread boundary guard is held and
@@ -75,6 +83,7 @@ pub(super) async fn maybe_compact(
         }
     }
     let thread = snapshot.thread.clone();
+    let current_turn = snapshot.turn.clone();
     let evidence = control
         .store
         .database
@@ -82,20 +91,58 @@ pub(super) async fn maybe_compact(
             let raw = crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?;
             // Only a provider-reported count triggers; unknown usage never does,
             // and usage measured before an adopted replacement is stale.
-            Ok(raw
-                .latest_reported_input()
-                .and_then(|(attempt, tokens, stale)| {
-                    tokens.filter(|_| !stale).map(|input_tokens| {
-                        if input_tokens < threshold {
-                            Measurement::BelowThreshold
+            let Some((attempt, Some(input_tokens), false)) = raw.latest_reported_input() else {
+                return Ok(None);
+            };
+            let target_key = crate::compaction::CompactionKeys::new(&thread).automatic_target();
+            let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=1048576", [&target_key], |row| row.get(0)).optional()?;
+            let mut insufficient_prefix = false;
+            let mut prior_turn_prefix = false;
+            let mut insufficient_spill = false;
+            let mut exhausted_current_turn = false;
+            let mut baseline_marks = None;
+            if let Some(mut pending) = pending.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                && let (Some(previous), Some(target)) = (pending["attempt"].as_str().map(str::to_owned), pending["target_tokens"].as_u64())
+                && previous != attempt
+            {
+                let same_model: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt old JOIN model_attempt new ON old.profile_id=new.profile_id AND old.model_id=new.model_id WHERE old.id=?1 AND new.id=?2)", params![previous,attempt], |row| row.get(0))?;
+                if !same_model || target != ((threshold as u128 * 4) / 5) as u64 {
+                    db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
+                } else {
+                    if pending["verified"].is_null() {
+                        let insufficient = target::verify(target, input_tokens) == target::Verification::Insufficient;
+                        let outcome = if insufficient {"insufficient"} else {"met"};
+                        let verification = json!({"attempt_id":attempt,"input_tokens":input_tokens,"target_tokens":target,"outcome":outcome}).to_string();
+                        pending["verified"] = json!(outcome);
+                        let tx = db.transaction()?;
+                        tx.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.target_verification',json(?1)) WHERE id=?2 AND json_valid(error_json)", params![verification,previous])?;
+                        tx.execute("UPDATE app_meta SET value=?2 WHERE key=?1", params![target_key,pending.to_string()])?;
+                        tx.commit()?;
+                    }
+                    if pending["verified"] == "met" {
+                        db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
+                    } else if pending["scope"] == "prefix" {
+                        if pending["turn"] == current_turn {
+                            insufficient_prefix = true;
                         } else {
-                            Measurement::Ready(Evidence {
-                                attempt: attempt.to_owned(),
-                                input_tokens,
-                            })
+                            prior_turn_prefix = true;
                         }
-                    })
-                }))
+                    } else if pending["scope"] == "spill" {
+                        insufficient_spill = true;
+                    } else if pending["scope"] == "active_turn" && pending["turn"] == current_turn {
+                        exhausted_current_turn = true;
+                        baseline_marks = serde_json::from_value(pending["marks"].clone()).ok();
+                    }
+                }
+            }
+            if input_tokens < threshold && !insufficient_prefix && !prior_turn_prefix && !insufficient_spill && !exhausted_current_turn {
+                return Ok(Some(Measurement::BelowThreshold));
+            }
+            let input_characters = db.query_row(
+                "SELECT CASE WHEN json_valid(input_manifest_json) THEN CASE WHEN json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END END FROM model_attempt WHERE id=?1",
+                [attempt], |row| row.get::<_, Option<i64>>(0),
+            )?.and_then(|n| u64::try_from(n).ok());
+            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix, prior_turn_prefix, insufficient_spill, exhausted_active: exhausted_current_turn, baseline_marks })))
         })
         .await
         .map_err(storage_error);
@@ -183,14 +230,27 @@ pub(super) async fn maybe_compact(
             .as_ref()
             .is_none_or(|marks| marks.iter().any(|mark| mark.starts_with(kind))),
     };
-    let spill_new = has_kind("spill:");
-    let summary_new = has_kind("summary:")
+    let widened_active = evidence.exhausted_active
+        && match (&evidence.baseline_marks, &marks) {
+            (Some(previous), Some(current)) => guard::has_new_marks(previous, current, "middle:"),
+            _ => false,
+        };
+    let spill_new = !evidence.insufficient_prefix
+        && !evidence.insufficient_spill
+        && !evidence.exhausted_active
+        && has_kind("spill:");
+    let summary_new = !evidence.insufficient_prefix
+        && has_kind("summary:")
         && !(marks.is_none()
             && budget
                 .guard
                 .as_ref()
                 .is_some_and(|guard| guard.blocks_unknown_summary(snapshot)));
-    let middle_new = has_kind("middle:");
+    let middle_new = if evidence.exhausted_active {
+        widened_active
+    } else {
+        has_kind("middle:")
+    };
     let any_summary_new = middle_new || summary_new;
     let no_growth = !spill_new && !any_summary_new;
     let ids = crate::diagnostics::DiagnosticIds {
@@ -287,10 +347,20 @@ pub(super) async fn maybe_compact(
     control.changed(&snapshot.thread);
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
+    let target_plan = evidence
+        .input_characters
+        .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
     let mut midturn = Value::Null;
-    let prefer_active = std::mem::take(&mut budget.prefix_adopted);
+    let prefer_active = evidence.insufficient_prefix
+        || (!evidence.prior_turn_prefix && std::mem::take(&mut budget.prefix_adopted));
+    if evidence.prior_turn_prefix {
+        budget.prefix_adopted = false;
+    }
     let mut summary_scope = "";
     let result: Result<Value, ApiError> = async {
+    let before_characters = if target_plan.is_some() {
+        Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
+    } else { None };
     // #182: spill rewrites an earlier tool result while later output is
     // kept, so it waits for a boundary where the tool loop is closed.
     let spill = if spill_new && !open_loop {
@@ -309,6 +379,43 @@ pub(super) async fn maybe_compact(
         Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope).await
         {
             Ok(mut summary) => {
+                if summary_scope == "prefix" && middle_new && !slot.stop.is_cancelled()
+                    && let (Some(plan), Some(before)) = (target_plan, before_characters)
+                {
+                    let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
+                    if before.saturating_sub(after) < plan.remove_characters {
+                        match control.compactor.summarize_active_turn(&snapshot.thread, slot.stop.clone()).await {
+                            Ok(active) if !active.no_target => {
+                                summary.spilled_groups = summary.spilled_groups.saturating_add(active.spilled_groups);
+                                summary.source_nodes = summary.source_nodes.saturating_add(active.source_nodes);
+                                summary.created_parts = summary.created_parts.saturating_add(active.created_parts);
+                                summary.reused_parts = summary.reused_parts.saturating_add(active.reused_parts);
+                                summary.source_characters = summary.source_characters.zip(active.source_characters).map(|(a,b)| a.saturating_add(b));
+                                summary.summary_characters = summary.summary_characters.zip(active.summary_characters).map(|(a,b)| a.saturating_add(b));
+                                summary.summary_limit = summary.summary_limit.zip(active.summary_limit).map(|(a,b)| a.saturating_add(b));
+                                summary.model_requests = summary.model_requests.zip(active.model_requests).map(|(a,b)| a.saturating_add(b));
+                                if let (Some(total), Some(usage)) = (&mut summary.summary_usage, &active.summary_usage) {
+                                    total.merge(usage);
+                                } else {
+                                    summary.summary_usage = None;
+                                }
+                                summary.summary_node_id = active.summary_node_id;
+                                summary.original_node_ids.extend(active.original_node_ids);
+                                summary.no_target = false;
+                                midturn = json!({"scope":"active_turn", "reason":"target_shortfall"});
+                                summary_scope = "active_turn";
+                            }
+                            Ok(_) => {}
+                            Err(error) if error.is_storage_failure() || slot.stop.is_cancelled() => return Err(error),
+                            Err(error) => {
+                                summary.spilled_groups += spill.spilled_groups;
+                                summary.source_nodes += spill.source_nodes;
+                                summary.original_node_ids.extend(spill.original_node_ids);
+                                return Ok(json!({"outcome":"adopted","summary":summary,"summary_error":error}));
+                            }
+                        }
+                    }
+                }
                 summary.spilled_groups += spill.spilled_groups;
                 summary.source_nodes += spill.source_nodes;
                 summary.original_node_ids.extend(spill.original_node_ids);
@@ -460,6 +567,9 @@ pub(super) async fn maybe_compact(
     if !midturn.is_null() {
         observation["midturn"] = midturn;
     }
+    if let Some(plan) = target_plan {
+        observation["target_plan"] = json!({"target_tokens":plan.target_tokens,"remove_characters":plan.remove_characters,"input_characters":evidence.input_characters});
+    }
     observation["trigger"] = json!({
         "auto_at_tokens": threshold,
         "input_tokens": evidence.input_tokens,
@@ -467,16 +577,43 @@ pub(super) async fn maybe_compact(
     });
     // Record on the attempt whose reported usage triggered this decision, in the
     // existing automatic-compaction field and partial index (no new table).
+    let baseline = if adopted && target_plan.is_some() && summary_scope == "active_turn" {
+        guard::candidates(control, &snapshot.thread, None)
+            .await
+            .ok()
+            .flatten()
+            .map(|c| c.marks)
+    } else {
+        None
+    };
+    let pending_target = if adopted {
+        target_plan.map(|plan| {
+            let scope = if summary_scope.is_empty() { "spill" } else { summary_scope };
+            let mut value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":scope,"turn":snapshot.turn,"marks":baseline});
+            if value.to_string().len() > 1_048_576 {
+                value["marks"] = Value::Null;
+            }
+            value.to_string()
+        })
+    } else {
+        None
+    };
+    let target_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_target();
     let body = observation.to_string();
     let attempt = evidence.attempt;
     control
         .store
         .database
         .call(move |db| {
-            db.execute(
+            let tx = db.transaction()?;
+            tx.execute(
                 "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json(?1)) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json))",
                 params![body, attempt],
             )?;
+            if let Some(pending) = pending_target {
+                tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![target_key,pending])?;
+            }
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -491,11 +628,11 @@ struct Order {
     ordinary_new: bool,
 }
 
-/// One summary operation per attempt. #182 order: the ordinary summary of
+/// Select one summary operation. #182 order: the ordinary summary of
 /// earlier Turns first (oldest context matters least); the active-Turn
 /// summary only when that prefix has nothing but earlier summaries, or when
-/// the previous attempt adopted the prefix summary and a fresh measurement is
-/// still at or above the threshold (`prefer_active`).
+/// the previous attempt adopted the prefix summary in this Turn and a fresh
+/// measurement remains above the calibrated target or threshold (`prefer_active`).
 async fn summarize_once(
     control: &Arc<Control>,
     thread: &str,

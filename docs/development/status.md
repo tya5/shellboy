@@ -4384,3 +4384,8 @@ owner restart. Full final-tree local checks were restarted after interruption;
 no interrupted execution is claimed successful. W8 second review and exact-tip
 three-OS CI remain gates before W4 integration. #194/#197 closing comments wait
 until the reviewed chain is on main.
+
+#209 calibrated proactive target is under development on its task branch.
+The target uses paired provider usage and request-character measurements;
+verification, loop regression and three-OS CI results are pending. It is not
+approved or integrated.
