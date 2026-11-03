@@ -4422,3 +4422,8 @@ CI on this requested baseline selects Linux; dispatch and outcome are pending.
 and pending-reply index 26. Synthetic upgrade checks cover starts 24, 25, and
 26; W3 recovery authorization, independent barrier release, bounded bootstrap
 records, and bilingual status remain in the rebased branch.
+
+#211: shutdown PTY observation now tracks persistent cells at completed frames,
+with readiness-driven reads and bounded VT/screen diagnostics. Production grace,
+input and shutdown behavior are unchanged. Local checks and native 50-before /
+50-after observations are pending; W8 owns review and landing.

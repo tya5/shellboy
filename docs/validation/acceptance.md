@@ -9322,3 +9322,15 @@ no installed binary, real provider traffic, or user data was used.
 from schemas 24, 25, and 26, preserving rows and ledger and checking the recovery
 index plan. Python scripts suite: 193 passed. Rust and 3-OS CI are pending; no
 installed binary, real provider, or user data was exercised.
+
+## #211 shutdown PTY screen synchronization (2026-11-03)
+
+Investigation found the failed run 41706512517 emits `W/Enter` at row 14,
+column 5, then moves to column 14 for `Keep waiting`: the expected colon at
+column 12 is not emitted in that diff. A raw search for `W/Enter:` cannot
+recognize retained cells. Regression coverage keeps that colon across a
+fragmented diff and checks only completed screens, plus replaced/returned
+markers. The pending macOS comparison runs the unchanged baseline and the
+corrected test 50 times each on one native runner, with per-iteration logs and
+exact source SHA in each result. Repeat counts, independent checks and 3-OS CI
+are pending; do not infer a failure rate or successful fix from this entry.

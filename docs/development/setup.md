@@ -381,3 +381,20 @@ literal's text/ID did not change. `--check` fails while
 (c) remains, and stale reviewed IDs are errors. Conservative (c) candidates
 still require source-boundary review; never bulk-translate provider/user/saved
 content. See [the Stage C table](../validation/language-audit-stage-c.md).
+
+### Focused shutdown PTY repetitions
+
+For #211, dispatch `ci.yml` with `shutdown_repeats=true` and an exact
+`shutdown_baseline` SHA. Only the native `macos-latest` observation job runs
+(plus CI reuse metadata); it builds and repeats the unchanged baseline first,
+then the current tip, 50 times each. `shutdown-repeats-macOS` retains build logs,
+per-iteration logs and both `results.json` records. Baseline failures are
+observations, not silently retried; the current phase must have zero failures.
+Check both records contain 50 results and their intended source SHAs before
+reporting a comparison. No provider calls or user data are needed.
+
+The same helper runs locally as
+`python3 scripts/dev/repeat-shutdown-test.py --output NEW_DIRECTORY --count 5`.
+It builds one registered integration target, refuses a zero-test selection,
+and records every failure instead of stopping on the first. In the sandbox,
+run it through `rust-slot` so the shared binary cannot change during a repeat.

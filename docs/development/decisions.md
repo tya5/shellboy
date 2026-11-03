@@ -3205,3 +3205,21 @@ Audit found reply-duty admission capped at128 but no cap on ordinary held sends.
 Thus shared send/run.retry recovery uses committed units and retains a
 recoverable Turn until drained; no compatibility writer exemption is added.
 Source: user instruction in this #194 chain integration task, 2026-11-03.
+
+## 2026-11-03: Observe shutdown PTY cells, not emitted byte substrings (#211)
+
+The shutdown subprocess fixture keeps a persistent VT screen across all reads
+and key actions. Ratatui emits changed cells, not complete labels: unchanged
+punctuation or letters can be retained at their old coordinates and never
+appear in a contiguous output substring. A frame is observed after Ratatui's
+cursor visibility command at the end of a draw. Success requires all expected
+labels in that same completed screen after the action, not elapsed time or a
+label from an earlier screen. Readiness uses Tokio's Unix AsyncFd; the existing
+60-second deadlock watchdog and 50 ms application grace are unchanged.
+
+Pin test-only `vt100` 0.16.2 rather than writing another partial VT parser. It
+handles cell persistence, cursor movement, styles, OSC and fragmented UTF-8;
+no production dependency or terminal input behavior changes. The fixture keeps
+a bounded 4 MiB transcript and prints the completed/live screens and JSON VT
+capture on observation failure. This is synthetic temporary-data evidence,
+not a claim about physical terminal fonts or installed applications.

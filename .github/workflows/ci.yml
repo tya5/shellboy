@@ -295,6 +295,22 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
         run: python3 current/scripts/dev/repeat-shutdown-test.py --source current --output evidence/after --count 50
+      - name: Require a complete exact-source comparison
+        env:
+          BASELINE_SHA: ${{ inputs.shutdown_baseline }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          for phase, sha in [('before', os.environ['BASELINE_SHA']), ('after', os.environ['GITHUB_SHA'])]:
+              result = json.loads(Path(f'evidence/{phase}/results.json').read_text())
+              assert result['sha'] == sha, result
+              assert len(result['results']) == result['count'] == 50, result
+              assert not result.get('build_exit'), result
+              if phase == 'after':
+                  assert result['failures'] == 0, result
+              print(phase, result['sha'], result['failures'], '/', result['count'])
+          PY
       - name: Retain both exact-source results and PTY failure logs
         if: always()
         uses: actions/upload-artifact@v4
