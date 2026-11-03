@@ -75,8 +75,9 @@ Shellboy layout uses the observation, with unknown conservatively reserving two
 cells for ambiguous characters and component widths for emoji sequences.
 Ratatui and upstream renderers retain their own default width behavior, so on a
 mismatching terminal their internal layout can differ from Shellboy's. Shellboy
-must use width-invariant ASCII decorations for a two-column or unknown observation; existing direct `SELECTED` and `CHILD` glyph
-uses do not yet meet this requirement and must be corrected. This does not
+uses width-invariant ASCII decorations for a two-column or unknown observation;
+some direct app glyphs are Unicode East Asian Neutral rather than ASCII, so the
+fallback is not a blanket guarantee for every terminal or font. It also does not
 guarantee alignment of preserved user/model text on every terminal;
 when one column is measured it restores the original application-owned glyphs.
 Raw content and copy/save paths do not change. A pluggable Ratatui width policy
