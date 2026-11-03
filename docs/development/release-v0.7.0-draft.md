@@ -73,11 +73,10 @@ behavior.
 - Conversation-history row clicks now expand only eligible tool/notice rows;
   ordinary message rows do not trigger disclosure, and command details appear
   only while their tool row is expanded (#177).
-- Narrow conversation panes preserve wide glyphs and wrap most nested rows
-  without clipping. Fallback body hints remain on their own rows. This work is
-  not complete: the wrapped continuation lines of the "> Original reference" row
-  and the "Display details limited · F6 Original" row still lack indentation
-  (#179, reopened).
+- Narrow conversation panes preserve wide glyphs and wrap nested rows without
+  clipping or losing indentation, including the wrapped lines of the "> Original
+  reference" row and the "Display details limited" row. Fallback body hints
+  remain on their own rows (#179).
 - Overflow recovery trims retain every user input from the active Turn (#185).
 - Watch results retain their order and separators in English; more recovery,
   receipt and operation diagnostics display in the selected UI language
