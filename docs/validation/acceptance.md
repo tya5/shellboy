@@ -9238,3 +9238,18 @@ current tree; 257-message ordered/reopen/stale-retry and atomic rollback tests
 are included. Both history index25 and reply index26, their ledger entries and
 fresh/25 upgrade equivalence are asserted. No installed-binary changes, real
 providers, embeddings, user data, final CI success or main integration claimed.
+
+### #194 final review follow-ups: repair/release windows and upgrade mock
+
+The bounded repair window can be consumed by unavailable sources before an
+older accepted terminal receipt is classified held. Release selection and its
+continuation predicate therefore include eligible accepted and held receipts;
+source availability still guards admission. Regressions place 128 unavailable
+rows before an older accepted and newer held row, and separately retain a lone
+accepted unavailable remainder across another resume pass. These assertions
+prevent ordering inversion and premature exit from recovery_wait.
+
+The public-upgrade synthetic provider returns a final message, not an explicit
+reply. Its schema26 exec invocation selects `--result turn-end` to continue
+checking this preserved non-reply compatibility path. The default explicit
+reply mode is covered independently by exec-client integration tests.

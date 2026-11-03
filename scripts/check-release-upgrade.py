@@ -364,7 +364,10 @@ def main():
         assert 'SYNTHETIC_RAG_CONTENT' in json.dumps(cli(new, upgraded, 'rag', 'search', '--scope', 'source:synthetic-documents', '--query', 'SYNTHETIC_RAG_CONTENT'))
         schema = root / 'result.schema.json'
         schema.write_text('{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}', encoding='utf-8')
-        execution = subprocess.run([str(new), '--config', str(config), '--data-dir', str(upgraded), 'exec', '--schema', str(schema), '--thread', seed, 'UPGRADE_EXEC'], cwd=work, env=env, capture_output=True, text=True, timeout=90)
+        # This fixture returns an end message, not an explicit correlated reply.
+        # Preserve that upgrade check even after exec's default changes to reply.
+        result_args = ['--result', 'turn-end'] if args.expected_new_schema >= 26 else []
+        execution = subprocess.run([str(new), '--config', str(config), '--data-dir', str(upgraded), 'exec', *result_args, '--schema', str(schema), '--thread', seed, 'UPGRADE_EXEC'], cwd=work, env=env, capture_output=True, text=True, timeout=90)
         assert execution.returncode == 0, (execution.stdout, execution.stderr)
         assert json.loads(execution.stdout) == {'value': 'upgraded mock exec'}
         execution_facts = json.loads(execution.stderr)

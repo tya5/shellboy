@@ -96,7 +96,7 @@ pub(super) fn interrupted_remaining(db: &Connection, thread: &str) -> rusqlite::
     let terminal = format!(
         "({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))"
     );
-    db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted'))))"), [thread], |r| r.get(0))
+    db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') AND path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted'))))"), [thread], |r| r.get(0))
 }
 
 /// Caller has established a new Run under human/live-owning-parent authority.
@@ -115,8 +115,10 @@ pub(crate) fn recover_on_resume_tx(
         "({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))"
     );
     // Merge interrupted and current recovery input before applying LIMIT: neither
-    // source may overtake an older receipt from the other source.
-    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id,COALESCE(run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait',0) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND ((path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted')))) OR (run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait')) AND EXISTS(SELECT 1 FROM node source WHERE source.id=receipt.message_node_id AND source.payload_json IS NOT NULL AND source.deleted_reason IS NULL) ORDER BY created_at,rowid LIMIT 128"))?;
+    // source may overtake an older receipt from the other source. Repair has
+    // its own bounded window: eligible accepted rows beyond it must participate
+    // directly, rather than waiting for repair while newer held rows pass them.
+    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id,COALESCE(run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait',0) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') AND ((path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted')))) OR (run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait')) AND EXISTS(SELECT 1 FROM node source WHERE source.id=receipt.message_node_id AND source.payload_json IS NOT NULL AND source.deleted_reason IS NULL) ORDER BY created_at,rowid LIMIT 128"))?;
     let rows = q
         .query_map(params![thread, run, turn], |r| {
             Ok((
@@ -148,7 +150,7 @@ pub(crate) fn recover_on_resume_tx(
     let revision = history::selection_revision(tx, thread, history::ThreadScope::Live)?;
     append_admitted_tx(tx, thread, revision as u64, &nodes, at)?;
     for (receipt, _, _, _, current_recovery) in &rows {
-        tx.execute("UPDATE receipt SET state=CASE WHEN ?3 THEN 'accepted' ELSE 'applied' END,hold_reason=CASE WHEN ?3 THEN NULL ELSE 'recovered_at_explicit_resume' END,updated_at=?2 WHERE id=?1 AND state='held' AND path_admission='admitted'", params![receipt,at,current_recovery])?;
+        tx.execute("UPDATE receipt SET state=CASE WHEN ?3 THEN 'accepted' ELSE 'applied' END,hold_reason=CASE WHEN ?3 THEN NULL ELSE 'recovered_at_explicit_resume' END,updated_at=?2 WHERE id=?1 AND state IN ('accepted','held') AND path_admission='admitted'", params![receipt,at,current_recovery])?;
     }
     let sources = rows.iter().map(|(receipt,node,old_run,old_turn,_)|json!({"receipt_id":receipt,"message_id":node,"original_run_id":old_run,"original_turn_id":old_turn})).collect::<Vec<_>>();
     super::context::record(
@@ -359,6 +361,79 @@ mod tests {
                 None
             );
         }
+    }
+
+    #[test]
+    fn accepted_recovery_beyond_repair_window_precedes_newer_held_input() {
+        let mut db = fixture();
+        for n in 0..128 {
+            let id = format!("missing{n:03}");
+            input(&db, &id, "unadmitted", "0");
+            db.execute(
+                "UPDATE node SET payload_json=NULL,deleted_reason='collected' WHERE id=?1",
+                [&id],
+            )
+            .unwrap();
+        }
+        input(&db, "older-accepted", "unadmitted", "1");
+        db.execute(
+            "UPDATE receipt SET state='accepted' WHERE id='older-accepted'",
+            [],
+        )
+        .unwrap();
+        input(&db, "newer-held", "unadmitted", "2");
+        let tx = db.transaction().unwrap();
+        assert_eq!(
+            recover_on_resume_tx(&tx, "t", "new", "next", json!({"kind":"human"}), "resume")
+                .unwrap(),
+            2
+        );
+        let selected = tx
+            .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(selected, ["older-accepted", "newer-held"]);
+        assert_eq!(state(&tx, "older-accepted").0, "applied");
+        assert!(!interrupted_remaining(&tx, "t").unwrap());
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn unrepaired_accepted_only_remainder_keeps_recovery_retryable() {
+        let mut db = fixture();
+        for n in 0..129 {
+            let id = format!("missing{n:03}");
+            input(&db, &id, "unadmitted", "0");
+            db.execute("UPDATE receipt SET state='accepted' WHERE id=?1", [&id])
+                .unwrap();
+            db.execute(
+                "UPDATE node SET payload_json=NULL,deleted_reason='collected' WHERE id=?1",
+                [&id],
+            )
+            .unwrap();
+        }
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('new','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('next','t','new','recovery_wait','now','{}');").unwrap();
+        for (generation, expected_state) in [(0, "recovery_wait"), (1, "preparing")] {
+            let tx = db.transaction().unwrap();
+            assert!(
+                super::super::state::resume_recovery_turn_tx(
+                    &tx, "t", "new", "next", generation, "resume"
+                )
+                .unwrap()
+            );
+            assert_eq!(
+                tx.query_row("SELECT state FROM turn WHERE id='next'", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                expected_state
+            );
+            assert_eq!(interrupted_remaining(&tx, "t").unwrap(), generation == 0);
+            tx.commit().unwrap();
+        }
+        assert_eq!(state(&db, "missing128").0, "cancelled");
     }
 
     #[test]
