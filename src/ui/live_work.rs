@@ -1170,6 +1170,21 @@ mod tests {
         assert_eq!(more_text(7, true, UiLanguage::En), "at least 7 more items");
     }
 
+    #[test]
+    fn capped_footer_does_not_claim_an_exact_oldest_work_time() {
+        let at = Instant::now();
+        let mut view = LiveWorkView::default();
+        view.set_language(UiLanguage::En);
+        view.accept(Some(snapshot(at)), at);
+        assert!(view.footer().unwrap().contains("Oldest work"));
+        let mut capped = snapshot(at);
+        capped.counts_capped = true;
+        view.accept(Some(capped), at);
+        let footer = view.footer().unwrap();
+        assert!(footer.contains("at least"));
+        assert!(!footer.contains("Oldest work"), "a truncated sample cannot identify the oldest work: {footer}");
+    }
+
     fn snapshot(at: Instant) -> LiveWorkSnapshot {
         LiveWorkSnapshot {
             run_id: "owner".into(),
