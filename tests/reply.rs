@@ -309,3 +309,58 @@ async fn reply_to_model_is_delivered_once_and_preserves_correlation() {
     assert_eq!(details["sender"]["kind"], "model");
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
+    for deleted in ["sender", "recipient", "both"] {
+        let (_root, store) = fixture().await;
+        let a = store
+            .execute(request(send(true)), None)
+            .await
+            .unwrap()
+            .result;
+        let message = a["message_id"].as_str().unwrap().to_owned();
+        let id = message.clone();
+        store.database.call(move|db| {
+            db.execute("UPDATE receipt SET sender_json=?2,state='applied',path_admission='admitted' WHERE message_node_id=?1",rusqlite::params![id,serde_json::json!({"kind":"model","instance_id":"i","thread_id":"sender","run_id":"r","turn_id":"u","execution_id":"s"}).to_string()])?;
+            db.execute_batch("UPDATE run SET state='stopped',ended_at='now'; UPDATE turn SET state='stopped',ended_at='now';")?;
+            if deleted=="both" { db.execute("UPDATE thread SET parent_thread_id='sender' WHERE id='recipient'",[])?; }
+            Ok(())
+        }).await.unwrap();
+        let thread = if deleted == "recipient" {
+            "recipient"
+        } else {
+            "sender"
+        };
+        store
+            .execute(
+                request(Command::ThreadDelete(ThreadDeleteArgs {
+                    thread_id: thread.into(),
+                    descendants: deleted == "both",
+                    preview_marker: None,
+                })),
+                None,
+            )
+            .await
+            .unwrap();
+        let m = message.clone();
+        store.database.call(move|db| {
+            let raw:String=db.query_row("SELECT result_json FROM receipt WHERE message_node_id=?1",[&m],|r|r.get(0))?;
+            let value:serde_json::Value=serde_json::from_str(&raw).unwrap();
+            assert_eq!(value["reply"]["state"],if deleted=="sender"{"cancelled"}else{"recipient_deleted"});
+            if deleted=="sender" {
+                assert_eq!(value["reply"]["cancel_reason"],"sender_deleted");
+                assert_eq!(value["reply"]["cancelled_by"]["thread_id"],"sender");
+                assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'",[],|r|r.get::<_,i64>(0))?,1);
+            }
+            if deleted=="recipient" {
+                let event:(String,Option<String>)=db.query_row("SELECT kind,target_run_id FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_outcome'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
+                assert_eq!(event,("context_changed".into(),None));
+                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE thread_id='sender'",[],|r|r.get::<_,i64>(0))?,0,"an idle sender must not start");
+            }
+            assert_eq!(db.query_row("SELECT count(*) FROM gc_job WHERE state='pending'",[],|r|r.get::<_,i64>(0))?,1);
+            Ok(())
+        }).await.unwrap();
+        store.database.shutdown().await.unwrap();
+    }
+}

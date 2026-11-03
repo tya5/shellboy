@@ -2499,6 +2499,7 @@ fn delete_thread(
         tx.execute("UPDATE attachment_delivery SET status='cancelled' WHERE thread_id=?1 AND status IN ('accepted','held')",[id]).map_err(sql_error)?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason='target_unavailable',updated_at=?2 WHERE target_thread_id=?1 AND state IN ('accepted','held')",params![id,now]).map_err(sql_error)?;
     }
+    let reply_wakes = super::reply::deleted_threads_tx(tx, &targets, now).map_err(sql_error)?;
     bump_roots(tx)?;
     let revision: i64 = tx
         .query_row(
@@ -2512,6 +2513,7 @@ fn delete_thread(
     // The caller publishes these existing notifications only after commit.
     // A receipt replay returns its saved value without repeating the effects.
     result.changed_threads = targets;
+    result.quiet_wake_threads = reply_wakes;
     Ok(result)
 }
 

@@ -105,6 +105,19 @@ pub(crate) fn awaiting_reply_tx(db: &Connection, thread: &str) -> rusqlite::Resu
     })?.collect()
 }
 
+fn cancelled_notice_tx(
+    db: &Connection,
+    thread: &str,
+    message: &str,
+    at: &str,
+) -> rusqlite::Result<()> {
+    db.execute(
+            "INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed','{\"kind\":\"shellboy\"}',?2,?3,?4)",
+            params![format!("reply-cancelled-{message}"), thread, json!({"kind":"reply_cancelled","message_id":message}).to_string(), at],
+        )?;
+    Ok(())
+}
+
 pub(crate) fn cancel_reply_tx(
     db: &Connection,
     thread: &str,
@@ -117,10 +130,7 @@ pub(crate) fn cancel_reply_tx(
     if changed == 1 && admitted {
         // Leave the current selected path and inflight manifest intact. The
         // ordinary event admission path presents this notice without waking a Run.
-        db.execute(
-            "INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed','{\"kind\":\"shellboy\"}',?2,?3,?4)",
-            params![format!("reply-cancelled-{message}"), thread, json!({"kind":"reply_cancelled","message_id":message}).to_string(), at],
-        )?;
+        cancelled_notice_tx(db, thread, message, at)?;
     }
     if changed == 1 {
         db.execute(
@@ -255,6 +265,124 @@ impl super::db::Store {
         }
         Ok(result)
     }
+}
+
+/// Called only after ordinary completion gates, in the completion transaction.
+pub(crate) fn complete_tx(
+    db: &Connection,
+    thread: &str,
+    run: &str,
+    at: &str,
+    wakes: &mut Vec<String>,
+) -> rusqlite::Result<Option<String>> {
+    let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND state='applied' ORDER BY created_at,rowid LIMIT 128")?
+        .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    if !rows.is_empty() {
+        db.execute(
+            "UPDATE thread SET revision=revision+1 WHERE id=?1",
+            [thread],
+        )?;
+    }
+    let mut pending = Vec::new();
+    for (message, sender, saved) in rows {
+        let value: Value = serde_json::from_str(&saved)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        if value["reply"].get("reminded_at").is_some() {
+            if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
+                if let Some(thread) = outcome_tx(db, &message, &sender, "ignored", at)? { wakes.push(thread); }
+            }
+        } else {
+            db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.reminded_at',?2,'$.reply.reminded_run_id',?3),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at,run])?;
+            pending.push(json!({"message_id":message,"sender":crate::protocol::MessageSender::from_saved(Some(&sender))}));
+        }
+    }
+    if pending.is_empty() {
+        return Ok(None);
+    }
+    let event = format!("reply-reminder-{}", uuid::Uuid::new_v4());
+    let payload = json!({"kind":"reply_reminder","messages":pending});
+    db.execute("INSERT INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at) VALUES(?1,?2,?3,'reply_reminder',?4,?5)",params![event,thread,run,payload.to_string(),at])?;
+    db.execute(
+        "INSERT INTO delivery(event_id,recipient_id,state) VALUES(?1,?2,'pending')",
+        params![event, run],
+    )?;
+    Ok(Some(event))
+}
+
+fn outcome_tx(
+    db: &Connection,
+    message: &str,
+    raw_sender: &str,
+    state: &str,
+    at: &str,
+) -> rusqlite::Result<Option<String>> {
+    let sender = crate::protocol::MessageSender::from_saved(Some(raw_sender));
+    if sender.kind != crate::protocol::SenderKind::Model {
+        return Ok(None);
+    }
+    let Some(thread) = sender.thread_id else {
+        return Ok(None);
+    };
+    let live: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+        [&thread],
+        |r| r.get(0),
+    )?;
+    if !live {
+        return Ok(None);
+    }
+    let run: Option<String> = db
+        .query_row(
+            "SELECT id FROM run WHERE thread_id=?1 AND state='live'",
+            [&thread],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let id = format!("reply-outcome-{message}");
+    db.execute(
+        "UPDATE thread SET revision=revision+1 WHERE id=?1",
+        [&thread],
+    )?;
+    let payload = json!({"kind":"reply_outcome","message_id":message,"state":state});
+    db.execute("INSERT OR IGNORE INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![id,thread,run,if run.is_some(){"reply_outcome"}else{"context_changed"},payload.to_string(),at])?;
+    if let Some(run) = run {
+        db.execute(
+            "INSERT OR IGNORE INTO delivery(event_id,recipient_id,state) VALUES(?1,?2,'pending')",
+            params![id, run],
+        )?;
+        return Ok(Some(thread));
+    }
+    Ok(None)
+}
+
+/// All selected Threads are already marked deleted. Recipient deletion wins.
+pub(crate) fn deleted_threads_tx(
+    db: &Connection,
+    targets: &[String],
+    at: &str,
+) -> rusqlite::Result<Vec<String>> {
+    let selected = serde_json::to_string(targets).unwrap();
+    let rows = db.prepare("SELECT message_node_id,target_thread_id,sender_json,path_admission FROM receipt INDEXED BY receipt_reply_pending WHERE json_extract(result_json,'$.reply.state')='pending' AND (target_thread_id IN (SELECT value FROM json_each(?1)) OR json_extract(sender_json,'$.thread_id') IN (SELECT value FROM json_each(?1))) ORDER BY created_at,rowid")?
+        .query_map([selected], |r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut wakes = Vec::new();
+    for (message, target, sender, admission) in rows {
+        if targets.contains(&target) {
+            db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?;
+            if let Some(thread) = outcome_tx(db, &message, &sender, "recipient_deleted", at)? {
+                wakes.push(thread);
+            }
+        } else {
+            let actor = json!({"kind":"thread_deletion","thread_id":crate::protocol::MessageSender::from_saved(Some(&sender)).thread_id});
+            if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender_deleted"}).to_string(),at])? == 1 && admission=="admitted" {
+                cancelled_notice_tx(db,&target,&message,at)?;
+            }
+        }
+        db.execute(
+            "UPDATE thread SET revision=revision+1 WHERE id=?1",
+            [target],
+        )?;
+    }
+    Ok(wakes)
 }
 
 #[cfg(test)]

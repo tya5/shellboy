@@ -872,6 +872,8 @@ pub fn event_title(kind: &str, language: UiLanguage) -> &str {
         return super::events::event_title(kind);
     }
     match kind {
+        "reply_reminder" => "Reply reminder",
+        "reply_outcome" => "Reply outcome",
         "index_state" => "Index state",
         "previous_instance_interrupted" => "Previous interruption record",
         "app_shutdown" => "Saved shutdown record",
