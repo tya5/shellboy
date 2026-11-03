@@ -226,7 +226,7 @@ async fn history_keeps_shared_prefix_recursive_sources_live_creator_and_pending_
         f.node(id, None).await;
     }
     f.node("unselected_live", Some("turn")).await;
-    f.db.call(|db|{db.execute_batch("INSERT INTO thread_path VALUES('live',0,'prefix'),('live',1,'summary'),('deleted',0,'prefix'),('deleted',1,'deleted_suffix'); INSERT INTO edge VALUES('prefix','deleted_suffix'); INSERT INTO replacement VALUES('r1','summary','1','1','1','adopted','now'),('r2','nested_summary','2','1','1','adopted','now'); INSERT INTO replacement_source VALUES('r1',0,'nested_summary',0,NULL),('r2',0,'source',0,NULL); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('receipt','op','{}','deleted','pending','held','now'); INSERT INTO runtime_pin VALUES('pin','fixture','node','pinned',0,'now');")?;Ok(())}).await.unwrap();
+    f.db.call(|db|{db.execute_batch("INSERT INTO thread_path VALUES('live',0,'prefix'),('live',1,'summary'),('deleted',0,'prefix'),('deleted',1,'deleted_suffix'); INSERT INTO edge VALUES('prefix','deleted_suffix'); INSERT INTO replacement VALUES('r1','summary','1','1','1','adopted','now'),('r2','nested_summary','2','1','1','adopted','now'); INSERT INTO replacement_source VALUES('r1',0,'nested_summary',0,NULL),('r2',0,'source',0,NULL); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('receipt','op','{}','deleted','pending','held','now',json_object('reply',json_object('state','pending'))); INSERT INTO runtime_pin VALUES('pin','fixture','node','pinned',0,'now');")?;Ok(())}).await.unwrap();
     // No explicit deletion job: even unreachable old payloads are not collected.
     assert_eq!(
         f.gc.collect(StorageCategory::History, now())
@@ -1042,6 +1042,8 @@ async fn deleted_receipts_are_collected_in_finite_batches_but_live_parties_and_p
             db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')",[id])?;
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,?2,?3,?1,'applied','now',?4)",params![id,sender,target,serde_json::json!({"reply":{"state":state}}).to_string()])?;
         }
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES('reply-live-sender','user','now','{}')",[])?;
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','replied','$.reply.node_id','reply-live-sender') WHERE id='live-sender'",[])?;
         db.execute("INSERT INTO gc_job(id,kind,root_revision,state)VALUES('receipt-gc','history',0,'pending')",[])?;
         Ok(())
     }).await.unwrap();
@@ -1064,7 +1066,7 @@ async fn deleted_receipts_are_collected_in_finite_batches_but_live_parties_and_p
     }
     assert_eq!(previous, 3);
     f.db.call(|db| {
-        for id in ["live-target", "live-sender", "pending"] {
+        for id in ["live-target", "live-sender", "reply-live-sender", "pending"] {
             let payload: Option<String> =
                 db.query_row("SELECT payload_json FROM node WHERE id=?1", [id], |r| {
                     r.get(0)
