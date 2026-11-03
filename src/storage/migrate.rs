@@ -182,15 +182,13 @@ pub(super) fn run(
         tx.execute_batch(include_str!("../../migrations/0024_revisit_messages.sql"))?;
         tx.commit()?;
     }
-<<<<<<< HEAD
-    validation();
-=======
     if version < 25 {
+        report(25 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0025_index_recovery.sql"))?;
         tx.commit()?;
     }
->>>>>>> 6772f30602 (Bound startup index recovery into indexed pages)
+    validation();
     validate_schema(connection)?;
     Ok(())
 }
@@ -327,6 +325,7 @@ mod activity_migration_tests {
             "nodes_index_gc",
             "node_event_retention",
             "delivery_event_state",
+            "jobs_running_recovery",
             "jobs_running_recovery",
         ] {
             assert_eq!(
