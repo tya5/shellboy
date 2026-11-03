@@ -8,8 +8,8 @@ Warn is the default; strict rejects individual calls. Argument failures no longe
 The adopted target removes `ui.ambiguous_width` and measures on every launch
 without delaying the first frame. The capability reader, asynchronous cache
 updates, input filtering, config removal, release note and requested fake
-terminal tests remain unimplemented. Existing fallback selection is incomplete:
-`SELECTED` and `CHILD` are rendered directly on some paths.
+terminal tests remain unimplemented. Some glyphs are rendered directly as Unicode
+East Asian Neutral rather than ASCII; arbitrary terminal behavior is unverified.
 
 
 ## #194 step 1: "answer" renamed to "end message" (branch `issue-194/step1-end-message`)
