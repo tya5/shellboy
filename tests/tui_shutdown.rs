@@ -63,8 +63,9 @@ async fn until(terminal: &mut File, output: &mut Vec<u8>, needle: &[u8]) {
     .unwrap_or_else(|error| {
         let start = output.len().saturating_sub(4096);
         panic!(
-            "Expected terminal state {:?} did not arrive: {error}; terminal tail: {:?}",
+            "Expected terminal state {:?} did not arrive: {error}; terminal start: {:?}; terminal tail: {:?}",
             String::from_utf8_lossy(needle),
+            String::from_utf8_lossy(&output[..output.len().min(4096)]),
             String::from_utf8_lossy(&output[start..]),
         )
     });
