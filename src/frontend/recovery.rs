@@ -371,7 +371,7 @@ mod tests {
         let p = &nodes[0].presentation;
         assert_eq!(
             p.title,
-            "復旧再開 | 再開前にこの応答処理で記録したモデル失敗2件"
+            "復旧再開 · 再開前にこの応答処理で記録したモデル失敗2件"
         );
         assert_eq!(p.blocks[0].text, "直近の保存理由: 保存済み二回目🦀");
         assert!(
