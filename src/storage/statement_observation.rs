@@ -12,7 +12,7 @@ pub(super) struct Counters {
 }
 
 pub(super) struct StatementObservation<'a> {
-    connection: &'a Connection,
+    connection: &'a mut Connection,
     counters: Box<Counters>,
 }
 
@@ -47,7 +47,7 @@ unsafe extern "C" fn profile(
 }
 
 impl<'a> StatementObservation<'a> {
-    pub fn install(connection: &'a Connection) -> rusqlite::Result<Self> {
+    pub fn install(connection: &'a mut Connection) -> rusqlite::Result<Self> {
         let mut counters = Box::<Counters>::default();
         // The guard removes the callback before dropping its context.
         let result = unsafe {
@@ -69,6 +69,9 @@ impl<'a> StatementObservation<'a> {
             counters,
         })
     }
+    pub fn connection(&mut self) -> &mut Connection {
+        self.connection
+    }
     pub fn counters(&self) -> Counters {
         *self.counters
     }
@@ -87,11 +90,12 @@ mod tests {
     use super::*;
     #[test]
     fn captures_counters_without_sql_or_values() {
-        let db = Connection::open_in_memory().unwrap();
+        let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1),(2),(3)")
             .unwrap();
-        let trace = StatementObservation::install(&db).unwrap();
-        let n: i64 = db
+        let mut trace = StatementObservation::install(&mut db).unwrap();
+        let n: i64 = trace
+            .connection()
             .query_row("SELECT count(*) FROM t WHERE x > ?1", [1], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 2);
