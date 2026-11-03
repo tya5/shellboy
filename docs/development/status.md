@@ -2,7 +2,7 @@
 
 ## Startup timing CLI (#212)
 
-A read-only `shellboy startup [--last N]` command is being added over the existing bounded diagnostic log, without owner startup or new storage/workers. Initial synthetic-log unit tests pass (12 matching library tests including existing startup tests), and the standalone subprocess test passes. Two more parser/version guard tests were added afterward and await final rerun. Completion requires final local checks and both default-scope and all-OS CI on the pushed tip.
+Implemented read-only `shellboy startup [--last N]` over bounded owner diagnostics, with no owner startup or new storage/workers. On macOS, formatting, all 14 startup-related library tests, the standalone synthetic-log subprocess test, strict all-target Clippy, and integration-layout checks pass. The fixture total is the sum of its recorded 7 ms configuration and 1 ms endpoint stages. Default-scope and all-OS CI are pending on the final documented tip; W8 review/landing remain.
 
 ## Shell unknown argument policy
 
