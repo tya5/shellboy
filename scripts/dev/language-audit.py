@@ -195,6 +195,66 @@ def ranges(items, pairs):
     return fixtures, localized, excluded, modules
 
 
+def paired_render_ranges(items, pairs, spans):
+    """Pair exact (En/Ja, Self pattern) arms in a typed, imported renderer.
+
+    This deliberately does not guess from field names, similar strings, or two
+    arbitrary tuples. Both arms and a Japanese-free English literal are needed.
+    """
+    texts = [t.text for t in items]
+    result = []
+    for start, end in spans:
+        header_end = next((i for i in range(start, end) if texts[i] == '{'), end)
+        header = texts[start:header_end]
+        if not any(header[i:i + 8] == ['fn', 'render', '(', 'self', ',', 'language', ':', 'UiLanguage']
+                   for i in range(len(header) - 7)):
+            continue
+        body = texts[header_end:end]
+        imports = ['use', 'UiLanguage', ':', ':', '{', 'En', ',', 'Ja', '}', ';']
+        if not any(body[i:i + len(imports)] == imports for i in range(len(body) - len(imports) + 1)):
+            continue
+        for i in range(header_end, end):
+            if texts[i:i + 6] != ['match', '(', 'language', ',', 'self', ')']:
+                continue
+            left = i + 6
+            if left not in pairs or texts[left] != '{':
+                continue
+            stop, j, arms = pairs[left], left + 1, {}
+            while j < stop:
+                if texts[j] != '(' or j not in pairs:
+                    break
+                pattern_end = pairs[j]
+                pattern = texts[j + 1:pattern_end]
+                if texts[pattern_end + 1:pattern_end + 3] != ['=', '>']:
+                    break
+                expression = pattern_end + 3
+                j = expression
+                if j < stop and texts[j] == '{' and pairs[j] + 1 < stop and (
+                        items[pairs[j] + 1].kind == 'word' or texts[pairs[j] + 1] == '('):
+                    j = pairs[j] + 1
+                    next_arm = j
+                else:
+                    while j < stop and texts[j] != ',':
+                        j = pairs[j] + 1 if j in pairs else j + 1
+                    next_arm = j + 1
+                if (expression < j and len(pattern) >= 5 and pattern[0] in ('Ja', 'En')
+                        and pattern[1:5] == [',', 'Self', ':', ':'] and '|' not in pattern):
+                    key = tuple(pattern[2:])
+                    arms.setdefault(key, {}).setdefault(pattern[0], []).append((expression, j))
+                j = next_arm
+            for versions in arms.values():
+                if len(versions.get('Ja', [])) != 1 or len(versions.get('En', [])) != 1:
+                    continue
+                en_start, en_end = versions['En'][0]
+                english = [t for t in items[en_start:en_end] if t.kind in ('string', 'raw_string')]
+                if (not english or any(JAPANESE.search(decoded(t)) for t in english)
+                        or not any(re.search(r'[A-Za-z]', decoded(t)) for t in english)):
+                    continue
+                ja_start, ja_end = versions['Ja'][0]
+                result.append((items[ja_start].start, items[ja_end - 1].end))
+    return result
+
+
 def item_ranges(items, pairs):
     """Find conservative function/const/static item spans; unknown forms use the file."""
     texts = [t.text for t in items]
@@ -264,6 +324,93 @@ def decoded(token):
                   token.text, flags=re.DOTALL)
 
 
+# These are token fingerprints of the reviewed typed-key construction and UI
+# projection functions, not source literals. If any projection changes, the
+# catalogue rule fails closed until that path is independently re-examined.
+CATALOGUE_PROOF = {
+    'src/operations.rs': {
+        '2b97db37bf2875e148ef296b39c83352e4b4e919222669f1e790444abc738176',
+        '22d418c2ece3eccac350f8da1ef06ddf368adfb6ac848573cdf0bb92b78ee20e',
+        'e4350e84095cef8970f0671e172f6d45d5d4bd3831f5b0bd0f02ce4ecc7263d9',
+        '87f0e07828f8adfa929dd3e73a805281faf33f276263ada2de8c4f2746acbf44',
+    },
+    'src/ui/operations/metadata.rs': {
+        '3a514953c6ad8883b36faaebc96b4476d747e23e6c9fa6c4e35cccee70527f4c',
+        'ee111179d4c571e341289d42946dafd042ef682247dd759b65e40e1e587bdf50',
+    },
+    'src/ui/operations.rs': {
+        'cdf8536fc4654255a83a3fad9095a1277dc7423b7798c4cacdd2e03b24ba6f9d',
+        'cf6d600a439dad85a962b9fa509667c84b953f7dd125939dd6f9a5f7583cd5cb',
+    },
+}
+
+
+def catalogue_pairs(catalogue, metadata):
+    """Join literal catalogue fields to same-ID local! arms; never join by text alone."""
+    source, dest = {}, {}
+    texts = [t.text for t in catalogue]
+    pairs = groups(catalogue)
+    specs = {'FieldSpec': ('FieldId', ('label', 'help')),
+             'OperationSpec': ('OperationId', ('label', 'meaning'))}
+    for i, token in enumerate(catalogue):
+        if token.text not in specs or texts[i + 1:i + 2] != ['{']:
+            continue
+        enum, fields = specs[token.text]
+        stop = pairs[i + 1]
+        body = texts[i + 2:stop]
+        if body[:3] != ['id', ':', enum] or body[3:5] != [':', ':'] or len(body) < 6:
+            continue
+        key = (enum, body[5])
+        for j in range(i + 2, stop - 2):
+            if (texts[j] in fields and texts[j + 1] == ':'
+                    and catalogue[j + 2].kind in ('string', 'raw_string')):
+                source.setdefault((key, texts[j]), []).append(catalogue[j + 2])
+    texts = [t.text for t in metadata]
+    pairs = groups(metadata)
+    spans = item_ranges(metadata, pairs)
+    functions = {'field_label_for': ('FieldId', 'label'), 'field_help_for': ('FieldId', 'help'),
+                 'operation_label_for': ('OperationId', 'label'), 'operation_meaning_for': ('OperationId', 'meaning')}
+    for start, end in spans:
+        head = texts[start:min(end, start + 12)]
+        if 'fn' not in head or head.index('fn') + 1 >= len(head):
+            continue
+        name = head[head.index('fn') + 1]
+        if name not in functions:
+            continue
+        enum, field = functions[name]
+        for i in range(start, end - 12):
+            if texts[i:i + 4] != [enum, ':', ':', texts[i + 3]]:
+                continue
+            if texts[i + 4:i + 8] != ['=', '>', 'local', '!'] or texts[i + 8] != '(':
+                continue
+            stop = pairs[i + 8]
+            args = metadata[i + 9:stop]
+            # language, Ja literal, En literal, with optional trailing comma.
+            if len(args) not in (5, 6) or [t.text for t in args[:2]] != ['language', ',']:
+                continue
+            if (args[2].kind not in ('string', 'raw_string') or args[3].text != ','
+                    or args[4].kind not in ('string', 'raw_string')
+                    or (len(args) == 6 and args[5].text != ',')
+                    or JAPANESE.search(decoded(args[4])) or not re.search('[A-Za-z]', decoded(args[4]))):
+                continue
+            dest.setdefault(((enum, texts[i + 3]), field), []).append(args[2].text)
+    return [(values[0].start, values[0].end) for key, values in source.items()
+            if len(values) == 1 and dest.get(key) == [values[0].text]]
+
+
+def catalogue_ranges(root, prepared):
+    for relative, required in CATALOGUE_PROOF.items():
+        path = root / relative
+        if path not in prepared:
+            return []
+        _, items, _, _, _, _, spans = prepared[path]
+        fingerprints = {scope_fingerprint(items, spans, start, {}) for start, _ in spans}
+        if not required <= fingerprints:
+            return []
+    return catalogue_pairs(prepared[root / 'src/operations.rs'][1],
+                           prepared[root / 'src/ui/operations/metadata.rs'][1])
+
+
 def inventory(root, classifications=None):
     paths = sorted((root / 'src').rglob('*.rs'))
     prepared, fixture_paths = {}, set()
@@ -273,15 +420,17 @@ def inventory(root, classifications=None):
         pairs = groups(items)
         fixture, localized, excluded, modules = ranges(items, pairs)
         spans = item_ranges(items, pairs)
-        prepared[path] = source, items, fixture, localized, excluded, spans
+        paired = paired_render_ranges(items, pairs, spans)
+        prepared[path] = source, items, fixture, localized, paired, excluded, spans
         for module in modules:
             parent = path.parent if path.name in ('lib.rs', 'main.rs', 'mod.rs') else path.with_suffix('')
             fixture_paths.update([parent / (module + '.rs'), parent / module / 'mod.rs'])
+    catalogue = catalogue_ranges(root, prepared)
     if classifications is not None and not isinstance(classifications, dict):
         raise ValueError('reviewed decisions must be a JSON object')
     decisions = classifications or {}
     seen, records = set(), []
-    for path, (source, items, fixture, localized, excluded, spans) in prepared.items():
+    for path, (source, items, fixture, localized, paired, excluded, spans) in prepared.items():
         occurrences, fingerprints = Counter(), {}
         for index, token in enumerate(items):
             if token.kind not in ('string', 'raw_string') or not JAPANESE.search(decoded(token)):
@@ -297,6 +446,10 @@ def inventory(root, classifications=None):
                 category, reason = 'b', 'test-only item/module'
             elif contains(localized):
                 category, reason = 'a', 'explicit Japanese macro argument or match arm'
+            elif contains(paired):
+                category, reason = 'a', 'paired typed En/Ja renderer arms'
+            elif relative == 'src/operations.rs' and contains(catalogue):
+                category, reason = 'a', 'same-ID bilingual operation catalogue with pinned UI projection'
             elif contains(excluded):
                 category, reason = 'b', 'qualified logging format or serde identifier'
             else:

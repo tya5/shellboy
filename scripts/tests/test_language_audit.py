@@ -89,6 +89,67 @@ class LanguageAuditTests(unittest.TestCase):
                     f'UiLanguage::Ja => "{JA}3", }} }}')
         self.assertEqual([r['category'] for r in self.records()], ['c', 'c', 'a'])
 
+    def test_catalogue_join_requires_same_id_field_japanese_and_english(self):
+        catalogue = AUDIT['tokens'](f'FieldSpec {{ id: FieldId::One, label: "{JA}", help: "{JA} help" }}')
+        def paired(body):
+            metadata = AUDIT['tokens']('fn field_label_for(id: FieldId) { match id { ' + body + ' } }')
+            return AUDIT['catalogue_pairs'](catalogue, metadata)
+        good = f'FieldId::One => local!(language, "{JA}", "English"),'
+        self.assertEqual(len(paired(good)), 1)
+        self.assertEqual(paired(good.replace('One', 'Other')), [])
+        self.assertEqual(paired(good.replace(f'"{JA}"', f'"{JA} changed"')), [])
+        self.assertEqual(paired(good.replace('"English"', f'"{JA} en"')), [])
+        self.assertEqual(paired(good + good), [])
+        self.assertEqual(paired(good.replace('local!', 'other!')), [])
+
+    def test_catalogue_projection_fingerprint_fails_closed(self):
+        self.source('fn projection() { true; }', 'operations.rs')
+        self.source('fn projection() { true; }', 'ui/operations.rs')
+        self.source('fn projection() { true; }', 'ui/operations/metadata.rs')
+        def prepared():
+            out = {}
+            for path in (self.root / 'src').rglob('*.rs'):
+                source = path.read_text()
+                items = AUDIT['tokens'](source)
+                spans = AUDIT['item_ranges'](items, AUDIT['groups'](items))
+                out[path] = (source, items, [], [], [], [], spans)
+            return out
+        original = prepared()
+        proof = {path.relative_to(self.root).as_posix():
+                 {AUDIT['scope_fingerprint'](value[1], value[6], value[6][0][0], {})}
+                 for path, value in original.items()}
+        fn = AUDIT['catalogue_ranges']
+        globals_ = fn.__globals__
+        old_proof, old_pairs = globals_['CATALOGUE_PROOF'], globals_['catalogue_pairs']
+        self.addCleanup(globals_.update, CATALOGUE_PROOF=old_proof, catalogue_pairs=old_pairs)
+        globals_['CATALOGUE_PROOF'] = proof
+        globals_['catalogue_pairs'] = lambda *_: [(1, 2)]
+        self.assertEqual(fn(self.root, original), [(1, 2)])
+        self.source('fn projection() { false; }', 'ui/operations.rs')
+        self.assertEqual(fn(self.root, prepared()), [])
+        self.assertEqual(fn(self.root, {}), [])
+
+    def test_paired_renderer_requires_exact_english_arm_and_typed_import(self):
+        self.source(f'impl T {{ fn render(self, language: UiLanguage) -> String {{ '
+                    f'use UiLanguage::{{En, Ja}}; match (language, self) {{ '
+                    f'(En, Self::One) => "English", (Ja, Self::One) => "{JA}1", '
+                    f'(Ja, Self::Unpaired) => "{JA}2", '
+                    f'(En, Self::Mixed) => "{JA}3", (Ja, Self::Mixed) => "{JA}4", '
+                    f'}} }} }}')
+        self.assertEqual([r['category'] for r in self.records()], ['a', 'c', 'c', 'c'])
+        self.source(f'fn render(self, language: Other) {{ use Other::{{En, Ja}}; '
+                    f'match (language, self) {{ (En, Self::One) => "English", '
+                    f'(Ja, Self::One) => "{JA}" }} }}')
+        self.assertEqual([r['category'] for r in self.records()], ['c'])
+
+    def test_paired_renderer_distinguishes_struct_patterns_and_optional_comma(self):
+        self.source(f'impl T {{ fn render(self, language: UiLanguage) -> String {{ '
+                    f'use UiLanguage::{{En, Ja}}; match (language, self) {{ '
+                    f'(En, Self::One {{ mode: true }}) => {{ "English" }} '
+                    f'(Ja, Self::One {{ mode: false }}) => "{JA}1", '
+                    f'(Ja, Self::One {{ mode: true }}) => "{JA}2", }} }} }}')
+        self.assertEqual([r['category'] for r in self.records()], ['c', 'a'])
+
     def test_ja_in_match_guard_does_not_make_en_pattern_japanese(self):
         self.source(f'fn f() {{ match lang {{ UiLanguage::En if other == UiLanguage::Ja => "{JA}", '
                     f'_ => "en", }} }}')
