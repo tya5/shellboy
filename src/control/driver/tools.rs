@@ -38,6 +38,12 @@ pub(super) async fn run_tool_group(
                     model::SHELL_ARGUMENTS.join(", ")
                 ),
             );
+            if let Err(error) = &call.args {
+                validation_errors.entry(call.call_id.clone()).and_modify(|message| {
+                    message.push(' ');
+                    message.push_str(error);
+                });
+            }
             continue;
         }
         let args = match &call.args {
@@ -47,13 +53,13 @@ pub(super) async fn run_tool_group(
                 continue;
             }
         };
-        for encoding in [&args.input_encoding, &args.output_encoding] {
+        for (parameter, encoding) in [("input_encoding", &args.input_encoding), ("output_encoding", &args.output_encoding)] {
             if let Err(error) = crate::shell::encode_input(
                 "",
                 encoding,
                 control.store.config.limits.shell_stdin_bytes,
             ) {
-                validation_errors.insert(call.call_id.clone(), error.to_string());
+                validation_errors.insert(call.call_id.clone(), format!("Invalid shell parameter {parameter}: expected supported encoding; {error}"));
             }
         }
         if let Some(text) = &args.initial_stdin
@@ -63,7 +69,7 @@ pub(super) async fn run_tool_group(
                 control.store.config.limits.shell_stdin_bytes,
             )
         {
-            validation_errors.insert(call.call_id.clone(), error.to_string());
+            validation_errors.insert(call.call_id.clone(), format!("Invalid shell parameter initial_stdin: expected valid input within the configured byte limit; {error}"));
         }
     }
     let mut cancelled_count = 0usize;
