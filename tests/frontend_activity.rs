@@ -35,7 +35,7 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
         Ok(())
     }).await.unwrap();
     let observed = projection(&db).await;
-    let summary = observed.snapshot.context_reduction.clone().unwrap();
+    let summary = observed.snapshot.context_reduction.unwrap();
     let summary_ja = summary.localized(shellboy::config::UiLanguage::Ja);
     assert!(summary_ja.contains("spill 3組"));
     assert!(summary_ja.contains("省略 7件"));
