@@ -144,6 +144,16 @@ fn every_section_rejects_unknown_keys_and_wrong_types() {
     }
 }
 #[test]
+fn removing_only_manual_width_key_preserves_other_ui_configuration() {
+    let old = "[ui]\nsend_key='Ctrl+Enter'\nnewline_keys=['Enter']\nambiguous_width='two'\n";
+    assert!(Config::parse(old).is_err());
+    let migrated = old.replace("ambiguous_width='two'\n", "");
+    let config = Config::parse(&migrated).unwrap();
+    assert_eq!(config.ui.send_key, "Ctrl+Enter");
+    assert_eq!(config.ui.newline_keys, ["Enter"]);
+}
+
+#[test]
 fn invariants_are_rejected_without_clamping() {
     for source in [
         "[retention]\ntool_raw_days=0",
