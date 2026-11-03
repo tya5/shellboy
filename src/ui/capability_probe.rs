@@ -134,6 +134,33 @@ mod tests {
     }
 
     #[test]
+    fn paste_decodes_identically_with_and_without_filter() {
+        for payload in [
+            b"before\x1b[1;2R\x1b[?uafter".as_slice(),
+            b"bad\xfftext".as_slice(),
+        ] {
+            let mut encoded = b"\x1b[200~".to_vec();
+            encoded.extend_from_slice(payload);
+            encoded.extend_from_slice(b"\x1b[201~");
+            let mut filter = ReplyFilter::default();
+            filter.expect(Kind::Cursor);
+            filter.expect(Kind::Keyboard);
+            let mut filtered = Vec::new();
+            let mut replies = Vec::new();
+            for fragment in encoded.chunks(2) {
+                filter.feed(fragment, &mut filtered, &mut replies);
+            }
+            assert_eq!(filtered, encoded);
+            assert!(replies.is_empty());
+            // Crossterm's existing paste decoder applies UTF-8 loss replacement.
+            assert_eq!(
+                String::from_utf8_lossy(&filtered[6..filtered.len() - 6]),
+                String::from_utf8_lossy(payload)
+            );
+        }
+    }
+
+    #[test]
     fn typing_and_delayed_replies_are_filtered_exactly_once() {
         let (tx, rx) = mpsc::channel();
         tx.send(b"hel".as_slice()).unwrap();
