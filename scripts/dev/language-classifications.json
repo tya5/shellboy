@@ -2803,5 +2803,25 @@
     "category": "a",
     "reason": "Japanese generated missing-end-time label retained by the legacy Japanese ended_text API. The selected-language UI footer uses FooterText::EndedUnknown.localized(UiLanguage::En) for the same missing-time condition. Actual saved timestamps are formatted, not rewritten.",
     "source_tokens_sha256": "385fcec8df673a58a4d57cf540ffe8fcf53658b6f5f7f64afcf1a70ddfeb33e3"
+  },
+  "src/ui/activity.rs:2572e155a54b925f:1": {
+    "category": "a",
+    "reason": "Reviewed RecoveryStage::localized: this complete Japanese stage label has an explicit English counterpart selected by UiLanguage; the recovery renderer and bilingual tests use that mapping.",
+    "source_tokens_sha256": "8025dee052f806da46f2b459ebae0559daad8df6dc0b9d0951462221db6ad2d8"
+  },
+  "src/ui/activity.rs:4642c242dc96777e:1": {
+    "category": "a",
+    "reason": "Reviewed RecoveryStage::localized: this complete Japanese stage label has an explicit English counterpart selected by UiLanguage; the recovery renderer and bilingual tests use that mapping.",
+    "source_tokens_sha256": "8025dee052f806da46f2b459ebae0559daad8df6dc0b9d0951462221db6ad2d8"
+  },
+  "src/ui/activity.rs:589d1dce7fbfa223:1": {
+    "category": "a",
+    "reason": "Reviewed RecoveryStage::localized: this complete Japanese stage label has an explicit English counterpart selected by UiLanguage; the recovery renderer and bilingual tests use that mapping.",
+    "source_tokens_sha256": "8025dee052f806da46f2b459ebae0559daad8df6dc0b9d0951462221db6ad2d8"
+  },
+  "src/ui/activity.rs:bc1dc00855e49894:1": {
+    "category": "a",
+    "reason": "Reviewed saved_recovery_reason_unavailable: the complete fallback sentence has explicit Japanese and English variants; English is ASCII, and raw provider messages bypass the fallback translation.",
+    "source_tokens_sha256": "6bf7e1f513731bc2de7fda549bf6fa1bba6b33c25932cc58a4f3ee704d2eb588"
   }
 }
