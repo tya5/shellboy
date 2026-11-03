@@ -378,7 +378,9 @@ Migration 27 adds the interrupted-job recovery index after the history index
 (25) and pending-reply index (26).
 Startup authorization recovery (#203) scans the `index.auto.` key range in
 primary-key order, yielding the DB worker after at most 128 records or 1 MiB
-of values. Each update autocommits and its notification is published even if a
-later record fails. Values exceeding the byte limit fail recovery without being
+of values. The initial query seeks from the inclusive prefix; subsequent queries
+seek strictly after the last key, using a single lower bound and the prefix upper
+bound so previously visited rows are not scanned again within a run. Each update
+autocommits and its notification is published even if a later record fails. Values exceeding the byte limit fail recovery without being
 loaded; the operator must repair that record. Restart resumes safely by
 rescanning already-failed records; no automatic retry is admitted.

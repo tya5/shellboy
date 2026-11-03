@@ -4540,3 +4540,5 @@ compilation, the five new bootstrap regressions and seven existing metadata
 regressions; Python 197 tests, layout/watchdog and language checks also passed.
 Strict Clippy and exact-tip CI results are tracked in the issue handoff.
 #203: authorization recovery uses bounded keyset pages; synthetic tests cover restart, corrupt and oversized records. Validation pending.
+
+2026-11-03 #203 follow-up: authorization recovery uses a single seek lower bound per query; late-page work is checked with SQLite VM-step counters on synthetic data. Three-OS CI is tracked on the published tip.

@@ -9574,3 +9574,5 @@ rebuild or installed-binary change is part of these checks. Recovery is an atomi
 mutation; pure query observations use read-only connections. #203 authorization
 recovery is not reimplemented by this change.
 #203 validation pending: synthetic paged authorization recovery; no real provider or user data used.
+
+2026-11-03 #203 cursor-seek follow-up: synthetic SQLite VM-step coverage checks early, late, and exhausted keyset cursors over 10,000 authorization keys; page-order and restart coverage uses synthetic records. Real user data and process-kill recovery remain untested.

@@ -445,6 +445,9 @@ pub(super) fn recover_authorization(db: &mut Connection) -> Result<(), StorageEr
     }
 }
 
+const AUTH_RECOVERY_FIRST: &str = "SELECT key,octet_length(value) FROM app_meta WHERE key>=?1 AND key<'index.auto/' ORDER BY key LIMIT 1";
+const AUTH_RECOVERY_NEXT: &str = "SELECT key,octet_length(value) FROM app_meta WHERE key>?1 AND key<'index.auto/' ORDER BY key LIMIT 1";
+
 /// Each update autocommits; return its notification even on a later error.
 pub(super) fn recover_authorization_page(
     db: &mut Connection,
@@ -452,14 +455,22 @@ pub(super) fn recover_authorization_page(
 ) -> (Result<Option<String>, StorageError>, bool) {
     let mut changed = false;
     let result = (|| {
-        let mut last = cursor.unwrap_or_default();
+        let mut first = cursor.is_none();
+        let mut last = cursor.unwrap_or_else(|| "index.auto.".to_string());
         let mut count = 0;
         let mut bytes = 0;
         loop {
-            let row: Option<(String, i64)> = db.query_row(
-                "SELECT key,octet_length(value) FROM app_meta WHERE key>='index.auto.' AND key>?1 AND key<'index.auto/' ORDER BY key LIMIT 1",
-                [&last], |r| Ok((r.get(0)?, r.get(1)?)),
-            ).optional()?;
+            let row: Option<(String, i64)> = db
+                .query_row(
+                    if first {
+                        AUTH_RECOVERY_FIRST
+                    } else {
+                        AUTH_RECOVERY_NEXT
+                    },
+                    [&last],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
             let Some((key, size)) = row else {
                 return Ok(None);
             };
@@ -485,6 +496,7 @@ pub(super) fn recover_authorization_page(
                 changed |= update_json_meta(db, &key, &admission)? > 0;
             }
             last = key;
+            first = false;
             count += 1;
             bytes += size;
         }
@@ -876,11 +888,13 @@ mod metadata_tests {
             )
             .unwrap();
         }
-        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT key,octet_length(value) FROM app_meta WHERE key>='index.auto.' AND key>?1 AND key<'index.auto/' ORDER BY key LIMIT 1", [""], |r| r.get(3)).unwrap();
-        assert!(plan.contains("INDEX"), "{plan}");
         let (first, changed) = recover_authorization_page(&mut db, None);
         assert!(changed);
-        assert!(first.unwrap().is_some());
+        let first = first.unwrap();
+        assert_eq!(first.as_deref(), Some("index.auto.0127"));
+        let (second, changed) = recover_authorization_page(&mut db, first);
+        assert!(changed);
+        assert_eq!(second.unwrap().as_deref(), Some("index.auto.0255"));
         let failed: i64 = db
             .query_row(
                 "SELECT count(*) FROM app_meta WHERE json_extract(value,'$.state')='failed'",
@@ -888,7 +902,8 @@ mod metadata_tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(failed, RECOVERY_ROWS);
+        assert_eq!(failed, 2 * RECOVERY_ROWS);
+        // Restart without a cursor, as after a crash between pages.
         recover_authorization(&mut db).unwrap();
         let failed: i64 = db
             .query_row(
@@ -901,6 +916,36 @@ mod metadata_tests {
         let (done, changed) = recover_authorization_page(&mut db, None);
         assert!(done.is_ok());
         assert!(!changed);
+    }
+
+    #[test]
+    fn authorization_recovery_late_cursor_seeks_without_scanning_history() {
+        use rusqlite::StatementStatus;
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        for n in 0..10_000 {
+            db.execute(
+                "INSERT INTO app_meta VALUES(?1,'{}')",
+                [format!("index.auto.{n:05}")],
+            )
+            .unwrap();
+        }
+        let steps = |cursor: &str| {
+            let mut stmt = db.prepare(AUTH_RECOVERY_NEXT).unwrap();
+            let result: Option<String> = stmt.query_row([cursor], |r| r.get(0)).optional().unwrap();
+            (result, stmt.get_status(StatementStatus::VmStep))
+        };
+        let (early, early_steps) = steps("index.auto.00127");
+        let (late, late_steps) = steps("index.auto.09998");
+        let (end, end_steps) = steps("index.auto.09999");
+        assert_eq!(early.as_deref(), Some("index.auto.00128"));
+        assert_eq!(late.as_deref(), Some("index.auto.09999"));
+        assert_eq!(end, None);
+        assert!(
+            late_steps <= early_steps + 10 && end_steps <= early_steps + 10,
+            "early={early_steps}, late={late_steps}, end={end_steps}"
+        );
     }
 
     #[test]
