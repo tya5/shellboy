@@ -148,11 +148,16 @@ impl Fixture {
         path
     }
     fn command(&self, schema: &Path) -> tokio::process::Command {
+        self.command_mode(schema, "turn-end")
+    }
+    fn command_mode(&self, schema: &Path, mode: &str) -> tokio::process::Command {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
         command
             .arg("--data-dir")
             .arg(self.root.path().join("data"))
             .arg("exec")
+            .arg("--result")
+            .arg(mode)
             .arg("--schema")
             .arg(schema)
             .current_dir(self.root.path())
@@ -540,6 +545,8 @@ async fn absent_owner_and_unsupported_schema_have_distinct_stderr_only_failures(
             .arg("--data-dir")
             .arg(data)
             .arg("exec")
+            .arg("--result")
+            .arg("turn-end")
             .arg("--schema")
             .arg(schema)
             .arg("work");
@@ -735,5 +742,47 @@ async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_res
         })
         .await
         .unwrap();
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn empty_end_message_succeeds_even_with_schema() {
+    let mut fixture = Fixture::new().await;
+    let schema = fixture.schema();
+    let mut command = fixture.command(&schema);
+    command.arg("work");
+    let child = command.spawn().unwrap();
+    let mut child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+    let incoming = fixture.next(&mut child).await;
+    incoming.reply.send(http(200, json!({"id":"empty", "status":"completed", "output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"internal"}]}]}))).unwrap();
+    let output = crate::test_watchdog::watchdog("empty end message", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"\n");
+    assert_eq!(diagnostic(&output)["repairs"], 0);
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn run_end_returns_assigned_runs_last_end_message() {
+    let mut fixture = Fixture::new().await;
+    let schema = fixture.schema();
+    let mut command = fixture.command_mode(&schema, "run-end");
+    command.arg("work");
+    let mut child = spawn(command);
+    let incoming = fixture.next(&mut child).await;
+    incoming.reply.send(answer("{\"value\":\"last\"}")).unwrap();
+    let output = crate::test_watchdog::watchdog("run end result", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"value":"last"})
+    );
+    assert!(diagnostic(&output)["run_id"].is_string());
     fixture.close().await;
 }
