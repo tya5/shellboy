@@ -11,10 +11,11 @@ type Operation = Box<dyn FnOnce(&mut Connection) -> Result<Output, StorageError>
 
 macro_rules! named_jobs {
     ($($variant:ident => $function:ident),+ $(,)?) => {
-        #[derive(Clone, Copy)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
         pub(super) enum Kind { $($variant),+ }
 
         impl Kind {
+            #[cfg(test)] const ALL: &'static [Kind] = &[$(Kind::$variant),+];
             pub(super) fn of(command: &Command) -> Self {
                 match command {
                     $(Command::$variant(_) => Self::$variant,)+
@@ -66,9 +67,91 @@ named_jobs! {
     StorageCollect => storage_collect,
 }
 
+// Existing mutations awaiting the bounds audit in #200. This list must only shrink.
+const UNDECLARED_WRITER_BOUNDS: &[Kind] = &[
+    Kind::OwnerShutdown,
+    Kind::ThreadCreate,
+    Kind::ThreadFork,
+    Kind::ThreadDelete,
+    Kind::ThreadSet,
+    Kind::MessageSend,
+    Kind::MessageCancel,
+    Kind::RunRetry,
+    Kind::RunStop,
+    Kind::AttachmentAdd,
+    Kind::AttachmentRemove,
+    Kind::Compact,
+    Kind::ContextEdit,
+];
+
+impl Kind {
+    fn declared_writer_bound(self) -> bool {
+        match self {
+            Kind::OwnerShutdown
+            | Kind::ThreadCreate
+            | Kind::ThreadFork
+            | Kind::ThreadDelete
+            | Kind::ThreadSet
+            | Kind::MessageSend
+            | Kind::MessageCancel
+            | Kind::RunRetry
+            | Kind::RunStop
+            | Kind::AttachmentAdd
+            | Kind::AttachmentRemove
+            | Kind::Compact
+            | Kind::ContextEdit => false,
+            Kind::Status
+            | Kind::ModelList
+            | Kind::ThreadList
+            | Kind::ThreadGet
+            | Kind::UsageGet
+            | Kind::CompactList
+            | Kind::CompactPreview
+            | Kind::ShellList
+            | Kind::ThreadDeletePreview
+            | Kind::MessageGet
+            | Kind::OperationGet
+            | Kind::RunGet
+            | Kind::TurnGet
+            | Kind::Wait
+            | Kind::HistoryList
+            | Kind::HistoryGet
+            | Kind::HistorySearch
+            | Kind::HistoryRelations
+            | Kind::ShellGet
+            | Kind::ShellRead
+            | Kind::ShellWrite
+            | Kind::ShellEof
+            | Kind::ShellStop
+            | Kind::AttachmentList
+            | Kind::IndexStatus
+            | Kind::IndexPreview
+            | Kind::IndexBackfill
+            | Kind::IndexRetry
+            | Kind::IndexRebuild
+            | Kind::IndexProbe
+            | Kind::StorageStatus
+            | Kind::StorageCollect => false,
+        }
+    }
+    pub(super) fn writer_allowed(self, command: &Command) -> bool {
+        !command.is_read_only()
+            && (self.declared_writer_bound() || UNDECLARED_WRITER_BOUNDS.contains(&self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn writer_bound_exemptions_are_unique_and_not_declared() {
+        for (i, kind) in UNDECLARED_WRITER_BOUNDS.iter().enumerate() {
+            assert!(!kind.declared_writer_bound(), "remove bound-declared kind from exemptions");
+            assert!(!UNDECLARED_WRITER_BOUNDS[..i].contains(kind), "duplicate exemption");
+        }
+        assert_eq!(Kind::ALL.len(), 45, "classify new kinds and update this ratchet");
+    }
 
     #[tokio::test]
     async fn labeled_jobs_preserve_values_and_storage_errors() {
