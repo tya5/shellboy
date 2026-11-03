@@ -49,7 +49,7 @@ mod message_queue;
 mod models;
 #[allow(dead_code)]
 pub(crate) mod observation_notice;
-pub use message_queue::{PendingMessage, PendingMessages, SubmittedMessage};
+pub use message_queue::{PendingMessage, PendingMessages, ReplyTarget, SubmittedMessage};
 #[cfg(test)]
 mod scroll_characterization_tests;
 #[cfg(test)]
@@ -3801,8 +3801,26 @@ impl UiState {
         if pending.status != ReceiptStatus::Accepting {
             return;
         }
+        let replying = view
+            .composer
+            .reply_submission
+            .as_ref()
+            .is_some_and(|(revision, _)| *revision == submission.revision);
+        let replied_to =
+            replying.then(|| view.composer.reply_submission.as_ref().unwrap().1.clone());
+        if replying {
+            view.composer.reply_submission = None;
+        }
         match result {
             Ok(()) => {
+                if replied_to.as_deref().is_some_and(|id| {
+                    view.composer
+                        .reply
+                        .as_ref()
+                        .is_some_and(|target| target.message_id == id)
+                }) {
+                    view.composer.reply = None;
+                }
                 view.pending.remove(&submission.revision);
                 if view
                     .operation_notice
@@ -4493,6 +4511,9 @@ impl UiState {
                 return vec![];
             }
         };
+        if self.view().composer.reply.is_some() {
+            return self.submit_reply();
+        }
         if text.starts_with('/') && self.view().draft.command_is_typed() {
             let source = self.active.clone();
             let original = self.view().draft.clone();
@@ -4572,7 +4593,62 @@ impl UiState {
         }
         self.send_current(None)
     }
+    fn submit_reply(&mut self) -> Vec<UiAction> {
+        let language = self.config.ui.language;
+        let view = self.active_view_mut();
+        if view.composer.reply_submission.is_some() {
+            return vec![];
+        }
+        if !view.draft.attachments.is_empty() || view.draft.edit.is_some() {
+            view.status = i18n::local!(
+                language,
+                "返信は本文のみです。添付・編集を解除してください",
+                "Replies are text only; remove attachments and edit mode"
+            )
+            .into();
+            return vec![];
+        }
+        if view.draft.text.trim().is_empty() {
+            return vec![];
+        }
+        let Some(target) = view.composer.reply.clone() else {
+            return vec![];
+        };
+        let original = view.draft.clone();
+        let submission = CommandSubmission {
+            draft_id: original.draft_id.clone(),
+            revision: original.revision,
+        };
+        view.draft.clear_text();
+        view.draft.revision += 1;
+        view.composer.reply_submission = Some((original.revision, target.message_id.clone()));
+        view.pending.insert(
+            original.revision,
+            PendingSend {
+                snapshot: original.clone(),
+                command_cleared: Some(view.draft.clone()),
+                status: ReceiptStatus::Accepting,
+                message: None,
+                source_node_id: None,
+                operation_id: None,
+                send: None,
+            },
+        );
+        vec![UiAction::SubmittedCommand {
+            submission,
+            action: Box::new(UiAction::Command(Command::MessageReply(
+                crate::protocol::MessageReplyArgs {
+                    message_id: target.message_id,
+                    text: original.text,
+                    sender_label: None,
+                },
+            ))),
+        }]
+    }
     fn send_current(&mut self, confirmed_run_id: Option<String>) -> Vec<UiAction> {
+        if self.view().composer.reply.is_some() {
+            return self.submit_reply();
+        }
         let language = self.config.ui.language;
         if self.view().selecting_agents.is_some() {
             self.active_view_mut().status = i18n::local!(
@@ -5102,7 +5178,11 @@ impl UiState {
                 vec![]
             }
             "/paste" => self.paste_command(argument),
+            "/replies" => {
+                self.queue_popup.epoch=self.queue_popup.epoch.wrapping_add(1); self.queue_popup.replies=true; self.queue_popup.visible=true; self.queue_popup.archives=None; self.queue_popup.selected=0; vec![]
+            }
             "/queue" => {
+                self.queue_popup.replies=false;
                 self.queue_popup.epoch = self.queue_popup.epoch.wrapping_add(1);
                 self.queue_popup.visible = true;
                 self.queue_popup.archives = None;
@@ -5110,6 +5190,7 @@ impl UiState {
                 vec![]
             }
             "/restore" if argument == "list" => {
+                self.queue_popup.replies=false;
                 self.queue_popup.epoch = self.queue_popup.epoch.wrapping_add(1);
                 self.queue_popup.visible = true;
                 self.queue_popup.archive_loading = true;
@@ -6485,11 +6566,16 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     let input = input::display(&state.view().draft, state.config.ui.language);
     let input_width = area.width.saturating_sub(2).max(1);
     let input_metrics = input::measure(&input.text, input.cursor, input_width);
-    let input_height = input_metrics
+    let mut input_height = input_metrics
         .rows
         .saturating_add(2)
         .min(usize::from((area.height / 4).clamp(3, 8)))
         .min(usize::from(area.height.saturating_sub(4))) as u16;
+    if state.view().composer.reply.is_some() {
+        input_height = input_height
+            .saturating_add(1)
+            .min(area.height.saturating_sub(4));
+    }
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -6637,7 +6723,19 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         view.describe_calls,
         state.animation.blink_dim(Instant::now()),
     );
-    let input_area = layout[2];
+    let mut input_area = layout[2];
+    if let Some(target) = &state.view().composer.reply {
+        frame.render_widget(
+            Paragraph::new(target.caption(state.config.ui.language)),
+            Rect {
+                height: 1,
+                ..input_area
+            },
+        );
+        input_area.y = input_area.y.saturating_add(1);
+        input_area.height = input_area.height.saturating_sub(1);
+    }
+
     let input_body_height = input_area.height.saturating_sub(2);
     let cursor = draw_input(frame, input_area, state, &input, &input_metrics);
     draw_status(frame, layout[3], state);

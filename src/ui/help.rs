@@ -399,6 +399,10 @@ impl Page {
                 "Deliver now and release only the foreground shell wait"
             ),
         );
+        page.entry("/replies",local!(config.ui.language,
+            "返事待ちを確認。Enterで返信先を選び、Escで返信モード解除（本文は保持）",
+            "Inspect awaiting replies; Enter selects a target, Esc leaves reply mode and keeps text"
+        ));
         page.entry(
             "/queue",
             local!(
