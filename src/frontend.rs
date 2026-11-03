@@ -1133,8 +1133,16 @@ async fn run_with_delivery(
                 permit,
             ));
         }
-        if let Some((generation, reason)) = browser.take_resync() {
-            update(&updates, UiUpdate::BrowserResync { generation, reason }).await;
+        if let Some((generation, reason, reason_en)) = browser.take_resync() {
+            update(
+                &updates,
+                UiUpdate::BrowserResync {
+                    generation,
+                    reason,
+                    reason_en,
+                },
+            )
+            .await;
         }
         if updates.closed() {
             break;
