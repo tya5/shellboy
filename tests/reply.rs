@@ -58,3 +58,52 @@ async fn expected_reply_cap_is_128_and_replay_is_not_a_new_duty() {
     store.execute(request(send(false)), None).await.unwrap();
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn reply_requires_applied_pending_and_is_idempotent() {
+    let (_root, store) = fixture().await;
+    let accepted = store
+        .execute(request(send(true)), None)
+        .await
+        .unwrap()
+        .result;
+    let id = accepted["message_id"].as_str().unwrap().to_owned();
+    let reply = request(Command::MessageReply(MessageReplyArgs {
+        message_id: id.clone(),
+        text: "synthetic reply".into(),
+        sender_label: None,
+    }));
+    let before = store.execute(reply.clone(), None).await.unwrap_err();
+    assert_eq!(before.code, ErrorCode::InvalidState);
+    let admitted = id.clone();
+    store.database.call(move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&admitted])?; Ok(()) }).await.unwrap();
+    let result = store.execute(reply.clone(), None).await.unwrap().result;
+    assert_eq!(result["reply_to"], id);
+    assert_eq!(store.execute(reply, None).await.unwrap().result, result);
+    let details = store
+        .execute(
+            request(Command::MessageGet(MessageTarget {
+                message_id: id.clone(),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(details["expect_reply"], true);
+    assert_eq!(details["reply"]["state"], "replied");
+    assert_eq!(details["reply"]["node_id"], result["message_id"]);
+    let late = store
+        .execute(
+            request(Command::MessageReply(MessageReplyArgs {
+                message_id: id,
+                text: "late".into(),
+                sender_label: None,
+            })),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(late.details["reply_state"], "replied");
+    store.database.shutdown().await.unwrap();
+}

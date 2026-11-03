@@ -40,7 +40,11 @@ pub(crate) fn append_admitted_tx(
     at: &str,
 ) -> Result<(), StorageError> {
     if history::selection_revision(tx, thread, history::ThreadScope::Live)? as u64 != revision {
-        return Err(ApiError::new(ErrorCode::InvalidState, "selected path revision changed; discard late adoption").into());
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "selected path revision changed; discard late adoption",
+        )
+        .into());
     }
     let mut has_notice = false;
     for node in nodes {
