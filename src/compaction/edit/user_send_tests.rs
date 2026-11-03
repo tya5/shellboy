@@ -77,7 +77,7 @@ async fn accepted_user_message_fences_new_owner_scope_without_revising_selection
                     format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
                     Command::MessageSend(MessageSendArgs {
                         sender_label: None,
-                        now: false,
+                        deliver: Deliver::Next,
                         thread_id: Some(thread.clone()),
                         text: "new accepted user instruction".into(),
                     }),
@@ -92,7 +92,7 @@ async fn accepted_user_message_fences_new_owner_scope_without_revising_selection
             std::slice::from_ref(&thread)
         );
         let accepted: MessageAccepted = serde_json::from_value(sent.result).unwrap();
-        assert!(!accepted.now);
+        assert_eq!(accepted.deliver, Deliver::Next);
         let expected_assignment = match scope {
             "new_run" => Assignment::NewRun,
             "new_turn" => Assignment::NewTurn,

@@ -29,6 +29,16 @@ onward. Adoption starts a new reasoning epoch. See
 [compaction](../design/compaction.md#active-turn-middle-summary-181). No
 migration or setting. 3-OS CI run 41535174896 passed. Next: merge sequencing with
 issue-183/append-context and #180 (coordinator). #182 is separate.
+## Revisit as a delivery timing (#187, rebased on fd23d321; CI in acceptance)
+
+Revisit is `message send --deliver complete`: an ordinary message held as a
+receipt and released into the receipt path when the Thread's live Run would
+complete, or delivered immediately when none is live. It never outlives its
+Run: stop, shutdown and recovery wait hand it to the ordinary held-input rules. `--deliver now` replaces
+`--now`. The `revisit` commands, `revisit` event kind, per-Run app_meta state,
+`limits.revisit_max_per_run`, `revisit_limit_reached` and the Revisit capture
+diagnostic are removed. Migration 24 drops the old metadata and adds
+`receipt_run_completion`. Validation status is in acceptance.
 
 ## Paused index consumption (#173)
 

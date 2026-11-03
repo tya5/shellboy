@@ -154,7 +154,7 @@ const MEANINGS: &[Meaning] = &[
         &[
             ("thread_id", FieldId::Thread),
             ("sender_label", FieldId::SenderLabel),
-            ("now", FieldId::Now),
+            ("deliver", FieldId::Deliver),
             ("text", FieldId::Text),
             ("text_stdin", FieldId::Text),
         ],
@@ -193,28 +193,6 @@ const MEANINGS: &[Meaning] = &[
     (
         OperationId::RunStop,
         &["run", "stop"],
-        &[("run_id", FieldId::Run)],
-        None,
-    ),
-    (
-        OperationId::RevisitSet,
-        &["revisit", "set"],
-        &[
-            ("run_id", FieldId::Run),
-            ("text", FieldId::Text),
-            ("text_stdin", FieldId::Text),
-        ],
-        None,
-    ),
-    (
-        OperationId::RevisitGet,
-        &["revisit", "get"],
-        &[("run_id", FieldId::Run)],
-        None,
-    ),
-    (
-        OperationId::RevisitCancel,
-        &["revisit", "cancel"],
         &[("run_id", FieldId::Run)],
         None,
     ),

@@ -79,11 +79,6 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: RunCommand,
     },
-    /// Reserve, inspect, or cancel an instruction at normal Run completion.
-    Revisit {
-        #[command(subcommand)]
-        command: RevisitCommand,
-    },
     /// Inspect one answer interval and its saved answer node.
     Turn {
         #[command(subcommand)]
@@ -218,29 +213,6 @@ pub enum RunCommand {
     Retry(RunOptions),
     /// Request stopping this Run and its owned work; inspect state to confirm termination.
     Stop(RunOptions),
-}
-#[derive(Debug, Clone, Subcommand)]
-pub enum RevisitCommand {
-    /// Replace the pending instruction. Models may omit --run for their own Run.
-    Set(RevisitSetOptions),
-    /// Inspect pending instruction, setter, count and last firing time.
-    Get(RevisitOptions),
-    /// Remove the pending instruction without stopping the Run.
-    Cancel(RevisitOptions),
-}
-#[derive(Debug, Clone, Args)]
-pub struct RevisitOptions {
-    /// Required for humans; models may address their own Run or a directly owned child.
-    #[arg(long = "run")]
-    pub run_id: Option<String>,
-}
-#[derive(Debug, Clone, Args)]
-pub struct RevisitSetOptions {
-    #[command(flatten)]
-    pub target: RevisitOptions,
-    /// Instruction of at most 8192 UTF-8 bytes; blank text is rejected.
-    #[command(flatten)]
-    pub text: TextOptions,
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum TurnCommand {
@@ -489,9 +461,11 @@ pub struct MessageSendOptions {
     pub sender_label: Option<String>,
     #[arg(long = "thread")]
     pub thread_id: Option<String>,
-    /// Release a foreground shell wait; does not interrupt response generation.
-    #[arg(long)]
-    pub now: bool,
+    /// Delivery timing. Omitted: the next safe boundary. now: also release a
+    /// foreground shell wait (never interrupts response generation). complete:
+    /// when the Thread's live Run would complete, or immediately if none is live.
+    #[arg(long, value_enum)]
+    pub deliver: Option<wire::Deliver>,
     #[command(flatten)]
     pub text: TextOptions,
 }
@@ -576,6 +550,14 @@ pub struct HistoryGetOptions {
     pub cursor: Option<String>,
     #[arg(long, default_value = wire::DEFAULT_ENCODING)]
     pub encoding: String,
+}
+impl ValueEnum for wire::Deliver {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Now, Self::Complete]
+    }
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.as_str()))
+    }
 }
 impl ValueEnum for wire::HistoryRelation {
     fn value_variants<'a>() -> &'a [Self] {
@@ -854,7 +836,7 @@ impl Cli {
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,
-                    now: a.now,
+                    deliver: a.deliver.unwrap_or_default(),
                 }),
                 MessageCommand::Get(a) => C::MessageGet(wire::MessageTarget {
                     message_id: a.message_id,
@@ -872,16 +854,6 @@ impl Cli {
                 RunCommand::Get(a) => C::RunGet(wire::RunTarget { run_id: a.run_id }),
                 RunCommand::Retry(a) => C::RunRetry(wire::RunTarget { run_id: a.run_id }),
                 RunCommand::Stop(a) => C::RunStop(wire::RunTarget { run_id: a.run_id }),
-            },
-            CliCommand::Revisit { command } => match command {
-                RevisitCommand::Set(a) => C::RevisitSet(wire::RevisitSetArgs {
-                    run_id: a.target.run_id,
-                    text: read_text_limited(a.text, stdin, wire::MAX_REVISIT_TEXT_BYTES).await?,
-                }),
-                RevisitCommand::Get(a) => C::RevisitGet(wire::RevisitArgs { run_id: a.run_id }),
-                RevisitCommand::Cancel(a) => {
-                    C::RevisitCancel(wire::RevisitArgs { run_id: a.run_id })
-                }
             },
             CliCommand::Turn {
                 command: TurnCommand::Get(a),
@@ -1076,13 +1048,7 @@ async fn read_text<R: AsyncRead + Unpin>(
     options: TextOptions,
     reader: &mut R,
 ) -> Result<String, ApiError> {
-    read_text_limited(options, reader, MAX_STDIN_TEXT_BYTES).await
-}
-async fn read_text_limited<R: AsyncRead + Unpin>(
-    options: TextOptions,
-    reader: &mut R,
-    max_bytes: usize,
-) -> Result<String, ApiError> {
+    let max_bytes = MAX_STDIN_TEXT_BYTES;
     match (options.text, options.text_stdin) {
         (Some(text), false) => {
             if text.len() > max_bytes {

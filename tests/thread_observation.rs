@@ -61,11 +61,11 @@ async fn multiple_threads_and_last_answer_input_stay_distinct_during_a_new_reque
         let first=call(&control,Command::ThreadCreate(ThreadCreateArgs { agents:None, connection:None, cwd:None, model:None, effort:None, parent_id:None })).await;
         let other=call(&control,Command::ThreadCreate(ThreadCreateArgs { agents:None, connection:None, cwd:None, model:None, effort:None, parent_id:None })).await;
         let thread=first["thread_id"].as_str().unwrap().to_owned();let other=other["thread_id"].as_str().unwrap().to_owned();
-        call(&control,Command::MessageSend(MessageSendArgs{thread_id:Some(thread.clone()),text:"first input".into(),sender_label:Some("initial".into()),now:false})).await;
+        call(&control,Command::MessageSend(MessageSendArgs{thread_id:Some(thread.clone()),text:"first input".into(),sender_label:Some("initial".into()),deliver: Deliver::Next})).await;
         incoming.recv().await.unwrap().send(()).unwrap();
         let done=call(&control,settled(vec![thread.clone(),other])).await;
         assert_eq!(done["status"],"satisfied");assert_eq!(done["snapshot"]["changes"][0]["thread_id"],thread);
-        call(&control,Command::MessageSend(MessageSendArgs{thread_id:Some(thread.clone()),text:"new input".into(),sender_label:Some("self-asserted-reviewer".into()),now:false})).await;
+        call(&control,Command::MessageSend(MessageSendArgs{thread_id:Some(thread.clone()),text:"new input".into(),sender_label:Some("self-asserted-reviewer".into()),deliver: Deliver::Next})).await;
         let release=incoming.recv().await.unwrap();
         let details=call(&control,Command::ThreadGet(ThreadTarget{thread_id:Some(thread.clone())})).await;
         assert_eq!(details["last_answer"]["excerpt"],"first answer");

@@ -1,7 +1,7 @@
 use clap::{Parser, error::ErrorKind};
 use shellboy::{
     cli::{Cli, MAX_STDIN_TEXT_BYTES},
-    protocol::{Command, ErrorCode},
+    protocol::{Command, Deliver, ErrorCode, MessageSendArgs},
 };
 #[cfg(unix)]
 use std::ffi::OsString;
@@ -836,61 +836,41 @@ fn rag_conversion_backend_flags_are_no_longer_part_of_the_cli() {
 }
 
 #[tokio::test]
-async fn revisit_targets_and_bounded_stdin_map_to_shared_commands() {
-    use shellboy::protocol::{MAX_REVISIT_TEXT_BYTES, RevisitArgs, RevisitSetArgs};
-    assert_eq!(
-        convert(&["revisit", "get"]).await,
-        Command::RevisitGet(RevisitArgs { run_id: None })
-    );
-    assert_eq!(
-        convert(&["revisit", "cancel", "--run", "child"]).await,
-        Command::RevisitCancel(RevisitArgs {
-            run_id: Some("child".into())
-        })
-    );
-    assert_eq!(
-        convert(&["revisit", "set", "--text", "Review remaining requirements"]).await,
-        Command::RevisitSet(RevisitSetArgs {
-            run_id: None,
-            text: "Review remaining requirements".into()
-        })
-    );
+async fn message_delivery_timing_replaces_now_and_revisit_commands() {
+    for (flag, deliver) in [
+        (None, Deliver::Next),
+        (Some("now"), Deliver::Now),
+        (Some("complete"), Deliver::Complete),
+    ] {
+        let mut args = vec!["message", "send", "--text", "Check again"];
+        if let Some(flag) = flag {
+            args.extend(["--deliver", flag]);
+        }
+        assert_eq!(
+            convert(&args).await,
+            Command::MessageSend(MessageSendArgs {
+                sender_label: None,
+                thread_id: None,
+                text: "Check again".into(),
+                deliver,
+            })
+        );
+    }
     for args in [
-        vec!["shellboy", "revisit", "set"],
-        vec!["shellboy", "revisit", "set", "--text", "x", "--text-stdin"],
+        vec!["shellboy", "message", "send", "--now", "--text", "x"],
+        vec![
+            "shellboy",
+            "message",
+            "send",
+            "--deliver",
+            "later",
+            "--text",
+            "x",
+        ],
+        vec!["shellboy", "revisit", "set", "--text", "x"],
     ] {
         assert!(Cli::try_parse_from(args).is_err());
     }
-    let text = "é".repeat(MAX_REVISIT_TEXT_BYTES / 2);
-    let cli =
-        Cli::try_parse_from(["shellboy", "revisit", "set", "--run", "r", "--text-stdin"]).unwrap();
-    let result = cli
-        .into_command_with_stdin(cwd(), &mut text.as_bytes())
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        result,
-        Command::RevisitSet(RevisitSetArgs {
-            run_id: Some("r".into()),
-            text
-        })
-    );
-    let bytes = vec![b'x'; MAX_REVISIT_TEXT_BYTES + 2];
-    let mut input = bytes.as_slice();
-    let cli = Cli::try_parse_from(["shellboy", "revisit", "set", "--text-stdin"]).unwrap();
-    assert_eq!(
-        cli.into_command_with_stdin(cwd(), &mut input)
-            .await
-            .unwrap_err()
-            .code,
-        ErrorCode::InputLimit
-    );
-    assert_eq!(
-        input.len(),
-        1,
-        "stdin reads at most limit+1 bytes before rejecting"
-    );
 }
 
 #[tokio::test]

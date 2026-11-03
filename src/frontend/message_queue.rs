@@ -18,7 +18,7 @@ pub(super) fn query(
     )?;
     // SQLite returns bounded text fragments; never load 128 full message blobs
     // merely to draw a preview. Full canonical content stays source-addressable.
-    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,r.sender_json,r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.now'),0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
+    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,r.sender_json,r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
     let items = stmt
         .query_map([thread], |row| {
             let sender: String = row.get(2)?;
@@ -431,7 +431,7 @@ mod tests {
                 state,
                 (state == "held").then_some("terminal_before_path_admission"),
                 admission,
-                serde_json::json!({"now":now}).to_string()
+                serde_json::json!({"deliver": if now { "now" } else { "next" }}).to_string()
             ],
         )
         .unwrap();

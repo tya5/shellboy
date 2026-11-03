@@ -872,7 +872,6 @@ pub fn event_title(kind: &str, language: UiLanguage) -> &str {
         return super::events::event_title(kind);
     }
     match kind {
-        "revisit" => "Revisit resumed",
         "index_state" => "Index state",
         "previous_instance_interrupted" => "Previous interruption record",
         "app_shutdown" => "Saved shutdown record",
@@ -905,8 +904,6 @@ pub fn section_label(section: &str, language: UiLanguage) -> &str {
         (UiLanguage::Ja, "shells") => "shell",
         (UiLanguage::En, "tool_calls") => "Tool calls",
         (UiLanguage::Ja, "tool_calls") => "ツール呼出し",
-        (UiLanguage::En, "revisits") => "Revisits",
-        (UiLanguage::Ja, "revisits") => "再訪",
         (UiLanguage::En, "owned_children") => "Owned children",
         (UiLanguage::Ja, "owned_children") => "所有する子",
         (UiLanguage::En, "unreflected_messages") => "Unreflected messages",
@@ -998,7 +995,6 @@ pub(super) fn event_messages(
             "turns",
             "shells",
             "tool_calls",
-            "revisits",
             "owned_children",
             "unreflected_messages",
             "cancelled_waits",

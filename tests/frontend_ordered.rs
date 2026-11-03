@@ -120,7 +120,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.into()),
                 text: text.into(),
             }),

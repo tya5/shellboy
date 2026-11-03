@@ -313,73 +313,53 @@ own Thread if it appears among the targets. Each destination starts an independe
 Run, so send a few at a time when many targets could exceed provider rate limits.
 
 A destination whose `parent_id` is your Thread becomes owned by your current
-Run: you can stop it, retry it, or register Revisit. An unrelated destination has
+Run: you can stop it or retry it. An unrelated destination has
 an independent Run that you cannot stop; the human user can. The saved
 `result_uncertain: true` describes uncertain effects of the interrupted work.
 Use the saved evidence to decide how to continue rather than assuming the work
-completed or repeating side effects automatically. Interrupted Revisit reservations
-must be inspected and explicitly registered again when appropriate.
+completed or repeating side effects automatically.
 
-## Reserve a Revisit before finishing
+## Revisit: a message delivered when the Run completes
 
-A Revisit is one free-form self-instruction delivered when your live Run would
-otherwise complete normally. It creates an ordinary developer-event Turn in
-this conversation, after owned shells/children and pending input/events have
-been handled. It is not a new human request or an automatic judgement of success.
+A Revisit is an ordinary message whose delivery waits until your live Run would
+otherwise complete normally, after owned shells/children and pending input and
+events have been handled. Use it to make yourself check the work once more
+before finishing. It is not a new human request or a judgement of success.
 
 ```sh
-shellboy revisit set --text 'Before finishing, inspect the original request and later constraints using their saved node IDs. Continue missing work and report unverified results.'
-shellboy revisit get
-shellboy revisit cancel
+shellboy message send --deliver complete --text 'Before finishing, inspect the original request and later constraints using their saved node IDs. Continue missing work and report unverified results.'
 ```
 
-Within an authenticated model shell, omit `--run` for your own Run. You may also
-specify a directly owned child Run; unrelated Runs and non-direct descendants
-are rejected. A human must specify `--run`. A reservation belongs to one live
-Run, is not inherited by children/forks and survives follow-up input until actual
-Run completion. Parent/human replacement is visible via setter identity,
-`replaced_other` and `previous_text_preview`; inspect get rather than assuming
-that your earlier text is still pending. Text is limited to 8192 UTF-8 bytes;
-`--text-stdin` accepts multiline instructions within that same bound.
+Inside your shell, omitting `--thread` targets your own Thread. The result has
+`delivery_status: held` and `deliver: complete` while it waits; keep its
+`message_id`. Inspect it with `message get` and remove it with
+`message cancel --message MESSAGE_ID`. Several such messages may wait; at
+completion they arrive together, in send order, as a new Turn of the same Run,
+and your Run continues. Messages you or others send later with the default
+timing or `--deliver now` are delivered at their own boundaries first; a waiting
+Revisit never delays them. To continue again, send another one during that Turn.
 
-Consumption/delivery happens once. Retries do not guarantee exactly-once model
-execution or external effects. Finishing the resulting Turn does not repeat the
-consumed reservation. You may register another reservation during that Turn to
-continue again: cycles are unlimited by default, or capped by the optional
-`limits.revisit_max_per_run` setting. `revisit_limit_reached` means registration
-was refused; inspect get and decide how to proceed. Existing `/stop`, Ctrl+C and
-`run stop` end continuing work and drop pending reservations while keeping saved
-history. Run inspection, status and the Thread list expose count/pending facts;
-they do not establish progress or successful completion.
+If no Run is live when it is sent (for example your parent sends one to a child
+that already finished), it is delivered immediately like an ordinary message and
+starts a new Run. A parent may send one to its owned child under the ordinary
+message rules.
 
-Before asking the user a question and ending your Turn, cancel the reservation
-or rewrite it to notice that you are waiting for an answer. Core cannot identify
-questions. If a Revisit fires while waiting for the user, end briefly without
-starting extra work. A false trigger can cost an additional model request.
+A waiting Revisit never outlives its Run. If the Run ends some other way, it is
+released at that moment as ordinary input: after `/stop`, Ctrl+C or `run stop`
+it is held like any input sent to a stopping Run and is admitted at the next
+explicit resume; after shutdown it is admitted at the next resume after
+restart; when the Run enters `recovery_wait`, it joins the held input that an
+explicit retry sends. After a human Esc interruption the Run still completes, so
+the Revisit is delivered then; check the latest human direction first.
 
-Stop, shutdown and restart never automatically resume a reservation. The previous
-shutdown record retains interrupted text/setter/count and the next actual Turn
-receives those facts through the existing context event. Inspect uncertainty and
-saved effects before deciding whether to register a fresh reservation. Revisit
-get fails on a terminal Run; use `run get` and saved history for its final facts.
+Before asking the user a question and ending your Turn, cancel a waiting
+Revisit. Core cannot identify questions. If one arrives while waiting for the
+user, end briefly without starting extra work. A false trigger can cost an
+additional model request.
 
-### Revisit recovery and child completion
-
-If capacity prevents Revisit firing, its reservation remains pending and the
-Run enters `recovery_wait`. Fix capacity before `run retry`; retry can send one
-ordinary model request with no new input before completion attempts the reserved
-instruction again. Revisit does not replace existing recovery semantics.
-
-`child_turn_completed` is progress, not completion of a child Run. Revisit can
-produce several such notifications. When child work or reservations remain,
-wait for `child_run_ended` before treating the child as finished. A parent's
-Revisit instruction is delivered to the child as a developer-role event, with
-higher instruction priority than the parent's user-role `message send` text.
-
-If `revisit get` reports malformed metadata, its counter is unknown; do not infer
-zero or re-register blindly. Stop the Run or restart the owner to discard the
-unreadable reservation. Optional Run/list projections can omit its Revisit
-summary while other controls remain available.
+`child_turn_completed` is progress, not completion of a child Run. A child with
+Revisit work can send several such notifications; wait for `child_run_ended`
+before treating the child as finished.
 
 ## Inspect a delegation sender
 
@@ -407,11 +387,11 @@ Collection keeps history references/reasons, not the reclaimed content; conversa
 
 ## Queued messages and human Turn interruption
 
-`shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
+`shellboy message send --thread THREAD_ID --text 'Report; no reply needed'` queues ordinary input at the next tool-group/request boundary. Use this for routine reports. Add `--deliver now` only when the information must urgently release the recipient's foreground shell wait. That shell continues with its execution ID; immediate delivery does not cancel an in-progress model response. Do not poll or send repeated nudges merely because an input remains queued.
 
 Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` exposes its saved delivery/context; applied means path admission, not a successful answer. To cancel unread input explicitly, use `shellboy message cancel --message MESSAGE_ID` (repeat `--message` for up to 128 fixed IDs). Humans may cancel any sender's input; models may cancel only input sent by their own Thread. Check each returned outcome: another input may already have been admitted. Same-operation replay returns the saved outcomes. Cancellation does not wake the model. `archive_draft_id` identifies a durable source available to a human through TUI `/restore list` or `/restore draft ID`; restoration does not execute or send anything automatically.
 
-A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background work; a later genuine shell/child completion may wake a Turn after Esc. Revisit reservations are discarded on human interruption. Automatic time-based backgrounding is not enabled.
+A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background work; a later genuine shell/child completion may wake a Turn after Esc. A waiting Revisit message is still delivered when the Run then completes. Automatic time-based backgrounding is not enabled.
 
 
 ### Human Watch views and saved facts

@@ -120,7 +120,7 @@ A latest reason of `previous_instance_interrupted` or `app_shutdown` adds `[exit
 
 ## Revisit facts (Issue #36)
 
-The latest Run's optional typed Revisit summary supplies consumed count and pending reservation to the existing row and selected detail. Use `Revisit N` and append `next reserved` only for a saved pending instruction. This is independent of app-exit marking and ordinary Run/Turn state; a new Run starts with its own facts. The activity footer shows the same summary while the Run is live/stopping, observed at the existing reactive progress cadence. No instruction body or setter is copied into list/status rows.
+The latest Run's optional typed Revisit summary supplies consumed count and pending reservation to the existing row and selected detail. Use `Revisit N` and append `next reserved` only while a `--deliver complete` message of the Thread is waiting (#187); N counts those the latest Run received at completion. This is independent of app-exit marking and ordinary Run/Turn state; a new Run starts with its own facts. The activity footer shows the same summary while the Run is live/stopping, observed at the existing reactive progress cadence. No instruction body or setter is copied into list/status rows.
 
 Reserve row width for the Revisit label so a long title does not hide it. Narrow rows use `Revisit N+` (`+` means a pending next reservation); the selected detail retains `next reserved`. At extremely narrow widths the existing title/tree remains primary, with full values reachable in details.
 

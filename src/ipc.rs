@@ -438,7 +438,7 @@ mod frame_delivery_tests {
         let make = |text| {
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),
                 text,
             })
@@ -515,7 +515,7 @@ mod frame_delivery_tests {
             endpoint(),
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),
                 text: "hello".into(),
             }),
@@ -685,7 +685,7 @@ mod frame_delivery_tests {
             endpoint(),
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),
                 text: "hello".into(),
             }),

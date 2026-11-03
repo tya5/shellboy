@@ -275,7 +275,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
         control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.into()),
             text: text.into(),
         }),
@@ -297,7 +297,7 @@ async fn preparation_failure_preserves_accepted_message_and_retry_reuses_its_tur
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: original.into(),
             }),
@@ -902,7 +902,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "old original request".into(),
         }),
@@ -996,7 +996,7 @@ async fn edited_request_requires_exact_run_consent_and_waits_for_old_run_to_stop
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "running original".into(),
         }),
@@ -1311,7 +1311,7 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: "continue existing provider history".into(),
             }),
@@ -1465,7 +1465,7 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: original.into(),
             }),
@@ -1641,7 +1641,7 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: "create the per-thread instructions through shell".into(),
             }),
@@ -1699,7 +1699,7 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: "observe the new instructions at the next Turn".into(),
             }),
@@ -1791,27 +1791,19 @@ async fn accepted_quit_prevents_tools_from_a_late_model_response_without_cancell
     actions.close_tool_starts_on_quit(&control);
     send(&control, &thread, "response will arrive after Quit").await;
     let pending = incoming(&control, &mut receive).await;
-    let target = thread.clone();
-    let run: String = control
-        .store
-        .database
-        .call(move |db| {
-            Ok(db.query_row(
-                "SELECT id FROM run WHERE thread_id=?1 AND state='live'",
-                [target],
-                |r| r.get(0),
-            )?)
-        })
-        .await
-        .unwrap();
-    request(
+    let waiting = request(
         &control,
-        Command::RevisitSet(RevisitSetArgs {
-            run_id: Some(run.clone()),
+        Command::MessageSend(MessageSendArgs {
+            sender_label: None,
+            thread_id: Some(thread.clone()),
             text: "Do not fire after Quit admission".into(),
+            deliver: Deliver::Complete,
         }),
     )
-    .await;
+    .await["message_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     actions.try_send(shellboy::ui::UiAction::Quit).unwrap();
     let marker = root.path().join("forbidden-after-quit");
     let command = format!("printf forbidden > '{}'", marker.display());
@@ -1828,34 +1820,20 @@ async fn accepted_quit_prevents_tools_from_a_late_model_response_without_cancell
         .unwrap();
     settled(&control, &thread).await;
     assert!(!marker.exists());
-    let reservation = request(
-        &control,
-        Command::RevisitGet(RevisitArgs {
-            run_id: Some(run.clone()),
-        }),
-    )
-    .await;
-    assert!(
-        reservation["pending"].is_object(),
-        "Quit admission preserves the reservation until shutdown captures it"
-    );
-    assert_eq!(
-        reservation["consumed_count"], 0,
-        "Quit admission must not fire Revisit"
-    );
-    let target = run.clone();
+    let target = waiting.clone();
     assert_eq!(
         control
             .store
             .database
             .call(move |db| Ok(db.query_row(
-                "SELECT count(*) FROM event WHERE kind='revisit' AND target_run_id=?1",
+                "SELECT state FROM receipt WHERE message_node_id=?1",
                 [target],
-                |r| r.get::<_, i64>(0)
+                |r| r.get::<_, String>(0)
             )?))
             .await
             .unwrap(),
-        0
+        "held",
+        "Quit admission must not deliver a waiting Revisit message"
     );
     owner
         .db
@@ -1987,7 +1965,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(parent.clone()),
                 text: "synthetic session parent".into(),
             }),
@@ -2194,7 +2172,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "first turn".into(),
         }),
@@ -2313,7 +2291,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "new turn".into(),
         }),
@@ -2457,7 +2435,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "selected file removed".into(),
         }),
@@ -2490,7 +2468,7 @@ async fn working_instruction_header_preserves_empty_and_original_snapshots() {
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: "first snapshot".into(),
             }),
@@ -2522,7 +2500,7 @@ async fn working_instruction_header_preserves_empty_and_original_snapshots() {
             &control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: "next Turn observes edit".into(),
             }),
@@ -2565,7 +2543,7 @@ async fn unreadable_working_instructions_recover_without_an_outbound_header() {
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "permission failure".into(),
         }),
@@ -4050,7 +4028,7 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
                         &control,
                         Command::MessageSend(MessageSendArgs {
                             sender_label: None,
-                            now: false,
+                            deliver: Deliver::Next,
                             thread_id: Some(target.clone()),
                             text: "synthetic filter recovery".into(),
                         }),

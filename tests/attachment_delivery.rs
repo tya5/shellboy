@@ -372,7 +372,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
                 "instance:before",
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some("thread".into()),
                     text: "before attachment".into(),
                 }),
@@ -389,7 +389,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
                 "instance:after",
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some("thread".into()),
                     text: "after attachment".into(),
                 }),
@@ -438,7 +438,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
                 "instance:initial",
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some("thread".into()),
                     text: "initial".into(),
                 }),
@@ -477,7 +477,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
                 "instance:new-run",
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some("thread".into()),
                     text: "new instruction".into(),
                 }),
@@ -528,7 +528,7 @@ async fn terminated_foreign_origin_incomplete_group_does_not_block_live_target()
                 "instance:target-start",
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some("thread".into()),
                     text: "target".into(),
                 }),

@@ -613,7 +613,7 @@ impl Control {
         let outcome=tokio::spawn(async move{
             let _guard=control.admit(true)?;
             let references:Vec<Value>=files.iter().map(|file|json!({"path":file.path,"kind":file.kind})).collect();
-            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"confirmed_run_id":confirmed_run,"text":content.text,"files":references,"args":args,"now":options.now,"submission":options.submission});
+            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"confirmed_run_id":confirmed_run,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"submission":options.submission});
             content.fingerprint_positions(&mut intent);
             let reservation=control.store.reserve_internal(operation_id.clone(),intent).await?;
             match reservation{db::RuntimeReservation::Saved(result)=>return result,db::RuntimeReservation::Pending=>return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),db::RuntimeReservation::New=>{control.changed.notify_waiters();}}
@@ -1235,7 +1235,6 @@ impl Control {
                             "app_shutdown",
                             "shutdown",
                         )?;
-                        revisit::drop_all_pending(&tx)?;
                         tx.commit()?;
                         Ok(())
                     })
@@ -1704,7 +1703,7 @@ mod failure_tests {
         let command = Command::MessageSend(MessageSendArgs {
             thread_id: Some("target".into()),
             text: "synthetic sender".into(),
-            now: false,
+            deliver: Deliver::Next,
             sender_label: Some("human owner".into()),
         });
         let mut forged = Request::new(format!("{}:forged", owner.instance_id), command.clone());

@@ -458,8 +458,6 @@ section!(positive "limits", Limits {
     draft_bytes: u64 = MIB,
     data_warning_bytes: u64 = 8 * GIB,
     data_max_bytes: u64 = 10 * GIB
-} optional {
-    revisit_max_per_run: Option<u64> = None
 });
 section!(Cache {
     body_bytes: u64 = 32 * MIB,

@@ -91,14 +91,11 @@ independently of post-header stream idle time. Zero is rejected; disabling body
 inactivity with stream_idle_timeout_ms=0 does not disable this deadline. Owner
 restart applies configuration changes. Embedding/catalog total limits do not change.
 
-## Optional Revisit consumption limit (#36)
+## Revisit has no limit setting (#187)
 
-`limits.revisit_max_per_run` is an optional unsigned integer: absent means no
-consumption limit, zero disables new registrations, and a positive value caps
-consumptions per Run. Other Limits fields remain strictly positive. The small
-section declaration macro distinguishes optional fields from the existing
-positive numeric fields; it does not add a validation registry. See
-[Revisit](revisit.md) for the `revisit_limit_reached` rejection and counter.
+`limits.revisit_max_per_run` (#36) is removed and is now an unknown key. Revisit
+is an ordinary message bounded by the existing message limits; see
+[Revisit](revisit.md#limit-decision).
 
 
 ## Deterministic history embedding batches (#43)

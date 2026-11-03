@@ -115,7 +115,6 @@ pub(super) async fn admit_locked(
             let at=state::now();
             tx.execute("UPDATE turn SET interrupt_requested_at=?2,generation=generation+1 WHERE id=?1 AND interrupt_requested_at IS NULL",params![saved_turn,at])?;
             tx.execute("UPDATE model_attempt SET state='cancelled',ended_at=?2,error_json=?3 WHERE turn_id=?1 AND state IN ('preparing','inflight')",params![saved_turn,at,json!({"kind":"human_turn_interrupted","message":"A human interrupted this Turn"}).to_string()])?;
-            revisit::drop_pending(&tx,&run).map_err(crate::storage::StorageError::from)?;
             tx.execute("UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",params![saved_thread,at])?;
             result["requested"]=json!(true);result["state"]=json!("interrupt_requested");result["interrupt_requested_at"]=json!(at);
             tx.commit()?;Ok(result)
@@ -276,7 +275,7 @@ mod tests {
                         sender_label: None,
                         thread_id: Some(thread.clone()),
                         text: "fixture".into(),
-                        now: false,
+                        deliver: crate::protocol::Deliver::Next,
                     }),
                 ),
                 None,

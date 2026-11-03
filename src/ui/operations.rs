@@ -91,9 +91,6 @@ ThreadList,
     ThreadDeletePreview,
     Status,
     MessageCancel,
-    RevisitSet,
-    RevisitGet,
-    RevisitCancel,
     IndexPreview,
     IndexProbe;
     Exec,ConfigInit,ConfigCheck,DocsList,DocsGet,DocsSearch,RagInit,RagSourceAdd,RagSourceList,RagSourceRemove,RagIndex,RagIngest,RagStatus,RagInspect,RagSearch,RagGet,
@@ -1219,12 +1216,20 @@ impl Form {
                         String::new(),
                         Text,
                     ),
-                    f("now", "優先送信", "false".into(), Boolean),
+                    f(
+                        "deliver",
+                        "届けるとき（空=次の区切り）",
+                        String::new(),
+                        Choice(&["", "now", "complete"]),
+                    ),
                 ],
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
                         sender_label: form.optional("sender_label")?,
-                        now: form.boolean("now")?,
+                        deliver: form
+                            .optional("deliver")?
+                            .and_then(|value| Deliver::parse(&value))
+                            .unwrap_or_default(),
                         thread_id: form.optional("thread")?,
                         text: form.owned("text")?,
                     }))
@@ -1255,28 +1260,6 @@ impl Form {
                     }))
                 },
             ),
-            OpKind::RevisitSet => (
-                vec![
-                    run(),
-                    f("text", "通常完了時の次の指示", String::new(), Multiline),
-                ],
-                |form, _| {
-                    Ok(Command::RevisitSet(RevisitSetArgs {
-                        run_id: form.optional("run")?,
-                        text: form.owned("text")?,
-                    }))
-                },
-            ),
-            OpKind::RevisitGet => (vec![run()], |form, _| {
-                Ok(Command::RevisitGet(RevisitArgs {
-                    run_id: form.optional("run")?,
-                }))
-            }),
-            OpKind::RevisitCancel => (vec![run()], |form, _| {
-                Ok(Command::RevisitCancel(RevisitArgs {
-                    run_id: form.optional("run")?,
-                }))
-            }),
             OpKind::OperationGet => (
                 vec![f("operation", "operation ID", c.operation.clone(), Text)],
                 |form, _cwd| {
@@ -2322,17 +2305,6 @@ mod tests {
                 json!({"message_ids":[id(3)]}),
             ),
             (
-                OpKind::RevisitSet,
-                "revisit.set",
-                json!({"run_id":id(5),"text":"synthetic text"}),
-            ),
-            (OpKind::RevisitGet, "revisit.get", json!({"run_id":id(5)})),
-            (
-                OpKind::RevisitCancel,
-                "revisit.cancel",
-                json!({"run_id":id(5)}),
-            ),
-            (
                 OpKind::IndexPreview,
                 "index.preview",
                 json!({"scope":"threads","thread_ids":[id(1)]}),
@@ -2352,8 +2324,6 @@ mod tests {
             "thread.set",
             "message.send",
             "message.cancel",
-            "revisit.set",
-            "revisit.cancel",
             "run.retry",
             "run.stop",
             "wait",
@@ -2466,8 +2436,6 @@ mod tests {
                         | "thread.set"
                         | "message.send"
                         | "message.cancel"
-                        | "revisit.set"
-                        | "revisit.cancel"
                         | "run.retry"
                         | "run.stop"
                         | "attachment.add"
@@ -2488,7 +2456,6 @@ mod tests {
                         | "compact.list"
                         | "thread.delete_preview"
                         | "message.get"
-                        | "revisit.get"
                         | "operation.get"
                         | "run.get"
                         | "turn.get"
@@ -3039,10 +3006,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 61);
+        assert_eq!(rows.len(), 58);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            61
+            58
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3054,7 +3021,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 61);
+        assert_eq!(operations.rows().len(), 58);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

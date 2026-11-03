@@ -292,7 +292,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
                 op,
                 Command::MessageSend(crate::protocol::MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(thread),
                     text: "accepted despite observer cancellation".into(),
                 }),

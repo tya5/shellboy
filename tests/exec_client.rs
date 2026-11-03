@@ -210,7 +210,7 @@ impl Fixture {
                 format!("{}:{}", self.owner.instance_id, uuid::Uuid::new_v4()),
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some(id),
                     text: "initial work".into(),
                 }),

@@ -413,10 +413,10 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         if turn.is_none() {
             let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
             if owned{return Ok(Next::Idle);}
-            if shutting_down.load(std::sync::atomic::Ordering::SeqCst) && super::revisit::has_pending(&tx,&run)? { return Ok(Next::Done); }
-            if super::revisit::fire(&tx,&thread,&run,&now(),&config)? {
-                turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);
-            } else {
+            // During shutdown, waiting Revisit messages are handed off at the next start.
+            if shutting_down.load(std::sync::atomic::Ordering::SeqCst) && super::revisit::has_pending(&tx,&thread)? { return Ok(Next::Done); }
+            turn=super::revisit::release_tx(&tx,&thread,&run,&now())?;
+            if turn.is_none() {
                 super::state::complete_idle_run(&tx, &thread, &run)?;
                 tx.commit()?;return Ok(Next::Done);
             }

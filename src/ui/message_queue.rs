@@ -80,6 +80,11 @@ impl PendingMessage {
                 ),
                 "stopped" | "stopping" => i18n::local!(language, "停止", "Stopped"),
                 "recovery_wait" => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
+                "run_completion" => i18n::local!(
+                    language,
+                    "作業の完了時に届ける",
+                    "Delivered when the Run completes"
+                ),
                 _ => reason,
             });
         }

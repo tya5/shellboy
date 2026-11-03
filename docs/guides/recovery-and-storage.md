@@ -359,8 +359,8 @@ Files and external command effects are not rolled back by either operation.
 Use `shellboy docs get --id shellboy/history-and-search` for history inspection
 and fork boundaries.
 
-Malformed Thread-local Revisit metadata can prevent an interruption snapshot
-for that Thread. Startup records its Thread ID and a fixed reason in
+A Thread whose saved cursor disagrees with its path cannot receive an
+interruption snapshot. Startup records its Thread ID and a fixed reason in
 diagnostics without logging its content, and continues with healthy conversations.
 Actual database/I/O failures still stop startup instead of being treated as a
 recoverable conversation defect.

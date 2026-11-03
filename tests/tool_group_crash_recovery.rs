@@ -110,7 +110,7 @@ async fn send_and_complete(control: &Arc<Control>, thread: &str, marker: &str) {
             control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.into()),
                 text: marker.into(),
             }),
@@ -344,7 +344,7 @@ async fn real_result_write_failure_is_repaired_after_storage_is_restored() {
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "run one synthetic shell".into(),
         }),
@@ -546,7 +546,7 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
         &directory,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "start the actual native shell".into(),
         }),

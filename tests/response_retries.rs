@@ -235,7 +235,7 @@ impl Fixture {
                 &control,
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some(thread),
                     text: text.into(),
                 }),
@@ -1461,7 +1461,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
             &f.control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: Some("leader".into()),
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
                 text: text.clone(),
             }),
@@ -1659,7 +1659,7 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
             &f.control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread),
                 text: "synthetic quota observation".into(),
             }),

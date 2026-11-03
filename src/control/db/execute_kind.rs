@@ -56,7 +56,6 @@ named_jobs! {
     ThreadDeletePreview => thread_delete_preview, ThreadSet => thread_set,
     MessageSend => message_send, MessageCancel => message_cancel, MessageGet => message_get,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
-    RevisitSet => revisit_set, RevisitGet => revisit_get, RevisitCancel => revisit_cancel,
     TurnGet => turn_get, Wait => wait, HistoryList => history_list, HistoryGet => history_get,
     HistorySearch => history_search, HistoryRelations => history_relations, ShellGet => shell_get,
     ShellRead => shell_read, ShellWrite => shell_write, ShellEof => shell_eof, ShellStop => shell_stop,

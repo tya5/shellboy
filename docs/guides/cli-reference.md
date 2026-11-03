@@ -157,7 +157,7 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--now] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
+| `message send [--thread THREAD] [--deliver now\|complete] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
 | `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and answer_node_id when available |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed queued message IDs. Each item reports cancelled/already_cancelled/already_admitted/not_found/forbidden/unavailable and an archive_draft_id when available; admitted history cannot be cancelled. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
@@ -187,10 +187,28 @@ generic input band rather than the human band. That legacy human band is not
 verified sender identity. This follows decision D-006 in issue #68; band styling
 belongs to #41 and is not changed by this sender-inspection follow-up.
 
-Ordinary sends queue for the next safe boundary. Add `--now` only to request
-urgent delivery by releasing a foreground shell wait: that shell continues under
-its execution ID, and an in-progress model response is not interrupted.
-Acceptance still does not mean delivery or completion.
+`--deliver` chooses when the message is admitted; it is the same message in
+every case:
+
+- omitted: queue for the next safe boundary.
+- `now`: also release a foreground shell wait for urgent delivery. That shell
+  continues under its execution ID; an in-progress model response is not
+  interrupted.
+- `complete` (Revisit): deliver when the Thread's live Run would complete
+  normally, after owned shells and children finish. The result is
+  `delivery_status: held`, `assignment: pending`, `deliver: complete`. If no Run
+  is live, it is delivered immediately exactly like an omitted timing, and the
+  result shows that assignment (for example `new_run`).
+
+Later default or `now` messages overtake waiting `complete` messages; waiting
+`complete` messages are delivered together, in send order, as one new Turn of
+the completing Run. Several may wait. A waiting message never outlives its
+Run: if the Run stops, is shut down or enters recovery wait instead, it becomes
+ordinary held input at that moment (`stopping`, `previous_instance_interrupted`
+or `recovery_wait`) and the usual message rules apply; a human Esc still ends
+in completion, so it is delivered then.
+Inspect with `message get` and cancel with `message cancel`. Acceptance still
+does not mean delivery or completion.
 
 Humans may cancel any sender's queued input; authenticated models may cancel
 only input sent by their own Thread. Check each result: admission may win the
@@ -218,112 +236,6 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | `run retry --run RUN` | Recovery Run/Turn references; explicitly reprepare a recovery_wait Turn in a live Run, reusing the Turn/original message without blindly rerunning executed shells. Human or direct parent decides |
 | `run stop --run RUN` | Confirmed stopping/Run state; stops own Run and owned descendants without affecting independent Runs. Models limited to ownership, humans may explicitly target. Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/answer_node_id/recovery_hint. Background owned work may keep the Run live after answering |
-
-### Revisit (3 operations)
-
-| Operation and all specific flags | Main result and conditions |
-|---|---|
-| `revisit set [--run RUN] (--text TEXT \| --text-stdin)` | Replace one pending completion instruction, 1..8192 UTF-8 bytes, nonblank. Returns pending/setter/count/time, `replaced_other` and `previous_text_preview` |
-| `revisit get [--run RUN]` | Read pending instruction/setter, consumed_count, last_fired_at and optional limit; no operation receipt |
-| `revisit cancel [--run RUN]` | Remove pending instruction; returns `cancelled`, false when nothing was pending. Does not stop the Run |
-
-Humans must supply `--run`. Authenticated models may omit it for their own live
-Run or name a directly owned child's live Run; unrelated Runs and non-direct
-descendants are denied. All operations reject non-live Runs. Revisit is delivered
-as a developer event at normal Run completion, after owned shells and children
-finish; it never fires during recovery wait, stop or restart. One reservation is
-consumed once, while ordinary request/recovery and external-effect semantics
-remain unchanged. Re-registration is unlimited unless the owner configures
-`limits.revisit_max_per_run`. Cancel or rewrite before ending with a question
-that requires the user. Re-query `get` after uncertain mutations, using the same
-operation ID to replay the saved outcome.
-
-### Wait (1 operation)
-
-```text
-wait --conditions-json JSON [--timeout-ms MS]
-```
-
-Conditions are a typed array with **any** semantics (at least one satisfied). Default timeout 30000ms; 0 observes immediately. Empty arrays are invalid. Satisfaction, timeout, observer disconnect, or cancellation never stops other target work.
-
-Bash:
-
-```bash
-shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"TURN"},{"type":"run_ended","run_id":"RUN"}]' --timeout-ms 30000
-shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"EXECUTION"}]'
-shellboy wait --conditions-json '[{"type":"shell_output","execution_id":"EXECUTION","cursor":"CURSOR_FROM_SHELL_READ"}]'
-```
-
-PowerShell native JSON argument passing differs from Bash. Reading a UTF-8 file into a string alone may not fix quoting. See [PowerShell arguments](shell.md#powershell-arguments) and match your version's argument mode.
-
-`turn_completed` observes an answer unit; `run_ended` the lifetime including owned resources; `shell_ended` shell termination; `shell_output` output after a shell-read cursor. Cyclic self/ancestor waits yield `wait_cycle`. `result` contains `status`, satisfied conditions `matched`, target-state `snapshot`, and optional cursor/reason/hint. Status is `satisfied|timeout|interrupted|recovery_wait|unavailable`. Even satisfied can mean stopped/failed/nonzero exit; inspect snapshots, then run/turn/message get and history get as appropriate.
-
-### History (4 operations)
-
-| Operation and all specific flags | Main result and conditions |
-|---|---|
-| `history list --thread THREAD [--excerpt-chars N] [--run RUN] [--since RFC3339] [--status STATE] [--limit N] [--cursor C]` | `items` (node_id/kind/excerpt/payload_chars/provenance/context/selection/executions), next_cursor. Status filters saved related-shell state. Selected path, default 50/max 200. excerpt-chars default 512/range 0–4096; zero retrieves no body and returns empty excerpt. payload_chars counts stored JSON characters, null if reclaimed. Up to eight execution links with total/truncation |
-| `history get --node NODE [--limit-bytes N] [--cursor C] [--encoding UTF-8]` | node_id/kind/text/provenance/context, source_node_ids/previous_node_ids/next_node_ids, next_cursor, tombstone_reason; display text excludes encrypted reasoning |
-| `history search --query TEXT [--limit N] [--thread THREAD] [--kind KIND]... [--exclude-kind KIND]... [--from RFC3339] [--to RFC3339]` | Object with items (node_id/excerpt/distance/spans/provenance and optional thread_scope), auto_history, degraded and scope_status; default 10/max 50. Filters before active-space ranking; no active space yields empty items. Disabled automatic ingestion warns of potentially missing newer sources |
-| `history relations --node NODE --relation previous\|next\|sources\|replacements [--limit N] [--cursor C]` | `items` (node_id/provenance and, for replacements, replacement_id/source_revision/source_hash), next_cursor; direct relations, default 50/max 200 |
-
-Without `--thread`, search is global and never implicitly fills in the model's Thread. With it, eligible nodes are the Thread's current selected path plus recursively followed completed summary/spill replacement sources, not every branch of a fork origin. A global hit need not be on the currently selected path. `--kind` values combine with OR; Thread/time/exclusion combine with AND. Kinds identify nodes (`user` / `assistant` / `tool_result`); exclude tools with `--exclude-kind tool_result`. Include/exclude lists each allow at most 32 kinds, each at most 64 characters. `--from` inclusive and `--to` exclusive filter node creation time using offset-bearing RFC3339; together require from < to.
-
-`provenance` includes kind/created_at/source_revision and only recorded turn_id/run_id/origin_thread_id associations. Origin means creation, not every sharing fork. `spans` contains source_revision/content_hash/body_kind/start/end; start/end are half-open Unicode scalar offsets in extracted text. These are selected semantic index-chunk spans, not keyword matches. Distance is L2; no threshold option exists. Chunks group per node; different nodes with identical content remain distinct. Only `--thread` adds thread_scope (thread_id/on_current_path): true on the current adopted path, false if eligible solely as a completed-replacement source. Global results omit it rather than inferring membership.
-
-Relations previous/next are conversation edges; sources goes from replacement output to source; replacements from source to output. The latter two return only completed replacements. Relation-item source_revision/source_hash identify source at replacement time, while provenance.source_revision is the returned node's current revision. No bulk ancestor/descendant traversal or history editing occurs. Pass next_cursor to the same node/relation, never another target. Inspect adopted paths with `history list --thread`.
-
-Get defaults/maxes to 65536 bytes, minimum 1, paginating without splitting UTF-8 characters. Follow neighboring branches and summary-source references with get; list does not enumerate the whole DAG.
-
-### Shell (5 operations)
-
-Shell startup uses the model shell tool; there is no CLI `shell start`.
-
-| Operation and all specific flags | Main result and conditions |
-|---|---|
-| `shell get --execution EXECUTION` | execution_id/run_id/state/output_complete/exit_code/reason, saved command/cwd/thread_id/turn_id |
-| `shell read --execution EXECUTION [--cursor C] [--encoding NAME] [--limit-bytes N]` | execution_id/text/encoding/cursor/raw_bytes/output_complete/decode_errors; default/max 65536 bytes, minimum 1; omitted encoding uses the saved execution encoding |
-| `shell write --execution EXECUTION (--text TEXT | --text-stdin) [--encoding NAME]` | bytes_written/status/stdin_open/reason; status `complete|timeout|closed|stopped|failed`; bytes_written is actual bytes, including partial writes. Encoding defaults UTF-8. Only live shells started with stdin_open; stdin/write-deadline limits apply |
-| `shell eof --execution EXECUTION` | accepted and related fields; closes stdin, separate from stop; shell can continue afterward |
-| `shell stop --execution EXECUTION` | accepted and related fields; starts stop, while termination/pipe drain are observed separately. Self-stop gives the CLI reply bounded grace |
-
-Write/EOF/stop validate model Run ownership and reject side effects on independent Runs. Read/get remain queries. Shell termination differs from complete raw collection; check output_complete for the full tail. See [shell guide](shell.md).
-
-### Attachment (3 operations plus alias)
-
-| Operation and all specific flags | Main result and conditions |
-|---|---|
-| `attachment add [--thread THREAD] --path PATH --kind image\|file` | **Array** of attachment details (attachment_id/source_node_id/delivery_status/thread_id/path/kind/selected/managed/unavailable_reason). Even one addition uses `result[0].attachment_id`. Selects external path references, read at model-request time |
-| `attachment list [--thread THREAD]` | Attachment-detail array; absolute path and current unavailable_reason for ordinary and managed images; inspect saved selection IDs |
-| `attachment remove [--thread THREAD] --attachment ATTACHMENT` | attachment_id/removed; deselects without deleting external files |
-
-`shellboy attach PATH --kind image|file [--thread THREAD]` aliases add with positional path; kind remains required. Relative CLI attachment paths become absolute against CLI startup cwd. See [attachments](attachments.md) for image/PDF/file support, model capability, changes/missing files, and compaction exclusion. Successful add does not mean API delivery completed.
-
-Managed clipboard images use the same absolute `path` as ordinary attachments.
-Files remain writable; changes are recorded by the next send's hash comparison.
-Existing retention can reclaim unused managed files; inspect `unavailable_reason`.
-A list result is a current observation, not a pin or guarantee of later access.
-
-Add/list elements return `source_node_id` and `delivery_status` (accepted/held/applied/cancelled). A separate attachment-add node is saved; shell-origin additions enter the path at a safe boundary after the complete tool group. Add acceptance JSON is neither a human-message receipt nor proof the model read it. Resending unfolds at the original position instead of moving attachments to the latest message. Same-ID/same-request replay checks saved outcomes before current Thread/file preflight, returning the original result even if the Thread was deleted after acceptance. Initial request checks and caller authentication still apply. See [attachment guide](attachments.md).
-
-### Compact (1 operation)
-
-`compact [--thread THREAD]` saves compaction for the next safe boundary and returns `thread_id/status=queued/operation_id`. Normally it includes model summarization and API cost. Queued is not adopted completion. Same-ID replay returns original queued acceptance even after processing. Inspect `operation get --operation ID` `downstream.state` (queued/running/completed/failed), terminal outcome/ended_at. Original nodes are not overwritten: a replacement path retains source references. See [history and search](history-and-search.md).
-
-### Index (6 operations)
-
-Status/preview/backfill/retry/rebuild support `[--scope threads|all] [--space SPACE] [--thread THREAD ...] [--source NODE ...]`; repeat thread/source flags.
-
-| Operation | Main result and conditions |
-|---|---|
-| `index status` | Work counts and saved pause reason/time; bounded spaces with connection/model/dimensions/segment count/vector payload bytes, plus recorded probes; no automatic backfill |
-| `index preview` | sources/segments/characters/already_indexed/unavailable; read-only candidates, no embedding requests/jobs/candidate creation |
-| `index backfill` | sources/segments/characters/already_indexed/unavailable; accepts explicit selection into index jobs, with API costs separate from conversation |
-| `index retry` | clears an index pause; outside a pause, explicitly retries failed jobs; never authorizes all-history backfill |
-| `index rebuild [--dimensions N]` | Same acceptance-size shape as backfill; first real input validates an explicit dimension, preserving the active space until complete catch-up; refusal stops the candidate |
-| `index probe [--dimensions N]` | One potentially charged fixed-input request; saves outcome/dimension per endpoint/model/request mode; no automatic fallback |
-
-Backfill/rebuild require **explicit targets** via scope, thread, or source. `--scope threads` alone adds no IDs: also specify Thread IDs. `--scope all` strongly authorizes all targets. `--space` alone is not an explicit selection. Omitted space means current configuration's space. Unsupported nonactive-space changes or inconsistent combinations fail; successful status does not authorize arbitrary space mutation. Without a source selection, preview reports currently authorized retry-eligible work (failed admissions count as unavailable when their input size is unknown). It never authorizes new history. Dimensions are 1..8192 and are accepted only by rebuild/probe, not every endpoint. A probe does not authorize a rebuild. Returned characters are not a monetary estimate. First preview the same selection, check scope and your contracted unit price, then execute. Preview reserves nothing; later additions/deletion/configuration can change work volume. The CLI is noninteractive and backfill/rebuild do not pause for confirmation.
 
 ### Storage (2 operations)
 
@@ -355,7 +267,6 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 | `operation_conflict` | ID reused for different content; inspect original receipt |
 | `operation_expired` | Mutation replay with an unsaved old-instance ID or an expired outcome, including a collected current-instance result; inspect retained operation metadata and target state before deciding on duplicate execution |
 | `operation_not_found` | Receipt missing; after disconnect also inspect target state |
-| `revisit_limit_reached` | Configured per-Run consumption cap reached; inspect `revisit get` and owner configuration |
 | `invalid_state` | Current state/ownership disallows it; inspect details/hint/get |
 | `wait_cycle` | Cycle through self/ownership/other waits; split waits or report |
 | `cursor_expired` | Restart paging the same target from the beginning |

@@ -247,8 +247,7 @@ captured; the read result and downstream mutable work remain separate.
 The form's prefilled ID is the typed request target. ManagementContext identifies
 where a reply belongs; it is not an implicit Thread/Run authority. Clearing a
 required human target must retain canonical CLI validation, not silently restore
-the viewing Thread. In particular, human Revisit get without --run remains an
-error rather than following a changing current Run; attachment source references
+the viewing Thread. Attachment source references
 keep their explicitly resolved foreign Thread and selection identity.
 
 | Result class | Required treatment |
@@ -387,15 +386,14 @@ readonly WAL snapshot; no I/O, DB work, queue wait or join enters the UI OS thre
 A hidden/closed consumer causes no read. Failure keeps identified old facts stale
 or marks unavailable; it never invents idle/zero/completed values.
 
-The first saved-metadata extraction covers shell get, message get and explicit-Run
-Revisit get. Only these three typed commands enter this reader. Identifiers are
+The first saved-metadata extraction covers shell get and message get (#187 removed
+Revisit get). Only these typed commands enter this reader. Identifiers are
 validated before SQL (at most4096 bytes); point-read scalar cells are bounded to
 64 bytes for native enums and512 bytes for other saved scalars, and JSON source
 copy is at most64KiB (sender plus assignment share that budget). Required identity
 overflow is an explicit error; optional overflow carries field-limit witnesses.
-Decode runs after the readonly snapshot on finite presentation work. Revisit's
-canonical saved-state decoder/view remains in its existing domain module; no
-second business-state interpretation or authorization policy is introduced.
+Decode runs after the readonly snapshot on finite presentation work; no second
+business-state interpretation or authorization policy is introduced.
 Initial explicit F8 reads use the existing admission/pool and report their read
 scope/time. This intermediate route is not completion of live target subscriptions
 or the final joint current/browser/inspector snapshot; those remain mandatory.
@@ -461,7 +459,8 @@ The next extraction covers saved Run/Turn metadata. Their initial explicit reads
 must retain canonical saved usage totals in the same readonly transaction; normal
 reactive refresh later separates metadata500ms and usage3s. Run metadata copies
 at most128 owned Run IDs and128 active execution IDs, with per-state indexed
-prefixes of129 before sorting. Recovery reason and Revisit share64KiB. Saved
+prefixes of129 before sorting. Recovery reason is bounded to64KiB; the Revisit
+summary is two receipt-derived scalars. Saved
 scalar cells are bounded to512 bytes before materialization; an oversized scalar
 makes this projection explicitly unavailable rather than silently changing an
 identity, timestamp or lifecycle fact. This initial extraction adds no schema/index.
@@ -881,7 +880,8 @@ Use the adopted [sender inspection](protocol.md#message-sender-inspection-59)
 contract when classifying conversation input. New external CLI receipts are
 `external_cli` and keep the existing distinct generic-input band; trusted TUI
 input is recorded human. Parent/self model and Revisit classifications require
-saved identity/allocation evidence, never a self-asserted name. Historical null
+saved identity/allocation evidence (Revisit: the receipt's saved completion
+delivery context, #187), never a self-asserted name. Historical null
 retains the existing Human conversation-band convention only; CLI/F6 sender
 inspection reports unknown when evidence is missing. This display convention
 must not invent a sender identity or authority.

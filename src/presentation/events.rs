@@ -4,7 +4,6 @@ use super::{PresentationField, short};
 
 pub(super) fn event_title(kind: &str) -> &str {
     match kind {
-        "revisit" => "再訪を再開",
         "index_state" => "索引の状態",
         "previous_instance_interrupted" => "前回の中断記録",
         "app_shutdown" => "終了時の保存記録",
@@ -26,15 +25,6 @@ pub(super) fn event_title(kind: &str) -> &str {
         "child_report" => "子からの途中報告",
         _ => "その他の状態変更",
     }
-}
-
-pub(super) fn revisit_preview(event: &serde_json::Value) -> Option<String> {
-    let text = event.pointer("/payload/instruction")?.as_str()?;
-    let mut preview: String = text.chars().take(240).collect();
-    if preview.len() < text.len() {
-        preview.push_str(crate::ui::text_width::glyphs::ellipsis());
-    }
-    Some(super::sanitize_plain(&preview, 0).0)
 }
 
 /// Automatic readiness is a routine observation, not a user setting change.
@@ -169,18 +159,6 @@ pub(super) fn title_ja(kind: &str, event: &serde_json::Value) -> String {
     use serde_json::Value;
     if let Some((title, _)) = index_pause_notice_ja(event) {
         return title;
-    }
-    if kind == "revisit" {
-        return event
-            .pointer("/payload/consumed_count")
-            .and_then(Value::as_u64)
-            .map(|count| {
-                crate::ui::text_width::glyphs::formatted!(
-                    "Revisit resumed · {count}",
-                    "Revisit resumed | {count}"
-                )
-            })
-            .unwrap_or_else(|| "Revisit resumed".into());
     }
     // Canonical Shellboy notification nodes are added when preparing continuation
     // input. This describes receipt of that input, not its sole trigger or a
@@ -459,7 +437,6 @@ pub(super) fn interruption_ja(value: &serde_json::Value, kind: &str) -> (String,
             "turns",
             "shells",
             "tool_calls",
-            "revisits",
             "owned_children",
             "unreflected_messages",
             "cancelled_waits",
@@ -503,7 +480,6 @@ fn section_label(section: &str) -> &str {
         "turns" => "応答処理",
         "shells" => "コマンド",
         "tool_calls" => "中断時のツール",
-        "revisits" => "Interrupted Revisit reservations",
         "owned_children" => "子の作業",
         "unreflected_messages" => "未反映の依頼",
         "cancelled_waits" => "中断した待機観測",
@@ -515,21 +491,6 @@ fn section_label(section: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn revisit_preview_uses_measured_ellipsis_without_changing_payload() {
-        let raw = format!("user | · → {}", "a".repeat(260));
-        let event = serde_json::json!({"payload": {"instruction": raw}});
-        let original = event.clone();
-        for (policy, suffix) in [(Some(1), "…"), (Some(2), "."), (None, ".")] {
-            crate::ui::text_width::set_terminal_width(policy);
-            let shown = revisit_preview(&event).unwrap();
-            assert!(shown.starts_with("user | · → "), "{shown}");
-            assert!(shown.ends_with(suffix), "{shown}");
-            assert_eq!(event, original);
-        }
-        crate::ui::text_width::clear_terminal_width();
-    }
-
     #[test]
     fn continuation_has_saved_identity_outcome_and_duration_without_inventing_name() {
         let event = serde_json::json!({"event_id":"saved", "payload":{"execution_id":"execution-complete-id", "exit_code":7, "elapsed_ms":316000}});

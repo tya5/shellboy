@@ -56,7 +56,7 @@ fn owner_forms_cover_every_owner_catalogue_identity_without_client_stubs() {
         .iter()
         .map(|kind| kind.catalogue())
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(implemented.len(), 45);
+    assert_eq!(implemented.len(), 42);
     assert_eq!(implemented, owner);
     for kind in OpKind::OWNER {
         let form = Form::new(*kind, &context());
@@ -82,16 +82,11 @@ fn six_new_owner_forms_build_real_commands_and_preserve_optional_arguments() {
     );
     set(&mut cancel, "messages", "");
     assert!(cancel.command(&c.cwd).is_err());
-    let mut revisit = Form::new(OpKind::RevisitSet, &c);
-    set(&mut revisit, "text", "next instruction");
+    let mut deferred = Form::new(OpKind::MessageSend, &c);
+    set(&mut deferred, "text", "next instruction");
+    set(&mut deferred, "deliver", "complete");
     assert!(
-        matches!(revisit.command(&c.cwd).unwrap(),Command::RevisitSet(args)if args.run_id.as_deref()==Some("run")&&args.text=="next instruction")
-    );
-    assert!(
-        matches!(Form::new(OpKind::RevisitGet,&c).command(&c.cwd).unwrap(),Command::RevisitGet(args)if args.run_id.as_deref()==Some("run"))
-    );
-    assert!(
-        matches!(Form::new(OpKind::RevisitCancel,&c).command(&c.cwd).unwrap(),Command::RevisitCancel(args)if args.run_id.as_deref()==Some("run"))
+        matches!(deferred.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.deliver==Deliver::Complete&&args.text=="next instruction")
     );
     assert!(
         matches!(Form::new(OpKind::IndexPreview,&c).command(&c.cwd).unwrap(),Command::IndexPreview(args)if args.thread_ids==["thread"])
@@ -110,9 +105,9 @@ fn previously_missing_flags_have_typed_effects() {
     let mut send = Form::new(OpKind::MessageSend, &c);
     set(&mut send, "text", "hello");
     set(&mut send, "sender_label", "operator");
-    set(&mut send, "now", "true");
+    set(&mut send, "deliver", "now");
     assert!(
-        matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.now&&args.sender_label.as_deref()==Some("operator"))
+        matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
     );
     let mut history = Form::new(OpKind::HistoryGet, &c);
     set(&mut history, "final_answer_only", "true");
@@ -215,7 +210,7 @@ fn headers_never_become_actions_and_help_preserves_edits_and_references() {
     let actions = operations.rows().to_vec();
     let rendered = screen(&operations);
     assert!(rendered.contains("その他の操作"));
-    assert!(rendered.contains("61件"));
+    assert!(rendered.contains("58件"));
     operations.key(key(KeyCode::Home));
     for (index, expected) in actions.iter().enumerate() {
         assert_eq!(OpKind::ALL[operations.selected], *expected);

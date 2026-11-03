@@ -494,7 +494,7 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
     let sent = control
         .request(request(Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "fixture only".into(),
         })))

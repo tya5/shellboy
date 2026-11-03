@@ -3440,7 +3440,6 @@ mod tests {
         item.revisit = Some(crate::protocol::RevisitSummary {
             pending: true,
             consumed_count: 5,
-            last_fired_at: None,
         });
         let browser = ThreadBrowser {
             items: vec![item.clone()],

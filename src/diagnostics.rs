@@ -191,7 +191,6 @@ pub(crate) enum ToolRepairReason {
     AmbiguousCallSource,
     CursorMismatch,
     CaptureCursorMismatch,
-    CaptureRevisitMalformed,
     OrdinalOverflow,
 }
 #[derive(Debug, Clone, Serialize)]

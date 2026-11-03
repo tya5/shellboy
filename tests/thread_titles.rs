@@ -76,7 +76,7 @@ async fn send(store: &Store, id: &str, text: &str) -> MessageAccepted {
             store,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(id.into()),
                 text: text.into(),
             }),

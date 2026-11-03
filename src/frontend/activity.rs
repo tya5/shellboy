@@ -107,7 +107,7 @@ pub(super) struct RawProjection {
     run: Option<(String, String, Option<String>, Option<String>)>,
     turn: Option<SavedTurn>,
     attempt: Option<SavedAttempt>,
-    revisit: Option<String>,
+    revisit: Option<crate::protocol::RevisitSummary>,
     context_reduction: Option<String>,
     recovery_counts: Option<(u64, u64, u64, u64)>,
     counts_capped: bool,
@@ -202,12 +202,7 @@ pub(super) fn read_tx_with_limit(
     let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
     let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[run_id],|r|r.get(0))?;
     let revisit = if matches!(run_state.as_str(), "live" | "stopping") {
-        db.query_row(
-            "SELECT value FROM app_meta WHERE key=?1",
-            [format!("revisit.{run_id}")],
-            |row| row.get(0),
-        )
-        .optional()?
+        crate::control::revisit::summary_for_run(db, run_id)?
     } else {
         None
     };
@@ -337,8 +332,6 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
         };
     };
     let revisit = revisit
-        .as_deref()
-        .and_then(crate::control::revisit::summary_from_body)
         .as_ref()
         .and_then(crate::presentation::revisit_label);
     let mut snapshot = ActivitySnapshot {
@@ -690,11 +683,7 @@ mod tests {
         let error = json!({"error":{"kind":"provider","message":"saved reason","status":500},
             "automatic_trim":{"before_characters":90000,"after_characters":40000,"omitted_nodes":7,"compact":{"spilled_groups":3,"no_target":false}}}).to_string();
         db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('a','u',2,0,'p','m',0,'incomplete','{}',?1,'now')",[error]).unwrap();
-        db.execute(
-            "INSERT INTO app_meta(key,value)VALUES('revisit.r',?1)",
-            [json!({"pending":null,"consumed_count":3,"last_fired_at":"earlier"}).to_string()],
-        )
-        .unwrap();
+        crate::control::revisit::seed_fixture(&db, "t", "r", 3, false);
         let raw = read_tx(&db, "t").unwrap();
         db.execute("UPDATE run SET state='completed' WHERE id='r'", [])
             .unwrap();

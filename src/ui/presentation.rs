@@ -801,7 +801,6 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
         "shell_ended" => glyphs::SHELL,
         "child_turn_completed" | "child_run_ended" | "child_report" => glyphs::CHILD,
         "recovery_wait" | "child_recovery_wait" => glyphs::WAIT,
-        "revisit" => glyphs::REVISIT,
         "thread_settings"
         | "connection_changed"
         | "model_changed"
@@ -859,23 +858,8 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
             .map(|f| f.value.as_str())
     };
     let kind = notice_kind(node).unwrap_or("");
-    let revisit_instruction = (kind == "revisit")
-        .then(|| {
-            node.presentation
-                .ui_messages
-                .bodies
-                .iter()
-                .flat_map(|(_, body)| body)
-                .find_map(|message| match message {
-                    Message::Raw { text } if !text.trim().is_empty() => Some(text.as_str()),
-                    _ => None,
-                })
-        })
-        .flatten();
     let saved = saved_failure_text(node, language);
-    let title = if let Some(instruction) = revisit_instruction {
-        instruction.to_owned()
-    } else if let Some((_, reason)) = &saved {
+    let title = if let Some((_, reason)) = &saved {
         let count = field("/saved_model_failures/count").unwrap_or("?");
         let summary = format!(
             "{}{count}{}",

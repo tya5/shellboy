@@ -96,7 +96,7 @@ impl Fixture {
             number,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),
                 text: "fixture".into(),
             }),

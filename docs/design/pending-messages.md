@@ -112,11 +112,12 @@ still counts the full serialized draft payload.
 ## Explicit foreground release
 
 Normal configured send key and CLI send queue at the next tool-group/request
-boundary without releasing a foreground shell. `message send --now` explicitly
+boundary without releasing a foreground shell. `message send --deliver now` explicitly
 releases that wait; its process continues and the next model input receives the
 saved messages. Persist the bounded delivery-mode fact with the receipt/result
-and operation fingerprint. MessageAccepted exposes typed `now: bool`, optional
-on input with default false; current acknowledgements serialize it directly.
+and operation fingerprint. MessageAccepted exposes typed `deliver`
+(`next`/`now`/`complete`, default `next` and omitted when `next`); `complete` is
+[Revisit](revisit.md).
 Receipt result metadata may additionally contain cancellation facts, so message
 get reads the typed saved assignment projection rather than parsing that internal
 record as a strict public acknowledgement. Public unknown-field rejection stays

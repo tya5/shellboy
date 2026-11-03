@@ -154,90 +154,85 @@
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
-  "src/presentation/events.rs:4f5da937a5103cbb:1": {
-    "category": "a",
-    "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
-  },
   "src/presentation/events.rs:ada8b376f754ec68:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:112f436c64513522:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:8616fa9256185981:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:44b22b26e9b2c135:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:e9dcbe03b96ad9eb:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:f8a1a79c0f9cd0ed:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:13f5916b1a55a6ae:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:2057a96bed26f392:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:c3e7115095a225cc:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:64891fe89e96183e:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:b0e5347b4b659922:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:72d7a2429570c6ba:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:70080e45f7282d03:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:f27ff0993479551f:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:de3da5375eedcba4:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:fbdc72ace73d5480:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "89b0b7ba92c1724cb599a1feb950d1290f04a4d959d6b3154b7652a9a51b0900"
+    "source_tokens_sha256": "c87f66dcb1bf79ab31e46cf00bf010fef8d2f80621748ec02b5ea33f7a49b61b"
   },
   "src/presentation/events.rs:62a142b415a31d33:1": {
     "category": "a",
@@ -327,42 +322,42 @@
   "src/presentation/events.rs:fabe43d04e73bfdd:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:c778312bd4809d33:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:2524da328d5e7884:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:4946f69a4e851f3d:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:f0fb74f2c0e0804a:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:03e76b90ffcad3a0:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:4b2f76e2a50916a0:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:faddd85045de248e:1": {
     "category": "a",
     "reason": "continuation_title/title_ja: Japanese legacy projection; English UI constructs EventIdentity, EventTitle, CommandNotice and ThreadNotice from structured source facts",
-    "source_tokens_sha256": "bc99c98bd827ab69317a298a835cfdf87cc99b71246697cd1d0e5bf556e6bc04"
+    "source_tokens_sha256": "3d300072eade14a96b9ab87a9fbdc64144e45f1903b5bb7f03f1dc6a0fc42d39"
   },
   "src/presentation/events.rs:b0e5347b4b659922:2": {
     "category": "a",
@@ -517,136 +512,136 @@
   "src/presentation/events.rs:19fb4ce66ae9adf5:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:3e87e765d5f61df1:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:a46d85614313315c:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:a27b449c7a45ab6b:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:5ccf16e783733505:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:736cd69c5b5640fd:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:e694a5f5a5dae8be:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:df1c3738e10f4321:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:6c01f7cb1b18fa24:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:ef4e6254fd288256:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:d6165bfb6d8626d0:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:f5126488554334d8:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:8b5d473bf23fc0fd:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:3f4648d8d63f87d0:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:f8319609f8af768b:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:aa3010156e179daf:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:112f436c64513522:2": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:e76e443634f67496:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "6a4afd16d7c11e6a2714698af12d3a7e1778a8e3b9a1fdd7bb1b95527b2ead7d"
+    "source_tokens_sha256": "670542e92ba6f1044a2ddd2cc7de5660653218890728965ba6ea29a8e5e35cf2"
   },
   "src/presentation/events.rs:04bfdcfe5cfbb119:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:9619ab013d737995:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:f2e48761917e7023:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:9cd490c9ca4ca580:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:2e6da0ceb7515648:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:01472dc1e3c60fcd:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:c5cf2ca66363c5c8:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:52b9fb9c4bae2dc1:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   },
   "src/presentation/events.rs:6f3a44c4e47ba70b:1": {
     "category": "a",
     "reason": "interruption_ja/section_label: Japanese legacy projection; English UI uses structured interruption messages and localized section labels",
-    "source_tokens_sha256": "2a4f5033027531992d1d5803a1e47414d5fa615d0fb059e96a903b4fec196719"
+    "source_tokens_sha256": "d3996b4642b91ffe162c6801dd8e7779e1f29c4def186486ffcf688e21d71162"
   }
 }

@@ -186,7 +186,7 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
             text: "inspect me".into(),
         }),

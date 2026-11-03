@@ -129,7 +129,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
             control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: Deliver::Next,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
                 text: "fixture instruction".into(),
             }),
@@ -192,7 +192,7 @@ async fn check(scenario: Scenario, expected: &str) {
                     sender_label: None,
                     thread_id: Some(accepted.thread_id.clone()),
                     text: "additional instruction".into(),
-                    now: true,
+                    deliver: Deliver::Now,
                 }),
             )
             .await;

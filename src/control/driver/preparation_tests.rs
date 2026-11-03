@@ -49,7 +49,7 @@ pub(super) async fn fixture(
                 format!("{}:send", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(thread),
                     text: "original instruction".into(),
                 }),

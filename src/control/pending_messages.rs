@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 /// A late nudge for already-admitted input must not release a later shell call.
 pub(crate) fn has_immediate_pending_tx(db: &Connection, turn: &str) -> rusqlite::Result<bool> {
-    db.query_row("SELECT EXISTS(SELECT 1 FROM receipt r WHERE r.turn_id=?1 AND r.state='accepted' AND r.path_admission='unadmitted' AND json_extract(r.result_json,'$.now')=1 AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id))",[turn],|r|r.get(0))
+    db.query_row("SELECT EXISTS(SELECT 1 FROM receipt r WHERE r.turn_id=?1 AND r.state='accepted' AND r.path_admission='unadmitted' AND json_extract(r.result_json,'$.deliver')='now' AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id))",[turn],|r|r.get(0))
 }
 
 pub(crate) fn archive_id(message: &str) -> String {

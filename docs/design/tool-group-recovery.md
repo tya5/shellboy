@@ -97,11 +97,11 @@ missing or contradictory source bindings. A fork must end before the incomplete
 group, never at its unresolved call/result. The original Thread is unchanged
 until explicit deletion.
 
-Startup prevalidates the exact current Revisit state in schema-allowed app_meta
-records before writing that Thread's interruption details. Malformed Revisit
-records skip only that Thread's capture and emit a fixed diagnostic reason;
-healthy Threads still capture and start. Revisit selection SQL guards malformed
-JSON before evaluating JSON paths. Ordinary SQLite/I/O/global metadata failures
+Startup prevalidates each Thread's cursor before writing that Thread's
+interruption details. A mismatch skips only that Thread's capture and emits a
+fixed diagnostic reason; healthy Threads still capture and start. (The #36
+Revisit metadata check was removed with that metadata in #187.) Ordinary
+SQLite/I/O/global metadata failures
 remain fatal. A capture failure identifies only its Thread, without assigning
 an unrelated group ID. No malformed body is copied into diagnostics.
 

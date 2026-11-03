@@ -167,12 +167,13 @@ pub(crate) fn point_sql(kind: Kind) -> String {
     // No reservation text/output payload crosses the raw boundary unchecked.
     // A saturated latest-Turn prefix cannot claim canonical lexical tie ordering.
     let (revisit, guard) = if kind == Kind::Run {
+        let (pending, delivered) = crate::control::revisit::summary_sql("r.thread_id", "r.id");
         (
-            "(SELECT CASE WHEN octet_length(value)<=16384 THEN value END FROM app_meta WHERE key='revisit.'||r.id)",
-            "CASE WHEN EXISTS(SELECT 1 FROM turn INDEXED BY turns_by_run WHERE run_id=r.id AND created_at=(SELECT max(created_at) FROM turn INDEXED BY turns_by_run WHERE run_id=r.id) LIMIT 1 OFFSET 200) THEN 'latest_turn_prefix_limit' WHEN EXISTS(SELECT 1 FROM app_meta WHERE key='revisit.'||r.id AND octet_length(value)>16384) THEN 'revisit_metadata_limit' END",
+            format!("{pending}||':'||{delivered}"),
+            "CASE WHEN EXISTS(SELECT 1 FROM turn INDEXED BY turns_by_run WHERE run_id=r.id AND created_at=(SELECT max(created_at) FROM turn INDEXED BY turns_by_run WHERE run_id=r.id) LIMIT 1 OFFSET 200) THEN 'latest_turn_prefix_limit' END",
         )
     } else {
-        ("NULL", "NULL")
+        ("NULL".into(), "NULL")
     };
     let (elapsed, output) = if kind == Kind::Shell {
         (
@@ -511,7 +512,10 @@ fn canonical_item(
         reason: get(8),
         revisit: get(18)
             .as_deref()
-            .and_then(crate::control::revisit::summary_from_body),
+            .and_then(|facts| facts.split_once(':'))
+            .and_then(|(pending, delivered)| {
+                crate::control::revisit::summary(pending == "1", delivered.parse().ok()?)
+            }),
         targets: Vec::new(),
     };
     item.targets = super::links(kind, &item)?;
@@ -664,11 +668,10 @@ mod tests {
             ('s','r','t','shell-op','exited','/','{"completion":{"elapsed_ms":42}}','UTF-8','UTF-8','closed','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','saved-shell');
           INSERT INTO output_chunk VALUES('s',1,'stdout',0,X'61','2026-11-01T00:00:01Z');
           INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at) VALUES('message-op','fixture','{}','h','completed','2026-11-01T00:00:00Z');
-          INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason) VALUES
-            ('receipt','message-op','{}','scope','message','r','t','applied','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','saved-hold');
+          INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES
+            ('receipt','message-op','{}','scope','message','r','t','applied','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','saved-hold','{"deliver":"complete","delivery_context":{"reason":"run_completion"}}');
           INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,ended_at,error_json) VALUES
             ('a','t',0,0,'attempt-profile','attempt-model',0,'failed','{}','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','{"code":"saved-attempt"}');
-          INSERT INTO app_meta VALUES('revisit.r','{"pending":null,"consumed_count":3,"last_fired_at":"2026-11-01T00:00:01Z"}');
         "#).unwrap();
         db
     }
@@ -695,7 +698,7 @@ mod tests {
                 db.execute_batch(r#"
                   UPDATE thread SET title='Renamed',profile_id='new-profile',model_id='new-model',parent_thread_id=NULL WHERE id='scope';
                   UPDATE model_attempt SET profile_id='new-attempt-profile',model_id='new-attempt-model' WHERE id='a';
-                  UPDATE app_meta SET value='{"pending":null,"consumed_count":4,"last_fired_at":null}' WHERE key='revisit.r';
+                  UPDATE receipt SET result_json='{"deliver":"complete"}' WHERE id='receipt';
                   UPDATE shell_execution SET shell_json='{"completion":{"elapsed_ms":99}}' WHERE id='s';
                   INSERT INTO output_chunk VALUES('s',2,'stderr',0,X'62','2026-11-01T00:00:00.5Z');
                 "#).unwrap();
@@ -727,21 +730,11 @@ mod tests {
         }
     }
     #[test]
-    fn saturated_latest_turn_and_oversized_revisit_are_unknown_not_stale_dtos() {
+    fn saturated_latest_turn_is_unknown_not_a_stale_dto() {
         let db = canonical_fixture();
         for n in 0..200 {
             db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,'scope','r','completed','2026-11-01T00:00:00Z')",[format!("t{n:03}")]).unwrap();
         }
-        let raw = read_status_tx(&db, &retained_keys(), &mut TextBudget::default()).unwrap();
-        assert!(!raw.facts.iter().any(|fact| fact.key.kind == Kind::Run));
-        assert!(raw.limited.iter().any(|limited| limited.id == "r"));
-        assert!(raw.missing.is_empty());
-        db.execute("DELETE FROM turn WHERE id<>'t'", []).unwrap();
-        db.execute(
-            "UPDATE app_meta SET value=?1 WHERE key='revisit.r'",
-            ["x".repeat(16385)],
-        )
-        .unwrap();
         let raw = read_status_tx(&db, &retained_keys(), &mut TextBudget::default()).unwrap();
         assert!(!raw.facts.iter().any(|fact| fact.key.kind == Kind::Run));
         assert!(raw.limited.iter().any(|limited| limited.id == "r"));

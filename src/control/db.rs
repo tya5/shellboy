@@ -44,7 +44,7 @@ impl DraftSubmission {
 }
 #[derive(Debug, Clone, Default)]
 pub struct DraftSendOptions {
-    pub now: bool,
+    pub deliver: Deliver,
     pub submission: Option<DraftSubmission>,
     pub expected_selection_revision: Option<i64>,
     /// Control's canonical preflight-independent request hash; never a wire field.
@@ -73,7 +73,7 @@ pub(crate) fn draft_send_fingerprint(
             Ok(json!({"path":path,"kind":file.kind}))
         })
         .collect::<Result<Vec<_>>>()?;
-    let mut intent = json!({"internal_operation":"draft_send_raw","args":args,"thread_id":thread,"text":content.text,"files":files,"now":options.now,"submission":options.submission});
+    let mut intent = json!({"internal_operation":"draft_send_raw","args":args,"thread_id":thread,"text":content.text,"files":files,"deliver":options.deliver,"submission":options.submission});
     content.fingerprint_positions(&mut intent);
     Ok(hash(serde_json::to_vec(&intent).map_err(|_| {
         error(ErrorCode::InvalidArgument, "Invalid draft request identity")
@@ -661,7 +661,7 @@ impl Store {
             .iter()
             .map(|f| json!({"path":f.path,"kind":f.kind,"managed_id":f.managed_id}))
             .collect();
-        let mut intent = json!({"internal_operation":"draft_send","args":args,"thread_id":thread_id,"text":content.text,"files":paths,"now":options.now,"submission":options.submission});
+        let mut intent = json!({"internal_operation":"draft_send","args":args,"thread_id":thread_id,"text":content.text,"files":paths,"deliver":options.deliver,"submission":options.submission});
         content.fingerprint_positions(&mut intent);
         let fingerprint = options
             .request_fingerprint
@@ -705,7 +705,7 @@ impl Store {
                             sender_label: None,
                             thread_id: Some(target),
                             text: content.text.clone(),
-                            now: options.now,
+                            deliver: options.deliver,
                         },
                         None,
                         &operation_id,
@@ -996,7 +996,7 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs { sender_label: None,thread_id:Some(fork),text:content.text.clone(),now:options.now},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
+                let mut result=store.send_content(&tx,&MessageSendArgs { sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
@@ -1098,7 +1098,7 @@ impl Store {
                             sender_label: None,
                             thread_id: Some(thread_id),
                             text: text.as_ref().clone(),
-                            now: false,
+                            deliver: Deliver::Next,
                         },
                         None,
                         &operation_id,
@@ -1337,26 +1337,6 @@ impl Store {
                 &args.operation_id,
                 &self.instance_id,
             )?),
-            Command::RevisitGet(args) => {
-                MutationResult::value(super::revisit::get(tx, args, caller, &self.config)?)
-            }
-            Command::RevisitSet(args) => {
-                let (thread, result) =
-                    super::revisit::set(tx, args, caller, operation_id, now, &self.config)?;
-                Ok(MutationResult {
-                    result,
-                    changed_threads: vec![thread],
-                    ..Default::default()
-                })
-            }
-            Command::RevisitCancel(args) => {
-                let (thread, result) = super::revisit::cancel(tx, args, caller, now, &self.config)?;
-                Ok(MutationResult {
-                    result,
-                    changed_threads: vec![thread],
-                    ..Default::default()
-                })
-            }
             Command::RunGet(args) => {
                 let mut details = run_details(tx, &args.run_id)?;
                 details.usage_totals = Some(saved_usage_for_detail(
@@ -1704,7 +1684,7 @@ impl Store {
             reason,
             wake,
             owner_changed,
-        } = assign_message(tx, &id, caller, now)?;
+        } = assign_message(tx, &id, caller, args.deliver, now)?;
         let message_id = uuid::Uuid::new_v4().to_string();
         let payload = json!({"role":"user","content":content.elements});
         let body = payload.to_string();
@@ -1722,7 +1702,7 @@ impl Store {
             thread_id: id.clone(),
             delivery_status: status,
             assignment,
-            now: args.now,
+            deliver: args.deliver,
             run_id: assigned_run,
             turn_id: assigned_turn,
         };
@@ -1740,7 +1720,7 @@ impl Store {
             result.changed_threads.push(owner);
         }
         if wake {
-            if args.now {
+            if args.deliver == Deliver::Now {
                 result.wake_threads.push(id);
             } else {
                 result.quiet_wake_threads.push(id);
@@ -1765,6 +1745,7 @@ fn assign_message(
     tx: &Transaction<'_>,
     id: &str,
     caller: Option<&Origin>,
+    deliver: Deliver,
     now: &str,
 ) -> Result<MessageAssignment> {
     let parent: Option<String> = tx
@@ -1794,9 +1775,21 @@ fn assign_message(
                 "child Run is owned by another live parent Run",
             ));
         }
+        // A Run already in recovery wait gets ordinary input, as at entry.
+        let recovering: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state='recovery_wait')",
+                [&run_id],
+                |row| row.get(0),
+            )
+            .map_err(sql_error)?;
         if state == "stopping" {
             status = DeliveryStatus::Held;
             reason = Some("stopping");
+        } else if deliver == Deliver::Complete && !recovering {
+            // Revisit: unassigned until this Run ends (see control::revisit).
+            status = DeliveryStatus::Held;
+            reason = Some(super::revisit::RUN_COMPLETION);
         } else {
             assigned_run = Some(run_id.clone());
             let turn:Option<(String,String,i64)>=tx.query_row("SELECT id,state,generation FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[&run_id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(sql_error)?;
@@ -2267,7 +2260,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
     Ok(RunDetails {
         usage_totals: None,
         waiting_reason: crate::readback::run_wait_reason(connection, &row.0, id)?,
-        revisit: super::revisit::summary(connection, id)?,
+        revisit: super::revisit::summary_for_run(connection, id).map_err(sql_error)?,
         context: crate::context::for_run(connection, id)?,
         run_id: id.into(),
         thread_id: row.0,
@@ -2328,7 +2321,6 @@ fn stop_run(
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(sql_error)?;
         for run in &result.stop_runs {
-            super::revisit::drop_pending(tx, run)?;
             tx.execute("UPDATE run SET state='stopping',stop_reason='explicit_stop' WHERE id=?1 AND state='live'",[run]).map_err(sql_error)?;
             tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run]).map_err(sql_error)?;
             super::attachment_delivery::hold_run_tx(tx, run)?;
@@ -2458,7 +2450,6 @@ fn delete_thread(
         }
     }
     for id in &targets {
-        super::revisit::delete_thread(tx, id)?;
         tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
         // Retain the last path/replacement as ownership evidence until payload
         // GC. Deleted Threads are not roots or public selection targets. Removing
@@ -3743,7 +3734,7 @@ mod agents_reference_tests {
                     req(Command::MessageSend(MessageSendArgs {
                         thread_id: Some(target.clone()),
                         text: "synthetic sender fixture".into(),
-                        now: false,
+                        deliver: Deliver::Next,
                         sender_label: label.map(str::to_owned),
                     })),
                     caller,
@@ -3870,7 +3861,7 @@ mod agents_reference_tests {
                 req(Command::MessageSend(MessageSendArgs {
                     thread_id: Some(target),
                     text: "no authority from label".into(),
-                    now: false,
+                    deliver: Deliver::Next,
                     sender_label: Some("human".into()),
                 })),
                 Some(origin),
@@ -3967,7 +3958,8 @@ mod interrupted_message_assignment_tests {
                 token: "private-origin-token".into(),
             });
             let tx = db.transaction().unwrap();
-            let assigned = assign_message(&tx, "child", caller.as_ref(), "resume").unwrap();
+            let assigned =
+                assign_message(&tx, "child", caller.as_ref(), Deliver::Next, "resume").unwrap();
             assert_eq!(assigned.assignment, Assignment::NewRun);
             let count: i64 = tx
                 .query_row(
@@ -4130,12 +4122,12 @@ mod message_acknowledgement_state_tests {
                 sender_label: None,
                 thread_id: Some("t".into()),
                 text: "urgent".into(),
-                now: true,
+                deliver: Deliver::Now,
             }),
         );
         let first = store.execute(request.clone(), None).await.unwrap();
         let accepted: MessageAccepted = serde_json::from_value(first.result.clone()).unwrap();
-        assert!(accepted.now);
+        assert_eq!(accepted.deliver, Deliver::Now);
         assert_eq!(accepted.assignment, Assignment::NewRun);
         store
             .execute(
@@ -4170,7 +4162,7 @@ mod message_acknowledgement_state_tests {
         assert_eq!(replay.result, first.result);
         assert!(replay.wake_threads.is_empty() && replay.quiet_wake_threads.is_empty());
         let replay: MessageAccepted = serde_json::from_value(replay.result).unwrap();
-        assert!(replay.now);
+        assert_eq!(replay.deliver, Deliver::Now);
         assert_eq!(replay.delivery_status, DeliveryStatus::Accepted);
         db.shutdown().await.unwrap();
     }
@@ -4409,7 +4401,7 @@ mod owned_child_notification_tests {
                     sender_label: None,
                     thread_id: Some("child".into()),
                     text: "synthetic delegation".into(),
-                    now: false,
+                    deliver: Deliver::Next,
                 }),
             );
             let result = store.execute(request.clone(), caller.clone()).await;
@@ -4474,7 +4466,7 @@ mod owned_child_notification_tests {
                                     sender_label: None,
                                     thread_id: Some("child".into()),
                                     text: "another input".into(),
-                                    now: false,
+                                    deliver: Deliver::Next,
                                 }),
                             ),
                             caller,

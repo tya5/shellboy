@@ -1,4 +1,4 @@
-//! Revisit lifecycle through real Control/HTTP, plus trusted Store-boundary authority fixtures.
+//! Revisit (`message send --deliver complete`) through real Control and a local HTTP mock.
 use serde_json::{Value, json};
 use shellboy::{app::DataOwner, control::Control, protocol::*};
 use std::{sync::Arc, time::Duration};
@@ -9,7 +9,6 @@ use tokio::{
 };
 struct Incoming {
     body: Value,
-    session: Option<String>,
     reply: oneshot::Sender<(u16, Value)>,
 }
 async fn proxy() -> (
@@ -27,7 +26,7 @@ async fn proxy() -> (
             tokio::spawn(async move {
                 let mut bytes = Vec::new();
                 let mut chunk = [0; 8192];
-                let (body, session) = loop {
+                let body = loop {
                     let n = stream.read(&mut chunk).await.unwrap();
                     if n == 0 {
                         return;
@@ -44,29 +43,13 @@ async fn proxy() -> (
                             })
                             .unwrap();
                         if bytes.len() >= i + 4 + length {
-                            let session = head.lines().find_map(|line| {
-                                let (name, value) = line.split_once(':')?;
-                                name.eq_ignore_ascii_case("x-shellboy-session-id")
-                                    .then(|| value.trim().to_owned())
-                            });
-                            break (
-                                serde_json::from_slice::<Value>(&bytes[i + 4..i + 4 + length])
-                                    .unwrap(),
-                                session,
-                            );
+                            break serde_json::from_slice::<Value>(&bytes[i + 4..i + 4 + length])
+                                .unwrap();
                         }
                     }
                 };
                 let (reply, result) = oneshot::channel();
-                if send
-                    .send(Incoming {
-                        body,
-                        session,
-                        reply,
-                    })
-                    .await
-                    .is_err()
-                {
+                if send.send(Incoming { body, reply }).await.is_err() {
                     return;
                 }
                 let Ok((status, body)) = result.await else {
@@ -79,12 +62,9 @@ async fn proxy() -> (
     });
     (format!("http://{address}/v1"), receive, task)
 }
-async fn owner(root: &std::path::Path, url: &str, limit: Option<u64>) -> DataOwner {
+async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
     let config = root.join("config.toml");
-    let limits = limit
-        .map(|n| format!("[limits]\nrevisit_max_per_run={n}\n"))
-        .unwrap_or_default();
-    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\nresponse_header_timeout_ms=15000\n{limits}")).unwrap();
+    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\nresponse_header_timeout_ms=15000\n")).unwrap();
     DataOwner::start(Some(config), Some(root.join("data")), root.into())
         .await
         .unwrap()
@@ -125,28 +105,20 @@ async fn thread(control: &Arc<Control>) -> String {
         .unwrap()
         .into()
 }
-
-fn invocation(control: &Control, command: Command) -> Request {
-    Request::new(
-        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
-        command,
-    )
-}
-fn set(run: &str, text: &str) -> Command {
-    Command::RevisitSet(RevisitSetArgs {
-        run_id: Some(run.into()),
-        text: text.into(),
-    })
-}
-async fn begin(control: &Arc<Control>, thread: &str) -> MessageAccepted {
+async fn send(
+    control: &Arc<Control>,
+    thread: &str,
+    text: &str,
+    deliver: Deliver,
+) -> MessageAccepted {
     serde_json::from_value(
         request(
             control,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver,
                 thread_id: Some(thread.into()),
-                text: "One original user instruction".into(),
+                text: text.into(),
             }),
         )
         .await,
@@ -158,144 +130,395 @@ async fn run_state(control: &Control, run: &str, expected: &str) {
     crate::test_watchdog::watchdog("tests/revisit.rs: run_state", async {
         loop {
             let id = run.clone();
-            let (state, reason): (String, Option<String>) = control
+            let state: String = control
                 .store
                 .database
                 .call(move |db| {
-                    Ok(db.query_row(
-                        "SELECT state,stop_reason FROM run WHERE id=?1",
-                        [id],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                    )?)
+                    Ok(db.query_row("SELECT state FROM run WHERE id=?1", [id], |r| r.get(0))?)
                 })
                 .await
                 .unwrap();
             if state == expected {
                 break;
             }
-            assert!(
-                !matches!(state.as_str(), "stopped" | "failed" | "completed"),
-                "Run {run} ended in {state}: {reason:?}, expected {expected}"
-            );
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
     .await
     .expect("Run lifecycle watchdog");
 }
-async fn saved(control: &Control, run: &str) -> Value {
-    let key = format!("revisit.{run}");
-    control
-        .store
-        .database
-        .call(move |db| {
-            let text: String =
-                db.query_row("SELECT value FROM app_meta WHERE key=?1", [key], |r| {
-                    r.get(0)
-                })?;
-            Ok(serde_json::from_str(&text).unwrap())
-        })
-        .await
-        .unwrap()
-}
-async fn event_count(control: &Control, run: &str) -> i64 {
-    let run = run.to_owned();
+/// Saved receipt state and hold reason of one message.
+async fn receipt(control: &Control, message: &str) -> (String, Option<String>, Option<String>) {
+    let message = message.to_owned();
     control
         .store
         .database
         .call(move |db| {
             Ok(db.query_row(
-                "SELECT count(*) FROM event WHERE kind='revisit' AND target_run_id=?1",
-                [run],
-                |r| r.get(0),
+                "SELECT state,hold_reason,run_id FROM receipt WHERE message_node_id=?1",
+                [message],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )?)
         })
         .await
         .unwrap()
 }
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn normal_completion_delivers_once_and_allows_many_cycles_unless_explicitly_limited() {
-    for (limit, cycles) in [(None, 16_u64), (Some(2), 2), (Some(0), 0)] {
-        let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, server) = proxy().await;
-        let owner = owner(root.path(), &url, limit).await;
-        let control = Control::new(&owner, root.path().into());
-        let thread = thread(&control).await;
-        let accepted = begin(&control, &thread).await;
-        let run = accepted.run_id.unwrap();
-        let mut current = incoming(&mut receive).await;
-        for ordinal in 0..cycles {
-            let instruction = format!("REVISIT_INSTRUCTION_{ordinal}: verify remaining work");
-            let registration = request(&control, set(&run, &instruction)).await;
-            assert_eq!(registration["consumed_count"], ordinal);
-            assert_eq!(registration["pending"]["text"], instruction);
-            assert_eq!(event_count(&control, &run).await, ordinal as i64);
-            current
-                .reply
-                .send((200, answer("Finished this Turn")))
-                .unwrap();
-            current = incoming(&mut receive).await;
-            let inputs = current.body["input"].as_array().unwrap();
-            assert!(
-                inputs
-                    .iter()
-                    .any(|item| item["role"] == "developer"
-                        && item.to_string().contains(&instruction)),
-                "Revisit must be an ordinary developer event: {}",
-                current.body
-            );
-            assert_eq!(saved(&control, &run).await["consumed_count"], ordinal + 1);
-            assert!(saved(&control, &run).await["pending"].is_null());
-        }
-        if limit.is_some() {
-            let response = control
-                .request(invocation(&control, set(&run, "Over limit")))
-                .await;
-            assert_eq!(response.error.unwrap().code, ErrorCode::RevisitLimitReached);
-        }
-        current.reply.send((200, answer("Final answer"))).unwrap();
-        run_state(&control, &run, "completed").await;
-        assert_eq!(event_count(&control, &run).await, cycles as i64);
-        assert!(
-            receive.try_recv().is_err(),
-            "consumed reservation must not fire again"
-        );
-        let id = run.clone();
-        let (turns, messages): (i64, i64) = control
-            .store
-            .database
-            .call(move |db| {
-                Ok((
-                    db.query_row("SELECT count(*) FROM turn WHERE run_id=?1", [&id], |r| {
-                        r.get(0)
-                    })?,
-                    db.query_row("SELECT count(*) FROM receipt WHERE run_id=?1", [id], |r| {
-                        r.get(0)
-                    })?,
-                ))
-            })
-            .await
-            .unwrap();
-        assert_eq!(turns, cycles as i64 + 1);
-        assert_eq!(messages, 1, "Revisit is not a synthetic user message");
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-        server.abort();
+async fn run_revisit(control: &Arc<Control>, run: &str) -> Option<RevisitSummary> {
+    serde_json::from_value::<RunDetails>(
+        request(control, Command::RunGet(RunTarget { run_id: run.into() })).await,
+    )
+    .unwrap()
+    .revisit
+}
+/// Texts appear in this request exactly in the given order; `absent` do not appear.
+fn assert_order(body: &Value, present: &[&str], absent: &[&str]) {
+    let text = body.to_string();
+    let mut last = 0;
+    for item in present {
+        let at = text[last..]
+            .find(item)
+            .unwrap_or_else(|| panic!("{item} missing or out of order: {text}"));
+        last += at + item.len();
+    }
+    for item in absent {
+        assert!(!text.contains(item), "{item} delivered too early: {text}");
+    }
+}
+struct Fixture {
+    _root: tempfile::TempDir,
+    owner: DataOwner,
+    control: Arc<Control>,
+    receive: mpsc::Receiver<Incoming>,
+    server: tokio::task::JoinHandle<()>,
+    thread: String,
+}
+async fn fixture() -> Fixture {
+    let root = tempfile::tempdir().unwrap();
+    let (url, receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    Fixture {
+        _root: root,
+        owner,
+        control,
+        receive,
+        server,
+        thread,
+    }
+}
+impl Fixture {
+    async fn finish(self) {
+        self.control.shutdown().await.unwrap();
+        self.owner.shutdown().await.unwrap();
+        self.server.abort();
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn recovery_wait_preserves_reservation_and_only_normal_completion_fires_it() {
+async fn live_run_receives_complete_messages_in_send_order_when_it_would_complete() {
+    let mut f = fixture().await;
+    let run = send(&f.control, &f.thread, "ORIGINAL", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    let first = incoming(&mut f.receive).await;
+    let mut ids = Vec::new();
+    for text in ["COMPLETE_ONE", "COMPLETE_TWO"] {
+        let accepted = send(&f.control, &f.thread, text, Deliver::Complete).await;
+        assert_eq!(accepted.deliver, Deliver::Complete);
+        assert_eq!(accepted.delivery_status, DeliveryStatus::Held);
+        assert_eq!(accepted.assignment, Assignment::Pending);
+        assert!(accepted.run_id.is_none());
+        ids.push(accepted.message_id);
+    }
+    assert_eq!(
+        run_revisit(&f.control, &run).await,
+        Some(RevisitSummary {
+            pending: true,
+            consumed_count: 0
+        })
+    );
+    assert_order(
+        &first.body,
+        &["ORIGINAL"],
+        &["COMPLETE_ONE", "COMPLETE_TWO"],
+    );
+    first.reply.send((200, answer("First answer"))).unwrap();
+    let revisit = incoming(&mut f.receive).await;
+    assert_order(
+        &revisit.body,
+        &["ORIGINAL", "COMPLETE_ONE", "COMPLETE_TWO"],
+        &[],
+    );
+    for id in &ids {
+        let (_, _, assigned) = receipt(&f.control, id).await;
+        assert_eq!(
+            assigned.as_deref(),
+            Some(run.as_str()),
+            "same Run continues"
+        );
+    }
+    revisit.reply.send((200, answer("Checked"))).unwrap();
+    run_state(&f.control, &run, "completed").await;
+    assert_eq!(
+        run_revisit(&f.control, &run).await,
+        Some(RevisitSummary {
+            pending: false,
+            consumed_count: 2
+        })
+    );
+    assert!(f.receive.try_recv().is_err(), "delivered once");
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn without_a_live_run_complete_is_delivered_immediately_like_a_normal_send() {
+    let mut f = fixture().await;
+    let accepted = send(&f.control, &f.thread, "IMMEDIATE", Deliver::Complete).await;
+    assert_eq!(accepted.assignment, Assignment::NewRun);
+    assert_eq!(accepted.delivery_status, DeliveryStatus::Accepted);
+    let run = accepted.run_id.unwrap();
+    let first = incoming(&mut f.receive).await;
+    assert_order(&first.body, &["IMMEDIATE"], &[]);
+    first.reply.send((200, answer("Done"))).unwrap();
+    run_state(&f.control, &run, "completed").await;
+    assert_eq!(run_revisit(&f.control, &run).await, None);
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_completing_between_send_and_complete_still_delivers() {
+    let mut f = fixture().await;
+    let run = send(&f.control, &f.thread, "WORK", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    incoming(&mut f.receive)
+        .await
+        .reply
+        .send((200, answer("Finished early")))
+        .unwrap();
+    run_state(&f.control, &run, "completed").await;
+    let accepted = send(&f.control, &f.thread, "LATE_REVISIT", Deliver::Complete).await;
+    assert_eq!(accepted.assignment, Assignment::NewRun);
+    let next = incoming(&mut f.receive).await;
+    assert_order(&next.body, &["WORK", "LATE_REVISIT"], &[]);
+    next.reply.send((200, answer("Checked"))).unwrap();
+    run_state(&f.control, accepted.run_id.as_deref().unwrap(), "completed").await;
+    f.finish().await;
+}
+
+/// Later now/default messages overtake waiting complete messages; each timing
+/// class keeps its own send order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn now_and_default_messages_overtake_waiting_complete_messages() {
+    use Deliver::*;
+    let cases: &[&[(&str, Deliver)]] = &[
+        &[("C_THEN_NOW_C", Complete), ("C_THEN_NOW_N", Now)],
+        &[("C_THEN_DEFAULT_C", Complete), ("C_THEN_DEFAULT_D", Next)],
+        &[
+            ("MIX_C1", Complete),
+            ("MIX_N1", Now),
+            ("MIX_C2", Complete),
+            ("MIX_N2", Now),
+            ("MIX_D1", Next),
+        ],
+    ];
+    for case in cases {
+        let mut f = fixture().await;
+        let run = send(&f.control, &f.thread, "BASE", Next)
+            .await
+            .run_id
+            .unwrap();
+        let first = incoming(&mut f.receive).await;
+        for (text, deliver) in *case {
+            send(&f.control, &f.thread, text, *deliver).await;
+        }
+        let complete = case
+            .iter()
+            .filter(|(_, deliver)| *deliver == Complete)
+            .map(|(text, _)| *text)
+            .collect::<Vec<_>>();
+        let ordinary = case
+            .iter()
+            .filter(|(_, deliver)| *deliver != Complete)
+            .map(|(text, _)| *text)
+            .collect::<Vec<_>>();
+        first.reply.send((200, answer("Base answer"))).unwrap();
+        let second = incoming(&mut f.receive).await;
+        assert_order(&second.body, &ordinary, &complete);
+        second.reply.send((200, answer("Ordinary answer"))).unwrap();
+        let third = incoming(&mut f.receive).await;
+        assert_order(&third.body, &complete, &[]);
+        third.reply.send((200, answer("Revisit answer"))).unwrap();
+        run_state(&f.control, &run, "completed").await;
+        f.finish().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelling_one_waiting_complete_message_leaves_the_others() {
+    let mut f = fixture().await;
+    let run = send(&f.control, &f.thread, "BASE", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    let first = incoming(&mut f.receive).await;
+    let cancelled = send(
+        &f.control,
+        &f.thread,
+        "CANCELLED_COMPLETE",
+        Deliver::Complete,
+    )
+    .await;
+    send(&f.control, &f.thread, "KEPT_COMPLETE", Deliver::Complete).await;
+    let result = request(
+        &f.control,
+        Command::MessageCancel(MessageCancelArgs {
+            message_ids: vec![cancelled.message_id.clone()],
+        }),
+    )
+    .await;
+    assert_eq!(result["items"][0]["outcome"], "cancelled");
+    first.reply.send((200, answer("Base answer"))).unwrap();
+    let revisit = incoming(&mut f.receive).await;
+    assert_order(&revisit.body, &["KEPT_COMPLETE"], &["CANCELLED_COMPLETE"]);
+    revisit.reply.send((200, answer("Checked"))).unwrap();
+    run_state(&f.control, &run, "completed").await;
+    assert_eq!(
+        receipt(&f.control, &cancelled.message_id).await.0,
+        "cancelled"
+    );
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stop_releases_waiting_messages_as_ordinary_held_input() {
+    let mut f = fixture().await;
+    let run = send(&f.control, &f.thread, "STOPPED_WORK", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    let held = incoming(&mut f.receive).await;
+    let waiting = send(&f.control, &f.thread, "RELEASED_AT_STOP", Deliver::Complete).await;
+    request(
+        &f.control,
+        Command::RunStop(RunTarget {
+            run_id: run.clone(),
+        }),
+    )
+    .await;
+    run_state(&f.control, &run, "stopped").await;
+    let _ = held.reply.send((200, answer("Late response")));
+    assert_eq!(
+        receipt(&f.control, &waiting.message_id).await,
+        ("held".into(), Some("stopping".into()), None),
+        "the same held input a send to the stopping Run gets"
+    );
+    assert!(f.receive.try_recv().is_err(), "stop starts nothing");
+    let next_run = send(&f.control, &f.thread, "NEW_INSTRUCTION", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    let next = incoming(&mut f.receive).await;
+    assert_order(&next.body, &["RELEASED_AT_STOP", "NEW_INSTRUCTION"], &[]);
+    next.reply.send((200, answer("New answer"))).unwrap();
+    run_state(&f.control, &next_run, "completed").await;
+    assert!(f.receive.try_recv().is_err(), "delivered once");
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn human_turn_interruption_releases_waiting_messages_at_run_end() {
+    let mut f = fixture().await;
+    let accepted = send(&f.control, &f.thread, "INTERRUPTED_WORK", Deliver::Next).await;
+    let run = accepted.run_id.clone().unwrap();
+    let held = incoming(&mut f.receive).await;
+    send(
+        &f.control,
+        &f.thread,
+        "RELEASED_AFTER_ESC",
+        Deliver::Complete,
+    )
+    .await;
+    f.control
+        .interrupt_turn(f.thread.clone(), accepted.turn_id.unwrap())
+        .await
+        .unwrap();
+    drop(held);
+    let revisit = incoming(&mut f.receive).await;
+    assert_order(
+        &revisit.body,
+        &["turn_interrupted", "RELEASED_AFTER_ESC"],
+        &[],
+    );
+    revisit.reply.send((200, answer("Checked"))).unwrap();
+    run_state(&f.control, &run, "completed").await;
+    f.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_releases_waiting_messages_to_the_pending_path_on_next_start() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
-    let owner = owner(root.path(), &url, None).await;
-    let control = Control::new(&owner, root.path().into());
+    let owner_one = owner(root.path(), &url).await;
+    let control = Control::new(&owner_one, root.path().into());
     let thread = thread(&control).await;
-    let accepted = begin(&control, &thread).await;
-    let run = accepted.run_id.unwrap();
-    let first = incoming(&mut receive).await;
-    request(&control, set(&run, "AFTER_RECOVERY_ONLY")).await;
+    send(&control, &thread, "BEFORE_SHUTDOWN", Deliver::Next).await;
+    let held = incoming(&mut receive).await;
+    let waiting = send(
+        &control,
+        &thread,
+        "RELEASED_AFTER_RESTART",
+        Deliver::Complete,
+    )
+    .await;
+    control.shutdown().await.unwrap();
+    owner_one.shutdown().await.unwrap();
+    drop(held);
+    let owner_two = owner(root.path(), &url).await;
+    let control = Control::new(&owner_two, root.path().into());
+    assert_eq!(
+        receipt(&control, &waiting.message_id).await,
+        (
+            "held".into(),
+            Some("previous_instance_interrupted".into()),
+            None
+        )
+    );
+    let next_run = send(&control, &thread, "AFTER_RESTART", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    let next = incoming(&mut receive).await;
+    assert_order(
+        &next.body,
+        &["RELEASED_AFTER_RESTART", "AFTER_RESTART"],
+        &[],
+    );
+    next.reply.send((200, answer("Resumed"))).unwrap();
+    run_state(&control, &next_run, "completed").await;
+    control.shutdown().await.unwrap();
+    owner_two.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recovery_wait_hands_waiting_messages_to_the_ordinary_recovery_rules() {
+    let mut f = fixture().await;
+    let run = send(&f.control, &f.thread, "BASE", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    let first = incoming(&mut f.receive).await;
+    let waiting = send(
+        &f.control,
+        &f.thread,
+        "RELEASED_AT_RECOVERY",
+        Deliver::Complete,
+    )
+    .await;
     first
         .reply
         .send((
@@ -304,374 +527,61 @@ async fn recovery_wait_preserves_reservation_and_only_normal_completion_fires_it
         ))
         .unwrap();
     let target = run.clone();
-    crate::test_watchdog::watchdog("tests/revisit.rs: recovery_wait_preserves_reservation_and_only_normal_completion_fires_it",async {loop {let id=target.clone();let recovery=control.store.database.call(move|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state='recovery_wait')",[id],|r|r.get::<_,bool>(0))?)).await.unwrap();if recovery{break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
-    assert_eq!(event_count(&control, &run).await, 0);
+    let control = f.control.clone();
+    crate::test_watchdog::watchdog("tests/revisit.rs: recovery_wait", async move {
+        loop {
+            let id = target.clone();
+            let recovery = control.store.database.call(move |db| Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state='recovery_wait')",[id],|r|r.get::<_,bool>(0))?)).await.unwrap();
+            if recovery {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
     assert_eq!(
-        saved(&control, &run).await["pending"]["text"],
-        "AFTER_RECOVERY_ONLY"
+        receipt(&f.control, &waiting.message_id).await,
+        (
+            "held".into(),
+            Some("recovery_wait".into()),
+            Some(run.clone())
+        ),
+        "the same held input a machine send during recovery wait gets"
     );
-    assert!(receive.try_recv().is_err());
     request(
-        &control,
+        &f.control,
         Command::RunRetry(RunTarget {
             run_id: run.clone(),
         }),
     )
     .await;
-    incoming(&mut receive)
-        .await
-        .reply
-        .send((200, answer("Recovered")))
-        .unwrap();
-    let revisit = incoming(&mut receive).await;
-    assert!(revisit.body.to_string().contains("AFTER_RECOVERY_ONLY"));
-    revisit.reply.send((200, answer("Verified"))).unwrap();
-    run_state(&control, &run, "completed").await;
-    assert_eq!(event_count(&control, &run).await, 1);
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-    server.abort();
+    let retried = incoming(&mut f.receive).await;
+    assert_order(&retried.body, &["BASE", "RELEASED_AT_RECOVERY"], &[]);
+    retried.reply.send((200, answer("Recovered"))).unwrap();
+    run_state(&f.control, &run, "completed").await;
+    assert!(f.receive.try_recv().is_err(), "delivered once");
+    f.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn stopping_a_held_request_drops_pending_without_firing() {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
-    let owner = owner(root.path(), &url, None).await;
-    let control = Control::new(&owner, root.path().into());
-    let thread = thread(&control).await;
-    let run = begin(&control, &thread).await.run_id.unwrap();
-    let held = incoming(&mut receive).await;
-    request(&control, set(&run, "MUST_NOT_FIRE_AFTER_STOP")).await;
-    request(
-        &control,
-        Command::RunStop(RunTarget {
-            run_id: run.clone(),
-        }),
-    )
-    .await;
-    run_state(&control, &run, "stopped").await;
-    assert!(saved(&control, &run).await["pending"].is_null());
-    assert_eq!(event_count(&control, &run).await, 0);
-    let _ = held.reply.send((200, answer("Late response")));
-    assert!(receive.try_recv().is_err());
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-    server.abort();
-}
-
-async fn seed_run(control: &Arc<Control>, id: &str, owner_run: Option<&str>) -> String {
-    let thread = thread(control).await;
-    let t = thread.clone();
-    let id = id.to_owned();
-    let owner = owner_run.map(str::to_owned);
-    control.store.database.call(move|db| {
-        db.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','2026-10-01T00:00:00Z')",rusqlite::params![id,t,owner])?;
-        Ok(())
-    }).await.unwrap();
-    thread
-}
-fn trusted_origin(control: &Control, run: &str, thread: &str) -> Origin {
-    Origin {
-        instance_id: control.store.instance_id.clone(),
-        thread_id: thread.into(),
-        run_id: run.into(),
-        turn_id: "trusted-store-test-turn".into(),
-        execution_id: "trusted-store-test-shell".into(),
-        token: "not-an-issued-token".into(),
-    }
-}
-async fn store_request(
-    control: &Control,
-    command: Command,
-    caller: Option<Origin>,
-) -> Result<Value, ApiError> {
-    control
-        .store
-        .execute(invocation(control, command), caller)
+async fn complete_message_waits_for_owned_background_shell() {
+    let mut f = fixture().await;
+    let run = send(&f.control, &f.thread, "BASE", Deliver::Next)
         .await
-        .map(|result| result.result)
-}
-
-#[tokio::test]
-async fn trusted_store_authority_replacement_receipts_and_read_only_get_are_consistent() {
-    // Store accepts an already authenticated caller. The separate Control check
-    // below proves that passing this unissued token through RPC is rejected.
-    let root = tempfile::tempdir().unwrap();
-    let owner = owner(root.path(), "http://127.0.0.1:9/v1", None).await;
-    let control = Control::new(&owner, root.path().into());
-    let parent_thread = seed_run(&control, "parent", None).await;
-    let child_thread = seed_run(&control, "child", Some("parent")).await;
-    seed_run(&control, "grandchild", Some("child")).await;
-    seed_run(&control, "unrelated", None).await;
-    let parent = trusted_origin(&control, "parent", &parent_thread);
-    let child = trusted_origin(&control, "child", &child_thread);
-    let own = store_request(
-        &control,
-        Command::RevisitSet(RevisitSetArgs {
-            run_id: None,
-            text: "SELF".into(),
-        }),
-        Some(parent.clone()),
-    )
-    .await
-    .unwrap();
-    assert_eq!(own["run_id"], "parent");
-    assert_eq!(own["pending"]["set_by"]["relation"], "self");
-    let operation = invocation(&control, set("child", "Parent instruction"));
-    let original = control
-        .store
-        .execute(operation.clone(), Some(parent.clone()))
-        .await
-        .unwrap()
-        .result;
-    assert_eq!(original["pending"]["set_by"]["relation"], "owner");
-    let replacement = store_request(
-        &control,
-        set("child", "Child instruction"),
-        Some(child.clone()),
-    )
-    .await
-    .unwrap();
-    assert_eq!(replacement["replaced_other"], true);
-    assert_eq!(replacement["previous_text_preview"], "Parent instruction");
-    assert_eq!(
-        control
-            .store
-            .execute(operation.clone(), Some(parent.clone()))
-            .await
-            .unwrap()
-            .result,
-        original,
-        "replay returns original saved outcome"
-    );
-    let mut conflict = operation;
-    conflict.command = set("child", "Changed with same operation");
-    assert_eq!(
-        control
-            .store
-            .execute(conflict, Some(parent.clone()))
-            .await
-            .unwrap_err()
-            .code,
-        ErrorCode::OperationConflict
-    );
-    let receipts = || async {
-        control
-            .store
-            .database
-            .call(|db| {
-                Ok(
-                    db.query_row("SELECT count(*) FROM operation_receipt", [], |r| {
-                        r.get::<_, i64>(0)
-                    })?,
-                )
-            })
-            .await
-            .unwrap()
-    };
-    let before = receipts().await;
-    let get = store_request(
-        &control,
-        Command::RevisitGet(RevisitArgs {
-            run_id: Some("child".into()),
-        }),
-        Some(parent.clone()),
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        get["pending"]["text"], "Child instruction",
-        "replay must not restore overwritten state"
-    );
-    assert_eq!(receipts().await, before, "get allocates no durable receipt");
-    for target in ["grandchild", "unrelated"] {
-        for command in [
-            set(target, "Denied"),
-            Command::RevisitGet(RevisitArgs {
-                run_id: Some(target.into()),
-            }),
-            Command::RevisitCancel(RevisitArgs {
-                run_id: Some(target.into()),
-            }),
-        ] {
-            assert_eq!(
-                store_request(&control, command, Some(parent.clone()))
-                    .await
-                    .unwrap_err()
-                    .code,
-                ErrorCode::InvalidState
-            );
-        }
-    }
-    assert_eq!(
-        store_request(
-            &control,
-            Command::RevisitGet(RevisitArgs { run_id: None }),
-            None
-        )
-        .await
-        .unwrap_err()
-        .code,
-        ErrorCode::InvalidState
-    );
-    let human = store_request(&control, set("child", "Human instruction"), None)
-        .await
+        .run_id
         .unwrap();
-    assert_eq!(human["replaced_other"], true);
-    assert_eq!(human["pending"]["set_by"]["kind"], "human");
-    let mut forged = invocation(&control, Command::RevisitGet(RevisitArgs { run_id: None }));
-    forged.origin = Some(parent.clone());
-    assert_eq!(
-        control.request(forged).await.error.unwrap().code,
-        ErrorCode::InvalidArgument
-    );
-    for expected in [true, false] {
-        assert_eq!(
-            store_request(
-                &control,
-                Command::RevisitCancel(RevisitArgs {
-                    run_id: Some("child".into())
-                }),
-                Some(parent.clone())
-            )
-            .await
-            .unwrap()["cancelled"],
-            expected
-        );
-    }
-    control
-        .store
-        .database
-        .call(|db| {
-            db.execute("UPDATE run SET state='stopped' WHERE id='parent'", [])?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        store_request(&control, set("child", "Dead owner"), Some(parent))
-            .await
-            .unwrap_err()
-            .code,
-        ErrorCode::InvalidState
-    );
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-}
-
-#[tokio::test]
-async fn startup_captures_pending_instruction_then_drops_it_without_automatic_delivery() {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
-    let owner = owner(root.path(), &url, None).await;
-    let control = Control::new(&owner, root.path().into());
-    let thread = seed_run(&control, "interrupted-revisit", None).await;
-    request(
-        &control,
-        set("interrupted-revisit", "INTERRUPTED_REVISIT_CAPTURE_ONLY"),
-    )
-    .await;
-    // Close the DB owner without graceful Control capture, simulating the
-    // durable startup input left by a terminated previous process.
-    owner.shutdown().await.unwrap();
-    drop(control);
-    let reopened = DataOwner::start(
-        Some(root.path().join("config.toml")),
-        Some(root.path().join("data")),
-        root.path().into(),
-    )
-    .await
-    .unwrap();
-    let control = Control::new(&reopened, root.path().into());
-    assert!(saved(&control, "interrupted-revisit").await["pending"].is_null());
-    assert_eq!(event_count(&control, "interrupted-revisit").await, 0);
-    let body=control.store.database.call(|db|{
-        Ok(db.query_row("SELECT payload_json FROM node WHERE kind='interruption_context' ORDER BY rowid DESC LIMIT 1",[],|r|r.get::<_,String>(0))?)
-    }).await.unwrap();
-    let node: Value = serde_json::from_str(&body).unwrap();
-    let snapshot: Value = serde_json::from_str(node["text"].as_str().unwrap()).unwrap();
-    assert!(
-        snapshot
-            .to_string()
-            .contains("INTERRUPTED_REVISIT_CAPTURE_ONLY")
-    );
-    assert_eq!(
-        snapshot["change"]["revisits"]["items"][0]["consumed_count"],
-        0
-    );
-    assert_eq!(
-        snapshot["change"]["revisits"]["items"][0]["pending"]["set_by"]["kind"],
-        "human"
-    );
-    assert!(
-        receive.try_recv().is_err(),
-        "startup must not resume reservation"
-    );
-    let fresh = begin(&control, &thread).await;
-    let next = incoming(&mut receive).await;
-    assert!(
-        next.body
-            .to_string()
-            .contains("INTERRUPTED_REVISIT_CAPTURE_ONLY"),
-        "next actual Turn receives the interruption facts"
-    );
-    next.reply
-        .send((200, answer("Acknowledged interruption")))
-        .unwrap();
-    run_state(&control, fresh.run_id.as_ref().unwrap(), "completed").await;
-    request(
-        &control,
-        Command::ThreadDelete(ThreadDeleteArgs {
-            preview_marker: None,
-            thread_id: thread.clone(),
-            descendants: false,
-        }),
-    )
-    .await;
-    assert_eq!(
-        control
-            .store
-            .database
-            .call(|db| Ok(db.query_row(
-                "SELECT count(*) FROM app_meta WHERE key='revisit.interrupted-revisit'",
-                [],
-                |r| r.get::<_, i64>(0)
-            )?))
-            .await
-            .unwrap(),
-        0
-    );
-    control.shutdown().await.unwrap();
-    reopened.shutdown().await.unwrap();
-    server.abort();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn pending_revisit_waits_for_owned_background_shell_then_fires() {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
-    let owner = owner(root.path(), &url, None).await;
-    let control = Control::new(&owner, root.path().into());
-    let thread = thread(&control).await;
-    let run = begin(&control, &thread).await.run_id.unwrap();
-    let first = incoming(&mut receive).await;
+    let first = incoming(&mut f.receive).await;
     let command = if cfg!(windows) {
         "[Console]::ReadLine()"
     } else {
         "read value"
     };
     first.reply.send((200,json!({"id":"background-owned-work","status":"completed","output":[{"type":"function_call","call_id":"background-wait","name":"shell","arguments":json!({"command":command,"background":true,"stdin_open":true}).to_string()}]}))).unwrap();
-    let after_tool = incoming(&mut receive).await;
-    assert!(
-        after_tool.body["input"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["type"] == "function_call_output")
-    );
+    let after_tool = incoming(&mut f.receive).await;
     let id = run.clone();
-    let execution: String = control
+    let execution: String = f
+        .control
         .store
         .database
         .call(move |db| {
@@ -683,54 +593,57 @@ async fn pending_revisit_waits_for_owned_background_shell_then_fires() {
         })
         .await
         .unwrap();
-    request(&control, set(&run, "AFTER_OWNED_SHELL_FINISHES")).await;
+    send(
+        &f.control,
+        &f.thread,
+        "AFTER_OWNED_SHELL_FINISHES",
+        Deliver::Complete,
+    )
+    .await;
     after_tool
         .reply
         .send((200, answer("Foreground answer complete")))
         .unwrap();
-    // Wait for the Turn to complete before testing the owned-work gate.
     let id = run.clone();
-    crate::test_watchdog::watchdog("tests/revisit.rs: pending_revisit_waits_for_owned_background_shell_then_fires",async{loop{let target=id.clone();let done=control.store.database.call(move|db|Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap();if done{break;}tokio::time::sleep(Duration::from_millis(5)).await;}}).await.unwrap();
-    assert_eq!(event_count(&control, &run).await, 0);
-    assert_eq!(
-        saved(&control, &run).await["pending"]["text"],
-        "AFTER_OWNED_SHELL_FINISHES"
-    );
-    assert!(receive.try_recv().is_err());
+    let control = f.control.clone();
+    crate::test_watchdog::watchdog("tests/revisit.rs: owned shell turn", async move {
+        loop {
+            let target = id.clone();
+            let done = control.store.database.call(move |db| Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap();
+            if done {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(f.receive.try_recv().is_err());
     request(
-        &control,
+        &f.control,
         Command::ShellEof(ExecutionTarget {
             execution_id: execution,
         }),
     )
     .await;
-    let shell_ended = incoming(&mut receive).await;
-    assert!(shell_ended.body.to_string().contains("shell_ended"));
-    assert_eq!(
-        event_count(&control, &run).await,
-        0,
-        "owned completion event is processed before Revisit"
+    let shell_ended = incoming(&mut f.receive).await;
+    assert_order(
+        &shell_ended.body,
+        &["shell_ended"],
+        &["AFTER_OWNED_SHELL_FINISHES"],
     );
     shell_ended
         .reply
         .send((200, answer("Shell completion acknowledged")))
         .unwrap();
-    let revisit = incoming(&mut receive).await;
-    assert!(
-        revisit
-            .body
-            .to_string()
-            .contains("AFTER_OWNED_SHELL_FINISHES")
-    );
+    let revisit = incoming(&mut f.receive).await;
+    assert_order(&revisit.body, &["AFTER_OWNED_SHELL_FINISHES"], &[]);
     revisit
         .reply
         .send((200, answer("Owned work verified")))
         .unwrap();
-    run_state(&control, &run, "completed").await;
-    assert_eq!(event_count(&control, &run).await, 1);
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-    server.abort();
+    run_state(&f.control, &run, "completed").await;
+    f.finish().await;
 }
 
 fn cli_command(args: &[&str]) -> String {
@@ -758,440 +671,72 @@ fn tool(command: &str) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn model_shell_cli_registers_its_authenticated_own_run_without_explicit_target() {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, proxy) = proxy().await;
-    let owner = owner(root.path(), &url, None).await;
-    let control = Control::new(&owner, root.path().into());
-    let (send, receive_ipc) = mpsc::channel(16);
-    let ipc = shellboy::ipc::LocalServer::bind(&owner, send)
+async fn model_shell_cli_defers_a_message_to_its_own_run_completion() {
+    let mut f = fixture().await;
+    let (send_ipc, receive_ipc) = mpsc::channel(16);
+    let ipc = shellboy::ipc::LocalServer::bind(&f.owner, send_ipc)
         .await
         .unwrap();
-    let serving = tokio::spawn(control.clone().serve(receive_ipc));
-    let thread = thread(&control).await;
-    let run = begin(&control, &thread).await.run_id.unwrap();
-    incoming(&mut receive)
+    let serving = tokio::spawn(f.control.clone().serve(receive_ipc));
+    let run = send(&f.control, &f.thread, "BASE", Deliver::Next)
         .await
-        .reply
-        .send((
-            200,
-            tool(&cli_command(&[
-                "revisit",
-                "set",
-                "--text",
-                "MODEL_OWN_REVISIT",
-            ])),
-        ))
+        .run_id
         .unwrap();
-    let after_tool = incoming(&mut receive).await;
-    let reservation = saved(&control, &run).await;
-    assert_eq!(reservation["pending"]["set_by"]["kind"], "model");
-    assert_eq!(reservation["pending"]["set_by"]["relation"], "self");
-    assert_eq!(reservation["pending"]["set_by"]["run_id"], run);
-    after_tool
-        .reply
-        .send((200, answer("Original task finished")))
-        .unwrap();
-    let revisit = incoming(&mut receive).await;
-    assert!(
-        revisit.body["input"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["role"] == "developer"
-                && item.to_string().contains("MODEL_OWN_REVISIT"))
-    );
-    revisit
-        .reply
-        .send((200, answer("Self check finished")))
-        .unwrap();
-    run_state(&control, &run, "completed").await;
-    assert_eq!(event_count(&control, &run).await, 1);
-    control.shutdown().await.unwrap();
-    ipc.shutdown().await.unwrap();
-    serving.abort();
-    owner.shutdown().await.unwrap();
-    proxy.abort();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn child_revisit_finishes_before_parent_receives_child_completion_and_its_own_revisit() {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, proxy) = proxy().await;
-    let owner = owner(root.path(), &url, None).await;
-    let control = Control::new(&owner, root.path().into());
-    let (send, receive_ipc) = mpsc::channel(16);
-    let ipc = shellboy::ipc::LocalServer::bind(&owner, send)
+    incoming(&mut f.receive)
         .await
-        .unwrap();
-    let serving = tokio::spawn(control.clone().serve(receive_ipc));
-    let parent_thread = thread(&control).await;
-    let child_thread = request(
-        &control,
-        Command::ThreadCreate(ThreadCreateArgs {
-            agents: None,
-            cwd: None,
-            parent_id: Some(parent_thread.clone()),
-            connection: None,
-            model: None,
-            effort: None,
-        }),
-    )
-    .await["thread_id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let parent_run = begin(&control, &parent_thread).await.run_id.unwrap();
-    let first = incoming(&mut receive).await;
-    request(&control, set(&parent_run, "PARENT_REVISIT_AFTER_CHILD")).await;
-    first
         .reply
         .send((
             200,
             tool(&cli_command(&[
                 "message",
                 "send",
-                "--thread",
-                &child_thread,
+                "--deliver",
+                "complete",
                 "--text",
-                "OWNED_CHILD_INPUT",
+                "MODEL_OWN_REVISIT",
             ])),
         ))
         .unwrap();
-    let a = incoming(&mut receive).await;
-    let b = incoming(&mut receive).await;
-    let is_child =
-        |body: &Value| {
-            body["input"].as_array().unwrap().iter().any(|item| {
-                item["role"] == "user" && item.to_string().contains("OWNED_CHILD_INPUT")
-            })
-        };
-    let (child, parent) = if is_child(&a.body) {
-        assert!(!is_child(&b.body));
-        (a, b)
-    } else {
-        assert!(is_child(&b.body));
-        (b, a)
-    };
-    assert_eq!(child.session.as_deref(), Some(child_thread.as_str()));
-    assert_eq!(parent.session.as_deref(), Some(parent_thread.as_str()));
-    let target = parent_run.clone();
-    let child_run: String = control
+    let after_tool = incoming(&mut f.receive).await;
+    let waiting: i64 = f
+        .control
         .store
         .database
-        .call(move |db| {
+        .call(|db| {
             Ok(db.query_row(
-                "SELECT id FROM run WHERE owner_run_id=?1 AND state='live'",
-                [target],
+                "SELECT count(*) FROM receipt WHERE state='held' AND hold_reason='run_completion' AND json_extract(sender_json,'$.kind')='model'",
+                [],
                 |r| r.get(0),
             )?)
         })
         .await
         .unwrap();
-    request(&control, set(&child_run, "CHILD_REVISIT_BEFORE_REPORT")).await;
-    parent
+    assert_eq!(waiting, 1, "{}", after_tool.body);
+    after_tool
         .reply
-        .send((200, answer("Waiting for owned child")))
+        .send((200, answer("Original task finished")))
         .unwrap();
-    child
+    let revisit = incoming(&mut f.receive).await;
+    assert_order(
+        &revisit.body,
+        &["Original task finished", "MODEL_OWN_REVISIT"],
+        &[],
+    );
+    revisit
         .reply
-        .send((200, answer("Child original answer")))
+        .send((200, answer("Self check finished")))
         .unwrap();
-    // Child Turn completion may independently wake the parent before the
-    // child's Revisit request reaches the proxy. Route by the real Thread
-    // session header, rather than assuming a cross-Thread HTTP arrival order.
-    let child_revisit = crate::test_watchdog::watchdog("tests/revisit.rs: child_revisit_finishes_before_parent_receives_child_completion_and_its_own_revisit", async {
-        for _ in 0..8 {
-            let next = incoming(&mut receive).await;
-            let parent_id = parent_run.clone();
-            let ended: i64 = control.store.database.call(move |db| {
-                Ok(db.query_row("SELECT count(*) FROM event WHERE kind='child_run_ended' AND target_run_id=?1", [parent_id], |r| r.get(0))?)
-            }).await.unwrap();
-            assert_eq!(ended, 0, "child cannot report Run completion before its Revisit finishes");
-            assert_eq!(event_count(&control, &parent_run).await, 0);
-            if next.session.as_deref() == Some(child_thread.as_str()) {
-                assert!(next.body["input"].as_array().unwrap().iter().any(|item| item["role"] == "developer" && item.to_string().contains("CHILD_REVISIT_BEFORE_REPORT")), "child request must carry its Revisit event: {}", next.body);
-                return next;
-            }
-            assert_eq!(next.session.as_deref(), Some(parent_thread.as_str()));
-            assert!(next.body.to_string().contains("child_turn_completed") || next.body.to_string().contains("shell_ended"), "unexpected parent notification: {}", next.body);
-            next.reply.send((200, answer("Parent observed progress; child still owns work"))).unwrap();
-        }
-        panic!("child Revisit did not arrive within the bounded notification sequence");
-    }).await.expect("child Revisit routing watchdog");
-    child_revisit
-        .reply
-        .send((200, answer("Child verified all work")))
-        .unwrap();
-    let parent_revisit = crate::test_watchdog::watchdog("tests/revisit.rs: child_revisit_finishes_before_parent_receives_child_completion_and_its_own_revisit", async {
-        for _ in 0..8 {
-            let next = incoming(&mut receive).await;
-            assert_eq!(next.session.as_deref(), Some(parent_thread.as_str()));
-            if next.body["input"].as_array().unwrap().iter().any(|item| {
-                item["role"] == "developer"
-                    && item.to_string().contains("PARENT_REVISIT_AFTER_CHILD")
-            }) {
-                assert!(
-                    next.body.to_string().contains("child_run_ended"),
-                    "parent must process child Run completion before own Revisit"
-                );
-                return next;
-            }
-            assert_eq!(event_count(&control, &parent_run).await, 0);
-            assert!(
-                next.body.to_string().contains("child_turn_completed")
-                    || next.body.to_string().contains("child_run_ended")
-                    || next.body.to_string().contains("shell_ended"),
-                "unexpected parent notification: {}",
-                next.body
-            );
-            next.reply
-                .send((200, answer("Parent accepted child progress/completion")))
-                .unwrap();
-        }
-        panic!("parent Revisit did not arrive within the bounded notification sequence");
-    })
-    .await
-    .expect("parent Revisit routing watchdog");
-    parent_revisit
-        .reply
-        .send((200, answer("Parent self check finished")))
-        .unwrap();
-    run_state(&control, &parent_run, "completed").await;
-    assert_eq!(event_count(&control, &child_run).await, 1);
-    assert_eq!(event_count(&control, &parent_run).await, 1);
-    control.shutdown().await.unwrap();
+    run_state(&f.control, &run, "completed").await;
+    assert_eq!(
+        run_revisit(&f.control, &run).await,
+        Some(RevisitSummary {
+            pending: false,
+            consumed_count: 1
+        })
+    );
+    f.control.shutdown().await.unwrap();
     ipc.shutdown().await.unwrap();
     serving.abort();
-    owner.shutdown().await.unwrap();
-    proxy.abort();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn registration_racing_normal_completion_is_either_delivered_or_rejected_as_terminal() {
-    for _ in 0..4 {
-        let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, server) = proxy().await;
-        let owner = owner(root.path(), &url, None).await;
-        let control = Control::new(&owner, root.path().into());
-        let thread = thread(&control).await;
-        let run = begin(&control, &thread).await.run_id.unwrap();
-        let held = incoming(&mut receive).await;
-        let (_, registration) = crate::test_watchdog::watchdog("tests/revisit.rs: registration_racing_normal_completion_is_either_delivered_or_rejected_as_terminal", async {
-            tokio::join!(
-                async {
-                    held.reply
-                        .send((200, answer("Completion racing registration")))
-                        .unwrap();
-                    tokio::task::yield_now().await;
-                },
-                control.request(invocation(&control, set(&run, "REGISTER_COMPLETION_RACE")))
-            )
-        })
-        .await
-        .expect("registration/completion race watchdog");
-        if registration.ok {
-            let revisit = incoming(&mut receive).await;
-            assert!(
-                revisit.body["input"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|item| item["role"] == "developer"
-                        && item.to_string().contains("REGISTER_COMPLETION_RACE")),
-                "accepted reservation must not be stranded by completion"
-            );
-            revisit
-                .reply
-                .send((200, answer("Race registration delivered")))
-                .unwrap();
-            run_state(&control, &run, "completed").await;
-            assert_eq!(event_count(&control, &run).await, 1);
-            assert!(saved(&control, &run).await["pending"].is_null());
-        } else {
-            assert_eq!(
-                registration.error.unwrap().code,
-                ErrorCode::InvalidState,
-                "only terminal-target rejection is valid when completion wins"
-            );
-            run_state(&control, &run, "completed").await;
-            assert_eq!(event_count(&control, &run).await, 0);
-        }
-        assert!(
-            receive.try_recv().is_err(),
-            "no duplicate delivery after either serialized outcome"
-        );
-        control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
-        server.abort();
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_user_input_and_cancel_keep_the_same_run_without_premature_revisit() {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
-    let owner = owner(root.path(), &url, None).await;
-    let control = Control::new(&owner, root.path().into());
-    let thread = thread(&control).await;
-    let original = begin(&control, &thread).await;
-    let run = original.run_id.unwrap();
-    let held = incoming(&mut receive).await;
-    request(&control, set(&run, "CANCEL_BEFORE_QUEUED_INPUT_COMPLETES")).await;
-    let followup: MessageAccepted = serde_json::from_value(
-        crate::test_watchdog::watchdog("tests/revisit.rs: queued_user_input_and_cancel_keep_the_same_run_without_premature_revisit",
-            request(
-                &control,
-                Command::MessageSend(MessageSendArgs {
-                    sender_label: None,
-                    now: false,
-                    thread_id: Some(thread),
-                    text: "FOLLOWUP_ACCEPTED_BEFORE_COMPLETION".into(),
-                }),
-            ),
-        )
-        .await
-        .expect("follow-up acceptance watchdog"),
-    )
-    .unwrap();
-    assert_eq!(followup.run_id.as_deref(), Some(run.as_str()));
-    let cancelled = request(
-        &control,
-        Command::RevisitCancel(RevisitArgs {
-            run_id: Some(run.clone()),
-        }),
-    )
-    .await;
-    assert_eq!(cancelled["cancelled"], true);
-    assert_eq!(event_count(&control, &run).await, 0);
-    let _ = held.reply.send((200, answer("Late superseded answer")));
-    let latest = incoming(&mut receive).await;
-    assert!(latest.body["input"].as_array().unwrap().iter().any(|item| {
-        item["role"] == "user"
-            && item
-                .to_string()
-                .contains("FOLLOWUP_ACCEPTED_BEFORE_COMPLETION")
-    }));
-    latest
-        .reply
-        .send((200, answer("Answer includes follow-up")))
-        .unwrap();
-    run_state(&control, &run, "completed").await;
-    assert_eq!(event_count(&control, &run).await, 0);
-    assert!(saved(&control, &run).await["pending"].is_null());
-    let target = run.clone();
-    let receipts: i64 = control
-        .store
-        .database
-        .call(move |db| {
-            Ok(db.query_row(
-                "SELECT count(*) FROM receipt WHERE run_id=?1",
-                [target],
-                |r| r.get(0),
-            )?)
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        receipts, 2,
-        "both accepted user messages retain their own receipt"
-    );
-    assert!(receive.try_recv().is_err());
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-    server.abort();
-}
-
-#[tokio::test]
-async fn malformed_optional_metadata_does_not_block_observation_or_stop_and_never_invents_counts() {
-    let root = tempfile::tempdir().unwrap();
-    let owner = owner(root.path(), "http://127.0.0.1:9/v1", None).await;
-    let control = Control::new(&owner, root.path().into());
-    for (ordinal, broken) in [
-        "{",
-        "{}",
-        r#"{"pending":null,"consumed_count":"unknown","last_fired_at":null}"#,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let run = format!("broken-{ordinal}");
-        let thread = seed_run(&control, &run, None).await;
-        let key = format!("revisit.{run}");
-        let damaged = broken.to_owned();
-        control
-            .store
-            .database
-            .call(move |db| {
-                db.execute(
-                    "INSERT INTO app_meta(key,value)VALUES(?1,?2)",
-                    rusqlite::params![key, damaged],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let get = control
-            .request(invocation(
-                &control,
-                Command::RevisitGet(RevisitArgs {
-                    run_id: Some(run.clone()),
-                }),
-            ))
-            .await;
-        let error = get.error.unwrap();
-        assert_eq!(error.code, ErrorCode::InvalidState);
-        assert!(error.hint.unwrap().contains("Stop"));
-        let details = request(
-            &control,
-            Command::RunGet(RunTarget {
-                run_id: run.clone(),
-            }),
-        )
-        .await;
-        assert!(
-            details.get("revisit").is_none(),
-            "unreadable optional metadata must not become a fabricated zero counter"
-        );
-        let list = request(
-            &control,
-            Command::ThreadList(ThreadListArgs {
-                limit: MAX_LIST_LIMIT,
-                cursor: None,
-                query: None,
-            }),
-        )
-        .await;
-        let item = list["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|item| item["thread_id"] == thread)
-            .unwrap();
-        assert!(item.get("revisit").is_none());
-        request(
-            &control,
-            Command::RunStop(RunTarget {
-                run_id: run.clone(),
-            }),
-        )
-        .await;
-        run_state(&control, &run, "stopped").await;
-        let key = format!("revisit.{run}");
-        assert_eq!(
-            control
-                .store
-                .database
-                .call(move |db| Ok(db.query_row(
-                    "SELECT count(*) FROM app_meta WHERE key=?1",
-                    [key],
-                    |r| r.get::<_, i64>(0)
-                )?))
-                .await
-                .unwrap(),
-            0
-        );
-    }
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
+    f.owner.shutdown().await.unwrap();
+    f.server.abort();
 }

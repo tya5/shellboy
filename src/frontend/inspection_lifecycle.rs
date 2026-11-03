@@ -26,12 +26,7 @@ const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' EL
 
                 CASE WHEN octet_length(u.recovery_reason_json)<=?2 THEN u.recovery_reason_json END,
 
-                COALESCE(octet_length(u.recovery_reason_json)>?2,0),
-                CASE WHEN octet_length(m.value)<=?2-COALESCE(CASE WHEN octet_length(u.recovery_reason_json)<=?2 THEN octet_length(u.recovery_reason_json) END,
-    0) THEN m.value END,
-
-                COALESCE(octet_length(m.value)>?2-COALESCE(CASE WHEN octet_length(u.recovery_reason_json)<=?2 THEN octet_length(u.recovery_reason_json) END,
-    0),0)
+                COALESCE(octet_length(u.recovery_reason_json)>?2,0)
                 , (COALESCE(octet_length(r.thread_id)>512,0)
     OR COALESCE(octet_length(r.state)>512,0)
     OR COALESCE(octet_length(r.owner_run_id)>512,0)
@@ -41,7 +36,7 @@ const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' EL
     OR COALESCE(octet_length(u.id)>512,0)
     OR COALESCE(octet_length(u.answer_node_id)>512,0))
 FROM run r LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1)
-                LEFT JOIN app_meta m ON m.key='revisit.'||r.id WHERE r.id=?1";
+                WHERE r.id=?1";
 
 const TURN_SQL: &str =
     "SELECT CASE WHEN octet_length(u.thread_id)>512 THEN '' ELSE u.thread_id END,
@@ -76,8 +71,7 @@ struct RawRun {
     answer: Option<String>,
     reason: Option<String>,
     reason_limited: bool,
-    revisit: Option<String>,
-    revisit_limited: bool,
+    revisit: Option<crate::protocol::RevisitSummary>,
     owned_runs: Vec<String>,
     runs_limited: bool,
     executions: Vec<String>,
@@ -132,13 +126,12 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
     let body = match command {
         Command::RunGet(args) => {
             let id = &args.run_id;
-            // Each reason/revisit is length-gated before String materialization.
-            // Revisit shares the64KiB aggregate source-copy allowance with reason.
+            // Each reason is length-gated before String materialization.
             let mut raw = db
                 .query_row(RUN_SQL, rusqlite::params![id, JSON_BYTES as i64], |row| {
                     Ok(RawRun {
                         waiting_reason: None,
-                        scalar_overflow: row.get(12)?,
+                        scalar_overflow: row.get(10)?,
                         thread: row.get(0)?,
                         state: row.get(1)?,
                         owner: row.get(2)?,
@@ -149,8 +142,7 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
                         answer: row.get(7)?,
                         reason: row.get(8)?,
                         reason_limited: row.get(9)?,
-                        revisit: row.get(10)?,
-                        revisit_limited: row.get(11)?,
+                        revisit: None,
                         owned_runs: Vec::new(),
                         runs_limited: false,
                         executions: Vec::new(),
@@ -162,6 +154,7 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
             if !raw.scalar_overflow {
                 raw.waiting_reason = crate::readback::run_wait_reason(db, &raw.thread, id)?;
             }
+            raw.revisit = crate::control::revisit::summary_for_run(db, id)?;
             (raw.owned_runs, raw.runs_limited) = owned(db, OWNED_RUNS, id)?;
             (raw.executions, raw.executions_limited) = owned(db, OWNED_EXECUTIONS, id)?;
             RawBody::Run(raw)
@@ -280,9 +273,6 @@ pub(super) fn prepare_in(
             if raw.reason_limited {
                 limited_fields.extend(["recovery_hint".into(), "context.recovery_reason".into()]);
             }
-            if raw.revisit_limited {
-                limited_fields.push("revisit".into());
-            }
             if raw.runs_limited {
                 limited_fields.push("owned_run_ids".into());
             }
@@ -306,10 +296,6 @@ pub(super) fn prepare_in(
             let thread = raw.thread.clone();
             let state = serde_json::from_value(serde_json::json!(raw.state))
                 .map_err(|_| ApiError::new(ErrorCode::InvalidState, "Unknown saved Run state"))?;
-            let revisit = raw
-                .revisit
-                .as_deref()
-                .and_then(crate::control::revisit::summary_from_body);
             (
                 thread,
                 encoded(RunDetails {
@@ -325,7 +311,7 @@ pub(super) fn prepare_in(
                     owned_run_ids: raw.owned_runs,
                     owned_execution_ids: raw.executions,
                     recovery_hint: reason_hint(raw.reason, raw.reason_limited, language),
-                    revisit,
+                    revisit: raw.revisit,
                 })?,
             )
         }
@@ -436,8 +422,8 @@ mod tests {
     fn seed(db: &Connection) {
         db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('foreign','Foreign','/foreign','AGENTS.md','p','m','2026-01-01T00:00:03Z'),('viewer','Viewer','/viewer','','p','m','now');
             INSERT INTO run(id,thread_id,state,created_at)VALUES('r','foreign','live','2026-01-01T00:00:00Z');
-            INSERT INTO turn(id,thread_id,run_id,state,generation,created_at,recovery_reason_json)VALUES('u','foreign','r','recovery_wait',7,'2026-01-01T00:00:01Z','{\"code\":\"IoFailed\",\"message\":\"saved reason\"}');
-            INSERT INTO app_meta(key,value)VALUES('revisit.r','{\"pending\":null,\"consumed_count\":3,\"last_fired_at\":null}');").unwrap();
+            INSERT INTO turn(id,thread_id,run_id,state,generation,created_at,recovery_reason_json)VALUES('u','foreign','r','recovery_wait',7,'2026-01-01T00:00:01Z','{\"code\":\"IoFailed\",\"message\":\"saved reason\"}');").unwrap();
+        crate::control::revisit::seed_fixture(db, "foreign", "r", 3, false);
     }
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
@@ -497,7 +483,7 @@ mod tests {
         let expected = canonical(&db, &run());
         let trace = Statements::new(&db);
         let raw = read_tx(&db, &run()).unwrap();
-        assert_eq!(trace.count(), 5);
+        assert_eq!(trace.count(), 6);
         drop(trace);
         let prepared = prepare(raw).unwrap();
         assert_eq!(prepared.value, expected);
@@ -527,7 +513,7 @@ mod tests {
                 assert_eq!(
                     trace.count(),
                     if matches!(command, Command::RunGet(_)) {
-                        4
+                        5
                     } else {
                         1
                     }
@@ -763,26 +749,22 @@ mod tests {
         assert_eq!(reason_hint(original.clone(), false, En), original);
     }
     #[test]
-    fn reason_and_revisit_share_source_budget_and_decode_after_read() {
+    fn reason_is_budgeted_and_revisit_summary_is_read_from_receipts() {
         let db = fixture();
         let reason = json!({"message":"x".repeat(JSON_BYTES-100)}).to_string();
         db.execute("UPDATE turn SET recovery_reason_json=?1", [reason])
             .unwrap();
-        db.execute("UPDATE app_meta SET value=?1 WHERE key='revisit.r'",[json!({"pending":null,"consumed_count":3,"last_fired_at":null,"padding":"x".repeat(200)}).to_string()]).unwrap();
         let raw = read_tx(&db, &run()).unwrap();
         let RawBody::Run(body) = &raw.body else {
             panic!()
         };
-        assert!(
-            body.reason.as_ref().unwrap().len() + body.revisit.as_ref().map_or(0, String::len)
-                <= JSON_BYTES
-        );
-        assert!(body.revisit_limited);
-        assert!(
-            prepare(raw)
-                .unwrap()
-                .limited_fields
-                .contains(&"revisit".into())
+        assert!(body.reason.as_ref().unwrap().len() <= JSON_BYTES);
+        assert_eq!(
+            body.revisit,
+            Some(crate::protocol::RevisitSummary {
+                pending: false,
+                consumed_count: 3
+            })
         );
         db.execute(
             "UPDATE turn SET recovery_reason_json=?1",

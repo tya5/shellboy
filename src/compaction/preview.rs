@@ -369,12 +369,6 @@ fn load(
             protected.insert(id);
         }
     }
-    *sql += 1;
-    let mut statement=db.prepare("SELECT n.id FROM json_each(?1) q JOIN node n ON n.id=q.value JOIN event e ON e.id=json_extract(n.payload_json,'$.event_id') WHERE n.turn_id=?2 AND n.kind='event' AND e.kind='revisit' AND e.target_run_id=?3 LIMIT 4097")?;
-    let mut rows = statement.query(params![ids, current_id, run])?;
-    while let Some(row) = rows.next()? {
-        protected.insert(required(row, 0, ID, budget)?);
-    }
     let mut snapshot = Snapshot {
         thread: thread.into(),
         revision: data.0 as u64,

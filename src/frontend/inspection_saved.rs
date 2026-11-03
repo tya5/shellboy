@@ -1,4 +1,4 @@
-//! Three saved, human inspection targets; no command replay or runtime effects.
+//! Two saved, human inspection targets; no command replay or runtime effects.
 use crate::{
     context::ExecutionContext,
     protocol::{
@@ -18,7 +18,6 @@ const SCALAR_BYTES: usize = 512;
 pub(super) enum RawSaved {
     Shell(RawShell),
     Message(RawMessage),
-    Revisit(RawRevisit),
 }
 #[derive(Debug)]
 pub(super) struct PreparedSaved {
@@ -61,20 +60,8 @@ pub(super) struct RawMessage {
     limited: Vec<String>,
     observed: DateTime<Utc>,
 }
-#[derive(Debug)]
-pub(super) struct RawRevisit {
-    run: String,
-    thread: String,
-    body: Option<String>,
-    present: bool,
-    limited: bool,
-    observed: DateTime<Utc>,
-}
 pub(super) fn supports(command: &Command) -> bool {
-    matches!(
-        command,
-        Command::ShellGet(_) | Command::MessageGet(_) | Command::RevisitGet(_)
-    )
+    matches!(command, Command::ShellGet(_) | Command::MessageGet(_))
 }
 pub(super) async fn request(
     control: &std::sync::Arc<crate::control::Control>,
@@ -94,8 +81,7 @@ pub(super) async fn request(
         move |db| read_tx(db, &command, None),
     )
     .await?;
-    let limit = control.store.config.limits.revisit_max_per_run;
-    let prepared = super::presentation_work(move || prepare(raw, limit)).await??;
+    let prepared = super::presentation_work(move || prepare(raw)).await??;
     let mut value = prepared.value;
     value["view_observation"] =
         json!({"observed_at":prepared.observed_at,"thread_id":prepared.thread});
@@ -163,12 +149,6 @@ const MESSAGE_SQL:&str="SELECT
  +16*COALESCE(octet_length(r.result_json)>65536-CASE WHEN octet_length(r.sender_json)<=65536 THEN octet_length(r.sender_json) ELSE 0 END,0)
  +32*(octet_length(r.created_at)>512)+64*(octet_length(r.updated_at)>512)+128*COALESCE(octet_length(r.hold_reason)>512,0)
  FROM receipt r LEFT JOIN turn t ON t.id=r.turn_id WHERE r.message_node_id=?1";
-const REVISIT_SQL: &str = "SELECT
- CASE WHEN octet_length(r.thread_id)<=512 THEN r.thread_id END,
- CASE WHEN octet_length(r.state)<=64 THEN r.state END,m.key IS NOT NULL,
- CASE WHEN r.state='live' AND octet_length(m.value)<=65536 THEN m.value END,
- COALESCE(octet_length(m.value)>65536,0)
- FROM run r LEFT JOIN app_meta m ON m.key='revisit.'||r.id WHERE r.id=?1";
 
 /// Closed allowlist checked before touching SQLite. `default_thread` is issuing
 /// context, never authority to retarget an explicit execution/message/Run.
@@ -281,46 +261,9 @@ pub(super) fn read_tx(
                 observed: Utc::now(),
             }))
         }
-        Command::RevisitGet(args) => {
-            // Human CLI canonical behavior: selection is not an implicit Run.
-            let run = args.run_id.as_deref().ok_or_else(|| {
-                domain(
-                    ErrorCode::InvalidState,
-                    "Humans must specify --run for Revisit",
-                )
-            })?;
-            id(run)?;
-            let row = db
-                .query_row(REVISIT_SQL, [run], |r| {
-                    Ok((
-                        r.get::<_, Option<String>>(0)?,
-                        r.get::<_, Option<String>>(1)?,
-                        r.get::<_, bool>(2)?,
-                        r.get(3)?,
-                        r.get(4)?,
-                    ))
-                })
-                .optional()?
-                .ok_or_else(|| domain(ErrorCode::TargetUnavailable, "Revisit Run not found"))?;
-            let state = required(row.1, "Revisit Run state")?;
-            if state != "live" {
-                return Err(domain(
-                    ErrorCode::InvalidState,
-                    "Revisit requires a live Run",
-                ));
-            }
-            Ok(RawSaved::Revisit(RawRevisit {
-                run: run.into(),
-                thread: required(row.0, "Revisit Thread identity")?,
-                present: row.2,
-                body: row.3,
-                limited: row.4,
-                observed: Utc::now(),
-            }))
-        }
         _ => Err(domain(
             ErrorCode::InvalidArgument,
-            "Saved inspection supports only shell get, message get and explicit-Run revisit get",
+            "Saved inspection supports only shell get and message get",
         )),
     }
 }
@@ -334,11 +277,7 @@ fn invalid(message: &str) -> ApiError {
 fn encode<T: serde::Serialize>(value: T) -> Result<Value, ApiError> {
     serde_json::to_value(value).map_err(|_| invalid("Cannot encode saved inspection"))
 }
-/// Config is supplied by the running owner; None retains unlimited/null policy.
-pub(super) fn prepare(
-    raw: RawSaved,
-    revisit_limit: Option<u64>,
-) -> Result<PreparedSaved, ApiError> {
+pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
     match raw {
         RawSaved::Shell(mut raw) => {
             debug_assert!(
@@ -493,41 +432,6 @@ pub(super) fn prepare(
                 observed_at: raw.observed.to_rfc3339(),
             })
         }
-        RawSaved::Revisit(raw) => {
-            debug_assert!(
-                raw.body
-                    .as_ref()
-                    .is_none_or(|body| body.len() <= JSON_BYTES)
-            );
-            let (value, limited_fields) = if raw.limited {
-                (
-                    json!({"run_id":raw.run,"pending":null,"consumed_count":null,"last_fired_at":null,"limit":revisit_limit}),
-                    vec![
-                        "/pending".into(),
-                        "/consumed_count".into(),
-                        "/last_fired_at".into(),
-                    ],
-                )
-            } else {
-                if raw.present && raw.body.is_none() {
-                    return Err(invalid("Saved Revisit state is unavailable"));
-                }
-                (
-                    crate::control::revisit::inspect_saved(
-                        &raw.run,
-                        raw.body.as_deref(),
-                        revisit_limit,
-                    )?,
-                    Vec::new(),
-                )
-            };
-            Ok(PreparedSaved {
-                value,
-                thread: Some(raw.thread),
-                limited_fields,
-                observed_at: raw.observed.to_rfc3339(),
-            })
-        }
     }
 }
 
@@ -535,7 +439,7 @@ pub(super) fn prepare(
 mod tests {
     use super::*;
     use crate::frontend::sql_trace::Statements;
-    use crate::protocol::{ExecutionTarget, MessageTarget, RevisitArgs, RunTarget};
+    use crate::protocol::{ExecutionTarget, MessageTarget, RunTarget};
     use rusqlite::{StatementStatus, params};
     fn seed(db: &Connection) -> rusqlite::Result<()> {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('target','/','','fixture','synthetic','2026-01-01T00:00:00Z'),('issuing','/','','fixture','synthetic','2026-01-01T00:00:00Z');
@@ -568,11 +472,6 @@ mod tests {
             execution_id: "shell".into(),
         })
     }
-    fn revisit() -> Command {
-        Command::RevisitGet(RevisitArgs {
-            run_id: Some("run".into()),
-        })
-    }
     #[test]
     fn closed_allowlist_and_absent_human_run_reject_before_sql() {
         let db = fixture();
@@ -586,17 +485,6 @@ mod tests {
                 .into_api_error()
                 .code,
             ErrorCode::InvalidArgument
-        );
-        assert_eq!(
-            read_tx(
-                &db,
-                &Command::RevisitGet(RevisitArgs { run_id: None }),
-                Some("target")
-            )
-            .unwrap_err()
-            .into_api_error()
-            .code,
-            ErrorCode::InvalidState
         );
         assert_eq!(trace.count(), 0);
     }
@@ -613,7 +501,7 @@ mod tests {
             drop(trace);
             let expected =
                 encode(crate::control::db::message_details(&db, "message").unwrap()).unwrap();
-            let prepared = prepare(raw, Some(37)).unwrap();
+            let prepared = prepare(raw).unwrap();
             assert_eq!(prepared.value, expected);
             assert_eq!(prepared.thread.as_deref(), Some("target"));
             assert!(prepared.limited_fields.is_empty());
@@ -634,7 +522,7 @@ mod tests {
             .call(|db| read_tx(db, &shell(), Some("issuing")))
             .await
             .unwrap();
-        let prepared = prepare(raw, None).unwrap();
+        let prepared = prepare(raw).unwrap();
         assert_eq!(prepared.value, encode(canonical).unwrap());
         assert_eq!(prepared.thread.as_deref(), Some("target"));
         assert!(prepared.limited_fields.is_empty());
@@ -653,7 +541,7 @@ mod tests {
         };
         assert!(row.assignment.is_none());
         assert!(row.sender.as_ref().unwrap().len() <= JSON_BYTES);
-        let prepared = prepare(raw, None).unwrap();
+        let prepared = prepare(raw).unwrap();
         assert!(prepared.value["assignment"].is_null());
         assert_eq!(prepared.value["delivery_status"], "applied");
         assert_eq!(prepared.value["answer_node_id"], "answer");
@@ -671,57 +559,9 @@ mod tests {
         };
         assert!(row.sender.is_none());
         assert!(row.assignment.as_ref().unwrap().len() <= JSON_BYTES);
-        let prepared = prepare(raw, None).unwrap();
+        let prepared = prepare(raw).unwrap();
         assert_eq!(prepared.value["sender"]["kind"], "unknown");
         assert!(prepared.limited_fields.iter().any(|p| p == "/sender"));
-    }
-    #[test]
-    fn revisit_uses_actual_limit_unknown_is_not_zero_and_terminal_never_retargets() {
-        let db = fixture();
-        let state = json!({"pending":{"text":"Continue","set_by":{"kind":"human"},"operation_id":"fixture:set","set_at":"2026-01-01T00:00:00Z"},"consumed_count":23,"last_fired_at":"2026-01-01T00:00:00Z"});
-        db.execute(
-            "INSERT INTO app_meta(key,value)VALUES('revisit.run',?1)",
-            [state.to_string()],
-        )
-        .unwrap();
-        let prepared =
-            prepare(read_tx(&db, &revisit(), Some("issuing")).unwrap(), Some(37)).unwrap();
-        assert_eq!(
-            prepared.value,
-            json!({"run_id":"run","pending":state["pending"],"consumed_count":23,"last_fired_at":state["last_fired_at"],"limit":37})
-        );
-        assert!(prepared.limited_fields.is_empty());
-        assert_eq!(prepared.thread.as_deref(), Some("target"));
-        let unlimited = prepare(read_tx(&db, &revisit(), None).unwrap(), None).unwrap();
-        assert!(unlimited.value["limit"].is_null());
-        db.execute(
-            "UPDATE app_meta SET value=?1 WHERE key='revisit.run'",
-            [json!({"consumed_count":23,"padding":"x".repeat(JSON_BYTES)}).to_string()],
-        )
-        .unwrap();
-        let prepared = prepare(read_tx(&db, &revisit(), None).unwrap(), None).unwrap();
-        assert!(prepared.value["consumed_count"].is_null());
-        assert!(!prepared.limited_fields.is_empty());
-        db.execute(
-            "UPDATE app_meta SET value='{\"consumed_count\":\"invalid\"}' WHERE key='revisit.run'",
-            [],
-        )
-        .unwrap();
-        assert_eq!(
-            prepare(read_tx(&db, &revisit(), None).unwrap(), None)
-                .unwrap_err()
-                .code,
-            ErrorCode::InvalidState
-        );
-        db.execute("UPDATE run SET state='completed' WHERE id='run'", [])
-            .unwrap();
-        assert_eq!(
-            read_tx(&db, &revisit(), Some("issuing"))
-                .unwrap_err()
-                .into_api_error()
-                .code,
-            ErrorCode::InvalidState
-        );
     }
     #[test]
     fn shell_metadata_overflow_is_limited_while_primitive_completion_stays_visible() {
@@ -736,7 +576,7 @@ mod tests {
         let RawSaved::Shell(row) = &raw else { panic!() };
         assert!(row.shell_json.is_none());
         assert!(row.reason.is_none());
-        let prepared = prepare(raw, None).unwrap();
+        let prepared = prepare(raw).unwrap();
         assert_eq!(prepared.value["exit_code"], 0);
         assert_eq!(prepared.value["state"], "exited");
         assert!(prepared.value.get("elapsed_ms").is_none());
@@ -858,7 +698,6 @@ mod tests {
                 for command in [
                     shell(),
                     message(),
-                    revisit(),
                     Command::RunGet(crate::protocol::RunTarget {
                         run_id: "run".into(),
                     }),
@@ -952,21 +791,20 @@ mod tests {
         assert_eq!(values[0]["command"], "printf done");
         assert_eq!(values[1]["message_id"], "message");
         assert_eq!(values[2]["run_id"], "run");
-        assert_eq!(values[3]["run_id"], "run");
-        assert_eq!(values[3]["usage_totals"]["scope"], "run");
-        assert_eq!(values[3]["usage_totals"]["scope_id"], "run");
-        assert_eq!(values[4]["turn_id"], "turn");
-        assert_eq!(values[4]["usage_totals"]["scope"], "turn");
-        assert_eq!(values[4]["usage_totals"]["scope_id"], "turn");
-        assert_eq!(values[5]["operation_id"], "saved:operation");
-        assert_eq!(values[5]["downstream"]["state"], "applied");
-        assert_eq!(values[5]["current_instance"], false);
-        assert_eq!(values[6]["attachments"][0]["attachment_id"], "attachment");
-        assert_eq!(values[6]["scope"]["kind"], "thread");
-        assert_eq!(values[7]["scope"]["kind"], "attachment");
-        assert_eq!(values[7]["scope"]["selection_found"], true);
+        assert_eq!(values[2]["usage_totals"]["scope"], "run");
+        assert_eq!(values[2]["usage_totals"]["scope_id"], "run");
+        assert_eq!(values[3]["turn_id"], "turn");
+        assert_eq!(values[3]["usage_totals"]["scope"], "turn");
+        assert_eq!(values[3]["usage_totals"]["scope_id"], "turn");
+        assert_eq!(values[4]["operation_id"], "saved:operation");
+        assert_eq!(values[4]["downstream"]["state"], "applied");
+        assert_eq!(values[4]["current_instance"], false);
+        assert_eq!(values[5]["attachments"][0]["attachment_id"], "attachment");
+        assert_eq!(values[5]["scope"]["kind"], "thread");
+        assert_eq!(values[6]["scope"]["kind"], "attachment");
+        assert_eq!(values[6]["scope"]["selection_found"], true);
         assert!(
-            values[7]["notice"]
+            values[6]["notice"]
                 .as_str()
                 .unwrap()
                 .contains("not been checked")

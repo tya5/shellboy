@@ -28,7 +28,6 @@ AND (EXISTS (
             SELECT 1 FROM tool_call c WHERE c.group_id=g.id
             AND (c.state IN ('pending','running') OR NOT EXISTS (
                 SELECT 1 FROM tool_result z WHERE z.group_id=c.group_id AND z.call_id=c.call_id)))))
-    OR EXISTS (SELECT 1 FROM app_meta m JOIN run r ON m.key='revisit.'||r.id WHERE r.thread_id=t.id AND CASE WHEN json_valid(m.value) THEN json_type(m.value,'$.pending')='object' ELSE 1 END)
     OR EXISTS (
         SELECT 1
         FROM app_meta m
@@ -126,11 +125,6 @@ WHERE u.thread_id=?1 AND (g.state<>'completed' OR EXISTS (
     AND (pending.state IN ('pending','running') OR NOT EXISTS (
         SELECT 1 FROM tool_result saved WHERE saved.group_id=pending.group_id AND saved.call_id=pending.call_id))))
 ORDER BY g.created_at,g.id,c.ordinal";
-
-const REVISIT_SNAPSHOT: &str = r"SELECT json_set(m.value,'$.run_id',r.id)
-FROM run r JOIN app_meta m ON m.key='revisit.'||r.id
-WHERE r.thread_id=?1 AND CASE WHEN json_valid(m.value) THEN json_type(m.value,'$.pending')='object' ELSE 0 END
-ORDER BY r.created_at,r.id";
 
 const OWNED_CHILDREN_SNAPSHOT: &str = r"SELECT json_object('run_id', c.id,
     'thread_id', c.thread_id,
@@ -407,24 +401,8 @@ fn capture_context(
     for thread in threads {
         if isolate_bad_cursor {
             let valid: bool = tx.query_row("SELECT cursor_node_id IS (SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1) FROM thread WHERE id=?1",[&thread],|r|r.get(0))?;
-            let mut malformed_revisit = false;
-            let mut statement = tx.prepare_cached("SELECT m.value FROM app_meta m JOIN run r ON m.key='revisit.'||r.id WHERE r.thread_id=?1")?;
-            let mut rows = statement.query([&thread])?;
-            while let Some(row) = rows.next()? {
-                let body: String = row.get(0)?;
-                if !super::revisit::capture_state_valid(&body) {
-                    malformed_revisit = true;
-                    break;
-                }
-            }
-            let issue = if !valid {
-                Some(crate::diagnostics::ToolRepairReason::CaptureCursorMismatch)
-            } else if malformed_revisit {
-                Some(crate::diagnostics::ToolRepairReason::CaptureRevisitMalformed)
-            } else {
-                None
-            };
-            if let Some(reason) = issue {
+            if !valid {
+                let reason = crate::diagnostics::ToolRepairReason::CaptureCursorMismatch;
                 if failures.len() < 32 {
                     failures.push(crate::diagnostics::ToolRepairFailure {
                         thread_id: thread.chars().take(128).collect(),
@@ -458,7 +436,6 @@ fn capture_context(
             )?;
             let tool_calls =
                 snapshot_section(tx, TOOL_CALL_SNAPSHOT, &thread, at, "tool_calls", reason)?;
-            let revisits = snapshot_section(tx, REVISIT_SNAPSHOT, &thread, at, "revisits", reason)?;
             let children = snapshot_section(
                 tx,
                 OWNED_CHILDREN_SNAPSHOT,
@@ -528,7 +505,7 @@ fn capture_context(
             )?;
             let actor = json!({"kind":"shellboy","source":source});
             let snapshot_node = uuid::Uuid::new_v4().to_string();
-            let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"tool_calls":tool_calls,"revisits":revisits,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
+            let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"tool_calls":tool_calls,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
             crate::history::append_node(
                 tx,
                 &thread,

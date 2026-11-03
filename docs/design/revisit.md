@@ -1,106 +1,111 @@
-# Revisit: one pending self-instruction per Run
+# Revisit: a message delivered when the Run completes
 
-Issue #36 is adopted after the interrupted-tool invariant repair (#37).
-Revisit supplies one execution opportunity at normal Run completion, without
-interpreting goals, classifying questions or adding a general hooks system.
+Issue #187 replaces the per-Run reservation of #36. A Revisit is an ordinary
+message sent with a delivery timing: `message send --deliver complete`. It is
+not bound to a Run, has no separate store, command, event kind, setter record,
+counter or limit, and adds no worker, queue or table.
 
-## Ordering and authority
+## Delivery timing
+
+`message send` takes one optional `--deliver` value. All three timings are the
+same message, receipt, cancellation and inspection path; only the moment of
+admission differs.
+
+| Timing | Meaning |
+| --- | --- |
+| omitted | Queue for the next safe boundary (tool-group or request boundary). |
+| `now` | As omitted, and also release a foreground shell wait. Never interrupts a model response. |
+| `complete` | When the target Thread's live Run would complete normally. With no live Run, exactly the omitted timing. |
+
+`--deliver complete` against a live Run saves the message as a held receipt
+with `hold_reason='run_completion'` and no Run/Turn assignment. The result says
+`deliver: complete`, `delivery_status: held`, `assignment: pending`. When no Run
+is live, the result is that of an ordinary send (`new_run`, or `held` behind a
+stopping Run under the ordinary rules). The caller therefore sees whether the
+message was deferred or delivered, and receives the message ID either way.
+
+Ordering is per timing class, not one FIFO. Default and `now` messages sent
+later are admitted at their own boundaries and overtake waiting `complete`
+messages; a waiting `complete` message never blocks or delays them. Waiting
+`complete` messages keep their send order among themselves.
+
+## Completion boundary
 
 `driver::next` is the normal completion decision under the existing Thread
 boundary and DB transaction. Only after active/recovery Turns, pending events,
-attachments and owned shells/children are absent, consume a pending reservation
-and create an ordinary `revisit` event/delivery and Turn instead of completing
-the Run. The original set operation, setter, target Run, consumed count and
-instruction travel in a developer-role event source. A child therefore reports
-`child_run_ended` only after its Revisit work finishes. Other input and stop
-mutations serialize on the same boundary; stop/shutdown admission wins over
-starting a further request. No scheduler, worker or extra queue is added.
+attachments and owned shells/children are absent, it assigns every waiting
+`complete` message of the Thread, in receipt order, to one new Turn of the
+completing Run (`accepted`, with `delivery_context.reason='run_completion'`).
+The existing receipt admission then appends them like any message and the Run
+continues. A child therefore reports `child_run_ended` only after that work.
+A human Turn interruption (Esc) is no exception: when the Run would then
+complete, the waiting messages are delivered the same way.
 
-Models may address their own authenticated live Run (omitting --run), or a Run
-they directly own while their own Run remains live. Humans must specify --run.
-Use direct ownership, like retry, because this mutates one Run's instruction;
-descendant cancellation is intentionally broader. Own-Run operations differ
-from retry's recovery-only guard. Reject unrelated or non-direct descendants.
-All three operations reject terminal/stopping Runs. Set replaces a single
-pending reservation; get exposes setter identity, full bounded text, count and
-last firing time. Set reports whether another setter was replaced and a bounded
-preview. Cancel is idempotent. Get is receipt-free; mutations retain existing
-operation fingerprint/replay/outcome budgets. Unlimited re-registration is the
-default; optional `limits.revisit_max_per_run` rejects set at the consumed limit
-with `revisit_limit_reached` (zero disables registration). Text is 1..8192 UTF-8
-bytes. Reject blank text.
+A waiting message never outlives its Run (#187, user rule of 2026-11-03).
+When the Run ends or stalls in any other way, every waiting message becomes,
+at that moment, the same held input an ordinary send at that moment would have
+produced; the existing message rules alone decide what happens next:
 
-## Persistence and bounds
+- stop (explicit, Ctrl+C, owner stop): `held` with `stopping`, unassigned.
+  The next explicit resume (a human message or a live owning parent's
+  restart) admits it before the new input, like any input held by a stop;
+- application shutdown: `held` with `previous_instance_interrupted`. Startup
+  applies the same hand-off for a forced exit. The next resume admits it;
+- entering recovery wait: assigned to the recovery Turn, `held` with
+  `recovery_wait`. An explicit retry sends it with the retried request. A
+  `complete` send while a Run is already in recovery wait is likewise an
+  ordinary send.
 
-Use one `app_meta` key `revisit.RUN_ID` holding pending reservation (or null),
-consumed count and last firing time. Setter/operation/time are saved with the
-instruction. Repeated cycles overwrite this bounded state rather than creating
-metadata per firing; events/history grow under normal retention/compaction.
-Count bytes in existing history usage by extending its derived covering index
-through isolated startup migration 12. Enforce existing logical capacity for set
-and firing. Receipt admission remains the normal mutation budget. No table,
-Core lifecycle enum or dependency is introduced. The DB worker owns state;
-request-local decoded state is released at transaction completion.
+Once request-start admission closes for shutdown, the completion decision does
+not start a Turn for waiting messages; the shutdown stop hands them off. The
+interruption record captures them as unreflected messages.
 
-Consume and enqueue in one transaction; this is once-only durable delivery,
-not exactly-once model execution or external effects. Existing retry/recovery
-semantics apply. The event source is associated with its new Turn and protected
-as its current request by trim and summary compaction. Include its kind and
-original operation provenance in raw history; the presentation uses English
-`Revisit` labels and an instruction preview. Add pending/count/time facts to
-existing Run, Thread-list and status projections; animation is not a Core fact.
+Messages are bounded by the existing message limits (`limits.draft_bytes`,
+logical capacity at send). Cancellation is `message cancel`; cancelling one
+waiting message changes only that receipt. Inspection is `message get` and the
+pending-message queue, where the hold reason shows the waiting timing. Thread
+deletion cancels them with every other queued message.
 
-## Stop, shutdown, restart and deletion
+## Authority
 
-Explicit stop drops pending reservations atomically with freezing ownership.
-Shutdown captures original pending text/setter/count in the existing interrupted
-context first, then drops pending reservations; forced exit is repaired on the
-next startup. Startup captures previous reservations, then drops them before
-old work is terminalized. A normal startup context_changed event carries those
-facts at the Thread's next actual Turn; no automatic Revisit is resumed. Preserve
-consumed counts for inspection, and remove metadata when its Thread is deleted.
-No pending reservation can revive a stopped Run, and a second owner never fires
-an earlier owner's reservation.
+Unchanged from `message send`: a model addresses its own Thread by omitting
+`--thread`; a live parent may send to its child under the ordinary ownership
+check; humans may send to any Thread. There is no Run target and no replace
+operation: several `complete` messages may wait at once.
 
-A question to the user is not detectable by Core. The Agent Guide instructs the
-model to cancel/rewrite before ending with a question, or finish briefly if a
-Revisit fires while awaiting the user. An unnecessary request is an accepted
-cost; no question classifier or special silent completion state is added.
+## Observation
+
+Run, Thread-list and status projections keep the optional typed summary
+`{pending, consumed_count}`: `pending` means at least one `complete` message of
+the Thread is waiting; `consumed_count` is the number of `complete` messages
+that Run received at completion. The TUI keeps `Revisit N`, `next reserved`
+and the narrow `Revisit N+`, and the `↻` row kind for messages delivered at
+completion. Schema migration 24 adds the partial index
+`receipt_run_completion(run_id) WHERE deliver='complete'` so the count does not
+scan a Thread's receipts.
+
+## Limit decision
+
+`limits.revisit_max_per_run` is removed. It capped repeated self-registration
+on one Run. A model can already continue indefinitely with ordinary messages to
+its own Thread, so the cap guarded nothing that messages do not; stop and Turn
+interruption remain the human controls. No replacement setting is added.
+
+## Migration
+
+Migration 24 deletes the old `revisit.RUN_ID` app_meta rows (they are not moved;
+pre-1.0 policy) and adds the index above. The `revisit.%` pattern stays in the
+history-byte index and the #171 usage-counter triggers; no row matches it after
+the delete, and rewriting those triggers is not worth a schema change. Old
+`revisit` events in history render as ordinary saved events.
+`scripts/check-release-upgrade.py` and `scripts/error_catalog.py` target schema 24.
 
 ## Verification
 
-Use temporary stores and local HTTP mocks: one-shot delivery, many re-registered
-cycles, optional limit, operation replay/replacement/cancel, own/direct/unrelated
-authority, completion/input/stop races, owned work ordering, child reporting,
-recovery and shutdown exclusion, interrupted capture, deletion and compaction
-protection. Native signal behavior is tested separately under #38. A synthetic
-mechanical model does not demonstrate improved real-model completion judgment;
-that evaluation, including missed requirements and question false triggers,
-must be reported separately from delivery correctness.
-
-## Review refinements: completion, damaged metadata and capacity (#36)
-
-Closing the request-start gate prevents firing an existing reservation, while an
-idle Run without a reservation retains ordinary normal completion (including
-its normal child completion report). The shutdown check therefore applies only
-after a pending reservation is known to exist.
-
-Current-format State decoding stays strict; missing required counters are not
-interpreted as zero and no compatibility defaults are added. A malformed optional
-Revisit summary is omitted from Run/list/status observations; explicit `revisit
-get` reports an invalid-state error with a stop/restart hint. Stop and lifecycle
-clear paths discard unreadable metadata without reconstructing a counter. Valid
-metadata retains consumed counts when pending text is removed. Interrupted
-capture prevalidates each Thread before writing its snapshot; a malformed
-Thread is diagnosed and isolated rather than blocking startup or other Threads.
-
-If capacity blocks firing, the completion transaction rolls back: the pending
-instruction and consumed count remain unchanged. Existing preparation recovery
-makes the Run recovery_wait. After capacity is fixed, explicit retry may issue
-one ordinary request without a new input before normal completion retries the
-reservation. This reuses recovery ownership and avoids a second retry engine.
-
-`child_turn_completed` reports a Turn, including each Revisit Turn; only
-`child_run_ended` reports the child Run's terminal completion. A directly owning
-parent's Revisit instruction arrives as the same developer-role event as a
-self reservation, rather than the user-role instruction created by message send.
+Integration tests use temporary stores and a local HTTP mock: completion
+delivery in send order, immediate delivery without a live Run, a Run completing
+between the original send and the `complete` send, `now`/default overtaking
+waiting messages (including interleaved sequences), cancelling one of several,
+release at stop, at Esc, at shutdown (admitted after restart) and at recovery wait,
+owned background shell ordering, and the model shell CLI path. A unit test
+covers the closed start gate.

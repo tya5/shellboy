@@ -170,7 +170,7 @@ async fn connection_loss_preserves_auto_operation_id_and_does_not_resend() {
             &directory,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: shellboy::protocol::Deliver::Next,
                 thread_id: Some("synthetic-thread".into()),
                 text: "one instruction".into(),
             }),
@@ -239,7 +239,7 @@ async fn mismatched_reply_keeps_the_requested_id_for_receipt_lookup() {
             &directory,
             Command::MessageSend(MessageSendArgs {
                 sender_label: None,
-                now: false,
+                deliver: shellboy::protocol::Deliver::Next,
                 thread_id: Some("synthetic-thread".into()),
                 text: "one instruction".into(),
             }),

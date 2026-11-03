@@ -16,7 +16,6 @@ pub enum InspectionTarget {
     Turn(String),
     Shell(String),
     Message(String),
-    Revisit(String),
     Storage,
     Deletion(ThreadDeleteArgs),
     Index(IndexArgs),

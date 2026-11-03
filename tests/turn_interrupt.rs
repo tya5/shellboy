@@ -148,7 +148,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
                 sender_label: None,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
                 text: "fixture instruction".into(),
-                now: false,
+                deliver: Deliver::Next,
             }),
         )
         .await,
@@ -321,21 +321,13 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('owned-child','/','/AGENTS.md','test','fixture','now')",[])?;
         db.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('owned-child-run','owned-child',?1,'live','now')",[child_owner])?;Ok(())
     }).await.unwrap();
-    command(
-        &control,
-        Command::RevisitSet(RevisitSetArgs {
-            run_id: Some(old_run.clone()),
-            text: "must not fire".into(),
-        }),
-    )
-    .await;
     let queued = command(
         &control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "new direction after interruption".into(),
-            now: false,
+            deliver: Deliver::Next,
         }),
     )
     .await;
@@ -409,8 +401,6 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
         assert_eq!(marker["change"]["carried_sources"][0]["original_turn_id"],old_turn);
         let delivery:String=db.query_row("SELECT result_json FROM receipt WHERE message_node_id=?1",[&queued_id],|r|r.get(0))?;
         assert_eq!(serde_json::from_str::<Value>(&delivery).unwrap()["delivery_context"]["turn_id"],current.0);
-        let revisit:Option<String>=db.query_row("SELECT value FROM app_meta WHERE key=?1",[format!("revisit.{old_run}")],|r|r.get(0)).optional()?;
-        assert!(revisit.is_none_or(|v|serde_json::from_str::<Value>(&v).unwrap()["pending"].is_null()));
         Ok(())
     }).await.unwrap();
     close(control, owner, server).await;
@@ -455,7 +445,7 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "a replacement turn".into(),
-            now: false,
+            deliver: Deliver::Next,
         }),
     )
     .await;
@@ -605,14 +595,6 @@ async fn background_completion_after_interruption_starts_new_turn_and_completes_
     .unwrap();
     let run = accepted.run_id.clone().unwrap();
     let old_turn = accepted.turn_id.clone().unwrap();
-    command(
-        &control,
-        Command::RevisitSet(RevisitSetArgs {
-            run_id: Some(run.clone()),
-            text: "must not automatically resume".into(),
-        }),
-    )
-    .await;
     control
         .interrupt_turn(accepted.thread_id.clone(), old_turn.clone())
         .await
@@ -685,7 +667,6 @@ async fn background_completion_after_interruption_starts_new_turn_and_completes_
     control.store.database.call(move|db|{
         assert_eq!(db.query_row("SELECT count(*) FROM turn WHERE run_id=?1",[&run],|r|r.get::<_,i64>(0))?,2);
         assert_eq!(db.query_row("SELECT count(*) FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.run_id=?1",[&run],|r|r.get::<_,i64>(0))?,3);
-        assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='revisit' AND target_run_id=?1",[run],|r|r.get::<_,i64>(0))?,0);
         Ok(())
     }).await.unwrap();
     assert!(requests.try_recv().is_err());
@@ -714,7 +695,7 @@ async fn ordinary_queued_input_keeps_foreground_group_intact_without_extra_model
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
             text: "ordinary report for the next boundary".into(),
-            now: false,
+            deliver: Deliver::Next,
         }),
     )
     .await;

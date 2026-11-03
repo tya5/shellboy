@@ -41,14 +41,15 @@ Issue #170 adds schema21 derived event-retention lookup indexes and bounded
 maintenance of terminal-Run pending deliveries and unreferenced shell
 completion events. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
 
-Conversation schema23 records selected-path admission (13), Turn interruption
+Conversation schema24 records selected-path admission (13), Turn interruption
 and draft indexes (14), derived readback indexes (15), bounded Thread
 observation lookup indexes (16), the F parent lookup index (17), summary usage
 metadata accounting (18), the completed-attempt scope index (19), index-source
 GC lookup indexes (20, #164), event-retention lookup indexes (21), and
 trigger-maintained logical usage counters plus the pending attachment-delivery
-operation index (22, #171; see [storage](storage.md)), and bounded activity
-indexes (23, #172). Version 19 was reused without schema changes for
+operation index (22, #171; see [storage](storage.md)), bounded activity
+indexes (23, #172), and the Revisit completion-delivery index with the #36
+metadata dropped (24, #187). Version 19 was reused without schema changes for
 [opt-in Responses cache diagnostics](cache-diagnostics.md); standalone
 RAG remains schema3. The existing migration2
 `tool_result_node(node_id)` index supports #41's retained-source query batching;
@@ -69,10 +70,11 @@ Issue #20 clarification; it does not trigger deletion or conversion of user data
 
 ## Revisit and application-exit visibility (#36, #38, #39)
 
-Adopt [Revisit](revisit.md) as one bounded self-instruction at normal Run
-completion, using existing event/delivery and explicit stop/shutdown precedence.
-Protocol remains v2 with additive operations and optional factual summaries;
-conversation schema v12 extends derived metadata byte accounting. Existing
+Adopt [Revisit](revisit.md) (#187) as an ordinary message sent with
+`--deliver complete`, released into the existing receipt path when the Thread's
+live Run would complete normally, or delivered immediately when none is live.
+It replaces the #36 per-Run reservation, its commands, event kind, metadata and
+limit; schema v24 drops that metadata. Existing
 shutdown and [Thread browser](thread-browser.md) projections expose interrupted
 latest Runs without adding a lifecycle state or automatically resuming work.
 

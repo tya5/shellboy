@@ -231,7 +231,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
                     sender_label: None,
                     thread_id: Some("t".into()),
                     text: "ordinary".into(),
-                    now: false,
+                    deliver: Deliver::Next,
                 }),
             ),
             None,
@@ -256,7 +256,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
                     sender_label: None,
                     thread_id: Some("t".into()),
                     text: "urgent".into(),
-                    now: true,
+                    deliver: Deliver::Now,
                 }),
             ),
             None,
@@ -265,7 +265,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
         .unwrap();
     assert_eq!(now.wake_threads, ["t"]);
     assert!(now.quiet_wake_threads.is_empty());
-    assert_eq!(now.result["now"], true);
+    assert_eq!(now.result["deliver"], "now");
     let id = now.result["message_id"].as_str().unwrap().to_owned();
     store
         .database
@@ -337,7 +337,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
         parent_id: None,
     };
     let options = DraftSendOptions {
-        now: true,
+        deliver: Deliver::Now,
         submission: Some(frozen.clone()),
         expected_selection_revision: Some(0),
         ..Default::default()
@@ -382,7 +382,7 @@ async fn frozen_submission_survives_precommit_failure_and_accepts_atomically_wit
         .await
         .unwrap();
     let options = DraftSendOptions {
-        now: true,
+        deliver: Deliver::Now,
         submission: Some(frozen.clone()),
         expected_selection_revision: Some(0),
         ..Default::default()
@@ -608,7 +608,7 @@ fn cancel_ids_are_explicit_bounded_unique_and_immediate_defaults_to_false() {
     );
     let default: MessageSendArgs =
         serde_json::from_value(json!({"thread_id":"t","text":"queued"})).unwrap();
-    assert!(!default.now);
+    assert_eq!(default.deliver, crate::protocol::Deliver::Next);
 }
 
 #[tokio::test]
@@ -693,7 +693,7 @@ async fn actual_control_draft_replay_precedes_missing_files_and_old_owner_checks
             "saved request"
         };
         match field {
-            "now" => changed.now = true,
+            "now" => changed.deliver = crate::protocol::Deliver::Now,
             "snapshot" => {
                 changed.submission.as_mut().unwrap().snapshot["text"] =
                     json!("different frozen source")

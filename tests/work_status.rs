@@ -656,7 +656,11 @@ async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_foot
     let f = Fixture::new().await;
     let before = f.status(StatusArgs::default()).await.unwrap();
     f.db.call(|db| {
-        db.execute("INSERT INTO app_meta(key,value) VALUES('revisit.root',?1)",[json!({"pending":{"text":"PRIVATE_INSTRUCTION","set_by":{"kind":"human"},"operation_id":"fixture:reserve","set_at":"2026-10-25T08:00:00Z"},"consumed_count":5,"last_fired_at":"2026-10-25T07:59:00Z"}).to_string()])?;
+        db.execute_batch(r#"WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<5)
+            INSERT INTO node(id,kind,created_at,payload_json) SELECT 'revisit-'||i,'user','2026-10-25T08:00:00Z','{}' FROM n;
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<5)
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,created_at,result_json) SELECT 'revisit-'||i,'fixture:revisit-'||i,'null','a','revisit-'||i,'root','applied','2026-10-25T08:00:00Z','{"deliver":"complete","delivery_context":{"reason":"run_completion"}}' FROM n;
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,hold_reason,created_at,result_json) VALUES('revisit-0','fixture:revisit-0','null','a','revisit-0','held','run_completion','2026-10-25T08:00:00Z','{"deliver":"complete"}');"#)?;
         let activity = shellboy::frontend::activity::project(db,"a")?;
         assert_eq!(activity.snapshot.revisit.as_deref(),Some("Revisit 5 | next reserved"));
         Ok(())
@@ -671,10 +675,6 @@ async fn revisit_facts_are_run_scoped_fingerprinted_and_projected_to_active_foot
     let summary = run.revisit.as_ref().unwrap();
     assert!(summary.pending);
     assert_eq!(summary.consumed_count, 5);
-    assert_eq!(
-        summary.last_fired_at.as_deref(),
-        Some("2026-10-25T07:59:00Z")
-    );
     assert!(
         after
             .items

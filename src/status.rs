@@ -438,7 +438,8 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         }
         let mut projected = work_item(row, kind, state)?;
         if kind == WorkKind::Run {
-            projected.item.revisit = crate::control::revisit::summary(db, &projected.item.id)?;
+            projected.item.revisit =
+                crate::control::revisit::summary_for_run(db, &projected.item.id).map_err(sql)?;
         }
         let item = &projected.item;
         if scope

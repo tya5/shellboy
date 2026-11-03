@@ -585,3 +585,8 @@ CREATE INDEX activity_shell_spawned_turn ON shell_execution(turn_id) WHERE CASE 
 CREATE INDEX activity_shell_uncollected_owner ON shell_execution(owner_run_id) WHERE state IN ('exited','failed','stopped') AND output_complete=0;
 INSERT INTO schema_migration(version,name) VALUES(23,'0023_activity_bounded');
 PRAGMA user_version=23;
+
+-- Revisit is an ordinary held message (#187): count completion deliveries per Run.
+CREATE INDEX receipt_run_completion ON receipt(run_id) WHERE json_extract(result_json,'$.deliver')='complete';
+INSERT INTO schema_migration(version,name) VALUES(24,'0024_revisit_messages');
+PRAGMA user_version=24;

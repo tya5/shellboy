@@ -3005,3 +3005,36 @@ live-validated. Revisit if a provider rejects the shape (fallback: skip
 predicate on Anthropic thinking in the active Turn), if measured cache or
 quality loss warrants a positional drop, or to keep Responses reasoning later.
 #182 tracks the separate risk to the existing edits.
+## D-187: Revisit is a delivery timing of an ordinary message (2026-11-03)
+
+Approved by the user. `message send --deliver now|complete` replaces `--now`
+and the `revisit set/get/cancel` commands. `complete` holds the receipt without
+assignment (`hold_reason='run_completion'`) while a Run is live; normal Run
+completion assigns every waiting one, in send order, to one new Turn.
+Ordering is per timing class: later default/`now` messages overtake waiting
+`complete` messages.
+
+A waiting message never outlives its Run (user rule, 2026-11-03; replaces the
+earlier choice to keep messages waiting after Esc). At normal completion,
+including completion after a human Esc, it is delivered into a new Turn. On
+stop, shutdown or entry into recovery wait it becomes, at that moment, the
+held input an ordinary send would have produced (`stopping`,
+`previous_instance_interrupted`, or assigned `recovery_wait`), and only the
+existing message rules decide what follows. Startup applies the shutdown
+hand-off after a forced exit.
+
+Less certain choices, with recheck conditions:
+- A message waiting when its Run enters recovery wait is held for an explicit
+  retry even if a human sent it (the hand-off happens without a caller). A
+  `complete` send while the Run is already in recovery wait is an ordinary send,
+  so a human's resumes recovery. Recheck if the two feel inconsistent.
+- `limits.revisit_max_per_run` is removed rather than redefined: ordinary
+  messages already allow unbounded self-continuation, so the cap guarded nothing
+  unique. Recheck if real runs show runaway self-Revisit loops that stop and
+  Esc do not handle.
+- Stored #36 reservations are dropped by migration 24, not moved: they had no
+  message node or receipt to move into. Old `revisit` events stay in history as
+  generic events.
+- The Revisit count is derived from receipts through a new partial index
+  instead of a stored counter. Recheck if the index shows up in write cost.
+

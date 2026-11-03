@@ -149,7 +149,7 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
 #[test]
 fn success_and_error_envelopes_match_contract_and_omit_absent_fields() {
     let message = MessageAccepted {
-        now: false,
+        deliver: Deliver::Next,
         message_id: "m".into(),
         thread_id: "t".into(),
         delivery_status: DeliveryStatus::Held,
@@ -190,7 +190,7 @@ fn assignment_never_exposes_fabricated_or_partial_ids() {
     ] {
         assert!(
             MessageAccepted {
-                now: false,
+                deliver: Deliver::Next,
                 message_id: "m".into(),
                 thread_id: "t".into(),
                 delivery_status: DeliveryStatus::Accepted,
@@ -819,30 +819,37 @@ fn current_output_and_history_results_require_observation_fields() {
 }
 
 #[test]
-fn revisit_wire_rejects_blank_and_oversized_utf8_instructions() {
-    for (text, expected) in [
-        (" \n\t".into(), Some(ErrorCode::InvalidArgument)),
-        ("é".repeat(MAX_REVISIT_TEXT_BYTES / 2), None),
-        (
-            format!("{}x", "é".repeat(MAX_REVISIT_TEXT_BYTES / 2)),
-            Some(ErrorCode::InputLimit),
-        ),
-    ] {
-        let command = Command::RevisitSet(RevisitSetArgs { run_id: None, text });
-        assert_eq!(command.validate().err().map(|error| error.code), expected);
-        let value = serde_json::to_value(&command).unwrap();
-        assert_eq!(value["command"], "revisit.set");
-        assert_eq!(serde_json::from_value::<Command>(value).unwrap(), command);
-    }
-    assert!(
-        Command::RevisitGet(RevisitArgs {
-            run_id: Some(" ".into())
+fn message_delivery_timing_is_one_optional_wire_field() {
+    let command = |deliver| {
+        Command::MessageSend(MessageSendArgs {
+            sender_label: None,
+            thread_id: None,
+            text: "x".into(),
+            deliver,
         })
-        .validate()
-        .is_err()
+    };
+    let value = serde_json::to_value(command(Deliver::Next)).unwrap();
+    assert!(value["args"].get("deliver").is_none(), "{value}");
+    for (deliver, wire) in [(Deliver::Now, "now"), (Deliver::Complete, "complete")] {
+        let value = serde_json::to_value(command(deliver)).unwrap();
+        assert_eq!(value["args"]["deliver"], wire, "{value}");
+        assert_eq!(
+            serde_json::from_value::<Command>(value).unwrap(),
+            command(deliver)
+        );
+    }
+    let mut legacy = serde_json::to_value(command(Deliver::Next)).unwrap();
+    legacy["args"]["now"] = serde_json::json!(true);
+    assert!(
+        serde_json::from_value::<Command>(legacy).is_err(),
+        "--now has no alias"
     );
-    assert!(Command::RevisitGet(RevisitArgs { run_id: None }).is_read_only());
-    assert!(!Command::RevisitCancel(RevisitArgs { run_id: None }).is_read_only());
+    for removed in ["revisit.set", "revisit.get", "revisit.cancel"] {
+        assert!(
+            serde_json::from_value::<Command>(serde_json::json!({"command":removed,"args":{}}))
+                .is_err()
+        );
+    }
 }
 
 #[test]

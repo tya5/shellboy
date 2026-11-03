@@ -8885,3 +8885,28 @@ cause not determined; branch input is 2,580 tokens higher in total because
 earlier Turns' context lines remain in history (581 tokens at the last
 request, four earlier lines). LiteLLM-internal retry usage is unknown. The
 subscription is not billed per token; cost is reference only.
+### #187 Revisit As A Delivery Timing (Pre-rebase 3-OS CI Passed)
+
+macOS arm64 / Rust 1.99.1, shared target slot: `cargo fmt --check`,
+`cargo clippy --all-targets -D warnings` and the test layout check passed.
+`tests/revisit.rs` (10 integration tests: completion delivery in send order,
+immediate delivery without a live Run, Run completing between send and the
+`complete` send, now/default overtaking including interleaved sequences,
+cancelling one of several, stop then next completion, human Turn interruption,
+recovery wait, owned background shell, model shell CLI) passed with real
+Control and a local HTTP mock. The full `cargo test --all-targets` run had 1799/1801
+lib and 1046/1053 integration passes; the shell `failed`/`exited`, watchdog
+and stdin failures passed on focused rerun (host under shared load).
+`runtime_features::headless_stop_boundaries...` (owner lock still held at
+restart) and `tui_recovery::multiple_calls...` still fail locally and are not
+shown to relate to this change. 3-OS CI run 41560295018 on f575c68b passed
+(ubuntu, macOS, Windows), including both of those tests. No real API was
+called; real-model Revisit behaviour and physical terminals are untested.
+Rebased onto fd23d321 (#171 schema 22, #181/#183/#185); the migration became 24 (after #171's 22 and #172's 23)
+and the inert `revisit.%` accounting pattern was kept for the #171 counters.
+After the rebase, `tests/revisit.rs`, the compaction tests (including a new
+released-Revisit current-request test), storage/gc tests and the Python script
+tests were rerun locally; the rebased tip's 3-OS CI is reported with the branch.
+The Run-end rule (a waiting message never outlives its Run) replaced the stop
+and Esc tests with release at stop, Esc, shutdown-then-restart and recovery
+wait; see the rebased run below.

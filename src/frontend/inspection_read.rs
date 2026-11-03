@@ -37,7 +37,7 @@ enum Body {
         Box<super::inspection_lifecycle::Raw>,
         crate::config::UiLanguage,
     ),
-    Saved(super::inspection_saved::RawSaved, Option<u64>),
+    Saved(super::inspection_saved::RawSaved),
     Attachments(super::inspection_attachments::Raw),
     Operation(super::inspection_operation::RawOperation),
     Storage(crate::gc::observation::RawStorageObservation),
@@ -155,36 +155,20 @@ pub(super) fn read_scoped_tx(
                 )?),
                 services.config.ui.language,
             ),
-            InspectionTarget::Shell(id) => Body::Saved(
-                super::inspection_saved::read_tx(
-                    db,
-                    &Command::ShellGet(ExecutionTarget {
-                        execution_id: id.clone(),
-                    }),
-                    None,
-                )?,
-                services.config.limits.revisit_max_per_run,
-            ),
-            InspectionTarget::Message(id) => Body::Saved(
-                super::inspection_saved::read_tx(
-                    db,
-                    &Command::MessageGet(MessageTarget {
-                        message_id: id.clone(),
-                    }),
-                    None,
-                )?,
-                services.config.limits.revisit_max_per_run,
-            ),
-            InspectionTarget::Revisit(id) => Body::Saved(
-                super::inspection_saved::read_tx(
-                    db,
-                    &Command::RevisitGet(RevisitArgs {
-                        run_id: Some(id.clone()),
-                    }),
-                    None,
-                )?,
-                services.config.limits.revisit_max_per_run,
-            ),
+            InspectionTarget::Shell(id) => Body::Saved(super::inspection_saved::read_tx(
+                db,
+                &Command::ShellGet(ExecutionTarget {
+                    execution_id: id.clone(),
+                }),
+                None,
+            )?),
+            InspectionTarget::Message(id) => Body::Saved(super::inspection_saved::read_tx(
+                db,
+                &Command::MessageGet(MessageTarget {
+                    message_id: id.clone(),
+                }),
+                None,
+            )?),
             InspectionTarget::Attachments {
                 thread_id,
                 attachment_id,
@@ -304,8 +288,8 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             observed_at = prepared.observed_at;
             (prepared.thread.unwrap_or_default(), prepared.value)
         }
-        Body::Saved(raw, limit) => {
-            let prepared = super::inspection_saved::prepare(raw, limit)?;
+        Body::Saved(raw) => {
+            let prepared = super::inspection_saved::prepare(raw)?;
             limited_fields = prepared.limited_fields;
             observed_at = prepared.observed_at;
             (prepared.thread.unwrap_or_default(), prepared.value)

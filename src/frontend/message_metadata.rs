@@ -34,12 +34,11 @@ SELECT c.bucket,c.state,c.receipt_id,
 FROM candidates c JOIN receipt r ON r.rowid=c.receipt_id";
 const COMMON_SOURCES: &str = "WITH requested AS (SELECT DISTINCT value AS id FROM json_each(?1))
     SELECT q.id,n.created_at,COALESCE(n.kind IN ('user','user_message','message'),0),
-        COALESCE(u.thread_id,?2),e.id IS NOT NULL
+        COALESCE(u.thread_id,?2),EXISTS(SELECT 1 FROM receipt r INDEXED BY receipt_message_node
+            WHERE r.message_node_id=q.id AND r.target_thread_id=COALESCE(u.thread_id,?2)
+            AND json_extract(r.result_json,'$.delivery_context.reason')='run_completion')
     FROM requested q LEFT JOIN node n ON n.id=q.id
-    LEFT JOIN turn u ON u.id=n.turn_id
-    LEFT JOIN event e ON n.kind='event' AND e.id=CASE WHEN json_valid(n.payload_json)
-        THEN json_extract(n.payload_json,'$.event_id') END
-        AND e.kind='revisit' AND e.target_thread_id=COALESCE(u.thread_id,?2)";
+    LEFT JOIN turn u ON u.id=n.turn_id";
 
 struct Metadata {
     created_at: Option<String>,
@@ -380,11 +379,11 @@ mod tests {
             .unwrap()
             .join("\n");
         assert!(
-            plan.contains("SEARCH n") && plan.contains("SEARCH u") && plan.contains("SEARCH e"),
+            plan.contains("SEARCH n") && plan.contains("SEARCH u") && plan.contains("SEARCH r"),
             "{plan}"
         );
         assert!(
-            !plan.contains("SCAN n") && !plan.contains("SCAN e"),
+            !plan.contains("SCAN n") && !plan.contains("SCAN r"),
             "{plan}"
         );
     }
@@ -415,7 +414,7 @@ mod tests {
         ] {
             input(&db, id, sender, state);
         }
-        db.execute_batch("UPDATE node SET created_at='shared'; UPDATE receipt SET created_at='shared'; INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('second','second','null','child','ambiguous','held','shared'); INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('event','revisit','{}','child','{}','shared'); INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('revisit','u','event','shared','{\"event_id\":\"event\"}'),('fake','u','event','shared','{\"kind\":\"revisit\"}');").unwrap();
+        db.execute_batch("UPDATE node SET created_at='shared'; UPDATE receipt SET created_at='shared'; INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('second','second','null','child','ambiguous','held','shared'); INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('revisit','u','user','shared','{}'),('fake','u','event','shared','{\"kind\":\"revisit\"}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('revisit','revisit','null','child','revisit','applied','delivered','{\"deliver\":\"complete\",\"delivery_context\":{\"reason\":\"run_completion\"}}');").unwrap();
         let ids = [
             "human",
             "parent-input",
@@ -659,9 +658,9 @@ mod tests {
         );
     }
     #[test]
-    fn revisit_requires_saved_event_relation_and_collisions_are_bounded_unknown() {
+    fn revisit_requires_saved_completion_delivery_and_collisions_are_bounded_unknown() {
         let db = fixture();
-        db.execute_batch("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('event','revisit','{}','child','{}','time'); INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('revisit','u','event','time','{\"event_id\":\"event\"}'),('fake','u','event','time','{\"kind\":\"revisit\"}');").unwrap();
+        db.execute_batch("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('revisit','u','user','time','{}'),('fake','u','event','time','{\"kind\":\"revisit\"}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('revisit','revisit','null','child','revisit','applied','delivered','{\"deliver\":\"complete\",\"delivery_context\":{\"reason\":\"run_completion\"}}');").unwrap();
         assert_eq!(
             read(&db, "revisit", Some("fork"), None).unwrap().source,
             InputSource::Revisit

@@ -329,7 +329,6 @@ fn inspection_target(command: &Command) -> Option<InspectionTarget> {
         Command::TurnGet(args) => Some(InspectionTarget::Turn(args.turn_id.clone())),
         Command::ShellGet(args) => Some(InspectionTarget::Shell(args.execution_id.clone())),
         Command::MessageGet(args) => Some(InspectionTarget::Message(args.message_id.clone())),
-        Command::RevisitGet(args) => args.run_id.clone().map(InspectionTarget::Revisit),
         Command::StorageStatus(_) => Some(InspectionTarget::Storage),
         Command::ThreadDeletePreview(args) => Some(InspectionTarget::Deletion(args.clone())),
         Command::IndexStatus(args) => Some(InspectionTarget::Index(args.clone())),
@@ -1582,7 +1581,7 @@ async fn run_with_delivery(
                                 let (content, files) = draft_input(&snapshot.text,snapshot.attachments.clone())?;
                                 let submission=crate::control::db::DraftSubmission {draft_id:crate::control::db::DraftSubmission::id_for_operation(&trace.operation_id),source_draft_id:draft_id.clone(),revision,snapshot:serde_json::to_value(&snapshot).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Cannot preserve draft"))?};
                                 control.store.prepare_draft_submission(&trace.operation_id,thread_id.as_deref(),&submission).await?;
-                                let options=crate::control::db::DraftSendOptions {now,submission:Some(submission),..Default::default()};
+                                let options=crate::control::db::DraftSendOptions {deliver:if now {crate::protocol::Deliver::Now} else {crate::protocol::Deliver::Next},submission:Some(submission),..Default::default()};
                                 control
                                     .send_ordered_draft(
                                         trace.operation_id.clone(),
@@ -2171,7 +2170,7 @@ async fn run_with_delivery(
                                 })?;
                                 let submission=crate::control::db::DraftSubmission {draft_id:crate::control::db::DraftSubmission::id_for_operation(&trace.operation_id),source_draft_id:draft_id.clone(),revision,snapshot:serde_json::to_value(&snapshot).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Cannot preserve draft"))?};
                                 control.store.prepare_draft_submission(&trace.operation_id,Some(&source_thread_id),&submission).await?;
-                                let options=crate::control::db::DraftSendOptions {now,submission:Some(submission),..Default::default()};
+                                let options=crate::control::db::DraftSendOptions {deliver:if now {crate::protocol::Deliver::Now} else {crate::protocol::Deliver::Next},submission:Some(submission),..Default::default()};
                                 control
                                     .edit_ordered_request(
                                         trace.operation_id.clone(),

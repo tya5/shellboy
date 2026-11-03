@@ -732,18 +732,6 @@ fn response_header_timeout_is_independent_positive_and_debuggable() {
 }
 
 #[test]
-fn revisit_limit_is_unset_by_default_and_zero_explicitly_disables_registration() {
-    assert_eq!(Config::parse("").unwrap().limits.revisit_max_per_run, None);
-    for limit in [0, 1, 1000] {
-        let config = Config::parse(&format!("[limits]\nrevisit_max_per_run={limit}\n")).unwrap();
-        assert_eq!(config.limits.revisit_max_per_run, Some(limit));
-    }
-    for value in ["-1", "1.5", "'unlimited'", "true"] {
-        assert!(Config::parse(&format!("[limits]\nrevisit_max_per_run={value}\n")).is_err());
-    }
-}
-
-#[test]
 fn embedding_batch_caps_preserve_singleton_defaults_and_reject_invalid_bounds() {
     let config = Config::parse("").unwrap();
     assert_eq!(config.embedding.batch_max_inputs, 1);

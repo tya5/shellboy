@@ -8,7 +8,6 @@ use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_VERSION: u32 = 2;
-pub const MAX_REVISIT_TEXT_BYTES: usize = 8192;
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
 pub const MAX_LIST_LIMIT: u32 = 200;
@@ -53,7 +52,6 @@ states!(ErrorCode {
     OperationNotFound,
     InvalidState,
     PreviewStale,
-    RevisitLimitReached,
     WaitCycle,
     CursorExpired,
     CursorEncodingMismatch,
@@ -160,7 +158,6 @@ impl ApiError {
             ErrorCode::OperationExpired | ErrorCode::OperationNotFound => "Inspect saved target state and history; an unavailable receipt does not prove the mutation was never applied",
             ErrorCode::InvalidState => "Inspect the target with its get command; read shellboy docs get --id shellboy/recovery-and-storage before choosing retry or stop",
             ErrorCode::PreviewStale => "Request thread.delete_preview again and explicitly confirm its new target marker; never retry deletion with the stale preview",
-            ErrorCode::RevisitLimitReached => "Inspect revisit get and the configured per-Run limit; continue or stop this Run explicitly rather than retrying registration",
             ErrorCode::WaitCycle => "Inspect Run ownership and wait dependencies; correct the wait direction instead of polling around the cycle",
             ErrorCode::CursorExpired => "Restart the same list/read with its original target and filters, without the old cursor; previously returned items or bytes may repeat",
             ErrorCode::CursorEncodingMismatch => "Restart shell read without the old cursor and specify the desired encoding; previously read bytes may be returned again",
@@ -432,7 +429,33 @@ args!(ThreadDeleteArgs {
     preview_marker: Option<DeletionPreviewMarker>
 });
 args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<String> });
-args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default)] now: bool });
+args!(MessageSendArgs { #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
+/// Message delivery timing; `Complete` is Revisit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Deliver {
+    #[default]
+    Next,
+    Now,
+    Complete,
+}
+impl Deliver {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Next => "next",
+            Self::Now => "now",
+            Self::Complete => "complete",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        [Self::Next, Self::Now, Self::Complete]
+            .into_iter()
+            .find(|deliver| deliver.as_str() == value)
+    }
+    pub fn is_next(&self) -> bool {
+        *self == Self::Next
+    }
+}
 args!(MessageCancelArgs { message_ids: Vec<String> });
 states!(MessageCancelOutcome {
     Cancelled,
@@ -452,8 +475,6 @@ args!(OperationTarget {
     operation_id: String
 });
 args!(RunTarget { run_id: String });
-args!(RevisitArgs { run_id: Option<String> });
-args!(RevisitSetArgs { run_id: Option<String>, text: String });
 args!(TurnTarget { turn_id: String });
 args!(ExecutionTarget {
     execution_id: String
@@ -626,12 +647,6 @@ pub enum Command {
     RunRetry(RunTarget),
     #[serde(rename = "run.stop")]
     RunStop(RunTarget),
-    #[serde(rename = "revisit.set")]
-    RevisitSet(RevisitSetArgs),
-    #[serde(rename = "revisit.get")]
-    RevisitGet(RevisitArgs),
-    #[serde(rename = "revisit.cancel")]
-    RevisitCancel(RevisitArgs),
     #[serde(rename = "turn.get")]
     TurnGet(TurnTarget),
     #[serde(rename = "wait")]
@@ -705,7 +720,7 @@ impl ShellToolArgs {
         nonempty(&self.output_encoding, "output_encoding")
     }
 }
-args!(MessageAccepted { message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default)] now: bool, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
+args!(MessageAccepted { message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
 impl MessageAccepted {
     pub fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.message_id, "message_id")?;
@@ -860,7 +875,10 @@ fn frame_io(error: std::io::Error) -> ApiError {
 }
 
 // Core result records deliberately retain provider-specific bodies as JSON payloads.
-args!(RevisitSummary { pending: bool, consumed_count: u64, last_fired_at: Option<String> });
+args!(RevisitSummary {
+    pending: bool,
+    consumed_count: u64
+});
 args!(ThreadSummary { #[serde(default)] last_answer: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, excerpt: String });
 args!(ThreadDetails { #[serde(default)] last_answer: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String> });
 args!(MessageDetails { sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] answer_node_id: Option<String> });
@@ -963,17 +981,18 @@ args!(Accepted { accepted: bool });
 mod message_acknowledgement_tests {
     use super::*;
     #[test]
-    fn acknowledgement_delivery_mode_is_typed_defaults_false_and_keeps_unknown_field_rejection() {
-        let mut wire = serde_json::json!({"message_id":"message","thread_id":"thread","delivery_status":"accepted","assignment":"new_run","run_id":"run","turn_id":"turn","now":true});
+    fn acknowledgement_delivery_mode_is_typed_defaults_next_and_keeps_unknown_field_rejection() {
+        let mut wire = serde_json::json!({"message_id":"message","thread_id":"thread","delivery_status":"accepted","assignment":"new_run","run_id":"run","turn_id":"turn","deliver":"now"});
         let accepted: MessageAccepted = serde_json::from_value(wire.clone()).unwrap();
         accepted.validate().unwrap();
-        assert!(accepted.now);
+        assert_eq!(accepted.deliver, Deliver::Now);
         assert_eq!(serde_json::to_value(&accepted).unwrap(), wire);
-        wire.as_object_mut().unwrap().remove("now");
-        assert!(
-            !serde_json::from_value::<MessageAccepted>(wire.clone())
+        wire.as_object_mut().unwrap().remove("deliver");
+        assert_eq!(
+            serde_json::from_value::<MessageAccepted>(wire.clone())
                 .unwrap()
-                .now
+                .deliver,
+            Deliver::Next
         );
         wire["unknown_delivery_flag"] = serde_json::json!(true);
         assert!(serde_json::from_value::<MessageAccepted>(wire).is_err());

@@ -213,7 +213,6 @@ pub(crate) mod glyphs {
     pub(crate) const SHELL: &str = "$";
     pub(crate) const CHILD: &str = "↳";
     pub(crate) const WAIT: &str = "⋯";
-    pub(crate) const REVISIT: &str = "↻";
     pub(crate) const SETTINGS: &str = "⌘";
     pub(crate) const LIFECYCLE: &str = "⏻";
     pub(crate) const INDEX: &str = "⌕";

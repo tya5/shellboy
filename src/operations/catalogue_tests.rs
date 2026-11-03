@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 65, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 62, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown"] {
         let lifecycle = leaves
             .remove(name)
@@ -83,7 +83,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     );
     assert_eq!(
         leaves.len(),
-        62,
+        59,
         "update executable-path inventory deliberately; UI launch/help/version are not operations"
     );
     let bindings = CLI_BINDINGS
@@ -199,8 +199,8 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
 
 #[test]
 fn identities_are_complete_and_attach_is_the_only_explicit_alias() {
-    assert_eq!(OperationId::ALL.len(), 61);
-    assert_eq!(SPECS.len(), 61);
+    assert_eq!(OperationId::ALL.len(), 58);
+    assert_eq!(SPECS.len(), 58);
     let ids = OperationId::ALL.iter().copied().collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), OperationId::ALL.len());
     assert_eq!(
@@ -319,9 +319,9 @@ fn runtime_cli_flags_and_mutual_exclusions_are_not_lost_in_form_metadata() {
             FieldId::Messages,
         ),
         (
-            vec!["revisit", "set", "--run", "r", "--text", "next"],
-            OperationId::RevisitSet,
-            FieldId::Text,
+            vec!["message", "send", "--deliver", "complete", "--text", "next"],
+            OperationId::MessageSend,
+            FieldId::Deliver,
         ),
         (
             vec!["exec", "--schema", "contract.json", "--thread", "t", "work"],

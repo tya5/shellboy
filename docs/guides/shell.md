@@ -56,7 +56,7 @@ Choose the next observation from the stored state and result:
 | cursor_expired / cursor_encoding_mismatch | Check the target and encoding, then resume reading without a cursor. Previously read bytes may return again |
 | output_expired | Check retention state. Repeated reads cannot restore reclaimed raw output |
 
-When a human moves foreground work to the background, the shell stays alive and subsequent tool calls that have not executed are cancelled. If explicitly immediate instructions (`message send --now` or the TUI immediate key) release a foreground wait, also inspect the existing execution. Do not treat release of the tool wait as process termination and execute the same command again.
+When a human moves foreground work to the background, the shell stays alive and subsequent tool calls that have not executed are cancelled. If explicitly immediate instructions (`message send --deliver now` or the TUI immediate key) release a foreground wait, also inspect the existing execution. Do not treat release of the tool wait as process termination and execute the same command again.
 
 In that case, the tool result includes `status: "running"`, the continuing `execution_id`, and an intervention `reason` of `"human_backgrounded"` or `"additional_input"`. Each subsequent call, if any, receives a `cancelled` result. The UI reports the target and subsequent cancellations from the same stored results; it does not invent cancellations when no subsequent calls exist. The shell may finish after that notification, so get/read/wait on the same ID for its latest state.
 

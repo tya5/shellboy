@@ -32,7 +32,7 @@ async fn send(control: &Arc<Control>, thread: &str) {
         control,
         Command::MessageSend(MessageSendArgs {
             sender_label: None,
-            now: false,
+            deliver: Deliver::Next,
             thread_id: Some(thread.into()),
             text: "synthetic cache diagnostic fixture".into(),
         }),

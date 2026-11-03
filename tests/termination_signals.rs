@@ -329,7 +329,7 @@ impl Fixture {
                 &directory,
                 Command::MessageSend(MessageSendArgs {
                     sender_label: None,
-                    now: false,
+                    deliver: Deliver::Next,
                     thread_id: Some(thread),
                     text: "wait for OS termination".into(),
                 }),

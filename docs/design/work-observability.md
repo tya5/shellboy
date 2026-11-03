@@ -42,7 +42,7 @@ cursor v2はversion/instance/scope/正規化filterのSHA-256/最後のSortKey/�
 
 ## Revisit observation (Issue #36)
 
-Run WorkItems include the optional typed Revisit summary (pending, consumed_count, last_fired_at) in the same owner read transaction and status fingerprint. Other work kinds do not duplicate Run reservation facts. Existing human work rows append the bounded `Revisit N · next reserved` label; full summary values remain in details. The active conversation footer reads the same facts through the existing activity projection, with no new poller. Conversation event presentation names the Revisit continuation, shows a bounded instruction preview, and retains original event/Run/set-operation provenance in raw details. Interrupted reservations use their own bounded interruption section and an English label.
+Run WorkItems include the optional typed Revisit summary (pending, consumed_count) in the same owner read transaction and status fingerprint, derived from receipts (#187): pending means a `--deliver complete` message of the Thread is waiting; consumed_count counts those the Run received at completion. Existing human work rows append the bounded `Revisit N · next reserved` label. The active conversation footer reads the same facts through the existing activity projection, with no new poller. Delivered messages are ordinary user rows with the `↻` Revisit source; waiting ones appear in the pending-message queue and interruption record like any message.
 
 ## Read-time shell timing (Issue #45)
 

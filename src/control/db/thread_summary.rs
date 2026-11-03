@@ -22,23 +22,16 @@ LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn
 }
 fn columns_from() -> String {
     let activity_joins = activity_joins();
-    format!("SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
+    let (revisit_pending, revisit_delivered) =
+        crate::control::revisit::summary_sql("t.id", "latest.id");
+    format!(
+        "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
     COALESCE(u.state,latest.state), latest.stop_reason,latest.id,{ACTIVITY_COLUMNS},
-    CASE WHEN json_valid(revisit.value) THEN json_type(revisit.value)='object'
-      AND json_type(revisit.value,'$.consumed_count')='integer'
-      AND (json_type(revisit.value,'$.last_fired_at') IS NULL OR json_type(revisit.value,'$.last_fired_at')='null'
-           OR (json_type(revisit.value,'$.last_fired_at')='text' AND length(json_extract(revisit.value,'$.last_fired_at'))<=128))
-      AND (json_type(revisit.value,'$.pending') IS NULL OR json_type(revisit.value,'$.pending')='null'
-           OR (json_type(revisit.value,'$.pending')='object' AND json_type(revisit.value,'$.pending.text')='text'
-             AND json_type(revisit.value,'$.pending.operation_id')='text' AND json_type(revisit.value,'$.pending.set_at')='text'
-             AND json_type(revisit.value,'$.pending.set_by') IS NOT NULL)) ELSE 0 END,
-    CASE WHEN json_valid(revisit.value) THEN json_type(revisit.value,'$.pending')='object' ELSE 0 END,
-    CASE WHEN json_valid(revisit.value) THEN substr(revisit.value->'$.consumed_count',1,21) END,
-    CASE WHEN json_valid(revisit.value) THEN CASE WHEN json_type(revisit.value,'$.last_fired_at')='text' THEN substr(json_extract(revisit.value,'$.last_fired_at'),1,128) END END,
+    {revisit_pending},{revisit_delivered},
     u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation
 FROM thread t {activity_joins}
-LEFT JOIN app_meta revisit ON revisit.key='revisit.'||latest.id
-")
+"
+    )
 }
 
 #[derive(Clone)]
@@ -101,10 +94,8 @@ pub(crate) struct RawSummary {
     stop_reason: Option<String>,
     pub(crate) activity: RawActivity,
     pub(crate) identity: SummaryIdentity,
-    revisit_valid: bool,
     revisit_pending: bool,
-    revisit_count: Option<String>,
-    revisit_fired: Option<String>,
+    revisit_delivered: u64,
 }
 
 /// Saved identities/times, never an invented timestamp for a phase transition.
@@ -138,18 +129,16 @@ pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         activity: decode_activity(row, 8)?,
         identity: SummaryIdentity {
             run_id: row.get(7)?,
-            turn_id: row.get(18)?,
-            answer_id: row.get(19)?,
-            run_ended_at: row.get(20)?,
-            attempt_started_at: row.get(21)?,
+            turn_id: row.get(16)?,
+            answer_id: row.get(17)?,
+            run_ended_at: row.get(18)?,
+            attempt_started_at: row.get(19)?,
             turn_generation: row
-                .get::<_, Option<i64>>(22)?
+                .get::<_, Option<i64>>(20)?
                 .and_then(|value| u64::try_from(value).ok()),
         },
-        revisit_valid: row.get::<_, Option<bool>>(14)?.unwrap_or(false),
-        revisit_pending: row.get::<_, Option<bool>>(15)?.unwrap_or(false),
-        revisit_count: row.get(16)?,
-        revisit_fired: row.get(17)?,
+        revisit_pending: row.get(14)?,
+        revisit_delivered: row.get::<_, i64>(15)?.unsigned_abs(),
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
@@ -163,16 +152,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         parent_id: raw.parent_id,
         state: raw.state.unwrap_or_else(|| "idle".into()),
         latest_run_stop_reason: raw.stop_reason,
-        revisit: raw
-            .revisit_count
-            .as_deref()
-            .filter(|_| raw.revisit_valid)
-            .and_then(|count| count.parse::<u64>().ok())
-            .map(|consumed_count| RevisitSummary {
-                pending: raw.revisit_pending,
-                consumed_count,
-                last_fired_at: raw.revisit_fired,
-            }),
+        revisit: crate::control::revisit::summary(raw.revisit_pending, raw.revisit_delivered),
         updated_at: raw.updated_at,
         excerpt,
     }
@@ -213,7 +193,6 @@ mod tests {
     use super::*;
     use crate::frontend::sql_trace::Statements;
     use rusqlite::StatementStatus;
-    use serde_json::json;
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -223,14 +202,13 @@ mod tests {
         db
     }
     #[test]
-    fn exact_id_batch_is_one_statement_with_saved_activity_and_bounded_revisit_proof() {
+    fn exact_id_batch_is_one_statement_with_saved_activity_and_revisit_messages() {
         let db = fixture();
-        let state = json!({"pending":{"text":"x".repeat(8192),"set_by":null,"operation_id":"op","set_at":"now"},"consumed_count":u64::MAX,"last_fired_at":"earlier"});
-        db.execute(
-            "INSERT INTO app_meta VALUES('revisit.r',?1)",
-            [state.to_string()],
-        )
-        .unwrap();
+        db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('m1','user','now','{}'),('m2','user','now','{}'),('m3','user','now','{}');
+            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,hold_reason,result_json)VALUES
+            ('a','a','null','t','m1','r','u','applied','now',NULL,'{\"deliver\":\"complete\",\"delivery_context\":{\"reason\":\"run_completion\"}}'),
+            ('b','b','null','t','m2','r','u','applied','now',NULL,'{\"deliver\":\"complete\"}'),
+            ('c','c','null','t','m3',NULL,NULL,'held','now','run_completion','{\"deliver\":\"complete\"}');").unwrap();
         let trace = Statements::new(&db);
         let rows = read_ids_tx(&db, &["t".into(), "missing".into(), "t".into()]).unwrap();
         assert_eq!(trace.count(), 1);
@@ -246,26 +224,23 @@ mod tests {
         );
         assert_eq!(summary.activity, crate::activity::ActivityPhase::Recovery);
         assert_eq!(
-            serde_json::to_value(summary.revisit).unwrap(),
-            serde_json::to_value(crate::control::revisit::summary(&db, "r").unwrap()).unwrap()
+            summary.revisit,
+            Some(RevisitSummary {
+                pending: true,
+                consumed_count: 1
+            })
         );
-        for malformed in [
-            "{}",
-            "null",
-            r#"{"pending":{},"consumed_count":1,"last_fired_at":null}"#,
-        ] {
-            db.execute(
-                "UPDATE app_meta SET value=?1 WHERE key='revisit.r'",
-                [malformed],
-            )
-            .unwrap();
-            let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
-            assert!(
-                prepare(raw, "title".into(), String::new())
-                    .revisit
-                    .is_none()
-            );
-        }
+        assert_eq!(
+            summary.revisit,
+            crate::control::revisit::summary_for_run(&db, "r").unwrap()
+        );
+        db.execute_batch("DELETE FROM receipt").unwrap();
+        let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
+        assert!(
+            prepare(raw, "title".into(), String::new())
+                .revisit
+                .is_none()
+        );
     }
     #[test]
     fn requested_summary_plan_does_not_scale_with_unrelated_threads() {

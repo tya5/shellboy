@@ -74,7 +74,7 @@ impl Form {
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "sender_label" => FieldId::SenderLabel,
-            "now" => FieldId::Now,
+            "deliver" => FieldId::Deliver,
             "text" => FieldId::Text,
             "condition" | "target" => FieldId::Conditions,
             "settled_states" => FieldId::SettlementStates,
@@ -589,13 +589,6 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::RunGet => local!(language, "作業 · 詳細", "Run · Details"),
         OperationId::RunRetry => local!(language, "作業 · 復旧を再試行", "Run · Retry recovery"),
         OperationId::RunStop => local!(language, "作業 · 停止", "Run · Stop"),
-        OperationId::RevisitSet => local!(language, "次の指示 · 設定", "Next instruction · Set"),
-        OperationId::RevisitGet => {
-            local!(language, "次の指示 · 確認", "Next instruction · Inspect")
-        }
-        OperationId::RevisitCancel => {
-            local!(language, "次の指示 · 取消", "Next instruction · Cancel")
-        }
         OperationId::TurnGet => local!(language, "応答処理 · 詳細", "Turn · Details"),
         OperationId::Wait => local!(language, "待機 · 条件を観測", "Wait · Observe conditions"),
         OperationId::HistoryList => local!(language, "履歴 · 一覧", "History · List"),
@@ -766,21 +759,6 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定Runとその所有作業の停止を要求します。保存状態で実際の終了を確認します。",
             "Request that the specified Run and its owned work stop. Check saved state for actual completion."
-        ),
-        OperationId::RevisitSet => local!(
-            language,
-            "Runが通常完了するときに実行する指示を置き換えます。停止や終了処理が優先されます。",
-            "Replace the instruction to run when the Run completes normally. Stop and shutdown take precedence."
-        ),
-        OperationId::RevisitGet => local!(
-            language,
-            "指定Runに保存された次の指示、設定者、実行回数と最終実行日時を表示します。",
-            "Show the next instruction saved for a Run, who set it, execution count, and last execution time."
-        ),
-        OperationId::RevisitCancel => local!(
-            language,
-            "Runの通常完了時に実行する未実行の指示を取り消します。Run自体は続行します。",
-            "Cancel the pending instruction to run on normal Run completion. The Run itself continues."
         ),
         OperationId::TurnGet => local!(
             language,
@@ -1029,11 +1007,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
-        FieldId::Now => local!(
-            language,
-            "前景shell待ちを解除",
-            "Release foreground shell wait"
-        ),
+        FieldId::Deliver => local!(language, "届けるとき", "Delivery timing"),
         FieldId::Text => local!(language, "入力本文", "Message text"),
         FieldId::Conditions => local!(language, "観測条件", "Observation conditions"),
         FieldId::Timeout => local!(
@@ -1153,8 +1127,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Run => local!(
             language,
-            "対象Runを指定します。人のCLIは明示IDが必要です。Revisitだけはモデルの自分のRunを省略できます。",
-            "Specify the target Run. A human CLI must supply an ID; only Revisit can default to the model's own Run."
+            "対象Runを指定します。人のCLIは明示IDが必要です。",
+            "Specify the target Run. A human CLI must supply an ID."
         ),
         FieldId::Attempt => local!(
             language,
@@ -1291,10 +1265,10 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "自己申告の表示名であり権限を与えません。message sendは最大64Unicode文字です。",
             "A self-declared label; it grants no authority. message send allows at most 64 Unicode characters."
         ),
-        FieldId::Now => local!(
+        FieldId::Deliver => local!(
             language,
-            "入力を保存し、前景shell待ちを解除します。応答生成そのものの割込みではありません。",
-            "Save the input and release the foreground shell wait. This does not interrupt response generation."
+            "空は次の安全な区切り。nowは前景shell待ちも解除します（応答生成は割込みません）。completeは動いているRunが完了するときに届け、動いていなければすぐ届けます。",
+            "Empty: the next safe boundary. now: also release a foreground shell wait (never interrupts response generation). complete: deliver when the live Run would complete, or immediately if no Run is live."
         ),
         FieldId::Text => local!(
             language,

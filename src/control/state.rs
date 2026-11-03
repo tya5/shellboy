@@ -290,6 +290,7 @@ pub(super) fn recover_turn_tx(
             "UPDATE attachment_delivery SET status='held' WHERE thread_id=?1 AND status='accepted'",
             [thread],
         )?;
+        super::revisit::hand_off_tx(tx, Some(thread), "recovery_wait", Some((run, turn)), &now())?;
         owner_event(
             tx,
             run,
@@ -431,7 +432,19 @@ pub(super) fn stop_drained_runs(
     owned: &[(String, String)],
     stopping_for_shutdown: bool,
 ) -> Result<(), StorageError> {
-    for (run, _) in owned {
+    for (run, thread) in owned {
+        // The same held input a send to this stopping Run would have produced.
+        super::revisit::hand_off_tx(
+            tx,
+            Some(thread),
+            if stopping_for_shutdown {
+                "previous_instance_interrupted"
+            } else {
+                "stopping"
+            },
+            None,
+            &now(),
+        )?;
         tx.execute("UPDATE turn SET state='stopped',ended_at=?2 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",params![run,now()])?;
         cancel_run_attempts(tx, run, &now())?;
         tx.execute("UPDATE shell_execution SET state='stopped',output_complete=0,ended_at=?2,end_reason='run_stopped_before_spawn_or_collection' WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')",params![run,now()])?;
@@ -456,7 +469,6 @@ pub(crate) fn interrupt_previous_work(
     tx: &rusqlite::Transaction<'_>,
     now: &str,
 ) -> Result<RepairReport, StorageError> {
-    super::revisit::drop_all_pending(tx)?;
     tx.execute(
         "DELETE FROM app_meta WHERE key GLOB 'compact.automatic_active.*'",
         [],
@@ -471,6 +483,7 @@ pub(crate) fn interrupt_previous_work(
     interrupt_previous_attempts(tx, now)?;
     tx.execute("UPDATE attachment_delivery SET status='held' WHERE status='accepted' AND (target_run_id IS NOT NULL OR json_extract(origin_json,'$.kind')='shell')",[])?;
     tx.execute("UPDATE receipt SET state='held',hold_reason='previous_instance_interrupted',updated_at=?1 WHERE state='accepted'",[&now])?;
+    super::revisit::hand_off_tx(tx, None, "previous_instance_interrupted", None, now)?;
     super::message_delivery::repair_terminal_tx(tx, now)?;
     Ok(report)
 }
