@@ -80,3 +80,5 @@ mod shared_ui_message_tests {
         assert_eq!(evaluations, 1);
     }
 }
+
+pub mod width_cache;

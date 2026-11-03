@@ -717,3 +717,23 @@ async fn headless_failed_ready_write_closes_endpoint_and_releases_owner() {
     .await
     .unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn width_cache_fake_terminal_benchmark() {
+    let output = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/width_cache_pty.py"
+        ))
+        .arg(env!("CARGO_BIN_EXE_shellboy"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+}

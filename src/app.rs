@@ -142,6 +142,10 @@ pub struct DataOwner {
     _lock: Arc<OwnerLock>,
 }
 impl DataOwner {
+    /// Keep owner exclusion alive during a background width-cache update.
+    pub fn width_cache_guard(&self) -> Arc<OwnerLock> {
+        self._lock.clone()
+    }
     pub async fn start(
         config_path: Option<PathBuf>,
         data_dir: Option<PathBuf>,
