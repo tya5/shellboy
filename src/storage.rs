@@ -500,6 +500,88 @@ impl DbWorker {
         })
     }
 
+    /// Observe an inspection connection without interfering with the writer queue.
+    pub(crate) fn observe_inspection<T>(
+        &self,
+        connection: &mut Connection,
+        kind: &str,
+        queued_at: Instant,
+        operation: impl FnOnce(&mut Connection) -> T,
+    ) -> T {
+        let started = Instant::now();
+        let queue = started.saturating_duration_since(queued_at);
+        let backtrace = statement_observation::SlowBacktrace::new(started);
+        let capture = backtrace.clone();
+        let mut observation = statement_observation::StatementObservation::install(connection);
+        let counters = observation
+            .available()
+            .then(|| observation.shared_counters());
+        let observer = self.clone();
+        let label = kind.to_owned();
+        let mut reported = false;
+        let installed = observation
+            .connection()
+            .progress_handler(
+                PROGRESS_GRANULARITY as std::ffi::c_int,
+                Some(move || {
+                    let now = Instant::now();
+                    capture.observe(now);
+                    let elapsed = now.saturating_duration_since(started);
+                    if !reported && elapsed >= SLOW_JOB_THRESHOLD {
+                        reported = true;
+                        if let Ok(mut limit) = observer.shared.slow_limit.try_lock()
+                            && limit.admit(now)
+                            && let Ok(diagnostics) = observer.shared.diagnostics.try_lock()
+                            && let Some(diagnostics) = diagnostics.as_ref()
+                        {
+                            let snapshot = counters
+                                .as_ref()
+                                .and_then(|c| c.try_lock().ok().map(|c| *c));
+                            diagnostics.record_db_job_active(
+                                &label,
+                                "inspection",
+                                elapsed,
+                                snapshot,
+                                capture.symbols(),
+                            );
+                        }
+                    }
+                    false
+                }),
+            )
+            .is_ok();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            operation(observation.connection())
+        }));
+        if installed {
+            let _ = observation
+                .connection()
+                .progress_handler(0, None::<fn() -> bool>);
+        }
+        let counters = observation.available().then(|| observation.counters());
+        drop(observation);
+        let run = started.elapsed();
+        if (queue >= SLOW_JOB_THRESHOLD || run >= SLOW_JOB_THRESHOLD)
+            && let Ok(diagnostics) = self.shared.diagnostics.try_lock()
+            && let Some(diagnostics) = diagnostics.as_ref()
+            && let Ok(mut limit) = self.shared.slow_limit.try_lock()
+            && limit.admit(Instant::now())
+        {
+            diagnostics.record_db_job_with_counters(
+                kind,
+                queue,
+                run,
+                counters,
+                Some("inspection"),
+                backtrace.symbols(),
+            );
+        }
+        match result {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
     /// Number of idle checkpoint attempts, including partial or failed attempts.
     #[doc(hidden)]
     pub fn checkpoint_attempts(&self) -> usize {
@@ -1780,6 +1862,77 @@ mod slow_job_tests {
         })
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn inspection_active_event_is_emitted_once() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            root.path().join("logs"),
+            crate::config::Logging::default(),
+        );
+        let db = DbWorker::open(root.path().join("db")).await.unwrap();
+        db.attach_diagnostics(diagnostics.clone());
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .create_scalar_function(
+                "test_pause",
+                0,
+                rusqlite::functions::FunctionFlags::empty(),
+                |_| {
+                    std::thread::sleep(SLOW_JOB_THRESHOLD + Duration::from_millis(20));
+                    Ok(1_i64)
+                },
+            )
+            .unwrap();
+        db.observe_inspection(&mut connection, "HistoryList", Instant::now(), |conn| {
+            conn.query_row("SELECT test_pause()", [], |r| r.get::<_, i64>(0)).unwrap();
+            conn.query_row("WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<10000) SELECT sum(x) FROM n", [], |r| r.get::<_, i64>(0)).unwrap();
+        });
+        db.shutdown().await.unwrap();
+        diagnostics.shutdown().await;
+        let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        let active: Vec<serde_json::Value> = log
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .filter(|row| row["event"] == "db_job_active")
+            .collect();
+        assert_eq!(active.len(), 1, "{log}");
+        assert_eq!(active[0]["db_job_active"]["kind"], "HistoryList");
+        assert_eq!(active[0]["db_job_active"]["lane"], "inspection");
+        assert!(!log.contains("test_pause"));
+    }
+
+    #[tokio::test]
+    async fn inspection_event_has_counters_and_never_logs_private_values() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            root.path().join("logs"),
+            crate::config::Logging::default(),
+        );
+        let db = DbWorker::open(root.path().join("db")).await.unwrap();
+        db.attach_diagnostics(diagnostics.clone());
+        let mut connection = Connection::open_in_memory().unwrap();
+        let queued = Instant::now() - SLOW_JOB_THRESHOLD;
+        let value: String = db.observe_inspection(&mut connection, "HistoryGet", queued, |conn| {
+            conn.query_row("SELECT ?1", ["private inspection marker"], |row| row.get(0))
+                .unwrap()
+        });
+        assert_eq!(value, "private inspection marker");
+        db.shutdown().await.unwrap();
+        diagnostics.shutdown().await;
+        let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        assert!(!log.contains("private inspection marker"));
+        let event: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+        assert_eq!(event["db_job_slow"]["kind"], "HistoryGet");
+        assert_eq!(event["db_job_slow"]["lane"], "inspection");
+        assert_eq!(event["db_job_slow"]["statement_counters"]["rows"], 1);
+        assert!(
+            event["db_job_slow"]["statement_counters"]["vm_steps"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
     }
 
     #[tokio::test]

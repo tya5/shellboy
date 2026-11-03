@@ -366,12 +366,17 @@ impl Store {
             }
             let instance = self.instance_id.clone();
             let path = self.database.path().to_path_buf();
+            let observer = self.database.clone();
+            let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
+            let queued_at = std::time::Instant::now();
             return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                let tx = db.transaction().map_err(sql_error)?;
-                let result = crate::status::snapshot(&tx, &args, &instance)?;
-                tx.commit().map_err(sql_error)?;
-                MutationResult::value(result)
+                observer.observe_inspection(&mut db, &kind, queued_at, |db| {
+                    let tx = db.transaction().map_err(sql_error)?;
+                    let result = crate::status::snapshot(&tx, &args, &instance)?;
+                    tx.commit().map_err(sql_error)?;
+                    MutationResult::value(result)
+                })
             })
             .await?;
         }
@@ -380,12 +385,18 @@ impl Store {
             let args = args.clone();
             let config = self.config.clone();
             let path = self.database.path().to_path_buf();
+            let observer = self.database.clone();
+            let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
+            let queued_at = std::time::Instant::now();
             return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                let tx = db.transaction().map_err(sql_error)?;
-                let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
-                    .map_err(storage_error)?;
-                tx.commit().map_err(sql_error)?;
+                let raw = observer.observe_inspection(&mut db, &kind, queued_at, |db| {
+                    let tx = db.transaction().map_err(sql_error)?;
+                    let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
+                        .map_err(storage_error)?;
+                    tx.commit().map_err(sql_error)?;
+                    Ok::<_, ApiError>(raw)
+                })?;
                 drop(db);
                 MutationResult::value(crate::compaction::preview::prepare(raw))
             })
@@ -394,13 +405,17 @@ impl Store {
         if let Command::AttachmentList(args) = &request.command {
             let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
             let path = self.database.path().to_path_buf();
+            let observer = self.database.clone();
+            let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
+            let queued_at = std::time::Instant::now();
             let mut items = inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                let tx = db.transaction().map_err(sql_error)?;
-                let items = crate::attachments::list_tx(&tx, &thread)?;
-                tx.commit().map_err(sql_error)?;
-                drop(db);
-                Ok::<_, ApiError>(items)
+                observer.observe_inspection(&mut db, &kind, queued_at, |db| {
+                    let tx = db.transaction().map_err(sql_error)?;
+                    let items = crate::attachments::list_tx(&tx, &thread)?;
+                    tx.commit().map_err(sql_error)?;
+                    Ok::<_, ApiError>(items)
+                })
             })
             .await??;
             return MutationResult::value(
@@ -416,18 +431,23 @@ impl Store {
             let mut store = self.clone();
             store.usage_context = crate::usage_totals::read_context();
             let path = self.database.path().to_path_buf();
+            let observer = self.database.clone();
+            let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
+            let queued_at = std::time::Instant::now();
             return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                let tx = db.transaction().map_err(sql_error)?;
-                let value = store.dispatch(
-                    &tx,
-                    &request.command,
-                    caller.as_ref(),
-                    &request.operation_id,
-                    &chrono::Utc::now().to_rfc3339(),
-                );
-                tx.commit().map_err(sql_error)?;
-                value
+                observer.observe_inspection(&mut db, &kind, queued_at, |db| {
+                    let tx = db.transaction().map_err(sql_error)?;
+                    let value = store.dispatch(
+                        &tx,
+                        &request.command,
+                        caller.as_ref(),
+                        &request.operation_id,
+                        &chrono::Utc::now().to_rfc3339(),
+                    );
+                    tx.commit().map_err(sql_error)?;
+                    value
+                })
             })
             .await?;
         }
