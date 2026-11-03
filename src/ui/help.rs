@@ -59,11 +59,6 @@ impl Page {
             rows: Vec::new(),
             language: config.ui.language,
         };
-        page.note(local!(
-            config.ui.language,
-            "起動中の構造更新の段数は、起動全体の進行割合ではありません。",
-            "Startup schema-update steps are not a percentage of overall startup."
-        ));
         page.section(local!(config.ui.language, "よく使う操作", "Common actions"));
         use super::key_hints::Action;
         for action in [
@@ -137,6 +132,11 @@ impl Page {
             ),
         );
         page.note(local!(config.ui.language, "番号の表示は1始まり。/copy 項目ID 番号の指定は0始まりです。64KiBを超える本文はoで原文、nで続き、pで先頭を確認します。F2は見えている画面だけの範囲選択です。", "Displayed numbers start at 1; /copy item ID and number start at 0. For text over 64 KiB, use o for original, n for the next page, and p for the first. F2 selects only the visible terminal screen."));
+        page.note(local!(
+            config.ui.language,
+            "起動中の構造更新の段数は、起動全体の進行割合ではありません。",
+            "Startup schema-update steps are not a percentage of overall startup."
+        ));
         page.section(local!(
             config.ui.language,
             "画像やファイルを添付する",
