@@ -9257,3 +9257,10 @@ reply mode is covered independently by exec-client integration tests.
 ## Shell unknown argument policy
 
 Coverage includes both policies, valid calls alongside invalid calls, unknown keys with invalid known types, configuration validation, duplicate-key isolation, combined unknown-key/encoding/stdin failures and the argument byte limit. Local focused tests and three-OS CI results must be reported for the final tip; real provider behavior has not been tested.
+
+### #209 calibrated proactive target (in progress)
+
+Pending: scripted 200K-to-184K proactive loop, paired-character arithmetic,
+missing and stale usage, target verification and safe wider selection on the
+final tip. Real-provider behavior and retention quality remain untested. The
+three-OS CI result and independent review are required before landing.

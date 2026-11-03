@@ -633,3 +633,16 @@ atomic adoption, cancellation, protected groups, bounded work and no-progress
 fences. If no wider safe source exists, defer rather than repeatedly summarize
 identical sources. A provider that never reports usage retains the existing
 behavior; unmeasurable target achievement is not represented as success.
+
+The outstanding target is one bounded Thread-owned `app_meta` value
+(`compact.automatic_target.<thread>`; at most 1 MiB), not a new worker or
+queue. It stores the triggering attempt, target, scope, Turn and bounded
+post-adoption candidate witness; it is removed on Thread deletion, target
+success or connection/model change, and replaced by the next adopted target
+attempt. Fresh verification is also attached to the triggering attempt's
+existing `automatic_trim_attempt` record. For an insufficient active-Turn
+summary, only growth of eligible middle candidates permits another attempt in
+the same Turn; incomplete candidate evidence does not establish growth. A new
+Turn restores ordinary prefix selection. Local replay-character changes guide
+whether to widen in the same attempt; only the next provider report verifies
+the outcome. No independent token or output-size guarantee is implied.
