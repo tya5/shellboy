@@ -157,6 +157,12 @@ pub(super) struct ContextBar {
     pub usage: super::ContextUsage,
     pub auto_at: u64,
 }
+
+#[derive(Clone, Copy)]
+pub(super) struct FooterTrailing<'a> {
+    pub(super) context: Option<ContextBar>,
+    pub(super) db_status: Option<&'a str>,
+}
 /// 999 -> `999`, 10200 -> `10.2K`, 140000 -> `140K`, 1200000 -> `1.2M` (floored).
 pub(super) fn compact_tokens(n: u64) -> String {
     fn scaled(n: u64, unit: u64, suffix: &str) -> String {
@@ -259,8 +265,10 @@ pub(super) fn footer_lines(
         palette,
         activity_spans,
         notice,
-        context,
-        None,
+        FooterTrailing {
+            context,
+            db_status: None,
+        },
     )
 }
 
@@ -271,13 +279,13 @@ pub(super) fn footer_lines_with_db(
     palette: super::theme::Palette,
     mut activity_spans: Vec<ratatui::text::Span<'static>>,
     notice: Option<(&str, bool)>,
-    context: Option<ContextBar>,
-    db_status: Option<&str>,
+    trailing: FooterTrailing<'_>,
 ) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::{
         style::Style,
         text::{Line, Span},
     };
+    let FooterTrailing { context, db_status } = trailing;
     let phase = view.footer_phase();
     let db_status = db_status
         .map(|status| fit(status, usize::from(width), false))
@@ -708,8 +716,10 @@ mod tests {
             palette,
             vec![ratatui::text::Span::raw("Working")],
             None,
-            None,
-            Some("DB message send 1s"),
+            FooterTrailing {
+                context: None,
+                db_status: Some("DB message send 1s"),
+            },
         );
         assert_eq!(rows.len(), 2);
         let status: String = rows[0]
