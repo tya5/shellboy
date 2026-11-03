@@ -4715,7 +4715,7 @@ async fn proactive_prefix_shortfall_reconsiders_older_turn() {
         send(&control, &target, "TURN_B_MARKER").await;
         let mut saw_new_older = false;
         let mut next = incoming(&control, &mut receive).await;
-        assert_eq!(next.body["tools"], json!([]), "older Turn A must become eligible despite the prior shortfall");
+        assert_eq!(next.body["tools"], json!([]), "newly eligible older context must be summarized despite the prior shortfall");
         for _ in 0..20 {
             if next.body["tools"] != json!([]) {
                 break;
