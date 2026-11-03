@@ -4357,3 +4357,9 @@ retained. Added bilingual delayed-reply success/failure state/render coverage.
 Native focused checks and default-scope CI remain pending at this record point.
 No migration renumbering: the latest user order is hotfix index 25, then #194
 26 and #172 27 after the hotfix lands; wait for that integration instruction.
+
+#194 rebased validation update (2026-11-03): strict locked all-target Clippy,
+27 send-state unit tests, one foreground DB-stall regression, seven reply
+integration tests, and 190 Python script tests passed on macOS. Publication
+remains blocked on approval for a new non-rewriting remote branch; no push,
+new CI, migration renumbering, or integration is claimed.
