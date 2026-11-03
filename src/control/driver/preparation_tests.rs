@@ -9,9 +9,16 @@ use tokio::{
 pub(super) async fn fixture(
     url: &str,
 ) -> (tempfile::TempDir, DataOwner, Arc<Control>, MessageAccepted) {
+    fixture_with_policy(url, "warn").await
+}
+
+async fn fixture_with_policy(
+    url: &str,
+    policy: &str,
+) -> (tempfile::TempDir, DataOwner, Arc<Control>, MessageAccepted) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("config.toml");
-    std::fs::write(&path,format!("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url={url:?}\n")).unwrap();
+    std::fs::write(&path,format!("default_connection='fixture'\ndefault_model='fixture'\n[shell]\nunknown_arguments={policy:?}\n[connections.fixture]\nbase_url={url:?}\n")).unwrap();
     let owner = DataOwner::start(
         Some(path),
         Some(root.path().join("data")),
@@ -1653,4 +1660,59 @@ async fn admitted_attempt_records_the_exact_sent_body_bytes_by_source() {
     assert_eq!(saved["input_bytes"]["total"], sent);
     drop(snapshot);
     close(control, owner).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unknown_arguments_and_invalid_calls_are_isolated_per_policy() {
+    for policy in ["warn", "strict"] {
+        let (root, owner, control, accepted) =
+            fixture_with_policy("http://127.0.0.1:1/v1", policy).await;
+        let snapshot = ready(&control, &accepted).await;
+        let slot = DriverSlot {
+            id: id(),
+            run_id: accepted.run_id.clone().unwrap(),
+            stop: CancellationToken::new(),
+            nudge: Arc::new(Notify::new()),
+            foreground: Arc::new(ForegroundSlot::default()),
+            turn: Arc::new(Mutex::new(None)),
+        };
+        let turn = snapshot.turn.clone();
+        control.store.database.call(move |db| {
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('policy-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
+            db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('policy-group','policy-attempt',?1,'running','now')", [&turn])?;
+            for (i, name) in ["bad", "unknown", "valid"].iter().enumerate() {
+                db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('policy-group',?1,?2,'shell','{}','pending')", params![name,i as i64])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let marker = root.path().join("ran");
+        let command = format!("printf yes > '{}'", marker.display());
+        let response = model::ModelResponse::completed(json!({"status":"completed","output":[
+            {"type":"function_call","name":"shell","call_id":"bad","arguments":"{\"command\":1}"},
+            {"type":"function_call","name":"shell","call_id":"unknown","arguments":json!({"command":"true","timeout":2}).to_string()},
+            {"type":"function_call","name":"shell","call_id":"valid","arguments":json!({"command":command}).to_string()}
+        ]}),true).unwrap();
+        run_tool_group(&control, &snapshot, &slot, "policy-group", response.calls)
+            .await
+            .unwrap();
+        assert!(marker.exists(), "valid call did not run in {policy}");
+        let rows = control.store.database.call(|db| {
+            let mut q = db.prepare("SELECT r.call_id, r.status, n.payload_json FROM tool_result r JOIN node n ON n.id=r.node_id WHERE r.group_id='policy-group' ORDER BY r.call_id")?;
+            let rows = q.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        }).await.unwrap();
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].1, "error");
+        assert!(rows[0].2.contains("command"));
+        assert!(rows[1].2.contains("timeout"));
+        if policy == "strict" {
+            assert_eq!(rows[1].1, "error");
+        } else {
+            assert!(rows[1].2.contains("Ignored unknown"));
+        }
+        assert_ne!(rows[2].1, "error");
+        drop(snapshot);
+        close(control, owner).await;
+    }
 }
