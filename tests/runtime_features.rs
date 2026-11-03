@@ -4693,6 +4693,39 @@ async fn proactive_target_escalates_before_threshold_recrossing() {
 }
 
 #[tokio::test]
+async fn proactive_prefix_shortfall_reconsiders_older_turn() {
+    crate::test_watchdog::watchdog("proactive prefix shortfall across turns", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        for n in 0..2 {
+            send(&control, &target, &format!("old-{n} {}", "a".repeat(4000))).await;
+            incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("old answer", 50_000))).unwrap();
+            settled(&control, &target).await;
+        }
+        send(&control, &target, &format!("TURN_A_MARKER {}", "b".repeat(4000))).await;
+        incoming(&control, &mut receive).await.reply.send((200, json!({"id":"step-a","status":"completed", "usage":{"input_tokens":201_061,"output_tokens":1},"output":[{"type":"function_call","call_id":"step-a","name":"shell","arguments":json!({"command":"echo A"}).to_string()}]}))).unwrap();
+        let prefix = incoming(&control, &mut receive).await;
+        assert_eq!(prefix.body["tools"], json!([]));
+        prefix.reply.send((200, answer("## Goal\nOld work retained"))).unwrap();
+        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("turn A finished", 184_622))).unwrap();
+        settled(&control, &target).await;
+        send(&control, &target, "TURN_B_MARKER").await;
+        let next = incoming(&control, &mut receive).await;
+        assert_eq!(next.body["tools"], json!([]), "older Turn A must become eligible despite the prior shortfall");
+        assert!(next.body["input"].to_string().contains("TURN_A_MARKER"), "summary must include the newly eligible older Turn: {}", next.body["input"]);
+        next.reply.send((200, answer("## Goal\nTurn A retained"))).unwrap();
+        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("turn B finished", 140_000))).unwrap();
+        settled(&control, &target).await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn proactive_target_widens_in_one_attempt_and_keeps_usage() {
     crate::test_watchdog::watchdog("proactive target same-attempt widening", async {
         let root = tempfile::tempdir().unwrap();
