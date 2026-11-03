@@ -16,6 +16,10 @@ on:
         description: Record cost-free Linux PSS and PTY startup of Shellboy and other agents on a fake model (no thresholds)
         type: boolean
         default: false
+      startup_bisect:
+        description: Cost-free same-runner fake-model startup bisect (#192)
+        type: boolean
+        default: false
       performance:
         description: Compare baseline/current Windows timings and four-thread contention
         type: boolean
@@ -251,5 +255,25 @@ jobs:
         with:
           name: agent-comparison-linux-${{ github.sha }}
           path: .local/compare
+          include-hidden-files: true
+          if-no-files-found: warn
+  startup-bisect:
+    if: github.event_name == 'workflow_dispatch' && inputs.startup_bisect == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Bisect first completed frame on this runner
+        run: python3 scripts/bench/startup_bisect.py 275eb12223fde36861a647e12cc24a352dc8ac24 c090fa799f1c5d873a36ea07994c936244377437 .local/startup-bisect/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: startup-bisect-${{ github.sha }}
+          path: .local/startup-bisect
           include-hidden-files: true
           if-no-files-found: warn
