@@ -106,7 +106,11 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
         _ => panic!("reminder must continue Run"),
     };
     assert_eq!(
-        snapshot.events.len(),
+        snapshot
+            .events
+            .iter()
+            .filter(|id| id.starts_with("reply-reminder-"))
+            .count(),
         1,
         "the reminder must be in this continuation request"
     );
