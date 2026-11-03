@@ -3710,7 +3710,7 @@ fn recovery_reason_survives_transient_results_and_retry_targets_the_current_run(
             turn_id: Some("current-turn".into()),
             phase: ActivityPhase::Recovery,
             recovery: Some(RecoverySnapshot {
-                stage: "モデル要求".into(),
+                stage: shellboy::ui::activity::RecoveryStage::ModelRequest,
                 message: "fixture failure".into(),
                 pending_messages: 1,
                 saved_tool_results: 2,
@@ -3773,7 +3773,7 @@ fn stopped_recovery_keeps_the_original_reason_and_requires_a_new_explicit_choice
             run_id: Some("stopped-run".into()),
             phase: ActivityPhase::Stopped,
             recovery: Some(RecoverySnapshot {
-                stage: "処理（段階の記録なし）".into(),
+                stage: shellboy::ui::activity::RecoveryStage::Unrecorded,
                 message: "original failure".into(),
                 stop_reason: Some("explicit_stop".into()),
                 ..Default::default()
