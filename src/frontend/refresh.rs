@@ -121,7 +121,11 @@ fn read_visible_tx_limited(
     })
 }
 
-fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
+fn project(
+    raw: RawVisible,
+    width: u16,
+    language: crate::config::UiLanguage,
+) -> Result<ProjectedVisible, ApiError> {
     let RawVisible {
         details,
         history,
@@ -290,7 +294,8 @@ pub(super) async fn run(
             let raw=checked_storage(&control,visible).await?;
             // Rendering, sender/model-error JSON, decoding and timestamp work
             // begin only after the readonly snapshot released its transaction.
-            let mut frame=presentation_work(move || project(raw,render_width)).await??;
+            let language=control.store.config.ui.language;
+            let mut frame=presentation_work(move || project(raw,render_width,language)).await??;
             let page_len=frame.nodes.len();
             let notice_threads=frame.nodes.iter().flat_map(|node|node.presentation.fields.iter())
                 .filter(|field|field.key=="/ui_notice/thread_id").map(|field|field.value.clone()).take(128).collect();
@@ -419,7 +424,7 @@ mod tests {
         owner.db.call(|db| {
             db.execute_batch("UPDATE thread SET title='later',model_id='later-model' WHERE id='t'; UPDATE receipt SET state='cancelled' WHERE message_node_id='queued';")?;Ok(())
         }).await.unwrap();
-        let frame = presentation_work(move || project(raw, 80))
+        let frame = presentation_work(move || project(raw, 80, crate::config::UiLanguage::En))
             .await
             .unwrap()
             .unwrap();
@@ -522,7 +527,7 @@ mod tests {
             assert_eq!(raw.recovery.len(),1,"a non-event carrying event_id is not a recovery observation");
             tx.commit()?;Ok(raw)
         }).await.unwrap();
-        let frame = presentation_work(move || project(raw, 80))
+        let frame = presentation_work(move || project(raw, 80, crate::config::UiLanguage::En))
             .await
             .unwrap()
             .unwrap();
@@ -820,14 +825,14 @@ mod tests {
             })
             .await
             .unwrap();
-        let before = project(before, 80).unwrap();
+        let before = project(before, 80, crate::config::UiLanguage::En).unwrap();
         assert_eq!(before.details.title, "saved pending title");
         assert!(before.nodes.is_empty());
         assert_eq!(
             before.info.pending.items[0].message_id,
             "saved pending title"
         );
-        let after = project(after, 80).unwrap();
+        let after = project(after, 80, crate::config::UiLanguage::En).unwrap();
         assert_eq!(after.details.title, "saved pending title");
         assert!(
             after
@@ -943,7 +948,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let frame = project(visible, 80).unwrap();
+        let frame = project(visible, 80, crate::config::UiLanguage::En).unwrap();
         assert_eq!(frame.details.title, "coupled title");
         assert_eq!(frame.info.read_revision, sequence);
         let prepared = view_read::prepare(facts, sequence, &tickets, crate::config::UiLanguage::Ja);
