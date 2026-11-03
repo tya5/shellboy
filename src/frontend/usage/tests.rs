@@ -10,7 +10,10 @@ use serde_json::json;
 fn cached_usage_never_turns_missing_or_invalid_counts_into_zero() {
     assert_eq!(cached_tokens(None), "未報告");
     for count in [0, 12345, i64::MAX as u64] {
-        assert_eq!(cached_tokens(Some(count)), count.to_string());
+        assert_eq!(
+            cached_tokens(Some(count), crate::config::UiLanguage::En),
+            count.to_string()
+        );
     }
 }
 
