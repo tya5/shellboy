@@ -419,8 +419,10 @@ Implementation pending; this paragraph records the adopted target, not current b
 At every TUI startup, send terminal width, DA and keyboard enhancement queries
 before the first frame without waiting. A common capability-probe mechanism
 represents each capability as `Unmeasured` or `Measured(value)`; the input
-reader consumes replies at any time without inserting them into input. A measured
-layout change causes one redraw. A successful cached width is the initial layout
+reader consumes matching replies only for outstanding queries, at most one per
+query, and never filters bracketed paste. Plain cursor replies can collide with
+Shift+F3; prefer DEC-private DSR where available. A measured layout change causes
+one redraw. A successful cached width is the initial layout
 baseline, not a measurement for the current launch; otherwise use conservative
 fallback glyphs and widths. Keyboard enhancement stays off until confirmed.
 Only successful new measurements are cached per terminal program/version or
