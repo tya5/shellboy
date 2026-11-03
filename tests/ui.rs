@@ -3166,7 +3166,11 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
     assert_eq!(ui.view().selection_revision, 2);
     assert!(!ui.view().navigation.is_loading());
     assert!(!ui.view().navigation.follow());
-    assert!(ui.view().status.contains("Restored the history display position"));
+    assert!(
+        ui.view()
+            .status
+            .contains("Restored the history display position")
+    );
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("visible history old1"));
@@ -3202,7 +3206,11 @@ fn history_rebase_replaces_removed_anchor_and_rejects_old_refresh() {
         ui.view().navigation.anchor.node_id.as_deref(),
         Some("replacement")
     );
-    assert!(ui.view().status.contains("The display source is no longer on the selected path"));
+    assert!(
+        ui.view()
+            .status
+            .contains("The display source is no longer on the selected path")
+    );
     ui.apply(UiUpdate::History {
         pending: Default::default(),
         read_revision: 0,
