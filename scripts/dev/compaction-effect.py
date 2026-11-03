@@ -15,6 +15,7 @@ import datetime as dt
 import json
 import math
 import sqlite3
+import statistics
 import tempfile
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -137,7 +138,7 @@ def summarize(rows, side, threshold):
         'model_requests': len(requests),
         'provider_input_tokens': {
             'known_requests': len(known), 'unknown_requests': len(requests) - len(known),
-            'median': percentile(known, .5), 'p90': percentile(known, .9),
+            'median': statistics.median(known) if known else None, 'p90': percentile(known, .9),
             'above_compaction_threshold': {
                 'threshold': threshold, 'requests': above_threshold,
                 'share': above_threshold / len(known) if known else None},
@@ -148,7 +149,7 @@ def summarize(rows, side, threshold):
             'ratio': (sum(r['cached'] for r in ratio_pairs) / sum(r['input'] for r in ratio_pairs)) if ratio_pairs else None},
         'compaction_attempts': {'total': len(attempts), 'outcomes': outcomes},
         'requests_between_compactions': {
-            'intervals': len(gaps), 'median': percentile(gaps, .5),
+            'intervals': len(gaps), 'median': statistics.median(gaps) if gaps else None,
             'p90': percentile(gaps, .9)},
     }
 
