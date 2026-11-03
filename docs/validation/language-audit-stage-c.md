@@ -483,3 +483,17 @@ returned no items with an incompatible/degraded index; no index was rebuilt.
 No broad classification or fingerprint change is claimed. Exact3OS integration,
 physical terminal, clipboard, live provider and final Stage C acceptance remain
 separate. This work follows the subsequently selected0.6.1 cutoff.
+
+## #152 Deletion, Key Hint, And Count Message Audit
+
+On current base `62a4c4def5`, the deletion review, key-hint, and typed count
+message surfaces retain explicit Japanese UI branches with language-selected
+English alternatives. Existing source evidence includes the bilingual deletion
+loading/failure screen test in `src/ui/thread_deletion.rs`, the measured-width
+guide-key test in `src/ui/help.rs`, and localized generated-title/count
+projections in `src/presentation/projection.rs` and
+`src/presentation/messages.rs`. These are UI-owned labels; provider errors,
+source titles, IDs, and stored values remain unchanged. The current language
+audit reports 729 category (c) records; fingerprint consistency is not a zero
+gate. This note records reviewed surfaces only and does not claim the Stage C
+zero gate, physical PTY, Windows, or integration acceptance.

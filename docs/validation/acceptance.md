@@ -9331,3 +9331,4 @@ known operation keys and checks both localized values; unknown identifiers keep
 the underscore-normalized fallback. No source values or protocol labels are
 rewritten. Local validation is `cargo fmt --all -- --check` plus Python language
 audit tests; three-OS CI is pending.
+- #152 deletion/key-hint/count audit note is documentation evidence only. Strict language audit, physical terminal checks, and integration-tip three-OS acceptance remain separate and outstanding.
