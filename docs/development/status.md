@@ -4397,3 +4397,10 @@ until the reviewed chain is on main.
 The target uses paired provider usage and request-character measurements;
 verification, loop regression and three-OS CI results are pending. It is not
 approved or integrated.
+## #192 session-owned input continuation
+
+Continue W4's adopted design and filter on a task-isolated branch rebased onto
+226c4f6d. Replace blocking Unix capability helpers with one session-owned reader;
+Windows native console input sends no VT probes. Implementation and validation
+are pending. #194 is accepted and frozen until explicit hotfix-landed notice;
+no migration changes are included here.
