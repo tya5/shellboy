@@ -51,7 +51,6 @@ pub(super) struct RawMessage {
     state: String,
     run: Option<String>,
     turn: Option<String>,
-    answer: Option<String>,
     sender: Option<String>,
     assignment: Option<String>,
     created: Option<String>,
@@ -138,13 +137,13 @@ const MESSAGE_SQL:&str="SELECT
  CASE WHEN octet_length(r.state)<=64 THEN r.state END,
  CASE WHEN octet_length(r.run_id)<=512 THEN r.run_id END,
  CASE WHEN octet_length(r.turn_id)<=512 THEN r.turn_id END,
- CASE WHEN octet_length(t.answer_node_id)<=512 THEN t.answer_node_id END,
+ NULL,
  CASE WHEN octet_length(r.sender_json)<=65536 THEN r.sender_json END,
  CASE WHEN octet_length(r.result_json)<=65536-CASE WHEN octet_length(r.sender_json)<=65536 THEN octet_length(r.sender_json) ELSE 0 END THEN r.result_json END,
  CASE WHEN octet_length(r.created_at)<=512 THEN r.created_at END,
  CASE WHEN octet_length(r.updated_at)<=512 THEN NULLIF(r.updated_at,'') END,
  CASE WHEN octet_length(r.hold_reason)<=512 THEN r.hold_reason END,
- COALESCE(octet_length(r.run_id)>512,0)+2*COALESCE(octet_length(r.turn_id)>512,0)+4*COALESCE(octet_length(t.answer_node_id)>512,0)
+ COALESCE(octet_length(r.run_id)>512,0)+2*COALESCE(octet_length(r.turn_id)>512,0)
  +8*(octet_length(r.sender_json)>65536)
  +16*COALESCE(octet_length(r.result_json)>65536-CASE WHEN octet_length(r.sender_json)<=65536 THEN octet_length(r.sender_json) ELSE 0 END,0)
  +32*(octet_length(r.created_at)>512)+64*(octet_length(r.updated_at)>512)+128*COALESCE(octet_length(r.hold_reason)>512,0)
@@ -218,7 +217,7 @@ pub(super) fn read_tx(
                         r.get::<_, Option<String>>(1)?,
                         r.get(2)?,
                         r.get(3)?,
-                        r.get(4)?,
+                        r.get::<_, Option<String>>(4)?,
                         r.get(5)?,
                         r.get(6)?,
                         r.get(7)?,
@@ -251,7 +250,6 @@ pub(super) fn read_tx(
                 state: required(row.1, "message delivery state")?,
                 run: row.2,
                 turn: row.3,
-                answer: row.4,
                 sender: row.5,
                 assignment: row.6,
                 created: row.7,

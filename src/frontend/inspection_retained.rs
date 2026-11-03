@@ -1011,6 +1011,9 @@ pub(super) fn capture_response(
             }
             for condition in a.conditions.iter().take(201) {
                 let found = match condition {
+                    crate::protocol::WaitCondition::ReplyReceived { message_id } => {
+                        Some((TargetKind::Node, message_id.as_str()))
+                    }
                     crate::protocol::WaitCondition::RunEnded { run_id } => {
                         Some((TargetKind::Run, run_id.as_str()))
                     }

@@ -8962,3 +8962,12 @@ On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 history-interaction suites passed (24, 2, and 15 tests respectively). Final-tip three-OS CI run `41561161744` succeeded on UI/code/test SHA
 `499e764407` across Windows, macOS, and Ubuntu. This follow-up commit changes
 only validation documentation; the tested UI implementation is unchanged.
+
+### #194 Step 2: Reply Core
+
+Synthetic fixtures cover fresh/upgrade partial-index plans, once-only ordered
+admission with rollback, 128-duty capacity, replay and fingerprint conflicts,
+applied/pending and recipient authority checks, reply correlation, queued and
+admitted cancellation, terminal reply wait states, and observer cleanup.
+Terminal `ignored`/`recipient_deleted` facts are injected for wait tests; their
+production transitions are step 3. Final-tip three-OS CI remains pending.

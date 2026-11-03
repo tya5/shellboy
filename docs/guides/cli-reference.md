@@ -63,7 +63,7 @@ Without an explicit ID, the CLI generates an instance-specific operation ID. For
 
 For important changes, explicitly retain an ID in the already known same-instance form `INSTANCE:YOUR_UNIQUE_NONCE` so acceptance can be investigated after disconnection. The instance component matches an operation_id returned by that owner. Do not reuse Run/Turn/message/node IDs as operation IDs.
 
-`message send` `delivery_status=accepted|held|applied|cancelled` describes acceptance/application. `assignment=new_run|new_turn|existing_turn` includes both run_id and turn_id; saved assignment never changes. `assignment=pending` has neither; query `message get` later for initial assignment. Successful send does not mean an answer is complete. Use `answer_node_id` for source retrieval when available.
+`message send` `delivery_status=accepted|held|applied|cancelled` describes acceptance/application. `assignment=new_run|new_turn|existing_turn` includes both run_id and turn_id; saved assignment never changes. `assignment=pending` has neither; query `message get` later for initial assignment. Successful send does not mean an answer is complete. For explicit replies, inspect `reply.state` and read `reply.node_id` when replied.
 
 ### Saved execution context
 
@@ -153,13 +153,14 @@ Set with `thread set --thread THREAD --title 'Investigation and fixes'`. `--titl
 
 Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd resolves against the creation/change target's base. Changing cwd does not change an existing AGENTS reference. See [configuration](configuration.md#startup-settings-and-thread-settings).
 
-### Message / Operation (4 operations)
+### Message / Operation (5 operations)
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
-| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and answer_node_id when available |
-| `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed queued message IDs. Each item reports cancelled/already_cancelled/already_admitted/not_found/forbidden/unavailable and an archive_draft_id when available; admitted history cannot be cancelled. Does not wake the model |
+| `message send [--thread THREAD] [--deliver now\|complete] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
+| `message reply --message MESSAGE (--text TEXT | --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns reply_to/message_id and optional delivery |
+| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and optional expect_reply/reply/reply_to facts |
+| `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns reply_cancelled without removing history. Other outcomes are cancelled/already_cancelled/already_admitted/not_found/forbidden/unavailable. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
 
 `message get` returns `sender.kind`: `model` with verified credential-free
@@ -736,3 +737,21 @@ reconstructs the admitted comparison identity, not a newer response's ID. An
 unknown historical request witness or changed diagnosis setting is reported as
 unknown rather than silently guessed. Neither command verifies provider cache
 effectiveness.
+
+## Explicit Reply Core (#194)
+
+`message send --expect-reply` records a reply duty on the accepted message;
+there can be at most 128 pending duties per recipient Thread. A recipient model
+(or human) replies with `message reply --message MESSAGE_ID --text TEXT` or
+`--text-stdin`. It must be applied and still pending. `message get` exposes
+`expect_reply`, `reply` (state and optional timestamp, node, sender), or
+`reply_to` for a delivered reply; it no longer borrows a Turn's end message.
+Use `history get --node REPLY_NODE_ID` for the body.
+
+`wait reply_received` uses a JSON condition
+`{"type":"reply_received","message_id":"MESSAGE_ID"}`. Inspect the snapshot:
+`satisfied` can mean replied, ignored, cancelled, or recipient deleted. Timeout
+does not cancel the duty. `thread get` includes `awaiting_reply` (up to 128,
+oldest first). Cancelling a queued request cancels both input and duty;
+cancelling an admitted duty returns `reply_cancelled`, retains history, and
+notifies the recipient without waking it.

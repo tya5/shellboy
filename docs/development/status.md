@@ -4196,3 +4196,13 @@ observations and clarifies that cold interactive startup includes owner startup.
 These are historical fake-model measurements, not new provider measurements.
 The historical sampler is not yet integrated into main; the guide identifies
 its exact source and workflow. Review and integration CI remain pending.
+
+### #194 Step 2: Explicit Reply Core
+
+The reply-expected send flag, ordered durable admission notices, 128 pending
+reply cap, explicit reply mutation, reply receipt fields, reply waits, admitted
+duty cancellation, and Thread awaiting-reply projection are implemented on the
+step-1 base. Migration 25 is provisional until integration ordering is known.
+Run-end reminders/deletion outcomes and exec modes belong to subsequent steps.
+Synthetic local validation is in progress; three-OS CI and integration remain
+pending. No real-provider measurements are involved.

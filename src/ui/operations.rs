@@ -53,6 +53,7 @@ ThreadList,
     ThreadDelete,
     ThreadSet,
     MessageSend,
+    MessageReply,
     MessageGet,
     OperationGet,
     RunGet,
@@ -1219,6 +1220,20 @@ impl Form {
                             .unwrap_or_default(),
                         thread_id: form.optional("thread")?,
                         text: form.owned("text")?,
+                    }))
+                },
+            ),
+            OpKind::MessageReply => (
+                vec![
+                    f("message", "message ID", c.message.clone(), Text),
+                    f("text", "Reply", String::new(), Multiline),
+                    f("sender_label", "Sender label", String::new(), Text),
+                ],
+                |form, _cwd| {
+                    Ok(Command::MessageReply(MessageReplyArgs {
+                        message_id: form.owned("message")?,
+                        text: form.owned("text")?,
+                        sender_label: form.optional("sender_label")?,
                     }))
                 },
             ),

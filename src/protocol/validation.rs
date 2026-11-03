@@ -216,6 +216,7 @@ impl WaitArgs {
         }
         for condition in &self.conditions {
             match condition {
+                WaitCondition::ReplyReceived { message_id } => nonempty(message_id, "message_id")?,
                 WaitCondition::ThreadSettled { .. } => {}
                 WaitCondition::TurnCompleted { turn_id } => nonempty(turn_id, "turn_id")?,
                 WaitCondition::RunEnded { run_id } => nonempty(run_id, "run_id")?,

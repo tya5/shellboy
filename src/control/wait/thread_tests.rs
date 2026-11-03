@@ -116,3 +116,44 @@ async fn cancelling_a_thread_observation_keeps_its_target_live_and_removes_pendi
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn reply_waiters_share_one_terminal_fact_and_leave_no_pending_records() {
+    crate::test_watchdog::watchdog("multiple reply waiters", async {
+        let root = tempfile::tempdir().unwrap();
+        let owner = open(root.path()).await;
+        let control = Control::new(&owner, root.path().into());
+        owner.db.call(|db| {
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('recipient','/','/a','p','m','0'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('reply-request','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('reply-request','reply-request','{}','recipient','reply-request','held','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');")?;
+            Ok(())
+        }).await.unwrap();
+        let query = WaitArgs {
+            conditions: vec![WaitCondition::ReplyReceived { message_id: "reply-request".into() }],
+            timeout_ms: crate::test_watchdog::WATCHDOG.as_millis() as u64,
+            after: None,
+        };
+        let first = tokio::spawn(observe(control.clone(), "reply-wait-one".into(), query.clone(), None, CancellationToken::new()));
+        let second = tokio::spawn(observe(control.clone(), "reply-wait-two".into(), query, None, CancellationToken::new()));
+        loop {
+            let count = owner.db.call(|db| Ok(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('wait.pending.reply-wait-one','wait.pending.reply-wait-two')", [], |r| r.get::<_,i64>(0))?)).await.unwrap();
+            if count == 2 { break; }
+            tokio::task::yield_now().await;
+        }
+        owner.db.call(|db| {
+            db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json('{\"state\":\"cancelled\",\"at\":\"1\"}')) WHERE message_node_id='reply-request'", [])?;
+            Ok(())
+        }).await.unwrap();
+        control.changed("recipient");
+        for waiter in [first, second] {
+            let result = waiter.await.unwrap().unwrap();
+            assert_eq!(result["status"], "satisfied");
+            assert_eq!(result["snapshot"]["conditions"][0]["state"], "cancelled");
+        }
+        owner.db.call(|db| {
+            assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('wait.pending.reply-wait-one','wait.pending.reply-wait-two')", [], |r| r.get::<_,i64>(0))?, 0);
+            Ok(())
+        }).await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
