@@ -3113,5 +3113,95 @@
     "category": "a",
     "reason": "AutomaticCompactionSkip::label_localized has an explicit English arm for the same RejectedInvalidState | RejectedOther pattern (\"Auto-compaction deferred (previous attempt rejected)\"). The saved enum/state is unchanged.",
     "source_tokens_sha256": "7b3a66f4adfea458be0918e9343396f06bb85d719bcb3a976a798cb68f3d45ac"
+  },
+  "src/presentation/messages.rs:66fbd21bcc455dfc:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:2a002cd4e0fc0802:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:a593f7ae5457885f:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:e9920c5843da5ff8:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:9bb038c004056f05:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:ebe02102c4b96aa9:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:3f255e7012ff2914:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:f0804e5148e3034f:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:3529ab2a1e9aad0f:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:579eefde6c08dfb9:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:3d2c1598a96cc94c:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:31f7b49353e52bb6:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:8d8a29066395dd13:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:80891c8af30ce09d:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:2042a39f0cac802f:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:fd0a0aeb0fb703ee:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:2de7a99234bd2781:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+  },
+  "src/presentation/messages.rs:73b5698667456f76:1": {
+    "category": "a",
+    "reason": "Reviewed Message::render source branch: UiLanguage::En renders a separate English template; the Japanese branch is UI-owned and dynamic values remain opaque. Narrow and standard-width forms are explicit.",
+    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   }
 }
