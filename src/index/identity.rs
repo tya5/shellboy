@@ -469,13 +469,20 @@ fn read_status(
                 status.reason = Some(pause);
             }
         }
+        if meta(db, &IndexKeys::new(key).recovery_required())?.is_some() {
+            status.reason = Some(match status.reason.take() {
+                Some(prior) => format!("{prior}; {}", queue::RECOVERY_REQUIRED_MESSAGE),
+                None => queue::RECOVERY_REQUIRED_MESSAGE.into(),
+            });
+        }
         if !explicit {
             if let Some(group) = meta(db, &IndexKeys::new(key).rebuild())? {
                 if let Some(space) = meta(db, &IndexKeys::new(key).group(&group))? {
                     spaces.insert(space);
                 }
                 if status.reason.is_none()
-                    && meta(db, &IndexKeys::new(key).enqueueing(&group))?.is_some()
+                    && (meta(db, &IndexKeys::new(key).enqueueing(&group))?.is_some()
+                        || meta(db, &IndexKeys::new(key).enqueue_failed(&group))?.is_some())
                 {
                     status.reason=Some("Rebuild source admission is in progress or was interrupted; explicitly rebuild after interrupted preparation".into());
                 }
