@@ -268,6 +268,8 @@ pub enum IndexCommand {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum StorageCommand {
+    /// Check SQLite integrity and foreign keys while the owner is stopped.
+    Check,
     Status(StorageOptions),
     Collect(StorageOptions),
 }
@@ -1033,6 +1035,9 @@ impl Cli {
                 }),
             },
             CliCommand::Storage { command } => match command {
+                StorageCommand::Check => {
+                    return Err(invalid("storage check is a standalone command"));
+                }
                 StorageCommand::Status(a) => C::StorageStatus(a.into()),
                 StorageCommand::Collect(a) => C::StorageCollect(a.into()),
             },

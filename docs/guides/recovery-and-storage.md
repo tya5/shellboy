@@ -373,6 +373,18 @@ recoverable conversation defect.
 
 Per-conversation isolation does not bypass database integrity checks. For example,
 invalid JSON syntax in `turn.recovery_reason_json` violates its database CHECK
-and is rejected by startup `quick_check` before interruption capture. Preserve
-the database and inspect the reported storage/integrity failure; this case is
-not reported as a successfully isolated conversation defect.
+is detected by `quick_check` when it runs after an unclean or unknown shutdown,
+or by `shellboy storage check`. A clean restart does not run that scan and can
+therefore leave pre-existing CHECK violations undetected. Preserve the database
+and inspect any reported storage/integrity failure; do not treat corruption as a
+successfully isolated conversation defect.
+
+## Manual database integrity check
+
+Stop the owner, then run `shellboy storage check` with the same `--data-dir`
+and configuration. The command acquires the owner lock and runs SQLite
+`quick_check` and `foreign_key_check` without creating or migrating a database.
+Use it after suspected storage corruption or when a full manual check is needed.
+Normal startup checks foreign keys after migrations and runs `quick_check` after
+an unclean or unknown previous shutdown; a clean restart skips those scans.
+A successful check does not prove that every application-level invariant holds.

@@ -363,7 +363,7 @@ impl DbWorker {
         path: impl AsRef<Path>,
         owner: Arc<dyn Send + Sync>,
     ) -> Result<Self, StorageError> {
-        Self::open_internal(path, DEFAULT_QUEUE_CAPACITY, Some(owner), None, None).await
+        Self::open_internal(path, DEFAULT_QUEUE_CAPACITY, Some(owner), None, None, false).await
     }
 
     pub(crate) async fn open_owned_reporting(
@@ -371,6 +371,7 @@ impl DbWorker {
         owner: Arc<dyn Send + Sync>,
         progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
         startup_diagnostics: crate::diagnostics::Diagnostics,
+        clean_shutdown: bool,
     ) -> Result<Self, StorageError> {
         Self::open_internal(
             path,
@@ -378,6 +379,7 @@ impl DbWorker {
             Some(owner),
             progress,
             Some(startup_diagnostics),
+            clean_shutdown,
         )
         .await
     }
@@ -387,7 +389,7 @@ impl DbWorker {
         path: impl AsRef<Path>,
         capacity: usize,
     ) -> Result<Self, StorageError> {
-        Self::open_internal(path, capacity, None, None, None).await
+        Self::open_internal(path, capacity, None, None, None, false).await
     }
 
     async fn open_internal(
@@ -396,6 +398,7 @@ impl DbWorker {
         owner: Option<Arc<dyn Send + Sync>>,
         progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
         startup_diagnostics: Option<crate::diagnostics::Diagnostics>,
+        clean_shutdown: bool,
     ) -> Result<Self, StorageError> {
         if capacity == 0 {
             return Err(StorageError::Configuration(
@@ -440,6 +443,7 @@ impl DbWorker {
                     worker,
                     progress,
                     startup_diagnostics,
+                    clean_shutdown,
                 )
             })
             .map_err(|error| StorageError::Worker(error.to_string()))?;
@@ -1054,6 +1058,7 @@ fn run_worker(
     state: WorkerState,
     progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
     startup_diagnostics: Option<crate::diagnostics::Diagnostics>,
+    clean_shutdown: bool,
 ) -> Result<(), StorageError> {
     let runtime = match tokio::runtime::Builder::new_current_thread().build() {
         Ok(runtime) => runtime,
@@ -1062,14 +1067,18 @@ fn run_worker(
             return Ok(());
         }
     };
-    let mut connection =
-        match open_connection(&path, progress.as_ref(), startup_diagnostics.as_ref()) {
-            Ok(connection) => connection,
-            Err(error) => {
-                let _ = ready.send(Err(error));
-                return Ok(());
-            }
-        };
+    let mut connection = match open_connection(
+        &path,
+        progress.as_ref(),
+        startup_diagnostics.as_ref(),
+        clean_shutdown,
+    ) {
+        Ok(connection) => connection,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return Ok(());
+        }
+    };
     if ready.send(Ok(())).is_err() {
         return Ok(());
     }
@@ -1258,6 +1267,7 @@ fn open_connection(
     path: &Path,
     progress: Option<&tokio::sync::watch::Sender<crate::app::StartupProgress>>,
     diagnostics: Option<&crate::diagnostics::Diagnostics>,
+    clean_shutdown: bool,
 ) -> Result<Connection, StorageError> {
     use crate::app::StartupStage;
     let trace = std::cell::RefCell::new(StartupDbTrace {
@@ -1301,6 +1311,7 @@ fn open_connection(
             "FULL/FK required, found synchronous={synchronous}, foreign_keys={foreign_keys}"
         )));
     }
+    let migrated = version > 0 && version < SCHEMA_VERSION;
     let version = if version == 0 {
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1327,20 +1338,61 @@ fn open_connection(
         },
     )?;
     validate_schema(&connection)?;
-    trace
-        .borrow_mut()
-        .next(StartupStage::DatabaseForeignKeys, None, None);
-    if connection.prepare("PRAGMA foreign_key_check")?.exists([])? {
-        return Err(StorageError::Schema("foreign key violations".into()));
+    if migrated {
+        trace
+            .borrow_mut()
+            .next(StartupStage::DatabaseForeignKeys, None, None);
+        check_integrity(&connection, true, false)?;
     }
-    trace
-        .borrow_mut()
-        .next(StartupStage::DatabaseQuickCheck, None, None);
-    let integrity: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-    if integrity != "ok" {
-        return Err(StorageError::Schema(format!("quick_check: {integrity}")));
+    if !clean_shutdown {
+        trace
+            .borrow_mut()
+            .next(StartupStage::DatabaseQuickCheck, None, None);
+        check_integrity(&connection, false, true)?;
     }
     Ok(connection)
+}
+
+/// Run both integrity checks without starting an owner or creating a database.
+pub fn manual_check(
+    config: Option<&Path>,
+    data_dir: Option<&Path>,
+    cwd: &Path,
+) -> Result<(), crate::protocol::ApiError> {
+    let loaded = crate::config::Config::load_with_overrides(
+        config,
+        data_dir,
+        cwd,
+        &crate::config::PathEnvironment::current(),
+    )
+    .map_err(|error| {
+        crate::protocol::ApiError::new(crate::protocol::ErrorCode::ConfigInvalid, error.to_string())
+    })?;
+    let _lock = crate::app::OwnerLock::acquire(&loaded.data_dir)?;
+    register_vec().map_err(crate::app::storage_error)?;
+    let connection = Connection::open_with_flags(
+        loaded.data_dir.join("shellboy.db"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| crate::app::storage_error(StorageError::Sqlite(error)))?;
+    check_integrity(&connection, true, true).map_err(crate::app::storage_error)
+}
+
+pub fn check_integrity(
+    connection: &Connection,
+    foreign_keys: bool,
+    quick: bool,
+) -> Result<(), StorageError> {
+    if foreign_keys && connection.prepare("PRAGMA foreign_key_check")?.exists([])? {
+        return Err(StorageError::Schema("foreign key violations".into()));
+    }
+    if quick {
+        let integrity: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(StorageError::Schema(format!("quick_check: {integrity}")));
+        }
+    }
+    Ok(())
 }
 
 fn validate_schema(connection: &Connection) -> Result<i64, StorageError> {
@@ -1936,5 +1988,49 @@ mod lane_budget_tests {
         })
         .await
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod integrity_policy_tests {
+    use super::*;
+
+    #[test]
+    fn reopen_obeys_clean_marker_and_unclean_checks() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("db");
+        drop(open_connection(&path, None, None, false).unwrap());
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','now');").unwrap();
+        drop(db);
+        assert!(open_connection(&path, None, None, true).is_ok());
+        assert!(
+            open_connection(&path, None, None, false)
+                .unwrap_err()
+                .to_string()
+                .contains("quick_check")
+        );
+    }
+
+    #[test]
+    fn integrity_policy_respects_selected_checks() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("PRAGMA foreign_keys=OFF; CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(parent_id INTEGER REFERENCES parent(id), n INTEGER CHECK(n > 0)); INSERT INTO child VALUES(99, 1);").unwrap();
+        assert!(check_integrity(&db, false, false).is_ok());
+        assert!(
+            check_integrity(&db, true, false)
+                .unwrap_err()
+                .to_string()
+                .contains("foreign key")
+        );
+        assert!(check_integrity(&db, false, true).is_ok());
+        db.execute_batch("PRAGMA ignore_check_constraints=ON; UPDATE child SET n=0; PRAGMA ignore_check_constraints=OFF;")
+            .unwrap();
+        assert!(
+            check_integrity(&db, false, true)
+                .unwrap_err()
+                .to_string()
+                .contains("quick_check")
+        );
     }
 }

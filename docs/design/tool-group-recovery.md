@@ -106,8 +106,9 @@ remain fatal. A capture failure identifies only its Thread, without assigning
 an unrelated group ID. No malformed body is copied into diagnostics.
 
 The recovery_reason_json column has a JSON-validity CHECK. Invalid syntax there
-is a database integrity violation detected by the unchanged startup quick_check
-before capture. It remains fatal; per-Thread isolation does not bypass integrity,
-SQL or I/O failures. This partially adopts review L2: isolate schema-allowed
+is a database integrity violation detected by quick_check after an unclean or
+unknown shutdown, or by the manual storage check. Clean startup skips this scan;
+undetected pre-existing corruption is not a successfully isolated Thread defect.
+Detected integrity, SQL and I/O failures remain fatal. This partially adopts review L2: isolate schema-allowed
 metadata defects, but retain the existing global integrity boundary rather than
 pretending a CHECK-violating database is healthy.
