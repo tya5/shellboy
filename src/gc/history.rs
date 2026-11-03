@@ -38,7 +38,7 @@ pub(super) fn history_step(db: &mut Connection, job: &str) -> Result<HistoryStep
     if !session || parsed.is_none() {
         reset(&tx, job, current)?;
         tx.commit().map_err(sql_error)?;
-        report.stage = Stage::Roots.as_str().into();
+        report.stage = Stage::Receipts.as_str().into();
         report.root_revision = current;
         report.restarted = true;
         return Ok(report);
@@ -51,6 +51,7 @@ pub(super) fn history_step(db: &mut Connection, job: &str) -> Result<HistoryStep
         report.root_revision = current;
     }
     match progress.stage {
+        Stage::Receipts => receipts_step(&tx, &mut progress, &mut report)?,
         Stage::Roots => roots_step(&tx, job, &mut progress, &mut report)?,
 
         Stage::Provenance => provenance_step(&tx, job, &mut progress, &mut report)?,
@@ -67,6 +68,31 @@ pub(super) fn history_step(db: &mut Connection, job: &str) -> Result<HistoryStep
     }
     tx.commit().map_err(sql_error)?;
     Ok(report)
+}
+
+// Keyset the entire finite receipt horizon: LIMIT bounds examination as well as
+// deletion, even when most receipts remain owned. Recheck inside the DELETE.
+const RECEIPT_ELIGIBLE: &str = "EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NOT NULL) AND json_extract(COALESCE(receipt.result_json,'{}'),'$.reply.state') IS NOT 'pending' AND NOT EXISTS(SELECT 1 FROM thread sender WHERE sender.id=json_extract(receipt.sender_json,'$.thread_id') AND json_extract(receipt.sender_json,'$.kind')='model' AND sender.deleted_at IS NULL)";
+fn receipts_step(
+    tx: &Transaction<'_>,
+    progress: &mut Progress,
+    report: &mut HistoryStep,
+) -> Result<()> {
+    let rows=tx.prepare("SELECT rowid,id,octet_length(sender_json)+COALESCE(octet_length(result_json),0) FROM receipt WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT ?3").map_err(sql_error)?
+        .query_map(params![progress.last_rowid,progress.receipt_horizon,BATCH as i64],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?))) .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
+    let sql = format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE}");
+    for (rowid, id, bytes) in &rows {
+        if tx.execute(&sql, [id]).map_err(sql_error)? == 1 {
+            report.bytes_collected += (*bytes).max(0) as u64;
+        }
+        progress.last_rowid = *rowid;
+    }
+    report.scanned = rows.len() as u64;
+    if rows.len() < BATCH {
+        progress.stage = Stage::Roots;
+        progress.last_rowid = 0;
+    }
+    Ok(())
 }
 
 fn roots_step(
@@ -234,6 +260,7 @@ mod tests {
     #[test]
     fn durable_stage_bytes_and_current_progress_fields_are_required() {
         for (stage, literal) in [
+            (Stage::Receipts, "receipts"),
             (Stage::Roots, "roots"),
             (Stage::Provenance, "provenance"),
             (Stage::Sweep, "sweep"),
@@ -251,7 +278,12 @@ mod tests {
         assert_eq!(progress.horizon, 456);
         assert!(!progress.revalidate_roots);
         assert_eq!(progress.last_rowid, 123);
-        assert_eq!(serde_json::to_string(&progress).unwrap(), current);
+        assert_eq!(progress.receipt_horizon, 0);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&serde_json::to_string(&progress).unwrap())
+                .unwrap()["receipt_horizon"],
+            0
+        );
         assert!(serde_json::from_str::<Progress>(r#"{"stage":"sweep","last_rowid":123}"#).is_err());
         assert!(
             serde_json::from_str::<Progress>(r#"{"stage":"future","last_rowid":123}"#).is_err()
