@@ -202,7 +202,11 @@ impl IndexService {
         let mut current_spaces = selected.iter().cloned().collect::<Vec<_>>();
         if let Some(profile) = &self.profile_key {
             let keys = IndexKeys::new(profile);
-            for key in [keys.pause(), dimensions::candidate_key(keys)] {
+            for key in [
+                keys.pause(),
+                keys.recovery_required(),
+                dimensions::candidate_key(keys),
+            ] {
                 meta_rows.push(read_meta(db, key, &mut budget)?);
             }
             let rebuild = read_meta(db, keys.rebuild(), &mut budget)?;
@@ -213,6 +217,7 @@ impl IndexService {
                 }
                 meta_rows.push(candidate);
                 meta_rows.push(read_meta(db, keys.enqueueing(group), &mut budget)?);
+                meta_rows.push(read_meta(db, keys.enqueue_failed(group), &mut budget)?);
             }
             meta_rows.push(rebuild);
             let group = read_meta(db, keys.group("active"), &mut budget)?;
@@ -392,7 +397,8 @@ pub(crate) fn prepare_saved(raw: RawIndexSaved) -> Value {
     let preparation=current_group.map(|group|{
         let key=IndexKeys::new(raw.profile.as_deref().unwrap()).enqueueing(group);
         let fence=by_key.get(key.as_str());
-        json!({"group":group,"enqueue_fence_present":fence.is_some(),"enqueue_fence_count":fence.and_then(|v|v.parse::<u64>().ok()),"note":"Admission fence is saved progress, never authorization for an automatic full-history restart; interrupted preparation requires explicit rebuild."})
+        let failed=by_key.contains_key(IndexKeys::new(raw.profile.as_deref().unwrap()).enqueue_failed(group).as_str());
+        json!({"group":group,"enqueue_failed":failed,"enqueue_fence_present":fence.is_some(),"enqueue_fence_count":fence.and_then(|v|v.parse::<u64>().ok()),"note":"Admission fence is saved progress, never authorization for an automatic full-history restart; interrupted preparation requires explicit rebuild."})
     });
     let candidate_key = raw
         .profile
@@ -481,9 +487,19 @@ pub(crate) fn prepare_saved(raw: RawIndexSaved) -> Value {
         && !paused
         && preparation
             .as_ref()
-            .is_some_and(|p| p["enqueue_fence_present"] == true)
+            .is_some_and(|p| p["enqueue_fence_present"] == true || p["enqueue_failed"] == true)
     {
         reason=Some("Rebuild source admission is in progress or was interrupted; explicitly rebuild after interrupted preparation".into());
+    }
+    if raw.profile.as_ref().is_some_and(|profile| {
+        by_key.contains_key(IndexKeys::new(profile).recovery_required().as_str())
+    }) {
+        let message =
+            "Oversized legacy index work could not be recovered; explicitly rebuild this profile";
+        reason = Some(match reason {
+            Some(prior) => format!("{prior}; {message}"),
+            None => message.into(),
+        });
     }
     if reason.is_none() {
         reason = raw.jobs.iter().find_map(|j| {
@@ -1279,6 +1295,213 @@ mod tests {
         );
         assert_eq!(observed["unknown_work_records"], 2);
         assert_eq!(observed["status"]["counts"]["pending"]["complete"], false);
+        db.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn oversized_unidentifiable_work_is_deleted_and_visible_in_saved_status() {
+        let (_root, db, service) = fixture().await;
+        let profile = service.key().unwrap().to_owned();
+        let key = IndexKeys::new(&profile).bootstrap("broken");
+        db.call(move |db| {
+            let body = "x".repeat(1024 * 1024 + 1);
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
+                params![key, body],
+            )?;
+            let (changed, cursor, done) = queue::recover_inflight_page(db, None)?;
+            assert!(changed && !done);
+            assert_eq!(cursor.as_deref(), Some(key.as_str()));
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [key], |r| r
+                    .get::<_, i64>(
+                    0
+                ))?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let observed = saved(&db, service, SavedReadLimits::default()).await;
+        assert!(
+            observed["status"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("explicitly rebuild")
+        );
+        db.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn recovered_source_waits_when_disabled_or_paused_then_splits() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut total = 0;
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                loop {
+                    let mut chunk = [0; 8192];
+                    let n = stream.read(&mut chunk).await.unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&chunk[..n]);
+                    if let Some(end) = bytes.windows(4).position(|x| x == b"\r\n\r\n") {
+                        let length = String::from_utf8_lossy(&bytes[..end])
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|v| v.trim().parse::<usize>().unwrap())
+                            })
+                            .unwrap();
+                        if bytes.len() >= end + 4 + length {
+                            let request: Value =
+                                serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+                            total += request["input"].as_array().unwrap()[0]
+                                .as_str()
+                                .unwrap()
+                                .len();
+                            break;
+                        }
+                    }
+                    assert!(bytes.len() < 2_000_000);
+                }
+                let body = r#"{"data":[{"index":0,"embedding":[1.0,2.0]}]}"#;
+                stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+            }
+            total
+        });
+        let (_root, db, original) = fixture().await;
+        let mut config = (*original.config).clone();
+        config.connections.get_mut("fixture").unwrap().base_url = url;
+        config.indexing.split_chars = 2_000_000;
+        config.indexing.auto_history = false;
+        let held = IndexService::new(db.clone(), Arc::new(config.clone()));
+        let profile = held.key().unwrap().to_owned();
+        let text = "x".repeat(1_100_000);
+        let payload =
+            json!({"role":"user","content":[{"type":"input_text","text":text}]}).to_string();
+        let body_hash = hash(payload.as_bytes());
+        let key = IndexKeys::new(&profile).bootstrap("legacy");
+        let stored_key = key.clone();
+        db.call(move |db| {
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES('source','user','2026-01-01T00:00:00Z',?1,?2,?3)", params![payload, payload.len() as i64, body_hash])?;
+            let work = Work::pending(Witness { node_id: "source".into(), revision: 0, body_hash: Some(body_hash), raw: None }, "text".into(), Segment { start: 0, end: 1_100_000, text: "x".repeat(1_100_000) }, "active", "new-finalized");
+            db.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2)", params![stored_key, encode_json(&work)?])?;
+            let (changed, _, done) = queue::recover_inflight_page(db, None)?;
+            assert!(changed && !done);
+            Ok(())
+        }).await.unwrap();
+        assert!(!held.drain_authorization(&profile).await.unwrap());
+        let observed = saved(&db, held.clone(), SavedReadLimits::default()).await;
+        assert_eq!(
+            observed["status"]["counts"]["held_auto_history"]["value"],
+            1
+        );
+        config.indexing.auto_history = true;
+        let active = IndexService::new(db.clone(), Arc::new(config));
+        let pause = IndexKeys::new(&profile).pause();
+        let pause_copy = pause.clone();
+        db.call(move |db| {
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,'paused')",
+                [pause_copy],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(!active.drain_authorization(&profile).await.unwrap());
+        let paused_profile = profile.clone();
+        db.call(move |db| {
+            assert_eq!(
+                claim::discard_paused(db, &paused_profile, None)?,
+                Some(false)
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.call(move |db| {
+            db.execute("DELETE FROM app_meta WHERE key=?1", [pause])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(active.drain_authorization(&profile).await.unwrap());
+        let paused_profile = profile.clone();
+        db.call(move |db| {
+            let pause = IndexKeys::new(&paused_profile).pause();
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,'paused')",
+                [&pause],
+            )?;
+            assert_eq!(
+                claim::discard_paused(db, &paused_profile, None)?,
+                Some(false)
+            );
+            db.execute("DELETE FROM app_meta WHERE key=?1", [&pause])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.call(move |db| {
+            let mut q = db.prepare("SELECT value FROM app_meta WHERE key LIKE ?1 ORDER BY key")?;
+            let rows = q
+                .query_map([IndexKeys::new(&profile).bootstrap_pattern()], |r| {
+                    r.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert!(rows.len() >= 2, "expected split bootstrap units");
+            let mut parts = rows
+                .iter()
+                .map(|row| {
+                    assert!(row.len() <= 1024 * 1024);
+                    decode_json::<Work>(row).unwrap().segment
+                })
+                .collect::<Vec<_>>();
+            parts.sort_by_key(|part| part.start);
+            assert_eq!(
+                parts.iter().map(|part| part.text.len()).sum::<usize>(),
+                1_100_000
+            );
+            assert_eq!(parts.first().unwrap().start, 0);
+            assert_eq!(parts.last().unwrap().end, 1_100_000);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        for _ in 0..5 {
+            let progress = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                active.process_one(CancellationToken::new()),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            if !progress {
+                break;
+            }
+        }
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(15), server)
+                .await
+                .unwrap()
+                .unwrap(),
+            1_100_000
+        );
+        let done = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM embedding_chunk WHERE source_node_id='source'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(done, 2);
         db.shutdown().await.unwrap();
     }
     async fn seed(db: &DbWorker, count: usize) {
