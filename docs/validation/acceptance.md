@@ -9280,3 +9280,16 @@ A separate test deletes malformed oversized work and verifies saved status asks
 for explicit rebuild. The Unicode/JSON-escaping split test runs independently.
 The source witness is rechecked before re-admission. Real provider billing,
 physical power loss and the final multi-OS integration SHA are not verified.
+
+## #172 review follow-up on 461685ff
+
+Synthetic temporary databases only. Added regression coverage for each original
+explicit authorization with auto_history=false and a current pause, failed
+candidate activation after barrier release, and Japanese/English render-time
+manual-rebuild display without changing raw/copy/source values. The existing
+1.1-million-byte source -> split units -> loopback provider -> two saved chunks
+end-to-end test is retained. Native strict Clippy/focused tests and final default
+CI are pending. Production data, billable embeddings, process-crash injection,
+and additional OS checks beyond the requested default CI are untested here.
+Migration version is deliberately not changed; #172 carries the integration
+checklist and #203 tracks the existing unbounded authorization recovery.

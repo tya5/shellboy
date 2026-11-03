@@ -665,6 +665,38 @@ pub(crate) fn prioritized_fields(value: &Value, roots: &[&str]) -> Vec<Presentat
     out
 }
 
+/// Translate only the owned reason code; raw saved values and other reasons
+/// remain available unchanged for copying and source inspection.
+pub(crate) fn index_recovery_value(
+    key: &str,
+    value: &str,
+    language: crate::config::UiLanguage,
+) -> Option<String> {
+    if key.rsplit('/').next() != Some("reason") {
+        return None;
+    }
+    let code = "index_manual_rebuild_required";
+    let parts = value.split("; ").collect::<Vec<_>>();
+    if !parts.contains(&code) {
+        return None;
+    }
+    let label = match language {
+        crate::config::UiLanguage::Ja => {
+            "古い索引データを復旧できませんでした。このプロファイルの手動再構築が必要です"
+        }
+        crate::config::UiLanguage::En => {
+            "Legacy index work could not be recovered; manual rebuild required for this profile"
+        }
+    };
+    Some(
+        parts
+            .into_iter()
+            .map(|part| if part == code { label } else { part })
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

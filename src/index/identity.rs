@@ -315,7 +315,7 @@ fn retry_tx(
             {
                 changed |= tx.execute(embedding_job_sql_2, [&job])? > 0;
                 if let Some(mut work) = json_meta::<Work>(tx, &IndexKeys::input(&job))? {
-                    if !work.authorization.starts_with("new-finalized-recovery") {
+                    if !work.recovery {
                         work.authorization = "explicit-retry".into();
                     }
                     set_json_meta(tx, &IndexKeys::input(&job), &work)?;
@@ -373,7 +373,7 @@ fn retry_tx(
                     .is_none_or(|ids| ids.contains(&work.witness.node_id))
             {
                 work.state = "pending".into();
-                if !work.authorization.starts_with("new-finalized-recovery") {
+                if !work.recovery {
                     work.authorization = "explicit-retry".into();
                 }
                 work.attempts = 0;
@@ -496,7 +496,15 @@ fn read_status(
             })? {
                 let admission: AutoAdmission = decode_json(&value?)?;
                 match admission.state.as_str() {
-                    "pending" if !auto_history => status.held_auto_history += 1,
+                    "pending"
+                        if !auto_history
+                            && admission
+                                .recovery_authorization
+                                .as_deref()
+                                .is_none_or(|auth| auth.starts_with("new-finalized")) =>
+                    {
+                        status.held_auto_history += 1
+                    }
                     "pending" => status.pending += 1,
                     "running" => status.running += 1,
                     "failed" => status.failed += 1,
