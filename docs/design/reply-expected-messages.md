@@ -895,3 +895,8 @@ is not part of this foreground unit.
 `recovery_hint` include `remaining_held` while the Turn is recovery_wait. This is
 an exact status-readback count over the recipient's held index range, not a
 count or scan inside reply admission. No separate queue or worker is added.
+
+The ordered unit merges current-Turn recovery_wait input with terminal-Run
+interrupted input before LIMIT, rather than allocating separate source quotas.
+Older Turns of the same still-live Run remain isolated: retrying the current
+Turn is not permission to revive stale/imported assignments from another Turn.

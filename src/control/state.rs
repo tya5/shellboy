@@ -47,7 +47,7 @@ pub(super) fn resume_recovery_turn_tx(
     if !valid {
         return Ok(false);
     }
-    let recovered = super::message_delivery::recover_on_resume_tx(
+    super::message_delivery::recover_on_resume_tx(
         tx,
         thread,
         run,
@@ -55,14 +55,6 @@ pub(super) fn resume_recovery_turn_tx(
         json!({"kind":"shellboy"}),
         at,
     )?;
-    let rows = tx.prepare("SELECT id FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND turn_id=?2 AND run_id=?3 AND hold_reason='recovery_wait' ORDER BY created_at,rowid LIMIT ?4")?
-        .query_map(params![thread,turn,run,128_i64.saturating_sub(recovered as i64)], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    for id in rows {
-        tx.execute(
-            "UPDATE receipt SET state='accepted',hold_reason=NULL,updated_at=?2 WHERE id=?1",
-            params![id, at],
-        )?;
-    }
     let remaining: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND turn_id=?2 AND run_id=?3 AND hold_reason='recovery_wait')", params![thread,turn,run], |r| r.get(0))?;
     if remaining || super::message_delivery::interrupted_remaining(tx, thread)? {
         tx.execute(
