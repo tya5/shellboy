@@ -845,10 +845,9 @@ impl ManagementPopup {
                 text.as_str(),
             ),
         };
-        let mut lines = vec![
-            Line::from(crate::ui::text_width::glyphs::decorate(title))
-                .style(Style::default().fg(theme::EMPHASIS)),
-        ];
+        let heading = Line::from(crate::ui::text_width::glyphs::decorate(title))
+            .style(Style::default().fg(theme::EMPHASIS));
+        let mut body = Vec::new();
         let text = if matches!(self.preview, IndexPreviewState::Loading(_)) {
             crate::ui::text_width::glyphs::decorate(text)
         } else {
@@ -868,12 +867,12 @@ impl ManagementPopup {
             // Keep a long error from pushing the retained result out of view.
             let error = safe.replace('\n', " ");
             let short: String = error.chars().take(160).collect();
-            lines.push(Line::from(if error.chars().count() > 160 {
+            body.push(Line::from(if error.chars().count() > 160 {
                 format!("{short}{}", crate::ui::text_width::glyphs::ellipsis())
             } else {
                 short
             }));
-            lines.push(Line::from(crate::ui::text_width::glyphs::decorate(local!(
+            body.push(Line::from(crate::ui::text_width::glyphs::decorate(local!(
                 self.language,
                 "前回の結果 | 古い情報（再確認が必要）",
                 "Previous result | Stale (review again)"
@@ -883,11 +882,13 @@ impl ManagementPopup {
                 .chars()
                 .take(4096)
                 .collect();
-            lines.extend(safe.lines().map(|line| Line::from(line.to_owned())));
+            body.extend(safe.lines().map(|line| Line::from(line.to_owned())));
         } else {
-            lines.extend(safe.lines().map(|line| Line::from(line.to_owned())));
+            body.extend(safe.lines().map(|line| Line::from(line.to_owned())));
         }
-        presentation::hanging_wrap(lines, width.max(1))
+        let mut lines = presentation::hanging_wrap(vec![heading], width.max(1));
+        lines.extend(presentation::indented_wrap(body, width));
+        lines
     }
     fn preview_height(&self, area: Rect) -> u16 {
         let count = self.preview_lines(area.width).len();
@@ -1709,6 +1710,57 @@ mod preview_notice_tests {
             }
         }
         super::super::i18n::verify_screen(configure, expected);
+    }
+
+    #[test]
+    fn index_preview_body_is_indented_and_wraps_bilingually() {
+        for (language, body) in [
+            (
+                UiLanguage::En,
+                "Synthetic preview result with enough words to wrap onto continuation rows.",
+            ),
+            (
+                UiLanguage::Ja,
+                "合成プレビュー結果の説明が狭い幅で折り返されても字下げを保ちます。",
+            ),
+        ] {
+            let mut popup = ManagementPopup::default();
+            popup.set_language(language);
+            let args = IndexArgs {
+                scope: Some(IndexScope::All),
+                ..Default::default()
+            };
+            popup.mode = ManagementMode::Index;
+            popup.scope = Some(args.clone());
+            popup.preview = IndexPreviewState::Ready(args, body.into());
+            for width in [16, 64] {
+                let rows = popup.preview_lines(width);
+                let shown = rows.iter().map(ToString::to_string).collect::<String>();
+                assert!(
+                    shown.contains("Cost preview") || shown.contains("費用preview"),
+                    "{shown}"
+                );
+                let body_start = rows
+                    .iter()
+                    .position(|row| {
+                        let line = row.to_string();
+                        line.contains("Synthetic") || line.contains("合成")
+                    })
+                    .expect("preview body starts after its heading");
+                for row in rows.iter().skip(body_start).filter(|row| row.width() > 0) {
+                    let shown = row
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>();
+                    assert!(shown.starts_with("  "), "{language:?} {width}: {shown}");
+                    assert!(
+                        row.width() <= usize::from(width),
+                        "{language:?} {width}: {shown}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

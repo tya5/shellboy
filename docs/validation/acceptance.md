@@ -8947,3 +8947,41 @@ On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 history-interaction suites passed (24, 2, and 15 tests respectively). Final-tip three-OS CI run `41561161744` succeeded on UI/code/test SHA
 `499e764407` across Windows, macOS, and Ubuntu. This follow-up commit changes
 only validation documentation; the tested UI implementation is unchanged.
+history-interaction suites passed (24, 2, and 15 tests respectively). Three-OS CI run `41559188009` succeeded on code/test SHA `59256f8b` across
+Windows, macOS, and Ubuntu. Final-tip three-OS CI run `41564221482`
+succeeded on SHA `77c29e87`; #177 is handed off.
+## #179 Item-Body Indentation Audit (in progress)
+
+Static audit in `src/ui` and `src/presentation` after #177 final-tip CI succeeded:
+
+| Surface | Direct line construction | Initial classification |
+| --- | --- | --- |
+| Conversation body | `src/ui/presentation.rs::node_lines_inner` (`Uncached`, `Details`, block/reasoning lines) | `Uncached` and `Details` are `Body`; prose/code and reasoning blocks retain their typed roles. Body and reasoning roles use the shared hanging indenter; tool, header, metadata, and event rows remain distinct. |
+| Notice rows | `src/ui/presentation.rs::notice_row`, `append_notice_run` | Standalone and grouped notice rows use `row_columns` as flat, single-line item headers; grouped children carry tree prefixes. They do not emit wrapped body rows, so keep this left alignment intentional. |
+| Owned work / waits | `src/ui/live_work.rs::draw` | The #98 opened-output read-error, notice, loading, and captured-output rows use shared two-space hanging indentation. Existing tree glyphs remain nested; the muted notice style is preserved on the inserted indent. |
+| Pending input | `src/ui/message_queue.rs` panel and compact strip | The `/queue` panel renders excerpt bodies with hanging indentation; the compact strip keeps its existing fixed-height excerpt row and prefixes it without introducing wrapped rows. |
+| Recovery | `src/ui/live_work.rs` Recovery rows; `src/ui/threads.rs::watch_lines`; `src/ui/presentation.rs::recovery_lines` | Active Recovery rows use the owned-work path; Watch secondary details already indent; chrome recovery status is one line. `recovery_lines` has no production caller in the scanned tree, so keep its legacy output distinct from active recovery UI. |
+| Management preview | `src/ui/management.rs::preview_lines` | Preview title remains a heading; multiline result, error, and stale-result content use shared nested-body indentation and hanging wrapping. Structured field rows retain their own selection/list prefixes. |
+| Operation help | `src/ui/operations/metadata.rs::help_lines`, `src/ui/operations/client_forms.rs` | Field labels/values are peer rows. The F1 selected-field help remains sequential scrollable guide prose, not an item with a child body; `popup::Reader` wraps and preserves each source row. |
+| Other TUI surfaces | `chrome.rs`, `startup.rs`, `composer.rs`, `models.rs`, `operations.rs`, `help.rs`, `code_copy.rs`, `stream_performance.rs`, `details.rs`, `popup*`, `threads.rs` | Chrome/status and picker/modal paragraphs are top-level; operation/help rows are independent field/document lines. `details.rs` and popup readers preserve source lines; `threads.rs::watch_lines` already indents its secondary detail row. |
+| Presentation model | `src/presentation/**` | No Ratatui `Line` constructors found; this layer provides typed content, not TUI row indentation. |
+
+Focused renderer coverage checks the shared indenter at narrow and wide widths
+in Japanese and English, and management preview content at both widths. At widths
+below three cells the two-space indent is omitted because it cannot fit alongside
+content; all returned rows remain within the viewport. Existing tool-note
+assertions retain the two-space prefix, muted style, and non-body classification. The shared indenter also covers body-role paths, including
+uncached hints and Details fallback; the UI projection keeps headings and tree
+prefixes separate from nested rows. Opened-output notice decoration remains
+muted and is never canonical output-body content.
+
+Audit classification: labels, status rows, grouped notice headers, flat chrome,
+modal/page prose, and source-preserving readers are peer/top-level content, not
+nested item bodies. Watch secondary detail already has its own tree indent.
+Operation F1 help remains a scrollable guide document: its selected-field label
+and following explanatory paragraph are sequential document lines rather than
+item-body rows, so the reader's existing source-preserving wrapping is retained.
+No other row-construction surface in the audited UI/presentation paths was found
+to have the same missing nested-body prefix. Unit-level rendered-Line assertions
+verify first-line indentation and wrapped continuation alignment; symbols and
+wording are unchanged.
