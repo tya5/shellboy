@@ -2,7 +2,7 @@
 
 ## Startup timing CLI (#212; validation pending)
 
-Synthetic logs cover multiple launches, migration versions, app-version increase, rotation, missing stages, and malformed lines; the CLI subprocess verifies no owner is started, no database is created, and unrelated log fields are not emitted. macOS via `rust-slot`: `cargo fmt -- --check`, `cargo test --lib startup::tests --no-fail-fast` (14 passed), the standalone integration test (1 passed), and `cargo clippy --locked --all-targets -- -D warnings` passed. The incomplete-launch fixture correctly totals 8 ms (7 ms configuration + 1 ms endpoint). Test layout (104 suites), watchdog policy, and `git diff --check` passed. Default-scope and all-OS CI are pending on the final documented tip.
+Synthetic logs cover multiple launches, migration versions, app-version increase, rotation, missing stages, and malformed lines; the CLI subprocess verifies no owner is started, no database is created, and unrelated log fields are not emitted. macOS via `rust-slot`: `cargo fmt --all -- --check`, the CLI executable-path inventory test (1 passed), `cargo test --lib startup::tests --no-fail-fast` (14 passed), the standalone integration test (1 passed), and `cargo clippy --locked --all-targets -- -D warnings` passed. The incomplete-launch fixture correctly totals 8 ms (7 ms configuration + 1 ms endpoint). Test layout (104 suites), watchdog policy, and `git diff --check` passed. Default-scope and all-OS CI are pending on the final documented tip.
 
 ## End-message rename (#194 step 1)
 

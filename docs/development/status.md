@@ -2,7 +2,7 @@
 
 ## Startup timing CLI (#212)
 
-Implemented read-only `shellboy startup [--last N]` over bounded owner diagnostics, with no owner startup or new storage/workers. On macOS, formatting, all 14 startup-related library tests, the standalone synthetic-log subprocess test, strict all-target Clippy, and integration-layout checks pass. The fixture total is the sum of its recorded 7 ms configuration and 1 ms endpoint stages. Default-scope and all-OS CI are pending on the final documented tip; W8 review/landing remain.
+Implemented read-only `shellboy startup [--last N]` over bounded owner diagnostics, with no owner startup or new storage/workers. On macOS, formatting, the CLI executable-path inventory test (including standalone `startup` option coverage), all 14 startup-related library tests, the standalone synthetic-log subprocess test, strict all-target Clippy, and integration-layout checks pass. The incomplete-launch fixture totals its recorded 7 ms configuration and 1 ms endpoint stages. Default-scope and all-OS CI are pending on the final documented tip; W8 review/landing remain.
 
 ## Shell unknown argument policy
 
