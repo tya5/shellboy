@@ -842,7 +842,9 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
     match kind.unwrap_or("") {
         "shell_ended" => glyphs::SHELL,
         "child_turn_completed" | "child_run_ended" | "child_report" => glyphs::CHILD,
-        "recovery_wait" | "child_recovery_wait" => glyphs::WAIT,
+        "recovery_wait" | "child_recovery_wait" | "reply_reminder" | "reply_outcome" => {
+            glyphs::WAIT
+        }
         "thread_settings"
         | "connection_changed"
         | "model_changed"
@@ -1594,6 +1596,15 @@ fn input_metadata(
             parts.push(label.replace(['\n', '\r'], " "));
         }
     }
+    if let Some(state) = node.presentation.reply_state {
+        parts.push(state.label(language).into());
+    }
+    if let Some(excerpt) = &node.presentation.reply_excerpt {
+        parts.push(match language {
+            UiLanguage::Ja => format!("返事: 「{excerpt}」"),
+            UiLanguage::En => format!("Reply: \"{excerpt}\""),
+        });
+    }
     if let Some(time) = node
         .presentation
         .created_at
@@ -1630,10 +1641,19 @@ fn user_band(
             .first()
             .is_some_and(|span| span.style.underline_color == Some(INPUT_DECORATION_MARKER))
             .then(|| body.spans.remove(0));
+        let metadata = metadata.take().map(|mut metadata| {
+            if node.presentation.reply_excerpt.is_some() || node.presentation.reply_state.is_some()
+            {
+                let available = usize::from(width)
+                    .saturating_sub(body.width() + mark.as_ref().map_or(0, Span::width) + 2);
+                metadata.content = tool_text_fit(&metadata.content, available).into();
+            }
+            metadata
+        });
         *line = InputBandRow {
             mark,
             body,
-            metadata: metadata.take(),
+            metadata,
         }
         .into_line(width, palette.user_band(node.presentation.input_source));
     }
@@ -2861,6 +2881,51 @@ fn japanese_config() -> crate::config::Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reply_option_b_keeps_existing_glyph_and_localized_tags() {
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            for state in [
+                crate::presentation::ReplyState::Pending,
+                crate::presentation::ReplyState::Replied,
+                crate::presentation::ReplyState::Ignored,
+                crate::presentation::ReplyState::Cancelled,
+                crate::presentation::ReplyState::RecipientDeleted,
+            ] {
+                let mut value = UiNode {
+                    node_id: "reply".into(),
+                    text: "body".into(),
+                    ..Default::default()
+                };
+                value.role = "user".into();
+                value.presentation.input_source = crate::presentation::InputSource::Parent;
+                let original_mark = input_marker(&value);
+                value.presentation.reply_state = Some(state);
+                value.presentation.reply_excerpt = Some("original request".into());
+                let palette = theme::Palette::from_capabilities(
+                    crate::config::PaletteMode::Dark,
+                    false,
+                    true,
+                );
+                let metadata = input_metadata(language, &value, palette).unwrap();
+                assert!(metadata.content.contains(state.label(language)));
+                assert!(metadata.content.contains(if language == UiLanguage::Ja {
+                    "返事:"
+                } else {
+                    "Reply:"
+                }));
+                assert_eq!(input_marker(&value), original_mark);
+                for width in [18, 80] {
+                    let mut lines = vec![Line::from(vec![
+                        Span::raw(original_mark.clone()),
+                        Span::raw("body"),
+                    ])];
+                    user_band(language, &mut lines, &value, width, palette);
+                    assert!(lines[0].width() <= usize::from(width));
+                }
+            }
+        }
+    }
+
     use super::*;
     #[test]
     fn unknown_and_missing_notice_kinds_use_the_approved_unknown_mark() {

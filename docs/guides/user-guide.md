@@ -300,8 +300,8 @@ Simply saying "use subagents" does not guarantee that the model understands Shel
 First read shellboy docs get --id shellboy/agent-guide and
 shellboy docs get --id shellboy/delegation using shell.
 Follow those procedures to create an owned child Thread and delegate research only.
-After sending its request, check assignment and completion, retrieve the original
-answer, and summarize the results.
+Send each request with `message send --expect-reply`, wait for `reply_received`,
+check the reply state, retrieve the original reply, and summarize the results.
 ```
 
 [Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
@@ -451,3 +451,5 @@ shell `cp` or `curl` can copy it without having the model emit its body. These
 options do not promise success or authorize new side effects. A received terminal
 incomplete response does not trigger an automatic retry; an interrupted transport
 retains the normal connection retry policy. No new filter/retry setting is added.
+
+Use `/replies` to select an applied reply request in the current conversation. The composer shows the reply target; submit text only with the usual send key. Esc leaves reply mode and preserves the draft. Saved reply state tags and a reply row's original excerpt use the existing sender glyphs. See [TUI reply controls](tui.md#replying-to-a-request).

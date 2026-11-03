@@ -335,3 +335,13 @@ exposes that saved observation and rebuilds the saved comparison ID; see
 the sent body by source, or null), and ungrouped scoped `usage get` returns
 `latest_request` (the scope's newest admitted attempt with `usage` and
 `input_bytes`, or null); see [input byte accounting](input-byte-accounting.md).
+
+## Explicit Reply Commands (#194)
+
+Use `message send --thread T --expect-reply --text TEXT` to request a deliberate
+reply and retain its message ID. The recipient uses `message reply --message M
+--text TEXT` (or `--text-stdin`). `message get --message M` exposes reply state;
+`wait --conditions-json '[{"type":"reply_received","message_id":"M"}]'` waits
+for a terminal reply state, not a Turn's end message. `thread get` lists pending
+`awaiting_reply` duties. See the adopted reply design for Run-end and exec
+behavior implemented by subsequent steps.

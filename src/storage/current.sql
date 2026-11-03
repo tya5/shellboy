@@ -595,3 +595,9 @@ PRAGMA user_version=24;
 CREATE INDEX history_tool_group_attempt ON tool_group(attempt_id);
 INSERT INTO schema_migration(version,name) VALUES(25,'0025_history_attempt_index');
 PRAGMA user_version=25;
+
+-- Bounded pending reply lookup (#194).
+CREATE INDEX receipt_reply_pending ON receipt(target_thread_id)
+  WHERE json_extract(result_json,'$.reply.state')='pending';
+INSERT INTO schema_migration(version,name) VALUES(26,'0026_reply_expected');
+PRAGMA user_version=26;

@@ -64,10 +64,12 @@ fn saved(
     admitted: bool,
 ) {
     let pending = PendingMessages {
+        awaiting_reply: Vec::new(),
         items: if admitted {
             vec![]
         } else {
             vec![PendingMessage {
+                expect_reply: false,
                 message_id: node.into(),
                 operation_id: "operation".into(),
                 sender_thread: None,
@@ -723,5 +725,174 @@ fn delayed_edit_confirmation_restores_only_the_untouched_composer() {
             );
         }
         assert_eq!(ui.view().pending[&revision].status, ReceiptStatus::Failed);
+    }
+}
+
+fn reply_target(id: &str) -> ReplyTarget {
+    ReplyTarget {
+        message_id: id.into(),
+        sender: "fixture sender".into(),
+        created_at: "now".into(),
+        excerpt: "original request".into(),
+        applied: true,
+    }
+}
+fn reply_action(ui: &mut UiState, text: &str) -> CommandSubmission {
+    ui.insert(text, false);
+    let mut actions = ui.submit();
+    let UiAction::SubmittedCommand { submission, action } = actions.remove(0) else {
+        panic!("reply submission required")
+    };
+    assert!(matches!(
+        *action,
+        UiAction::Command(Command::MessageReply(_))
+    ));
+    submission
+}
+#[test]
+fn reply_submit_is_text_only_preserves_slash_text_and_restores_failed_draft() {
+    let mut ui = ui();
+    ui.active_view_mut().composer.reply = Some(reply_target("original"));
+    let submission = reply_action(&mut ui, "/literal reply");
+    assert!(ui.view().draft.text.is_empty());
+    assert!(ui.submit().is_empty());
+    ui.command_outcome(submission, Err("synthetic cancelled".into()));
+    assert_eq!(ui.view().draft.text, "/literal reply");
+    assert_eq!(
+        ui.view().composer.reply.as_ref().unwrap().message_id,
+        "original"
+    );
+}
+#[test]
+fn reply_ack_does_not_clear_a_newer_target_or_draft() {
+    let mut ui = ui();
+    ui.active_view_mut().composer.reply = Some(reply_target("old"));
+    let submission = reply_action(&mut ui, "reply");
+    ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    ui.active_view_mut().composer.reply = Some(reply_target("new"));
+    ui.insert("new draft", false);
+    ui.command_outcome(submission, Ok(()));
+    assert_eq!(ui.view().draft.text, "new draft");
+    assert_eq!(ui.view().composer.reply.as_ref().unwrap().message_id, "new");
+}
+#[test]
+fn reply_mode_is_per_view_and_escape_preserves_draft() {
+    let mut ui = ui();
+    ui.select_thread("one".into());
+    ui.active_view_mut().composer.reply = Some(reply_target("original"));
+    ui.insert("draft", false);
+    ui.select_thread("two".into());
+    assert!(ui.view().composer.reply.is_none());
+    ui.select_thread("one".into());
+    assert!(ui.view().composer.reply.is_some());
+    ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+    assert!(ui.view().composer.reply.is_none());
+    assert_eq!(ui.view().draft.text, "draft");
+}
+#[test]
+fn replies_popup_selects_only_applied_requests_and_draws_both_languages() {
+    for language in [crate::config::UiLanguage::Ja, crate::config::UiLanguage::En] {
+        let mut ui = ui_in(language);
+        let mut target = reply_target("original");
+        target.applied = false;
+        ui.active_view_mut()
+            .pending_messages
+            .awaiting_reply
+            .push(target);
+        ui.queue_popup.replies = true;
+        ui.queue_popup.visible = true;
+        ui.queue_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(ui.view().composer.reply.is_none());
+        ui.active_view_mut().pending_messages.awaiting_reply[0].applied = true;
+        for width in [24, 80] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
+            terminal
+                .draw(|f| {
+                    ui.queue_popup
+                        .draw(f, f.area(), &ui.view().pending_messages, language)
+                })
+                .unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("/replies"), "{text}");
+        }
+        ui.queue_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            ui.view().composer.reply.as_ref().unwrap().message_id,
+            "original"
+        );
+        assert!(!ui.queue_popup.visible);
+        let caption = ui.view().composer.reply.as_ref().unwrap().caption(language);
+        assert!(
+            caption.contains(if language == crate::config::UiLanguage::Ja {
+                "返信先"
+            } else {
+                "Replying to"
+            })
+        );
+    }
+}
+
+#[test]
+fn reply_local_handoff_keeps_new_input_without_a_db_ack_for_success_or_failure() {
+    for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+        for success in [false, true] {
+            let mut ui = ui_in(language);
+            ui.active_view_mut().composer.reply = Some(reply_target("original"));
+            let submission = reply_action(&mut ui, "frozen reply");
+            let pending = &ui.view().pending[&submission.revision];
+            assert_eq!(pending.snapshot.text, "frozen reply");
+            assert_eq!(pending.status, ReceiptStatus::Accepting);
+            assert_eq!(pending.cleared_draft.as_ref(), Some(&ui.view().draft));
+            assert!(pending.restored_revision.is_none());
+            assert!(ui.view().draft.text.is_empty());
+            assert!(ui.view().draft.revision > submission.revision);
+            ui.insert("next input", false);
+            assert!(
+                ui.submit().is_empty(),
+                "cannot submit a second reply before the first completes"
+            );
+            let next = ui.view().draft.clone();
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+            let screen = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(screen.contains("next input"));
+            ui.command_outcome(
+                submission.clone(),
+                if success {
+                    Ok(())
+                } else {
+                    Err("synthetic failure".into())
+                },
+            );
+            assert_eq!(
+                ui.view().draft,
+                next,
+                "late reply result must not overwrite newer input"
+            );
+            if success {
+                assert!(!ui.view().pending.contains_key(&submission.revision));
+            } else {
+                assert_eq!(
+                    ui.view().pending[&submission.revision].snapshot.text,
+                    "frozen reply"
+                );
+                assert_eq!(
+                    ui.view().pending[&submission.revision].status,
+                    ReceiptStatus::Failed
+                );
+            }
+        }
     }
 }

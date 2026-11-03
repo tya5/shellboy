@@ -28,6 +28,7 @@ pub(crate) mod request_parts {
 pub mod output;
 pub(crate) mod receipt;
 pub mod replay;
+pub(crate) mod reply;
 pub(crate) mod revisit;
 pub(crate) mod run_action;
 pub(crate) mod state;
@@ -1701,6 +1702,7 @@ mod failure_tests {
             .await
             .insert(origin.token.clone(), origin.clone());
         let command = Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             thread_id: Some("target".into()),
             text: "synthetic sender".into(),
             deliver: Deliver::Next,

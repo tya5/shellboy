@@ -121,6 +121,17 @@ class ReleaseUpgradeTests(unittest.TestCase):
                 with closing(sqlite3.connect(uri, uri=True)) as reader:
                     self.assertEqual(reader.execute('SELECT * FROM sample').fetchall(), [(17,)])
 
+    def test_public_schema24_and25_staging_is_a_noop(self):
+        for schema in (24, 25):
+            with self.subTest(schema=schema):
+                db = self.fixture(17)
+                self.upgrade(db, 17, schema)
+                before, records = checks.ledger(db), checks.snapshot(db)
+                checks.prepare_schema(db, schema)
+                self.assertEqual(checks.ledger(db), before)
+                self.assertEqual(checks.snapshot(db), records)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (schema,))
+
     def test_public_schema19_noop_preserves_records_and_ledger(self):
         db = self.fixture(17)
         self.upgrade(db, 17, 19)
@@ -199,6 +210,18 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'receipt_run_completion'):
             checks.check_migration(db, before, 23, 24)
 
+    def test_schema25_to26_adds_partial_reply_index_without_rewriting_rows(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 25)
+        before, records = self.upgrade(db, 25, 26)
+        self.assertEqual(checks.ledger(db), before + [(26, '0026_reply_expected')])
+        self.assertEqual(checks.snapshot(db), records)
+        plan = db.execute("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id=? AND json_extract(result_json,'$.reply.state')='pending'", ('parent',)).fetchall()
+        self.assertTrue(any('receipt_reply_pending' in row[3] for row in plan))
+        db.executescript('DROP INDEX receipt_reply_pending; CREATE INDEX receipt_reply_pending ON receipt(target_thread_id);')
+        with self.assertRaisesRegex(AssertionError, 'receipt_reply_pending'):
+            checks.check_migration(db, before, 25, 26)
+
     def test_schema18_rejects_old_history_index_and_parent_index(self):
         db = self.fixture(17)
         before, _ = self.upgrade(db, 17, 18)
@@ -223,17 +246,17 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'history_tool_group_attempt'):
             checks.check_migration(db, before, 24, 25)
 
-    def test_arguments_default_to_public_v070_schema24_and_target25(self):
+    def test_arguments_default_to_public_v071_schema25_and_target26(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.7.0', 24, '0.7.1', 25))
+                         ('0.7.1', 25, '0.7.1', 26))
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
-        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 25))
+        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 26))
         release = checks.parse_args(required + ['--old-version', '0.7.0', '--expected-version', '0.7.1'])
-        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 25))
+        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 26))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         explicit_public_schema = checks.parse_args(required + ['--old-version', '0.7.0', '--start-schema', '24'])

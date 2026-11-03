@@ -190,6 +190,12 @@ pub(super) fn run(
         ))?;
         tx.commit()?;
     }
+    if version < 26 {
+        report(26 - version, super::SCHEMA_VERSION - version);
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(include_str!("../../migrations/0026_reply_expected.sql"))?;
+        tx.commit()?;
+    }
     validation();
     validate_schema(connection)?;
     Ok(())
@@ -272,10 +278,47 @@ mod activity_migration_tests {
     use super::*;
 
     #[test]
+    fn reply_pending_index_is_present_on_fresh_and_25_upgrade() {
+        for upgrade in [false, true] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            if upgrade {
+                db.execute_batch("DROP INDEX receipt_reply_pending; DELETE FROM schema_migration WHERE version=26; PRAGMA user_version=25;").unwrap();
+                run(&mut db, 25, &|_, _| {}, &|| {}).unwrap();
+            }
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+                    .unwrap(),
+                crate::storage::SCHEMA_VERSION
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT name FROM schema_migration WHERE version=25",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+                "0025_history_attempt_index"
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT name FROM schema_migration WHERE version=26",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+                "0026_reply_expected"
+            );
+            assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+            let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get(3)).unwrap();
+            assert!(plan.contains("receipt_reply_pending"), "{plan}");
+        }
+    }
+    #[test]
     fn version_22_upgrade_preserves_rows_and_installs_activity_indexes() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("DROP INDEX history_tool_group_attempt; DROP INDEX activity_attempt_turn; DROP INDEX activity_turn_run; DROP INDEX activity_turn_run_state; DROP INDEX activity_group_turn_state; DROP INDEX activity_shell_spawned_turn; DROP INDEX activity_shell_uncollected_owner; DROP INDEX receipt_run_completion; DELETE FROM schema_migration WHERE version>=23; PRAGMA user_version=22; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');").unwrap();
+        db.execute_batch("DROP INDEX history_tool_group_attempt; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX activity_attempt_turn; DROP INDEX activity_turn_run; DROP INDEX activity_turn_run_state; DROP INDEX activity_group_turn_state; DROP INDEX activity_shell_spawned_turn; DROP INDEX activity_shell_uncollected_owner; DROP INDEX receipt_run_completion; DELETE FROM schema_migration WHERE version>=23; PRAGMA user_version=22; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');").unwrap();
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); PRAGMA ignore_check_constraints=ON; INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('bad','r','u','bad','exited','/','broken json','UTF-8','UTF-8','closed','now'),('good','r','u','good','exited','/','{\"spawned\":true}','UTF-8','UTF-8','closed','now'); PRAGMA ignore_check_constraints=OFF;").unwrap();
         let observed = std::cell::RefCell::new(Vec::new());
         run(
@@ -285,7 +328,7 @@ mod activity_migration_tests {
             &|| {},
         )
         .unwrap();
-        assert_eq!(*observed.borrow(), vec![(1, 3), (2, 3), (3, 3)]);
+        assert_eq!(*observed.borrow(), vec![(1, 4), (2, 4), (3, 4), (4, 4)]);
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(

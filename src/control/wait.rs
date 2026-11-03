@@ -161,6 +161,7 @@ async fn observe_inner(
     if let Some(caller) = &caller {
         for condition in &args.conditions {
             let own = match condition {
+                WaitCondition::ReplyReceived { .. } => false,
                 WaitCondition::ThreadSettled { thread_ids, .. } => {
                     thread_ids.contains(&caller.thread_id)
                 }
@@ -209,7 +210,7 @@ async fn observe_inner(
             .call(move |db| {
                 let tx=db.transaction()?;
                 let observation=inspect(&tx,&query,origin.as_ref(),initial);
-                let edges=if origin.is_some() && initial {ownership_edges(&tx)} else {Ok(Vec::new())};
+                let edges=if origin.is_some() && (initial || query.conditions.iter().any(|condition| matches!(condition, WaitCondition::ReplyReceived { .. }))) {ownership_edges(&tx)} else {Ok(Vec::new())};
                 if initial&&observation.as_ref().is_ok_and(|observation|outcome(&query,observation,None).is_ok_and(|value|value.is_none()))&&edges.is_ok(){
                     let caller=origin.as_ref().map(|origin|json!({"thread_id":origin.thread_id,"run_id":origin.run_id,"turn_id":origin.turn_id,"execution_id":origin.execution_id}));
                     let body=json!({"operation_id":durable_id,"caller":caller,"conditions":query.conditions,"timeout_ms":query.timeout_ms,"after_cursor":observation.as_ref().ok().and_then(|o|o.cursor.as_ref()),"accepted_at":chrono::Utc::now().to_rfc3339()}).to_string();
@@ -228,7 +229,11 @@ async fn observe_inner(
         if let Some(result) = outcome(&args, &observation, None)? {
             return Ok(result);
         }
-        if guard.is_none()
+        if (guard.is_none()
+            || args
+                .conditions
+                .iter()
+                .any(|condition| matches!(condition, WaitCondition::ReplyReceived { .. })))
             && let Some(caller) = &caller
         {
             let mut entries = control.waits.entries.lock().expect("wait graph poisoned");
@@ -237,7 +242,7 @@ async fn observe_inner(
                 targets: observation.targets.clone(),
             };
             let mut edges = edges?;
-            for previous in entries.values() {
+            for (_, previous) in entries.iter().filter(|(id, _)| *id != &operation_id) {
                 for target in &previous.targets {
                     edges.push((previous.source.clone(), target.clone()));
                 }
@@ -252,10 +257,12 @@ async fn observe_inner(
                 ));
             }
             entries.insert(operation_id.clone(), registration);
-            guard = Some(Guard {
-                entries: control.waits.entries.clone(),
-                id: operation_id.clone(),
-            });
+            if guard.is_none() {
+                guard = Some(Guard {
+                    entries: control.waits.entries.clone(),
+                    id: operation_id.clone(),
+                });
+            }
         }
         if initial
             && guard.is_some()
@@ -404,6 +411,28 @@ fn inspect(
     let mut snapshots = Vec::new();
     for condition in &args.conditions {
         match condition {
+            WaitCondition::ReplyReceived { message_id } => {
+                let row = db.query_row("SELECT r.target_thread_id,r.result_json FROM receipt r WHERE r.message_node_id=?1", [message_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).optional().map_err(sql_error)?;
+                if let Some((thread, saved)) = row {
+                    let saved: Value = saved
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str(s).ok())
+                        .unwrap_or(Value::Null);
+                    if saved["expect_reply"] != true {
+                        return Err(invalid("message does not expect a reply"));
+                    }
+                    let reply = &saved["reply"];
+                    let state = reply["state"].as_str().unwrap_or("pending");
+                    snapshots.push(json!({"type":"reply","message_id":message_id,"state":state,"reply_node_id":reply["node_id"],"at":reply["at"]}));
+                    if state != "pending" {
+                        observation.matched.push(condition.clone());
+                    } else {
+                        observation.targets.push(format!("thread:{thread}"));
+                    }
+                } else {
+                    missing(&mut observation, initial, "Message", message_id)?;
+                }
+            }
             WaitCondition::ThreadSettled { thread_ids, states } => {
                 let report = thread_report.as_ref().expect("Thread condition projection");
                 let changes: Vec<_> = report
@@ -1605,3 +1634,52 @@ mod tests {
 
 #[cfg(test)]
 mod thread_tests;
+
+#[cfg(test)]
+mod reply_received_tests {
+    use super::*;
+    #[test]
+    fn pending_reply_has_no_deadline_and_all_terminal_reasons_satisfy() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','0'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('m','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('m','op','{}','t','m','held','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');").unwrap();
+        let args = WaitArgs {
+            conditions: vec![WaitCondition::ReplyReceived {
+                message_id: "m".into(),
+            }],
+            timeout_ms: 0,
+            after: None,
+        };
+        let pending = inspect(&db, &args, None, true).unwrap();
+        assert!(pending.matched.is_empty());
+        assert!(!pending.recovery);
+        assert_eq!(
+            outcome(&args, &pending, Some(WaitStatus::Timeout))
+                .unwrap()
+                .unwrap()["status"],
+            "timeout"
+        );
+        for state in ["replied", "ignored", "cancelled", "recipient_deleted"] {
+            db.execute(
+                "UPDATE receipt SET result_json=json_set(result_json,'$.reply.state',?1)",
+                [state],
+            )
+            .unwrap();
+            let terminal = inspect(&db, &args, None, true).unwrap();
+            assert_eq!(terminal.matched, args.conditions);
+            assert_eq!(terminal.snapshot["conditions"][0]["state"], state);
+            assert_eq!(
+                outcome(&args, &terminal, Some(WaitStatus::Interrupted))
+                    .unwrap()
+                    .unwrap()["status"],
+                "satisfied"
+            );
+        }
+        db.execute("UPDATE receipt SET result_json='{}'", [])
+            .unwrap();
+        assert_eq!(
+            inspect(&db, &args, None, true).err().unwrap().code,
+            ErrorCode::InvalidArgument
+        );
+    }
+}

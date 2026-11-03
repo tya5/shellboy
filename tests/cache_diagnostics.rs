@@ -31,6 +31,7 @@ async fn send(control: &Arc<Control>, thread: &str) {
     request(
         control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.into()),

@@ -45,3 +45,117 @@ async fn closed_start_gate_only_defers_a_waiting_message_and_preserves_child_com
         owner.shutdown().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn reply_reminder_then_ignored_contains_every_sender() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    control.store.database.call(|db| {
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','now','now');")?;
+        for i in 0..128 {
+            let id=format!("message-{i:03}");
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')",[&id])?;
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES(?1,?1,?2,'t',?1,'applied','admitted','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",params![id,json!({"kind":"external_cli","label":format!("sender-{i}")}).to_string()])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    control
+        .store
+        .database
+        .call(|db| {
+            db.execute("UPDATE run SET state='stopping' WHERE id='r'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        next(&control, "t", "r").await.unwrap(),
+        Next::Done
+    ));
+    control
+        .store
+        .database
+        .call(|db| {
+            db.execute("UPDATE run SET state='live' WHERE id='r'", [])?;
+            db.execute("UPDATE turn SET state='recovery_wait' WHERE id='u'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        next(&control, "t", "r").await.unwrap(),
+        Next::Done
+    ));
+    control.store.database.call(|db| {
+        assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_reminder'",[],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0))?,128);
+        db.execute("UPDATE turn SET state='completed' WHERE id='u'",[])?;
+        Ok(())
+    }).await.unwrap();
+    let snapshot = match next(&control, "t", "r").await.unwrap() {
+        Next::Ready(s) => s,
+        _ => panic!("reminder must continue Run"),
+    };
+    assert_eq!(
+        snapshot
+            .events
+            .iter()
+            .filter(|id| id.starts_with("reply-reminder-"))
+            .count(),
+        1,
+        "the reminder must be in this continuation request"
+    );
+    control
+        .store
+        .database
+        .call(move |db| {
+            let payload: String = db.query_row(
+                "SELECT payload_ref_json FROM event WHERE kind='reply_reminder'",
+                [],
+                |r| r.get(0),
+            )?;
+            let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
+            assert_eq!(value["messages"].as_array().unwrap().len(), 128);
+            for (i, row) in value["messages"].as_array().unwrap().iter().enumerate() {
+                assert_eq!(row["message_id"], format!("message-{i:03}"));
+                assert_eq!(row["sender"]["label"], format!("sender-{i}"));
+            }
+            assert!(
+                payload.len() < 65536,
+                "bounded 128-duty reminder: {}",
+                payload.len()
+            );
+            // Esc completes a Turn without an end message. The next boundary is still normal completion.
+            db.execute(
+                "UPDATE turn SET state='completed',ended_at='later' WHERE id=?1",
+                [snapshot.turn],
+            )?;
+            db.execute(
+                "UPDATE delivery SET state='processed' WHERE recipient_id='r'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        next(&control, "t", "r").await.unwrap(),
+        Next::Done
+    ));
+    control.store.database.call(|db| {
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0))?,128);
+        assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_reminder'",[],|r|r.get::<_,i64>(0))?,1);
+        Ok(())
+    }).await.unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}

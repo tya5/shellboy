@@ -9159,6 +9159,100 @@ The final local UI integration subset also passed: 86 passed, 1 existing ignored
 (`cargo test --locked --test integration ui::`), including the new-Run edit
 confirmation regression. Only final-tip 3-OS CI and the explicitly untested
 interactive/production cases remain outstanding.
+### #194 Step 2: Reply Core
+
+Synthetic fixtures cover fresh/upgrade partial-index plans, once-only ordered
+admission with rollback, 128-duty capacity, replay and fingerprint conflicts,
+applied/pending and recipient authority checks, reply correlation, queued and
+admitted cancellation, terminal reply wait states, and observer cleanup.
+Terminal `ignored`/`recipient_deleted` facts are injected for wait tests; their
+production transitions are step 3. Final-tip three-OS CI remains pending.
+
+### #194 Step 3 / #197 Synthetic Acceptance
+
+Fixtures exercise the 128-entry reminder (each message ID and sender), ignored
+outcomes after normal completion/Esc, stopping and recovery gates, rollback and
+reopening with a different Run, recipient/sender/both deletion precedence, idle
+sender non-start, and 260 deleted-target receipt rows reclaimed in bounded GC
+steps. Pending duties, live recipients, and live model senders retain receipt
+roots and associated bodies. These are synthetic fixtures, not real-provider or
+power-loss tests. Final task CI and review remain required.
+
+Step-3 review follow-up: deletion uses receipt_reply_pending with target equality
+and LIMIT 128 per recipient (EXPLAIN asserted); 4096 unrelated pending replies
+remain untouched. Sender deletion is deferred to 128-row GC batches before
+eligibility, with actor/reason and cancellation notice asserted after GC.
+
+### #194 Step 6 Reply TUI Acceptance
+
+Synthetic fixtures cover Japanese/English option B states with unchanged source
+marks, narrow/wide reply popup drawing, applied-only selection, exact saved reply
+correlation, failed reply restoration, per-view reply mode, Escape draft retention,
+and acknowledgement races with newer drafts/targets. Final task CI is pending;
+these fixtures do not establish manual terminal or real-provider behavior.
+
+## #194 step 6 / #198 composition rebase
+
+Target parent: main 226c4f6d. Reply submissions initialize the new local-first
+PendingSend fields. Added synthetic bilingual tests render the next input before
+any DB acknowledgement and verify both late success and late failure preserve
+it, keep the frozen original as needed, and prevent a duplicate in-flight reply.
+Existing untouched-reply failure restoration and ordinary-send #198 regressions
+remain present. Release-upgrade fixtures preserve 0.6.1 support and both main's
+byte-accounting and reply cancellation driver tests survive the rebase. Native
+strict Clippy/focused tests and final default CI are pending; no real provider,
+installed binary or user data is used.
+Rebase follow-up: main's newly introduced compaction-effect Python fixture now
+expects this branch's current schema 25 (no migration renumbering). All 190
+Python script tests passed on macOS; strict all-target Clippy also passed.
+Focused native tests and publication/CI remain pending at this record point.
+
+### #194 rebased native checks completed (2026-11-03)
+
+On macOS, the chained rust-slot validation exited 0: `cargo fmt --all`,
+`cargo clippy --locked --all-targets -- -D warnings`,
+`cargo test --locked --lib ui::send_tests::` (27 passed),
+`cargo test --locked --lib foreground_db_stall` (1 passed), and
+`cargo test --locked --test integration reply::` (7 passed). All three
+filters ran nonzero matching tests after a fresh library rebuild. This includes
+bilingual reply local-handoff and sender-deletion-before-GC regressions.
+The schema fixture correction separately passed all 190 Python script tests.
+No real provider, installed binary, or user data was used. Final published-tip
+CI, other OSes, and manual terminal/provider behavior remain unverified.
+
+#194 publication correction: CI 41634512059 on 90871f3c failed before native
+compilation at the language classification gate. Exactly one reviewed entry,
+ui/operations.rs's second Japanese end-message-only field label, had a stale
+source-scope fingerprint after the form rebase. Re-reviewed its bilingual field
+rendering and updated only that classification record; no Rust or migration
+changes. The full classification audit now passes locally. Replacement exact-tip
+CI remains pending at this record point; prior native test evidence is unchanged.
+
+### #194 chain migration26 checkpoint (2026-11-03)
+
+Synthetic local fixtures only. All 191 Python script tests passed. Strict locked
+all-target Clippy and the real-command oversized-held-queue send/retry/replay
+integration regression passed before owner restart. The interrupted remainder
+of that check is not validation. Final full local checks are restarted on the
+current tree; 257-message ordered/reopen/stale-retry and atomic rollback tests
+are included. Both history index25 and reply index26, their ledger entries and
+fresh/25 upgrade equivalence are asserted. No installed-binary changes, real
+providers, embeddings, user data, final CI success or main integration claimed.
+
+### #194 final review follow-ups: repair/release windows and upgrade mock
+
+The bounded repair window can be consumed by unavailable sources before an
+older accepted terminal receipt is classified held. Release selection and its
+continuation predicate therefore include eligible accepted and held receipts;
+source availability still guards admission. Regressions place 128 unavailable
+rows before an older accepted and newer held row, and separately retain a lone
+accepted unavailable remainder across another resume pass. These assertions
+prevent ordering inversion and premature exit from recovery_wait.
+
+The public-upgrade synthetic provider returns a final message, not an explicit
+reply. Its schema26 exec invocation selects `--result turn-end` to continue
+checking this preserved non-reply compatibility path. The default explicit
+reply mode is covered independently by exec-client integration tests.
 
 ## Shell unknown argument policy
 

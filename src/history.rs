@@ -81,7 +81,7 @@ impl History {
                     "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(ThreadDetails { last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
+                        Ok(ThreadDetails { awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
                             context_usage: None,
                             context: None,
                             thread_id: id.clone(),
@@ -693,12 +693,14 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
                 )
             })?;
             if args.end_message_only {
-                end_message_text(&value).ok_or_else(|| {
-                    ApiError::new(
+                if value.get("output").and_then(Value::as_array).is_some() {
+                    end_message_text(&value).unwrap_or_default()
+                } else {
+                    return Err(ApiError::new(
                         ErrorCode::TargetUnavailable,
                         "No final assistant message is saved in this node",
-                    )
-                })?
+                    ));
+                }
             } else {
                 text_of_payload(&value)
             }

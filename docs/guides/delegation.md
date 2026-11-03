@@ -19,7 +19,7 @@ This example runs in the parent model's Bash shell. Replace `CHILD_THREAD_ID` an
 ```bash
 shellboy thread create --parent "$SHELLBOY_THREAD_ID"
 # Retain result.thread_id
-shellboy message send --thread CHILD_THREAD_ID --text 'Task: read-only audit of the parser. Make no changes. Return definite defects, supporting evidence, and the scope verified.'
+shellboy message send --thread CHILD_THREAD_ID --expect-reply --text 'Task: read-only audit of the parser. Make no changes. Return definite defects, supporting evidence, and the scope verified.'
 # Retain result.message_id / assignment / run_id / turn_id
 shellboy message get --message MESSAGE_ID
 ```
@@ -33,7 +33,7 @@ stays `unknown`. When sending across data directories, use `--sender-label` to
 name yourself: Origin is stripped and the receiver sees an external CLI plus
 that unverified name.
 
-Creation, sending, and retrieving the answer are separate steps. Distinguish create's `result.thread_id` as `CHILD_THREAD_ID`, send's `result.message_id` as `CHILD_MESSAGE_ID`, and the assigned `result.turn_id` as `CHILD_TURN_ID`. Do not try to retrieve the receiving model's answer or shell output using the execution ID of the observing shell that ran send.
+Creation, sending, and retrieving the reply are separate steps. Distinguish create's `result.thread_id` as `CHILD_THREAD_ID`, send's `result.message_id` as `CHILD_MESSAGE_ID`, and the assigned `result.turn_id` as `CHILD_TURN_ID`. Do not try to retrieve the recipient's reply or shell output using the execution ID of the observing shell that ran send.
 
 Use `shellboy status --thread CHILD_THREAD_ID` to list current stored state, then get individual objects using the returned Run/Turn/shell/message IDs. Thread hierarchy and Run ownership differ: do not infer stop or recovery authority from the Thread's appearance.
 
@@ -41,34 +41,52 @@ Creating with a parent inherits cwd, AGENTS reference, connection, model, and ef
 
 `assignment` is `new_run`, `new_turn`, `existing_turn`, or `pending`. With `pending`, no Run/Turn has been determined yet; do not wait on a nonexistent Turn. Track the same message with `message get`, inspect the `held` reason and the target's `thread get` / `run get`. Once assigned to a definite Run/Turn, a message is not later reassigned to different IDs. Do not bypass pending by sending a duplicate request.
 
-## Waiting with any semantics and retrieving answers
+## Waiting for replies
 
-Once you have a Turn ID, wait for that response interval. This is a Bash example; replace IDs inside the JSON with actual returned values too.
-
-```bash
-shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"CHILD_TURN_ID"}]' --timeout-ms 30000
-shellboy turn get --turn CHILD_TURN_ID
-# Retrieve the Turn's end_message_node_id if present
-shellboy history get --node END_MESSAGE_NODE_ID --limit-bytes 65536
-```
-
-Multiple conditions use **any** semantics. The call returns when one is satisfied, not necessarily when every child completes.
+Wait on the accepted message, even while assignment is pending. A reply is a
+specific response to that request, not the recipient's last Turn text.
 
 ```bash
-shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"TURN_A"},{"type":"turn_completed","turn_id":"TURN_B"}]' --timeout-ms 30000
+shellboy wait --conditions-json '[{"type":"reply_received","message_id":"CHILD_MESSAGE_ID"}]' --timeout-ms 30000
+shellboy message get --message CHILD_MESSAGE_ID
+# For reply.state=replied, use reply.node_id:
+shellboy history get --node REPLY_NODE_ID --limit-bytes 65536
 ```
 
-Inspect `matched` and `snapshot.conditions`, then wait again only for unfinished targets. `turn_completed` observes terminal states including stopped/failed, so even `satisfied` requires checking the target's `state` and `end_message_node_id`. Do not invent an answer for a stopped Turn without an end message node. If its body returns `next_cursor`, page through the same node.
+The child receives the message ID and replies once after it is applied:
 
-| Wait status | Next action |
-|---|---|
-| `satisfied` | Inspect matched targets' states and retrieve needed answer nodes/output |
-| `timeout` | Targets continue. Check progress and do other work, or wait again as a separate operation |
-| `interrupted` | Observation was released. Do not treat it as a successful target stop; check current state and new instructions |
-| `recovery_wait` | An explicit recovery decision is needed. Retrieve the cause; as immediate parent, retry/stop, or consult a higher authority if needed |
-| `unavailable` | The target is unavailable, for example after deletion. Check snapshot/reason; do not repeat the same wait unconditionally |
+```bash
+shellboy message reply --message CHILD_MESSAGE_ID --text 'Findings, evidence, and remaining work.'
+```
 
-Waiting on your own Run/Turn/current shell, or forming a cycle with ancestors or other waits, is rejected. A child waiting for its parent Run to end could cycle with the parent waiting to reclaim that child. Do not work around `wait_cycle` with sleep loops; fix the direction of requests and notifications. Ctrl+C or connection loss releases the CLI observation and does not stop the target Run/shell.
+A model reply is also delivered to the sender's conversation; an external CLI
+sender reads the original receipt and reply node. If the recipient ends without
+replying (`ignored`), or its Thread is deleted (`recipient_deleted`), a model
+sender receives a `reply_outcome` notice in its live Run. Without a live Run,
+the notice is available at the next Turn and does not start a Run. If an admitted
+duty is cancelled, the recipient receives `reply_cancelled` at its next request
+boundary; this notice does not wake it. Progress reports remain ordinary
+messages. `satisfied` is not necessarily success: inspect the reply snapshot's
+`state` (`replied`, `ignored`, `cancelled`, or `recipient_deleted`). A pending
+reply has no deadline; a timeout limits only that wait call. At normal Run end,
+one reminder is delivered for unanswered applied requests; if still unanswered,
+they become `ignored`. A stopped or recovery-waiting Run leaves the reply pending.
+Use `thread_settled` for stalls and an explicit recovery decision; do not resend
+the same request merely because it is held or the wait timed out. Cancellation
+can withdraw a reply duty even after admission; inspect the receipt.
+
+Multiple conditions use **any** semantics:
+
+```bash
+shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_A"},{"type":"reply_received","message_id":"MESSAGE_B"}]' --timeout-ms 30000
+```
+
+Inspect `matched` and `snapshot.conditions` and wait again for outstanding
+requests. A wait can also combine `reply_received` with `thread_settled` for
+`recovery_wait`, `failed`, or `stopped`. `interrupted` and `unavailable` require
+inspection, not an assumption of success. Model waits are cycle-checked; do not
+work around `wait_cycle` with sleep loops. Ctrl+C or connection loss releases
+the observation, not the target. Follow `next_cursor` for long reply nodes.
 
 ## Progress reports and lifetime
 
@@ -79,7 +97,7 @@ shellboy thread get
 shellboy message send --thread PARENT_THREAD_ID --text 'Progress: read-only audit completed for 3 files; 1 remains. No changes. No reply needed.'
 ```
 
-This is an ordinary message notification. A child need not wait for a reply to every report; the parent adopts it at a safe boundary. A progress report does not replace retrieving the final answer. Completion of the child's answer and termination of its Run also differ. Background shells can keep a Run live after its Turn answers. If all owned work must finish, wait for `run_ended`.
+This is an ordinary message notification. A child need not wait for a reply to every report; the parent adopts it at a safe boundary. A progress report does not replace the requested reply. Completion of the child's answer and termination of its Run also differ. Background shells can keep a Run live after its Turn answers. If all owned work must finish, wait for `run_ended`.
 
 ```bash
 shellboy wait --conditions-json '[{"type":"run_ended","run_id":"CHILD_RUN_ID"}]' --timeout-ms 30000
@@ -102,7 +120,7 @@ shellboy run retry --run CHILD_RUN_ID
 shellboy run stop --run CHILD_RUN_ID
 ```
 
-Retry and stop are alternatives; the example does not instruct running both consecutively. An ordinary model message to a child in `recovery_wait` is held, not substituted for automatic recovery. After restart, earlier Runs are not automatically executed again. Decide on new execution using interruption information, stored answers, and unprocessed messages. Retain IDs of unexecuted instruction messages when stopping.
+Retry and stop are alternatives; the example does not instruct running both consecutively. An ordinary model message to a child in `recovery_wait` is held, not substituted for automatic recovery. After restart, earlier Runs are not automatically executed again. Decide on new execution using interruption information, stored end messages, reply states, and unprocessed messages. Retain IDs of unexecuted instruction messages when stopping.
 
 In PowerShell, use `$env:SHELLBOY_THREAD_ID`. Adapt single-quoted JSON examples to the shell's argument passing; see [Shell](shell.md). These delegation command examples have not been verified on physical Windows hardware.
 
@@ -136,3 +154,15 @@ Turn/node/time/excerpt) from `last_input` (latest durably accepted input, includ
 held/cancelled, with receipt state and credential-free sender/label). The latter
 does not prove application or model completion. Existing `excerpt` is unchanged.
 Labels remain self-asserted; inspect originals by node ID when needed.
+
+## Leader's operating flow
+
+Send an instruction with `message send --thread T --expect-reply` and retain its
+message ID. Wait for `reply_received`; after a timeout, reissue the wait rather
+than the instruction. Inspect `message get` and retrieve `reply.node_id` for a
+`replied` result. For `ignored`, inspect `last_end_message` and history for
+diagnosis; it is not a substitute for a reply. Use `thread_settled`/`status`
+for stalled or recovery-waiting work. Cancel an obsolete request with `message
+cancel` (including after admission), and use ordinary messages for progress.
+A separate `--deliver complete` "did you report?" reminder is unnecessary:
+the Run-end reply reminder provides that check.

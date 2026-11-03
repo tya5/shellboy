@@ -4321,3 +4321,66 @@ owners. Full UI integration and exact-tip three-OS CI are still pending at this
 record point; this branch is not integrated into main.
 The final local UI integration subset passed (86 tests; 1 existing ignored).
 Handoff still requires the final pushed tip's 3-OS CI, not an earlier run.
+### #194 Step 2: Explicit Reply Core
+
+The reply-expected send flag, ordered durable admission notices, 128 pending
+reply cap, explicit reply mutation, reply receipt fields, reply waits, admitted
+duty cancellation, and Thread awaiting-reply projection are implemented on the
+step-1 base. Migration 25 is provisional until integration ordering is known.
+Run-end reminders/deletion outcomes and exec modes belong to subsequent steps.
+Synthetic local validation is in progress; three-OS CI and integration remain
+pending. No real-provider measurements are involved.
+
+### #194 Step 3 and #197: Reply Lifecycle and Receipt Reclamation
+
+Implemented durable once-per-message Run-end reminders with per-message sender
+facts, then ignored outcomes; stopped/recovery work retains pending duties.
+Recipient transitions and outcomes are in the deletion transaction; sender-deleted cancellation is deferred to the bounded history-GC receipt phase.
+History GC now scans a finite receipt horizon in batches of at most 128 before
+marking, retaining pending duties and live endpoint ownership. The branch stays
+based on approved step 2, separate from the 0.7.0 release. Synthetic validation
+and task CI are in progress; no real provider calls are part of this work.
+
+### #194 Step 6: Reply TUI
+
+Option B retains source glyphs and adds bilingual saved reply-state tags and
+reply excerpts. `/replies` reuses the Thread-scoped bounded message popup;
+applied requests enter a per-view, text-only composer mode using message.reply.
+The existing submission acknowledgement path preserves failed and newer drafts.
+Synthetic rendering and source-projection validation are in progress; final task
+CI and review are required. No provider measurements or main integration.
+
+## #194 step 6 port onto #198 (main 226c4f6d)
+
+Rebased the authored reply chain onto the landed local-first composer hotfix.
+Reply command PendingSend uses cleared_draft and restored_revision; submitted
+text still clears locally before any DB result, while command acknowledgements
+preserve newer input and failures restore only the untouched composer. Main's
+#198 ordinary-send, attachment, autosave and edited-confirmation behavior is
+retained. Added bilingual delayed-reply success/failure state/render coverage.
+Native focused checks and default-scope CI remain pending at this record point.
+No migration renumbering: the latest user order is hotfix index 25, then #194
+26 and #172 27 after the hotfix lands; wait for that integration instruction.
+
+#194 rebased validation update (2026-11-03): strict locked all-target Clippy,
+27 send-state unit tests, one foreground DB-stall regression, seven reply
+integration tests, and 190 Python script tests passed on macOS. Publication
+remains blocked on approval for a new non-rewriting remote branch; no push,
+new CI, migration renumbering, or integration is claimed.
+
+## #194 chain on 0.7.1: migration 26 integration checkpoint (2026-11-03)
+
+Steps 2/3/6 are rebased onto e3e32fcc; W3 step4 exec-reply and W9 step5 guides
+are included. Schema26 follows the unchanged history index25; #172 remains27.
+All guards, migration fixtures and upgrade scripts are reconciled. Main's
+non-reply end_message_node_id retrieval and #198 local-first input are retained.
+
+The user explicitly rejected oversized recovery refusal. Audit found the
+reply-duty cap does not bound ordinary held messages; recovery now uses ordered
+128-row units and a recoverable remainder, with remaining_held in existing
+recovery status. The writer exemption ratchet is not expanded. A real-command
+129-held queue send/retry/replay integration test and strict Clippy passed before
+owner restart. Full final-tree local checks were restarted after interruption;
+no interrupted execution is claimed successful. W8 second review and exact-tip
+three-OS CI remain gates before W4 integration. #194/#197 closing comments wait
+until the reviewed chain is on main.

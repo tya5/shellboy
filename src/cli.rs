@@ -190,6 +190,8 @@ pub enum MessageCommand {
         after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
+    /// Reply once to a received reply-expected message.
+    Reply(MessageReplyOptions),
     Get(MessageOptions),
     /// Cancel explicit queued messages; admitted history cannot be cancelled.
     Cancel(MessageCancelOptions),
@@ -458,6 +460,9 @@ pub struct TextOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageSendOptions {
+    /// Require a deliberate reply to this message.
+    #[arg(long)]
+    pub expect_reply: bool,
     /// Self-asserted name (at most 64 Unicode characters); grants no authority.
     #[arg(long)]
     pub sender_label: Option<String>,
@@ -468,6 +473,15 @@ pub struct MessageSendOptions {
     /// when the Thread's live Run would complete, or immediately if none is live.
     #[arg(long, value_enum)]
     pub deliver: Option<wire::Deliver>,
+    #[command(flatten)]
+    pub text: TextOptions,
+}
+#[derive(Debug, Clone, Args)]
+pub struct MessageReplyOptions {
+    #[arg(long = "message")]
+    pub message_id: String,
+    #[arg(long)]
+    pub sender_label: Option<String>,
     #[command(flatten)]
     pub text: TextOptions,
 }
@@ -835,10 +849,16 @@ impl Cli {
             },
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
+                    expect_reply: a.expect_reply,
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,
                     deliver: a.deliver.unwrap_or_default(),
+                }),
+                MessageCommand::Reply(a) => C::MessageReply(wire::MessageReplyArgs {
+                    message_id: a.message_id,
+                    sender_label: a.sender_label,
+                    text: read_text(a.text, stdin).await?,
                 }),
                 MessageCommand::Get(a) => C::MessageGet(wire::MessageTarget {
                     message_id: a.message_id,

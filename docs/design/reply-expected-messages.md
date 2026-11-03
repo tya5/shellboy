@@ -1,6 +1,7 @@
 # Reply-expected messages (#194)
 
-Status: **Adopted (2026-11-03), not implemented.** This design turns the
+Status: **Implemented on the migration-26 integration branch (2026-11-03);
+final checks, independent review and main landing remain gates.** This design turns the
 user's decisions on #194 (comments marked "決定" and the answers to the memo's
 questions, 2026-11-03) into a concrete design, lists every existing behaviour
 it touches, records the answered questions under [Decisions](#decisions) and
@@ -67,10 +68,12 @@ These correct or sharpen assumptions in the issue thread.
    replayed as plain `user` text. A model cannot reply to a message it cannot
    name, so admission must add a short notice carrying the ID (see
    [Model-visible notices](#model-visible-notices)).
-5. **Existing bound 128.** The pending-message projection (`/queue`, 128 rows),
-   `message cancel` (1..128 IDs) and resume-time interrupted-message recovery
-   (`message_delivery::recover_on_resume_tx`, rejects >128) all use 128. There
-   is no total cap on queued messages today.
+5. **Existing windows of 128 are not a queue admission invariant.** The
+   pending-message projection (`/queue`, 128 rows), `message cancel` (1..128 IDs)
+   and the pre-integration interrupted-message recovery all used 128. There is
+   no total cap on ordinary queued messages. The integration replaces the old
+   recovery refusal with oldest-first progressing units; see the recovery
+   decision at the end of this document. The pending reply-duty cap remains128.
 6. **The #187 completion hook** is `driver::next`, in the branch where no Turn,
    pending input, event or owned work remains: `revisit::release_tx` runs and,
    if it found nothing, `state::complete_idle_run`. The shutdown gate already
@@ -162,19 +165,19 @@ exactly 128/129 and record the size of a 128-entry reminder notice; no timing
 or size is assumed here. The cap is per recipient Thread because the recipient
 is the one that must work through the list (decision Q15).
 
-### Migration 25
+### Migration 26
 
 Main is at schema 24 (`0024_revisit_messages.sql`). The Run-end check, the cap
 check and the `thread get` list all ask "pending reply-expected messages of
 Thread T". Without an index that scans every receipt the Thread ever received,
-at every Run completion, which the hot-query rules forbid. Migration 25 adds
+at every Run completion, which the hot-query rules forbid. Migration 26 adds
 only:
 
 ```sql
 CREATE INDEX receipt_reply_pending ON receipt(target_thread_id)
   WHERE json_extract(result_json,'$.reply.state')='pending';
-INSERT INTO schema_migration(version,name) VALUES(25,'0025_reply_expected');
-PRAGMA user_version=25;
+INSERT INTO schema_migration(version,name) VALUES(26,'0026_reply_expected');
+PRAGMA user_version=26;
 ```
 
 It moves no data. Message lookups by ID use the existing
@@ -695,7 +698,7 @@ text. `message get` `answer_node_id` stays until step 2.
   owner guard), `conversation-redesign.md`, `effective-spec.md` (#65 and #74
   paragraphs).
 
-### Step 2 — Schema 25 and the reply core
+### Step 2 — Schema 26 and the reply core
 
 `message send --expect-reply` (flag in `MessageSendArgs`, `MessageAccepted`,
 the operation fingerprint), `message reply` (`Command::MessageReply`,
@@ -708,7 +711,7 @@ message items `answer_node_id` → `reply_node_id`,
 (`reply_expected`, `reply`), the 128 cap, and model-self-target rejection.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
-- Schema: `migrations/0025_reply_expected.sql`, `src/storage/current.sql`,
+- Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,
   `src/storage/migrate.rs`, `src/storage.rs`, `scripts/check-release-upgrade.py`,
   `scripts/tests/test_release_upgrade.py`, `scripts/error_catalog.py`.
 - Core: new `src/control/reply.rs` (state transitions, reply operation,
@@ -725,7 +728,7 @@ Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 - Guides: `cli-reference.md` (send flag, `message reply`, `message get`,
   `wait`, cancel outcome, `thread get`).
 - Designs: `protocol.md`, `cli.md`, `wait.md`, `pending-messages.md`,
-  `storage.md`, `effective-spec.md` (schema 25 in "Current conversation
+  `storage.md`, `effective-spec.md` (schema 26 in "Current conversation
   storage").
 
 ### Step 3 — Run-end rule and terminal outcomes
@@ -877,3 +880,26 @@ Other judgements made while finalizing (not covered by a user answer):
 - **Error codes** follow the existing set: unknown targets are
   `target_unavailable`, authority failures `invalid_state` with
   `details.reason`; no `forbidden`/`not_found` error code is added.
+
+### Recovery queue units after integration with main (2026-11-03)
+
+The 128 pending reply-duty cap is not a general held-message admission bound.
+Ordinary sends can accumulate more than 128 held receipts; UI/readback windows
+also do not enforce admission. Per the user's decision, recovery must not refuse
+an oversized queue. Explicit send/retry releases the oldest 128 per pass and
+retains the remainder. The Turn stays in recovery_wait while work remains, so a
+fresh send/retry can progress after interruption/restart. New input is held
+behind the older queue. Each unit commits atomically, and a stale generation
+cannot release a second unit. Existing status retains the remaining held queue;
+only after the final unit does the Turn become preparing. Global startup repair
+is not part of this foreground unit.
+
+`thread get`'s existing `recovery_reason` and `run get`/`run retry`'s existing
+`recovery_hint` include `remaining_held` while the Turn is recovery_wait. This is
+an exact status-readback count over the recipient's held index range, not a
+count or scan inside reply admission. No separate queue or worker is added.
+
+The ordered unit merges current-Turn recovery_wait input with terminal-Run
+interrupted input before LIMIT, rather than allocating separate source quotas.
+Older Turns of the same still-live Run remain isolated: retrying the current
+Turn is not permission to revive stale/imported assignments from another Turn.

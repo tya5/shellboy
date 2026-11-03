@@ -63,8 +63,9 @@ async fn until(terminal: &mut File, output: &mut Vec<u8>, needle: &[u8]) {
     .unwrap_or_else(|error| {
         let start = output.len().saturating_sub(4096);
         panic!(
-            "Expected terminal state {:?} did not arrive: {error}; terminal tail: {:?}",
+            "Expected terminal state {:?} did not arrive: {error}; terminal start: {:?}; terminal tail: {:?}",
             String::from_utf8_lossy(needle),
+            String::from_utf8_lossy(&output[..output.len().min(4096)]),
             String::from_utf8_lossy(&output[start..]),
         )
     });
@@ -76,7 +77,20 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     let data = root.path().join("data");
     std::fs::write(&config, "[io]\nshutdown_grace_ms=50\n").unwrap();
     let (mut terminal, slave) = pty();
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+    // Size/input APIs may prefer /dev/tty over stdio. Give this child only the
+    // disposable PTY, never the parent's interactive controlling terminal.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1
+                || libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) == -1
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = command
         .arg("--config")
         .arg(&config)
         .arg("--data-dir")

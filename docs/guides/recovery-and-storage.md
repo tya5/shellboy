@@ -78,7 +78,7 @@ shellboy run get --run RUN_ID
 | Run `live` | Execution lifetime continues | Includes waiting for owned background work after answering |
 | Turn `recovery_wait` | Failure reason saved, awaiting an explicit decision | Time or configuration changes alone do not resume it |
 
-When `end_message_node_id` is returned, retrieve it with `shellboy history get --node NODE_ID`. Follow `next_cursor` for long bodies. Terminal `failed` / `stopped` states are not successful end messages.
+For a reply-expected request, inspect `message get` and retrieve `reply.node_id` when `reply.state` is `replied`. For a Turn or Run end message use its `end_message_node_id`. Follow `next_cursor` for long bodies. A stopped or Esc-ended Turn may have no end message; do not invent a result. A stopped Run leaves an outstanding reply pending until a reply, cancellation, or another terminal reply state.
 
 In the TUI, start via F8 `待機 | 条件を観測` and cancel only observation with lowercase w in management or `/cancel-wait`. Esc closes the display without stopping the target. Ctrl+C interrupts the current Thread instead; see [wait controls](tui.md#cancelling-observation-versus-interrupting-its-target).
 
@@ -141,6 +141,16 @@ Recovery wait is time awaiting human action, not continued model processing. An 
 ```sh
 shellboy run retry --run RUN_ID
 ```
+
+Large held-input queues recover in ordered units of at most 128 receipts, not
+by rejecting the queue. While older input remains, the Turn stays in
+`recovery_wait`; `run get` / `run retry`'s `recovery_hint` and `thread get`'s
+`recovery_reason` include `remaining_held`. Repeat an explicit retry with a new
+operation ID to advance the next unit. Replaying the same operation ID returns
+its saved result and does not release another unit. New human input follows the
+older held input; no remaining instructions are silently dropped. The final
+unit lets the Turn resume normal preparation. Unknown-admission receipts still
+require inspection rather than guessed delivery.
 
 If a provider rejects an attachment, inspect `shellboy attachment list --thread
 THREAD_ID`, then exclude the specific attachment before retrying:
