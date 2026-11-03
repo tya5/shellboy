@@ -673,5 +673,90 @@
     "category": "a",
     "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
     "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+  },
+  "src/presentation/rows.rs:84848997ab9fdca5:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:fac549e0a3671bef:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:6785acb9335c8a33:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:018774a2dd73f471:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:0c8b667104f23ad1:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:8f4dc91ecb4a3c29:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:38b97d4418d37b97:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:d2deeb848be13849:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:286d3cba4dbcd899:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:cda5e0611641b10e:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:b13cd63d1f62d84a:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:86b86ee263bb3e7c:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:fd4e6ed6da2e25c0:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:646bb04d1f6ce13c:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:d668d550336840ac:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:96b2bcd99d99fff2:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
+  },
+  "src/presentation/rows.rs:2d113574dbaa3be1:1": {
+    "category": "a",
+    "reason": "Reviewed UI vocabulary: each Japanese RowKind label is returned only for UiLanguage::Ja by presentation::messages::row_label, whose exhaustive match supplies the English label. Opaque row kind, mark, ordering, and status values are unchanged.",
+    "source_tokens_sha256": "0e8ea5b756ecd6278607daf2602565ac9611fbd07b364ec74ffe64170fc0cacf"
   }
 }

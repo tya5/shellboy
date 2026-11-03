@@ -127,6 +127,19 @@ mod tests {
     use super::*;
     use crate::ui::text_width::UnicodeWidthStr;
     #[test]
+    fn row_kind_labels_follow_ui_language_without_changing_marks_or_order() {
+        use crate::config::UiLanguage;
+        for kind in RowKind::ALL {
+            let (mark, ja, _) = kind.spec();
+            let english = crate::presentation::messages::row_label(kind, UiLanguage::En);
+            let japanese = crate::presentation::messages::row_label(kind, UiLanguage::Ja);
+            assert!(!english.is_empty(), "{kind:?}");
+            assert_eq!(japanese, ja, "{kind:?}");
+            assert_ne!(english, japanese, "{kind:?}");
+            assert_eq!(kind.mark(), mark, "{kind:?}");
+        }
+    }
+    #[test]
     fn marks_are_one_column_even_with_cjk_width_rules() {
         for kind in RowKind::ALL {
             let (mark, label, _) = kind.spec();
