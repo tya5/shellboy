@@ -2876,7 +2876,7 @@
   },
   "src/ui/chrome.rs:a762bed2d0773827:1": {
     "category": "c",
-    "reason": "Generated navigation loading status is concatenated with caller-provided hint and reaches the header in both languages. English producer/consumer projection is not yet verified; retained pending.",
-    "source_tokens_sha256": "2d03a7a213aaf3dff635a3261724858abf8b604ab1b9ab05b6e0685648ff7304"
+    "reason": "Current producer synthesizes Japanese-only navigation loading status and appends the caller hint; header consumer fits the combined notice. No English projection is verified, so retain pending rather than translating the hint.",
+    "source_tokens_sha256": "7a88d478cf4e40e5921a1a34d7eca46491ac67174ca9afaea1330532193849c9"
   }
 }
