@@ -992,10 +992,16 @@ pub(super) fn draw(
         && lines.len() < usize::from(area.height)
     {
         if let Some(error) = &view.error {
-            lines.push(Line::styled(
-                error.clone(),
-                Style::default().fg(theme::ATTENTION),
-            ));
+            let rows = error
+                .lines()
+                .map(|line| Line::styled(line.to_owned(), Style::default().fg(palette.muted())))
+                .collect();
+            let available = usize::from(area.height).saturating_sub(lines.len());
+            lines.extend(
+                presentation::indented_wrap(rows, area.width)
+                    .into_iter()
+                    .take(available),
+            );
         }
         if let Some(preview) = &view.preview {
             for (text, error) in [(&preview.stdout, false), (&preview.stderr, true)] {
@@ -1003,25 +1009,47 @@ pub(super) fn draw(
                     if lines.len() >= usize::from(area.height) {
                         break;
                     }
-                    lines.push(Line::styled(
-                        format!("  {}   {} {line}", glyphs::vertical(), glyphs::vertical()),
+                    let row = Line::styled(
+                        format!("{}   {} {line}", glyphs::vertical(), glyphs::vertical()),
                         if error {
                             Style::default().fg(theme::ATTENTION)
                         } else {
                             Style::default().fg(palette.muted())
                         },
-                    ));
+                    );
+                    let available = usize::from(area.height).saturating_sub(lines.len());
+                    lines.extend(
+                        presentation::indented_wrap(vec![row], area.width)
+                            .into_iter()
+                            .take(available),
+                    );
                 }
             }
-            if (preview.skipped || preview.decode_uncertain)
-                && lines.len() < usize::from(area.height)
-            {
-                lines.push(Line::from(WorkMessage::PreviewNotice.render(view.language)));
+            if preview.skipped || preview.decode_uncertain {
+                let text = WorkMessage::PreviewNotice.render(view.language);
+                let text = text.strip_prefix("  ").unwrap_or(&text).to_owned();
+                let available = usize::from(area.height).saturating_sub(lines.len());
+                lines.extend(
+                    presentation::indented_wrap(
+                        vec![Line::styled(text, Style::default().fg(palette.muted()))],
+                        area.width,
+                    )
+                    .into_iter()
+                    .take(available),
+                );
             }
         } else if view.error.is_none() {
-            lines.push(Line::from(
-                WorkMessage::PreviewLoading.render(view.language),
-            ));
+            let text = WorkMessage::PreviewLoading.render(view.language);
+            let text = text.strip_prefix("  ").unwrap_or(&text).to_owned();
+            let available = usize::from(area.height).saturating_sub(lines.len());
+            lines.extend(
+                presentation::indented_wrap(
+                    vec![Line::styled(text, Style::default().fg(palette.muted()))],
+                    area.width,
+                )
+                .into_iter()
+                .take(available),
+            );
         }
     }
     frame.render_widget(Paragraph::new(lines), area);
