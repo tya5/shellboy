@@ -15,7 +15,10 @@ pub(crate) struct Counters {
     pub autoindexes: u64,
     pub vm_steps: u64,
     pub elapsed_ns: u64,
-    pub rows: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counter_scope: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -34,6 +37,7 @@ pub(crate) struct StatementObservation<'a> {
 struct TraceContext {
     counters: Arc<Mutex<Counters>>,
     baselines: HashMap<usize, [u64; 4]>,
+    exhaustive: bool,
 }
 
 // Only exact, reviewed static statements are eligible for diagnostic output.
@@ -106,6 +110,31 @@ unsafe extern "C" fn profile(
     }
     let context = unsafe { &mut *context.cast::<TraceContext>() };
     let stmt = statement.cast::<ffi::sqlite3_stmt>();
+    if !context.exhaustive {
+        if event != ffi::SQLITE_TRACE_PROFILE || elapsed.is_null() {
+            return 0;
+        }
+        let duration = unsafe { *(elapsed as *const u64) };
+        if duration < 1_000_000 {
+            return 0;
+        }
+        let values = unsafe { statement_counts(stmt) };
+        if let Ok(mut counters) = context.counters.try_lock() {
+            counters.fullscan_steps = values[0];
+            counters.sorts = values[1];
+            counters.autoindexes = values[2];
+            counters.vm_steps = values[3];
+            counters.elapsed_ns = duration;
+            counters.counter_scope = Some("statement_lifetime_cumulative");
+            let sql = unsafe { ffi::sqlite3_sql(stmt) };
+            counters.fingerprint = if sql.is_null() {
+                None
+            } else {
+                safe_fingerprint(unsafe { CStr::from_ptr(sql) }.to_bytes())
+            };
+        }
+        return 0;
+    }
     if event == ffi::SQLITE_TRACE_STMT {
         if !elapsed.is_null()
             && unsafe { CStr::from_ptr(elapsed.cast()) }
@@ -130,7 +159,7 @@ unsafe extern "C" fn profile(
     if event == ffi::SQLITE_TRACE_ROW {
         // SQLite reports one callback for each generated result row.
         if let Ok(mut c) = context.counters.lock() {
-            c.rows = c.rows.saturating_add(1);
+            c.rows = Some(c.rows.unwrap_or_default().saturating_add(1));
         }
         return 0;
     }
@@ -168,13 +197,21 @@ unsafe extern "C" fn profile(
 impl<'a> StatementObservation<'a> {
     pub fn install(connection: &'a mut Connection) -> Self {
         Self::install_using(connection, |db, context| unsafe {
+            ffi::sqlite3_trace_v2(db, ffi::SQLITE_TRACE_PROFILE, Some(profile), context)
+        })
+    }
+    #[cfg(test)]
+    pub(crate) fn install_exhaustive_for_tests(connection: &'a mut Connection) -> Self {
+        let mut observation = Self::install_using(connection, |db, context| unsafe {
             ffi::sqlite3_trace_v2(
                 db,
                 ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_ROW,
                 Some(profile),
                 context,
             )
-        })
+        });
+        observation._context.exhaustive = true;
+        observation
     }
     fn install_using(
         connection: &'a mut Connection,
@@ -184,6 +221,7 @@ impl<'a> StatementObservation<'a> {
         let mut context = Box::new(TraceContext {
             counters: counters.clone(),
             baselines: HashMap::new(),
+            exhaustive: false,
         });
         // The guard removes the callback before dropping its context.
         let result = register(
@@ -299,7 +337,7 @@ mod tests {
     fn overrun_captures_executing_statement_not_later_sql() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY,deleted_at TEXT); INSERT INTO thread VALUES ('private-id',NULL)").unwrap();
-        let mut observation = StatementObservation::install(&mut db);
+        let mut observation = StatementObservation::install_exhaustive_for_tests(&mut db);
         let start = std::time::Instant::now();
         let trace = SlowBacktrace::new(start, Some(observation.shared_counters()));
         observation
@@ -364,6 +402,77 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual component overhead measurement"]
+    fn measure_hook_components() {
+        unsafe extern "C" fn callback(
+            event: u32,
+            ctx: *mut c_void,
+            stmt: *mut c_void,
+            _: *mut c_void,
+        ) -> i32 {
+            if event == ffi::SQLITE_TRACE_PROFILE && !ctx.is_null() {
+                std::hint::black_box(unsafe { statement_counts(stmt.cast()) });
+            }
+            0
+        }
+        fn workload(db: &Connection) {
+            let mut q = db
+                .prepare_cached("SELECT value FROM bench WHERE id = ?1")
+                .unwrap();
+            for id in 0..50_000_i64 {
+                std::hint::black_box(q.query_row([id % 10_000], |r| r.get::<_, i64>(0)).unwrap());
+            }
+        }
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE bench(id INTEGER PRIMARY KEY,value INTEGER); WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<9999) INSERT INTO bench SELECT x,x FROM n;").unwrap();
+        workload(&db);
+        for pass in 0..7 {
+            for mode in ["baseline", "profile", "profile_status", "progress"] {
+                let raw = unsafe { db.handle() };
+                if mode.starts_with("profile") {
+                    let ctx = if mode == "profile_status" {
+                        std::ptr::dangling_mut::<u8>().cast()
+                    } else {
+                        ptr::null_mut()
+                    };
+                    assert_eq!(
+                        unsafe {
+                            ffi::sqlite3_trace_v2(
+                                raw,
+                                ffi::SQLITE_TRACE_PROFILE,
+                                Some(callback),
+                                ctx,
+                            )
+                        },
+                        ffi::SQLITE_OK
+                    );
+                }
+                if mode == "progress" {
+                    db.progress_handler(
+                        1000,
+                        Some(|| {
+                            std::hint::black_box(std::time::Instant::now());
+                            false
+                        }),
+                    )
+                    .unwrap();
+                }
+                let start = std::time::Instant::now();
+                workload(&db);
+                eprintln!("pass={pass} mode={mode} ns={}", start.elapsed().as_nanos());
+                if mode.starts_with("profile") {
+                    unsafe {
+                        ffi::sqlite3_trace_v2(raw, 0, None, ptr::null_mut());
+                    }
+                }
+                if mode == "progress" {
+                    db.progress_handler(0, None::<fn() -> bool>).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
     #[ignore = "manual hook overhead measurement"]
     fn measure_hook_overhead() {
         fn workload(db: &Connection) {
@@ -413,6 +522,39 @@ mod tests {
     }
 
     #[test]
+    fn production_sampling_ignores_fast_statements_and_labels_slow_cumulative_counts() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.create_scalar_function(
+            "pause",
+            0,
+            rusqlite::functions::FunctionFlags::empty(),
+            |_| {
+                std::thread::sleep(std::time::Duration::from_millis(4));
+                Ok(1_i64)
+            },
+        )
+        .unwrap();
+        let mut observation = StatementObservation::install(&mut db);
+        let _: i64 = observation
+            .connection()
+            .query_row("SELECT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(observation.counters().counter_scope, None);
+        let _: i64 = observation
+            .connection()
+            .query_row("SELECT pause()", [], |r| r.get(0))
+            .unwrap();
+        let counters = observation.counters();
+        assert_eq!(
+            counters.counter_scope,
+            Some("statement_lifetime_cumulative")
+        );
+        assert!(counters.vm_steps > 0);
+        assert!(counters.elapsed_ns >= 1_000_000);
+        assert_eq!(counters.rows, None);
+    }
+
+    #[test]
     fn symbols_omit_paths_lines_and_untrusted_text() {
         let input = "   0: shellboy::storage::run_worker\n             at /private/test.rs:42:5\n   1: user::secret\n   2: shellboy::bad/path\n   3: shellboy::ok_42\n";
         assert_eq!(
@@ -453,7 +595,7 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1),(2),(3);")
             .unwrap();
-        let mut trace = StatementObservation::install(&mut db);
+        let mut trace = StatementObservation::install_exhaustive_for_tests(&mut db);
         let mut statement = trace
             .connection()
             .prepare("SELECT x FROM t WHERE x > ?1")
@@ -474,7 +616,7 @@ mod tests {
         let observed = trace.counters();
         assert_eq!(observed.vm_steps, vm_steps as u64);
         assert_eq!(observed.fullscan_steps, fullscan_steps as u64);
-        assert_eq!(observed.rows, 4);
+        assert_eq!(observed.rows, Some(4));
     }
 
     #[test]
@@ -495,7 +637,7 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1),(2),(3)")
             .unwrap();
-        let mut trace = StatementObservation::install(&mut db);
+        let mut trace = StatementObservation::install_exhaustive_for_tests(&mut db);
         let n: i64 = trace
             .connection()
             .query_row("SELECT count(*) FROM t WHERE x > ?1", [1], |r| r.get(0))
@@ -504,7 +646,7 @@ mod tests {
         let counters = trace.counters();
         assert!(counters.fullscan_steps > 0);
         assert!(counters.vm_steps > 0);
-        assert_eq!(counters.rows, 1);
+        assert_eq!(counters.rows, Some(1));
         let mut stmt = trace
             .connection()
             .prepare("SELECT x FROM t ORDER BY x")
@@ -512,6 +654,6 @@ mod tests {
         let rows = stmt.query_map([], |row| row.get::<_, i64>(0)).unwrap();
         assert_eq!(rows.collect::<Result<Vec<_>, _>>().unwrap(), vec![1, 2, 3]);
         drop(stmt);
-        assert_eq!(trace.counters().rows, 4);
+        assert_eq!(trace.counters().rows, Some(4));
     }
 }

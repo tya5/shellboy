@@ -55,7 +55,9 @@ fn scoped_shell_list_seeks_with_large_unrelated_history() {
     let mut request = args();
     request.thread_id = Some("t".into());
     let mut observation =
-        crate::storage::statement_observation::StatementObservation::install(&mut c);
+        crate::storage::statement_observation::StatementObservation::install_exhaustive_for_tests(
+            &mut c,
+        );
     let result = shells(observation.connection(), &request).unwrap();
     assert_eq!(result["items"].as_array().unwrap().len(), 1);
     let counters = observation.counters();

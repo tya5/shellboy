@@ -11,26 +11,28 @@ new table, queue, worker, or dependency.
 ## Connection-level instrumentation
 
 Instrument all SQLite connections used by the DB worker at the lowest practical
-layer, including the inspection read connections. Use rusqlite's `trace_v2`
-profile events to capture per-statement elapsed time and unexpanded SQL; never
-log bound values. Track the currently executing statement per thread so the
-existing #171 progress handler can identify it. After each statement collect
-`sqlite3_stmt_status` counters: `FULLSCAN_STEP`, `SORT`, `AUTOINDEX`, and
-`VM_STEP`, along with the row count. A nonzero full-scan count on a table that
-grows is a signal of a potential missing index independent of wall time.
+layer, including inspection reads. The always-on fast path subscribes only to
+SQLite `trace_v2` profile events, using SQLite's elapsed time without a separate
+per-statement timer. Only a statement reported at or above 1 ms is sampled for
+`FULLSCAN_STEP`, `SORT`, `AUTOINDEX`, and `VM_STEP`. SQLite counters can include
+previous executions of a reused prepared statement; report them as cumulative
+statement-lifetime snapshots, not per-execution or job totals. No sample means
+unknown, not zero. Production does not install a row callback and does not
+report row counts. Tests may opt into exhaustive observation to check indexed
+hot reads independently of the production sampling threshold.
 
-On the first progress-handler call after a job exceeds its limit, capture one
-`std::backtrace::Backtrace` on the executing thread and the current unexpanded
-SQL. Capture at most once per job. Record the origin at admission: requester
-kind, execute kind, command name, and argument shape such as limits and scopes,
-never argument values.
+The existing progress handler captures at most one backtrace on the executing
+thread after a job exceeds its limit. Fingerprints are emitted only for exact
+reviewed static statements after a slow profile event; unknown statements are
+omitted, including their SQL and parameter values. Requester category and
+execute kind are retained where available; argument values are never logged.
 
 ## Events, privacy, and bounds
 
-Extend the existing slow/active events with normalized SQL fingerprint without
-parameters, full-scan, sort, autoindex and VM step counts, rows, origin, and
-backtrace symbol names. At overrun only, obtain `EXPLAIN QUERY PLAN` text for
-the fingerprint using a separate read-only connection. Do not run the plan on
+Extend the existing slow/active events with available safe fingerprints,
+sampled counters, origin, and backtrace symbol names. For recognized slow
+statements, the existing diagnostic writer obtains `EXPLAIN QUERY PLAN` on a
+separate read-only connection and emits only fixed plan categories. Do not run the plan on
 the writer connection or log expanded SQL, message content, paths, or parameter
 values. Ensure the plan text and fingerprint are privacy-safe before logging;
 omit detail when that cannot be guaranteed. Emit at most one detailed record

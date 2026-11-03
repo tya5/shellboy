@@ -281,7 +281,7 @@ mod tests {
             serde_json::from_value(json!({"node_id":"n"})).unwrap();
         for name in ["list", "get", "previous", "next", "sources", "replacements"] {
             let mut observation =
-                crate::storage::statement_observation::StatementObservation::install(&mut db);
+                crate::storage::statement_observation::StatementObservation::install_exhaustive_for_tests(&mut db);
             match name {
                 "list" => {
                     super::super::list_nodes(observation.connection(), &list).unwrap();
@@ -341,7 +341,7 @@ mod tests {
         tx.commit().unwrap();
         {
             let mut observation =
-                crate::storage::statement_observation::StatementObservation::install(&mut db);
+                crate::storage::statement_observation::StatementObservation::install_exhaustive_for_tests(&mut db);
             assert!(observation.available());
             let _ = read_tx(observation.connection(), &["n".into()], Some("t")).unwrap();
             let counters = observation.counters();

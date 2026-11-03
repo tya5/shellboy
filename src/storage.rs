@@ -541,7 +541,8 @@ impl DbWorker {
                         {
                             let snapshot = counters
                                 .as_ref()
-                                .and_then(|c| c.try_lock().ok().map(|c| *c));
+                                .and_then(|c| c.try_lock().ok().map(|c| *c))
+                                .filter(|c| c.counter_scope.is_some());
                             diagnostics.record_db_job_active(
                                 &label,
                                 "inspection",
@@ -564,7 +565,10 @@ impl DbWorker {
                 .connection()
                 .progress_handler(0, None::<fn() -> bool>);
         }
-        let counters = observation.available().then(|| observation.counters());
+        let counters = observation
+            .available()
+            .then(|| observation.counters())
+            .filter(|c| c.counter_scope.is_some());
         drop(observation);
         let run = started.elapsed();
         if (queue >= SLOW_JOB_THRESHOLD || run >= SLOW_JOB_THRESHOLD)
@@ -638,7 +642,8 @@ impl DbWorker {
             let counters = active
                 .counters
                 .as_ref()
-                .and_then(|c| c.try_lock().ok().map(|c| *c));
+                .and_then(|c| c.try_lock().ok().map(|c| *c))
+                .filter(|c| c.counter_scope.is_some());
             (
                 active.job.kind,
                 active.job.lane,
@@ -1315,7 +1320,10 @@ fn run_worker(
                     &state.foreground_waiting,
                     slow_backtrace.clone(),
                 );
-                let counters = observation.available().then(|| observation.counters());
+                let counters = observation
+                    .available()
+                    .then(|| observation.counters())
+                    .filter(|c| c.counter_scope.is_some());
                 drop(observation);
                 let run = started.elapsed();
                 let diagnostics = state.diagnostics.try_lock().ok();
@@ -1882,15 +1890,10 @@ mod slow_job_tests {
                     .contains("active_job_snapshot_can_be_read")
             );
             assert_eq!(active_logs[0]["db_job_active"]["lane"], "foreground");
-            assert_eq!(
-                active_logs[0]["db_job_active"]["statement_counters"]["rows"],
-                1
-            );
             assert!(
-                active_logs[0]["db_job_active"]["statement_counters"]["vm_steps"]
-                    .as_u64()
-                    .unwrap()
-                    > 0
+                active_logs[0]["db_job_active"]
+                    .get("statement_counters")
+                    .is_none()
             );
             assert!(
                 active_logs[0]["db_job_active"]["elapsed_ms"]
@@ -1900,7 +1903,7 @@ mod slow_job_tests {
             );
             assert_eq!(
                 active_logs[0]["db_job_active"].as_object().unwrap().len(),
-                4
+                3
             );
         })
         .await
@@ -2000,13 +2003,7 @@ mod slow_job_tests {
         assert_eq!(event["db_job_slow"]["kind"], "HistoryGet");
         assert_eq!(event["db_job_slow"]["lane"], "inspection");
         assert_eq!(event["db_job_slow"]["requester"], "external");
-        assert_eq!(event["db_job_slow"]["statement_counters"]["rows"], 1);
-        assert!(
-            event["db_job_slow"]["statement_counters"]["vm_steps"]
-                .as_u64()
-                .unwrap()
-                > 0
-        );
+        assert!(event["db_job_slow"].get("statement_counters").is_none());
     }
 
     #[tokio::test]
@@ -2072,7 +2069,7 @@ mod slow_job_tests {
         assert!(rows[1]["db_job_slow"]["queue_ms"].as_u64().unwrap() >= 1000);
         assert!(
             rows.iter()
-                .all(|r| r["db_job_slow"].as_object().unwrap().len() == 5)
+                .all(|r| r["db_job_slow"].get("statement_counters").is_none())
         );
     }
 }
