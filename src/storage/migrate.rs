@@ -334,7 +334,10 @@ mod activity_migration_tests {
             &|| {},
         )
         .unwrap();
-        assert_eq!(*observed.borrow(), vec![(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]);
+        assert_eq!(
+            *observed.borrow(),
+            vec![(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
+        );
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(
