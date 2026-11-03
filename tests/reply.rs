@@ -594,7 +594,10 @@ async fn oversized_held_queue_progresses_through_send_and_retry_without_rejectio
         .unwrap();
     // Initial accepted input is recovered before the 129 stopping-held inputs.
     assert_eq!(&selected[1..=ids.len()], ids);
-    assert_eq!(selected.last().unwrap(), result["message_id"].as_str().unwrap());
+    assert_eq!(
+        selected.last().unwrap(),
+        result["message_id"].as_str().unwrap()
+    );
     assert_eq!(held, 0);
     store.database.shutdown().await.unwrap();
 }

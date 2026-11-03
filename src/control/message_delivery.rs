@@ -81,7 +81,9 @@ pub(crate) fn repair_terminal_tx(db: &Connection, at: &str) -> rusqlite::Result<
 /// Repair only this recipient's oldest 128 rows needing a state change.
 /// The global startup repair must never run inside foreground reply admission.
 fn repair_thread_batch_tx(db: &Connection, thread: &str, at: &str) -> rusqlite::Result<()> {
-    let terminal = format!("({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))");
+    let terminal = format!(
+        "({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))"
+    );
     let rows = db.prepare(&format!("SELECT id FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') AND ((NOT EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NULL) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=receipt.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL)) OR (state='held' AND path_admission='unknown' AND run_id IS NULL AND turn_id IS NULL AND hold_reason IS NOT 'uncertain_path_admission') OR ({terminal} AND (state<>CASE WHEN path_admission='admitted' THEN 'applied' ELSE 'held' END OR hold_reason IS NOT CASE path_admission WHEN 'admitted' THEN 'terminal_after_path_admission' WHEN 'unadmitted' THEN 'terminal_before_path_admission' ELSE 'uncertain_path_admission' END))) ORDER BY created_at,rowid LIMIT 128"))?
         .query_map([thread], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     for id in rows {
@@ -91,7 +93,9 @@ fn repair_thread_batch_tx(db: &Connection, thread: &str, at: &str) -> rusqlite::
 }
 
 pub(super) fn interrupted_remaining(db: &Connection, thread: &str) -> rusqlite::Result<bool> {
-    let terminal = format!("({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))");
+    let terminal = format!(
+        "({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))"
+    );
     db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted'))))"), [thread], |r| r.get(0))
 }
 
@@ -107,12 +111,14 @@ pub(crate) fn recover_on_resume_tx(
     at: &str,
 ) -> Result<usize, StorageError> {
     repair_thread_batch_tx(tx, thread, at)?;
-    let terminal = format!("({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))");
+    let terminal = format!(
+        "({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))"
+    );
     // Merge interrupted and current recovery input before applying LIMIT: neither
     // source may overtake an older receipt from the other source.
     let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id,COALESCE(run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait',0) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND ((path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted')))) OR (run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait')) AND EXISTS(SELECT 1 FROM node source WHERE source.id=receipt.message_node_id AND source.payload_json IS NOT NULL AND source.deleted_reason IS NULL) ORDER BY created_at,rowid LIMIT 128"))?;
     let rows = q
-        .query_map(params![thread,run,turn], |r| {
+        .query_map(params![thread, run, turn], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -286,31 +292,72 @@ mod tests {
     #[test]
     fn oversized_unavailable_sources_make_repair_progress_without_partial_admission() {
         let mut db = fixture();
-        for n in 0..257 { input(&db, &format!("n{n:03}"), "unadmitted", "0"); }
-        db.execute("UPDATE node SET payload_json=NULL,deleted_reason='collected'", []).unwrap();
-        for cancelled in [128,256,257] {
+        for n in 0..257 {
+            input(&db, &format!("n{n:03}"), "unadmitted", "0");
+        }
+        db.execute(
+            "UPDATE node SET payload_json=NULL,deleted_reason='collected'",
+            [],
+        )
+        .unwrap();
+        for cancelled in [128, 256, 257] {
             let tx = db.transaction().unwrap();
-            assert_eq!(recover_on_resume_tx(&tx,"t","new","next",json!({"kind":"human"}),"resume").unwrap(),0);
-            assert_eq!(tx.query_row("SELECT count(*) FROM receipt WHERE state='cancelled'", [], |r| r.get::<_,i64>(0)).unwrap(), cancelled);
-            assert_eq!(tx.query_row("SELECT count(*) FROM thread_path", [], |r| r.get::<_,i64>(0)).unwrap(), 0);
+            assert_eq!(
+                recover_on_resume_tx(&tx, "t", "new", "next", json!({"kind":"human"}), "resume")
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                tx.query_row(
+                    "SELECT count(*) FROM receipt WHERE state='cancelled'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                cancelled
+            );
+            assert_eq!(
+                tx.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
             tx.commit().unwrap();
         }
-        assert!(!interrupted_remaining(&db,"t").unwrap());
+        assert!(!interrupted_remaining(&db, "t").unwrap());
     }
 
     #[test]
     fn recipient_repair_writes_at_most_128_and_retains_unrelated_rows() {
         let db = fixture();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('unrelated','/','/a','p','m','before')",[]).unwrap();
-        for n in 0..257 { input(&db, &format!("n{n:03}"), "unadmitted", "0"); }
+        for n in 0..257 {
+            input(&db, &format!("n{n:03}"), "unadmitted", "0");
+        }
         input(&db, "foreign", "unadmitted", "0");
-        db.execute("UPDATE receipt SET target_thread_id='unrelated' WHERE id='foreign'", []).unwrap();
+        db.execute(
+            "UPDATE receipt SET target_thread_id='unrelated' WHERE id='foreign'",
+            [],
+        )
+        .unwrap();
         db.execute_batch("CREATE TEMP TABLE writes(id TEXT); CREATE TEMP TRIGGER audit_repair AFTER UPDATE ON receipt BEGIN INSERT INTO writes VALUES(new.id); END;").unwrap();
-        for expected in [128,128,1,0] {
+        for expected in [128, 128, 1, 0] {
             db.execute("DELETE FROM writes", []).unwrap();
             repair_thread_batch_tx(&db, "t", "repair").unwrap();
-            assert_eq!(db.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_,i64>(0)).unwrap(), expected);
-            assert_eq!(db.query_row("SELECT hold_reason FROM receipt WHERE id='foreign'", [], |r| r.get::<_,Option<String>>(0)).unwrap(), None);
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT hold_reason FROM receipt WHERE id='foreign'",
+                    [],
+                    |r| r.get::<_, Option<String>>(0)
+                )
+                .unwrap(),
+                None
+            );
         }
     }
 
@@ -320,17 +367,38 @@ mod tests {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('new','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('next','t','new','recovery_wait','now');").unwrap();
         for n in 0..257 {
             let id = format!("n{n:03}");
-            input(&db, &id, "unadmitted", &format!("{n:03}"));
             if n % 2 == 0 {
-                db.execute("UPDATE receipt SET run_id='new',turn_id='next',hold_reason='recovery_wait' WHERE id=?1", [&id]).unwrap();
+                db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'next','user',?2,'{}')", params![id,format!("{n:03}")]).unwrap();
+                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,path_admission,hold_reason)VALUES(?1,?1,'null','t',?1,'new','next','held',?2,'unadmitted','recovery_wait')",params![id,format!("{n:03}")]).unwrap();
+            } else {
+                input(&db, &id, "unadmitted", &format!("{n:03}"));
             }
         }
-        for (generation, count) in [(0,128),(1,256),(2,257)] {
+        for (generation, count) in [(0, 128), (1, 256), (2, 257)] {
             let tx = db.transaction().unwrap();
-            assert!(super::super::state::resume_recovery_turn_tx(&tx,"t","new","next",generation,"resume").unwrap());
-            let selected = tx.prepare("SELECT node_id FROM thread_path ORDER BY ordinal").unwrap().query_map([], |r| r.get::<_,String>(0)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-            assert_eq!(selected, (0..count).map(|n| format!("n{n:03}")).collect::<Vec<_>>());
-            assert_eq!(tx.query_row("SELECT count(*) FROM receipt WHERE state='held'", [], |r| r.get::<_,i64>(0)).unwrap(), 257-count);
+            assert!(
+                super::super::state::resume_recovery_turn_tx(
+                    &tx, "t", "new", "next", generation, "resume"
+                )
+                .unwrap()
+            );
+            let selected = tx
+                .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(
+                selected,
+                (0..count).map(|n| format!("n{n:03}")).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                tx.query_row("SELECT count(*) FROM receipt WHERE state='held'", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                257 - count
+            );
             tx.commit().unwrap();
         }
     }
