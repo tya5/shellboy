@@ -216,3 +216,18 @@ as requested by the user; label rewriting is deferred. Do not move the indicator
 to a new line. The existing UI
 clock updates the elapsed value, while the frontend receives job transitions
 through the in-memory watch snapshot.
+
+## Nonblocking Terminal Capabilities (#192)
+
+Implementation pending; this section records the adopted target, not current behavior.
+
+Before the first startup draw, issue terminal width, device attributes and
+keyboard enhancement queries without waiting. First-frame stage logging records
+the draw itself, not a terminal-response deadline. The common capability-probe mechanism tracks each capability as `Unmeasured`
+or `Measured(value)`. Capabilities start unmeasured; cached width or the conservative fallback is used until a valid width
+reply, and keyboard enhancement stays off until confirmed. The sole input reader
+filters terminal responses throughout startup and normal interaction, preserving
+interleaved keystrokes. Adoption of a response that changes layout requests one
+redraw. No response is allowed to stall startup or input, and no guessed value
+is cached. The width measurement and cache rules are specified in
+[the terminal width design](ui-language-stage-a-draft.md).
