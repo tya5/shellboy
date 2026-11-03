@@ -21,13 +21,17 @@ prose keep their existing structure. Bilingual narrow/wide
 regressions cover evicted/Details hints, the shared indenter and management
 preview. Local cargo checks and exact-tip CI remain pending.
 ## Reply-expected messages design (#194, awaiting approval)
+## Reply-expected messages design (#194, adopted, not implemented)
 
-Branch `issue-194/reply-design`: design memo
-[reply-expected-messages](../design/reply-expected-messages.md) turns the
-user's #194 decisions into a data model, CLI, Run-end rule, delegation mapping
-and gap analysis, with 17 open questions. Documentation only; nothing is
-implemented or verified. Next: user answers the open questions and approves,
-then implementation on a new branch.
+Branch `issue-194/reply-design`: the design
+[reply-expected-messages](../design/reply-expected-messages.md) is adopted with
+the user's answers to all 17 questions (Q2, Q11, Q14 individually; the rest as
+recommended; option B for the glyph) and the `exec --result
+reply|turn-end|run-end` design, including the user's rule that an empty end
+message is ordinary empty text. Judgements made without an explicit answer are
+marked in the memo and logged in decisions. Documentation only; nothing is
+implemented or verified. Resume point: implementation step 1 (rename "answer"
+to "end message") on a new branch, then steps 2–6 in order.
 
 ## Saved Turn context line (#183, branch `issue-183/append-context`)
 

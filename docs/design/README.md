@@ -49,7 +49,7 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
   opt-in comparison identity, bounded attempt observations, and read-only
   single-attempt inspection. Sticky headers are explicitly deferred.
 
-- [Reply-expected messages](reply-expected-messages.md) (#194, **proposed —
-  awaiting user approval**): `--expect-reply`, `message reply`,
-  `wait reply_received`, Run-end reminder, end-message rename and delegation
-  unification. Not adopted until approved.
+- [Reply-expected messages](reply-expected-messages.md) (#194, adopted, not
+  implemented): `--expect-reply`, `message reply`, `wait reply_received`,
+  Run-end reminder, end-message rename, `exec --result reply|turn-end|run-end`
+  and delegation unification, with a six-step implementation plan.
