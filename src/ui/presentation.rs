@@ -657,19 +657,37 @@ pub(super) fn hanging_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'s
 }
 
 pub(super) fn indented_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
-    // Preserve the viewport at widths too narrow to fit both the indent and text.
-    let indent = if width >= 3 { 2 } else { 0 };
-    hanging_wrap(lines, width.saturating_sub(indent).max(1))
+    lines
         .into_iter()
-        .map(|mut line| {
-            if line.width() > 0 && indent > 0 {
-                let style = line
-                    .spans
-                    .first()
-                    .map_or(line.style, |span| line.style.patch(span.style));
-                line.spans.insert(0, Span::styled("  ", style));
-            }
-            line
+        .flat_map(|line| {
+            // Keep a wide first character visible in three-cell panes by omitting the indent.
+            let first_char_width = line
+                .spans
+                .iter()
+                .flat_map(|span| span.content.chars())
+                .find(|character| !character.is_whitespace())
+                .map_or(1, |character| {
+                    unicode_width::UnicodeWidthChar::width(character).unwrap_or(0)
+                });
+            let indent = if width >= 3
+                && usize::from(width.saturating_sub(2)) >= first_char_width
+            {
+                2
+            } else {
+                0
+            };
+            hanging_wrap(vec![line], width.saturating_sub(indent).max(1))
+                .into_iter()
+                .map(move |mut line| {
+                    if line.width() > 0 && indent > 0 {
+                        let style = line
+                            .spans
+                            .first()
+                            .map_or(line.style, |span| line.style.patch(span.style));
+                        line.spans.insert(0, Span::styled("  ", style));
+                    }
+                    line
+                })
         })
         .collect()
 }
@@ -5139,7 +5157,7 @@ mod conversation_item_tests {
                 "入れ子の日本語説明文が狭い幅で複数行に折り返されます。",
             ),
         ] {
-            for width in [2, 4, 12, 48] {
+            for width in [2, 3, 4, 12, 48] {
                 let rows = indented_wrap(vec![Line::from(text)], width);
                 assert!(
                     rows.len() > 1 || width == 48,
@@ -5151,8 +5169,10 @@ mod conversation_item_tests {
                         .iter()
                         .map(|span| span.content.as_ref())
                         .collect::<String>();
-                    if width >= 3 {
+                    if width >= 3 && !(language == UiLanguage::Ja && width == 3) {
                         assert!(shown.starts_with("  "), "{language:?} {width}: {shown}");
+                    } else if language == UiLanguage::Ja && width == 3 {
+                        assert!(shown.starts_with("入"), "{language:?} {width}: {shown}");
                     }
                     assert!(
                         row.width() <= usize::from(width),

@@ -8997,13 +8997,14 @@ Static audit in `src/ui` and `src/presentation` after #177 final-tip CI succeede
 
 Focused renderer coverage checks the shared indenter at narrow and wide widths
 in Japanese and English, management preview content at both widths, and fixed-height
-compact excerpts from zero to wide widths. At widths
-below three cells the two-space indent is omitted because it cannot fit alongside
-content; all returned rows remain within the viewport. Existing tool-note
-assertions retain the two-space prefix, muted style, and non-body classification. The shared indenter also covers body-role paths, including
-uncached hints and Details fallback; the UI projection keeps headings and tree
-prefixes separate from nested rows. Opened-output notice decoration remains
-muted and is never canonical output-body content.
+compact excerpts from zero to wide widths. Below three cells, the two-space indent
+is omitted because it cannot fit alongside content. In a three-cell pane, it is
+also omitted when the first wide character would otherwise be clipped; all rows
+remain within the viewport. Existing tool-note assertions retain the two-space
+prefix, muted style, and non-body classification. The shared indenter also covers
+body-role paths, including uncached hints and Details fallback; the UI projection
+keeps headings and tree prefixes separate from nested rows. Opened-output notice
+decoration remains muted and is never canonical output-body content.
 
 Audit classification: labels, status rows, grouped notice headers, flat chrome,
 modal/page prose, and source-preserving readers are peer/top-level content, not
