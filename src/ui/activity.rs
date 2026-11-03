@@ -827,6 +827,15 @@ mod tests {
     }
 
     #[test]
+    fn missing_end_time_keeps_legacy_japanese_and_has_english_display() {
+        let label = FooterText::EndedUnknown;
+        assert_eq!(label.key(), "ui.activity.ended_unknown");
+        assert_eq!(label.text(), crate::presentation::TIME_TEXT[3].1);
+        assert_eq!(label.localized(UiLanguage::Ja), label.text());
+        assert_eq!(label.localized(UiLanguage::En), "End time unavailable");
+    }
+
+    #[test]
     fn activity_markers_and_retry_text_follow_measured_width() {
         use crate::ui::text_width::{self, UnicodeWidthStr};
         let retry = AutomaticRetrySnapshot {

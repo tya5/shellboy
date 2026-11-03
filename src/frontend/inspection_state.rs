@@ -1056,6 +1056,176 @@ mod tests {
     }
 
     #[test]
+    fn pending_thread_usage_detail_follows_locale_without_changing_protocol_fields() {
+        let target = InspectionTarget::Thread("foreign".into());
+        let mut state = Observation::default();
+        state.install(1, context(1), target.clone(), None);
+        state.observe(&context(1), &target, true);
+        let ticket = state.take_metadata(Instant::now()).unwrap();
+        let metadata = PreparedInspection {
+            target: target.clone(),
+            dependencies: Dependencies {
+                thread: "foreign".into(),
+                parent_thread: None,
+            },
+            value: serde_json::json!({"thread_id":"foreign", "connection":"conn", "model":"model", "title":"原文"}),
+            observed_at: "now".into(),
+            limited_fields: vec![],
+        };
+        assert!(matches!(
+            state.complete_metadata(&ticket, 1, Ok(metadata)),
+            Completion::Updated
+        ));
+        let projection = state.take_presentation().unwrap();
+        let en = super::super::inspection_presentation::prepare_in(
+            crate::config::UiLanguage::En,
+            &projection,
+            16 * 1024,
+        )
+        .unwrap();
+        let ja = super::super::inspection_presentation::prepare_in(
+            crate::config::UiLanguage::Ja,
+            &projection,
+            16 * 1024,
+        )
+        .unwrap();
+        assert_eq!(
+            en.report.detail.as_ref().unwrap()["context_usage"]["observation"],
+            "not_yet_read"
+        );
+        assert_eq!(
+            ja.report.detail.as_ref().unwrap()["context_usage"]["observation"],
+            "not_yet_read"
+        );
+        assert_eq!(
+            en.report.detail.as_ref().unwrap()["context_usage"]["inspect"],
+            "shellboy thread get --thread <thread_id>"
+        );
+        assert_eq!(
+            ja.report.detail.as_ref().unwrap()["context_usage"]["inspect"],
+            "shellboy thread get --thread <thread_id>"
+        );
+        assert_eq!(projection.metadata.value["title"], "原文");
+        assert_eq!(
+            en.report.detail.as_ref().unwrap()["context_usage"]["detail"],
+            "Waiting for saved usage"
+        );
+        assert_eq!(
+            ja.report.detail.as_ref().unwrap()["context_usage"]["detail"],
+            "保存済み使用量の取得待ち"
+        );
+        for (prepared, expected) in [
+            (&en, "Waiting for saved usage"),
+            (&ja, "保存済み使用量の取得待ち"),
+        ] {
+            let index = prepared
+                .snapshot
+                .fields
+                .iter()
+                .position(|field| field.key == "/context_usage/detail")
+                .unwrap();
+            let field = &prepared.snapshot.fields[index];
+            assert_eq!(field.value, expected);
+            assert_eq!(field.displayed(), expected);
+            assert_eq!(
+                prepared.snapshot.anchors[index].pointer,
+                "/context_usage/detail"
+            );
+        }
+        assert!(state.presentation_finished(&projection));
+        let (_root, diagnostics) = logger();
+        let usage = state.take_usage(Instant::now(), diagnostics).unwrap();
+        let original = serde_json::json!({"detail":"provider 原文", "tokens":13});
+        let totals = serde_json::json!({"thread_id":"foreign", "usage":"provider 原文"});
+        assert!(matches!(
+            state.complete_usage(
+                &usage,
+                2,
+                Ok(PreparedUsage {
+                    value: totals.clone(),
+                    context_usage: Some(original.clone()),
+                    context_scope: Some(("foreign".into(), "conn".into(), "model".into())),
+                    observed_at: "usage-read".into(),
+                })
+            ),
+            Completion::Updated
+        ));
+        let ready = state.take_presentation().unwrap();
+        for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+            let actual =
+                super::super::inspection_presentation::prepare_in(language, &ready, 16 * 1024)
+                    .unwrap();
+            assert_eq!(
+                actual.report.detail.as_ref().unwrap()["context_usage"],
+                original
+            );
+            assert_eq!(
+                actual.report.detail.as_ref().unwrap()["usage_totals"],
+                totals
+            );
+            let detail = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/context_usage/detail")
+                .unwrap();
+            assert_eq!(detail.value, "provider 原文");
+            assert_eq!(detail.displayed(), "provider 原文");
+            let usage = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/usage_totals/usage")
+                .unwrap();
+            assert_eq!(usage.displayed(), "provider 原文");
+            assert_eq!(ready.metadata.value["title"], "原文");
+        }
+        assert!(state.presentation_finished(&ready));
+        state.changed("foreign");
+        let (_root2, diagnostics2) = logger();
+        let due = state.scope.as_ref().unwrap().usage_next.unwrap();
+        let stale_ticket = state.take_usage(due, diagnostics2).unwrap();
+        assert!(matches!(
+            state.complete_usage(
+                &stale_ticket,
+                3,
+                Ok(PreparedUsage {
+                    value: totals.clone(),
+                    context_usage: Some(original.clone()),
+                    context_scope: Some(("foreign".into(), "old-conn".into(), "model".into())),
+                    observed_at: "previous-read".into(),
+                })
+            ),
+            Completion::Updated
+        ));
+        let previous = state.take_presentation().unwrap();
+        for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+            let actual =
+                super::super::inspection_presentation::prepare_in(language, &previous, 16 * 1024)
+                    .unwrap();
+            let context_usage = &actual.report.detail.as_ref().unwrap()["context_usage"];
+            assert_eq!(context_usage["observation"], "previous_configuration");
+            assert_eq!(context_usage["last_observation"], original);
+            assert_eq!(context_usage["read_at"], "previous-read");
+            let detail = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/context_usage/last_observation/detail")
+                .unwrap();
+            assert_eq!(detail.value, "provider 原文");
+            assert_eq!(detail.displayed(), "provider 原文");
+            let read_at = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/context_usage/read_at")
+                .unwrap();
+            assert_eq!(read_at.value, "previous-read");
+        }
+    }
+
+    #[test]
     fn index_window_survives_invalidations_and_cover_until_explicit_refresh() {
         let mut value = Observation::default();
         let target = InspectionTarget::Index(crate::protocol::IndexArgs::default());

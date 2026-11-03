@@ -402,10 +402,11 @@ pub(super) fn footer_lines_with_db(
             snapshot.timing.ended_at.as_ref(),
             chrono::FixedOffset::east_opt(snapshot.timing.local_offset_seconds),
         ) {
-            facts.push(crate::presentation::ended_text(
+            facts.push(crate::presentation::ended_text_localized(
                 Some(ended),
                 chrono::Utc::now(),
                 offset,
+                view.language,
             ));
         } else {
             facts.push(
