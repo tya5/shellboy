@@ -1,6 +1,6 @@
 //! Noninteractive composition of existing owner RPCs, with local final-result validation.
 use crate::{cli::ThreadCreateOptions, ipc, protocol::*};
-use clap::Args;
+use clap::{Args, ValueEnum};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -15,8 +15,18 @@ const SCHEMA_LIMIT: usize = 64 * 1024;
 const HISTORY_LIMIT: usize = 4 * 1024 * 1024;
 const ANSWER_LIMIT: usize = 1024 * 1024;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ResultMode {
+    Reply,
+    TurnEnd,
+    RunEnd,
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct ExecOptions {
+    /// Select the saved reply or end message to return.
+    #[arg(long, value_enum, default_value = "reply")]
+    pub result: ResultMode,
     /// JSON Schema file (bounded, documented subset; unsupported keywords are rejected).
     #[arg(long)]
     pub schema: PathBuf,
@@ -251,102 +261,183 @@ impl Session {
         )
         .map_err(|_| Failure::new(6, "owner_error", "Owner returned an invalid typed result"))
     }
-    async fn answer(&mut self) -> Result<String, Failure> {
-        let turn = self.progress.turn_id.clone().ok_or_else(|| {
-            Failure::new(
-                4,
-                "held",
-                "Message has no assigned Turn; inspect its saved receipt",
-            )
-        })?;
-        loop {
-            let facts: TurnDetails = self
-                .request(
-                    "turn",
-                    Command::TurnGet(TurnTarget {
-                        turn_id: turn.clone(),
-                    }),
-                )
-                .await?;
-            match facts.state {
-                TurnState::Completed => {
-                    self.progress
-                        .turn_usage
-                        .push(json!({"turn_id":turn,"usage_totals":facts.usage_totals}));
-                    let message = self.progress.message_id.clone().expect("accepted message");
-                    let delivery: MessageDetails = self
-                        .request(
-                            "message",
-                            Command::MessageGet(MessageTarget {
-                                message_id: message,
-                            }),
-                        )
-                        .await?;
-                    if delivery.delivery_status != DeliveryStatus::Applied {
+    async fn answer(&mut self, mode: ResultMode) -> Result<String, Failure> {
+        if self.progress.run_id.is_none() {
+            return Err(Failure::new(4, "held", "Message has no assigned Run"));
+        }
+        if mode == ResultMode::RunEnd {
+            let run = self.progress.run_id.clone().expect("assigned run");
+            loop {
+                let facts: RunDetails = self
+                    .request(
+                        "run",
+                        Command::RunGet(RunTarget {
+                            run_id: run.clone(),
+                        }),
+                    )
+                    .await?;
+                match facts.state {
+                    RunState::Completed => {
+                        let message = self.progress.message_id.clone().expect("accepted message");
+                        let delivery: MessageDetails = self
+                            .request(
+                                "message",
+                                Command::MessageGet(MessageTarget {
+                                    message_id: message,
+                                }),
+                            )
+                            .await?;
+                        if delivery.delivery_status != DeliveryStatus::Applied {
+                            return Err(Failure::new(4, "held", "Message was not applied"));
+                        }
+                        self.progress.end_message_node_id = facts.end_message_node_id;
+                        break;
+                    }
+                    RunState::Stopped | RunState::Failed => {
                         return Err(Failure::new(
                             4,
-                            "held",
-                            "Message was not applied; the completed Turn is not proof of its answer",
+                            "execution_unavailable",
+                            "Run ended without a successful end message",
                         ));
                     }
-                    self.progress.end_message_node_id = facts.end_message_node_id;
-                    break;
+                    _ => {}
                 }
-                TurnState::RecoveryWait => {
+                let remaining = self
+                    .deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .min(30_000) as u64;
+                if remaining == 0 {
+                    return Err(Failure::new(
+                        5,
+                        "timeout",
+                        "Client deadline expired; no target was stopped",
+                    ));
+                }
+                let wait: WaitResult = self
+                    .request(
+                        "wait",
+                        Command::Wait(WaitArgs {
+                            after: None,
+                            conditions: vec![WaitCondition::RunEnded {
+                                run_id: run.clone(),
+                            }],
+                            timeout_ms: remaining,
+                        }),
+                    )
+                    .await?;
+                if wait.status == WaitStatus::RecoveryWait {
+                    return Err(Failure::new(
+                        4,
+                        "recovery_wait",
+                        "Target requires explicit recovery",
+                    ));
+                }
+                if wait.status == WaitStatus::Unavailable {
+                    return Err(Failure::new(
+                        4,
+                        "execution_unavailable",
+                        "Wait target became unavailable",
+                    ));
+                }
+            }
+        } else {
+            let turn = self.progress.turn_id.clone().ok_or_else(|| {
+                Failure::new(
+                    4,
+                    "held",
+                    "Message has no assigned Turn; inspect its saved receipt",
+                )
+            })?;
+            loop {
+                let facts: TurnDetails = self
+                    .request(
+                        "turn",
+                        Command::TurnGet(TurnTarget {
+                            turn_id: turn.clone(),
+                        }),
+                    )
+                    .await?;
+                match facts.state {
+                    TurnState::Completed => {
+                        self.progress
+                            .turn_usage
+                            .push(json!({"turn_id":turn,"usage_totals":facts.usage_totals}));
+                        let message = self.progress.message_id.clone().expect("accepted message");
+                        let delivery: MessageDetails = self
+                            .request(
+                                "message",
+                                Command::MessageGet(MessageTarget {
+                                    message_id: message,
+                                }),
+                            )
+                            .await?;
+                        if delivery.delivery_status != DeliveryStatus::Applied {
+                            return Err(Failure::new(
+                                4,
+                                "held",
+                                "Message was not applied; the completed Turn is not proof of its answer",
+                            ));
+                        }
+                        self.progress.end_message_node_id = facts.end_message_node_id;
+                        break;
+                    }
+                    TurnState::RecoveryWait => {
+                        return Err(Failure::new(
+                            4,
+                            "recovery_wait",
+                            "Target requires explicit recovery; no automatic retry was requested",
+                        ));
+                    }
+                    TurnState::Stopped | TurnState::Failed => {
+                        return Err(Failure::new(
+                            4,
+                            "execution_unavailable",
+                            "Target ended without a successful answer",
+                        ));
+                    }
+                    _ => {}
+                }
+                let remaining = self
+                    .deadline
+                    .saturating_duration_since(Instant::now())
+                    .as_millis()
+                    .min(30_000) as u64;
+                if remaining == 0 {
+                    return Err(Failure::new(
+                        5,
+                        "timeout",
+                        "Client deadline expired; no target was stopped",
+                    ));
+                }
+                let wait: WaitResult = self
+                    .request(
+                        "wait",
+                        Command::Wait(WaitArgs {
+                            after: None,
+                            conditions: vec![WaitCondition::TurnCompleted {
+                                turn_id: turn.clone(),
+                            }],
+                            timeout_ms: remaining,
+                        }),
+                    )
+                    .await?;
+                if wait.status == WaitStatus::RecoveryWait {
                     return Err(Failure::new(
                         4,
                         "recovery_wait",
                         "Target requires explicit recovery; no automatic retry was requested",
                     ));
                 }
-                TurnState::Stopped | TurnState::Failed => {
+                if wait.status == WaitStatus::Unavailable {
                     return Err(Failure::new(
                         4,
                         "execution_unavailable",
-                        "Target ended without a successful answer",
+                        "Wait target became unavailable",
                     ));
                 }
-                _ => {}
+                // Satisfied, interrupted and timeout are observations, not success evidence.
             }
-            let remaining = self
-                .deadline
-                .saturating_duration_since(Instant::now())
-                .as_millis()
-                .min(30_000) as u64;
-            if remaining == 0 {
-                return Err(Failure::new(
-                    5,
-                    "timeout",
-                    "Client deadline expired; no target was stopped",
-                ));
-            }
-            let wait: WaitResult = self
-                .request(
-                    "wait",
-                    Command::Wait(WaitArgs {
-                        after: None,
-                        conditions: vec![WaitCondition::TurnCompleted {
-                            turn_id: turn.clone(),
-                        }],
-                        timeout_ms: remaining,
-                    }),
-                )
-                .await?;
-            if wait.status == WaitStatus::RecoveryWait {
-                return Err(Failure::new(
-                    4,
-                    "recovery_wait",
-                    "Target requires explicit recovery; no automatic retry was requested",
-                ));
-            }
-            if wait.status == WaitStatus::Unavailable {
-                return Err(Failure::new(
-                    4,
-                    "execution_unavailable",
-                    "Wait target became unavailable",
-                ));
-            }
-            // Satisfied, interrupted and timeout are observations, not success evidence.
         }
         let node = self.progress.end_message_node_id.clone().ok_or_else(|| {
             Failure::new(
@@ -519,6 +610,13 @@ pub async fn execute(
     origin: Option<Origin>,
     operation: Option<String>,
 ) -> Outcome {
+    if options.result == ResultMode::Reply {
+        return Outcome {
+            code: 6,
+            result: None,
+            diagnostics: json!({"command":"exec", "status":"not_yet_available", "message":"exec --result reply is not yet available"}),
+        };
+    }
     if operation.is_some() {
         return Outcome::input("exec performs multiple RPCs; --operation-id is not accepted");
     }
@@ -553,9 +651,9 @@ pub async fn execute(
             session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
             let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
             session.progress.message_id=Some(accepted.message_id);session.progress.run_id=accepted.run_id;session.progress.turn_id=accepted.turn_id;
-            let raw=session.answer().await?;
+            let raw=session.answer(options.result).await?;
             session.progress.stage="validate";
-            let errors=schema.check_raw(&raw);
+            let errors=if raw.is_empty() { vec![] } else { schema.check_raw(&raw) };
             if Instant::now()>=session.deadline {return Err(Failure::new(5,"timeout","Client deadline expired during validation; no target was stopped"));}
             if errors.is_empty() {return Ok(session.finish(Some(raw),0,"completed",json!({})));}
             if repair==options.max_repairs {return Ok(session.finish(None,3,"schema_mismatch",json!({"raw_answer":raw,"validation_errors":errors})));}

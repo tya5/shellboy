@@ -160,6 +160,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     .into());
                 }
                 Ok(ClientOperation::Exec(ExecOptions {
+                    result: crate::exec_client::ResultMode::Reply,
                     schema: PathBuf::from(required(form, "schema")?),
                     thread_id,
                     create,
