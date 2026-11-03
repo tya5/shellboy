@@ -4345,3 +4345,15 @@ applied requests enter a per-view, text-only composer mode using message.reply.
 The existing submission acknowledgement path preserves failed and newer drafts.
 Synthetic rendering and source-projection validation are in progress; final task
 CI and review are required. No provider measurements or main integration.
+
+## #194 step 6 port onto #198 (main 226c4f6d)
+
+Rebased the authored reply chain onto the landed local-first composer hotfix.
+Reply command PendingSend uses cleared_draft and restored_revision; submitted
+text still clears locally before any DB result, while command acknowledgements
+preserve newer input and failures restore only the untouched composer. Main's
+#198 ordinary-send, attachment, autosave and edited-confirmation behavior is
+retained. Added bilingual delayed-reply success/failure state/render coverage.
+Native focused checks and default-scope CI remain pending at this record point.
+No migration renumbering: the latest user order is hotfix index 25, then #194
+26 and #172 27 after the hotfix lands; wait for that integration instruction.

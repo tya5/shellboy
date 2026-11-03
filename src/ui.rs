@@ -4626,7 +4626,8 @@ impl UiState {
             original.revision,
             PendingSend {
                 snapshot: original.clone(),
-                command_cleared: Some(view.draft.clone()),
+                cleared_draft: Some(view.draft.clone()),
+                restored_revision: None,
                 status: ReceiptStatus::Accepting,
                 message: None,
                 source_node_id: None,

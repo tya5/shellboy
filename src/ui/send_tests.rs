@@ -837,3 +837,62 @@ fn replies_popup_selects_only_applied_requests_and_draws_both_languages() {
         );
     }
 }
+
+#[test]
+fn reply_local_handoff_keeps_new_input_without_a_db_ack_for_success_or_failure() {
+    for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+        for success in [false, true] {
+            let mut ui = ui_in(language);
+            ui.active_view_mut().composer.reply = Some(reply_target("original"));
+            let submission = reply_action(&mut ui, "frozen reply");
+            let pending = &ui.view().pending[&submission.revision];
+            assert_eq!(pending.snapshot.text, "frozen reply");
+            assert_eq!(pending.status, ReceiptStatus::Accepting);
+            assert_eq!(pending.cleared_draft.as_ref(), Some(&ui.view().draft));
+            assert!(pending.restored_revision.is_none());
+            assert!(ui.view().draft.text.is_empty());
+            assert!(ui.view().draft.revision > submission.revision);
+            ui.insert("next input", false);
+            assert!(
+                ui.submit().is_empty(),
+                "cannot submit a second reply before the first completes"
+            );
+            let next = ui.view().draft.clone();
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+            let screen = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(screen.contains("next input"));
+            ui.command_outcome(
+                submission.clone(),
+                if success {
+                    Ok(())
+                } else {
+                    Err("synthetic failure".into())
+                },
+            );
+            assert_eq!(
+                ui.view().draft,
+                next,
+                "late reply result must not overwrite newer input"
+            );
+            if success {
+                assert!(!ui.view().pending.contains_key(&submission.revision));
+            } else {
+                assert_eq!(
+                    ui.view().pending[&submission.revision].snapshot.text,
+                    "frozen reply"
+                );
+                assert_eq!(
+                    ui.view().pending[&submission.revision].status,
+                    ReceiptStatus::Failed
+                );
+            }
+        }
+    }
+}

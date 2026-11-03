@@ -9190,3 +9190,15 @@ marks, narrow/wide reply popup drawing, applied-only selection, exact saved repl
 correlation, failed reply restoration, per-view reply mode, Escape draft retention,
 and acknowledgement races with newer drafts/targets. Final task CI is pending;
 these fixtures do not establish manual terminal or real-provider behavior.
+
+## #194 step 6 / #198 composition rebase
+
+Target parent: main 226c4f6d. Reply submissions initialize the new local-first
+PendingSend fields. Added synthetic bilingual tests render the next input before
+any DB acknowledgement and verify both late success and late failure preserve
+it, keep the frozen original as needed, and prevent a duplicate in-flight reply.
+Existing untouched-reply failure restoration and ordinary-send #198 regressions
+remain present. Release-upgrade fixtures preserve 0.6.1 support and both main's
+byte-accounting and reply cancellation driver tests survive the rebase. Native
+strict Clippy/focused tests and final default CI are pending; no real provider,
+installed binary or user data is used.
