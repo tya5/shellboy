@@ -1479,8 +1479,8 @@ mod tests {
         .await
         .unwrap();
         for _ in 0..5 {
-            let progress = tokio::time::timeout(
-                std::time::Duration::from_secs(15),
+            let progress = crate::test_watchdog::watchdog(
+                "recovered source processing",
                 active.process_one(CancellationToken::new()),
             )
             .await
@@ -1491,7 +1491,7 @@ mod tests {
             }
         }
         assert_eq!(
-            tokio::time::timeout(std::time::Duration::from_secs(15), server)
+            crate::test_watchdog::watchdog("recovered source provider", server)
                 .await
                 .unwrap()
                 .unwrap(),
