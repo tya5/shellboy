@@ -232,10 +232,10 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `run get --run RUN` | run_id/thread_id/state/owner_run_id/turn_id/answer_node_id, owned_run_ids/owned_execution_ids, recovery_hint; optional waiting_reason identifies a saved in-flight context edit at the safe request boundary. Owned IDs reference current live resources, not a ledger of all historical children |
+| `run get --run RUN` | run_id/thread_id/state/owner_run_id/turn_id/end_message_node_id, owned_run_ids/owned_execution_ids, recovery_hint; optional waiting_reason identifies a saved in-flight context edit at the safe request boundary. Owned IDs reference current live resources, not a ledger of all historical children |
 | `run retry --run RUN` | Recovery Run/Turn references; explicitly reprepare a recovery_wait Turn in a live Run, reusing the Turn/original message without blindly rerunning executed shells. Human or direct parent decides |
 | `run stop --run RUN` | Confirmed stopping/Run state; stops own Run and owned descendants without affecting independent Runs. Models limited to ownership, humans may explicitly target. Check get/wait for completed resource cleanup |
-| `turn get --turn TURN` | turn_id/run_id/thread_id/state/answer_node_id/recovery_hint. Background owned work may keep the Run live after answering |
+| `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
 
 ### Storage (2 operations)
 
@@ -379,9 +379,9 @@ items and schema-valued additionalProperties. Do not assume full draft support.
 Schema64KiB/depth32/nodes2048, composed request128KiB, answer1MiB and100000
 validation steps are bounded; excess is explicit failure, not accepted truncation.
 
-To inspect exactly what was validated, use `history get --node ANSWER_NODE_ID
---final-answer-only`. Normal history reads still include the original natural
-text/reasoning. Final-only cursors cannot be reused for the ordinary projection.
+To inspect exactly what was validated, use `history get --node END_MESSAGE_NODE_ID
+--end-message-only`. Normal history reads still include the original natural
+text/reasoning. End-message-only cursors cannot be reused for the ordinary projection.
 Use an owner matching this CLI version for that additive read option.
 
 PowerShell 7 example (stdout remains separate from diagnostic stderr):
@@ -400,7 +400,7 @@ Turn: existing wait-cycle protection can reject that wait after message acceptan
 Inspect the reported message/operation IDs rather than resending. Prefer the new
 saved Thread default or a separate conversation. A timeout is not cancellation.
 
-Completion means a saved final answer for the assigned Turn, not proof that all
+Completion means a saved end message for the assigned Turn, not proof that all
 background shells/child Runs have drained. Inspect run get/status for continuing
 work. Schema validation guarantees supported shape only, not factual correctness.
 
@@ -411,11 +411,11 @@ the existing serde_json supported range; out-of-range numeric inputs fail explic
 
 ### exec owner-version guard
 
-Before Thread creation/message send, exec makes a read-only final_answer_only
+Before Thread creation/message send, exec makes a read-only end_message_only
 probe with a random missing node. A current owner decodes the argument and reports
 target_unavailable; old-style argument rejection exits6 before work. A refusal
 at answer read also exits6 (owner_version_mismatch), retaining known answer IDs
-and recommending ordinary history get --node ANSWER_NODE_ID without the new flag.
+and recommending ordinary history get --node END_MESSAGE_NODE_ID without the new flag.
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
 not an old-Core format shim or automatic answer/protocol downgrade.
@@ -542,7 +542,7 @@ editing/VACUUM is not a supported continuation path. Self/owning-ancestor/compos
 model waits remain cycle checked. Human wait observation does not scan the model
 ownership graph. No-after reports current settled states, not arbitrary history.
 
-`thread list/get` keep `excerpt` and add `last_answer` and `last_input` objects
+`thread list/get` keep `excerpt` and add `last_end_message` and `last_input` objects
 (or null when absent). The answer includes `node_id`, `turn_id`, `at`, `excerpt`
 and `body_available`; the input includes `message_id`, `node_id`, `at`, `state`,
 `sender`, `excerpt`, `body_available`. Excerpts include at most512 characters

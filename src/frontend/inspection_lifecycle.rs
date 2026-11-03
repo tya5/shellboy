@@ -307,7 +307,7 @@ pub(super) fn prepare_in(
                     state,
                     owner_run_id: raw.owner,
                     turn_id: raw.turn,
-                    answer_node_id: raw.answer,
+                    end_message_node_id: raw.answer,
                     owned_run_ids: raw.owned_runs,
                     owned_execution_ids: raw.executions,
                     recovery_hint: reason_hint(raw.reason, raw.reason_limited, language),
@@ -352,7 +352,7 @@ pub(super) fn prepare_in(
                     run_id: raw.run,
                     thread_id: raw.thread,
                     state,
-                    answer_node_id: raw.answer,
+                    end_message_node_id: raw.answer,
                     recovery_hint: reason_hint(raw.reason, raw.reason_limited, language),
                 })?,
             )

@@ -248,7 +248,7 @@ async fn bundled_agent_guide_explains_thread_wait_continuation_without_an_owner(
             "--after",
             "result.snapshot.changes",
             "result.cursor",
-            "last_answer",
+            "last_end_message",
             "last_input",
             "owner restart",
         ] {

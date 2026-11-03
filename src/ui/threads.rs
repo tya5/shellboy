@@ -3252,7 +3252,7 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
-            last_answer: None,
+            last_end_message: None,
             last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
@@ -4087,7 +4087,7 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
-            last_answer: None,
+            last_end_message: None,
             last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
             latest_run_stop_reason: None,
@@ -4330,7 +4330,7 @@ mod patch_tests {
     use super::*;
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
-            last_answer: None,
+            last_end_message: None,
             last_input: None,
             thread_id: id.into(),
             title: title.into(),
@@ -5039,7 +5039,7 @@ mod watch_integration_tests {
     use crossterm::event::Event;
     fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
         ThreadSummary {
-            last_answer: None,
+            last_end_message: None,
             last_input: None,
             thread_id: id.into(),
             title: format!("task {id}"),
@@ -5759,7 +5759,7 @@ mod language_tests {
 
     fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
         ThreadSummary {
-            last_answer: None,
+            last_end_message: None,
             last_input: None,
             revisit: None,
             thread_id: id.into(),

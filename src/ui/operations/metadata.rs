@@ -80,7 +80,7 @@ impl Form {
             "settled_states" => FieldId::SettlementStates,
             "timeout" => FieldId::Timeout,
             "excerpt_chars" => FieldId::ExcerptChars,
-            "final_answer_only" => FieldId::FinalAnswerOnly,
+            "end_message_only" => FieldId::EndMessageOnly,
             "encoding" => FieldId::Encoding,
             "relation" => FieldId::Relation,
             "kinds" => FieldId::Kinds,
@@ -777,8 +777,8 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
         OperationId::HistoryGet => local!(
             language,
-            "指定ノードの保存原文と出典を取得します。最終回答のみを選ぶと推論や途中説明を除きます。",
-            "Fetch a node's saved original and provenance. Final-answer-only excludes reasoning and interim explanations."
+            "指定ノードの保存原文と出典を取得します。終了メッセージのみを選ぶと推論や途中説明を除きます。",
+            "Fetch a node's saved original and provenance. End-message-only excludes reasoning and interim explanations."
         ),
         OperationId::HistorySearch => local!(
             language,
@@ -1017,7 +1017,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         ),
         FieldId::ExcerptChars => local!(language, "抜粋文字数", "Excerpt characters"),
         FieldId::LimitBytes => local!(language, "取得byte数", "Read size in bytes"),
-        FieldId::FinalAnswerOnly => local!(language, "最終回答のみ", "Final answer only"),
+        FieldId::EndMessageOnly => local!(language, "終了メッセージのみ", "End message only"),
         FieldId::Encoding => local!(language, "文字コード", "Encoding"),
         FieldId::Relation => local!(language, "履歴の関係", "History relationship"),
         FieldId::Kinds => local!(language, "含めるnode種類", "Included node kinds"),
@@ -1295,7 +1295,7 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "原文の一回の取得上限です。CLI既定と操作ごとの上限に従います。",
             "Maximum original text fetched in one request, subject to CLI defaults and per-operation limits."
         ),
-        FieldId::FinalAnswerOnly => local!(
+        FieldId::EndMessageOnly => local!(
             language,
             "保存された最終assistant messageだけを取得し、推論と途中説明を除きます。",
             "Fetch only the saved final assistant message, excluding reasoning and interim explanations."

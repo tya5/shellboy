@@ -2879,7 +2879,7 @@ async fn run_with_delivery(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             match request(
                                 &control,
-                                Command::HistoryGet(HistoryGetArgs { final_answer_only: false,
+                                Command::HistoryGet(HistoryGetArgs { end_message_only: false,
                                     node_id,
                                     cursor,
                                     limit_bytes: MAX_BODY_BYTES,
@@ -4413,7 +4413,7 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
-                last_answer: None,
+                last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
@@ -4427,7 +4427,7 @@ mod stream_tests {
                 excerpt: String::new(),
             },
             ThreadSummary {
-                last_answer: None,
+                last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,

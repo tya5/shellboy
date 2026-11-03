@@ -79,7 +79,7 @@ ORDER BY created_at, id";
 const TURN_SNAPSHOT: &str = r"SELECT json_object('turn_id', u.id,
     'run_id', u.run_id,
     'previous_state', u.state,
-    'answer_node_id', u.answer_node_id,
+    'end_message_node_id', u.answer_node_id,
     'recovery_reason', json(u.recovery_reason_json))
 FROM turn u
 JOIN run r ON r.id = u.run_id
@@ -146,7 +146,7 @@ const OWNED_CHILDREN_SNAPSHOT: &str = r"SELECT json_object('run_id', c.id,
         FROM turn u
         WHERE u.run_id = c.id
         ORDER BY u.created_at DESC, u.rowid DESC LIMIT 1),
-    'answer_node_id', (
+    'end_message_node_id', (
         SELECT u.answer_node_id
         FROM turn u
         WHERE u.run_id = c.id

@@ -423,7 +423,7 @@ fn inspect(
             WaitCondition::TurnCompleted { turn_id } => {
                 let row=db.query_row("SELECT u.state,u.run_id,u.answer_node_id,t.deleted_at FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[turn_id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?))).optional().map_err(sql_error)?;
                 if let Some((state, run, answer, deleted)) = row {
-                    snapshots.push(json!({"type":"turn","turn_id":turn_id,"run_id":run,"state":state,"answer_node_id":answer,"unavailable":deleted.is_some()}));
+                    snapshots.push(json!({"type":"turn","turn_id":turn_id,"run_id":run,"state":state,"end_message_node_id":answer,"unavailable":deleted.is_some()}));
                     if deleted.is_some() {
                         observation.unavailable = true;
                     } else if terminal(&state) {

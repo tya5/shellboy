@@ -36,7 +36,7 @@ async fn append(database: &DbWorker, id: &str, kind: &str, payload: Value) {
 
 fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryGetArgs {
     HistoryGetArgs {
-        final_answer_only: false,
+        end_message_only: false,
         node_id: node.into(),
         limit_bytes: limit,
         cursor,
@@ -776,7 +776,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert!(default.text.contains("private reasoning"));
     assert!(default.text.contains("later commentary"));
     let request = HistoryGetArgs {
-        final_answer_only: true,
+        end_message_only: true,
         ..body("final-node", 8, None)
     };
     let first = history.get(request.clone()).await.unwrap();
@@ -814,7 +814,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert!(
         serde_json::to_value(body("final-node", 8, None))
             .unwrap()
-            .get("final_answer_only")
+            .get("end_message_only")
             .is_none()
     );
     db.shutdown().await.unwrap();

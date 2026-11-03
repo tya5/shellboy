@@ -1357,14 +1357,19 @@ impl Form {
             OpKind::HistoryGet => (
                 vec![
                     node(),
-                    f("final_answer_only", "最終回答のみ", "false".into(), Boolean),
+                    f(
+                        "end_message_only",
+                        "終了メッセージのみ",
+                        "false".into(),
+                        Boolean,
+                    ),
                     f("limit", "取得byte数", "65536".into(), Number),
                     f("cursor", "続きcursor", String::new(), Text),
                     f("encoding", "encoding", DEFAULT_ENCODING.into(), Text),
                 ],
                 |form, _cwd| {
                     Ok(Command::HistoryGet(HistoryGetArgs {
-                        final_answer_only: form.boolean("final_answer_only")?,
+                        end_message_only: form.boolean("end_message_only")?,
                         node_id: form.owned("node")?,
                         limit_bytes: form.number("limit")?,
                         cursor: form.optional("cursor")?,

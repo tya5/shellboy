@@ -113,6 +113,7 @@ fn field_name(key: &str) -> &str {
         "delivery_status" => "依頼の適用状態",
         "assignment" => "割当",
         "answer_node_id" => "回答node ID",
+        "end_message_node_id" => "終了メッセージnode ID",
         "selected" => "選択中",
         "managed" => "管理対象",
         "output_complete" => "出力回収完了",

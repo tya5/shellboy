@@ -48,8 +48,8 @@ Once you have a Turn ID, wait for that response interval. This is a Bash example
 ```bash
 shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"CHILD_TURN_ID"}]' --timeout-ms 30000
 shellboy turn get --turn CHILD_TURN_ID
-# Retrieve result.answer_node_id if present
-shellboy history get --node ANSWER_NODE_ID --limit-bytes 65536
+# Retrieve the Turn's end_message_node_id if present
+shellboy history get --node END_MESSAGE_NODE_ID --limit-bytes 65536
 ```
 
 Multiple conditions use **any** semantics. The call returns when one is satisfied, not necessarily when every child completes.
@@ -58,7 +58,7 @@ Multiple conditions use **any** semantics. The call returns when one is satisfie
 shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"TURN_A"},{"type":"turn_completed","turn_id":"TURN_B"}]' --timeout-ms 30000
 ```
 
-Inspect `matched` and `snapshot.conditions`, then wait again only for unfinished targets. `turn_completed` observes terminal states including stopped/failed, so even `satisfied` requires checking the target's `state` and `answer_node_id`. Do not invent an answer for a stopped Turn without an answer node. If its body returns `next_cursor`, page through the same node.
+Inspect `matched` and `snapshot.conditions`, then wait again only for unfinished targets. `turn_completed` observes terminal states including stopped/failed, so even `satisfied` requires checking the target's `state` and `end_message_node_id`. Do not invent an answer for a stopped Turn without an end message node. If its body returns `next_cursor`, page through the same node.
 
 | Wait status | Next action |
 |---|---|
@@ -131,7 +131,7 @@ inspect failed/stopped/recovery records before deciding what to do. The wait doe
 not stop or resume work. Changing conditions or losing a source anchor rejects
 the cursor rather than silently skipping records. No background poller is needed.
 
-ThreadList/Get also separate `last_answer` (latest own final Turn answer, with
+ThreadList/Get also separate `last_end_message` (latest own Turn end message, with
 Turn/node/time/excerpt) from `last_input` (latest durably accepted input, including
 held/cancelled, with receipt state and credential-free sender/label). The latter
 does not prove application or model completion. Existing `excerpt` is unchanged.

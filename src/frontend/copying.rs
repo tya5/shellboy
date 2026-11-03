@@ -54,7 +54,7 @@ async fn source(
     for _ in 0..SOURCE_PAGES {
         let body = history
             .get(HistoryGetArgs {
-                final_answer_only: false,
+                end_message_only: false,
                 node_id: node_id.clone(),
                 limit_bytes: MAX_BODY_BYTES,
                 cursor,

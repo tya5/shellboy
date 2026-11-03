@@ -34,7 +34,7 @@ fn settled(ids: Vec<String>) -> Command {
     })
 }
 #[tokio::test]
-async fn multiple_threads_and_last_answer_input_stay_distinct_during_a_new_request() {
+async fn multiple_threads_and_last_end_message_input_stay_distinct_during_a_new_request() {
     crate::test_watchdog::watchdog("loopback Thread observations",async {
         let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();let address=listener.local_addr().unwrap();
         let (send,mut incoming)=mpsc::channel::<oneshot::Sender<()>>(2);
@@ -68,17 +68,17 @@ async fn multiple_threads_and_last_answer_input_stay_distinct_during_a_new_reque
         call(&control,Command::MessageSend(MessageSendArgs{thread_id:Some(thread.clone()),text:"new input".into(),sender_label:Some("self-asserted-reviewer".into()),deliver: Deliver::Next})).await;
         let release=incoming.recv().await.unwrap();
         let details=call(&control,Command::ThreadGet(ThreadTarget{thread_id:Some(thread.clone())})).await;
-        assert_eq!(details["last_answer"]["excerpt"],"first answer");
-        assert!(details["last_answer"]["turn_id"].is_string());assert!(details["last_answer"]["at"].is_string());
+        assert_eq!(details["last_end_message"]["excerpt"],"first answer");
+        assert!(details["last_end_message"]["turn_id"].is_string());assert!(details["last_end_message"]["at"].is_string());
         assert_eq!(details["last_input"]["excerpt"],"new input");
         assert_eq!(details["last_input"]["sender"]["kind"],"external_cli");
         assert_eq!(details["last_input"]["sender"]["label"],"self-asserted-reviewer");
         let page=call(&control,Command::ThreadList(ThreadListArgs{query:Some(thread.clone()),..Default::default()})).await;
-        assert_eq!(page["items"][0]["last_answer"],details["last_answer"]);
+        assert_eq!(page["items"][0]["last_end_message"],details["last_end_message"]);
         assert_eq!(page["items"][0]["last_input"],details["last_input"]);
         release.send(()).unwrap();call(&control,settled(vec![thread.clone()])).await;
         let latest=call(&control,Command::ThreadGet(ThreadTarget{thread_id:Some(thread)})).await;
-        assert_eq!(latest["last_answer"]["excerpt"],"second answer");
+        assert_eq!(latest["last_end_message"]["excerpt"],"second answer");
         assert_eq!(latest["last_input"]["excerpt"],"new input");
         server.await.unwrap();control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
     }).await.unwrap();

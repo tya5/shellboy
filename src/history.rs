@@ -81,7 +81,7 @@ impl History {
                     "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(ThreadDetails { last_answer: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
+                        Ok(ThreadDetails { last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
                             context_usage: None,
                             context: None,
                             thread_id: id.clone(),
@@ -468,14 +468,14 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
     } else {
         args.encoding.as_str()
     };
-    let cursor_scope = if args.final_answer_only {
+    let cursor_scope = if args.end_message_only {
         if row.kind != "assistant_response" {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
-                "Final-answer projection requires an assistant response node",
+                "End-message projection requires an assistant response node",
             ));
         }
-        "history.get.final_answer"
+        "history.get.end_message"
     } else {
         "history.get"
     };
@@ -513,8 +513,8 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
                     "stored history payload is malformed",
                 )
             })?;
-            if args.final_answer_only {
-                final_answer_text(&value).ok_or_else(|| {
+            if args.end_message_only {
+                end_message_text(&value).ok_or_else(|| {
                     ApiError::new(
                         ErrorCode::TargetUnavailable,
                         "No final assistant message is saved in this node",
@@ -612,8 +612,8 @@ fn reference_ids(connection: &Connection, sql: &str, id: &str) -> Result<Vec<Str
     Ok(ids)
 }
 
-/// A read projection only: never treats reasoning/commentary as a final answer.
-fn final_answer_text(payload: &Value) -> Option<String> {
+/// A read projection only: never treats reasoning/commentary as an end message.
+fn end_message_text(payload: &Value) -> Option<String> {
     let output = payload.get("output")?.as_array()?;
     let messages = || {
         output.iter().filter(|item| {

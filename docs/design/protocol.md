@@ -348,12 +348,12 @@ sender fact. This follow-up changes documentation and F6 explanation only, not
 source classification, bands or #41 rendering.
 
 
-## Final-answer read projection (#65)
+## End-message read projection (#65)
 
-history.get accepts optional final_answer_only (false by default; omitted from
+history.get accepts optional end_message_only (false by default; omitted from
 ordinary serialized requests). It applies only to assistant_response originals,
 selects the last assistant message with phase final_answer or the last unphased
-assistant message, and excludes reasoning/commentary. Its history.get.final_answer
+assistant message, and excludes reasoning/commentary. Its history.get.end_message
 cursor scope is distinct from the unchanged ordinary history.get scope; node,
 revision and UTF-8 cursor binding still apply. Missing final messages are explicit
 unavailability, not fabricated answers. No provider/API execution format or
@@ -388,7 +388,7 @@ See [Thread observations](thread-observation.md). WaitArgs adds optional after;
 WaitCondition adds thread_settled with explicit Thread IDs and settled-state
 filters. Existing any-condition results keep their shape, with a Thread cursor
 and snapshot.changes/more when these conditions are present. ThreadSummary and
-ThreadDetails add last_answer/last_input optional saved-fact objects. They do not
+ThreadDetails add last_end_message/last_input optional saved-fact objects. They do not
 change lifecycle, authorization, MessageSender identity or model-facing tools.
 Schema16 contains only derived indexes; protocol version remains2.
 

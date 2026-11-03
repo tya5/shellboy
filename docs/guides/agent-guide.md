@@ -102,7 +102,7 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 
 `docs` provides procedures, `status` provides current saved state, `history` provides conversation evidence, and `rag` retrieves documents from explicitly selected scopes. For full text or precise state, continue to the returned target instead of stopping at an excerpt or acceptance result.
 
-IDs have distinct roles even within the same task. `operation_id` identifies an operation receipt, `message_id` a request, `thread_id` a conversation, `run_id` execution ownership, `turn_id` an answer interval, `answer_node_id` the original answer, and `execution_id` one shell process. The shell ID that ran `message send` is not the recipient shell's ID. Store a launched command's returned ID as `WORK_EXECUTION_ID`, and recipient IDs separately as `CHILD_THREAD_ID` / `CHILD_MESSAGE_ID` / `CHILD_TURN_ID`. Do not assume local variables are automatically shared between shell tool calls.
+IDs have distinct roles even within the same task. `operation_id` identifies an operation receipt, `message_id` a request, `thread_id` a conversation, `run_id` execution ownership, `turn_id` an answer interval, `end_message_node_id` the Turn's end message (its last saved assistant message), and `execution_id` one shell process. The shell ID that ran `message send` is not the recipient shell's ID. Store a launched command's returned ID as `WORK_EXECUTION_ID`, and recipient IDs separately as `CHILD_THREAD_ID` / `CHILD_MESSAGE_ID` / `CHILD_TURN_ID`. Do not assume local variables are automatically shared between shell tool calls.
 
 ## Carry out one task
 
@@ -128,7 +128,7 @@ Keep `result.cursor` even on timeout and pass it with unchanged conditions.
 Read `result.snapshot.changes`; `snapshot.more` means continue with that cursor.
 This also catches a finish/restart or recovery/resume between calls and survives
 owner restart. `satisfied` does not imply success or authorize recovery/retry.
-ThreadList/Get expose `last_answer` separately from `last_input`, including the
+ThreadList/Get expose `last_end_message` separately from `last_input`, including the
 latter's saved sender and self-asserted label. See [Delegation](delegation.md#waiting-for-several-threads)
 for bounds, current-state baselines and result/original-content inspection.
 
@@ -163,7 +163,7 @@ shellboy history list --thread THREAD_ID --limit 20
 shellboy history get --node NODE_ID --limit-bytes 65536
 ```
 
-Replace uppercase example IDs with actual returned values. List and search excerpts are not full text. If get returns `next_cursor`, continue with `--cursor` for the same node. Retrieve an answer through its Turn's `answer_node_id`; summaries and spills expose `source_node_ids`. Inspect `previous_node_ids` / `next_node_ids` for adjacency, and the tombstone reason for reclaimed source text. Do not invent unavailable content.
+Replace uppercase example IDs with actual returned values. List and search excerpts are not full text. If get returns `next_cursor`, continue with `--cursor` for the same node. Retrieve a Turn's end message through its `end_message_node_id`; summaries and spills expose `source_node_ids`. Inspect `previous_node_ids` / `next_node_ids` for adjacency, and the tombstone reason for reclaimed source text. Do not invent unavailable content.
 
 Explicitly restrict a search when needed. Unlike other self-targeting operations, search's omitted `--thread` means a global search.
 

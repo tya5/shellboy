@@ -1,5 +1,22 @@
 # 開発判断
 
+## End-message rename, step 1 details (#194, 2026-11-03)
+
+Judgements made while landing step 1 of the
+[reply-expected messages](../design/reply-expected-messages.md) plan:
+
+- The `status` item field is shared by all item kinds, so it is renamed to
+  `end_message_node_id` for message items too (same value: the assigned Turn's
+  end message). Step 2 replaces it for message items with `reply_node_id`.
+  Recheck if step 2 keeps a Turn end message on message items.
+- The TUI operation form field for the renamed flag follows it:
+  `最終回答のみ` / `Final answer only` becomes `終了メッセージのみ` /
+  `End message only`. The `回答` row label is unchanged. Recheck if the user
+  wants the old form wording kept.
+- The exec contract prompt sent to the model ("Final answer contract") and the
+  schema-validation messages keep their wording, since changing model-facing
+  text is a behaviour change outside a rename.
+
 ## DB worker activity display (#190, 2026-11-03)
 
 The user approved option 1: place `DB <operation> <elapsed>` at the statusbar

@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ]),
             ("visual-recovery", "子の復旧待ちと途中報告", vec![
                 ("user",json!({"role":"user","content":"子に調査を依頼しています。状態と対応方法を教えてください。"})),
-                ("event",event("child_turn_completed",json!({"thread_id":"visual-child","run_id":"visual-child-run","turn_id":"visual-child-turn","state":"completed","answer_node_id":"visual-child-answer"}))),
+                ("event",event("child_turn_completed",json!({"thread_id":"visual-child","run_id":"visual-child-run","turn_id":"visual-child-turn","state":"completed","end_message_node_id":"visual-child-answer"}))),
                 ("event",event("child_recovery_wait",json!({"thread_id":"visual-child","run_id":"visual-child-run","turn_id":"visual-child-turn","state":"recovery_wait","error":{"code":"io_failed","message":"資料ファイルを読み込めません","hint":"参照先とアクセス権を確認してください"}}))),
                 ("event",event("shell_ended",json!({"execution_id":"visual-shell-report","state":"failed","exit_code":1,"output_complete":false}))),
                 ("assistant_response",answer("子の調査が**復旧待ち**になりました。参照先を確認してから、直属の親または人間が再試行を判断します。\n\n未完了の出力を成功結果として扱わないでください。")),
@@ -220,7 +220,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ("visual-row-kinds", "Row vocabulary synthetic fixture", vec![
                 ("user", json!({"role":"user","content":"ROW_FIXTURE_USER"})),
                 ("summary", json!({"source_node_ids":["visual-row-kinds-node-0"],"item":{"role":"developer","content":"ROW_FIXTURE_SUMMARY"}})),
-                ("event", event("child_turn_completed", json!({"thread_id":"visual-tree-child-39","title":"Fixture child","answer_node_id":"visual-tree-child-39-answer"}))),
+                ("event", event("child_turn_completed", json!({"thread_id":"visual-tree-child-39","title":"Fixture child","end_message_node_id":"visual-tree-child-39-answer"}))),
                 ("tool_result", json!({"item":{"type":"function_call_output","call_id":"unknown","output":json!({"command":"UNKNOWN_OBSERVATION","status":"observation_unavailable"}).to_string()}})),
             ]),
             ("visual-scroll-body", "スクロール・本文取得window境界", vec![

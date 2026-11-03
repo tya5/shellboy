@@ -247,7 +247,7 @@ def finish_round(binary, root, env, thread, sent, prompt, expected):
     if turn['state'] != 'completed':
         raise RuntimeError(f'Non-completed turn: {turn["state"]}')
     message = cli(binary, root, env, 'message', 'get', '--message', sent['message_id'])
-    node = cli(binary, root, env, 'history', 'get', '--node', message['answer_node_id'])
+    node = cli(binary, root, env, 'history', 'get', '--node', turn['end_message_node_id'])
     if node.get('text') != expected:
         raise RuntimeError('Missing exact fixed synthetic answer')
     shells = cli(binary, root, env, 'shell', 'list', '--thread', thread, '--limit', '20')

@@ -234,7 +234,7 @@ const MEANINGS: &[Meaning] = &[
             ("limit_bytes", FieldId::LimitBytes),
             ("cursor", FieldId::Cursor),
             ("encoding", FieldId::Encoding),
-            ("final_answer_only", FieldId::FinalAnswerOnly),
+            ("end_message_only", FieldId::EndMessageOnly),
         ],
         None,
     ),
