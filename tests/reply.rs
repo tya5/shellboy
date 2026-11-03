@@ -409,3 +409,97 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
         store.database.shutdown().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn replying_after_sender_deletion_before_gc_cancels_instead_of_replying() {
+    let (_root, store) = fixture().await;
+    let accepted = store
+        .execute(request(send(true)), None)
+        .await
+        .unwrap()
+        .result;
+    let message = accepted["message_id"].as_str().unwrap().to_owned();
+    let id = message.clone();
+    store.database.call(move |db| {
+        db.execute("UPDATE receipt SET sender_json=json_object('kind','model','thread_id','sender'),state='applied',path_admission='admitted' WHERE message_node_id=?1",[id])?;
+        db.execute_batch("UPDATE run SET state='stopped',ended_at='now'; UPDATE turn SET state='stopped',ended_at='now';")?;
+        Ok(())
+    }).await.unwrap();
+    store
+        .execute(
+            request(Command::ThreadDelete(ThreadDeleteArgs {
+                thread_id: "sender".into(),
+                descendants: false,
+                preview_marker: None,
+            })),
+            None,
+        )
+        .await
+        .unwrap();
+    let before = store
+        .execute(
+            request(Command::MessageGet(MessageTarget {
+                message_id: message.clone(),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(before["reply"]["state"], "pending");
+    let reply = request(Command::MessageReply(MessageReplyArgs {
+        message_id: message.clone(),
+        text: "must not be saved".into(),
+        sender_label: None,
+    }));
+    let error = store.execute(reply.clone(), None).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidState);
+    assert_eq!(error.details.as_ref().unwrap()["reason"], "sender_deleted");
+    assert_eq!(store.execute(reply, None).await.unwrap_err(), error);
+    let details = store
+        .execute(
+            request(Command::MessageGet(MessageTarget {
+                message_id: message.clone(),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(details["reply"]["state"], "cancelled");
+    assert_eq!(details["reply"]["cancel_reason"], "sender_deleted");
+    assert_eq!(details["reply"]["cancelled_by"]["thread_id"], "sender");
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM event WHERE id=?1",
+                    [format!("reply-cancelled-{message}")],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM node WHERE payload_json LIKE '%must not be saved%'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM gc_job WHERE state='pending'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1,
+                "GC has not run"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    store.database.shutdown().await.unwrap();
+}
