@@ -472,12 +472,12 @@ pub(super) fn recover_authorization_page(
                     "oversized index authorization record requires manual repair".into(),
                 ));
             }
-            let value: String =
-                db.query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
-                    r.get(0)
-                })?;
-            let json: Value = decode_json(&value)?;
-            if json.get("state").and_then(Value::as_str) == Some("running") {
+            let (value, running): (String, bool) = db.query_row(
+                "SELECT value,coalesce(json_extract(value,'$.state')='running',0) FROM app_meta WHERE key=?1",
+                [&key],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            if running {
                 let mut admission: AutoAdmission = decode_json(&value)?;
                 admission.state = "failed".into();
                 admission.error =
