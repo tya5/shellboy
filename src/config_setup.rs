@@ -1,6 +1,6 @@
 //! Standalone setup and shared, credential-free first-run diagnostics.
 use crate::{
-    config::{Config, PathEnvironment},
+    config::{Config, PathEnvironment, UiLanguage},
     model::http::HttpModelClient,
     protocol::{ApiError, ErrorCode},
 };
@@ -89,44 +89,101 @@ pub fn report(
 }
 
 impl SetupReport {
-    pub fn japanese(&self, example: bool) -> String {
+    pub fn render(&self, language: UiLanguage, example: bool) -> String {
         let mut facts = Vec::new();
         if self.missing.iter().any(|m| m.starts_with("connection")) {
-            facts.push("接続が未設定です".to_owned());
+            facts.push(
+                crate::ui::i18n::local!(
+                    language,
+                    "接続が未設定です",
+                    "Connection is not configured"
+                )
+                .to_owned(),
+            );
         }
         if self.missing.iter().any(|m| m.starts_with("model")) {
-            facts.push("モデルが未設定です".to_owned());
+            facts.push(
+                crate::ui::i18n::local!(language, "モデルが未設定です", "Model is not configured")
+                    .to_owned(),
+            );
         }
         if self.missing.iter().any(|m| m.starts_with("base_url")) {
-            facts.push("base_url が雛形のままです。接続先の API root に変更してください".into());
+            facts.push(
+                crate::ui::i18n::local!(
+                    language,
+                    "base_url が雛形のままです。接続先の API root に変更してください",
+                    "base_url still uses the template value; replace it with the provider API root"
+                )
+                .to_owned(),
+            );
         }
         if self.credential_set == Some(false) {
-            facts.push(format!(
-                "API key の環境変数 {} が未設定または空です（値は表示しません）",
-                self.credential_env.as_deref().unwrap_or_default()
-            ));
+            let name = self.credential_env.as_deref().unwrap_or_default();
+            facts.push(match language {
+                UiLanguage::Ja => {
+                    format!("API key の環境変数 {name} が未設定または空です（値は表示しません）")
+                }
+                UiLanguage::En => format!(
+                    "API key environment variable {name} is missing or empty (value is not shown)"
+                ),
+            });
         }
         if facts.is_empty() {
-            facts.push("設定を確認してください".into());
+            facts.push(
+                crate::ui::i18n::local!(
+                    language,
+                    "設定を確認してください",
+                    "Review the configuration"
+                )
+                .to_owned(),
+            );
         }
         let path = self
             .config_path
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| "--config で指定した設定ファイル".into());
+            .as_deref()
+            .unwrap_or(crate::ui::i18n::local!(
+                language,
+                "--config で指定した設定ファイル",
+                "configuration file selected with --config"
+            ));
         let mut text = format!(
-            "設定が必要です: {}\n設定ファイル: {path}\n",
-            facts.join(crate::ui::text_width::glyphs::separator())
+            "{}: {}\n{}: {path}\n",
+            crate::ui::i18n::local!(language, "設定が必要です", "Configuration required"),
+            facts.join(crate::ui::text_width::glyphs::separator()),
+            crate::ui::i18n::local!(language, "設定ファイル", "Configuration file"),
         );
         if !self.config_file_present {
-            text.push_str("設定ファイルは読み込まれていません。\n");
+            text.push_str(crate::ui::i18n::local!(
+                language,
+                "設定ファイルは読み込まれていません。\n",
+                "Configuration file has not been loaded.\n"
+            ));
         }
         if example {
             text.push_str(MINIMAL);
             text.push('\n');
         }
-        text.push_str(crate::ui::text_width::glyphs::select("同じ --config を指定して config init → 設定を編集・環境変数を設定 → config check → owner を再起動してください。\n", "同じ --config を指定して config init > 設定を編集・環境変数を設定 > config check > owner を再起動してください。\n"));
-        text.push_str("shellboy config init / shellboy config check\nガイド: shellboy docs get --id shellboy/configuration\n優先: --config > OS既定 / --data-dir > SHELLBOY_DATA_DIR > TOML > OS既定");
+        let next = match language {
+            UiLanguage::En => crate::ui::text_width::glyphs::select(
+                "Use the same --config: run shellboy config init → edit the selected file and set api_key_env → run shellboy config check → restart the owner.\n",
+                "Use the same --config: run shellboy config init > edit the selected file and set api_key_env > run shellboy config check > restart the owner.\n",
+            ),
+            UiLanguage::Ja => crate::ui::text_width::glyphs::select(
+                "同じ --config を指定して config init → 設定を編集・環境変数を設定 → config check → owner を再起動してください。\n",
+                "同じ --config を指定して config init > 設定を編集・環境変数を設定 > config check > owner を再起動してください。\n",
+            ),
+        };
+        text.push_str(next);
+        match language {
+            UiLanguage::En => {
+                text.push_str("shellboy config init / shellboy config check\n");
+                text.push_str("Guide: shellboy docs get --id shellboy/configuration\nPrecedence: ");
+                text.push_str(&self.precedence);
+            }
+            UiLanguage::Ja => text.push_str(
+                "shellboy config init / shellboy config check\nガイド: shellboy docs get --id shellboy/configuration\n優先: --config > OS既定 / --data-dir > SHELLBOY_DATA_DIR > TOML > OS既定",
+            ),
+        }
         text
     }
 }
@@ -147,6 +204,7 @@ pub fn enrich(
     {
         let setup = report(config, connection, model, credential_set);
         let details = error.details.get_or_insert_with(|| json!({}));
+        *details = with_setup_ui_language(config, std::mem::take(details));
         if let Some(details) = details.as_object_mut() {
             details.insert("setup".into(), json!(setup));
         }
@@ -155,13 +213,39 @@ pub fn enrich(
     error
 }
 
+fn with_setup_ui_language(config: &Config, mut details: Value) -> Value {
+    if let Some(details) = details.as_object_mut() {
+        details.insert(
+            "setup_ui_language".into(),
+            json!(match config.ui.language {
+                UiLanguage::En => "en",
+                UiLanguage::Ja => "ja",
+            }),
+        );
+    }
+    details
+}
+
 pub fn tui_error(error: &ApiError) -> String {
+    let language = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("setup_ui_language"))
+        .and_then(Value::as_str)
+        .map(|language| match language {
+            "ja" => UiLanguage::Ja,
+            _ => UiLanguage::En,
+        })
+        .unwrap_or_default();
     error
         .details
         .as_ref()
-        .and_then(|d| d.get("setup"))
+        .and_then(|details| details.get("setup"))
         .and_then(|value| serde_json::from_value::<SetupReport>(value.clone()).ok())
-        .map_or_else(|| error.message.clone(), |report| report.japanese(false))
+        .map_or_else(
+            || error.message.clone(),
+            |report| report.render(language, false),
+        )
 }
 
 pub fn selected_path(
@@ -223,7 +307,10 @@ pub async fn execute(
             "Configuration is incomplete; inspect details.setup.missing",
         )
         .hint(NEXT)
-        .details(json!({"auto_history":config.indexing.auto_history,"setup":setup})));
+        .details(with_setup_ui_language(
+            &config,
+            json!({"auto_history":config.indexing.auto_history,"setup":setup}),
+        )));
     }
     let name = config
         .default_connection
@@ -235,13 +322,19 @@ pub async fn execute(
                 ErrorCode::ConfigInvalid,
                 "Cannot prepare model catalog client",
             )
-            .details(json!({"auto_history":config.indexing.auto_history,"setup":setup}))
+            .details(with_setup_ui_language(
+                &config,
+                json!({"auto_history":config.indexing.auto_history,"setup":setup}),
+            ))
         })?;
     let models = client.models(CancellationToken::new()).await.map_err(|error| {
         let message = match error.status { Some(status) => format!("Model catalog request failed: HTTP {status}"), None => format!("Model catalog request failed ({})", error.kind) };
         ApiError::new(ErrorCode::IoFailed, message)
             .hint(if error.status == Some(404) { ROOT_HINT } else { "Check the configured endpoint, credential environment variable and network; no conversation request was sent" })
-            .details(json!({"auto_history":config.indexing.auto_history,"setup":setup,"http_status":error.status,"failure_kind":error.kind,"request":"GET model catalog only"}))
+            .details(with_setup_ui_language(
+                &config,
+                json!({"auto_history":config.indexing.auto_history,"setup":setup,"http_status":error.status,"failure_kind":error.kind,"request":"GET model catalog only"}),
+            ))
     })?;
     let model = config.default_model.as_deref().expect("reported model");
     let advertised = models.iter().any(|candidate| candidate == model);
@@ -331,5 +424,45 @@ mod tests {
             init_with_write(&path, |_| panic!("must not write existing file")).unwrap()["created"],
             false
         );
+    }
+
+    #[test]
+    fn setup_diagnostic_uses_selected_language_and_keeps_wire_copy_english() {
+        for (language, language_code, expected, opposite) in [
+            (
+                UiLanguage::En,
+                "en",
+                "Configuration required:",
+                "設定が必要です:",
+            ),
+            (
+                UiLanguage::Ja,
+                "ja",
+                "設定が必要です:",
+                "Configuration required:",
+            ),
+        ] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let error = enrich(
+                &config,
+                None,
+                None,
+                ApiError::new(ErrorCode::ConfigInvalid, "Configuration is invalid"),
+            );
+            let rendered = tui_error(&error);
+            assert!(rendered.starts_with(expected));
+            assert!(!rendered.contains(opposite));
+            assert_eq!(
+                error.details.as_ref().unwrap()["setup_ui_language"].as_str(),
+                Some(language_code)
+            );
+            assert_eq!(error.message, "Configuration is invalid");
+            assert_eq!(error.hint.as_deref(), Some(NEXT));
+            assert_eq!(
+                error.details.as_ref().unwrap()["setup"]["precedence"].as_str(),
+                Some(PRECEDENCE)
+            );
+        }
     }
 }

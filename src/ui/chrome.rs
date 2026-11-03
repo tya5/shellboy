@@ -589,7 +589,7 @@ pub(super) fn welcome(
     );
     if !setup.missing.is_empty() {
         return setup
-            .japanese(true)
+            .render(view.language, true)
             .lines()
             .map(|line| Line::from(crate::presentation::sanitize_plain(line, 0).0))
             .collect();
@@ -1236,6 +1236,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("chosen.toml");
         let mut config = Config::default();
+        // This fixture asserts the legacy Japanese first-run copy explicitly.
+        config.ui.language = crate::config::UiLanguage::Ja;
         config.source = Some(crate::config::ConfigSource {
             path: path.clone(),
             present: false,
