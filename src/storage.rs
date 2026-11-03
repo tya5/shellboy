@@ -441,9 +441,7 @@ impl DbWorker {
                     background_receiver,
                     ready_send,
                     worker,
-                    progress,
-                    startup_diagnostics,
-                    clean_shutdown,
+                    (progress, startup_diagnostics, clean_shutdown),
                 )
             })
             .map_err(|error| StorageError::Worker(error.to_string()))?;
@@ -1035,10 +1033,13 @@ fn run_worker(
     background: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<(), StorageError>>,
     state: WorkerState,
-    progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
-    startup_diagnostics: Option<crate::diagnostics::Diagnostics>,
-    clean_shutdown: bool,
+    startup: (
+        Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+        Option<crate::diagnostics::Diagnostics>,
+        bool,
+    ),
 ) -> Result<(), StorageError> {
+    let (progress, startup_diagnostics, clean_shutdown) = startup;
     let runtime = match tokio::runtime::Builder::new_current_thread().build() {
         Ok(runtime) => runtime,
         Err(error) => {
