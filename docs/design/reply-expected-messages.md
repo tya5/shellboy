@@ -35,7 +35,7 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 | D7 | Delegation is unified onto this mechanism | [Delegation mapping](#delegation-mapping) |
 | D8 | Replace every `answer_node_id` use without compatibility paths | [Implementation plan](#implementation-plan) |
 | D9 | `exec --result reply\|turn-end\|run-end`, default `reply`; `turn-end`/`run-end` send an ordinary message with no reply duty | [exec](#exec) |
-| D10 | An empty end message is an ordinary end message: empty text on the same path as any text, no special case (with `--schema` it is a mismatch like any non-JSON text) | [exec](#empty-end-message-and-no-end-message) |
+| D10 | An empty end message is a normal response: a successful empty result, exit 0 in every mode, also with `--schema`; validation and repairs apply only to non-empty text (refined by the user) | [exec](#empty-end-message-and-no-end-message) |
 | D11 | A Turn ended by Esc produced no end message: treated like a stopped Turn, exit 4, in every `--result` mode that reads an end message | [exec](#empty-end-message-and-no-end-message) |
 | Q1–Q17 | Answers to the memo's questions | [Decisions](#decisions) |
 | Earlier comments | Sender may cancel; cancelled recipient is notified through the existing event mechanism; fail-safe count cap reusing an existing queue bound; reply carries the original ID; both messages are stored in the DB and read on demand | [Data model](#data-model) |
@@ -471,17 +471,13 @@ has none (see below).
 
 Two user decisions (D10, D11) separate these cases:
 
-- **Empty end message (D10).** The Turn produced an end message whose text is
-  empty, for example a node holding only reasoning. D10 makes no distinction
-  between empty and non-empty text: the result text is the empty string and
-  it takes exactly the same path as any other text, with no special case,
-  error or distinct exit code. As a direct consequence:
-  - with `--schema`, it is validated like any other text. Empty text is not a
-    JSON value, so it fails validation, is repaired like any other mismatch
-    and, at the repair cap, exits 3 with `raw_answer: ""`;
-  - without a Schema, it is an empty result with exit 0. Today `exec` requires
-    `--schema`, so this case exists only if a later change makes the Schema
-    optional; this design does not change that.
+- **Empty end message (D10, refined by the user).** The Turn produced an end
+  message whose text is empty, for example a node holding only reasoning. That
+  is a normal response and a successful empty result: exec exits 0 with an
+  empty stdout line in every mode that reads an end message, including when
+  `--schema` is given. Schema validation and repairs apply only to non-empty
+  text, so an empty end message is never a mismatch and never triggers a
+  repair. Exit 0 therefore means "valid JSON, or an empty end message".
   `history get --end-message-only` returns empty text for such a node instead
   of today's `target_unavailable`.
 - **No end message (D11).** The Turn completed without producing an end
@@ -496,8 +492,8 @@ Per mode:
 | Mode | Empty end message | No end message (Esc) |
 |---|---|---|
 | `reply` | not applicable: the result is the reply, and reply text follows the non-empty `message send` text rule | not applicable: an Esc-ended Turn does not end the wait; the Run-end rule reminds once, then `ignored` → exit 4 |
-| `turn-end` | the processing Turn's end message is empty → validated like any text (with `--schema`: repairs, then exit 3) | the processing Turn was ended by Esc → exit 4 |
-| `run-end` | the Run's last Turn's end message is empty → validated like any text (with `--schema`: repairs, then exit 3) | the Run's last Turn was ended by Esc → exit 4, even if an earlier Turn of the Run had an end message |
+| `turn-end` | the processing Turn's end message is empty → exit 0, empty result, no validation or repair (also with `--schema`) | the processing Turn was ended by Esc → exit 4 |
+| `run-end` | the Run's last Turn's end message is empty → exit 0, empty result, no validation or repair (also with `--schema`) | the Run's last Turn was ended by Esc → exit 4, even if an earlier Turn of the Run had an end message |
 
 A deleted (tombstoned) node is also exit 4, as today: the saved fact is
 unavailable.
@@ -506,9 +502,9 @@ unavailable.
 
 | Exit | `reply` | `turn-end` | `run-end` |
 |---|---|---|---|
-| 0 | valid JSON in the reply | valid JSON in the Turn's end message | valid JSON in the Run's end message |
+| 0 | valid JSON in the reply | valid JSON in the Turn's end message, or an empty end message (D10) | valid JSON in the Run's end message, or an empty end message (D10) |
 | 2 | input error (unchanged) | same | same |
-| 3 | mismatch after repairs (unchanged) | same; an empty end message is not JSON, so it ends here like any mismatch (D10) | same (D10) |
+| 3 | mismatch after repairs (unchanged) | same, non-empty text only | same, non-empty text only |
 | 4 | held at send; `recovery_wait`; Run `stopped` / `failed` with the reply still pending; reply `ignored`, `cancelled`, `recipient_deleted` | held at send; Turn `recovery_wait`, `stopped`, `failed`; Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned | held at send; Run in recovery wait (the `run_ended` wait reports `recovery_wait`), `stopped`, `failed`; last Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned |
 | 5 | client deadline; the message stays pending and the Run-end rule later marks it `ignored` unless answered | client deadline (unchanged) | client deadline (unchanged) |
 | 6 | owner/transport/protocol/output failure (unchanged) | same | same |
@@ -759,14 +755,15 @@ and sender-deletion `cancelled` in the Thread deletion transaction (Q4);
 `--result reply|turn-end|run-end` (default `reply`) as in [exec](#exec): the
 per-mode send/wait/read, the empty-end-message rule in the
 `--end-message-only` projection (`src/history.rs` returns empty text instead
-of `target_unavailable`) and in exec (empty text on the normal validation path;
-no end-message node exits 4, D11), the exit table, per-mode diagnostics and the `reply_received` owner probe.
+of `target_unavailable`) and in exec (empty text exits 0; no end-message node
+exits 4, D11), the exit
+table, per-mode diagnostics and the `reply_received` owner probe.
 
 - Code: `src/exec_client.rs`, `src/history.rs`.
 - Tests: `tests/exec_client.rs` (each mode's success; reply `ignored`,
   `cancelled`, recovery and timeout exits; turn-end vs run-end with a
   `--deliver complete` message and with a reminder Turn; empty end message →
-  validated like any text, repairs, then exit 3 with `raw_answer: ""`; Esc-ended Turn (turn-end) and Esc-ended last Turn
+  exit 0 with empty stdout and no repair message sent, with `--schema`; Esc-ended Turn (turn-end) and Esc-ended last Turn
   (run-end) → exit 4; probe against a refusing owner).
 - Guides: `cli-reference.md` (exec section and owner guard).
 - Designs: `cli.md` (#65 exec section, owner guard), `effective-spec.md`
@@ -833,7 +830,7 @@ cap 128/129); Run-end reminder then `ignored` with sender notice and wait
 release; ordering with waiting `complete` messages; cancel before and after
 admission; recipient deletion; restart with a pending wait; multiple waiters;
 cycle rejection; exec in each `--result` mode (success, `ignored`, timeout,
-recovery, empty end message (Schema mismatch, exit 3) and Esc-ended Turn (exit 4), turn-end vs run-end with a
+recovery, empty end message (exit 0) and Esc-ended Turn (exit 4), turn-end vs run-end with a
 `--deliver complete` message and a reminder Turn); EXPLAIN QUERY PLAN for the
 pending-reply index. No timing assertions; no paid API.
 
@@ -864,7 +861,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q15 | Cap | 128 pending reply-expected messages per receiving Thread; the 129th send is refused with `input_limit` |
 | Q16 | Asking yourself | A model cannot send a reply-expected message to its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
-| D10 | Empty end message (user, after Q14) | No distinction from other text: empty text takes the normal path, so with `--schema` it is validated and, being non-JSON, exits 3 after repairs |
+| D10 | Empty end message (user, after Q14; refined) | A successful empty result: exit 0 in every mode, also with `--schema`; Schema validation and repairs apply only to non-empty text. Exit 0 means valid JSON or an empty end message |
 | D11 | Turn ended by Esc, no end message (user, correcting an earlier judgement) | Not the same as empty: no result, treated like a stopped Turn, exit 4 |
 
 Other judgements made while finalizing (not covered by a user answer):
