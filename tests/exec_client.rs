@@ -803,6 +803,7 @@ async fn run_end_selects_last_turn_after_processing_turn() {
         .request(Request::new(
             format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "later turn".into(),
                 deliver: Deliver::Complete,
@@ -857,18 +858,45 @@ async fn esc_ended_processing_turn_exits_four() {
     fixture.close().await;
 }
 
-#[tokio::test]
-async fn default_reply_mode_returns_explicit_unavailable_without_sending() {
-    let root = tempfile::tempdir().unwrap();
-    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
-        .arg("--data-dir")
-        .arg(root.path().join("data"))
-        .args(["exec", "--schema", "unused.json", "work"])
-        .output()
-        .await
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reply_mode_returns_explicit_reply_not_end_message() {
+    let mut fixture = Fixture::new().await;
+    let (accepted, first) = fixture.active().await;
+    let schema = fixture.schema();
+    let mut command = fixture.command_mode(&schema, "reply");
+    command.arg("--thread").arg(&accepted.thread_id).arg("work");
+    let mut child = spawn(command);
+    fixture.queued_exec(&accepted.thread_id).await;
+    first.reply.send(http(200,json!({"id":"boundary","status":"completed","output":[{"type":"function_call","call_id":"fixture-call","name":"shell","arguments":json!({"command":"echo fixture"}).to_string()}]}))).unwrap();
+    let processing = fixture.next(&mut child).await;
+    let thread = accepted.thread_id.clone();
+    let id: String = fixture.owner.db.call(move |db| Ok(db.query_row("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.label')='shellboy exec' ",[thread],|r|r.get(0))?)).await.unwrap();
+    let admitted = id.clone();
+    fixture.owner.db.call(move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&admitted])?; Ok(()) }).await.unwrap();
+    let reply = fixture
+        .control
+        .request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::MessageReply(MessageReplyArgs {
+                message_id: id,
+                text: "{\"value\":\"reply\"}".into(),
+                sender_label: None,
+            }),
+        ))
+        .await;
+    assert!(reply.ok, "{:?}", reply.error);
+    processing
+        .reply
+        .send(answer("{\"value\":\"end\"}"))
         .unwrap();
-    assert_eq!(output.status.code(), Some(6));
-    assert!(output.stdout.is_empty());
-    assert_eq!(diagnostic(&output)["status"], "not_yet_available");
-    assert!(!root.path().join("data").exists());
+    let output = crate::test_watchdog::watchdog("reply result", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"value":"reply"})
+    );
+    fixture.close().await;
 }
