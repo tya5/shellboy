@@ -1,12 +1,25 @@
-# Shellboy v0.6.2 (draft)
+# Shellboy Release Notes (Draft)
 
 Safer long-running conversations, clearer progress, and more consistent terminal
 behavior.
 
-**Scope:** proposed next patch release after `v0.6.1` (`93e527c`, tag commit
-`45c34c75e266c5bfde3d28e07a303bdea93e137a`). This draft reflects `main` at
+**Version:** to be decided (`0.7.0` suggested: breaking CLI changes).
+**Scope:** Changes on `main` since the `v0.6.1` release tag (`93e527c`, tag
+commit `45c34c75e266c5bfde3d28e07a303bdea93e137a`), through
 `18103ce70f4a9a1940e06da0087613685e63f78e` (2026-11-03). The package version
 has not been bumped; this is not a release candidate or publication record.
+
+## Breaking changes
+
+- Public Turn-end fields use “end message” instead of “answer”: for example,
+  `answer_node_id` is now `end_message_node_id`, and `last_answer` is now
+  `last_end_message`. `history get --final-answer-only` is renamed
+  `history get --end-message-only`. These are breaking public-name changes with
+  no compatibility aliases; the internal database column is unchanged (#194).
+- `revisit set/get/cancel` and the `message send --now` option are removed. Use
+  `message send --deliver now` or `message send --deliver complete` instead.
+  `complete` holds an ordinary message until the recipient Run completes
+  normally; `now` releases a foreground shell wait for urgent delivery (#187).
 
 ## Before upgrading
 
@@ -35,17 +48,11 @@ has not been bumped; this is not a release candidate or publication record.
 
 ## Changed behavior
 
-- Revisit is now an ordinary message with a delivery timing. Use
-  `message send --deliver complete` to hold a message until the recipient Run
-  completes normally, or `--deliver now` to release a foreground shell wait for
-  urgent delivery. The former `revisit set/get/cancel` commands and
-  `message send --now` flag are removed. The default still queues input for the
-  next safe boundary (#187).
-- Public Turn-end fields use “end message” instead of “answer”: for example,
-  `answer_node_id` is now `end_message_node_id`, and `last_answer` is now
-  `last_end_message`. `history get --final-answer-only` is renamed
-  `history get --end-message-only`. These are breaking public-name changes with
-  no compatibility aliases; the internal database column is unchanged (#194).
+- Long conversations are compacted proactively at a safe request boundary once
+  reported input reaches the configured threshold (200,000 tokens by default).
+  During a long Turn, compaction can also summarize an eligible older segment
+  while preserving the current request, later user instructions and recent work.
+  Incomplete or protected ranges are not compacted (#180, #181, #189).
 
 ## Fixes
 
@@ -66,13 +73,8 @@ has not been bumped; this is not a release candidate or publication record.
 
 ## Performance
 
-- Long conversations can be compacted proactively at a safe request boundary
-  once reported input reaches the configured threshold (200,000 tokens by
-  default). During a long Turn, compaction can also summarize an eligible older
-  segment while preserving the current request, later user instructions and
-  recent work. Unsafe or incomplete ranges are not compacted. These changes
-  reduce retained prompt context; this draft makes no measured latency or cost
-  claim for compaction (#180, #181, #189).
+- The compaction changes reduce retained prompt context, but this draft makes no
+  measured latency or cost claim for compaction (#180, #181, #189).
 - Requests now append the Turn context to saved history instead of regenerating
   it at the end of every request, allowing provider prompt caches to reuse the
   full preceding request as a prefix (#183). In the small paid before/after
