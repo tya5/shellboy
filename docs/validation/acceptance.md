@@ -9020,3 +9020,13 @@ Synthetic tests cover both languages, zero/one/two/many counts, receipt states,
 page bounds, user text preservation and control-character sanitization. Exact
 commands and CI results are recorded in the handoff. These tests do not establish
 physical-terminal behavior or completion of Stage C.
+
+On current base `9e822267d4`, scoped language inventory validates all recorded
+fingerprints: `src/presentation/rows.rs` a=17/b=1/c=1,
+`src/presentation/projection.rs` a=15/b=12/c=0, and
+`src/frontend/received/list.rs` a=12/b=16/c=0. Rows' one remaining c is the
+unused `NOTICE_SOURCE_OUTSIDE_WINDOW` Japanese constant; this batch does not
+assume its display role. Projection tests cover generated titles and preserve
+canonical summary payload bytes. Received-list tests cover Ja/En headings,
+states, pagination and sanitization while retaining source request/excerpt
+text. Local Rust verification is formatting only; exact-tip three-OS CI pending.

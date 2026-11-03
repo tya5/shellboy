@@ -4204,3 +4204,12 @@ The bounded received-record list uses the startup UI language for generated
 headings, page controls, state labels and missing-text hints. Request and
 received excerpts remain source text, subject to the existing sanitization and
 length limits. This is one Stage C slice, not the full language audit.
+
+### #152 rows, projection, and received-list batch (2026-11-03)
+
+Localized received-list generated text follows UI language; source request and
+excerpt data remain unchanged. Added bilingual coverage for row labels and
+projection-generated titles, keeping canonical Japanese values and source
+payloads intact. Scoped classification leaves only the unused
+`NOTICE_SOURCE_OUTSIDE_WINDOW` candidate pending; see acceptance for exact
+counts. Three-OS CI is pending.
