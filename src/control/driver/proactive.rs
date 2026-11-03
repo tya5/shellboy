@@ -202,8 +202,8 @@ pub(super) async fn maybe_compact(
             .as_ref()
             .is_none_or(|marks| marks.iter().any(|mark| mark.starts_with(kind))),
     };
-    let spill_new = has_kind("spill:");
-    let summary_new = has_kind("summary:")
+    let spill_new = !evidence.insufficient_prefix && has_kind("spill:");
+    let summary_new = !evidence.insufficient_prefix && has_kind("summary:")
         && !(marks.is_none()
             && budget
                 .guard
@@ -307,13 +307,13 @@ pub(super) async fn maybe_compact(
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
     let target_plan = evidence.input_characters.and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
-    let before_characters = if target_plan.is_some() {
-        Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
-    } else { None };
     let mut midturn = Value::Null;
     let prefer_active = evidence.insufficient_prefix || std::mem::take(&mut budget.prefix_adopted);
     let mut summary_scope = "";
     let result: Result<Value, ApiError> = async {
+    let before_characters = if target_plan.is_some() {
+        Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
+    } else { None };
     // #182: spill rewrites an earlier tool result while later output is
     // kept, so it waits for a boundary where the tool loop is closed.
     let spill = if spill_new && !open_loop {
@@ -337,14 +337,23 @@ pub(super) async fn maybe_compact(
                 {
                     let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
                     if before.saturating_sub(after) < plan.remove_characters {
-                        let active = control.compactor.summarize_active_turn(&snapshot.thread, slot.stop.clone()).await?;
-                        if !active.no_target {
-                            summary.spilled_groups += active.spilled_groups;
-                            summary.source_nodes += active.source_nodes;
-                            summary.original_node_ids.extend(active.original_node_ids);
-                            summary.no_target = false;
-                            midturn = json!({"scope":"active_turn", "reason":"target_shortfall"});
-                            summary_scope = "active_turn";
+                        match control.compactor.summarize_active_turn(&snapshot.thread, slot.stop.clone()).await {
+                            Ok(active) if !active.no_target => {
+                                summary.spilled_groups += active.spilled_groups;
+                                summary.source_nodes += active.source_nodes;
+                                summary.original_node_ids.extend(active.original_node_ids);
+                                summary.no_target = false;
+                                midturn = json!({"scope":"active_turn", "reason":"target_shortfall"});
+                                summary_scope = "active_turn";
+                            }
+                            Ok(_) => {}
+                            Err(error) if error.is_storage_failure() || slot.stop.is_cancelled() => return Err(error),
+                            Err(error) => {
+                                summary.spilled_groups += spill.spilled_groups;
+                                summary.source_nodes += spill.source_nodes;
+                                summary.original_node_ids.extend(spill.original_node_ids);
+                                return Ok(json!({"outcome":"adopted","summary":summary,"summary_error":error}));
+                            }
                         }
                     }
                 }
