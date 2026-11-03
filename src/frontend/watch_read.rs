@@ -459,7 +459,7 @@ mod tests {
         let raw = read_tx(&db, &["t".into()]).unwrap();
         assert!(raw.extras["t"].command.is_none());
         assert!(raw.extras["t"].command_limited);
-        assert!(raw.extras["t"].parent_title.as_ref().unwrap().len() <= 4096);
+        assert!(raw.extras["t"].parent_title.is_none());
         let prepared = prepare(raw);
         assert!(
             prepared[0].facts().work.as_ref().unwrap().rows[0]
