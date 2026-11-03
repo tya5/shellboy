@@ -774,6 +774,32 @@ impl ResponseStream {
 }
 
 #[cfg(test)]
+mod shell_argument_policy_tests {
+    use super::*;
+    #[test]
+    fn unknowns_are_separate_from_valid_and_invalid_fields() {
+        let (args, unknown) = parse_shell_arguments(r#"{"command":"true","timeout":2}"#);
+        assert!(args.is_ok());
+        assert_eq!(unknown, ["timeout"]);
+        let (args, unknown) = parse_shell_arguments(r#"{"command":1,"timeout":2}"#);
+        assert!(args.unwrap_err().contains("command"));
+        assert_eq!(unknown, ["timeout"]);
+        for raw in [r#"{}"#, r#"{"command":""}"#, r#"{"command":false}"#] {
+            assert!(parse_shell_arguments(raw).0.unwrap_err().contains("command"));
+        }
+    }
+    #[test]
+    fn byte_limit_and_duplicate_ids_remain_protocol_errors() {
+        let item = |id: &str, arguments: String| json!({"type":"function_call","name":"shell","call_id":id,"arguments":arguments});
+        let large = "x".repeat(MAX_TOOL_ARGUMENT_BYTES + 1);
+        let raw = json!({"status":"completed","output":[item("a",large)]});
+        assert!(ModelResponse::completed(raw, true).is_err());
+        let raw = json!({"status":"completed","output":[item("a","{}".into()),item("a","{}".into())]});
+        assert!(ModelResponse::completed(raw, true).is_err());
+    }
+}
+
+#[cfg(test)]
 mod embedding_failure_tests {
     use super::*;
     #[test]
