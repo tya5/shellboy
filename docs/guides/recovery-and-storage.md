@@ -339,6 +339,16 @@ the initial request. Omissible work between those messages can still be
 replaced by one notice; the request and later user messages are not silently
 removed. This is separate from whether an interrupted request is retried.
 
+While the model's latest response asked for a tool (the tool loop is still
+open), Shellboy does not omit or spill earlier tool results: signed thinking is
+bound to the exact history before it. In that state an explicit overflow
+summarizes the active Turn instead (all its tool rounds become one summary, the
+latest round as text, user messages kept word for word), else the earlier
+Turns; the omission after transient failures waits and the failure retries
+unchanged. If the provider still rejects replayed thinking as bound to a
+different conversation, Shellboy resends once without earlier reasoning and
+records it on the failed attempt.
+
 Recovery shows the saved failure, retry count, last-failure time and transport
 stage, plus protected request/latest-tool character/byte counts, known attachment
 sizes and available actions in error details. Unknown sizes remain null. These

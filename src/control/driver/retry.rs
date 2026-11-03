@@ -107,12 +107,96 @@ fn eligible_trim_failure(
     }
 }
 
+/// #182 rule 4: the provider rejected a replayed signed thinking block as bound
+/// to a different prefix. Save the failure with the retry fact, start a new
+/// reasoning epoch (no reasoning saved before it is sent again) in the same
+/// transaction, and resend once. Returns false when the attempt was obsolete.
+async fn thinking_binding_retry(
+    control: &Arc<Control>,
+    snapshot: &Snapshot,
+    attempt: &str,
+    failure: &model::http::AttemptFailure,
+    used: u32,
+    limit: u32,
+) -> Result<bool, ApiError> {
+    let body = json!({"error":failure.error,"partial_text":failure.partial_text,
+        "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
+        "raw_response":failure.raw_response,"attempt_id":attempt,
+        "automatic_retry":{"number":used+1,"limit":limit,"delay_ms":0,
+            "partial_response_discarded":false,"possible_duplicate_charge":false,
+            "reason":"thinking_binding"},
+        "thinking_binding_retry":{"reasoning_dropped":true}});
+    let (saved_attempt, thread) = (attempt.to_owned(), snapshot.thread.clone());
+    let applied = control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            let transition = super::super::state::fail_attempt(&tx, &saved_attempt, &body, &now())?;
+            let applied = transition == super::super::state::AttemptTransition::Applied;
+            if applied {
+                tx.execute(
+                    "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",
+                    [&thread],
+                )?;
+            }
+            tx.commit()?;
+            Ok(applied)
+        })
+        .await
+        .map_err(storage_error)?;
+    if applied {
+        control.diagnostics.record(
+            crate::diagnostics::DiagnosticEvent::ThinkingBindingRetry,
+            crate::diagnostics::DiagnosticIds {
+                thread_id: Some(snapshot.thread.clone()),
+                run_id: Some(snapshot.run.clone()),
+                turn_id: Some(snapshot.turn.clone()),
+                ..Default::default()
+            },
+        );
+        control.changed(&snapshot.thread);
+    }
+    Ok(applied)
+}
+
+/// #182 overflow fallback while the tool loop is open: the active-Turn summary
+/// (③ summarized, ④ as text), else the ordinary summary of earlier Turns.
+async fn open_loop_reduce(
+    control: &Arc<Control>,
+    snapshot: &Snapshot,
+    slot: &DriverSlot,
+) -> Result<Value, ApiError> {
+    let compactor = &control.compactor;
+    let mut scope = "active_turn";
+    let mut result = compactor
+        .summarize_active_turn(&snapshot.thread, slot.stop.clone())
+        .await;
+    if matches!(&result, Ok(r) if r.no_target) {
+        scope = "prefix";
+        result = compactor
+            .summarize_unsummarized_prefix(&snapshot.thread, slot.stop.clone())
+            .await;
+    }
+    Ok(match result {
+        Ok(result) => {
+            json!({"outcome":if result.no_target {"no_safe_reduction"} else {"adopted"},"summary":result,"midturn":{"scope":scope,"reason":"open_tool_loop"}})
+        }
+        Err(error) if error.is_storage_failure() => return Err(error),
+        Err(error) => {
+            json!({"outcome":"rejected","error":error,"midturn":{"scope":scope,"reason":"open_tool_loop"}})
+        }
+    })
+}
+
 #[derive(Default)]
 pub(super) struct RetryBudget {
     turn: String,
     generation: i64,
     used: u32,
     usage_limit_retry_fact: Option<model::usage_limit::UsageLimit>,
+    /// #182: the one resend after a thinking-binding rejection was used.
+    thinking_binding_retried: bool,
 }
 impl RetryBudget {
     pub(super) fn observe(&mut self, turn: &str, generation: i64) {
@@ -121,6 +205,7 @@ impl RetryBudget {
             self.generation = generation;
             self.used = 0;
             self.usage_limit_retry_fact = None;
+            self.thinking_binding_retried = false;
         }
     }
     pub(super) fn usage_limit_retry_bypass(&self) -> Option<model::usage_limit::UsageLimit> {
@@ -132,6 +217,7 @@ impl RetryBudget {
     /// Reset only after the completed response has been durably adopted.
     pub(super) fn succeeded(&mut self) {
         self.used = 0;
+        self.thinking_binding_retried = false;
         self.clear_usage_limit_retry_bypass();
     }
     fn delay(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Option<Duration> {
@@ -165,6 +251,14 @@ pub(super) async fn retry_or_recover(
 ) -> Result<(), ApiError> {
     let connection = &control.store.config.connections[&snapshot.profile];
     let limit = connection.response_max_retries;
+    if failure.error.is_thinking_binding() && !budget.thinking_binding_retried {
+        budget.thinking_binding_retried = true;
+        if thinking_binding_retry(control, snapshot, &attempt, &failure, budget.used, limit).await?
+        {
+            drop(boundary_guard);
+            return Ok(());
+        }
+    }
     let policy = classify_retry(
         &failure.error,
         &failure.facts,
@@ -206,7 +300,20 @@ pub(super) async fn retry_or_recover(
     };
     let mut trim_not_applied = None;
     if delay.is_some() {
-        if failure.error.is_context_limit() {
+        let open_loop = control.compactor.tool_loop_open(&snapshot.thread).await?;
+        if failure.error.is_context_limit() && open_loop {
+            // #182 rule 3: before a closed-loop boundary, selective trims and
+            // spills wait; overflow falls back to the active-Turn summary.
+            let mut observation = json!({"outcome":"stages_exhausted"});
+            if overflow.begin().is_some() {
+                observation = open_loop_reduce(control, snapshot, slot).await?;
+                control.changed(&snapshot.thread);
+            }
+            if observation["outcome"] != "adopted" {
+                delay = None;
+            }
+            trim_not_applied = Some(observation);
+        } else if failure.error.is_context_limit() {
             let mut observation = json!({"outcome":"stages_exhausted"});
             let stage = overflow.begin();
             if stage == Some(overflow::Reduction::OldGroups) {
@@ -252,7 +359,12 @@ pub(super) async fn retry_or_recover(
                 connection.response_retry_partial,
             )
         {
-            trim_not_applied = Some(trim::reduce(control, snapshot, slot, &mut failure).await?);
+            trim_not_applied = Some(if open_loop {
+                // #182: the large-input trim is a selective edit; it waits.
+                json!({"outcome":"deferred","reason":"open_tool_loop"})
+            } else {
+                trim::reduce(control, snapshot, slot, &mut failure).await?
+            });
         }
     }
     if slot.stop.is_cancelled() {

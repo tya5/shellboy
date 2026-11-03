@@ -22,6 +22,18 @@ migration or setting. `usage get --attempt` and ungrouped `usage get`
 for each model answer (approved option 3). See
 [input byte accounting](../design/input-byte-accounting.md). Rebased onto main
 after #180; replay category uses #180's `spill_marker`. Next: 3-OS CI, review.
+## Signed reasoning and history edits (#182, branch `issue-182/thinking-edit-guard`)
+
+Every replacement now keeps reasoning before its earliest edited position and
+stops reasoning after it (`history::select_path`, epoch plus `app_meta` kept
+set). Proactive compaction summarizes earlier Turns first, then the active Turn
+as one summary carrying the latest tool round as text (#181's epoch advance and
+retained suffix removed). Spill and trims wait for a closed tool loop; overflow
+before that uses the active-Turn summary. A documented thinking-binding 400 is
+resent once with reasoning dropped and recorded. Design:
+[compaction](../design/compaction.md#signed-reasoning-and-history-edits-182),
+decision D-189. Validation: see acceptance. No paid provider call. Next:
+coordinator merge; real Claude behaviour remains unvalidated.
 
 ## Final benchmark after #183 (2026-11-03, branch `bench/final-2026-11-03`)
 

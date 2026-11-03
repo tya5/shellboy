@@ -118,6 +118,30 @@ off-by-one raw counter. Local full runs share a build directory with other
 worktrees; unrelated failures traced to that sharing (a stale RAG `--cursor`
 binary, a missing `shellboy` binary) passed after a rebuild. Branch CI on three
 OSes is the acceptance gate; Windows and Linux are not verified locally.
+## Signed reasoning and history edits (#182, 2026-11-03)
+
+Native macOS through rust-slot, synthetic fixtures and loopback mocks only; no
+real provider request. After rebasing onto main with #180 (progress gate):
+`cargo test --lib -- compaction control history` 493 passed, 0 failed;
+`cargo test --test integration -- response_retries proactive compact overflow`
+all passed after the reshaped tests below (an earlier run also saw the
+environment-dependent `shell_output::completion_tests::actual_signal...` fail,
+which fails the same way on the unchanged base 9e822267). New or reshaped tests: `active_turn_plan_covers_every_tool_round_and_retains_user_inputs`,
+`unsummarized_prefix_ignores_a_prefix_made_only_of_summaries`,
+`active_turn_summary_keeps_prefix_byte_identical_and_no_signed_tail` (replay
+items through the request are identical and the encoded Anthropic request has
+no thinking/tool_use/tool_result after the edit point),
+`edits_keep_reasoning_before_the_edit_point_and_drop_it_after` (positional
+rule, appends, tail edit, fork, prefix from 0). Integration (`--test
+integration`): `proactive_summarizes_earlier_turns_first_then_the_active_turn`
+(order and request shapes), `thinking_binding_rejection_is_resent_once_without_reasoning_and_recorded`,
+`a_long_turn_defers_the_large_input_trim_while_its_tool_loop_is_open`, the
+partial-spill fixtures moved to a closed-loop boundary, and the overflow and
+#180 tests reshaped to the open-loop fallback all passed; `cargo fmt
+--check` and `cargo clippy --locked --all-targets -D warnings` passed.
+Three-OS CI is recorded below when it completes. Claude behaviour is not
+live-validated.
+
 ## Recovery trim keeps active-Turn inputs (#185, 2026-11-03)
 
 Commits 112764cf + 0049e9bf (format) on `issue-185/keep-turn-inputs`, stacked on

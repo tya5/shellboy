@@ -103,16 +103,24 @@ To replace a request, use `/edit USER_NODE_ID` in the TUI. It reads the full ori
 At a safe request boundary, Shellboy can compact from the latest
 provider-reported input-token count when it reaches `auto_at_tokens` (200,000
 by default; see [configuration](configuration.md), including the per-connection
-override and the `0` opt-out). Unknown or stale usage does not trigger it. For a
-live Turn with an eligible middle segment, Shellboy first spills eligible tool
-results and summarizes the oldest safe whole-group run inside that Turn. It
-keeps every user message of the active Turn, protected/incomplete groups, and
-the latest complete tool group and newer work. If no eligible middle segment
-exists, the existing prefix summary path is used. Adopting an active-Turn
-summary starts a new reasoning epoch: prior-epoch reasoning and opaque
-continuation data are not resent. Original history remains available subject
-to retention. This threshold policy is distinct from failure-driven overflow
-recovery; it adds no setting beyond `auto_at_tokens`.
+override and the `0` opt-out). Unknown or stale usage does not trigger it.
+Shellboy summarizes the oldest content first: it runs the ordinary summary of
+earlier Turns that are not yet summarized. Only when nothing but earlier
+summaries is left there, or when a fresh measurement after that summary is
+still at or above the threshold, does it summarize the active Turn: every tool
+round of the Turn is replaced by one summary, and the latest tool round is
+included in it as plain text. Earlier Turns and the Turn's request stay
+unchanged, and user messages delivered during the Turn are kept word for word
+right after the summary. One summary runs per attempt.
+
+Reasoning follows one rule for every replacement: reasoning before the first
+changed position is still sent unchanged, and reasoning saved after it is not
+sent again (signed thinking is bound to the exact history before it). Spilling
+tool results waits until the model's latest response requested no tool. If the
+context overflows before then, Shellboy summarizes the active Turn instead.
+Original history remains available subject to retention. This threshold policy
+is distinct from failure-driven overflow recovery; it adds no setting beyond
+`auto_at_tokens`.
 
 ## Compaction and spill
 
@@ -124,7 +132,7 @@ The CLI is `shellboy compact --thread THREAD_ID`. This is an explicit compaction
 
 Spill replaces long tool-result input bodies with placeholders referencing originals. Summaries save purpose, constraints, state, next work, references, and similar content into another node. Both preserve access to original content within retention rules, and neither silently changes other Threads' adopted paths. Attachments in the replaced interval leave send selection; [reattach](attachments.md) them if needed.
 
-Failure-driven overflow recovery starts only on provider-explicit context overflow. Its bounded recovery sequence is: spill older results → normal request retry 1 → if still explicit overflow, spill including the latest group and summarize → normal request retry 2 → if still failing, recovery wait. If no eligible targets exist, the intermediate retry is skipped. Unknown errors or mere HTTP/byte limits are not assumed to be context overflow. Already executed shells are not rerun for compaction.
+Failure-driven overflow recovery starts only on provider-explicit context overflow. Its bounded recovery sequence is: spill older results → normal request retry 1 → if still explicit overflow, spill including the latest group and summarize → normal request retry 2 → if still failing, recovery wait. While the model's latest response asked for a tool, spills and omission wait; an overflow then summarizes the active Turn instead (see [recovery](recovery-and-storage.md#failure-driven-reduction-50)). If no eligible targets exist, the intermediate retry is skipped. Unknown errors or mere HTTP/byte limits are not assumed to be context overflow. Already executed shells are not rerun for compaction.
 
 Manual compaction during recovery wait does not automatically resume the normal request. Inspect results; a human or the owning immediate parent must explicitly resume with `shellboy run retry --run RUN_ID`. See [Recovery and storage](recovery-and-storage.md).
 

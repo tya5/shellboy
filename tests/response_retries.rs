@@ -1350,8 +1350,12 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
     f.close().await;
 }
 
+/// The first large-input trim runs at a closed-loop boundary (the seeded
+/// history ends with a final answer). Once the Turn's own tool loop is open,
+/// #182 defers the second trim: transient failures retry unchanged and the
+/// deferral is recorded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_long_turn_can_reduce_again_after_successful_tool_work() {
+async fn a_long_turn_defers_the_large_input_trim_while_its_tool_loop_is_open() {
     fn tool(name: &str, command: String) -> Reply {
         Reply::http(200,"application/json",&json!({"id":name,"status":"completed","output":[{
             "type":"function_call","call_id":name,"name":"shell","arguments":json!({"command":command}).to_string()
@@ -1401,7 +1405,7 @@ async fn a_long_turn_can_reduce_again_after_successful_tool_work() {
             .unwrap();
     }
     let reduced_again = f.incoming().await;
-    assert!(!reduced_again.body.to_string().contains("FIRST_PROGRESS"));
+    assert!(reduced_again.body.to_string().contains("FIRST_PROGRESS"));
     assert!(reduced_again.body.to_string().contains("SECOND_PROGRESS"));
     assert!(
         reduced_again
@@ -1426,7 +1430,14 @@ async fn a_long_turn_can_reduce_again_after_successful_tool_work() {
                     [],
                     |r| r.get::<_, i64>(0)
                 )?,
-                2
+                1
+            );
+            assert!(
+                db.query_row(
+                    "SELECT count(*) FROM model_attempt WHERE json_extract(error_json,'$.automatic_trim_attempt.outcome')='deferred'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )? >= 1
             );
             Ok(())
         })
@@ -1435,9 +1446,10 @@ async fn a_long_turn_can_reduce_again_after_successful_tool_work() {
     f.close().await;
 }
 
-/// #185: an overflow inside a huge Turn must not drop user input delivered in
-/// that Turn. The request and every mid-Turn message stay verbatim around the
-/// omission notice; only work between them is omitted.
+/// #185/#182: an overflow inside a huge Turn must not drop user input
+/// delivered in that Turn. With the tool loop open, the overflow falls back to
+/// the active-Turn summary: the request stays in place, every mid-Turn message
+/// follows the summary verbatim, and the tool rounds become summary text.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
     fn tool(name: &str, command: String) -> Reply {
@@ -1496,7 +1508,32 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         ))
         .ok()
         .unwrap();
-    let reduced = f.incoming().await;
+    // Map segments and their reduce are tool-free summary requests.
+    let mut summaries = 0;
+    let reduced = loop {
+        let next = f.incoming().await;
+        if next.body["tools"] != json!([]) {
+            break next;
+        }
+        summaries += 1;
+        assert!(summaries <= 8, "bounded summary requests");
+        if summaries == 1 {
+            assert!(next.body.to_string().contains("EARLY-WORK"));
+        }
+        next.reply
+            .send(Reply::http(
+                200,
+                "application/json",
+                &json!({"id":format!("summary-{summaries}"),"status":"completed","output":[{
+                "type":"message","role":"assistant","status":"completed",
+                "content":[{"type":"output_text","text":"## Goal\nwork summarized"}]}]})
+                .to_string(),
+                "",
+            ))
+            .ok()
+            .unwrap();
+    };
+    assert!(summaries >= 1, "the active-Turn summary ran");
     let input = reduced.body["input"].as_array().unwrap().clone();
     let reduced_text = reduced.body.to_string();
     assert!(reduced_text.contains("TURN_REQUEST_MARKER"));
@@ -1508,16 +1545,25 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
     }
     assert!(
         !reduced_text.contains("EARLY-WORKxxxx"),
-        "omitted work proves the trim ran"
+        "summarized work proves the reduction ran"
     );
     let notice = input
         .iter()
-        .position(|item| item.to_string().contains("Shellboy context notice:"))
-        .expect("omission notice");
+        .position(|item| {
+            item.to_string()
+                .contains("summary of the tool work in the active Turn")
+        })
+        .expect("active-Turn summary notice");
     assert!(
         input[notice]
             .to_string()
-            .contains("user messages (its request and any messages delivered later in it)")
+            .contains("user message(s) delivered during this work follow this summary verbatim")
+    );
+    assert!(
+        input
+            .iter()
+            .all(|item| item.get("type").is_none_or(|t| t == "message")),
+        "no tool call or result remains: {input:?}"
     );
     let request_at = input
         .iter()
@@ -1548,6 +1594,12 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
                     [],
                     |r| r.get::<_, i64>(0)
                 )?,
+                0
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM node WHERE kind='summary'", [], |r| {
+                    r.get::<_, i64>(0)
+                })?,
                 1
             );
             Ok(())
@@ -1849,4 +1901,77 @@ async fn unknown_429_keeps_retry_policy_without_inferred_cooldown() {
             .is_none()
     );
     f.close().await;
+}
+
+/// #182 rule 4: the documented thinking-binding rejection is resent once with
+/// every earlier reasoning item dropped (new epoch), even with no ordinary
+/// retries configured, and the resend is recorded on the failed attempt. A
+/// second rejection is not resent again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorded() {
+    const BINDING: &str = "messages.3.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\".";
+    let binding = || {
+        Reply::http(
+            400,
+            "application/json",
+            &json!({"type":"error","error":{"code":"invalid_request_error","message":BINDING}})
+                .to_string(),
+            "",
+        )
+    };
+    for second_rejection in [false, true] {
+        let mut f = Fixture::new(0, 10, 5_000).await;
+        let first = f.incoming().await;
+        first.reply.send(Reply::http(200,"application/json",&json!({"id":"tool","status":"completed","output":[
+            {"type":"reasoning","id":"rs-tool","summary":[],"encrypted_content":"SIGNED"},
+            {"type":"function_call","call_id":"call","name":"shell","arguments":json!({"command":"echo BINDING"}).to_string()}
+        ]}).to_string(),"")).ok().unwrap();
+        let after_tool = f.incoming_after_tool().await;
+        assert!(
+            after_tool.body.to_string().contains("SIGNED"),
+            "reasoning is replayed before the rejection"
+        );
+        after_tool.reply.send(binding()).ok().unwrap();
+        let resent = f.incoming().await;
+        let input = resent.body["input"].as_array().unwrap();
+        assert!(
+            input.iter().all(|item| item["type"] != "reasoning"),
+            "{input:?}"
+        );
+        assert!(
+            input
+                .iter()
+                .any(|item| item["type"] == "function_call_output"),
+            "tool result kept"
+        );
+        if second_rejection {
+            resent.reply.send(binding()).ok().unwrap();
+            assert_eq!(f.settled().await, "recovery_wait");
+        } else {
+            resent.reply.send(Reply::success()).ok().unwrap();
+            assert_eq!(f.settled().await, "completed");
+        }
+        let attempts = f.attempts().await;
+        let recorded: Vec<_> = attempts
+            .iter()
+            .filter_map(|(_, error)| error.as_ref())
+            .filter(|error| error.get("thinking_binding_retry").is_some())
+            .collect();
+        assert_eq!(recorded.len(), 1, "{attempts:?}");
+        assert_eq!(recorded[0]["automatic_retry"]["reason"], "thinking_binding");
+        assert_eq!(
+            attempts.len(),
+            3,
+            "tool request, rejected request, one resend"
+        );
+        let epoch: i64 = f
+            .control
+            .store
+            .database
+            .call(|db| Ok(db.query_row("SELECT reasoning_epoch FROM thread", [], |r| r.get(0))?))
+            .await
+            .unwrap();
+        assert_eq!(epoch, 1);
+        f.close().await;
+    }
 }

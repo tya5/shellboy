@@ -12,6 +12,10 @@ pub(super) struct ProactiveBudget {
     guard: Option<super::proactive_guard::Guard>,
     status_context: Option<(String, String)>,
     below_context: Option<(String, String)>,
+    /// #182: the previous attempt in this Run adopted the ordinary prefix
+    /// summary; if a fresh measurement is still at or above the threshold,
+    /// the active-Turn summary goes first in the next attempt.
+    prefix_adopted: bool,
 }
 
 enum Measurement {
@@ -98,6 +102,9 @@ pub(super) async fn maybe_compact(
     let evidence = match evidence {
         Ok(Some(Measurement::Ready(evidence))) => evidence,
         Ok(Some(Measurement::BelowThreshold)) => {
+            // A fresh measurement below the threshold ends the #182
+            // "still at or above after the prefix summary" condition.
+            budget.prefix_adopted = false;
             if budget.status_context.take().is_some() {
                 super::proactive_guard::hide_status(control, &snapshot.thread).await?;
             }
@@ -154,7 +161,18 @@ pub(super) async fn maybe_compact(
     {
         return Ok(false);
     }
-    let marks = candidates.as_ref().map(|candidate| candidate.marks.clone());
+    // #182: while the tool loop is open, spill opportunities are deferred,
+    // not seen: keep them out of the progress guard so the closed-loop
+    // boundary still finds them new.
+    let open_loop = control.compactor.tool_loop_open(&snapshot.thread).await?;
+    let marks = candidates.as_ref().map(|candidate| {
+        candidate
+            .marks
+            .iter()
+            .filter(|mark| !(open_loop && mark.starts_with("spill:")))
+            .cloned()
+            .collect::<Vec<_>>()
+    });
     let protected = candidates
         .as_ref()
         .is_some_and(|candidate| candidate.mutable_protection);
@@ -270,8 +288,12 @@ pub(super) async fn maybe_compact(
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
     let mut midturn = Value::Null;
+    let prefer_active = std::mem::take(&mut budget.prefix_adopted);
+    let mut summary_scope = "";
     let result: Result<Value, ApiError> = async {
-    let spill = if spill_new {
+    // #182: spill rewrites an earlier tool result while later output is
+    // kept, so it waits for a boundary where the tool loop is closed.
+    let spill = if spill_new && !open_loop {
         control.compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone()).await
     } else {
         Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
@@ -284,7 +306,7 @@ pub(super) async fn maybe_compact(
             "summary": spill,
             "summary_deferred": true,
         }),
-        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, &mut midturn, middle_new, summary_new).await
+        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope).await
         {
             Ok(mut summary) => {
                 summary.spilled_groups += spill.spilled_groups;
@@ -342,6 +364,7 @@ pub(super) async fn maybe_compact(
     let adopted = observation["outcome"] == "adopted";
     let summary_rejected = observation.get("summary_error").is_some();
     let summary_deferred = observation["summary_deferred"] == true;
+    budget.prefix_adopted = adopted && !summary_rejected && summary_scope == "prefix";
     if !adopted || summary_rejected || (summary_deferred && preserve_guard_after_spill) {
         let rejection = observation
             .get("summary_error")
@@ -386,7 +409,14 @@ pub(super) async fn maybe_compact(
                     }
                 };
                 current.replace_candidates(
-                    after.as_ref().map(|candidate| candidate.marks.clone()),
+                    after.as_ref().map(|candidate| {
+                        candidate
+                            .marks
+                            .iter()
+                            .filter(|mark| !(open_loop && mark.starts_with("spill:")))
+                            .cloned()
+                            .collect()
+                    }),
                     after
                         .as_ref()
                         .is_some_and(|candidate| candidate.mutable_protection),
@@ -455,38 +485,57 @@ pub(super) async fn maybe_compact(
     Ok(true)
 }
 
-/// One summary operation per attempt (#181): the active-Turn middle segment
-/// when it has a target, otherwise the ordinary prefix summary as before.
+struct Order {
+    prefer_active: bool,
+    middle_new: bool,
+    ordinary_new: bool,
+}
+
+/// One summary operation per attempt. #182 order: the ordinary summary of
+/// earlier Turns first (oldest context matters least); the active-Turn
+/// summary only when that prefix has nothing but earlier summaries, or when
+/// the previous attempt adopted the prefix summary and a fresh measurement is
+/// still at or above the threshold (`prefer_active`).
 async fn summarize_once(
     control: &Arc<Control>,
     thread: &str,
     slot: &DriverSlot,
+    order: Order,
     midturn: &mut Value,
-    middle_new: bool,
-    ordinary_new: bool,
+    scope: &mut &'static str,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
-    if middle_new {
-        let active = control
-            .compactor
+    let compactor = &control.compactor;
+    if !order.prefer_active && order.ordinary_new {
+        let prefix = compactor
+            .summarize_unsummarized_prefix(thread, slot.stop.clone())
+            .await;
+        if !matches!(&prefix, Ok(result) if result.no_target) {
+            *midturn = json!({"skipped":"prefix_first"});
+            *scope = "prefix";
+            return prefix;
+        }
+    }
+    if order.middle_new {
+        let active = compactor
             .summarize_active_turn(thread, slot.stop.clone())
             .await;
         if !matches!(&active, Ok(result) if result.no_target) {
             *midturn = json!({"scope":"active_turn"});
+            *scope = "active_turn";
             return active;
         }
         *midturn = json!({"skipped":"no_target"});
     } else {
         *midturn = json!({"skipped":"no_new_target"});
     }
-    if ordinary_new {
-        control
-            .compactor
-            .summarize(thread, false, slot.stop.clone())
-            .await
-    } else {
-        Ok(crate::compaction::CompactResult {
-            no_target: true,
-            ..Default::default()
-        })
+    if order.prefer_active && order.ordinary_new {
+        *scope = "prefix";
+        return compactor
+            .summarize_unsummarized_prefix(thread, slot.stop.clone())
+            .await;
     }
+    Ok(crate::compaction::CompactResult {
+        no_target: true,
+        ..Default::default()
+    })
 }

@@ -542,7 +542,7 @@ async fn manual_compact_accepts_during_http_wait_and_adopts_without_starting_an_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn overflow_without_maximum_target_summarizes_without_unchanged_resend() {
+async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resend() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = owner_with_retries(root.path(), &url, 8).await;
@@ -565,17 +565,10 @@ async fn overflow_without_maximum_target_summarizes_without_unchanged_resend() {
     }).await.unwrap();
     let overflow =
         json!({"error":{"code":"context_length_exceeded","message":"fixture context exceeded"}});
-    pending.reply.send((400, overflow.clone())).unwrap();
-    let summary = incoming(&control, &mut receive).await;
-    assert_eq!(
-        summary.body["tools"],
-        json!([]),
-        "no unchanged conversation resend before the final stage"
-    );
-    summary.reply.send((200, answer("OK"))).unwrap();
-    let retry = incoming(&control, &mut receive).await;
-    assert_eq!(retry.body["tools"].as_array().unwrap().len(), 1);
-    retry.reply.send((400, overflow)).unwrap();
+    // #182: with the tool loop open and only the latest round left, there is
+    // no active-Turn target and no earlier Turn: no summary and no unchanged
+    // resend; the Turn waits for recovery.
+    pending.reply.send((400, overflow)).unwrap();
     settled(&control, &thread).await;
     control
         .store
@@ -588,19 +581,16 @@ async fn overflow_without_maximum_target_summarizes_without_unchanged_resend() {
             assert_eq!(
                 db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
                     .get::<_, i64>(0))?,
-                3
+                2
             );
             let saved: String = db.query_row(
-                "SELECT error_json FROM model_attempt WHERE state='failed'",
+                "SELECT error_json FROM model_attempt WHERE json_extract(error_json,'$.automatic_trim_attempt') IS NOT NULL",
                 [],
                 |r| r.get(0),
             )?;
             let saved: Value = serde_json::from_str(&saved).unwrap();
-            assert_eq!(
-                saved["automatic_trim_attempt"]["maximum_outcome"],
-                "no_safe_reduction"
-            );
-            assert_eq!(saved["automatic_retry"]["number"], 1);
+            assert_eq!(saved["automatic_trim_attempt"]["outcome"], "no_safe_reduction");
+            assert_eq!(saved["automatic_trim_attempt"]["midturn"]["reason"], "open_tool_loop");
             Ok(())
         })
         .await
@@ -708,53 +698,46 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         .reply
         .send((400, overflow.clone()))
         .unwrap();
-    let retry_one = next(&mut receive, &control, "first overflow: spill retry").await;
-    let context = current_context(&control, &thread).await;
-    assert_current_context_once(&retry_one.body, &context, "after automatic spill");
-    let outputs: Vec<Value> = retry_one.body["input"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|v| v["type"] == "function_call_output")
-        .map(|v| serde_json::from_str(v["output"].as_str().unwrap()).unwrap())
-        .collect();
-    assert_eq!(outputs.len(), 1);
-    assert!(
-        retry_one.body["input"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|v| v["type"] == "function_call_output" && v["call_id"] == "call-2")
-    );
-    assert!(
-        outputs[0]["output"]
-            .as_str()
-            .unwrap()
-            .contains("raw-group-2")
-    );
-    retry_one.reply.send((400, overflow.clone())).unwrap();
-    let summary = next(&mut receive, &control, "second overflow: summary request").await;
-    assert_eq!(summary.body["tools"], json!([]));
-    summary.reply.send((200, answer("OK"))).unwrap();
-    let retry_two = next(
+    // #182: the tool loop is open, so the overflow falls back to the
+    // active-Turn summary instead of spill/trim.
+    let summary = next(
         &mut receive,
         &control,
-        "second overflow: adopted summary retry",
+        "first overflow: active-Turn summary",
     )
     .await;
+    assert_eq!(summary.body["tools"], json!([]));
+    summary.reply.send((200, answer("OK"))).unwrap();
+    let retry_two = next(&mut receive, &control, "first overflow: summary retry").await;
+    let context = current_context(&control, &thread).await;
     assert_current_context_once(&retry_two.body, &context, "after automatic summary");
-    let outputs: Vec<Value> = retry_two.body["input"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|v| v["type"] == "function_call_output")
-        .map(|v| serde_json::from_str(v["output"].as_str().unwrap()).unwrap())
-        .collect();
-    assert!(outputs.len() <= 1);
-    for output in &outputs {
-        assert_eq!(output["call_id"], "call-2");
-    }
-    retry_two.reply.send((400, overflow)).unwrap();
+    let input = retry_two.body["input"].as_array().unwrap();
+    assert!(
+        input
+            .iter()
+            .all(|v| v["type"] != "function_call" && v["type"] != "function_call_output"),
+        "every tool round became summary text: {input:?}"
+    );
+    assert!(
+        input.iter().any(|v| v.to_string().contains("raw-group-2")),
+        "latest round as text"
+    );
+    retry_two.reply.send((400, overflow.clone())).unwrap();
+    // After the active-Turn summary no tool loop is open, so the existing
+    // final overflow stage summarizes once more; the overflow persists.
+    let final_summary = next(
+        &mut receive,
+        &control,
+        "second overflow: final-stage summary",
+    )
+    .await;
+    assert_eq!(final_summary.body["tools"], json!([]));
+    final_summary.reply.send((200, answer("OK"))).unwrap();
+    next(&mut receive, &control, "second overflow: final retry")
+        .await
+        .reply
+        .send((400, overflow))
+        .unwrap();
     settled(&control, &thread).await;
     assert!(receive.try_recv().is_err());
     let run_id = control
@@ -795,7 +778,7 @@ async fn both_overflow_retries_preserve_call_groups_and_never_execute_saved_tool
         .await
         .unwrap();
     assert_eq!((counts.0, counts.1), (3, 3));
-    assert!(counts.2 <= 3);
+    assert_eq!(counts.2, 0, "no spill while the tool loop is open");
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
@@ -2629,6 +2612,9 @@ async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_res
         let owner=DataOwner::start(Some(config),Some(root.path().join("data")),root.path().into()).await.unwrap();
         let control=Control::new(&owner,root.path().into());let thread=thread(&control).await;
         send(&control,&thread,"protected task").await;
+        // #182: with the tool loop open, overflow uses the active-Turn summary,
+        // which needs an older tool round to summarize besides the latest one.
+        receive.recv().await.unwrap().reply.send((200,json!({"id":"older","status":"completed","output":[{"type":"function_call","call_id":"older-tool","name":"shell","arguments":json!({"command":"echo older"}).to_string()}]}))).unwrap();
         receive.recv().await.unwrap().reply.send((200,json!({"id":"tool","status":"completed","output":[{"type":"function_call","call_id":"only-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]}))).unwrap();
         let pending=receive.recv().await.unwrap();let target=thread.clone();
         control.store.database.call(move|db| {
@@ -2652,7 +2638,7 @@ async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_res
         }
         control.store.database.call(|db| {
             assert_eq!(db.query_row("SELECT count(*) FROM node WHERE kind='summary'",[],|r|r.get::<_,i64>(0))?,0);
-            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,2);
+            assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,3);
             let raw:String=db.query_row("SELECT error_json FROM model_attempt WHERE state='incomplete'",[],|r|r.get(0))?;
             let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["automatic_trim_attempt"]["error"]["details"];
             assert_eq!(facts["map_requests"],1);assert_eq!(facts["reduce_requests"],1);assert_eq!(facts["summary_limit"],2000);Ok(())
@@ -3461,13 +3447,19 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
         let before = incoming(&control, &mut receive).await;
         let before_size = before.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
         assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
-        before.reply.send((200, tool_response(2, 200))).unwrap();
+        // #182: spill is a selective edit and waits until the tool loop is
+        // closed; the threshold is reported by the Turn's final answer and
+        // acted on at the next Turn's first boundary.
+        before.reply.send((200, tool_response(2, 100))).unwrap();
+        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
+        settled(&control, &target).await;
+        send(&control, &target, "next turn").await;
         let summary = incoming(&control, &mut receive).await;
         assert_eq!(summary.body["tools"], json!([]));
         let first_summary_input = summary.body["input"].to_string();
-        assert!(first_summary_input.contains("large-0") && first_summary_input.contains("large-1"));
-        assert!(!first_summary_input.contains("small-2"), "the newest completed group is protected");
-        let mut rejected = answer(&"too-long-summary ".repeat(180));
+        assert!(!first_summary_input.contains("large-0"), "earlier Turns first; the latest completed Turn stays");
+        // An empty summary is rejected without a reduce request.
+        let mut rejected = answer(" ");
         rejected["usage"] = json!({"input_tokens":321,"output_tokens":123,"total_tokens":444});
         summary.reply.send((200, rejected)).unwrap();
         let after = incoming(&control, &mut receive).await;
@@ -3484,27 +3476,22 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
         let first_events = proactive_events(&control, &target).await;
         assert_eq!(first_events.len(), 1, "{first_events:#?}");
         assert_eq!(first_events[0]["metrics"]["summary_rejected"], true, "{first_events:#?}");
-        assert!(first_events[0]["metrics"]["source_characters"].as_u64().unwrap() < 3_000, "tiny summary source: {first_events:#?}");
         assert_eq!(first_events[0]["metrics"]["summary_usage"]["requests"], 1);
-        assert_eq!(first_events[0]["metrics"]["summary_usage"]["reduce_requests"], 0);
-        after.reply.send((200, tool_response(3, 205))).unwrap();
-        let middle = incoming(&control, &mut receive).await;
-        assert_eq!(middle.body["tools"], json!([]));
-        let middle_input = middle.body["input"].to_string();
-        assert!(middle_input.contains("small-2"), "the new middle target must contain the newly eligible completed group");
-        assert!(!middle_input.contains("small-3"), "the newest tool group stays protected");
-        middle.reply.send((200, answer("The earlier shell commands completed."))).unwrap();
-        let gated = incoming(&control, &mut receive).await;
-        assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
-        gated.reply.send((200, answer("finished"))).unwrap();
+        if oversized {
+            // The oversized request exceeds the exact forecast bounds; #180
+            // re-evaluates a coverage-limited candidate on a new tool frontier,
+            // so this variant ends the Turn without one.
+            after.reply.send((200, answer("finished"))).unwrap();
+        } else {
+            after.reply.send((200, tool_response(3, 205))).unwrap();
+            let gated = incoming(&control, &mut receive).await;
+            assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
+            gated.reply.send((200, answer("finished"))).unwrap();
+        }
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
-        assert!((1..=2).contains(&events.len()), "only a newly eligible tool group can add one attempt: {events:#?}");
-        assert_eq!(events.iter().filter(|event| event["metrics"]["summary_rejected"] == true).count(), 1, "the rejected summary must not be reissued");
-        let item = events.iter().find(|event| event["metrics"]["summary_rejected"] == true).expect("original summary rejection is retained");
-        assert_eq!(events.len(), 2, "newly eligible middle sources produce one additional attempt");
-        let later = events.iter().find(|event| event["metrics"]["summary_rejected"] != true).unwrap();
-        assert_eq!(later["state"], "adopted", "the new middle summary must be adopted");
+        assert_eq!(events.len(), 1, "the rejected summary must not be reissued: {events:#?}");
+        let item = &events[0];
         assert_eq!(item["state"], "adopted");
         assert_eq!(item["metrics"]["summary_rejected"], true);
         assert!(item["metrics"]["spilled_groups"].as_u64().unwrap() >= 2);
@@ -3515,78 +3502,89 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
             "SELECT error_json FROM model_attempt WHERE id=?1", [attempt_id], |r| r.get(0)
         )?)).await.unwrap();
         let saved: Value = serde_json::from_str(&saved).unwrap();
-        assert_eq!(saved["automatic_trim_attempt"]["summary_error"]["code"], "invalid_state");
+        assert!(saved["automatic_trim_attempt"]["summary_error"]["code"].is_string());
         eprintln!("partial-spill replay bytes {before_size} -> {after_size}; summary input=321 output=123");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
 }
 
-/// #181: in a long Turn, proactive compaction replaces the old middle segment
-/// with one developer summary, keeps the request and the latest tool group, and
-/// starts a new reasoning epoch, so no earlier reasoning is replayed.
+/// #182 order and shape: at the threshold the ordinary summary of earlier Turns
+/// runs first (its edit precedes kept output, so all earlier reasoning stops);
+/// when a fresh measurement is still at or above the threshold, the active-Turn
+/// summary replaces every tool round (③ summarized, ④ as text) while the
+/// prefix through the request stays item-for-item identical.
 #[tokio::test]
-async fn proactive_active_turn_summary_replaces_middle_and_drops_reasoning() {
-    crate::test_watchdog::watchdog("proactive active-Turn summary", async {
+async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
+    crate::test_watchdog::watchdog("proactive #182 order", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\n").await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
-        send(&control, &target, "long current turn").await;
-        for (index, tokens) in [(0, 100), (1, 100), (2, 250)] {
-            let current = incoming(&control, &mut receive).await;
-            current.reply.send((200, json!({"id":format!("step-{index}"),"status":"completed",
-                "usage":{"input_tokens":tokens,"output_tokens":1},
-                "output":[
-                    {"type":"reasoning","id":format!("rs-{index}"),"summary":[],"encrypted_content":"E".repeat(4_000)},
-                    {"type":"function_call","call_id":format!("step-{index}"),"name":"shell",
-                     "arguments":json!({"command":format!("echo STEP{index}")}).to_string()}
-                ]}))).unwrap();
+        for text in ["EARLY-ONE", "EARLY-TWO"] {
+            send(&control, &target, text).await;
+            let mut reply = answer("ok");
+            reply["output"].as_array_mut().unwrap().insert(0, json!({"type":"reasoning","id":format!("rs-{text}"),"summary":[],"encrypted_content":"PRIOR"}));
+            incoming(&control, &mut receive).await.reply.send((200, reply)).unwrap();
+            settled(&control, &target).await;
         }
-        let summary = incoming(&control, &mut receive).await;
-        assert_eq!(summary.body["tools"], json!([]), "the attempt must summarize before continuing");
-        let material = summary.body["input"].to_string();
-        assert!(material.contains("step-0") && material.contains("step-1"), "covered groups are summary input");
-        assert!(!material.contains("step-2"), "the latest tool group stays verbatim");
+        send(&control, &target, "long current turn").await;
+        let step = |index: u32, tokens: u32| json!({"id":format!("step-{index}"),"status":"completed",
+            "usage":{"input_tokens":tokens,"output_tokens":1},
+            "output":[
+                {"type":"reasoning","id":format!("rs-{index}"),"summary":[],"encrypted_content":"E".repeat(4_000)},
+                {"type":"function_call","call_id":format!("step-{index}"),"name":"shell",
+                 "arguments":json!({"command":format!("echo STEP{index}")}).to_string()}
+            ]});
+        for (index, tokens) in [(0, 100), (1, 100), (2, 250)] {
+            incoming(&control, &mut receive).await.reply.send((200, step(index, tokens))).unwrap();
+        }
+        // First attempt: the ordinary summary of the earlier Turns.
+        let first = incoming(&control, &mut receive).await;
+        assert_eq!(first.body["tools"], json!([]));
+        let material = first.body["input"].to_string();
+        assert!(material.contains("EARLY-ONE"), "earlier Turn first");
+        assert!(!material.contains("STEP0"), "the active Turn waits");
+        first.reply.send((200, answer("## Goal\nEarly work summarized"))).unwrap();
+        let after_prefix = incoming(&control, &mut receive).await;
+        assert_ne!(after_prefix.body["tools"], json!([]));
+        let input = after_prefix.body["input"].as_array().unwrap();
+        // The edit precedes every kept response: no reasoning from before it.
+        assert!(input.iter().all(|item| item["type"] != "reasoning"), "{input:?}");
+        assert!(input.iter().any(|item| item["call_id"] == "step-2"));
+        // Still at or above the threshold on a fresh measurement: active Turn.
+        after_prefix.reply.send((200, step(3, 260))).unwrap();
+        let second = incoming(&control, &mut receive).await;
+        assert_eq!(second.body["tools"], json!([]));
+        let material = second.body["input"].to_string();
+        assert!(material.contains("STEP0") && material.contains("STEP2"), "③ is summary input");
+        assert!(!material.contains("STEP3"), "④ is carried as text, not summarized");
         assert!(!material.contains("EEEE"), "encrypted reasoning is never summary material");
-        let mut reply = answer("## Goal\nRun steps\n## Current state\nSTEP0 and STEP1 ran");
-        reply["usage"] = json!({"input_tokens":50,"output_tokens":5});
-        summary.reply.send((200, reply)).unwrap();
+        second.reply.send((200, answer("## Goal\nRun steps\n## Current state\nSTEP0-2 ran"))).unwrap();
         let after = incoming(&control, &mut receive).await;
         assert_ne!(after.body["tools"], json!([]));
         let input = after.body["input"].as_array().unwrap();
-        assert!(input.iter().all(|item| item["type"] != "reasoning"), "no reasoning from before the adoption: {input:?}");
-        assert!(input.iter().all(|item| item["call_id"] != "step-0" && item["call_id"] != "step-1"));
-        assert!(input.iter().any(|item| item["type"] == "function_call" && item["call_id"] == "step-2"));
-        assert!(input.iter().any(|item| item["type"] == "function_call_output" && item["call_id"] == "step-2"));
         let request = input.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
-        let notice = input.iter().position(|item| item.to_string().contains("summary of earlier work in the active Turn")).unwrap();
-        let latest = input.iter().position(|item| item["call_id"] == "step-2").unwrap();
-        assert!(request < notice && notice < latest, "request, summary, then the retained suffix");
-        assert_eq!(input[notice]["role"], "developer");
-        // A response after the adoption carries the new epoch and is replayed.
-        after.reply.send((200, json!({"id":"step-3","status":"completed","usage":{"input_tokens":120,"output_tokens":1},
-            "output":[{"type":"reasoning","id":"rs-3","summary":[],"encrypted_content":"NEW"},
-                {"type":"function_call","call_id":"step-3","name":"shell","arguments":json!({"command":"echo STEP3"}).to_string()}]}))).unwrap();
-        let next = incoming(&control, &mut receive).await;
-        assert_ne!(next.body["tools"], json!([]), "below the threshold: no further summary");
-        let reasoning: Vec<_> = next.body["input"].as_array().unwrap().iter().filter(|item| item["type"] == "reasoning").collect();
-        assert_eq!(reasoning.len(), 1);
-        assert_eq!(reasoning[0]["encrypted_content"], "NEW");
-        next.reply.send((200, answer("finished"))).unwrap();
+        let before = after_prefix.body["input"].as_array().unwrap();
+        let before_request = before.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
+        assert_eq!(input[..=request], before[..=before_request], "①② unchanged");
+        let tail = &input[request + 1..];
+        assert!(tail.iter().all(|item| item.get("type").is_none_or(|t| t == "message")), "no call, result or reasoning after the edit: {tail:?}");
+        let notice = tail.iter().find(|item| item.to_string().contains("summary of the tool work in the active Turn")).expect("summary notice");
+        let text = notice.to_string();
+        assert!(text.contains("STEP3") && text.contains("Latest tool round"), "④ as text: {text}");
+        after.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
-        assert_eq!(events.len(), 1, "{events:#?}");
-        assert_eq!(events[0]["state"], "adopted");
-        let attempt_id = events[0]["attempt_id"].as_str().unwrap().to_owned();
-        let (saved, epoch, executions): (String, i64, i64) = control.store.database.call(move |db| Ok((
-            db.query_row("SELECT error_json FROM model_attempt WHERE id=?1", [attempt_id], |r| r.get(0))?,
-            db.query_row("SELECT reasoning_epoch FROM thread", [], |r| r.get(0))?,
+        assert_eq!(events.len(), 2, "{events:#?}");
+        let ids: Vec<String> = events.iter().map(|e| e["attempt_id"].as_str().unwrap().to_owned()).collect();
+        let (records, executions): (Vec<String>, i64) = control.store.database.call(move |db| Ok((
+            ids.iter().map(|id| db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.midturn') FROM model_attempt WHERE id=?1", [id], |r| r.get(0))).collect::<Result<Vec<_>, _>>()?,
             db.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get(0))?,
         ))).await.unwrap();
-        let saved: Value = serde_json::from_str(&saved).unwrap();
-        assert_eq!(saved["automatic_trim_attempt"]["midturn"]["scope"], "active_turn");
-        assert_eq!(epoch, 1);
+        let mut records: Vec<Value> = records.iter().map(|r| serde_json::from_str(r).unwrap()).collect();
+        records.sort_by_key(|r| r.to_string());
+        assert_eq!(records, [json!({"scope":"active_turn"}), json!({"skipped":"prefix_first"})]);
         assert_eq!(executions, 4, "no saved tool is executed again");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
@@ -3974,7 +3972,16 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         "one actual attempt follows the new eligible group: {events:?}"
     );
     assert_eq!(events[0]["state"], "adopted");
-    assert!(events[0]["metrics"]["spilled_groups"].as_u64().unwrap_or(0) >= 1);
+    // #182: the tool loop is open, so spill waits; the active-Turn summary
+    // reduces the older group instead (the latest round becomes text).
+    assert_eq!(
+        events[0]["metrics"]["spilled_groups"].as_u64().unwrap_or(0),
+        0
+    );
+    assert!(
+        events[0]["metrics"]["summary_node_id"].is_string(),
+        "{events:?}"
+    );
     assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();

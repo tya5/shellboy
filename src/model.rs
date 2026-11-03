@@ -96,6 +96,16 @@ impl ModelError {
             )
         )
     }
+    /// #182: the documented preserved-thinking rejection ("Invalid `signature`
+    /// in `thinking` block. The block is bound to a different conversation.").
+    /// Matched on the provider text only; no vendor-specific request knob is
+    /// sent. A tampered signature lacks the "bound to" sentence and is not
+    /// this case.
+    pub fn is_thinking_binding(&self) -> bool {
+        self.status.is_none_or(|status| status == 400)
+            && self.message.contains("`thinking` block")
+            && self.message.contains("bound to a different conversation")
+    }
     /// Provider facts shared by embedding consumers; retry/pause budgets remain
     /// owned by the persistent index or the explicit RAG invocation.
     pub(crate) fn embedding_failure(&self) -> EmbeddingFailure {

@@ -31,6 +31,9 @@ pub enum DiagnosticEvent {
     AutomaticCompactionForecastLimited,
     AutomaticCompactionRejectedInvalidState,
     AutomaticCompactionRejectedOther,
+    /// #182: one resend after a documented thinking-binding rejection, with
+    /// the saved reasoning epoch advanced so no stale signed block is sent.
+    ThinkingBindingRetry,
     MessageSend,
     ShellFailure,
     StorageLimit,
