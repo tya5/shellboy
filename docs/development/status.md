@@ -20,6 +20,14 @@ clip to width. Headers, event/tool rows, notices and source-preserving guide
 prose keep their existing structure. Bilingual narrow/wide
 regressions cover evicted/Details hints, the shared indenter and management
 preview. Local cargo checks and exact-tip CI remain pending.
+## Reply-expected messages design (#194, awaiting approval)
+
+Branch `issue-194/reply-design`: design memo
+[reply-expected-messages](../design/reply-expected-messages.md) turns the
+user's #194 decisions into a data model, CLI, Run-end rule, delegation mapping
+and gap analysis, with 17 open questions. Documentation only; nothing is
+implemented or verified. Next: user answers the open questions and approves,
+then implementation on a new branch.
 
 ## Saved Turn context line (#183, branch `issue-183/append-context`)
 

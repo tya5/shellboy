@@ -48,3 +48,8 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
 - [Responses cache diagnostic facts](cache-diagnostics.md) (#142 part 1):
   opt-in comparison identity, bounded attempt observations, and read-only
   single-attempt inspection. Sticky headers are explicitly deferred.
+
+- [Reply-expected messages](reply-expected-messages.md) (#194, **proposed —
+  awaiting user approval**): `--expect-reply`, `message reply`,
+  `wait reply_received`, Run-end reminder, end-message rename and delegation
+  unification. Not adopted until approved.
