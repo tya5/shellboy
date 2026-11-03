@@ -5685,8 +5685,8 @@ mod writer_lane_audit_measurement {
             )
             .unwrap_or_else(|error| {
                 eprintln!(
-                    "AUDIT kind=ThreadDeleteRollback status=rejected code={:?}",
-                    error.code
+                    "AUDIT kind=ThreadDeleteRollback status=rejected code={:?} message={}",
+                    error.code, error.message
                 );
                 panic!("production ThreadDelete handler rejected synthetic leaf")
             });
@@ -5869,6 +5869,32 @@ mod writer_lane_audit_measurement {
             report_sql(&tx, "MessageSendRollback");
             tx.rollback().unwrap();
         }
+        let message_id: String = db.query_row(
+            "SELECT message_node_id FROM receipt WHERE state IN ('accepted','held') AND path_admission<>'admitted' ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        ).expect("copy has an unadmitted pending message");
+        let mut cancel_timings = Vec::new();
+        for repeat in 1..=3 {
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let tx = db.transaction().unwrap();
+            let args = MessageCancelArgs {
+                message_ids: vec![message_id.clone()],
+            };
+            let start = Instant::now();
+            crate::control::pending_messages::cancel_tx(&tx, &args, None, "2026-11-03T00:00:00Z")
+                .expect("production MessageCancel handler");
+            let elapsed_us = start.elapsed().as_micros();
+            cancel_timings.push(elapsed_us);
+            eprintln!("AUDIT kind=MessageCancelRollback repeat={repeat} elapsed_us={elapsed_us}");
+            report_sql(&tx, "MessageCancelRollback");
+            tx.rollback().unwrap();
+        }
+        eprintln!("AUDIT_TIMES kind=MessageCancelRollback values_us={cancel_timings:?}");
         db.progress_handler(0, None::<fn() -> bool>).unwrap();
         runtime.block_on(worker.shutdown()).unwrap();
     }
