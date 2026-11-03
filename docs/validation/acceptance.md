@@ -9322,3 +9322,5 @@ no installed binary, real provider traffic, or user data was used.
 from schemas 24, 25, and 26, preserving rows and ledger and checking the recovery
 index plan. Python scripts suite: 193 passed. Rust and 3-OS CI are pending; no
 installed binary, real provider, or user data was exercised.
+
+- #152 deletion/key-hint/count audit note is documentation evidence only. Strict language audit, physical terminal checks, and integration-tip three-OS acceptance remain separate and outstanding.

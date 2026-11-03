@@ -4422,3 +4422,5 @@ CI on this requested baseline selects Linux; dispatch and outcome are pending.
 and pending-reply index 26. Synthetic upgrade checks cover starts 24, 25, and
 26; W3 recovery authorization, independent barrier release, bounded bootstrap
 records, and bilingual status remain in the rebased branch.
+
+- #152 reconciliation: deletion/key-hint/count audit evidence recorded against current main in `docs/validation/language-audit-stage-c.md`; this is not Stage C completion.
