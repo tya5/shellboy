@@ -4296,3 +4296,4 @@ from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
 `rag init`. Anonymous download and `SHA256SUMS` verification covered all six
 public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
 - #172: startup index recovery uses bounded indexed pages before workers start; a single oversized bootstrap record runs alone.
+- #172: startup index recovery uses bounded indexed pages before workers start. New bootstrap Work records are capped at the existing 1 MiB recovery byte budget; oversized legacy records are deleted before payload selection and receive a compact recorded reason instead of running as an unbounded unit.
