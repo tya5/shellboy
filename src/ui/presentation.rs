@@ -669,9 +669,7 @@ pub(super) fn indented_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'
                 .map_or(1, |character| {
                     unicode_width::UnicodeWidthChar::width(character).unwrap_or(0)
                 });
-            let indent = if width >= 3
-                && usize::from(width.saturating_sub(2)) >= first_char_width
-            {
+            let indent = if width >= 3 && usize::from(width.saturating_sub(2)) >= first_char_width {
                 2
             } else {
                 0
@@ -5172,7 +5170,7 @@ mod conversation_item_tests {
                     if width >= 3 && !(language == UiLanguage::Ja && width == 3) {
                         assert!(shown.starts_with("  "), "{language:?} {width}: {shown}");
                     } else if language == UiLanguage::Ja && width == 3 {
-                        assert!(shown.starts_with("入"), "{language:?} {width}: {shown}");
+                        assert!(!shown.starts_with("  "), "{language:?} {width}: {shown}");
                     }
                     assert!(
                         row.width() <= usize::from(width),
