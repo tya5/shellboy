@@ -46,11 +46,20 @@ mod tests {
             ("omit", "Waiting for history editing"),
             ("trim", "Waiting for history editing"),
             ("maximal", "Waiting for history editing"),
-            ("unknown-provider-action", "Waiting for conversation compaction"),
+            (
+                "unknown-provider-action",
+                "Waiting for conversation compaction",
+            ),
         ] {
             reason.action = action.into();
-            assert_eq!(label_localized(&reason, crate::config::UiLanguage::En), expected);
-            assert_eq!(label_localized(&reason, crate::config::UiLanguage::Ja), label(&reason));
+            assert_eq!(
+                label_localized(&reason, crate::config::UiLanguage::En),
+                expected
+            );
+            assert_eq!(
+                label_localized(&reason, crate::config::UiLanguage::Ja),
+                label(&reason)
+            );
             assert_eq!(reason.action, action);
             assert_eq!(reason.operation_id, "opaque-operation");
             assert_eq!(reason.accepted_at, "saved-time");
