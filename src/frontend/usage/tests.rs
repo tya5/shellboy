@@ -10,10 +10,7 @@ use serde_json::json;
 fn cached_usage_never_turns_missing_or_invalid_counts_into_zero() {
     assert_eq!(cached_tokens(None), "未報告");
     for count in [0, 12345, i64::MAX as u64] {
-        assert_eq!(
-            cached_tokens(Some(count), crate::config::UiLanguage::En),
-            count.to_string()
-        );
+        assert_eq!(cached_tokens(Some(count)), count.to_string());
     }
 }
 
@@ -117,6 +114,16 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
     assert_eq!(field(&nodes[1], FIELD), Some("0"));
     assert_eq!(field(&nodes[2], FIELD), Some("未報告"));
     assert_eq!(field(&nodes[3], FIELD), Some("未報告"));
+    use crate::config::UiLanguage::En;
+    assert_eq!(
+        crate::presentation::fields::attempt_label(FIELD, En),
+        Some("Cached input tokens (provider-reported)")
+    );
+    assert_eq!(
+        crate::presentation::fields::attempt_value(FIELD, field(&nodes[6], FIELD).unwrap(), En,)
+            .as_deref(),
+        Some("Not reported (no request record)")
+    );
     assert_eq!(field(&nodes[4], FIELD), Some("999"));
     assert_eq!(
         field(&nodes[5], FIELD),
