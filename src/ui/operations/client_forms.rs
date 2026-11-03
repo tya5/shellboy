@@ -103,6 +103,7 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     "",
                     Multiline,
                 ),
+                f("exec_result", "結果モード", "reply", Text),
                 f(
                     "max_repairs",
                     "修復メッセージの最大回数（0〜5）",
@@ -160,7 +161,19 @@ pub(super) fn new(operation: OpKind, c: &Context) -> Form {
                     .into());
                 }
                 Ok(ClientOperation::Exec(ExecOptions {
-                    result: crate::exec_client::ResultMode::Reply,
+                    result: match required(form, "exec_result")?.as_str() {
+                        "reply" => crate::exec_client::ResultMode::Reply,
+                        "turn-end" => crate::exec_client::ResultMode::TurnEnd,
+                        "run-end" => crate::exec_client::ResultMode::RunEnd,
+                        _ => {
+                            return Err(local!(
+                                form.language,
+                                "結果モードはreply、turn-end、run-endです",
+                                "Result mode must be reply, turn-end, or run-end."
+                            )
+                            .into());
+                        }
+                    },
                     schema: PathBuf::from(required(form, "schema")?),
                     thread_id,
                     create,
