@@ -9573,3 +9573,4 @@ No real database, embedding/provider call, automatic full
 rebuild or installed-binary change is part of these checks. Recovery is an atomic
 mutation; pure query observations use read-only connections. #203 authorization
 recovery is not reimplemented by this change.
+#203 validation pending: synthetic paged authorization recovery; no real provider or user data used.

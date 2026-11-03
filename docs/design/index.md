@@ -376,5 +376,9 @@ No automatic full rebuild is started.
 
 Migration 27 adds the interrupted-job recovery index after the history index
 (25) and pending-reply index (26).
-The pre-existing unbounded startup authorization scan is tracked separately as
-#203; it is not fixed here.
+Startup authorization recovery (#203) scans the `index.auto.` key range in
+primary-key order, yielding the DB worker after at most 128 records or 1 MiB
+of values. Each update autocommits and its notification is published even if a
+later record fails. Values exceeding the byte limit fail recovery without being
+loaded; the operator must repair that record. Restart resumes safely by
+rescanning already-failed records; no automatic retry is admitted.

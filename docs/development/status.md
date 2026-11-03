@@ -4539,3 +4539,4 @@ and per-page rollback. Native macOS arm64 local checks passed locked test
 compilation, the five new bootstrap regressions and seven existing metadata
 regressions; Python 197 tests, layout/watchdog and language checks also passed.
 Strict Clippy and exact-tip CI results are tracked in the issue handoff.
+#203: authorization recovery uses bounded keyset pages; synthetic tests cover restart, corrupt and oversized records. Validation pending.
