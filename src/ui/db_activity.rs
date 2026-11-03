@@ -126,6 +126,93 @@ mod tests {
     }
 
     #[test]
+    fn every_known_db_operation_label_has_an_english_and_japanese_pair() {
+        let operations = [
+            "execute",
+            "owner_shutdown",
+            "status",
+            "model_list",
+            "thread_list",
+            "thread_get",
+            "usage_get",
+            "compact_list",
+            "compact_preview",
+            "shell_list",
+            "thread_create",
+            "thread_fork",
+            "thread_delete",
+            "thread_delete_preview",
+            "thread_set",
+            "message_send",
+            "message_cancel",
+            "message_get",
+            "operation_get",
+            "run_get",
+            "run_retry",
+            "run_stop",
+            "revisit_set",
+            "revisit_get",
+            "revisit_cancel",
+            "turn_get",
+            "wait",
+            "history_list",
+            "history_get",
+            "history_search",
+            "history_relations",
+            "shell_get",
+            "shell_read",
+            "shell_write",
+            "shell_eof",
+            "shell_stop",
+            "attachment_add",
+            "attachment_list",
+            "attachment_remove",
+            "compact",
+            "context_edit",
+            "index_status",
+            "index_preview",
+            "index_backfill",
+            "index_retry",
+            "index_rebuild",
+            "index_probe",
+            "storage_status",
+            "storage_collect",
+            "collect_receipts",
+            "collect",
+            "raw_batch",
+            "begin_raw",
+            "raw_step",
+        ];
+        for operation in operations {
+            let english = operation_label(operation, UiLanguage::En);
+            let japanese = operation_label(operation, UiLanguage::Ja);
+            assert!(!english.is_empty(), "missing English label for {operation}");
+            assert!(
+                !japanese.is_empty(),
+                "missing Japanese label for {operation}"
+            );
+            assert_ne!(english, japanese, "unpaired label for {operation}");
+            assert!(
+                !english
+                    .chars()
+                    .any(|ch| ('\u{3040}'..='\u{30ff}').contains(&ch))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_operation_fallback_remains_a_neutral_identifier() {
+        assert_eq!(
+            operation_label("future_operation", UiLanguage::En),
+            "future operation"
+        );
+        assert_eq!(
+            operation_label("future_operation", UiLanguage::Ja),
+            "future operation"
+        );
+    }
+
+    #[test]
     fn active_jobs_are_hidden_until_the_display_threshold_in_both_languages() {
         let started = Instant::now();
         let activity = active(started);

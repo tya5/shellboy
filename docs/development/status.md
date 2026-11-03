@@ -4168,3 +4168,10 @@ observations and clarifies that cold interactive startup includes owner startup.
 These are historical fake-model measurements, not new provider measurements.
 The historical sampler is not yet integrated into main; the guide identifies
 its exact source and workflow. Review and integration CI remain pending.
+
+### #152 DB activity language audit
+
+The DB worker status labels already choose English/Japanese pairs for every
+known operation. This batch pins the 54 Japanese arms as localized UI resources
+and adds exhaustive language-pair coverage; unknown operation identifiers keep
+the neutral fallback. No operation kind or persisted data changes.

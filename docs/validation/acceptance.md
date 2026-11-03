@@ -8962,3 +8962,12 @@ On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 history-interaction suites passed (24, 2, and 15 tests respectively). Final-tip three-OS CI run `41561161744` succeeded on UI/code/test SHA
 `499e764407` across Windows, macOS, and Ubuntu. This follow-up commit changes
 only validation documentation; the tested UI implementation is unchanged.
+
+### #152 DB activity language slice
+
+`src/ui/db_activity.rs`'s 54 previously unclassified Japanese labels are paired
+with explicit English labels in `operation_label`. Added coverage iterates all
+known operation keys and checks both localized values; unknown identifiers keep
+the underscore-normalized fallback. No source values or protocol labels are
+rewritten. Local validation is `cargo fmt --all -- --check` plus Python language
+audit tests; three-OS CI is pending.
