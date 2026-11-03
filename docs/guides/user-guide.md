@@ -21,6 +21,8 @@ configuration worker has loaded the configured language; it then uses that
 language for the remaining startup stages, cancellation, and failure screen.
 Before configuration is available, terminal-adapter failures also use English.
 
+Startup timing diagnostics are JSON lines in `<data-dir>/logs/shellboy.log` (and rotated files). Search for `startup_stage`; the fixed `stage`, `elapsed_ms`, and optional `migration_version` describe the same stages shown at startup, without conversation content or IDs. Logging is bounded and best-effort: rotation, queue saturation, I/O failure, or termination can omit records, so missing is not zero. Configuration failures before a data directory and owner lock are available cannot be recorded there. Review logs for private data before sharing.
+
 Language changes UI captions, explanations, command diagnostics, and generated
 status notices. It does not translate or rewrite conversation text, model/tool
 messages, provider errors, paths, IDs, code, copied text, or sent attachments.
@@ -117,6 +119,8 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 Starting without a subcommand requires an interactive terminal. You cannot run two owners against the same data-dir. Subcommands from another terminal use the running owner; they do not start one automatically. Choose a different data-dir for an independent environment.
 
 During startup, the screen shows current preparation such as configuration, DB migration, or cleanup of previously interrupted work. Conversation input becomes available after startup completes. Esc / Ctrl+C / Ctrl+Q request exit; initialization and persistence already started proceed to a safe boundary before closing. This does not roll back a migration or immediately release the lock. If startup fails, read the reason and close with Enter or Esc.
+
+The startup migration markers count schema upgrade steps, not the fraction of startup time or work completed. A long step can remain on the same marker; no remaining time is estimated. When there is not enough room for the markers, only the step count is shown.
 
 A new root Thread uses the startup directory as its cwd. Opening a saved Thread uses that Thread's saved cwd without overwriting it with the current startup directory. Check it with `/cwd` or F8's “会話 | 詳細” (conversation details).
 

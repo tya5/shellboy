@@ -108,11 +108,17 @@ pub struct Endpoint {
 }
 
 /// Ephemeral initialization observations, never persisted Core state/events.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StartupStage {
     Configuration,
     OwnerLock,
     Database,
+    DatabasePragmas,
+    DatabaseMigration,
+    DatabaseValidate,
+    DatabaseForeignKeys,
+    DatabaseQuickCheck,
     InterruptedWork,
     Control,
     Endpoint,
@@ -124,12 +130,16 @@ pub enum StartupStage {
 pub struct StartupProgress {
     pub stage: StartupStage,
     pub language: crate::config::UiLanguage,
+    pub motion: crate::config::MotionMode,
+    pub migration: Option<(u32, u32)>,
 }
 impl Default for StartupProgress {
     fn default() -> Self {
         Self {
             stage: StartupStage::Configuration,
             language: crate::config::UiLanguage::En,
+            motion: crate::config::MotionMode::On,
+            migration: None,
         }
     }
 }
@@ -155,7 +165,7 @@ impl DataOwner {
         cwd: PathBuf,
         progress: impl Fn(StartupStage) + Send,
     ) -> Result<Self, ApiError> {
-        Self::start_with_localized_progress(config_path, data_dir, cwd, move |stage, _| {
+        Self::start_with_localized_progress(config_path, data_dir, cwd, None, move |stage, _, _| {
             progress(stage)
         })
         .await
@@ -164,9 +174,15 @@ impl DataOwner {
         config_path: Option<PathBuf>,
         data_dir: Option<PathBuf>,
         cwd: PathBuf,
-        progress: impl Fn(StartupStage, crate::config::UiLanguage) + Send,
+        migration_progress: Option<tokio::sync::watch::Sender<StartupProgress>>,
+        progress: impl Fn(StartupStage, crate::config::UiLanguage, crate::config::MotionMode) + Send,
     ) -> Result<Self, ApiError> {
-        progress(StartupStage::Configuration, crate::config::UiLanguage::En);
+        let configuration_started = std::time::Instant::now();
+        progress(
+            StartupStage::Configuration,
+            crate::config::UiLanguage::En,
+            crate::config::MotionMode::On,
+        );
         let loaded = tokio::task::spawn_blocking(move || {
             let env = PathEnvironment::current();
             let selected = crate::config_setup::selected_path(config_path.as_deref(), &cwd, &env)?;
@@ -180,26 +196,37 @@ impl DataOwner {
         .await
         .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Configuration worker failed"))??;
         let language = loaded.config.ui.language;
-        progress(StartupStage::OwnerLock, language);
+        let motion = loaded.config.ui.motion;
+        let configuration_elapsed = configuration_started.elapsed();
+        let lock_started = std::time::Instant::now();
+        progress(StartupStage::OwnerLock, language, motion);
         let directory = loaded.data_dir.clone();
         let lock = tokio::task::spawn_blocking(move || OwnerLock::acquire(&directory))
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner lock worker failed"))??;
-        progress(StartupStage::Database, language);
-        let db = DbWorker::open_owned(loaded.data_dir.join("shellboy.db"), lock.clone())
-            .await
-            .map_err(storage_error)?;
         let diagnostics = crate::diagnostics::Diagnostics::start(
             loaded.data_dir.join("logs"),
             loaded.config.logging.clone(),
         );
+        diagnostics.record_startup_stage(StartupStage::Configuration, configuration_elapsed, None);
+        diagnostics.record_startup_stage(StartupStage::OwnerLock, lock_started.elapsed(), None);
+        progress(StartupStage::Database, language, motion);
+        let db = DbWorker::open_owned_reporting(
+            loaded.data_dir.join("shellboy.db"),
+            lock.clone(),
+            migration_progress,
+            diagnostics.clone(),
+        )
+        .await
+        .map_err(storage_error)?;
         db.attach_diagnostics(diagnostics.clone());
         diagnostics.record(
             crate::diagnostics::DiagnosticEvent::Startup,
             Default::default(),
         );
         let now = chrono::Utc::now().to_rfc3339();
-        progress(StartupStage::InterruptedWork, language);
+        let recovery_started = std::time::Instant::now();
+        progress(StartupStage::InterruptedWork, language, motion);
         let recovery = db.call(move |connection| {
             let tx=connection.transaction()?;
             let capture_failures = crate::control::interruption::capture_startup_interrupted_context(&tx,&now)?;
@@ -216,10 +243,15 @@ impl DataOwner {
             tx.commit()?;
             Ok(report)
         }).await;
+        diagnostics.record_startup_stage(
+            StartupStage::InterruptedWork,
+            recovery_started.elapsed(),
+            None,
+        );
         let report = match recovery {
             Ok(report) => report,
             Err(error) => {
-                progress(StartupStage::Closing, language);
+                progress(StartupStage::Closing, language, motion);
                 let _ = db.shutdown().await;
                 let _ = tokio::time::timeout(
                     std::time::Duration::from_millis(loaded.config.io.shutdown_grace_ms),
