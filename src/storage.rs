@@ -543,6 +543,10 @@ impl DbWorker {
             .reserve_owned()
             .await
             .map_err(|_| StorageError::Closed)?;
+        // A reserved slot is not admission. Admission is the send under this
+        // lock, which `shutdown` takes before closing: a send that wins is
+        // drained, one that loses is rejected with `Closed` and never runs.
+        // The slot (counted by `Sender::capacity`) is released on drop (#195).
         let admission = self
             .shared
             .sender
@@ -601,13 +605,30 @@ impl DbWorker {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
     {
+        self.admit_background_kind(kind, operation)
+            .await?
+            .receive()
+            .await
+    }
+
+    /// Background admission alone: returns once the job is in the lane (or
+    /// rejected), so a later shutdown is guaranteed to drain it.
+    async fn admit_background_kind<T, F>(
+        &self,
+        kind: &'static str,
+        operation: F,
+    ) -> Result<DbReply<Background<T>>, StorageError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
         let (mut command, reply) = make_background_job(operation);
         if let Command::Run { kind: named, .. } = &mut command {
             // The requester's closure, not the wrapper, names the kind.
             *named = kind;
         }
         self.admit(Lane::Background, command).await?;
-        reply.receive().await
+        Ok(reply)
     }
 
     /// Nonblocking foreground admission for callers which must preserve input when full.
@@ -1700,32 +1721,21 @@ mod lane_budget_tests {
                     .receive(),
                 ));
             }
-            let queued_background = |db: &DbWorker| {
-                DEFAULT_QUEUE_CAPACITY
-                    - db.shared
-                        .sender
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .unwrap()
-                        .background
-                        .capacity()
-            };
-            // Admit b2 strictly before b3 (background admission is async).
-            for (n, name) in ["b2", "b3"].into_iter().enumerate() {
-                let (task_db, order) = (db.clone(), order.clone());
-                waits.push(tokio::spawn(async move {
-                    task_db
-                        .call_background(move |_| {
-                            order.lock().unwrap().push(name);
-                            Ok(())
-                        })
-                        .await
-                        .map(|_| ())
-                }));
-                while queued_background(&db) < n + 1 {
-                    tokio::task::yield_now().await;
-                }
+            // Admit b2 strictly before b3 and both before shutdown. Awaiting
+            // admission itself, not lane capacity, which already drops when a
+            // slot is reserved but not yet sent (#195).
+            for name in ["b2", "b3"] {
+                let order = order.clone();
+                let reply = db
+                    .admit_background_kind("test", move |_| {
+                        order.lock().unwrap().push(name);
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                waits.push(tokio::spawn(
+                    async move { reply.receive().await.map(|_| ()) },
+                ));
             }
             go_tx.send(()).unwrap();
             // Shutdown is requested while jobs are queued; every one still runs.

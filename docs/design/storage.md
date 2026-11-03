@@ -198,6 +198,11 @@ no new indicator or protocol status is introduced.
   job, a waiting background unit goes next. When only one lane has work, that
   lane runs. Waiting uses a biased `select!` on a current-thread runtime owned
   by the DB thread. Shutdown closes both lanes and drains every admitted job.
+  Admission is the send made under the admission lock that shutdown takes; a
+  reserved lane slot is not admission. A request whose slot was reserved but
+  not yet sent when shutdown closed admission gets `Closed` and never runs, so
+  no accepted job is lost (#195). Tests observe admission by awaiting it, not
+  by lane capacity, which already counts reserved slots.
   The idle checkpoint waits for both lanes to be empty. A background flood
   cannot fill foreground admission.
 - **Idle-gap execution.** Because requesters issue their next `Advanced` unit
