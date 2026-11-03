@@ -129,7 +129,7 @@ fn acceptance_clears_only_its_captured_draft() {
     assert!(
         ui.view()
             .status
-            .contains("編集中の入力を保持（次は全文送信）")
+            .contains("Current input retained (next send uses the full text)")
     );
     assert_eq!(ui.view().thread_id.as_deref(), Some("thread-1"));
     let actions = enter(&mut ui);
@@ -3169,7 +3169,11 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
     assert_eq!(ui.view().selection_revision, 2);
     assert!(!ui.view().navigation.is_loading());
     assert!(!ui.view().navigation.follow());
-    assert!(ui.view().status.contains("再取得しました"));
+    assert!(
+        ui.view()
+            .status
+            .contains("Restored the history display position")
+    );
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("visible history old1"));
@@ -3205,7 +3209,11 @@ fn history_rebase_replaces_removed_anchor_and_rejects_old_refresh() {
         ui.view().navigation.anchor.node_id.as_deref(),
         Some("replacement")
     );
-    assert!(ui.view().status.contains("選択経路から外れた"));
+    assert!(
+        ui.view()
+            .status
+            .contains("The display source is no longer on the selected path")
+    );
     ui.apply(UiUpdate::History {
         pending: Default::default(),
         read_revision: 0,
@@ -3654,7 +3662,7 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
         ),
         (
             r#"{"unknown":"legacy-fixture-raw-only"}"#,
-            "保存された復旧理由を詳細で確認してください",
+            "Check the saved recovery reason in details",
         ),
     ] {
         let mut ui = state();
@@ -3671,7 +3679,7 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
             details,
             draft: None,
         });
-        assert_eq!(ui.view().status, format!("復旧待ち: {expected}"));
+        assert_eq!(ui.view().status, format!("Recovery pending: {expected}"));
         assert_eq!(ui.view().run_id.as_deref(), Some("saved-run"));
         for width in [60, 110] {
             let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();

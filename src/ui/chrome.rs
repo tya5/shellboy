@@ -1243,6 +1243,11 @@ mod tests {
             path: path.clone(),
             present: false,
         });
+        let mut english_ui = UiState::new(&config, root.path().into());
+        let english = frame_text(&mut english_ui, 150, 32);
+        assert!(english.contains("Configuration required:"));
+        assert!(!english.contains("設定が必要です:"));
+        config.ui.language = crate::config::UiLanguage::Ja;
         let mut ui = UiState::new(&config, root.path().into());
         let shown = frame_text(&mut ui, 150, 32);
         for expected in [
