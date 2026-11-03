@@ -2803,5 +2803,45 @@
     "category": "a",
     "reason": "App-authored browser resync notice. Browser::changed sends complete Japanese and English sentences together; ThreadBrowser::notice_for_language selects the current UI language. Tests preserve Japanese, require ASCII English, and keep raw notices untranslated.",
     "source_tokens_sha256": "43bd8e377b6ef65d54fff8ee6346db3b632b71572c46f3021ac9ed2f326b1349"
+  },
+  "src/ui/activity.rs:32c52d0b16cae6db:1": {
+    "category": "a",
+    "reason": "Reviewed FooterText::text: localized() returns it only for UiLanguage::Ja; every variant has an English counterpart in localized().",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:4a171d5ec3d217ca:1": {
+    "category": "a",
+    "reason": "Reviewed FooterText::text: localized() returns it only for UiLanguage::Ja; every variant has an English counterpart in localized().",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:cfe0839bf60e7117:1": {
+    "category": "a",
+    "reason": "Reviewed FooterText::text: localized() returns it only for UiLanguage::Ja; every variant has an English counterpart in localized().",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:bb0524ec3b5a1bd1:1": {
+    "category": "a",
+    "reason": "Reviewed FooterText::text: localized() returns it only for UiLanguage::Ja; every variant has an English counterpart in localized().",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:73ce111205a015c4:1": {
+    "category": "a",
+    "reason": "Reviewed FooterText::text: localized() returns it only for UiLanguage::Ja; every variant has an English counterpart in localized().",
+    "source_tokens_sha256": "0c1ccac4968c6869d6fe4f1099e4307a5d427c824e38ab564c261d3a8aefb591"
+  },
+  "src/ui/activity.rs:ead7b657f2117d7e:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese limit_summary() suffix; limit_summary_localized() uses this helper only for UiLanguage::Ja, with English minute-window copy selected separately.",
+    "source_tokens_sha256": "e7304a7c4c3db8da2dd9c8e3debcdf8c5771dcbc1ba9808f8056fa0578171711"
+  },
+  "src/ui/activity.rs:2580e1f7e13cf307:1": {
+    "category": "a",
+    "reason": "Reviewed Japanese limit_summary() suffix; limit_summary_localized() uses this helper only for UiLanguage::Ja, with English minute-window copy selected separately.",
+    "source_tokens_sha256": "e7304a7c4c3db8da2dd9c8e3debcdf8c5771dcbc1ba9808f8056fa0578171711"
+  },
+  "src/ui/activity.rs:c6f792a1a40e17de:1": {
+    "category": "a",
+    "reason": "Reviewed explicit UiLanguage::Ja AutomaticCompactionSkip arms; corresponding English arms are selected separately by the same enum and state match.",
+    "source_tokens_sha256": "7b3a66f4adfea458be0918e9343396f06bb85d719bcb3a976a798cb68f3d45ac"
   }
 }
