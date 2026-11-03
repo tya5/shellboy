@@ -363,3 +363,34 @@ async fn actual_control_index_retry_receipt_replay_does_not_clear_new_pause_or_n
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn failed_rebuild_enqueue_releases_fence_and_blocks_activation() {
+    let (_root, db, service) = fixture("http://127.0.0.1:9/v1".into()).await;
+    let profile = service.key().unwrap().to_owned();
+    let group = "rebuild-failure";
+    let current = IndexKeys::new(&profile).rebuild();
+    db.call(move |db| {
+        db.execute("INSERT INTO app_meta(key,value) VALUES(?1,'rebuild-failure')", [current])?;
+        db.execute_batch("CREATE TRIGGER reject_bootstrap BEFORE INSERT ON app_meta WHEN NEW.key LIKE 'index.bootstrap.%' BEGIN SELECT RAISE(ABORT,'synthetic failure'); END;")?;
+        Ok(())
+    }).await.unwrap();
+    assert!(
+        service
+            .enqueue(&["source".into()], group, "explicit-rebuild", None)
+            .await
+            .is_err()
+    );
+    db.call(move |db| {
+        let tx = db.transaction()?;
+        let keys = IndexKeys::new(&profile);
+        assert!(meta(&tx, &keys.enqueueing(group))?.is_none());
+        assert!(meta(&tx, &keys.enqueue_failed(group))?.is_some());
+        assert!(!maybe_activate_candidate(&tx, keys, group)?);
+        tx.commit()?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    db.shutdown().await.unwrap();
+}

@@ -494,8 +494,7 @@ pub(crate) fn prepare_saved(raw: RawIndexSaved) -> Value {
     if raw.profile.as_ref().is_some_and(|profile| {
         by_key.contains_key(IndexKeys::new(profile).recovery_required().as_str())
     }) {
-        let message =
-            "Oversized legacy index work could not be recovered; explicitly rebuild this profile";
+        let message = queue::RECOVERY_REQUIRED_MESSAGE;
         reason = Some(match reason {
             Some(prior) => format!("{prior}; {message}"),
             None => message.into(),
@@ -1322,6 +1321,13 @@ mod tests {
         })
         .await
         .unwrap();
+        let cli = service.status(IndexArgs::default()).await.unwrap();
+        assert!(
+            cli.reason
+                .as_deref()
+                .unwrap()
+                .contains("explicitly rebuild")
+        );
         let observed = saved(&db, service, SavedReadLimits::default()).await;
         assert!(
             observed["status"]["reason"]
