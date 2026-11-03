@@ -12,6 +12,34 @@ pub(super) async fn run_tool_group(
     let mut validation_errors = std::collections::HashMap::new();
     // Validate every encoding and initial input before the first OS spawn.
     for call in &calls {
+        if !call.unknown_arguments.is_empty() {
+            let event = match control.store.config.shell.unknown_arguments {
+                crate::config::UnknownArguments::Warn => crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsIgnored,
+                crate::config::UnknownArguments::Strict => crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsRejected,
+            };
+            for _ in &call.unknown_arguments {
+                control.diagnostics().record(event, crate::diagnostics::DiagnosticIds {
+                    thread_id: Some(snapshot.thread.clone()),
+                    run_id: Some(snapshot.run.clone()),
+                    turn_id: Some(snapshot.turn.clone()),
+                    ..Default::default()
+                });
+            }
+        }
+        if !call.unknown_arguments.is_empty()
+            && control.store.config.shell.unknown_arguments
+                == crate::config::UnknownArguments::Strict
+        {
+            validation_errors.insert(
+                call.call_id.clone(),
+                format!(
+                    "Unknown parameter(s): {}. Accepted: {}.",
+                    call.unknown_arguments.join(", "),
+                    model::SHELL_ARGUMENTS.join(", ")
+                ),
+            );
+            continue;
+        }
         let args = match &call.args {
             Ok(args) => args,
             Err(error) => {
@@ -60,7 +88,7 @@ pub(super) async fn run_tool_group(
                 None,
             ));
         }
-        let result = if let Some(error) = validation_errors.get(&call.call_id) {
+        let mut result = if let Some(error) = validation_errors.get(&call.call_id) {
             json!({"status":"error","error":error})
         } else if let Some(reason) = &cancelled {
             reason.clone()
@@ -100,6 +128,15 @@ pub(super) async fn run_tool_group(
                 }
             }
         };
+        if !call.unknown_arguments.is_empty()
+            && control.store.config.shell.unknown_arguments == crate::config::UnknownArguments::Warn
+        {
+            result["warning"] = json!(format!(
+                "Ignored unknown parameter(s): {}. Accepted: {}.",
+                call.unknown_arguments.join(", "),
+                model::SHELL_ARGUMENTS.join(", ")
+            ));
+        }
         let release = match result.get("reason").and_then(Value::as_str) {
             Some("human_backgrounded") => Some(ForegroundRelease::Background),
             Some("additional_input") => Some(ForegroundRelease::AdditionalInput),
