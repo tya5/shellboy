@@ -301,6 +301,11 @@ configured `auto_at_tokens` (default 200,000; `compact list` shows
 `reason: "proactive_threshold"`). Do not answer it with repeated
 `compact --maximal`; that drops role context and cache hits. Do targeted range
 edits only when still needed.
+An active-Turn summary may cover user messages delivered during the work. Its
+notice says how many were covered. To inspect their exact order, follow the
+originals with `shellboy history relations --node FIRST --relation next`,
+replacing `FIRST` with the first source node ID given by the notice.
+
 Leave unfinished work, unapplied user instructions and information required for
 the current task untouched. If no completed range is safely dispensable, do not
 edit it. Do this once per task boundary, not on every request: path edits can
