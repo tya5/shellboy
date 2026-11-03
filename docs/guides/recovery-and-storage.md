@@ -333,6 +333,12 @@ immediately; absent/rejected/exhausted reduction enters recovery without a resen
 Successful responses reset the consecutive budget, so a long Turn can reduce
 again after growing. Partial-output opt-out, stop and Retry-After safety remain.
 
+When maximum omission is planned during a live Turn, every user message in that
+Turn is retained verbatim as an anchor, including instructions delivered after
+the initial request. Omissible work between those messages can still be
+replaced by one notice; the request and later user messages are not silently
+removed. This is separate from whether an interrupted request is retried.
+
 Recovery shows the saved failure, retry count, last-failure time and transport
 stage, plus protected request/latest-tool character/byte counts, known attachment
 sizes and available actions in error details. Unknown sizes remain null. These

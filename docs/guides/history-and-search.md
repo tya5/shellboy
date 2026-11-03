@@ -98,6 +98,22 @@ TUI `/fork NODE_ID` performs the same branch operation. Forking within an unfini
 
 To replace a request, use `/edit USER_NODE_ID` in the TUI. It reads the full original request and attachment references into a separate edit draft. Sending forks a Thread with a prefix ending immediately before the original request, then saves the new request there. It does not directly UPDATE the original user node. If the original Thread's Run is active, stopping it requires explicit confirmation. Check the edit and stop target, then press Y; cancel with N/Esc. There is no independent `shellboy edit` CLI.
 
+## Proactive compaction during a long Turn
+
+At a safe request boundary, Shellboy can compact from the latest
+provider-reported input-token count when it reaches `auto_at_tokens` (200,000
+by default; see [configuration](configuration.md), including the per-connection
+override and the `0` opt-out). Unknown or stale usage does not trigger it. For a
+live Turn with an eligible middle segment, Shellboy first spills eligible tool
+results and summarizes the oldest safe whole-group run inside that Turn. It
+keeps every user message of the active Turn, protected/incomplete groups, and
+the latest complete tool group and newer work. If no eligible middle segment
+exists, the existing prefix summary path is used. Adopting an active-Turn
+summary starts a new reasoning epoch: prior-epoch reasoning and opaque
+continuation data are not resent. Original history remains available subject
+to retention. This threshold policy is distinct from failure-driven overflow
+recovery; it adds no setting beyond `auto_at_tokens`.
+
 ## Compaction and spill
 
 ```text
@@ -108,7 +124,7 @@ The CLI is `shellboy compact --thread THREAD_ID`. This is an explicit compaction
 
 Spill replaces long tool-result input bodies with placeholders referencing originals. Summaries save purpose, constraints, state, next work, references, and similar content into another node. Both preserve access to original content within retention rules, and neither silently changes other Threads' adopted paths. Attachments in the replaced interval leave send selection; [reattach](attachments.md) them if needed.
 
-Automatic compaction starts only on provider-explicit context overflow. Its bounded recovery sequence is: spill older results → normal request retry 1 → if still explicit overflow, spill including the latest group and summarize → normal request retry 2 → if still failing, recovery wait. If no eligible targets exist, the intermediate retry is skipped. Unknown errors or mere HTTP/byte limits are not assumed to be context overflow. Already executed shells are not rerun for compaction.
+Failure-driven overflow recovery starts only on provider-explicit context overflow. Its bounded recovery sequence is: spill older results → normal request retry 1 → if still explicit overflow, spill including the latest group and summarize → normal request retry 2 → if still failing, recovery wait. If no eligible targets exist, the intermediate retry is skipped. Unknown errors or mere HTTP/byte limits are not assumed to be context overflow. Already executed shells are not rerun for compaction.
 
 Manual compaction during recovery wait does not automatically resume the normal request. Inspect results; a human or the owning immediate parent must explicitly resume with `shellboy run retry --run RUN_ID`. See [Recovery and storage](recovery-and-storage.md).
 
