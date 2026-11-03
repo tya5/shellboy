@@ -229,13 +229,15 @@ fn recovery_detail_localizes_only_generated_facts() {
         }),
         ..Default::default()
     };
-    let english = plain(&recovery_lines(&snapshot, UiLanguage::En, 120, 20));
+    let english = plain(&recovery_lines(&snapshot, UiLanguage::En, 120, 16));
+    let english_detail = plain(&recovery_lines(&snapshot, UiLanguage::En, 120, 20));
     assert!(english.contains("Model request (input capacity exceeded)"));
-    assert!(english.contains("Review the saved recovery reason in Details."));
+    assert!(english_detail.contains("Review the saved recovery reason in Details."));
     assert!(english.contains("Context was auto-compacted from 90000 to 40000 characters"));
-    let japanese = plain(&recovery_lines(&snapshot, UiLanguage::Ja, 120, 20));
+    let japanese = plain(&recovery_lines(&snapshot, UiLanguage::Ja, 120, 16));
+    let japanese_detail = plain(&recovery_lines(&snapshot, UiLanguage::Ja, 120, 20));
     assert!(japanese.contains("モデル要求（入力容量超過）"));
-    assert!(japanese.contains("保存された復旧理由を詳細で確認してください"));
+    assert!(japanese_detail.contains("保存された復旧理由を詳細で確認してください"));
     assert!(japanese.contains("自動縮小済み"));
 
     let source = ActivitySnapshot {
