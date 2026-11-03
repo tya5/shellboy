@@ -79,9 +79,6 @@ fn cli_parse_error(error: &clap::Error) -> ApiError {
 }
 
 fn main() -> ExitCode {
-    if std::env::var_os("SHELLBOY_INTERNAL_WIDTH_PROBE").is_some() {
-        std::process::exit(shellboy::ui::width_probe_child());
-    }
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error)
@@ -424,8 +421,8 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // Resolve the same configuration before terminal initialization so a cached
-    // observation can avoid the blocking DSR helper. Owner startup revalidates it.
+    // A cached width is only the first-frame baseline; fresh queries never wait.
+    // Owner startup revalidates the cache destination before installing a writer.
     let width_config = std::env::current_dir().ok().and_then(|cwd| {
         shellboy::config::Config::load_with_overrides(
             cli.config.as_deref(),
@@ -521,18 +518,22 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         requests: rpc_receive,
         cwd,
     } = prepared;
-    // Only the active owner writes the cache; never persist an unknown probe.
-    if width.is_none()
-        && width_config
-            .as_ref()
-            .is_some_and(|c| c.data_dir == owner.loaded.data_dir)
-        && let (Some(id), Some(observed)) = (identity, session.width_observation())
+    // Only the active owner writes successful new measurements. Keep file I/O
+    // off the UI thread, including observations arriving after startup readiness.
+    if width_config
+        .as_ref()
+        .is_some_and(|c| c.data_dir == owner.loaded.data_dir)
+        && let Some(id) = identity
     {
         let data = owner.loaded.data_dir.clone();
         let guard = owner.width_cache_guard();
-        runtime.spawn_blocking(move || {
-            let _guard = guard;
-            let _ = shellboy::width_cache::write(&data, &id, observed);
+        let handle = runtime.handle().clone();
+        session.on_width_observation(move |observed| {
+            let (data, id, guard) = (data.clone(), id.clone(), guard.clone());
+            handle.spawn_blocking(move || {
+                let _guard = guard;
+                let _ = shellboy::width_cache::write(&data, &id, observed);
+            });
         });
     }
     termination.bind_diagnostics(owner.diagnostics.clone());

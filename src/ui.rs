@@ -70,10 +70,6 @@ pub mod startup;
 mod terminal_guard;
 pub mod termination;
 pub(crate) mod text_width;
-#[doc(hidden)]
-pub fn width_probe_child() -> i32 {
-    text_width::probe_child()
-}
 #[cfg(all(test, unix))]
 mod text_width_pty_tests;
 pub(crate) mod theme;
@@ -1374,6 +1370,7 @@ impl UiUpdate {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct HistoryLayoutKey {
     language: crate::config::UiLanguage,
+    terminal_width: Option<u8>,
     view: String,
     thread: Option<String>,
     history_revision: u64,
@@ -1396,6 +1393,7 @@ struct HistoryLayout {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct RenderUnitKey {
     language: crate::config::UiLanguage,
+    terminal_width: Option<u8>,
     start: usize,
     end: usize,
     width: u16,
@@ -1420,6 +1418,7 @@ impl RenderUnitKey {
     ) -> Option<Self> {
         Some(Self {
             language: view.language,
+            terminal_width: text_width::terminal_width_observation(),
             start,
             end,
             width,
@@ -1512,6 +1511,7 @@ impl HistoryLayoutKey {
     fn new(view_key: &str, view: &ThreadView, width: u16, _height: u16) -> Self {
         Self {
             language: view.language,
+            terminal_width: text_width::terminal_width_observation(),
             view: view_key.into(),
             thread: view.thread_id.clone(),
             history_revision: view.history_revision(),
@@ -6823,13 +6823,12 @@ pub struct TerminalSession {
     terminal: Terminal<crate::terminal_links::HyperlinkBackend<io::Stdout>>,
     link_snapshot: std::rc::Rc<std::cell::RefCell<crate::terminal_links::LinkSnapshot>>,
     _guard: TerminalGuard,
-    keyboard_enhancement_enabled: bool,
+    capabilities: terminal_input::SessionInput,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
-    width_observation: Option<u8>,
 }
 impl TerminalSession {
     pub fn set_diagnostics(&mut self, diagnostics: crate::diagnostics::Diagnostics) {
-        record_terminal_width(&diagnostics, self.width_observation);
+        record_terminal_width(&diagnostics, self.width_observation());
         self.diagnostics = Some(diagnostics);
     }
 
@@ -6842,7 +6841,12 @@ impl TerminalSession {
     }
 
     pub fn width_observation(&self) -> Option<u8> {
-        self.width_observation
+        self.capabilities.width_observation
+    }
+
+    /// Called only for a successful new measurement, never for the cache baseline.
+    pub fn on_width_observation(&mut self, observer: impl FnMut(u8) + 'static) {
+        self.capabilities.set_observer(Box::new(observer));
     }
 
     #[cfg(all(test, unix))]
@@ -6861,8 +6865,7 @@ impl TerminalSession {
             EnableBracketedPaste,
             EnableMouseCapture
         )?;
-        let supported = support_override
-            .unwrap_or_else(|| terminal::supports_keyboard_enhancement().unwrap_or(false));
+        let supported = support_override.unwrap_or(false);
         let keyboard_enhancement_enabled = if supported {
             match guard.push_keyboard_enhancement() {
                 Ok(()) => true,
@@ -6879,15 +6882,14 @@ impl TerminalSession {
             io::stdout(),
             std::rc::Rc::clone(&link_snapshot),
         ))?;
-        let width_observation = width.or_else(text_width::probe);
-        text_width::set_process_terminal_width(width_observation);
+        let capabilities = terminal_input::SessionInput::new(width, keyboard_enhancement_enabled)?;
+        text_width::set_process_terminal_width(width);
         Ok(Self {
             terminal,
             link_snapshot,
             _guard: guard,
-            keyboard_enhancement_enabled,
+            capabilities,
             diagnostics: None,
-            width_observation,
         })
     }
 }
@@ -6932,10 +6934,11 @@ fn run_session(
     updates: Receiver<UiUpdate>,
     termination: Option<&termination::Termination>,
 ) -> io::Result<UiExitReason> {
+    let requested_newline_keys = config.ui.newline_keys.clone();
     let mut runtime_config = config.clone();
     runtime_config.ui.newline_keys = input::available_newline_keys(
-        &config.ui.newline_keys,
-        session.keyboard_enhancement_enabled,
+        &requested_newline_keys,
+        session.capabilities.keyboard_enabled,
     );
     let config = &runtime_config;
     let terminal = &mut session.terminal;
@@ -7007,14 +7010,11 @@ fn run_session(
                 selecting = state.selection_mode;
             }
             state.animation_tick(Instant::now());
-            let width_ready = true;
-            if width_ready && state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
+            if state.draw_due(mode_changed, last_draw.elapsed(), frame_time) {
                 redraw::draw_terminal(terminal, &mut state, link_snapshot)?;
                 last_draw = Instant::now();
             }
-            let wait = if !width_ready {
-                Duration::from_millis(10)
-            } else if state.dirty && (!state.selection_mode || state.full_redraw_requested) {
+            let wait = if state.dirty && (!state.selection_mode || state.full_redraw_requested) {
                 frame_time
                     .saturating_sub(last_draw.elapsed())
                     .min(Duration::from_millis(25))
@@ -7024,11 +7024,20 @@ fn run_session(
             let wait = state
                 .deferred_action_wait(Instant::now())
                 .map_or(wait, |remaining| wait.min(remaining));
-            let wait = state
-                .deferred_action_wait(Instant::now())
-                .map_or(wait, |remaining| wait.min(remaining));
-            if event::poll(wait)? {
-                let actions_to_send = state.event(event::read()?);
+            let event =
+                session
+                    .capabilities
+                    .poll(&session._guard, session.diagnostics.as_ref(), wait)?;
+            if session.capabilities.take_changed() {
+                state.config.ui.newline_keys = input::available_newline_keys(
+                    &requested_newline_keys,
+                    session.capabilities.keyboard_enabled,
+                );
+                state.full_redraw_requested = true;
+                state.dirty = true;
+            }
+            if let Some(event) = event {
+                let actions_to_send = state.event(event);
                 for error in actions.try_send_batch(actions_to_send) {
                     state.action_rejected(&error.into_inner());
                 }

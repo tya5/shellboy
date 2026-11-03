@@ -5,7 +5,7 @@ use crate::{
     app::StartupStage,
     protocol::{ApiError, ErrorCode},
 };
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -343,8 +343,7 @@ fn wait_inner<T>(
                 Err(TryRecvError::Empty) => {}
             }
         }
-        // Keep handling input while the bounded probe runs, but do not start
-        // presentation workers with a width that could subsequently change.
+        // Owner readiness is independent of capability-response arrival.
         if ready.is_some() {
             return Ok(Ok(ready.take().expect("ready result")));
         }
@@ -409,8 +408,15 @@ fn wait_inner<T>(
                     .draw(|frame| render(frame, &screen, stage, tick, snapshot))?;
                 drawn = Some(signature);
             }
-            if event::poll(Duration::from_millis(25))? {
-                let event = event::read()?;
+            let event = session.capabilities.poll(
+                &session._guard,
+                session.diagnostics.as_ref(),
+                Duration::from_millis(25),
+            )?;
+            if session.capabilities.take_changed() {
+                drawn = None;
+            }
+            if let Some(event) = event {
                 if matches!(event, Event::Resize(..)) {
                     drawn = None;
                 }
