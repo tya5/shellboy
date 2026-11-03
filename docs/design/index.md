@@ -316,3 +316,33 @@ The cursor is ephemeral: restart scans the prefix again and already failed
 records remain failed. Each committed page is published before the next one;
 workers start only after recovery completes. Interrupted requests require an
 explicit retry and may already have incurred billing.
+
+### Oversized-work review follow-up (#172)
+
+Recovery keeps the exact original authorization (`explicit-backfill`,
+`explicit-rebuild`, `explicit-retry`, or the original new-finalized admission),
+group, witness and body kind. A separate `recovery` flag on Work and its job
+watermark protects recovered units from destructive pause cleanup; the flag is
+not an authorization. Disabled automatic history holds new-finalized admissions,
+not explicit admissions. Current profile/family pause still holds both.
+
+Enqueue failures are marked before releasing the admission counter. Counter
+release commits in its own transaction and still runs if failure-marker saving
+returns an error. Activation runs afterward, in a different transaction, so an
+activation failure cannot resurrect the released barrier. DB errors are returned,
+not hidden as successful admission. A process interruption may still leave a
+persisted preparation fence, reported by the existing status for explicit rebuild.
+
+Unidentifiable oversized work is deleted and leaves the existing profile marker;
+status exposes `index_manual_rebuild_required` as a language-neutral reason code.
+Management/details fields translate that code in `display` at render time in
+Japanese or English, preserving raw field values and copied/source details as
+#186 does for measured request values. Unknown reason text is not translated.
+No automatic full rebuild is started.
+
+Migration 25 remains unchanged on this review branch. Renumbering must wait for
+explicit confirmation that the 0.7.1 hotfix has landed. The latest planned order
+is hotfix 25, #194 reply 26, then #172 index recovery 27; this supersedes the
+older 25-to-26 checklist on #172. Reconcile that checklist only when authorized.
+The pre-existing unbounded startup authorization scan is tracked separately as
+#203; it is not fixed here.

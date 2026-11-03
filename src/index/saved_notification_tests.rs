@@ -394,3 +394,164 @@ async fn failed_rebuild_enqueue_releases_fence_and_blocks_activation() {
     .unwrap();
     db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn failed_activation_does_not_restore_released_enqueue_barrier() {
+    let (_root, db, service) = fixture("http://127.0.0.1:9/v1".into()).await;
+    let profile = service.key().unwrap().to_owned();
+    let p = profile.clone();
+    db.call(move |db| {
+        let keys = IndexKeys::new(&p);
+        db.execute("INSERT INTO app_meta(key,value) VALUES(?1,'activation-failure')", [keys.rebuild()])?;
+        // An empty candidate can activate; fail during the activation writes.
+        db.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('candidate','fixture','synthetic',2,?1,'candidate','unused')", [keys.splitter()])?;
+        db.execute("INSERT INTO app_meta(key,value) VALUES(?1,'candidate')", [keys.group("activation-failure")])?;
+        db.execute_batch("CREATE TRIGGER reject_activation BEFORE UPDATE ON index_space WHEN NEW.state='active' BEGIN SELECT RAISE(ABORT,'synthetic activation failure'); END;")?;
+        Ok(())
+    }).await.unwrap();
+    assert!(
+        service
+            .enqueue(&[], "activation-failure", "explicit-rebuild", None)
+            .await
+            .is_err()
+    );
+    db.call(move |db| {
+        let keys = IndexKeys::new(&profile);
+        assert!(meta(db, &keys.enqueueing("activation-failure"))?.is_none());
+        assert_eq!(
+            meta(db, &keys.rebuild())?.as_deref(),
+            Some("activation-failure")
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT state FROM index_space WHERE id='candidate'",
+                [],
+                |r| r.get::<_, String>(0)
+            )?,
+            "candidate"
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn recovered_explicit_admissions_keep_authorization_with_automatic_history_disabled() {
+    for authorization in ["explicit-backfill", "explicit-rebuild", "explicit-retry"] {
+        let (_root, db, original) = fixture("http://127.0.0.1:9/v1".into()).await;
+        let mut config = (*original.config).clone();
+        config.indexing.auto_history = false;
+        let service = IndexService::new(db.clone(), Arc::new(config));
+        let profile = service.key().unwrap().to_owned();
+        let p = profile.clone();
+        db.call(move |db| {
+            let witness = Witness {
+                node_id: "source".into(),
+                revision: 0,
+                body_hash: Some(db.query_row(
+                    "SELECT body_hash FROM node WHERE id='source'",
+                    [],
+                    |r| r.get(0),
+                )?),
+                raw: None,
+            };
+            let work = Work::pending(
+                witness,
+                "text".into(),
+                Segment {
+                    start: 0,
+                    end: 1_100_000,
+                    text: "x".repeat(1_100_000),
+                },
+                "active",
+                authorization,
+            );
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
+                params![IndexKeys::new(&p).bootstrap("legacy"), encode_json(&work)?],
+            )?;
+            queue::recover_inflight_page(db, None)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let pause = IndexKeys::new(&profile).pause();
+        let paused = pause.clone();
+        db.call(move |db| {
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,'paused')",
+                [paused],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(!service.drain_authorization(&profile).await.unwrap());
+        db.call(move |db| {
+            db.execute("DELETE FROM app_meta WHERE key=?1", [pause])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(service.drain_authorization(&profile).await.unwrap());
+        db.call(move |db| {
+            let keys = IndexKeys::new(&profile);
+            let value: String = db.query_row(
+                "SELECT value FROM app_meta WHERE key LIKE ?1",
+                [keys.bootstrap_pattern()],
+                |r| r.get(0),
+            )?;
+            let work: Work = decode_json(&value)?;
+            assert_eq!(work.authorization, authorization);
+            assert!(work.recovery);
+            assert_eq!(work.segment.text, "synthetic source");
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,'paused')",
+                [keys.pause()],
+            )?;
+            assert_eq!(claim::discard_paused(db, &profile, None)?, Some(false));
+            db.execute("DELETE FROM app_meta WHERE key=?1", [keys.pause()])?;
+            let ClaimResult::Ready(claims) = claim::claim(db, keys, 1, 64_000, false, None)? else {
+                panic!("recovered explicit work must be claimable with auto_history=false");
+            };
+            assert_eq!(claims[0].work.authorization, authorization);
+            assert!(claims[0].work.recovery);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn failed_failure_marker_save_still_releases_enqueue_barrier() {
+    let (_root, db, service) = fixture("http://127.0.0.1:9/v1".into()).await;
+    let profile = service.key().unwrap().to_owned();
+    let p = profile.clone();
+    db.call(move |db| {
+        db.execute("INSERT INTO app_meta(key,value) VALUES(?1,'marker-failure')", [IndexKeys::new(&p).rebuild()])?;
+        db.execute_batch("CREATE TRIGGER reject_enqueue BEFORE INSERT ON app_meta WHEN NEW.key LIKE 'index.bootstrap.%' OR NEW.key LIKE 'index.enqueue_failed.%' BEGIN SELECT RAISE(ABORT,'synthetic enqueue or marker failure'); END;")?;
+        Ok(())
+    }).await.unwrap();
+    assert!(
+        service
+            .enqueue(
+                &["source".into()],
+                "marker-failure",
+                "explicit-rebuild",
+                None
+            )
+            .await
+            .is_err()
+    );
+    db.call(move |db| {
+        assert!(meta(db, &IndexKeys::new(&profile).enqueueing("marker-failure"))?.is_none());
+        Ok(())
+    })
+    .await
+    .unwrap();
+    db.shutdown().await.unwrap();
+}

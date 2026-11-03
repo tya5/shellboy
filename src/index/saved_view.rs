@@ -426,7 +426,12 @@ pub(crate) fn prepare_saved(raw: RawIndexSaved) -> Value {
         let state = if row.key.starts_with("index.auto.") {
             decode_json::<AutoAdmission>(body).map(|w| {
                 (
-                    if !raw.auto_history && w.state == "pending" {
+                    if !raw.auto_history
+                        && w.state == "pending"
+                        && w.recovery_authorization
+                            .as_deref()
+                            .is_none_or(|auth| auth.starts_with("new-finalized"))
+                    {
                         "held_auto_history".into()
                     } else {
                         w.state
@@ -1326,14 +1331,14 @@ mod tests {
             cli.reason
                 .as_deref()
                 .unwrap()
-                .contains("explicitly rebuild")
+                .contains(queue::RECOVERY_REQUIRED_MESSAGE)
         );
         let observed = saved(&db, service, SavedReadLimits::default()).await;
         assert!(
             observed["status"]["reason"]
                 .as_str()
                 .unwrap()
-                .contains("explicitly rebuild")
+                .contains(queue::RECOVERY_REQUIRED_MESSAGE)
         );
         db.shutdown().await.unwrap();
     }

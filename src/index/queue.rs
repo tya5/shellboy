@@ -29,8 +29,7 @@ pub(super) fn queue_job(
     }
     let job = id();
     let source_hash = hash(work.segment.text.as_bytes());
-    let watermark =
-        json!({"witness":work.witness,"group":work.group,"authorization":work.authorization});
+    let watermark = json!({"witness":work.witness,"group":work.group,"authorization":work.authorization,"recovery":work.recovery});
     let inserted = tx.execute(
         embedding_job_sql,
         params![
@@ -49,16 +48,16 @@ pub(super) fn queue_job(
         set_json_meta(tx, &IndexKeys::input(&job), work)?;
     }
     if inserted == 0
-        && (!work.authorization.starts_with("new-finalized")
-            || work.authorization.starts_with("new-finalized-recovery"))
+        && (!work.authorization.starts_with("new-finalized") || work.recovery)
         && let Some(job) = job_id_for(tx, space, work)?
         && let Some(mut prior) = json_meta::<Work>(tx, &IndexKeys::input(&job))?
         && prior.state == "pending"
         && prior.authorization.starts_with("new-finalized")
     {
         prior.authorization.clone_from(&work.authorization);
+        prior.recovery |= work.recovery;
         set_json_meta(tx, &IndexKeys::input(&job), &prior)?;
-        tx.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization',?2) WHERE id=?1 AND state='pending'", params![job,work.authorization])?;
+        tx.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization',?2,'$.recovery',json(?3)) WHERE id=?1 AND state='pending'", params![job,work.authorization,if prior.recovery { "true" } else { "false" }])?;
     }
     Ok(inserted > 0)
 }
@@ -97,6 +96,8 @@ pub(super) struct AutoAdmission {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) recovery_group: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) recovery_authorization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) recovery_witness: Option<Witness>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) recovery_body_kind: Option<String>,
@@ -110,6 +111,8 @@ pub(super) struct Work {
     pub(super) segment: Segment,
     pub(super) group: String,
     pub(super) authorization: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) recovery: bool,
     pub(super) attempts: usize,
     pub(super) state: String,
     pub(super) next_at: Option<String>,
@@ -130,6 +133,7 @@ impl Work {
             segment,
             group: group.into(),
             authorization: authorization.into(),
+            recovery: false,
             attempts: 0,
             state: "pending".into(),
             next_at: None,
@@ -204,13 +208,13 @@ impl IndexService {
                             "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
                             params![bootstrap, value],
                         )?;
-                        if (!work.authorization.starts_with("new-finalized")
-                            || work.authorization.starts_with("new-finalized-recovery"))
+                        if (!work.authorization.starts_with("new-finalized") || work.recovery)
                             && let Some(mut prior) = json_meta::<Work>(&tx, &bootstrap)?
                             && prior.state == "pending"
                             && prior.authorization.starts_with("new-finalized")
                         {
                             prior.authorization.clone_from(&work.authorization);
+                            prior.recovery |= work.recovery;
                             set_json_meta(&tx, &bootstrap, &prior)?;
                         }
                     }
@@ -225,8 +229,7 @@ impl IndexService {
     }
 }
 
-pub(super) const RECOVERY_REQUIRED_MESSAGE: &str =
-    "Oversized legacy index work could not be recovered; explicitly rebuild this profile";
+pub(super) const RECOVERY_REQUIRED_MESSAGE: &str = "index_manual_rebuild_required";
 const RECOVERY_ROWS: i64 = 128;
 // A work record must fit one bounded recovery page, including its JSON metadata.
 const RECOVERY_BYTES: i64 = 1024 * 1024;
@@ -365,6 +368,7 @@ pub(super) fn recover_inflight_page(
                             node_id: witness.node_id.clone(),
                             recovery: true,
                             recovery_group: Some(tail.group.clone()),
+                            recovery_authorization: Some(tail.authorization.clone()),
                             recovery_witness: Some(witness.clone()),
                             recovery_body_kind: Some(kind),
                             state: if tail.state == "pending" { "pending" } else { "failed" }.into(),
@@ -451,13 +455,16 @@ pub(super) fn claim_authorization(
     range: &(String, String),
     profile: &str,
     family: Option<&str>,
+    auto_history: bool,
 ) -> Result<(bool, Option<(String, AutoAdmission)>), StorageError> {
-    let app_meta_sql = "SELECT key,value FROM app_meta WHERE key>=?1 AND key<?2 AND json_extract(value,'$.state')='pending' ORDER BY key LIMIT 1";
+    let app_meta_sql = "SELECT key,value FROM app_meta WHERE key>=?1 AND key<?2 AND json_extract(value,'$.state')='pending' AND (?3 OR json_extract(value,'$.recovery_authorization') IN ('explicit-backfill','explicit-rebuild','explicit-retry')) ORDER BY key LIMIT 1";
     let tx = db.transaction()?;
     let row: Option<(String, String)> = tx
-        .query_row(app_meta_sql, [&range.0, &range.1], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })
+        .query_row(
+            app_meta_sql,
+            params![range.0, range.1, auto_history],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .optional()?;
     let Some((key, value)) = row else {
         return Ok((false, None));
@@ -470,7 +477,8 @@ pub(super) fn claim_authorization(
             .is_some();
     let mut admission: AutoAdmission = decode_json(&value)?;
     if admission.recovery
-        && (admission.recovery_group.is_none()
+        && (admission.recovery_authorization.is_none()
+            || admission.recovery_group.is_none()
             || admission.recovery_witness.is_none()
             || admission.recovery_body_kind.is_none())
     {
@@ -799,7 +807,8 @@ mod metadata_tests {
         )
         .unwrap();
         let (discarded, claim) =
-            claim_authorization(&mut db, &keys.auto_range(), "profile", Some("family")).unwrap();
+            claim_authorization(&mut db, &keys.auto_range(), "profile", Some("family"), true)
+                .unwrap();
         assert!(discarded);
         assert!(claim.is_none());
         assert!(meta(&db, &keys.auto("node")).unwrap().is_none());
