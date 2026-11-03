@@ -219,9 +219,10 @@ through the in-memory watch snapshot.
 
 ## Nonblocking Terminal Capabilities (#192)
 
-Implementation pending; this section records the adopted target, not current behavior.
+The session-owned implementation is described below; validation evidence is
+tracked separately in acceptance, not inferred from this design.
 
-Before the first startup draw, issue terminal width, device attributes and
+Before the first Unix startup draw, issue terminal width, device attributes and
 keyboard enhancement queries without waiting. First-frame stage logging records
 the draw itself, not a terminal-response deadline. The common capability-probe mechanism tracks each capability as `Unmeasured`
 or `Measured(value)`. Capabilities start unmeasured; cached width or the conservative fallback is used until a valid width

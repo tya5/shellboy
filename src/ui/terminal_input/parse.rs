@@ -203,6 +203,10 @@ pub(crate) fn parse_csi(buffer: &[u8]) -> io::Result<Option<InternalEvent>> {
                         b'M' => return parse_csi_rxvt_mouse(buffer),
                         b'~' => return parse_csi_special_key_code(buffer),
                         b'u' => return parse_csi_u_encoded_key_code(buffer),
+                        // Plain DSR is never queried; preserve modified F3 input.
+                        b'R' if buffer.starts_with(b"\x1b[1;") => {
+                            return parse_csi_modifier_key_code(buffer);
+                        }
                         b'R' => return parse_csi_cursor_position(buffer),
                         _ => return parse_csi_modifier_key_code(buffer),
                     }
@@ -252,8 +256,12 @@ pub(crate) fn parse_csi_cursor_position(buffer: &[u8]) -> io::Result<Option<Inte
 
     let mut split = s.split(';');
 
-    let y = next_parsed::<u16>(&mut split)? - 1;
-    let x = next_parsed::<u16>(&mut split)? - 1;
+    let y = next_parsed::<u16>(&mut split)?
+        .checked_sub(1)
+        .ok_or_else(could_not_parse_event_error)?;
+    let x = next_parsed::<u16>(&mut split)?
+        .checked_sub(1)
+        .ok_or_else(could_not_parse_event_error)?;
 
     Ok(Some(InternalEvent::CursorPosition(x, y)))
 }
@@ -599,15 +607,14 @@ pub(crate) fn parse_csi_u_encoded_key_code(buffer: &[u8]) -> io::Result<Option<I
     // and the terminal sends a keyboard event containing shift, the sequence will
     // contain an additional codepoint separated by a ':' character which contains
     // the shifted character according to the keyboard layout.
-    if modifiers.contains(KeyModifiers::SHIFT) {
-        if let Some(shifted_c) = codepoints
+    if modifiers.contains(KeyModifiers::SHIFT)
+        && let Some(shifted_c) = codepoints
             .next()
             .and_then(|codepoint| codepoint.parse::<u32>().ok())
             .and_then(char::from_u32)
-        {
-            keycode = KeyCode::Char(shifted_c);
-            modifiers.set(KeyModifiers::SHIFT, false);
-        }
+    {
+        keycode = KeyCode::Char(shifted_c);
+        modifiers.set(KeyModifiers::SHIFT, false);
     }
 
     let input_event = Event::Key(KeyEvent::new_with_kind_and_state(

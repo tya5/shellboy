@@ -1,4 +1,4 @@
-//! Real PTY tests for the query, including input arriving between DSR replies.
+//! Disposable PTY: the real session draws before any terminal reply is sent.
 use super::*;
 use std::{
     fs::File,
@@ -8,41 +8,55 @@ use std::{
         unix::process::CommandExt,
     },
     process::{Command, Stdio},
-    time::Duration,
 };
-
-const FIXTURE: &str = "SHELLBOY_WIDTH_PROBE_FIXTURE";
-
-#[test]
-fn probe_child_fixture() {
-    if std::env::var_os("SHELLBOY_INTERNAL_WIDTH_PROBE").is_some() {
-        std::process::exit(super::text_width::probe_child());
-    }
-}
+const FIXTURE: &str = "SHELLBOY_CAPABILITY_INPUT_FIXTURE";
 
 #[test]
 fn probe_fixture() {
     if std::env::var_os(FIXTURE).is_none() {
         return;
     }
-    let session = TerminalSession::enter().unwrap();
-    let result = session.width_observation;
-    let mut mode = std::mem::MaybeUninit::<libc::termios>::uninit();
-    assert_eq!(
-        unsafe { libc::tcgetattr(libc::STDIN_FILENO, mode.as_mut_ptr()) },
-        0
+    let mut session = TerminalSession::enter().unwrap();
+    session
+        .terminal
+        .draw(|frame| {
+            frame.render_widget(Paragraph::new("FIRST_FRAME_WITHOUT_REPLIES"), frame.area());
+        })
+        .unwrap();
+    eprintln!("FRAME_WRITTEN");
+    assert_eq!(session.width_observation(), None);
+    let mut typed = String::new();
+    let mut pasted = String::new();
+    let deadline = crate::test_watchdog::Deadline::new("terminal capability input");
+    loop {
+        assert!(!deadline.expired(), "input stalled: {typed:?}");
+        if let Some(event) = session
+            .capabilities
+            .poll(&session._guard, None, Duration::from_millis(25))
+            .unwrap()
+        {
+            match event {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char('q'),
+                    ..
+                }) => break,
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char(c),
+                    ..
+                }) => typed.push(c),
+                Event::Paste(text) => pasted.push_str(&text),
+                _ => {}
+            }
+        }
+    }
+    eprintln!(
+        "PROBE_RESULT={:?};KEYBOARD={};TYPED={typed:?};PASTE={pasted:?}",
+        session.width_observation(),
+        session.capabilities.keyboard_enabled
     );
-    let mode = unsafe { mode.assume_init() };
-    assert_eq!(
-        mode.c_lflag & (libc::ICANON | libc::ECHO),
-        0,
-        "probe must leave parent terminal in raw mode"
-    );
-    drop(session);
-    println!("PROBE_RESULT={result:?}");
 }
 
-fn run_fixture(replies: Option<(&str, &str)>) -> String {
+fn run_fixture(replies: &[u8]) -> String {
     let (mut master, mut slave) = (-1, -1);
     let mut size = libc::winsize {
         ws_row: 24,
@@ -50,7 +64,7 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    // SAFETY: output pointers and size are initialized; each FD becomes one File.
+    // SAFETY: output descriptors become independently owned Files on success.
     assert_eq!(
         unsafe {
             libc::openpty(
@@ -58,7 +72,7 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
                 &mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                std::ptr::addr_of_mut!(size),
+                &mut size,
             )
         },
         0
@@ -84,8 +98,7 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
         .stdin(Stdio::from(slave.try_clone().unwrap()))
         .stdout(Stdio::from(slave.try_clone().unwrap()))
         .stderr(Stdio::from(slave.try_clone().unwrap()));
-    // SAFETY: only async-signal-safe syscalls run before exec; fd 0 is the
-    // disposable slave, not the real user's controlling terminal.
+    // SAFETY: the child owns only its disposable slave as controlling terminal.
     unsafe {
         command.pre_exec(|| {
             if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
@@ -96,9 +109,9 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
     }
     let mut child = command.spawn().unwrap();
     drop(slave);
-    let deadline = crate::test_watchdog::Deadline::new("width probe PTY");
+    let deadline = crate::test_watchdog::Deadline::new("capability PTY child");
     let mut output = Vec::new();
-    let mut sent = 0;
+    let mut sent = false;
     loop {
         let mut bytes = [0; 8192];
         match master.read(&mut bytes) {
@@ -106,19 +119,21 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
             Err(e)
                 if e.kind() == io::ErrorKind::WouldBlock || e.raw_os_error() == Some(libc::EIO) => {
             }
-            Err(e) => panic!("probe PTY read: {e}"),
+            Err(e) => panic!("PTY: {e}"),
         }
-        assert!(output.len() < 64 * 1024);
-        let queries = output.windows(4).filter(|b| *b == b"\x1b[6n").count();
-        if let Some((first, second)) = replies {
-            if sent == 0 && queries >= 1 {
-                master.write_all(first.as_bytes()).unwrap();
-                sent = 1;
-            }
-            if sent == 1 && queries >= 2 {
-                master.write_all(second.as_bytes()).unwrap();
-                sent = 2;
-            }
+        assert!(output.len() < 128 * 1024);
+        if !sent
+            && output
+                .windows(b"FRAME_WRITTEN".len())
+                .any(|w| w == b"FRAME_WRITTEN")
+        {
+            assert!(
+                output.windows(b"\x1b[?6n".len()).any(|w| w == b"\x1b[?6n"),
+                "queries precede frame"
+            );
+            master.write_all(replies).unwrap();
+            master.write_all(b"abq").unwrap();
+            sent = true;
         }
         if let Some(status) = child.try_wait().unwrap() {
             while let Ok(n) = master.read(&mut bytes) {
@@ -129,32 +144,50 @@ fn run_fixture(replies: Option<(&str, &str)>) -> String {
             }
             let text = String::from_utf8_lossy(&output).into_owned();
             assert!(status.success(), "{text}");
+            assert!(sent, "no frame before child exited: {text}");
             return text;
         }
         if deadline.expired() {
             child.kill().unwrap();
             child.wait().unwrap();
-            panic!(
-                "probe fixture watchdog: {}",
-                String::from_utf8_lossy(&output)
-            );
+            panic!("PTY watchdog: {}", String::from_utf8_lossy(&output));
         }
-        std::thread::sleep(Duration::from_millis(2));
+        std::thread::yield_now();
     }
 }
 
 #[test]
-fn probe_handles_one_two_inconsistent_and_timeout() {
+fn first_frame_and_input_do_not_wait_for_any_capability_reply() {
+    let output = run_fixture(b"");
+    assert!(
+        output.contains("PROBE_RESULT=None;KEYBOARD=false;TYPED=\"ab\""),
+        "{output}"
+    );
+}
+#[test]
+fn keyboard_reply_without_da_and_late_width_preserve_input() {
+    let output = run_fixture(b"\x1b[?1u\x1b[?11;2R\x1b[?11;3R");
+    assert!(
+        output.contains("PROBE_RESULT=Some(1);KEYBOARD=true;TYPED=\"ab\""),
+        "{output}"
+    );
+}
+#[test]
+fn wide_inconsistent_and_paste_observations_are_distinct() {
     for (reply, expected) in [
-        (Some(("\x1b[11;2R", "\x1b[11;3R")), "Some(1)"),
-        (Some(("\x1b[11;3R", "\x1b[11;5R")), "Some(2)"),
-        (Some(("\x1b[11;2R", "\x1b[11;5R")), "None"),
-        (None, "None"),
+        (b"\x1b[?11;3R\x1b[?11;5R".as_slice(), "Some(2)"),
+        (b"\x1b[?11;2R\x1b[?11;5R".as_slice(), "None"),
+        (b"\x1b[200~x\x1b[?1u\x1b[201~".as_slice(), "None"),
     ] {
         let output = run_fixture(reply);
         assert!(
-            output.contains(&format!("PROBE_RESULT={expected}")),
+            output.contains(&format!(
+                "PROBE_RESULT={expected};KEYBOARD=false;TYPED=\"ab\""
+            )),
             "{output}"
         );
+        if reply.starts_with(b"\x1b[200~") {
+            assert!(output.contains("PASTE=\"x\\u{1b}[?1u\""), "{output}");
+        }
     }
 }
