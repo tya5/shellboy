@@ -535,6 +535,13 @@ impl UiState {
             self.help_above_popups = above;
             return Some(actions);
         }
+        if self.top_overlay().is_none()
+            && key.code == KeyCode::Esc
+            && self.view().composer.reply.is_some()
+        {
+            self.active_view_mut().composer.reply = None;
+            return Some(vec![]);
+        }
         // Terminal selection shortcuts may consume Ctrl+C before it reaches us;
         // when delivered to the app it always retains its interrupt meaning.
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {

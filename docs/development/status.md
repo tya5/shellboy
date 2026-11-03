@@ -4336,3 +4336,12 @@ History GC now scans a finite receipt horizon in batches of at most 128 before
 marking, retaining pending duties and live endpoint ownership. The branch stays
 based on approved step 2, separate from the 0.7.0 release. Synthetic validation
 and task CI are in progress; no real provider calls are part of this work.
+
+### #194 Step 6: Reply TUI
+
+Option B retains source glyphs and adds bilingual saved reply-state tags and
+reply excerpts. `/replies` reuses the Thread-scoped bounded message popup;
+applied requests enter a per-view, text-only composer mode using message.reply.
+The existing submission acknowledgement path preserves failed and newer drafts.
+Synthetic rendering and source-projection validation are in progress; final task
+CI and review are required. No provider measurements or main integration.
