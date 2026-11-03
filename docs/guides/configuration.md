@@ -707,6 +707,13 @@ conversation requests, so you can judge whether the threshold pays off. Values a
 provider does not report stay unknown; reused cached summary parts send nothing. To keep a persistently large context, set
 `auto_at_tokens = 0` globally or for one connection, then restart the owner.
 
+### Unknown shell arguments
+
+`[shell] unknown_arguments = "warn"` is the default: unknown model-supplied
+shell parameters are ignored and named in the call result. Set it to `"strict"`
+to reject calls containing unknown parameters. Invalid known parameters are
+errors in either mode.
+
 ### Shell call descriptions
 
 `[shell] describe_calls = true` is the default and requires `description` in
