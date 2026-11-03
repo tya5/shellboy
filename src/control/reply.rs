@@ -131,68 +131,6 @@ pub(crate) fn cancel_reply_tx(
     Ok(changed == 1)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn admission_notices_are_once_only_ordered_and_transactional() {
-        let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','0'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','0');").unwrap();
-        for name in ["a", "b"] {
-            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','user','0','{\"role\":\"user\",\"content\":[]}')",[name]).unwrap();
-            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,result_json)VALUES(?1,?1,'{\"kind\":\"external_cli\"}','t',?1,'r','u','accepted','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",[name]).unwrap();
-        }
-        let tx = db.transaction().unwrap();
-        super::super::message_delivery::append_admitted_tx(
-            &tx,
-            "t",
-            0,
-            &["a".into(), "b".into()],
-            "now",
-        )
-        .unwrap();
-        let path = tx
-            .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")
-            .unwrap()
-            .query_map([], |r| r.get::<_, String>(0))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        assert_eq!(
-            path,
-            [
-                "a",
-                "event-reply-admission-a",
-                "b",
-                "event-reply-admission-b"
-            ]
-        );
-        super::super::message_delivery::mark_admitted_tx(&tx, "t", &["a".into(), "b".into()])
-            .unwrap();
-        assert_eq!(
-            tx.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
-                .unwrap(),
-            2
-        );
-        tx.rollback().unwrap();
-        assert_eq!(
-            db.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
-                .unwrap(),
-            0
-        );
-        assert_eq!(
-            db.query_row(
-                "SELECT count(*) FROM receipt WHERE path_admission='admitted'",
-                [],
-                |r| r.get::<_, i64>(0)
-            )
-            .unwrap(),
-            0
-        );
-    }
-}
-
 impl super::db::Store {
     pub(super) fn reply(
         &self,
@@ -316,5 +254,67 @@ impl super::db::Store {
             result.result["delivery"] = delivery;
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn admission_notices_are_once_only_ordered_and_transactional() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','0'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','running','0');").unwrap();
+        for name in ["a", "b"] {
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'u','user','0','{\"role\":\"user\",\"content\":[]}')",[name]).unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,result_json)VALUES(?1,?1,'{\"kind\":\"external_cli\"}','t',?1,'r','u','accepted','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",[name]).unwrap();
+        }
+        let tx = db.transaction().unwrap();
+        super::super::message_delivery::append_admitted_tx(
+            &tx,
+            "t",
+            0,
+            &["a".into(), "b".into()],
+            "now",
+        )
+        .unwrap();
+        let path = tx
+            .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            path,
+            [
+                "a",
+                "event-reply-admission-a",
+                "b",
+                "event-reply-admission-b"
+            ]
+        );
+        super::super::message_delivery::mark_admitted_tx(&tx, "t", &["a".into(), "b".into()])
+            .unwrap();
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        tx.rollback().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM receipt WHERE path_admission='admitted'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
     }
 }
