@@ -284,6 +284,22 @@ mod tests {
         tx.commit().unwrap();
     }
     #[test]
+    fn recipient_repair_writes_at_most_128_and_retains_unrelated_rows() {
+        let db = fixture();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('unrelated','/','/a','p','m','before')",[]).unwrap();
+        for n in 0..257 { input(&db, &format!("n{n:03}"), "unadmitted", "0"); }
+        input(&db, "foreign", "unadmitted", "0");
+        db.execute("UPDATE receipt SET target_thread_id='unrelated' WHERE id='foreign'", []).unwrap();
+        db.execute_batch("CREATE TEMP TABLE writes(id TEXT); CREATE TEMP TRIGGER audit_repair AFTER UPDATE ON receipt BEGIN INSERT INTO writes VALUES(new.id); END;").unwrap();
+        for expected in [128,128,1,0] {
+            db.execute("DELETE FROM writes", []).unwrap();
+            repair_thread_batch_tx(&db, "t", "repair").unwrap();
+            assert_eq!(db.query_row("SELECT count(*) FROM writes", [], |r| r.get::<_,i64>(0)).unwrap(), expected);
+            assert_eq!(db.query_row("SELECT hold_reason FROM receipt WHERE id='foreign'", [], |r| r.get::<_,Option<String>>(0)).unwrap(), None);
+        }
+    }
+
+    #[test]
     fn mixed_recovery_sources_share_one_oldest_first_unit() {
         let mut db = fixture();
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('new','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('next','t','new','recovery_wait','now');").unwrap();
