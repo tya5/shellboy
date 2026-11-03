@@ -4,6 +4,22 @@ Status: initial inventory, not completion or permission to translate source data
 Baseline: main `b12a8291b1950a5f7db58de4dccbb12101a2a074` (W6 task 1 landed).
 B-5/B-6 are not yet included. No third-party production source was edited.
 
+## Structural Classification (Proposed)
+
+The scanner classifies direct Japanese literal arguments in `local!` and
+`localized!` (including `glyphs::localized!`), and literals in explicit
+`UiLanguage::Ja` match arms, as (a). It classifies `#[cfg(test)]` and test
+items/modules, direct format literals in explicitly qualified `log::` or
+`tracing::` macros, and literal `serde(rename = ...)` identifiers as (b).
+Comments and character literals are excluded from this string inventory; the
+scan covers `src/**/*.rs`, not top-level test files. It does not infer that a
+source file is test-only from its filename. Unknown macros, nested arguments,
+other logging forms, arbitrary identifiers and ambiguous language predicates
+remain (c). The scanner is lexical, not a Rust type checker; its classification
+is evidence of structure, not proof of end-to-end English rendering or license
+to change canonical data. Manually reviewed, fingerprint-pinned decisions still
+take precedence and stale decisions fail closed.
+
 ## Post-0.6.0 Follow-Up Review
 
 The first two product batches were rebased onto main

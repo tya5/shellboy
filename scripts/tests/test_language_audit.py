@@ -70,6 +70,37 @@ class LanguageAuditTests(unittest.TestCase):
                     f'UiLanguage::Ja => "{JA}" }} after("{JA}"); }}')
         self.assertEqual([r['category'] for r in self.records()], ['a', 'c'])
 
+    def test_localized_macros_only_classify_direct_japanese_arguments(self):
+        self.source(f'fn f() {{ localized!(lang, "{JA}1", "{JA}2", "{JA}3", "{JA}4"); '
+                    f'crate::ui::text_width::glyphs::localized!(lang, "{JA}5", "{JA}6", "en", "en"); '
+                    f'other::localized!(lang, "{JA}7", "{JA}8", "en", "en"); '
+                    f'local!(lang, format!("{JA}9"), "en"); }}')
+        self.assertEqual([r['category'] for r in self.records()],
+                         ['a', 'a', 'c', 'c', 'a', 'a', 'c', 'c', 'c'])
+
+    def test_match_block_without_comma_does_not_include_next_arm(self):
+        self.source(f'fn f() {{ match lang {{ UiLanguage::Ja => {{ "{JA}1" }} '
+                    f'UiLanguage::En => {{ "{JA}2" }}, }} after("{JA}3"); }}')
+        self.assertEqual([r['category'] for r in self.records()], ['a', 'c', 'c'])
+
+    def test_match_alternatives_and_nonmatch_lookalikes_stay_pending(self):
+        self.source(f'fn f() {{ fake!(UiLanguage::Ja => "{JA}1"); '
+                    f'match lang {{ UiLanguage::Ja | UiLanguage::En => "{JA}2", '
+                    f'UiLanguage::Ja => "{JA}3", }} }}')
+        self.assertEqual([r['category'] for r in self.records()], ['c', 'c', 'a'])
+
+    def test_ja_in_match_guard_does_not_make_en_pattern_japanese(self):
+        self.source(f'fn f() {{ match lang {{ UiLanguage::En if other == UiLanguage::Ja => "{JA}", '
+                    f'_ => "en", }} }}')
+        self.assertEqual([r['category'] for r in self.records()], ['c'])
+
+    def test_logs_and_serde_identifiers_only_exclude_explicit_literal(self):
+        self.source(f'#[serde(rename = "{JA}1")] struct S; '
+                    f'fn f() {{ tracing::warn!("{JA}2", nested("{JA}3")); '
+                    f'other::warn!("{JA}4"); warn!("{JA}5"); '
+                    f'let internal_name = "{JA}6"; }}')
+        self.assertEqual([r['category'] for r in self.records()], ['b', 'b', 'c', 'c', 'c', 'c'])
+
     def test_test_module_and_async_test_items_but_not_production_siblings(self):
         self.source(f'#[cfg(test)] mod tests {{ fn fixture() {{ use_it("{JA}"); }} }}\n'
                     f'#[tokio::test(flavor="multi_thread")] async fn t() {{ use_it("{JA}"); }}\n'
