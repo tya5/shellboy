@@ -44,27 +44,29 @@ errors continue to propagate unchanged; do not translate their source text.
 
 ## Terminal width
 
-After raw mode and the alternate screen are active, an isolated helper process
-uses the public crossterm `cursor::position()` API to measure one and two
-`U+00B7` characters on row 11, before the event loop starts. The parent waits
-at most 300 ms and kills and reaps the helper on timeout. Isolation prevents a
-stuck cursor query from holding the UI process's event-reader lock. Crossterm
-may buffer non-position events in the helper during the probe; those events are
-not transferred back to the UI, including when the helper times out. Input
-arriving during the bounded startup interval can therefore be lost. Two agreeing
-responses identify one or two; a timeout, unsupported input path, small terminal,
-error or disagreement is unknown. The default `cached` mode reuses successful
-observations per terminal program and version (or TERM); missing identity always
-probes. `probe` remeasures and refreshes the observation; `narrow` and `wide`
-fix it explicitly. Neither locale nor terminal name is used to infer width. F1 help reports the result. When measured
-two differs from upstream Ratatui's default of one, TUI status and optional
-diagnostics explicitly record the mismatch.
+Implementation pending; this paragraph records the adopted target, not current behavior.
+
+On every startup, send width, device attributes (DA), and keyboard enhancement
+queries before the first frame without waiting. One capability-probe mechanism
+tracks each as `Unmeasured` or `Measured(value)`. A single input reader removes
+DSR (`ESC [ row ; column R`), DA (`ESC [ ? ... c`), and keyboard flags
+(`ESC [ ? ... u`) replies at any time, including while the user is typing.
+Replies never become input. No response leaves the capability unmeasured
+indefinitely. A successful width measurement becomes known and causes one
+redraw when layout changes. The last successful width per terminal program and
+version (or TERM) is only an initial baseline; a new successful measurement
+refreshes it. Unknown identity and guesses are never cached. If no cache exists,
+use conservative fallback glyphs and widths. No user width setting exists.
+Neither locale nor terminal name infers width. F1 help reports the result;
+diagnostics record measured mismatch with upstream Ratatui.
 
 Shellboy layout uses the observation, with unknown conservatively reserving two
 cells for ambiguous characters and component widths for emoji sequences.
 Ratatui and upstream renderers retain their own default width behavior, so on a
 mismatching terminal their internal layout can differ from Shellboy's. Shellboy
-uses width-invariant ASCII decorations for a two-column or unknown observation;
+must use width-invariant ASCII decorations for a two-column or unknown observation; existing direct `SELECTED` and `CHILD` glyph
+uses do not yet meet this requirement and must be corrected. This does not
+guarantee alignment of preserved user/model text on every terminal;
 when one column is measured it restores the original application-owned glyphs.
 Raw content and copy/save paths do not change. A pluggable Ratatui width policy
 is separate follow-up work.
