@@ -991,7 +991,7 @@ fn english_field_label(label: &str) -> &str {
         "作業（空=全体）" => "Run (empty = all)",
         "開始日時（RFC3339）" => "Start time (RFC3339)",
         "抜粋文字数（0=省略）" => "Excerpt characters (0 = omit)",
-        "最終回答のみ" => "Final answer only",
+        "終了メッセージのみ" => "End message only",
         "取得byte数" => "Bytes to retrieve",
         "検索語" => "Search query",
         "会話（空=全体）" => "Thread (empty = all)",
