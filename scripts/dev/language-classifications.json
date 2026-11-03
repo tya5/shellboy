@@ -1408,5 +1408,225 @@
     "category": "a",
     "reason": "Generated send/ready status has an exact English i18n::local counterpart in ui.rs; preserve it as a non-notice in both languages without changing provider-supplied status text.",
     "source_tokens_sha256": "a0f0c58bf677c1e5178b104ed50ac790d3132ee94bf5c4896223f16d4eb6964b"
+  },
+  "src/ui/operations/client_forms.rs:58fd544407463cfa:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:3d842a69813afdbe:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:3ff87e519d11d515:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:ea016b74bb87e72a:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:3fc7219c4fb6297c:1": {
+    "category": "a",
+    "reason": "bounded validation receives paired Ja/En labels and selects by form language; values and bounds are unchanged",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:e7cad39b98070e61:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:8f3a08c67d77ec33:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:256b55ca71e73beb:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:256b55ca71e73beb:2": {
+    "category": "a",
+    "reason": "bounded validation receives paired Ja/En labels and selects by form language; values and bounds are unchanged",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:99fcb0b96b6acd1a:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:3fc7219c4fb6297c:2": {
+    "category": "a",
+    "reason": "bounded validation receives paired Ja/En labels and selects by form language; values and bounds are unchanged",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:fcceb0337245f983:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:703e6617434d3a0f:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:70fdb70690edc2b8:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:679ff4f04c0fe240:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:4b6ee25d2b0a9250:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:2c314d32aa831d9a:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:54cf8bc88f390dc4:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:aedfcd16218d6b3a:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:914bf3fd37c16dae:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:184936194ec29745:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:c1d3a65a87404711:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:4b1bf6fd83b8a252:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:c31770e21ac337b2:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:ce49e4b2a52226f6:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:c2894c16a763f2f7:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:df6a8e9eb24354f3:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:cc4f39ea17489f19:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:c42c12812ac044fb:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:935078df9b0896d0:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:fca5a98d618904db:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:c5ceef9d882ab5c5:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:0a1a2082297e9e8c:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:5ff86809d35618b4:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:b0087fe81176f34a:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:9ec94d71e50d99bf:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:eac60607419ad6b5:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:1e6dc9b7a8435fae:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:e7cad39b98070e61:2": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:99fcb0b96b6acd1a:2": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:16c08280262f41d0:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:66bc43dad90f641f:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:db67d9786b18b0fc:1": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/operations/client_forms.rs:256b55ca71e73beb:3": {
+    "category": "a",
+    "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
+    "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
   }
 }
