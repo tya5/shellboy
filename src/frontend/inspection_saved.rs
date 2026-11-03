@@ -556,7 +556,7 @@ mod tests {
         let prepared = prepare(raw).unwrap();
         assert!(prepared.value["assignment"].is_null());
         assert_eq!(prepared.value["delivery_status"], "applied");
-        assert_eq!(prepared.value["answer_node_id"], "answer");
+        assert!(prepared.value.get("answer_node_id").is_none());
         assert!(prepared.limited_fields.iter().any(|p| p == "/assignment"));
         let sender =
             json!({"kind":"human","label":"Author","padding":"x".repeat(JSON_BYTES)}).to_string();
