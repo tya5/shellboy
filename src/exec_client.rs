@@ -539,9 +539,9 @@ mod reply_mode_tests {
     #[test]
     fn terminal_nonreply_outcomes_are_exit_four() {
         for state in ["ignored", "cancelled", "recipient_deleted", "pending"] {
-            let error = reply_node(Some(&json!({"state": state})))
-                .err()
-                .expect("must fail");
+            let Err(error) = reply_node(Some(&json!({"state": state}))) else {
+                panic!("{state} must fail");
+            };
             assert_eq!(error.code, 4, "{state}");
         }
         assert!(
