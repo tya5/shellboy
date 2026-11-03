@@ -340,6 +340,7 @@ pub(super) fn maybe_activate_candidate(
     if group == "active"
         || !group_current(tx, keys, group)?
         || meta(tx, &keys.enqueueing(group))?.is_some()
+        || meta(tx, &keys.enqueue_failed(group))?.is_some()
     {
         return Ok(false);
     }
@@ -375,6 +376,20 @@ pub(super) fn maybe_activate_candidate(
         [&space.id],
     )?;
     set_meta(tx, IndexKeys::ACTIVE_SPACE, &space.id)?;
+    if let Some(recovery) = json_meta::<Value>(tx, &keys.recovery_rebuild())?
+        && recovery["group"].as_str() == Some(group)
+    {
+        if recovery["marker"].as_str() == meta(tx, &keys.recovery_required())?.as_deref() {
+            tx.execute(
+                "DELETE FROM app_meta WHERE key=?1",
+                [keys.recovery_required()],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM app_meta WHERE key=?1",
+            [keys.recovery_rebuild()],
+        )?;
+    }
     tx.execute("DELETE FROM app_meta WHERE key=?1", [keys.rebuild()])?;
     Ok(true)
 }

@@ -315,9 +315,11 @@ fn retry_tx(
             {
                 changed |= tx.execute(embedding_job_sql_2, [&job])? > 0;
                 if let Some(mut work) = json_meta::<Work>(tx, &IndexKeys::input(&job))? {
-                    work.authorization = "explicit-retry".into();
+                    if !work.authorization.starts_with("new-finalized-recovery") {
+                        work.authorization = "explicit-retry".into();
+                    }
                     set_json_meta(tx, &IndexKeys::input(&job), &work)?;
-                    tx.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization','explicit-retry') WHERE id=?1",[job])?;
+                    tx.execute("UPDATE embedding_job SET authorized_watermark=json_set(authorized_watermark,'$.authorization',?2) WHERE id=?1", params![job, work.authorization])?;
                 }
             }
         }
@@ -371,7 +373,9 @@ fn retry_tx(
                     .is_none_or(|ids| ids.contains(&work.witness.node_id))
             {
                 work.state = "pending".into();
-                work.authorization = "explicit-retry".into();
+                if !work.authorization.starts_with("new-finalized-recovery") {
+                    work.authorization = "explicit-retry".into();
+                }
                 work.attempts = 0;
                 work.next_at = None;
                 work.error = None;

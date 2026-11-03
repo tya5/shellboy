@@ -13,6 +13,12 @@ impl<'a> IndexKeys<'a> {
     pub(super) fn pause(self) -> String {
         format!("index.pause.{}", self.0)
     }
+    pub(super) fn recovery_rebuild(self) -> String {
+        format!("index.recovery_rebuild.{}", self.0)
+    }
+    pub(super) fn recovery_required(self) -> String {
+        format!("index.recovery_required.{}", self.0)
+    }
     pub(super) fn rebuild(self) -> String {
         format!("index.rebuild.{}", self.0)
     }
@@ -21,6 +27,9 @@ impl<'a> IndexKeys<'a> {
     }
     pub(super) fn enqueueing(self, group: &str) -> String {
         format!("index.enqueueing.{}.{group}", self.0)
+    }
+    pub(super) fn enqueue_failed(self, group: &str) -> String {
+        format!("index.enqueue_failed.{}.{group}", self.0)
     }
     pub(super) fn common_failures(self) -> String {
         format!("index.common_failures.{}", self.0)
@@ -146,6 +155,10 @@ mod tests {
             serde_json::to_string(&work).unwrap()
         );
         let auto = AutoAdmission {
+            recovery: false,
+            recovery_group: None,
+            recovery_witness: None,
+            recovery_body_kind: None,
             node_id: "node".into(),
             state: "pending".into(),
             error: None,

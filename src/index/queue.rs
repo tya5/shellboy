@@ -1,6 +1,6 @@
 //! Authorized fixed-input job admission and durable queue keys.
 use super::*;
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 
 pub(super) fn bootstrap_key(keys: IndexKeys<'_>, work: &Work) -> String {
     let digest = hash(
@@ -49,7 +49,8 @@ pub(super) fn queue_job(
         set_json_meta(tx, &IndexKeys::input(&job), work)?;
     }
     if inserted == 0
-        && !work.authorization.starts_with("new-finalized")
+        && (!work.authorization.starts_with("new-finalized")
+            || work.authorization.starts_with("new-finalized-recovery"))
         && let Some(job) = job_id_for(tx, space, work)?
         && let Some(mut prior) = json_meta::<Work>(tx, &IndexKeys::input(&job))?
         && prior.state == "pending"
@@ -84,9 +85,21 @@ pub(super) fn job_id_for(
     .map_err(StorageError::from)
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct AutoAdmission {
     pub(super) node_id: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(super) recovery: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) recovery_group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) recovery_witness: Option<Witness>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) recovery_body_kind: Option<String>,
     pub(super) state: String,
     pub(super) error: Option<String>,
 }
@@ -124,13 +137,55 @@ impl Work {
         }
     }
 }
+fn split_bounded_work(work: Work) -> Result<Vec<Work>, StorageError> {
+    let mut pending = vec![work];
+    let mut result = Vec::new();
+    while let Some(work) = pending.pop() {
+        if encode_bootstrap_work(&work).is_ok() {
+            result.push(work);
+            continue;
+        }
+        let chars = work.segment.text.chars().count();
+        if chars < 2 {
+            return Err(StorageError::InvalidInput(
+                "bootstrap work metadata exceeds byte limit".into(),
+            ));
+        }
+        let midpoint = work
+            .segment
+            .text
+            .char_indices()
+            .nth(chars / 2)
+            .map(|(i, _)| i)
+            .unwrap();
+        let mut left = work.clone();
+        let mut right = work;
+        left.segment.text = right.segment.text[..midpoint].to_owned();
+        right.segment.text = right.segment.text[midpoint..].to_owned();
+        left.segment.end = left.segment.start + chars / 2;
+        right.segment.start = left.segment.end;
+        pending.push(right);
+        pending.push(left);
+    }
+    Ok(result)
+}
+
 impl IndexService {
     pub(super) async fn enqueue_batch(
         &self,
         key: &str,
         work: Vec<Work>,
-    ) -> Result<usize, ApiError> {
+    ) -> Result<(usize, usize), ApiError> {
         let key = key.to_owned();
+        let work = work
+            .into_iter()
+            .map(split_bounded_work)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db_error)?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let total = work.len();
         let inserted = self
             .database
             .call(move |db| {
@@ -149,7 +204,8 @@ impl IndexService {
                             "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
                             params![bootstrap, value],
                         )?;
-                        if !work.authorization.starts_with("new-finalized")
+                        if (!work.authorization.starts_with("new-finalized")
+                            || work.authorization.starts_with("new-finalized-recovery"))
                             && let Some(mut prior) = json_meta::<Work>(&tx, &bootstrap)?
                             && prior.state == "pending"
                             && prior.authorization.starts_with("new-finalized")
@@ -165,7 +221,7 @@ impl IndexService {
             .await
             .map_err(db_error)?;
         self.publish_saved(inserted > 0);
-        Ok(inserted)
+        Ok((inserted, total))
     }
 }
 
@@ -173,7 +229,6 @@ const RECOVERY_ROWS: i64 = 128;
 // A work record must fit one bounded recovery page, including its JSON metadata.
 const RECOVERY_BYTES: i64 = 1024 * 1024;
 const MAX_BOOTSTRAP_RECORD_BYTES: usize = RECOVERY_BYTES as usize;
-const BOOTSTRAP_RECOVERY_ERRORS: &str = "index.bootstrap_error.";
 
 struct BoundedJson(Vec<u8>, bool);
 
@@ -212,6 +267,36 @@ fn encode_bootstrap_work(work: &Work) -> Result<String, StorageError> {
     String::from_utf8(output.0).map_err(|error| StorageError::InvalidInput(error.to_string()))
 }
 
+// Work JSON is written with witness and body kind first. Inspect only a bounded
+// prefix; an unparseable prefix is never treated as authorization.
+fn legacy_source_prefix(bytes: &[u8]) -> Option<(Witness, String)> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let text = text.strip_prefix("{\"witness\":")?;
+    let mut witness = serde_json::Deserializer::from_str(text).into_iter::<Witness>();
+    let parsed = witness.next()?.ok()?;
+    let text = text
+        .get(witness.byte_offset()..)?
+        .strip_prefix(",\"body_kind\":")?;
+    let kind = serde_json::Deserializer::from_str(text)
+        .into_iter::<String>()
+        .next()?
+        .ok()?;
+    Some((parsed, kind))
+}
+
+#[derive(Deserialize)]
+struct LegacyTail {
+    group: String,
+    authorization: String,
+    state: String,
+}
+
+fn legacy_source_tail(bytes: &[u8]) -> Option<LegacyTail> {
+    let text = String::from_utf8_lossy(bytes);
+    let offset = text.rfind(",\"group\":")?;
+    serde_json::from_str(&format!("{{{}", &text[offset + 1..])).ok()
+}
+
 /// One transaction per page. The in-memory cursor may be discarded on restart:
 /// already converted jobs and bootstrap records are safe to visit again.
 pub(super) fn recover_inflight_page(
@@ -242,18 +327,67 @@ pub(super) fn recover_inflight_page(
             return Ok((modified, None, true));
         };
         if size > RECOVERY_BYTES {
-            let reason = json!({
-                "kind": "oversized_legacy_bootstrap",
-                "message": "Legacy bootstrap work record exceeded the bounded recovery unit and was skipped",
-                "observed_bytes": size,
-                "limit_bytes": RECOVERY_BYTES,
-            });
+            if let Some((profile, _)) = key
+                .strip_prefix(IndexKeys::BOOT_PREFIX)
+                .and_then(|suffix| suffix.rsplit_once('.'))
+            {
+                let rowid: i64 =
+                    tx.query_row("SELECT rowid FROM app_meta WHERE key=?1", [&key], |row| {
+                        row.get(0)
+                    })?;
+                let mut prefix = vec![0; 65536];
+                let mut tail = vec![0; 65536];
+                {
+                    let mut blob = tx.blob_open("main", "app_meta", "value", rowid, true)?;
+                    blob.read_exact(&mut prefix)
+                        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+                    blob.seek(SeekFrom::End(-65536))
+                        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+                    blob.read_exact(&mut tail)
+                        .map_err(|error| StorageError::InvalidInput(error.to_string()))?;
+                }
+                // The prefix may end in the middle of a UTF-8 character.
+                let prefix = String::from_utf8_lossy(&prefix);
+                let source = legacy_source_prefix(prefix.as_bytes());
+                let identified = if let (Some((witness, kind)), Some(tail)) =
+                    (source, legacy_source_tail(&tail))
+                {
+                    if (tail.authorization.starts_with("new-finalized")
+                        || ["explicit-backfill", "explicit-rebuild", "explicit-retry"]
+                            .contains(&tail.authorization.as_str()))
+                        && ["pending", "running", "failed"].contains(&tail.state.as_str())
+                        && group_current(&tx, IndexKeys::new(profile), &tail.group)?
+                        && witness_valid(&tx, &witness, &kind)?
+                    {
+                        let admission = AutoAdmission {
+                            node_id: witness.node_id.clone(),
+                            recovery: true,
+                            recovery_group: Some(tail.group.clone()),
+                            recovery_witness: Some(witness.clone()),
+                            recovery_body_kind: Some(kind),
+                            state: if tail.state == "pending" { "pending" } else { "failed" }.into(),
+                            error: (tail.state != "pending").then(|| "Previous bootstrap request interrupted or failed; retry explicitly".into()),
+                        };
+                        let record = IndexKeys::new(profile).auto(&format!(
+                            "recovery.{}",
+                            hash(format!("{}\0{}", witness.node_id, tail.group).as_bytes())
+                        ));
+                        tx.execute(
+                            "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value WHERE json_extract(excluded.value,'$.state')='failed'",
+                            params![record, encode_json(&admission)?],
+                        )?;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if !identified {
+                    set_meta(&tx, &IndexKeys::new(profile).recovery_required(), &id())?;
+                }
+            }
             tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
-            let error_key = format!("{BOOTSTRAP_RECOVERY_ERRORS}{}", hash(key.as_bytes()));
-            tx.execute(
-                "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                params![error_key, reason.to_string()],
-            )?;
             tx.commit()?;
             return Ok((true, Some(key), false));
         }
@@ -332,12 +466,27 @@ pub(super) fn claim_authorization(
             .transpose()?
             .flatten()
             .is_some();
+    let mut admission: AutoAdmission = decode_json(&value)?;
+    if admission.recovery
+        && (admission.recovery_group.is_none()
+            || admission.recovery_witness.is_none()
+            || admission.recovery_body_kind.is_none())
+    {
+        admission.state = "failed".into();
+        admission.error =
+            Some("Recovered source admission is incomplete; explicitly rebuild".into());
+        update_json_meta(&tx, &key, &admission)?;
+        tx.commit()?;
+        return Ok((true, None));
+    }
+    if paused && admission.recovery {
+        return Ok((false, None));
+    }
     if paused {
         tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
         tx.commit()?;
         return Ok((true, None));
     }
-    let mut admission: AutoAdmission = decode_json(&value)?;
     admission.state = "running".into();
     update_json_meta(&tx, &key, &admission)?;
     tx.commit()?;
@@ -351,6 +500,43 @@ mod metadata_tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE embedding_job(id TEXT PRIMARY KEY,state TEXT NOT NULL,error_json TEXT); CREATE INDEX jobs_running_recovery ON embedding_job(id) WHERE state='running';").unwrap();
         db
+    }
+
+    #[test]
+    fn oversized_work_splits_without_losing_unicode_or_offsets() {
+        let text = "\"\n日本".repeat(200_000);
+        let work = Work::pending(
+            Witness {
+                node_id: "n".into(),
+                revision: 1,
+                body_hash: None,
+                raw: None,
+            },
+            "text".into(),
+            Segment {
+                start: 9,
+                end: 9 + text.chars().count(),
+                text: text.clone(),
+            },
+            "active",
+            "test",
+        );
+        let parts = split_bounded_work(work).unwrap();
+        assert!(parts.len() > 1);
+        assert_eq!(
+            parts
+                .iter()
+                .map(|part| part.segment.text.as_str())
+                .collect::<String>(),
+            text
+        );
+        let mut offset = 9;
+        for part in parts {
+            assert_eq!(part.segment.start, offset);
+            offset += part.segment.text.chars().count();
+            assert_eq!(part.segment.end, offset);
+            assert!(encode_bootstrap_work(&part).unwrap().len() <= MAX_BOOTSTRAP_RECORD_BYTES);
+        }
     }
 
     #[test]
@@ -503,7 +689,7 @@ mod metadata_tests {
     #[test]
     fn recovery_skips_oversized_legacy_bootstrap_without_decoding_it() {
         let mut db = recovery_db();
-        let key = "index.bootstrap.a";
+        let key = "index.bootstrap.profile.a";
         let value = "not JSON".to_owned() + &"x".repeat(RECOVERY_BYTES as usize + 1);
         db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, value])
             .unwrap();
@@ -524,7 +710,7 @@ mod metadata_tests {
             "test",
         );
         db.execute(
-            "INSERT INTO app_meta VALUES('index.bootstrap.b',?1)",
+            "INSERT INTO app_meta VALUES('index.bootstrap.profile.b',?1)",
             [encode_json(&ordinary).unwrap()],
         )
         .unwrap();
@@ -540,28 +726,14 @@ mod metadata_tests {
             .unwrap(),
             0
         );
-        let failure: Value = json_meta(
-            &db,
-            &format!("{BOOTSTRAP_RECOVERY_ERRORS}{}", hash(key.as_bytes())),
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(failure["kind"], "oversized_legacy_bootstrap");
-        assert_eq!(failure["observed_bytes"], RECOVERY_BYTES + 9);
-        assert_eq!(failure["limit_bytes"], RECOVERY_BYTES);
-
-        // The oversized row is gone; the next legacy row is visited normally.
+        assert!(
+            meta(&db, &IndexKeys::new("profile").recovery_required())
+                .unwrap()
+                .is_some()
+        );
+        // The oversized row is gone; the next row is visited normally.
         let (changed, _, done) = recover_inflight_page(&mut db, cursor).unwrap();
         assert!(!changed && done);
-        assert_eq!(
-            db.query_row(
-                "SELECT count(*) FROM app_meta WHERE key='index.bootstrap_error.' || ?1",
-                [hash(key.as_bytes())],
-                |r| r.get::<_, i64>(0)
-            )
-            .unwrap(),
-            1
-        );
     }
 
     #[test]
