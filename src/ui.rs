@@ -6442,8 +6442,10 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         state.palette,
         spans,
         notice,
-        context,
-        state.db_status.as_deref(),
+        chrome::FooterTrailing {
+            context,
+            db_status: state.db_status.as_deref(),
+        },
     );
     frame.render_widget(Paragraph::new(lines), area);
 }
