@@ -3,6 +3,14 @@
 ## Shell unknown argument policy
 
 Warn is the default; strict rejects individual calls. Argument failures no longer cancel otherwise valid calls in the same group. See [Control design](../design/control.md#shell-argument-policy). Three-OS CI and independent review are pending.
+## Nonblocking terminal capability queries (#192, implementation pending)
+
+The adopted target removes `ui.ambiguous_width` and measures on every launch
+without delaying the first frame. The capability reader, asynchronous cache
+updates, input filtering, config removal, release note and requested fake
+terminal tests remain unimplemented. Existing fallback selection is incomplete:
+`SELECTED` and `CHILD` are rendered directly on some paths.
+
 
 ## #194 step 1: "answer" renamed to "end message" (branch `issue-194/step1-end-message`)
 

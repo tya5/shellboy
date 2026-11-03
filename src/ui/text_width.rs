@@ -251,7 +251,7 @@ pub(crate) mod glyphs {
         }
     }
     pub(crate) fn numbered_branch(last: bool, number: usize, selected: bool, kind: &str) -> String {
-        let marker = if selected { SELECTED } else { " " };
+        let marker = if selected { select(SELECTED, ">") } else { " " };
         format!("{}[{number}]{marker}{kind} ", branch(last))
     }
     pub(crate) fn ellipsis() -> &'static str {
@@ -353,6 +353,19 @@ mod tests {
             );
             assert_eq!(glyphs::vertical(), "|");
             assert_eq!(glyphs::formatted!("×{}", "x{}", 3), "x3");
+        }
+        clear_terminal_width();
+    }
+
+    #[test]
+    fn selected_branch_marker_has_conservative_fallback() {
+        for (width, marker) in [(Some(1), "›"), (Some(2), ">"), (None, "> ")] {
+            set_terminal_width(width);
+            let marker = marker.trim_end();
+            assert!(
+                glyphs::numbered_branch(false, 1, true, glyphs::SHELL)
+                    .contains(&format!("]{marker}$"))
+            );
         }
         clear_terminal_width();
     }
