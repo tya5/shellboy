@@ -6737,7 +6737,7 @@ impl TerminalSession {
         self.width_observation
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn enter_with_keyboard_enhancement(
         support_override: Option<bool>,
     ) -> io::Result<Self> {
