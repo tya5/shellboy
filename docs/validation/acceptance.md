@@ -9300,3 +9300,22 @@ policy-specific marker (or accept the two supported markers in the public
 integration test), keeping row background, content, scrollbar and layout checks.
 The live-work test still explicitly checks all three width policies and both
 languages. No production glyph policy is changed by this correction.
+
+#192 macOS shutdown regression investigation (2026-11-03): exact published tip
+`8e5cc49f` failed native macOS CI `41693893682` while Ubuntu and Windows passed.
+Local arm64 PTY reproduction also failed: N returns from force confirmation,
+but lone Esc never returns to graceful waiting. Freshly rebuilt, marker-checked
+and separately copied child/harness executables traced the Esc byte followed by
+Darwin `poll` reporting `POLLNVAL` (`revents=32`) on `/dev/tty`, then `WouldBlock`
+from read. Idle finalization was consequently never reached. The protected
+reproduction failed in 61.87 seconds; `/tmp/192-shutdown-fresh-roots.log` retains
+the local diagnostic evidence. Earlier local passes without diagnostic markers
+were excluded because shared-target artifacts were stale. The macOS `select`
+correction passed locked strict all-target Clippy and focused decoder/readiness
+tests. Three consecutive protected-binary shutdown PTY runs passed, including
+N/Esc return, explicit force exit and terminal-mode restoration (3.68, 0.57 and
+0.55 seconds; these are observations, not latency guarantees). Local validation
+log: `/tmp/192-select-clean-checks.log`. Readiness unit tests distinguish input,
+idle and EOF without sleeps, and reject out-of-range macOS descriptors before
+`FD_SET`. Corrected-tip three-OS CI, independent re-review and landing remain
+pending. No real-terminal, installed-binary or provider evidence is claimed.

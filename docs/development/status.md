@@ -4411,3 +4411,13 @@ invalidate width-keyed display caches, redraw, and persist via the existing
 owner guard off the UI thread. Cached width is only the initial baseline.
 macOS strict Clippy and focused decoder/filter/PTY/restoration tests passed;
 three-OS CI and further error-retention coverage follow in the next stage.
+
+#192 macOS CI follow-up: the exact `8e5cc49f` CI failed the force-shutdown PTY
+Esc-return transition. Protected local reproduction traced Darwin `POLLNVAL`
+for `/dev/tty`, followed by `WouldBlock`, starving idle Escape finalization.
+The macOS `select` readiness correction passed strict all-target Clippy,
+focused decoder/readiness tests and three consecutive protected-binary shutdown
+PTY runs; other Unix retains `poll` with explicit invalid-descriptor errors.
+Landing remains blocked pending corrected-tip local checks, W8 re-review and
+exact-tip three-OS CI. Shared-target test artifacts must be rebuilt from current
+crate roots and copied before invoking subprocess tests.

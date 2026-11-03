@@ -257,6 +257,13 @@ Already decoded input stays in the reader queue on I/O error. No probe thread,
 helper process or reader-lock wait is introduced. Reads use the existing UI
 poll budget; lone Escape disambiguation is a key-decoding concern, not a
 capability timeout. Probe state is bounded independently of response latency.
+On macOS, readiness uses `select`: Darwin `poll` can report `POLLNVAL` for
+`/dev/tty` even though the same descriptor remains readable. Treating that as
+input readiness prevents idle Escape finalization and spins on `WouldBlock`.
+Validate the descriptor against `FD_SETSIZE` before building the select set;
+an out-of-range descriptor is an explicit input error, never an unchecked set
+write. Other Unix systems retain `poll` and reject `POLLNVAL` as an I/O error.
+Neither path exposes partial capability replies, CSI or paste as idle keys.
 
 Before first draw, write DA/keyboard queries and two private DSR measurements
 at a known cursor location, restoring/clearing the probe area immediately.
