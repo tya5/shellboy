@@ -21,12 +21,12 @@ on:
         type: boolean
         default: false
       windows_test_threads:
-        description: Windows threads (4 selects Windows-only experiment; default/2 check all OSes)
+        description: Windows test threads; set all_oses=true to include Windows on task branches
         type: choice
         options: ['default', '2', '4']
         default: 'default'
       all_oses:
-        description: Include Windows on a task branch (main and integration/* always run all three OSes)
+        description: Run all three OS checks on a task branch (main, land/*, integration/* always select all three)
         type: boolean
         default: false
       baseline_ref:
@@ -38,6 +38,7 @@ permissions:
   actions: read
 jobs:
   reuse:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -50,6 +51,7 @@ jobs:
         id: evidence
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const reuse = require('./scripts/ci-reuse.cjs');
             await reuse({github, context, core});
@@ -59,9 +61,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Task branches check Linux/macOS; Windows (the slow job) runs on main,
-        # integration/* batches and on request, before anything lands.
-        os: ${{ fromJSON(inputs.windows_test_threads == '4' && '["windows-latest"]' || (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/integration/') || inputs.all_oses || inputs.windows_test_threads == '2') && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+        # Task branches are Linux-only by default; landing branches always run all OSes.
+        os: ${{ fromJSON((github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/land/') || startsWith(github.ref, 'refs/heads/integration/') || inputs.all_oses) && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

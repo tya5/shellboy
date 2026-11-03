@@ -119,11 +119,12 @@ visible failure names and no secondary encoding failure.
 
 ## CI execution and publication policy (#57)
 
-Automatic Rust checks run only for pushes to `main`. Branch pushes and pull
-requests do not start this workflow. Keep `workflow_dispatch`, its existing
-inputs and native OS matrices available unchanged for explicit branch checks,
-platform diagnosis and performance comparisons. This changes when checks run,
-not test coverage, assertions, failure gates or the Windows thread setting.
+Automatic Rust checks run on pushes to `main`. Branch pushes and pull requests
+do not start this workflow. `workflow_dispatch` on task branches selects Linux
+only by default; `all_oses=true` opts into all three for Windows/PTY/path changes.
+`main`, `land/*` and `integration/*` always select all three OSes. Existing
+performance and diagnostic inputs remain available. This changes default branch
+coverage and duplicate main-run work, not assertions or failure gates.
 
 Run the complete local standard check (`sh scripts/check.sh` or
 `./scripts/check.ps1`) successfully on the exact proposed tree before pushing.
@@ -225,9 +226,11 @@ files. Its allowlist gives a reason for each intentionally retained occurrence.
 
 ## Exact-SHA reuse and integration batches (#92)
 
-Keep both main push and manual Rust checks triggers. On main push only, a
-read-only Actions API lookup may reuse a completed successful first-attempt run
-of this repository's `ci.yml` on exactly the same SHA. Require actual successful
+Keep both main push and manual Rust checks triggers. A small prerequisite job
+runs only on main pushes and uses the existing read-only Actions API permission.
+It queries completed `ci.yml` runs by `head_sha=github.sha`, then accepts only
+a successful first-attempt run of this repository on exactly the same SHA.
+Require actual successful
 `check (ubuntu-latest)`, `check (macos-latest)` and `check (windows-latest)` jobs;
 a skipped job, Windows-only experiment, rerun or reuse-only push is not qualifying
 evidence. Log the source run URL in the job log and summary. API errors, absent

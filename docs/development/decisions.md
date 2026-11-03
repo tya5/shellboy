@@ -3125,3 +3125,29 @@ The 2026-11-03 decision supersedes earlier unconditional startup quick_check
 claims: quick_check runs on unclean or unknown previous shutdown, and
 foreign_key_check runs after migrations. Clean startup skips these scans.
 `storage check` explicitly runs both; a clean marker is not a corruption proof.
+## D-189: Reduce duplicate and queued native CI work (2026-11-03)
+
+User-approved. On `main` pushes, the `Rust checks` workflow asks the Actions API
+for completed runs on the exact `github.sha` and reuses only a same-repository,
+first-attempt successful run whose Ubuntu, macOS and Windows check jobs all
+succeeded. The small gate uses the existing `actions: read` `GITHUB_TOKEN`
+permission. Missing evidence, API errors, reruns, partial matrices, or reuse-only
+runs do not qualify; they run all three checks. The gate applies to main pushes,
+not manual dispatch.
+
+Workflow dispatch on task branches defaults to Linux only. `all_oses=true` opts a
+task branch into all three OSes for Windows, PTY or path-specific work. `land/*`
+and `integration/*` always run all three; main runs all three unless exact-SHA
+reuse safely skips the already-qualified checks.
+
+Reason: measured macOS queueing had 4.5 minutes median and 19 minutes maximum,
+and 13 duplicate main runs occurred on 2026-11-03. The change avoids waiting for
+macOS/Windows on ordinary task-branch iteration while preserving the full
+landing gate and avoiding a second native matrix for main SHAs already tested
+before landing.
+
+Validation: dispatch on this task branch and confirm Linux-only default, then
+dispatch with `all_oses=true` and confirm all three OSes. The main reuse path
+cannot be induced directly on this task branch without changing the event/ref
+under test; unit tests cover API filtering and fallback, and the workflow wiring
+keeps the reuse job restricted to main pushes.
