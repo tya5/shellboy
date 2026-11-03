@@ -6726,12 +6726,25 @@ impl TerminalSession {
     }
 
     pub fn enter() -> io::Result<Self> {
-        Self::enter_with_keyboard_enhancement(None)
+        Self::enter_with_width(None)
     }
 
+    pub fn enter_with_width(width: Option<u8>) -> io::Result<Self> {
+        Self::enter_inner(None, width)
+    }
+
+    pub fn width_observation(&self) -> Option<u8> {
+        self.width_observation
+    }
+
+    #[cfg(test)]
     pub(crate) fn enter_with_keyboard_enhancement(
         support_override: Option<bool>,
     ) -> io::Result<Self> {
+        Self::enter_inner(support_override, None)
+    }
+
+    fn enter_inner(support_override: Option<bool>, width: Option<u8>) -> io::Result<Self> {
         let guard = TerminalGuard::new();
         terminal::enable_raw_mode()?;
         execute!(
@@ -6758,7 +6771,7 @@ impl TerminalSession {
             io::stdout(),
             std::rc::Rc::clone(&link_snapshot),
         ))?;
-        let width_observation = text_width::probe();
+        let width_observation = width.or_else(text_width::probe);
         text_width::set_process_terminal_width(width_observation);
         Ok(Self {
             terminal,

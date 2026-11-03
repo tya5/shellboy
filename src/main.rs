@@ -424,7 +424,33 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut session = match shellboy::ui::TerminalSession::enter() {
+    // Resolve the same configuration before terminal initialization so a cached
+    // observation can avoid the blocking DSR helper. Owner startup revalidates it.
+    let width_config = std::env::current_dir().ok().and_then(|cwd| {
+        shellboy::config::Config::load_with_overrides(
+            cli.config.as_deref(),
+            cli.data_dir.as_deref(),
+            &cwd,
+            &shellboy::config::PathEnvironment::current(),
+        )
+        .ok()
+    });
+    let identity = shellboy::width_cache::current_identity();
+    let mode = width_config
+        .as_ref()
+        .map(|c| c.config.ui.ambiguous_width)
+        .unwrap_or(shellboy::config::AmbiguousWidth::Probe);
+    let width = match mode {
+        shellboy::config::AmbiguousWidth::Narrow => Some(1),
+        shellboy::config::AmbiguousWidth::Wide => Some(2),
+        shellboy::config::AmbiguousWidth::Cached => width_config.as_ref().and_then(|c| {
+            identity
+                .as_deref()
+                .and_then(|id| shellboy::width_cache::read(&c.data_dir, id))
+        }),
+        shellboy::config::AmbiguousWidth::Probe => None,
+    };
+    let mut session = match shellboy::ui::TerminalSession::enter_with_width(width) {
         Ok(session) => session,
         Err(error) => {
             eprintln!("Terminal error: {error}");
@@ -504,6 +530,25 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         requests: rpc_receive,
         cwd,
     } = prepared;
+    // Only the active owner writes the cache; never persist an unknown probe.
+    if width.is_none()
+        && matches!(
+            mode,
+            shellboy::config::AmbiguousWidth::Cached | shellboy::config::AmbiguousWidth::Probe
+        )
+        && owner.loaded.config.ui.ambiguous_width == mode
+        && width_config
+            .as_ref()
+            .is_some_and(|c| c.data_dir == owner.loaded.data_dir)
+        && let (Some(id), Some(observed)) = (identity, session.width_observation())
+    {
+        let data = owner.loaded.data_dir.clone();
+        let guard = owner.width_cache_guard();
+        runtime.spawn_blocking(move || {
+            let _guard = guard;
+            let _ = shellboy::width_cache::write(&data, &id, observed);
+        });
+    }
     termination.bind_diagnostics(owner.diagnostics.clone());
     session.set_diagnostics(owner.diagnostics.clone());
     termination.bind_shell(control.shell_shutdown_handle());

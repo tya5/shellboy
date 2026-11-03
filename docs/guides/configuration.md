@@ -743,3 +743,25 @@ or truncated into new provider facts. This does not calculate cache misses from
 usage counters. `shellboy thread request --thread THREAD_ID --attempt ATTEMPT_ID`
 also shows the observation under `saved.prompt_cache_diagnostics`, and rebuilds
 the saved comparison ID instead of borrowing the Thread's current last ID.
+
+## Terminal Ambiguous Width
+
+`ui.ambiguous_width` controls characters whose terminal width varies:
+
+```toml
+[ui]
+ambiguous_width = "cached"
+```
+
+The default `cached` probes once per terminal program and version (or `TERM`
+when program identity is unavailable), and remembers a successful result in
+its data directory. If no terminal identity is available, Shellboy probes on
+every launch. `probe` measures on every launch; `narrow` forces width 1 and
+`wide` forces width 2. If measurement fails, Shellboy uses the conservative
+glyph fallback and does not cache a guessed result.
+
+If the display becomes misaligned after changing terminal settings or fonts,
+set `ambiguous_width = "probe"`, restart in that terminal and allow the probe
+to complete, then switch back to `cached`. A successful probe refreshes that
+terminal's cached result. If the terminal does not answer, the cache is not
+replaced; choose `narrow` or `wide` explicitly instead.
