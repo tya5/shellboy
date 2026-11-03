@@ -57,6 +57,18 @@ no new index/migration is required for that B+C query. F separately requires
 the parent index; see [storage](storage.md). Historical version
 notes below describe their own releases, not the current schema number.
 
+## DB worker activity visibility (#190, 2026-11-03)
+
+An active DB job is read from an in-memory watch snapshot, never by queuing a
+read behind the writer. The snapshot includes fixed operation kind, lane, start
+time, and the existing no-progress state; no SQL or request content is exposed.
+When a job runs longer than one second, the existing status/footer row shows
+`DB <operation> <elapsed>` at the right edge. An active no-progress entry takes
+priority as `DB! <operation> no progress`; otherwise the bar stays unchanged.
+Both messages and help are localized in English and Japanese. Do not add a row,
+setting or persisted schema. The indication and timing are observational, not a
+completion-time promise.
+
 ## 0.2.0 compatibility boundary
 
 Issue #33 adopts current-only formats: protocol version 2; required Message/Run/Turn/HistoryBody context, HistoryBody provenance and HistorySnippet provenance/context/selection; genuinely optional Thread/fork context; current index profile/query-marker validation; no expired status-operation alias, old-owner field defaults, legacy index fallback, attachment-origin repair, or duplicated RAG degradation warnings in `scope_errors`. Conversation schema advances to v11; standalone RAG schema remains v3. Isolated startup migration removes obsolete non-object index failure counters and the unused receipt-turn-source index; fresh conversation DBs use the complete current schema. Keep the general schema migration runner, ledger/user_version checks, and protocol-version rejection. Historical compatibility notes in adopted designs are superseded by their current-only sections.

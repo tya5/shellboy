@@ -10,11 +10,11 @@ use std::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use rusqlite::{Connection, OpenFlags};
-use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 
 pub(crate) const MAX_VECTOR_DIMENSIONS: usize = 8192;
 
@@ -122,10 +122,44 @@ pub enum Background<T> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Lane {
+pub(crate) enum DbJobLane {
     Foreground,
     Background,
 }
+impl DbJobLane {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Foreground => "foreground",
+            Self::Background => "background",
+        }
+    }
+}
+type Lane = DbJobLane;
+
+/// In-memory view of the DB worker's active job and background no-progress state.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DbWorkerActivity {
+    pub(crate) active: Option<ActiveDbJob>,
+    pub(crate) no_progress: Vec<NoProgressJob>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ActiveDbJob {
+    pub id: u64,
+    pub kind: &'static str,
+    pub lane: DbJobLane,
+    pub started_at: SystemTime,
+    pub started: Instant,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NoProgressJob {
+    pub kind: &'static str,
+    pub deferrals: u32,
+}
+struct ActiveJobState {
+    job: ActiveDbJob,
+    slow_reported: bool,
+}
+type ActiveJob = Arc<Mutex<Option<ActiveJobState>>>;
 
 /// What the worker observes about one executed job.
 #[derive(Default, Clone, Copy)]
@@ -163,6 +197,86 @@ impl Lanes {
 /// Consecutive deferrals per background kind, with no completed job of that
 /// kind in between. Bounded by the finite set of background call sites.
 type NoProgress = Arc<Mutex<HashMap<&'static str, u32>>>;
+
+fn activity_snapshot(active_job: &ActiveJob, no_progress: &NoProgress) -> DbWorkerActivity {
+    let active = active_job
+        .lock()
+        .expect("DB active-job mutex poisoned")
+        .as_ref()
+        .map(|active| active.job.clone());
+    let mut no_progress: Vec<_> = no_progress
+        .lock()
+        .expect("DB no-progress mutex poisoned")
+        .iter()
+        .filter(|(_, count)| **count >= NO_PROGRESS_DEFERRALS)
+        .map(|(kind, deferrals)| NoProgressJob {
+            kind,
+            deferrals: *deferrals,
+        })
+        .collect();
+    no_progress.sort_unstable_by_key(|job| job.kind);
+    DbWorkerActivity {
+        active,
+        no_progress,
+    }
+}
+
+fn publish_activity(
+    updates: &watch::Sender<DbWorkerActivity>,
+    active_job: &ActiveJob,
+    no_progress: &NoProgress,
+) {
+    updates.send_replace(activity_snapshot(active_job, no_progress));
+}
+
+struct ActiveJobGuard {
+    id: u64,
+    active_job: ActiveJob,
+    no_progress: NoProgress,
+    updates: watch::Sender<DbWorkerActivity>,
+}
+impl ActiveJobGuard {
+    fn start(
+        id: u64,
+        kind: &'static str,
+        lane: DbJobLane,
+        started: Instant,
+        active_job: ActiveJob,
+        no_progress: NoProgress,
+        updates: watch::Sender<DbWorkerActivity>,
+    ) -> Self {
+        *active_job.lock().expect("DB active-job mutex poisoned") = Some(ActiveJobState {
+            job: ActiveDbJob {
+                id,
+                kind,
+                lane,
+                started_at: SystemTime::now(),
+                started,
+            },
+            slow_reported: false,
+        });
+        publish_activity(&updates, &active_job, &no_progress);
+        Self {
+            id,
+            active_job,
+            no_progress,
+            updates,
+        }
+    }
+}
+impl Drop for ActiveJobGuard {
+    fn drop(&mut self) {
+        if let Ok(mut current) = self.active_job.lock()
+            && current
+                .as_ref()
+                .is_some_and(|active| active.job.id == self.id)
+        {
+            *current = None;
+        }
+        publish_activity(&self.updates, &self.active_job, &self.no_progress);
+    }
+}
+
 /// Test-only record of (kind, counted steps, deferred) per background unit.
 #[cfg(test)]
 type StepLog = Arc<Mutex<Vec<(&'static str, u64, bool)>>>;
@@ -181,6 +295,9 @@ struct Shared {
     foreground_waiting: Arc<AtomicUsize>,
     #[cfg_attr(not(test), allow(dead_code))]
     no_progress: NoProgress,
+    active_job: ActiveJob,
+    activity_updates: watch::Sender<DbWorkerActivity>,
+    slow_limit: Arc<Mutex<SlowJobLimit>>,
     /// Committed-change signals for background maintenance requesters.
     signals: Arc<crate::maintenance::Signals>,
     #[cfg(test)]
@@ -254,12 +371,21 @@ impl DbWorker {
         let diagnostics = Arc::new(Mutex::new(None));
         let foreground_waiting = Arc::new(AtomicUsize::new(0));
         let no_progress: NoProgress = Arc::new(Mutex::new(HashMap::new()));
+        let active_job: ActiveJob = Arc::new(Mutex::new(None));
+        let (activity_updates, activity_receiver) = watch::channel(DbWorkerActivity::default());
+        drop(activity_receiver);
+        let slow_limit = Arc::new(Mutex::new(SlowJobLimit::new()));
+        let next_job_id = Arc::new(AtomicU64::new(0));
         #[cfg(test)]
         let background_steps = Arc::new(Mutex::new(Vec::new()));
         let worker = WorkerState {
             diagnostics: diagnostics.clone(),
             foreground_waiting: foreground_waiting.clone(),
             no_progress: no_progress.clone(),
+            active_job: active_job.clone(),
+            activity_updates: activity_updates.clone(),
+            slow_limit: slow_limit.clone(),
+            next_job_id: next_job_id.clone(),
             #[cfg(test)]
             background_steps: background_steps.clone(),
         };
@@ -294,6 +420,9 @@ impl DbWorker {
                 })),
                 foreground_waiting,
                 no_progress,
+                active_job,
+                activity_updates,
+                slow_limit,
                 signals: Arc::default(),
                 #[cfg(test)]
                 background_steps,
@@ -320,6 +449,41 @@ impl DbWorker {
     /// Producers mark committed changes here; the maintenance requester waits on it.
     pub fn signals(&self) -> &Arc<crate::maintenance::Signals> {
         &self.shared.signals
+    }
+
+    /// Subscribe to active-job and no-progress snapshots without using the DB queue.
+    pub(crate) fn subscribe_activity(&self) -> watch::Receiver<DbWorkerActivity> {
+        self.shared.activity_updates.subscribe()
+    }
+
+    /// Emit one bounded diagnostic when an observed active job crosses the slow threshold.
+    pub(crate) fn report_active_job_slow(&self, id: u64, now: Instant) {
+        let active = {
+            let Ok(mut current) = self.shared.active_job.try_lock() else {
+                return;
+            };
+            let Some(active) = current.as_mut().filter(|active| active.job.id == id) else {
+                return;
+            };
+            let elapsed = now.saturating_duration_since(active.job.started);
+            if elapsed < SLOW_JOB_THRESHOLD || active.slow_reported {
+                return;
+            }
+            active.slow_reported = true;
+            (active.job.kind, active.job.lane, elapsed)
+        };
+        let Ok(mut limit) = self.shared.slow_limit.try_lock() else {
+            return;
+        };
+        if !limit.admit(now) {
+            return;
+        }
+        let Ok(diagnostics) = self.shared.diagnostics.try_lock() else {
+            return;
+        };
+        if let Some(diagnostics) = diagnostics.as_ref() {
+            diagnostics.record_db_job_active(active.0, active.1.as_str(), active.2);
+        }
     }
 
     /// Background kinds currently deferred at least [`NO_PROGRESS_DEFERRALS`]
@@ -676,7 +840,7 @@ fn job_kind<F>() -> &'static str {
     name.trim_start_matches("shellboy::")
 }
 
-const SLOW_JOB_THRESHOLD: Duration = Duration::from_secs(1);
+pub(crate) const SLOW_JOB_THRESHOLD: Duration = Duration::from_secs(1);
 const SLOW_JOB_WINDOW: Duration = Duration::from_secs(60);
 const SLOW_JOBS_PER_WINDOW: u8 = 10;
 
@@ -737,6 +901,10 @@ struct WorkerState {
     diagnostics: Arc<Mutex<Option<crate::diagnostics::Diagnostics>>>,
     foreground_waiting: Arc<AtomicUsize>,
     no_progress: NoProgress,
+    active_job: ActiveJob,
+    activity_updates: watch::Sender<DbWorkerActivity>,
+    slow_limit: Arc<Mutex<SlowJobLimit>>,
+    next_job_id: Arc<AtomicU64>,
     #[cfg(test)]
     background_steps: StepLog,
 }
@@ -849,7 +1017,6 @@ fn run_worker(
         runtime,
     };
     let mut checkpoint = IdleCheckpoint::new(Instant::now(), connection.total_changes());
-    let mut slow_limit = SlowJobLimit::new();
     let mut budget_limit = SlowJobLimit::new();
     let mut no_progress_limit = SlowJobLimit::new();
     while let Some(command) = lanes.next() {
@@ -866,6 +1033,16 @@ fn run_worker(
                 lanes.background_turn = lane == Lane::Foreground;
                 let started = Instant::now();
                 let queue = started.duration_since(queued_at);
+                let job_id = state.next_job_id.fetch_add(1, Ordering::Relaxed);
+                let _activity_guard = ActiveJobGuard::start(
+                    job_id,
+                    kind,
+                    lane,
+                    started,
+                    state.active_job.clone(),
+                    state.no_progress.clone(),
+                    state.activity_updates.clone(),
+                );
                 let outcome = job(&mut connection, &state.foreground_waiting);
                 let run = started.elapsed();
                 let diagnostics = state.diagnostics.try_lock().ok();
@@ -873,7 +1050,8 @@ fn run_worker(
                 let name = || kind.replace("::", ".");
                 if (queue >= SLOW_JOB_THRESHOLD || run >= SLOW_JOB_THRESHOLD)
                     && let Some(diagnostics) = diagnostics
-                    && slow_limit.admit(Instant::now())
+                    && let Ok(mut limit) = state.slow_limit.try_lock()
+                    && limit.admit(Instant::now())
                 {
                     diagnostics.record_db_job(&name(), queue, run);
                 }
@@ -1215,6 +1393,81 @@ mod slow_job_tests {
         db.try_call(|_| Ok(()))
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn active_job_snapshot_can_be_read_while_the_writer_is_busy() {
+        crate::test_watchdog::watchdog("active DB job snapshot", async {
+            let root = tempfile::tempdir().unwrap();
+            let diagnostics = crate::diagnostics::Diagnostics::start(
+                root.path().join("logs"),
+                crate::config::Logging::default(),
+            );
+            let db = DbWorker::open(root.path().join("db")).await.unwrap();
+            db.attach_diagnostics(diagnostics.clone());
+            let (started_tx, started_rx) = oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let job_db = db.clone();
+            let job = tokio::spawn(async move {
+                let private_text = String::from("private conversation test marker");
+                job_db
+                    .call(move |_| {
+                        assert!(!private_text.is_empty());
+                        let _ = started_tx.send(());
+                        release_rx.recv().unwrap();
+                        Ok::<_, StorageError>(())
+                    })
+                    .await
+            });
+            started_rx.await.unwrap();
+            let mut activity_rx = db.subscribe_activity();
+            let snapshot = activity_rx.borrow_and_update().clone();
+            let active = snapshot.active.as_ref().expect("active job snapshot");
+            assert!(active.kind.contains("active_job_snapshot_can_be_read"));
+            assert_eq!(active.lane, DbJobLane::Foreground);
+            assert!(snapshot.no_progress.is_empty());
+            assert!(active.started_at <= SystemTime::now());
+
+            db.report_active_job_slow(active.id, active.started + SLOW_JOB_THRESHOLD);
+            release_tx.send(()).unwrap();
+            job.await.unwrap().unwrap();
+            let completed = activity_rx.borrow_and_update().clone();
+            assert!(completed.active.is_none());
+            assert!(completed.no_progress.is_empty());
+            db.shutdown().await.unwrap();
+            diagnostics.shutdown().await;
+
+            let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+            assert!(!log.contains("private conversation test marker"), "{log}");
+            let rows: Vec<serde_json::Value> = log
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let active_logs: Vec<_> = rows
+                .iter()
+                .filter(|row| row["event"] == "db_job_active")
+                .collect();
+            assert_eq!(active_logs.len(), 1, "{log}");
+            assert!(
+                active_logs[0]["db_job_active"]["kind"]
+                    .as_str()
+                    .unwrap()
+                    .contains("active_job_snapshot_can_be_read")
+            );
+            assert_eq!(active_logs[0]["db_job_active"]["lane"], "foreground");
+            assert!(
+                active_logs[0]["db_job_active"]["elapsed_ms"]
+                    .as_u64()
+                    .unwrap()
+                    >= 1000
+            );
+            assert_eq!(
+                active_logs[0]["db_job_active"].as_object().unwrap().len(),
+                3
+            );
+        })
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
     async fn slow_execution_and_queue_are_observed_with_distinct_caller_names() {
         let root = tempfile::tempdir().unwrap();
@@ -1231,6 +1484,15 @@ mod slow_job_tests {
         let first =
             tokio::spawn(async move { index_next_delay(&first_db, release_rx, start_tx).await });
         start_rx.await.unwrap();
+        let mut activity_rx = db.subscribe_activity();
+        let active_snapshot = activity_rx.borrow_and_update().clone();
+        let active = active_snapshot
+            .active
+            .as_ref()
+            .expect("dequeued job is visible");
+        assert!(active.kind.contains("index_next_delay"), "{}", active.kind);
+        assert_eq!(active.lane, DbJobLane::Foreground);
+        assert!(active.started_at <= SystemTime::now());
         let queued: Vec<_> = (0..SLOW_JOBS_PER_WINDOW + 2)
             .map(|_| gc_collect(&db).unwrap())
             .collect();
@@ -1490,19 +1752,28 @@ mod lane_budget_tests {
             );
             let db = open(&root).await;
             db.attach_diagnostics(diagnostics.clone());
+            let mut activity_rx = db.subscribe_activity();
+            let _ = activity_rx.borrow_and_update();
             assert!(matches!(stuck_unit(&db, true).await, Background::Deferred));
             assert!(
                 db.background_no_progress().is_empty(),
                 "one deferral is not evidence"
             );
+            assert!(activity_rx.borrow_and_update().no_progress.is_empty());
             assert!(matches!(stuck_unit(&db, true).await, Background::Deferred));
             let stuck = db.background_no_progress();
             assert_eq!(stuck.len(), 1);
             assert!(stuck[0].0.contains("stuck_unit"), "{stuck:?}");
             assert_eq!(stuck[0].1, NO_PROGRESS_DEFERRALS);
+            let activity = activity_rx.borrow_and_update().clone();
+            assert_eq!(activity.no_progress.len(), 1);
+            assert_eq!(activity.no_progress[0].kind, stuck[0].0);
+            assert_eq!(activity.no_progress[0].deferrals, NO_PROGRESS_DEFERRALS);
+            assert!(activity.active.is_none());
             // A completed job of the same kind is progress and clears the state.
             assert!(matches!(stuck_unit(&db, false).await, Background::Done(())));
             assert!(db.background_no_progress().is_empty());
+            assert!(activity_rx.borrow_and_update().no_progress.is_empty());
             db.shutdown().await.unwrap();
             diagnostics.shutdown().await;
             let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();

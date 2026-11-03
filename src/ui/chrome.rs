@@ -241,8 +241,30 @@ impl ContextBar {
     }
 }
 
+#[cfg(test)]
 /// Two quiet footer rows. Caller owns animation and transient-notice lifetime.
 pub(super) fn footer_lines(
+    view: &ThreadView,
+    width: u16,
+    hints: &str,
+    palette: super::theme::Palette,
+    activity_spans: Vec<ratatui::text::Span<'static>>,
+    notice: Option<(&str, bool)>,
+    context: Option<ContextBar>,
+) -> Vec<ratatui::text::Line<'static>> {
+    footer_lines_with_db(
+        view,
+        width,
+        hints,
+        palette,
+        activity_spans,
+        notice,
+        context,
+        None,
+    )
+}
+
+pub(super) fn footer_lines_with_db(
     view: &ThreadView,
     width: u16,
     hints: &str,
@@ -250,12 +272,26 @@ pub(super) fn footer_lines(
     mut activity_spans: Vec<ratatui::text::Span<'static>>,
     notice: Option<(&str, bool)>,
     context: Option<ContextBar>,
+    db_status: Option<&str>,
 ) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::{
         style::Style,
         text::{Line, Span},
     };
     let phase = view.footer_phase();
+    let db_status = db_status
+        .map(|status| fit(status, usize::from(width), false))
+        .filter(|status| !status.is_empty());
+    let status_reserve = db_status
+        .as_ref()
+        .map(|status| status.width() + glyphs::separator().width())
+        .unwrap_or_default();
+    if status_reserve > 0 {
+        activity_spans = fit_spans(
+            activity_spans,
+            usize::from(width).saturating_sub(status_reserve),
+        );
+    }
     let mut facts = Vec::new();
     if let Some(reason) = view.activity.snapshot.as_ref().and_then(|s| s.index_pause) {
         use crate::{config::UiLanguage, index::PauseReason};
@@ -443,7 +479,8 @@ pub(super) fn footer_lines(
                 .iter()
                 .map(|s| s.content.width())
                 .sum::<usize>()
-                + 3,
+                + 3
+                + status_reserve,
         ),
         false,
     );
@@ -455,7 +492,8 @@ pub(super) fn footer_lines(
     }
     if let Some(bar) = context {
         let used: usize = activity_spans.iter().map(|s| s.content.width()).sum();
-        let room = usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 });
+        let room =
+            usize::from(width).saturating_sub(used + if used > 0 { 3 } else { 0 } + status_reserve);
         if let Some(text) = bar.text_for(room, palette.plain(), view.language) {
             if used > 0 {
                 activity_spans.push(Span::raw(glyphs::separator()));
@@ -467,6 +505,23 @@ pub(super) fn footer_lines(
             };
             activity_spans.push(Span::styled(text, style));
         }
+    }
+    if let Some(status) = db_status {
+        let used: usize = activity_spans.iter().map(|span| span.content.width()).sum();
+        let separator = if used > 0 { glyphs::separator() } else { "" };
+        let gap = usize::from(width).saturating_sub(used + separator.width() + status.width());
+        if gap > 0 {
+            activity_spans.push(Span::raw(" ".repeat(gap)));
+        }
+        if used > 0 {
+            activity_spans.push(Span::raw(separator));
+        }
+        let style = if status.starts_with("DB!") && !palette.plain() {
+            Style::default().fg(super::theme::ATTENTION)
+        } else {
+            Style::default().fg(palette.muted())
+        };
+        activity_spans.push(Span::styled(status, style));
     }
     let (hint, error) = notice.unwrap_or((hints, false));
     let navigation_hint =
@@ -576,6 +631,31 @@ pub(super) fn welcome(
 
 // Sanitize display values, preserve graphemes, and make every cut explicit.
 // Source titles/models/paths remain untouched for details and full-value copy.
+fn fit_spans(
+    spans: Vec<ratatui::text::Span<'static>>,
+    width: usize,
+) -> Vec<ratatui::text::Span<'static>> {
+    use ratatui::text::Span;
+    let mut remaining = width;
+    let mut fitted = Vec::new();
+    for span in spans {
+        if remaining == 0 {
+            break;
+        }
+        let full_width = span.content.width();
+        let text = fit(span.content.as_ref(), remaining, false);
+        let used = text.width();
+        if used > 0 {
+            fitted.push(Span::styled(text, span.style));
+            remaining = remaining.saturating_sub(used);
+        }
+        if used < full_width {
+            break;
+        }
+    }
+    fitted
+}
+
 fn fit(text: &str, width: usize, tail: bool) -> String {
     if width == 0 {
         return String::new();
@@ -612,6 +692,44 @@ fn fit(text: &str, width: usize, tail: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn db_activity_is_right_aligned_without_adding_a_footer_row() {
+        use crate::{
+            config::{Config, PaletteMode},
+            ui::ThreadView,
+        };
+        let view = ThreadView::new(&Config::default(), std::path::PathBuf::from("/"));
+        let palette =
+            super::super::theme::Palette::from_capabilities(PaletteMode::Dark, false, true);
+        let rows = footer_lines_with_db(
+            &view,
+            80,
+            "",
+            palette,
+            vec![ratatui::text::Span::raw("Working")],
+            None,
+            None,
+            Some("DB message send 1s"),
+        );
+        assert_eq!(rows.len(), 2);
+        let status: String = rows[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(status.ends_with("DB message send 1s"), "{status:?}");
+        assert_eq!(status.len(), 80);
+
+        let normal = footer_lines(&view, 80, "", palette, vec![], None, None);
+        assert_eq!(normal.len(), 2);
+        let normal_text: String = normal[0]
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(!normal_text.contains("DB message send 1s"));
+    }
+
     #[test]
     fn draft_pause_update_displays_and_clears_saved_fact() {
         use crate::{

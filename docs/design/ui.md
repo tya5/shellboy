@@ -191,3 +191,14 @@ fallback. Compute this from the current frame's region, including after resize;
 do not add I/O or persisted state. Other status fields, glyphs, wording and
 order are unchanged. Update the bilingual help and cover the visible, folded,
 height-zero and resized cases with rendered-frame tests.
+
+### #190 DB worker activity in the existing footer
+
+While an active DB job exceeds one second, place the fixed, localized operation
+label and elapsed time at the right edge of the existing first footer row. If
+`db_job_no_progress` state exists, show its first sorted operation instead as
+`DB! <operation> no progress` (Japanese: `DB! <operation> 進捗なし`). Otherwise
+show no DB text. Keep the current row count and reserve space by fitting
+secondary footer facts; do not move the indicator to a new line. The existing UI
+clock updates the elapsed value, while the frontend receives job transitions
+through the in-memory watch snapshot.

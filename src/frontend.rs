@@ -982,6 +982,16 @@ async fn run_with_delivery(
     let mut ui_subscription = control.subscribe_ui();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut db_activity_rx = control.store.database.subscribe_activity();
+    let mut db_activity = db_activity_rx.borrow_and_update().clone();
+    let mut db_activity_open = true;
+    update(&updates, UiUpdate::DbWorkerActivity(db_activity.clone())).await;
+    if let Some(active) = db_activity.active.as_ref() {
+        control
+            .store
+            .database
+            .report_active_job_slow(active.id, std::time::Instant::now());
+    }
     let mut status_session = program_status::Session::new();
     let status_enabled = control.store.config.ui.program_status == crate::config::ProgramStatus::On;
     let mut status_dirty = status_enabled;
@@ -1209,6 +1219,20 @@ async fn run_with_delivery(
         .min()
         .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         tokio::select! {
+            changed = db_activity_rx.changed(), if db_activity_open => {
+                if changed.is_err() {
+                    db_activity_open = false;
+                } else {
+                    db_activity = db_activity_rx.borrow_and_update().clone();
+                    update(&updates, UiUpdate::DbWorkerActivity(db_activity.clone())).await;
+                    if let Some(active) = db_activity.active.as_ref() {
+                        control
+                            .store
+                            .database
+                            .report_active_job_slow(active.id, std::time::Instant::now());
+                    }
+                }
+            },
             _=tokio::time::sleep_until(browser_deadline.unwrap_or_else(||tokio::time::Instant::now()+Duration::from_secs(86400))),
                 if browser_deadline.is_some() && !updates.backpressured() && read_slots.available_permits()>0=>{
                 // Both timers can wake in the same select. Let the outer loop
@@ -3712,7 +3736,13 @@ async fn run_with_delivery(
                     });
                 }
             },
-            _=tick.tick(),if selection.progress_running || (status_enabled && status_dirty)=> {
+            _=tick.tick(),if selection.progress_running || (status_enabled && status_dirty) || db_activity.active.is_some()=> {
+                if let Some(active) = db_activity.active.as_ref() {
+                    control
+                        .store
+                        .database
+                        .report_active_job_slow(active.id, std::time::Instant::now());
+                }
                 status_ready = true;
                 if let Some(thread)=selection.periodic_refresh_thread(&refreshing) {
                     dirty_threads.insert(thread);

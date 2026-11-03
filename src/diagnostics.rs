@@ -30,6 +30,7 @@ pub enum DiagnosticEvent {
     IndexPaused,
     UsageTotalsSlow,
     DbJobSlow,
+    DbJobActive,
     DbJobBudget,
     DbJobNoProgress,
     LineageQuerySlow,
@@ -111,6 +112,13 @@ struct DbJobSlowTrace {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct DbJobActiveTrace {
+    kind: String,
+    lane: String,
+    elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct DbJobBudgetTrace {
     kind: String,
     steps: u64,
@@ -129,6 +137,8 @@ struct DbJobNoProgressTrace {
 enum DbJobTrace {
     #[serde(rename = "db_job_slow")]
     Slow(DbJobSlowTrace),
+    #[serde(rename = "db_job_active")]
+    Active(DbJobActiveTrace),
     #[serde(rename = "db_job_budget")]
     Budget(DbJobBudgetTrace),
     #[serde(rename = "db_job_no_progress")]
@@ -663,6 +673,34 @@ impl Diagnostics {
             index_discard: None,
         });
     }
+    /// An active DB job crossed the display threshold. Fixed fields only;
+    /// the worker-side shared limit and best-effort diagnostics queue bound it.
+    pub(crate) fn record_db_job_active(
+        &self,
+        kind: &str,
+        lane: &str,
+        elapsed: std::time::Duration,
+    ) {
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::DbJobActive,
+            ids: DiagnosticIds::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: Some(DbJobTrace::Active(DbJobActiveTrace {
+                kind: kind.chars().take(160).collect(),
+                lane: lane.into(),
+                elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+            })),
+            index_discard: None,
+        });
+    }
+
     /// A background job was interrupted at its step budget while foreground
     /// work waited. Fixed fields only; the caller rate-limits emission.
     pub(crate) fn record_db_budget(
