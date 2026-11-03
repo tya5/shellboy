@@ -32,6 +32,7 @@ impl Command {
             Self::ThreadDelete(_) => ("thread.delete", CommandRoute::Database),
             Self::ThreadDeletePreview(_) => ("thread.delete_preview", CommandRoute::Database),
             Self::ThreadSet(_) => ("thread.set", CommandRoute::Database),
+            Self::MessageReply(_) => ("message.reply", CommandRoute::Database),
             Self::MessageSend(_) => ("message.send", CommandRoute::Database),
             Self::MessageCancel(_) => ("message.cancel", CommandRoute::Database),
             Self::MessageGet(_) => ("message.get", CommandRoute::Database),
@@ -104,6 +105,7 @@ impl Command {
             | Self::ThreadDelete(_)
             | Self::ThreadDeletePreview(_)
             | Self::ThreadSet(_)
+            | Self::MessageReply(_)
             | Self::MessageSend(_)
             | Self::MessageCancel(_)
             | Self::MessageGet(_)
@@ -145,6 +147,7 @@ impl Command {
             | Self::ThreadDelete(_)
             | Self::ThreadDeletePreview(_)
             | Self::ThreadSet(_)
+            | Self::MessageReply(_)
             | Self::MessageSend(_)
             | Self::MessageCancel(_)
             | Self::MessageGet(_)
@@ -183,6 +186,7 @@ impl Command {
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
             | Self::ThreadSet(_)
+            | Self::MessageReply(_)
             | Self::MessageSend(_)
             | Self::MessageCancel(_)
             | Self::RunRetry(_)
@@ -257,6 +261,7 @@ impl Command {
             | Self::ThreadFork(_)
             | Self::ThreadDelete(_)
             | Self::ThreadSet(_)
+            | Self::MessageReply(_)
             | Self::MessageSend(_)
             | Self::MessageCancel(_)
             | Self::RunRetry(_)

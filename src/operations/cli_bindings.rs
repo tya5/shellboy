@@ -161,6 +161,17 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::MessageReply,
+        &["message", "reply"],
+        &[
+            ("message_id", FieldId::Message),
+            ("sender_label", FieldId::SenderLabel),
+            ("text", FieldId::Text),
+            ("text_stdin", FieldId::Text),
+        ],
+        None,
+    ),
+    (
         OperationId::MessageGet,
         &["message", "get"],
         &[("message_id", FieldId::Message)],
