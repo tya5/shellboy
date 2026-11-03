@@ -14,16 +14,23 @@ pub(super) async fn run_tool_group(
     for call in &calls {
         if !call.unknown_arguments.is_empty() {
             let event = match control.store.config.shell.unknown_arguments {
-                crate::config::UnknownArguments::Warn => crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsIgnored,
-                crate::config::UnknownArguments::Strict => crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsRejected,
+                crate::config::UnknownArguments::Warn => {
+                    crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsIgnored
+                }
+                crate::config::UnknownArguments::Strict => {
+                    crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsRejected
+                }
             };
             for _ in &call.unknown_arguments {
-                control.diagnostics().record(event, crate::diagnostics::DiagnosticIds {
-                    thread_id: Some(snapshot.thread.clone()),
-                    run_id: Some(snapshot.run.clone()),
-                    turn_id: Some(snapshot.turn.clone()),
-                    ..Default::default()
-                });
+                control.diagnostics().record(
+                    event,
+                    crate::diagnostics::DiagnosticIds {
+                        thread_id: Some(snapshot.thread.clone()),
+                        run_id: Some(snapshot.run.clone()),
+                        turn_id: Some(snapshot.turn.clone()),
+                        ..Default::default()
+                    },
+                );
             }
         }
         if !call.unknown_arguments.is_empty()
@@ -39,10 +46,12 @@ pub(super) async fn run_tool_group(
                 ),
             );
             if let Err(error) = &call.args {
-                validation_errors.entry(call.call_id.clone()).and_modify(|message| {
-                    message.push(' ');
-                    message.push_str(error);
-                });
+                validation_errors
+                    .entry(call.call_id.clone())
+                    .and_modify(|message| {
+                        message.push(' ');
+                        message.push_str(error);
+                    });
             }
             continue;
         }
@@ -53,13 +62,21 @@ pub(super) async fn run_tool_group(
                 continue;
             }
         };
-        for (parameter, encoding) in [("input_encoding", &args.input_encoding), ("output_encoding", &args.output_encoding)] {
+        for (parameter, encoding) in [
+            ("input_encoding", &args.input_encoding),
+            ("output_encoding", &args.output_encoding),
+        ] {
             if let Err(error) = crate::shell::encode_input(
                 "",
                 encoding,
                 control.store.config.limits.shell_stdin_bytes,
             ) {
-                validation_errors.insert(call.call_id.clone(), format!("Invalid shell parameter {parameter}: expected supported encoding; {error}"));
+                validation_errors.insert(
+                    call.call_id.clone(),
+                    format!(
+                        "Invalid shell parameter {parameter}: expected supported encoding; {error}"
+                    ),
+                );
             }
         }
         if let Some(text) = &args.initial_stdin

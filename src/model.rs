@@ -285,10 +285,14 @@ fn parse_shell_arguments(raw: &str) -> (Result<ShellToolArgs, String>, Vec<Strin
         for name in ["command", "input_encoding", "output_encoding"] {
             if let Some(text) = object.get(name).and_then(Value::as_str) {
                 if text.is_empty() {
-                    return Err(format!("Invalid shell parameter {name}: expected non-empty string"));
+                    return Err(format!(
+                        "Invalid shell parameter {name}: expected non-empty string"
+                    ));
                 }
                 if text.contains('\0') {
-                    return Err(format!("Invalid shell parameter {name}: expected string without NUL"));
+                    return Err(format!(
+                        "Invalid shell parameter {name}: expected string without NUL"
+                    ));
                 }
             }
         }
@@ -785,7 +789,12 @@ mod shell_argument_policy_tests {
         assert!(args.unwrap_err().contains("command"));
         assert_eq!(unknown, ["timeout"]);
         for raw in [r#"{}"#, r#"{"command":""}"#, r#"{"command":false}"#] {
-            assert!(parse_shell_arguments(raw).0.unwrap_err().contains("command"));
+            assert!(
+                parse_shell_arguments(raw)
+                    .0
+                    .unwrap_err()
+                    .contains("command")
+            );
         }
     }
     #[test]
@@ -794,7 +803,8 @@ mod shell_argument_policy_tests {
         let large = "x".repeat(MAX_TOOL_ARGUMENT_BYTES + 1);
         let raw = json!({"status":"completed","output":[item("a",large)]});
         assert!(ModelResponse::completed(raw, true).is_err());
-        let raw = json!({"status":"completed","output":[item("a","{}".into()),item("a","{}".into())]});
+        let raw =
+            json!({"status":"completed","output":[item("a","{}".into()),item("a","{}".into())]});
         assert!(ModelResponse::completed(raw, true).is_err());
     }
 }
