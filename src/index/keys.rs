@@ -157,6 +157,7 @@ mod tests {
         let auto = AutoAdmission {
             recovery: false,
             recovery_group: None,
+            recovery_authorization: None,
             recovery_witness: None,
             recovery_body_kind: None,
             node_id: "node".into(),

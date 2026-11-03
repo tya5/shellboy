@@ -448,6 +448,7 @@ impl IndexService {
             let value = serde_json::to_string(&AutoAdmission {
                 recovery: false,
                 recovery_group: None,
+                recovery_authorization: None,
                 recovery_witness: None,
                 recovery_body_kind: None,
                 node_id: node_id.clone(),
@@ -537,15 +538,13 @@ impl IndexService {
         }
     }
     async fn drain_authorization(&self, key: &str) -> Result<bool, ApiError> {
-        if !self.config.indexing.auto_history {
-            return Ok(false);
-        }
+        let auto_history = self.config.indexing.auto_history;
         let range = IndexKeys::new(key).auto_range();
         let profile = key.to_owned();
         let family = self.failure_key().map(str::to_owned);
         let Some((discarded, admission)) = self
             .background_unit(SCHEDULE_UNIT, move |db, _| {
-                queue::claim_authorization(db, &range, &profile, family.as_deref())
+                queue::claim_authorization(db, &range, &profile, family.as_deref(), auto_history)
             })
             .await?
         else {
@@ -556,11 +555,10 @@ impl IndexService {
             return Ok(discarded);
         };
         self.publish_saved(true); // claim_authorization committed pending -> running
-        let authorization = if admission.recovery {
-            "new-finalized-recovery"
-        } else {
-            "new-finalized"
-        };
+        let authorization = admission
+            .recovery_authorization
+            .as_deref()
+            .unwrap_or("new-finalized");
         let admission_group = admission.recovery_group.as_deref().unwrap_or("active");
         match self
             .enqueue(
@@ -587,11 +585,7 @@ impl IndexService {
                         .enqueue(
                             std::slice::from_ref(&admission.node_id),
                             group,
-                            if admission.recovery {
-                                "new-finalized-recovery-during-rebuild"
-                            } else {
-                                "new-finalized-during-rebuild"
-                            },
+                            "new-finalized-during-rebuild",
                             None,
                         )
                         .await
@@ -966,13 +960,15 @@ impl IndexService {
                             .iter()
                             .cloned()
                             .map(|segment| {
-                                Work::pending(
+                                let mut work = Work::pending(
                                     source.witness.canonical(),
                                     body_kind.clone(),
                                     segment,
                                     group,
                                     authorization,
-                                )
+                                );
+                                work.recovery = expected.is_some();
+                                work
                             })
                             .collect();
                         let (inserted, total) = self.enqueue_batch(&key, work).await?;
@@ -997,13 +993,15 @@ impl IndexService {
                         let work: Vec<_> = segments
                             .into_iter()
                             .map(|segment| {
-                                Work::pending(
+                                let mut work = Work::pending(
                                     source.witness.clone(),
                                     "tool_raw".into(),
                                     segment,
                                     group,
                                     authorization,
-                                )
+                                );
+                                work.recovery = expected.is_some();
+                                work
                             })
                             .collect();
                         for batch in work.chunks(128) {
@@ -1033,10 +1031,27 @@ impl IndexService {
             let key = key.clone();
             let group = group.to_owned();
             let enqueue_ok = enqueue_result.is_ok();
+            let failure_recorded = if !enqueue_ok {
+                let key = key.clone();
+                let group = group.clone();
+                self.database
+                    .call(move |db| {
+                        let tx = db.transaction()?;
+                        set_meta(&tx, &IndexKeys::new(&key).enqueue_failed(&group), "1")?;
+                        tx.commit()?;
+                        Ok(())
+                    })
+                    .await
+                    .map_err(db_error)
+            } else {
+                Ok(())
+            };
+            self.publish_saved(!enqueue_ok && failure_recorded.is_ok());
+            let release_group = group.clone();
             self.database
                 .call(move |db| {
                     let tx = db.transaction()?;
-                    let barrier = IndexKeys::new(&key).enqueueing(&group);
+                    let barrier = IndexKeys::new(&key).enqueueing(&release_group);
                     let count = meta(&tx, &barrier)?
                         .and_then(|value| value.parse::<u64>().ok())
                         .unwrap_or(1);
@@ -1045,9 +1060,19 @@ impl IndexService {
                     } else {
                         set_meta(&tx, &barrier, &(count - 1).to_string())?;
                     }
-                    if !enqueue_ok {
-                        set_meta(&tx, &IndexKeys::new(&key).enqueue_failed(&group), "1")?;
-                    }
+                    tx.commit()?;
+                    Ok(())
+                })
+                .await
+                .map_err(db_error)?;
+            self.publish_saved(true);
+            // Neither failure recording nor activation can roll back release.
+            failure_recorded?;
+            let key = self.key()?.to_owned();
+            let group = group.clone();
+            self.database
+                .call(move |db| {
+                    let tx = db.transaction()?;
                     if enqueue_ok {
                         maybe_activate_candidate(&tx, IndexKeys::new(&key), &group)?;
                     }

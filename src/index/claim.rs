@@ -20,14 +20,14 @@ pub(super) fn discard_paused(
     }
     for prefix in [keys.auto(""), keys.bootstrap("")] {
         let upper = format!("{}/", &prefix[..prefix.len() - 1]);
-        let key: Option<String> = tx.query_row("SELECT key FROM app_meta WHERE key>=?1 AND key<?2 AND json_extract(value,'$.state') IN ('pending','failed') AND COALESCE(json_extract(value,'$.recovery'),0) != 1 AND COALESCE(json_extract(value,'$.authorization'),'') NOT LIKE 'new-finalized-recovery%' ORDER BY key LIMIT 1", params![prefix, upper], |r| r.get(0)).optional()?;
+        let key: Option<String> = tx.query_row("SELECT key FROM app_meta WHERE key>=?1 AND key<?2 AND json_extract(value,'$.state') IN ('pending','failed') AND COALESCE(json_extract(value,'$.recovery'),0) != 1 ORDER BY key LIMIT 1", params![prefix, upper], |r| r.get(0)).optional()?;
         if let Some(key) = key {
             tx.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
             tx.commit()?;
             return Ok(Some(true));
         }
     }
-    let job: Option<String> = tx.query_row("SELECT j.id FROM index_space s JOIN embedding_job j ON j.space_id=s.id WHERE s.splitter_version=?1 AND j.state IN ('pending','failed') AND COALESCE(CASE WHEN json_valid(j.authorized_watermark) THEN json_extract(j.authorized_watermark,'$.authorization') END,'') NOT LIKE 'new-finalized-recovery%' LIMIT 1", [keys.splitter()], |r| r.get(0)).optional()?;
+    let job: Option<String> = tx.query_row("SELECT j.id FROM index_space s JOIN embedding_job j ON j.space_id=s.id WHERE s.splitter_version=?1 AND j.state IN ('pending','failed') AND COALESCE(CASE WHEN json_valid(j.authorized_watermark) THEN json_extract(j.authorized_watermark,'$.recovery') END,0) != 1 LIMIT 1", [keys.splitter()], |r| r.get(0)).optional()?;
     if let Some(job) = job {
         tx.execute(
             "DELETE FROM app_meta WHERE key=?1",

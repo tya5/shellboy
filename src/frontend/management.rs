@@ -147,6 +147,13 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
         ],
     );
     presentation::fields::decorate(&mut fields, &safe);
+    for field in &mut fields {
+        if let Some(display) =
+            presentation::fields::index_recovery_value(&field.key, &field.value, language)
+        {
+            field.display = Some(display);
+        }
+    }
     fields.extend(filter_fields);
     fn order(pointer: &str) -> (String, u8, String) {
         let (parent, key) = pointer.rsplit_once('/').unwrap_or(("", pointer));
@@ -1208,5 +1215,38 @@ mod completion_review_tests {
         assert!(english.is_ascii());
         let japanese = completion_text(UiLanguage::Ja, "fixture", false, &response);
         assert!(japanese.contains("受付結果: 失敗（raw error）"));
+    }
+}
+
+#[cfg(test)]
+mod index_recovery_reason_tests {
+    use super::*;
+
+    #[test]
+    fn manual_rebuild_reason_is_bilingual_without_changing_raw_saved_values() {
+        let raw = "other saved reason; index_manual_rebuild_required";
+        let saved = serde_json::json!({"management":{"status":{"reason":raw}}});
+        for (language, expected) in [
+            (UiLanguage::En, "manual rebuild required"),
+            (UiLanguage::Ja, "手動再構築が必要"),
+        ] {
+            let report = report_in(language, saved.clone(), usize::MAX);
+            let field = report
+                .fields
+                .iter()
+                .find(|field| field.key == "/management/status/reason")
+                .unwrap();
+            assert_eq!(field.value, raw);
+            assert!(
+                field.displayed().contains(expected),
+                "{}",
+                field.displayed()
+            );
+            assert!(field.displayed().starts_with("other saved reason; "));
+            assert_eq!(
+                report.detail.as_ref().unwrap()["management"]["status"]["reason"],
+                raw
+            );
+        }
     }
 }

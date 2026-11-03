@@ -481,6 +481,11 @@ fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<Presentat
     // The adopted request's size facts (#186): measured bytes and reported
     // tokens, each localized on its own; never converted into each other.
     for field in &mut fields {
+        if let Some(display) =
+            crate::presentation::fields::index_recovery_value(&field.key, &field.value, language)
+        {
+            field.display = Some(display);
+        }
         if let Some(label) = crate::presentation::fields::attempt_label(&field.key, language) {
             field.label = label.into();
             field.display =
@@ -1769,6 +1774,27 @@ impl Details {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_rebuild_details_localize_at_render_time_without_changing_copy_value() {
+        let ui = state();
+        let mut node = ui.view().nodes()[0].clone();
+        node.presentation.fields = vec![PresentationField {
+            key: "/management/status/reason".into(),
+            label: "Reason".into(),
+            value: "index_manual_rebuild_required".into(),
+            display: None,
+            value_omitted: false,
+        }];
+        for (language, expected) in [
+            (UiLanguage::En, "manual rebuild required"),
+            (UiLanguage::Ja, "手動再構築が必要"),
+        ] {
+            let fields = conversation_fields_for(&node, language);
+            assert_eq!(fields[0].value, "index_manual_rebuild_required");
+            assert!(fields[0].displayed().contains(expected));
+        }
+    }
 
     #[test]
     fn event_entry_localizes_only_known_projection_and_preserves_saved_values() {

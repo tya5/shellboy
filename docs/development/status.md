@@ -4296,3 +4296,21 @@ from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
 `rag init`. Anonymous download and `SHA256SUMS` verification covered all six
 public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
 - #172: startup index recovery uses bounded indexed pages before workers start. Oversized work is split to the 1 MiB serialized limit. Identifiable legacy sources return to the existing held-aware admission path; unidentifiable work leaves a visible manual-rebuild requirement. No automatic full rebuild is triggered. Validation and CI are recorded in the handoff.
+
+## #172 review follow-up on 461685ff
+
+An isolated follow-up branch preserves original recovery authorization separately
+from pause-retention provenance, commits enqueue barrier release independently
+of failure recording/activation, and localizes a neutral manual-rebuild reason
+only in management/details display. Migration stays 25 until integration after
+the 0.7.1 hotfix and #194; #172 has the exact file checklist for renumbering this
+migration to 26. Existing whole-Vec authorization recovery is tracked in #203,
+not changed. W3 hotfix files/worktrees are out of scope. Native focused checks
+and final default-scope CI remain pending at this record point.
+
+#172 numbering clarification: the older 25-to-26 checklist is superseded by the
+latest instruction to wait for explicit hotfix-landed confirmation, then plan
+hotfix 25 / #194 26 / #172 27. No renumbering is performed in this follow-up.
+Publication targets the requested baseline 461685ff and its existing remote
+branch, preserving review ancestry rather than rebasing these migration changes
+onto main before the separately coordinated integration.
