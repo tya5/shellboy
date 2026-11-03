@@ -208,13 +208,18 @@ impl Guard {
 }
 
 pub(super) fn has_new_marks(previous: &[String], current: &[String], kind: &str) -> bool {
-    current.iter().filter(|mark| mark.starts_with(kind)).any(|mark| {
-        let Some((key, chars)) = parse_mark(mark) else { return false; };
-        match previous.binary_search_by(|old| mark_key(old).cmp(key)) {
-            Ok(index) => parse_mark(&previous[index]).is_some_and(|(_, old)| chars > old),
-            Err(_) => true,
-        }
-    })
+    current
+        .iter()
+        .filter(|mark| mark.starts_with(kind))
+        .any(|mark| {
+            let Some((key, chars)) = parse_mark(mark) else {
+                return false;
+            };
+            match previous.binary_search_by(|old| mark_key(old).cmp(key)) {
+                Ok(index) => parse_mark(&previous[index]).is_some_and(|(_, old)| chars > old),
+                Err(_) => true,
+            }
+        })
 }
 
 fn hex_digest(value: &str) -> bool {
@@ -530,7 +535,11 @@ mod tests {
         assert!(!has_new_marks(&before, &[mark("middle", 1, 99)], "middle:"));
         assert!(has_new_marks(&before, &[mark("middle", 1, 101)], "middle:"));
         assert!(has_new_marks(&before, &[mark("middle", 2, 1)], "middle:"));
-        assert!(!has_new_marks(&before, &[mark("spill", 2, 1000)], "middle:"));
+        assert!(!has_new_marks(
+            &before,
+            &[mark("spill", 2, 1000)],
+            "middle:"
+        ));
     }
 
     #[test]

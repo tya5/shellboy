@@ -4697,38 +4697,72 @@ async fn proactive_target_widens_in_one_attempt_and_keeps_usage() {
     crate::test_watchdog::watchdog("proactive target same-attempt widening", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let owner =
+            proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
         for n in 0..2 {
             send(&control, &target, &format!("old-{n} {}", "a".repeat(4000))).await;
-            incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("old answer", 50_000))).unwrap();
+            incoming(&control, &mut receive)
+                .await
+                .reply
+                .send((200, answer_with_usage("old answer", 50_000)))
+                .unwrap();
             settled(&control, &target).await;
         }
-        send(&control, &target, &format!("current {}", "b".repeat(40_000))).await;
+        send(
+            &control,
+            &target,
+            &format!("current {}", "b".repeat(40_000)),
+        )
+        .await;
         for (n, tokens) in [(0, 50_000), (1, 50_000), (2, 201_061)] {
             let response = json!({"id":format!("widen-{n}"),"status":"completed",
-                "usage":{"input_tokens":tokens,"output_tokens":1},"output":[
-                    {"type":"function_call","call_id":format!("widen-{n}"),"name":"shell",
-                     "arguments":json!({"command":format!("echo WIDEN{n}")}).to_string()}
-                ]});
-            incoming(&control, &mut receive).await.reply.send((200, response)).unwrap();
+            "usage":{"input_tokens":tokens,"output_tokens":1},"output":[
+                {"type":"function_call","call_id":format!("widen-{n}"),"name":"shell",
+                 "arguments":json!({"command":format!("echo WIDEN{n}")}).to_string()}
+            ]});
+            incoming(&control, &mut receive)
+                .await
+                .reply
+                .send((200, response))
+                .unwrap();
         }
         let prefix = incoming(&control, &mut receive).await;
         assert_eq!(prefix.body["tools"], json!([]));
-        prefix.reply.send((200, answer_with_usage("## Goal\nOld work", 11))).unwrap();
+        prefix
+            .reply
+            .send((200, answer_with_usage("## Goal\nOld work", 11)))
+            .unwrap();
         let middle = incoming(&control, &mut receive).await;
-        assert_eq!(middle.body["tools"], json!([]), "widen before the next ordinary request");
+        assert_eq!(
+            middle.body["tools"],
+            json!([]),
+            "widen before the next ordinary request"
+        );
         assert!(middle.body["input"].to_string().contains("WIDEN0"));
-        middle.reply.send((200, answer_with_usage("## Goal\nWork done", 13))).unwrap();
+        middle
+            .reply
+            .send((200, answer_with_usage("## Goal\nWork done", 13)))
+            .unwrap();
         let after = incoming(&control, &mut receive).await;
         assert_ne!(after.body["tools"], json!([]));
-        after.reply.send((200, answer_with_usage("done", 100_000))).unwrap();
+        after
+            .reply
+            .send((200, answer_with_usage("done", 100_000)))
+            .unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
         assert_eq!(events.len(), 1, "{events:#?}");
         assert_eq!(events[0]["metrics"]["summary_usage"]["requests"], 2);
-        assert_eq!(events[0]["metrics"]["summary_usage"]["input_tokens"]["known_sum"], 24);
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-    }).await.unwrap();
+        assert_eq!(
+            events[0]["metrics"]["summary_usage"]["input_tokens"]["known_sum"],
+            24
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
 }

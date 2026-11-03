@@ -224,11 +224,15 @@ pub(super) async fn maybe_compact(
             .as_ref()
             .is_none_or(|marks| marks.iter().any(|mark| mark.starts_with(kind))),
     };
-    let widened_active = evidence.exhausted_active && match (&evidence.baseline_marks, &marks) {
-        (Some(previous), Some(current)) => guard::has_new_marks(previous, current, "middle:"),
-        _ => false,
-    };
-    let spill_new = !evidence.insufficient_prefix && !evidence.insufficient_spill && !evidence.exhausted_active && has_kind("spill:");
+    let widened_active = evidence.exhausted_active
+        && match (&evidence.baseline_marks, &marks) {
+            (Some(previous), Some(current)) => guard::has_new_marks(previous, current, "middle:"),
+            _ => false,
+        };
+    let spill_new = !evidence.insufficient_prefix
+        && !evidence.insufficient_spill
+        && !evidence.exhausted_active
+        && has_kind("spill:");
     let summary_new = !evidence.insufficient_prefix
         && has_kind("summary:")
         && !(marks.is_none()
@@ -236,7 +240,11 @@ pub(super) async fn maybe_compact(
                 .guard
                 .as_ref()
                 .is_some_and(|guard| guard.blocks_unknown_summary(snapshot)));
-    let middle_new = if evidence.exhausted_active { widened_active } else { has_kind("middle:") };
+    let middle_new = if evidence.exhausted_active {
+        widened_active
+    } else {
+        has_kind("middle:")
+    };
     let any_summary_new = middle_new || summary_new;
     let no_growth = !spill_new && !any_summary_new;
     let ids = crate::diagnostics::DiagnosticIds {
@@ -560,8 +568,14 @@ pub(super) async fn maybe_compact(
     // Record on the attempt whose reported usage triggered this decision, in the
     // existing automatic-compaction field and partial index (no new table).
     let baseline = if adopted && target_plan.is_some() && summary_scope == "active_turn" {
-        guard::candidates(control, &snapshot.thread, None).await.ok().flatten().map(|c| c.marks)
-    } else { None };
+        guard::candidates(control, &snapshot.thread, None)
+            .await
+            .ok()
+            .flatten()
+            .map(|c| c.marks)
+    } else {
+        None
+    };
     let pending_target = if adopted {
         target_plan.map(|plan| {
             let scope = if summary_scope.is_empty() { "spill" } else { summary_scope };
@@ -604,7 +618,7 @@ struct Order {
     ordinary_new: bool,
 }
 
-/// One summary operation per attempt. #182 order: the ordinary summary of
+/// Select one summary operation. #182 order: the ordinary summary of
 /// earlier Turns first (oldest context matters least); the active-Turn
 /// summary only when that prefix has nothing but earlier summaries, or when
 /// the previous attempt adopted the prefix summary and a fresh measurement is
