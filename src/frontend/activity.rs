@@ -433,18 +433,11 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             if let Some(details) = error.as_ref().and_then(|e| e.details.as_ref()) {
                 let facts = &details["recovery"];
                 if facts.is_object() {
-                    let values = (
-                        details["automatic_retries"].clone(),
-                        details["retry_limit"].clone(),
-                        facts["protected_request"]["bytes"].clone(),
-                        facts["protected_latest_tool"]["bytes"].clone(),
-                    );
-                    stage_detail_values = Some(values.clone());
                     stage_details = Some(RecoveryStageDetails {
-                        retries: values.0,
-                        retry_limit: values.1,
-                        request_bytes: values.2,
-                        tool_bytes: values.3,
+                        retries: details["automatic_retries"].clone(),
+                        retry_limit: details["retry_limit"].clone(),
+                        request_bytes: facts["protected_request"]["bytes"].clone(),
+                        tool_bytes: facts["protected_latest_tool"]["bytes"].clone(),
                     });
                     if let Some(actions) = facts["actions"].as_array() {
                         message.push_str(crate::ui::text_width::glyphs::separator());
@@ -474,27 +467,9 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                     .and_then(|e| e.details.as_ref())
                     .and_then(|d| d.get("content_filter"))
                     .and_then(|v| serde_json::from_value(v.clone()).ok()),
-                stage: if let Some((retries, retry_limit, request_bytes, tool_bytes)) =
-                    stage_detail_values
-                {
-                    let separator = crate::ui::text_width::glyphs::separator();
-                    format!(
-                        "{}{separator}retry {retries}/{retry_limit}{separator}request {request_bytes}B{separator}tool {tool_bytes}B",
-                        stage.localized(crate::config::UiLanguage::Ja)
-                    )
-                } else {
-                    stage.localized(crate::config::UiLanguage::Ja).into()
-                },
-                stage_kind: Some(stage),
+                stage,
                 stage_details,
-                message: if message_is_fallback {
-                    crate::ui::activity::saved_recovery_reason_unavailable(
-                        crate::config::UiLanguage::Ja,
-                    )
-                    .into()
-                } else {
-                    message
-                },
+                message,
                 message_is_fallback,
                 pending_messages,
                 saved_tool_results,
@@ -763,7 +738,7 @@ mod tests {
         );
         let recovery = projection.snapshot.recovery.unwrap();
         assert_eq!(recovery.message, "saved reason");
-        assert_eq!(recovery.stage_kind, Some(RecoveryStage::ModelRequest));
+        assert_eq!(recovery.stage, RecoveryStage::ModelRequest);
         assert_eq!(recovery.live_shells, 0);
         assert!(
             projection.poll_running,

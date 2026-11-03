@@ -153,8 +153,7 @@ pub struct RecoverySnapshot {
     pub resolved: bool,
     pub usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     pub content_filter: Option<crate::model::content_filter::ContentFilterFacts>,
-    pub stage: String,
-    pub stage_kind: Option<RecoveryStage>,
+    pub stage: RecoveryStage,
     pub stage_details: Option<RecoveryStageDetails>,
     pub message: String,
     pub message_is_fallback: bool,
@@ -167,10 +166,7 @@ pub struct RecoverySnapshot {
 }
 impl RecoverySnapshot {
     pub fn stage_localized(&self, language: UiLanguage) -> String {
-        let stage = self
-            .stage_kind
-            .map(|kind| kind.localized(language))
-            .unwrap_or(&self.stage);
+        let stage = self.stage.localized(language);
         let Some(details) = &self.stage_details else {
             return stage.to_owned();
         };

@@ -609,7 +609,10 @@ async fn human_model_failure_message_keeps_saved_error_and_does_not_guess_prefix
         Ok(())
     }).await.unwrap();
     let recovery = projection(&db).await.snapshot.recovery.unwrap();
-    assert_eq!(recovery.stage, "モデル要求");
+    assert_eq!(
+        recovery.stage,
+        shellboy::ui::activity::RecoveryStage::ModelRequest
+    );
     assert_eq!(recovery.message, model.message);
     let mut config = shellboy::config::Config::default();
     config.ui.language = shellboy::config::UiLanguage::Ja;
@@ -855,10 +858,16 @@ async fn exhausted_retry_recovery_stage_requires_exact_saved_model_and_counts() 
         .unwrap();
         let recovery = projection(&db).await.snapshot.recovery.unwrap();
         if known {
-            assert_eq!(recovery.stage, "モデル要求");
+            assert_eq!(
+                recovery.stage,
+                shellboy::ui::activity::RecoveryStage::ModelRequest
+            );
             assert_eq!(recovery.message, format!("{}{suffix}", model.message));
         } else {
-            assert_eq!(recovery.stage, "処理（段階の記録なし）");
+            assert_eq!(
+                recovery.stage,
+                shellboy::ui::activity::RecoveryStage::Unrecorded
+            );
             assert_eq!(recovery.message, reason);
         }
         let unchanged = db

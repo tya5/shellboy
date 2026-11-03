@@ -184,10 +184,7 @@ fn observed_age_and_unknown_saved_age_remain_distinct_in_both_languages() {
 #[test]
 fn recovery_diagnostics_have_complete_localized_text_and_keep_raw_messages() {
     let stage = RecoverySnapshot {
-        stage: RecoveryStage::ModelContextLimit
-            .localized(UiLanguage::Ja)
-            .to_owned(),
-        stage_kind: Some(RecoveryStage::ModelContextLimit),
+        stage: RecoveryStage::ModelContextLimit,
         stage_details: Some(RecoveryStageDetails {
             retries: serde_json::json!(2),
             retry_limit: serde_json::json!(3),
