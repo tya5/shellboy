@@ -9202,3 +9202,7 @@ remain present. Release-upgrade fixtures preserve 0.6.1 support and both main's
 byte-accounting and reply cancellation driver tests survive the rebase. Native
 strict Clippy/focused tests and final default CI are pending; no real provider,
 installed binary or user data is used.
+Rebase follow-up: main's newly introduced compaction-effect Python fixture now
+expects this branch's current schema 25 (no migration renumbering). All 190
+Python script tests passed on macOS; strict all-target Clippy also passed.
+Focused native tests and publication/CI remain pending at this record point.
