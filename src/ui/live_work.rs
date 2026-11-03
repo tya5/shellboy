@@ -2359,7 +2359,10 @@ mod language_tests {
                 .column_label()
                 .into();
             if !matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), "Recovery");
+                assert_eq!(
+                    WorkMessage::state(&row).render(UiLanguage::En),
+                    "Recovery needed"
+                );
                 assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), row.state);
             } else {
                 row.state = "live".into();
