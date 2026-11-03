@@ -9126,6 +9126,13 @@ synthetic upgrade test on the candidate; no candidate, tag, publication or
 installed-binary change is claimed by this preparation.
 Startup index recovery (#172): local synthetic tests exercise row and byte
 batching, restart, oversized single records, and index query plans. Python
-upgrade fixtures cover schema 24 to 25. Paused-consumer integration and 3-OS
-CI are not yet established by these focused tests; actual provider behavior
-and billing are not tested.
+upgrade fixtures cover schema 24 to 25. For a live-database migration timing
+measurement on 2026-11-03, a private SQLite `.backup` snapshot was made while
+the source was opened read-only; no row contents were printed. The snapshot
+was 2,875,023,360 bytes (701,910 pages at 4,096 bytes/page), with
+`user_version=24`, measured using SQLite 3.51.0. Creating and verifying
+`jobs_running_recovery` on that copy took 0.563808 s; the complete migration
+transaction took 0.573032 s. Creating the backup took 842.571 s; that is copy
+time, not migration time. This is one machine and one database snapshot, not a
+startup latency guarantee. The source database was not modified. Actual
+provider behavior and billing are not tested.
