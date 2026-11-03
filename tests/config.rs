@@ -132,6 +132,9 @@ fn every_section_rejects_unknown_keys_and_wrong_types() {
         "[workers]\nbogus=1",
         "[indexing]\nbogus=1",
         "[ui]\nbogus=1",
+        "[ui]\nambiguous_width='auto'",
+        "[ui]\nambiguous_width='one'",
+        "[ui]\nambiguous_width='two'",
         "[logging]\nbogus=1",
         "[compaction]\nconcurrency=1",
         "[limits]\ndraft_bytes='1 MiB'",
@@ -140,6 +143,16 @@ fn every_section_rejects_unknown_keys_and_wrong_types() {
         assert!(Config::parse(source).is_err(), "accepted {source}");
     }
 }
+#[test]
+fn removing_only_manual_width_key_preserves_other_ui_configuration() {
+    let old = "[ui]\nsend_key='Ctrl+Enter'\nnewline_keys=['Enter']\nambiguous_width='two'\n";
+    assert!(Config::parse(old).is_err());
+    let migrated = old.replace("ambiguous_width='two'\n", "");
+    let config = Config::parse(&migrated).unwrap();
+    assert_eq!(config.ui.send_key, "Ctrl+Enter");
+    assert_eq!(config.ui.newline_keys, ["Enter"]);
+}
+
 #[test]
 fn invariants_are_rejected_without_clamping() {
     for source in [

@@ -4,6 +4,23 @@
 
 Configuration is TOML read when the owner (`shellboy` without a subcommand) starts, or when `config check` runs. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner.
 
+## Migrating terminal width configuration
+
+Builds containing the terminal-input redesign remove `ui.ambiguous_width`, the
+manual one/two-column override for East Asian Ambiguous characters introduced
+in v0.7.0. Remove only `ambiguous_width = ...` from your existing `[ui]` section;
+keep its other settings. There is no replacement option. Leaving this key in
+place causes the strict parser to reject the **whole configuration**, rather
+than ignoring it. Restart using the same configuration path after editing.
+
+Terminal capability measurement now starts without blocking input or the first
+frame. A cached successful observation is an initial baseline, not a user
+override; late observations can update rendering. Missing or inconsistent
+measurements remain unknown and use conservative fallback glyphs and widths.
+Guessed measurements are never saved. The release identifier for this change
+is pending the release owner's decision; see the
+[terminal width migration note](../development/release-next-terminal-width-draft.md).
+
 ## First setup without an owner
 
 Published v0.3.0 predates these setup commands. With that older binary, create the
@@ -753,22 +770,7 @@ the saved comparison ID instead of borrowing the Thread's current last ID.
 
 ## Terminal Ambiguous Width
 
-`ui.ambiguous_width` controls characters whose terminal width varies:
-
-```toml
-[ui]
-ambiguous_width = "cached"
-```
-
-The default `cached` probes once per terminal program and version (or `TERM`
-when program identity is unavailable), and remembers a successful result in
-its data directory. If no terminal identity is available, Shellboy probes on
-every launch. `probe` measures on every launch; `narrow` forces width 1 and
-`wide` forces width 2. If measurement fails, Shellboy uses the conservative
-glyph fallback and does not cache a guessed result.
-
-If the display becomes misaligned after changing terminal settings or fonts,
-set `ambiguous_width = "probe"`, restart in that terminal and allow the probe
-to complete, then switch back to `cached`. A successful probe refreshes that
-terminal's cached result. If the terminal does not answer, the cache is not
-replaced; choose `narrow` or `wide` explicitly instead.
+Shellboy automatically measures the terminal's ambiguous-character width.
+It remembers successful observations per terminal identity and never saves a
+guessed result. When no observation is available, it uses conservative
+fallback glyphs and reserves wider character widths.

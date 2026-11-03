@@ -15,6 +15,14 @@ class VtScreenTests(unittest.TestCase):
         screen.feed('u')
         self.assertTrue(screen.text().startswith('ready'))
 
+    def test_private_cursor_query_is_ignored_across_every_split(self):
+        query = '\x1b[?6n'
+        for split in range(len(query) + 1):
+            screen = vt.Screen(12, 2)
+            screen.feed('ready' + query[:split])
+            screen.feed(query[split:] + '!')
+            self.assertTrue(screen.text().startswith('ready!'))
+
     def test_cursor_erase_and_split_control_sequences(self):
         screen = vt.Screen(12, 3)
         for chunk in ['abc', '\x1b[2;', '3Hxy', '\x1b[1G!', '\x1b[K']:

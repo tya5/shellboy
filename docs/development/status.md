@@ -3,6 +3,14 @@
 ## Shell unknown argument policy
 
 Warn is the default; strict rejects individual calls. Argument failures no longer cancel otherwise valid calls in the same group. See [Control design](../design/control.md#shell-argument-policy). Three-OS CI and independent review are pending.
+## Nonblocking terminal capability queries (#192, implementation pending)
+
+The adopted target removes `ui.ambiguous_width` and measures on every launch
+without delaying the first frame. The capability reader, asynchronous cache
+updates, input filtering, config removal, release note and requested fake
+terminal tests remain unimplemented. Some glyphs are rendered directly as Unicode
+East Asian Neutral rather than ASCII; arbitrary terminal behavior is unverified.
+
 
 ## #194 step 1: "answer" renamed to "end message" (branch `issue-194/step1-end-message`)
 
@@ -4422,3 +4430,27 @@ CI on this requested baseline selects Linux; dispatch and outcome are pending.
 and pending-reply index 26. Synthetic upgrade checks cover starts 24, 25, and
 26; W3 recovery authorization, independent barrier release, bounded bootstrap
 records, and bilingual status remain in the rebased branch.
+## #192 session-owned input continuation
+
+Continue W4's adopted design and filter on a task-isolated branch rebased onto
+226c4f6d. Replace blocking Unix capability helpers with one session-owned reader;
+Windows native console input sends no VT probes. Implementation and validation
+are pending. #194 is accepted and frozen until explicit hotfix-landed notice;
+no migration changes are included here.
+
+#192 session integration: startup and normal UI share the same input owner;
+queries precede the first draw without awaiting replies. Late measurements
+invalidate width-keyed display caches, redraw, and persist via the existing
+owner guard off the UI thread. Cached width is only the initial baseline.
+macOS strict Clippy and focused decoder/filter/PTY/restoration tests passed;
+three-OS CI and further error-retention coverage follow in the next stage.
+
+#192 macOS CI follow-up: the exact `8e5cc49f` CI failed the force-shutdown PTY
+Esc-return transition. Protected local reproduction traced Darwin `POLLNVAL`
+for `/dev/tty`, followed by `WouldBlock`, starving idle Escape finalization.
+The macOS `select` readiness correction passed strict all-target Clippy,
+focused decoder/readiness tests and three consecutive protected-binary shutdown
+PTY runs; other Unix retains `poll` with explicit invalid-descriptor errors.
+Landing remains blocked pending corrected-tip local checks, W8 re-review and
+exact-tip three-OS CI. Shared-target test artifacts must be rebuilt from current
+crate roots and copied before invoking subprocess tests.

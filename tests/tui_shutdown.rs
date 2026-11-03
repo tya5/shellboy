@@ -61,6 +61,12 @@ async fn until(terminal: &mut File, output: &mut Vec<u8>, needle: &[u8]) {
     })
     .await
     .unwrap_or_else(|error| {
+        // The bounded synthetic transcript must survive CI artifact collection;
+        // start/tail alone cannot reconstruct a diff-rendered shutdown screen.
+        eprintln!(
+            "SHUTDOWN_VT_CAPTURE_JSON={}",
+            serde_json::to_string(&String::from_utf8_lossy(output)).unwrap()
+        );
         let start = output.len().saturating_sub(4096);
         panic!(
             "Expected terminal state {:?} did not arrive: {error}; terminal start: {:?}; terminal tail: {:?}",
@@ -77,7 +83,10 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     let data = root.path().join("data");
     std::fs::write(&config, "[io]\nshutdown_grace_ms=50\n").unwrap();
     let (mut terminal, slave) = pty();
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+    // A copied binary keeps other shared-target builds from changing the child.
+    let binary = std::env::var_os("SHELLBOY_TEST_BINARY")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_shellboy").into());
+    let mut command = tokio::process::Command::new(binary);
     // Size/input APIs may prefer /dev/tty over stdio. Give this child only the
     // disposable PTY, never the parent's interactive controlling terminal.
     unsafe {
@@ -114,6 +123,7 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     // No request/side effect is started. Force exit interrupts this deliberately
     // expensive DB instruction after the UI grace/confirmation, not a sleep.
     db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('force-thread','/tmp','/tmp/AGENTS.md','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('force-run','force-thread','live','now'); CREATE TRIGGER fixture_block_shutdown BEFORE UPDATE OF state ON run WHEN OLD.id='force-run' BEGIN SELECT (WITH RECURSIVE counter(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter); END;").unwrap();
+    eprintln!("shutdown phase: Ctrl+Q to initial graceful wait");
     terminal.write_all(&[0x11]).unwrap();
     output.clear();
     until(&mut terminal, &mut output, b"W/Enter:").await;
@@ -122,6 +132,7 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
         "Grace must not silently force exit"
     );
     for return_key in [Some(b'n'), Some(0x1b), None] {
+        eprintln!("shutdown phase: force confirmation, return={return_key:?}");
         terminal.write_all(b"f").unwrap();
         output.clear();
         // A diff frame may separate a key from its following blank with cursor

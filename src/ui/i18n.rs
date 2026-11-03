@@ -328,10 +328,8 @@ mod rendering_tests {
             UiLanguage::En
         );
         assert!(Config::parse("[ui]\nlanguage='fr'").is_err());
-        assert!(Config::parse("[ui]\nambiguous_width=2").is_err());
         for value in ["cached", "probe", "narrow", "wide"] {
-            assert!(Config::parse(&format!("[ui]\nambiguous_width='{value}'")).is_ok());
+            assert!(Config::parse(&format!("[ui]\nambiguous_width='{value}'")).is_err());
         }
-        assert!(Config::parse("[ui]\nambiguous_width='other'").is_err());
     }
 }

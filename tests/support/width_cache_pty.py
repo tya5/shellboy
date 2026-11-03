@@ -40,12 +40,12 @@ def sample(binary, root, config, env, respond):
                 continue
             data = os.read(master, 65536)
             pending += data
-            while b'\x1b[6n' in pending:
-                _, pending = pending.split(b'\x1b[6n', 1)
+            while b'\x1b[?6n' in pending:
+                _, pending = pending.split(b'\x1b[?6n', 1)
                 queries += 1
                 if respond:
-                    os.write(master, f'\x1b[11;{1 + queries * respond}R'.encode())
-            pending = pending[-4:]
+                    os.write(master, f'\x1b[?11;{1 + queries * respond}R'.encode())
+            pending = pending[-5:]
             for text in frames.feed(data):
                 now = (time.perf_counter() - start) * 1000
                 if first is None and text.strip():
@@ -84,21 +84,14 @@ def main():
         caches = list((root / 'data').glob('.terminal-width-*'))
         assert len(caches) == 1 and caches[0].read_bytes() == b'1\n', caches
         second = sample(binary, root, config, env, False)
-        assert second['dsr_queries'] == 0, second
-        config.write_text(config.read_text() + 'ambiguous_width="probe"\n')
-        refreshed = sample(binary, root, config, env, 2)
-        assert refreshed['dsr_queries'] == 2, refreshed
-        assert caches[0].read_bytes() == b'2\n', caches[0].read_bytes()
-        config.write_text(config.read_text().replace('ambiguous_width="probe"', 'ambiguous_width="cached"'))
+        assert second['dsr_queries'] == 2, second
+        assert caches[0].read_bytes() == b'1\n'
         changed = dict(env, TERM_PROGRAM_VERSION='2')
         new_version = sample(binary, root, config, changed, 1)
         assert new_version['dsr_queries'] == 2, new_version
-        config.write_text(config.read_text().replace('ambiguous_width="cached"', 'ambiguous_width="wide"'))
-        fixed = sample(binary, root, config, env, False)
-        assert fixed['dsr_queries'] == 0, fixed
-        print(json.dumps({'first': first, 'cached': second, 'refresh_wide': refreshed,
-                          'new_version': new_version, 'fixed_wide': fixed,
-                          'method': 'fake terminal completed frame; zero DSR on cached restart'}))
+        print(json.dumps({'first': first, 'cached': second,
+                          'new_version': new_version,
+                          'method': 'fake terminal completed frame; session-owned nonblocking private CPR'}))
 
 
 if __name__ == '__main__':
