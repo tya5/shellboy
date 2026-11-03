@@ -10,7 +10,7 @@ pub fn identity(
     let valid = |s: &str| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control);
     if let Some(p) = program.filter(|s| valid(s)) {
         let v = version.filter(|s| valid(s)).unwrap_or("");
-        Some(format!("program:{p}:{}:{v}", v.len()))
+        Some(format!("program:{}:{p}:{}:{v}", p.len(), v.len()))
     } else {
         term.filter(|s| valid(s)).map(|t| format!("term:{t}"))
     }
@@ -87,6 +87,10 @@ mod tests {
         assert_ne!(
             identity(Some("a"), Some("1"), None),
             identity(None, None, Some("a"))
+        );
+        assert_ne!(
+            identity(Some("x"), Some("abc:1:d"), None),
+            identity(Some("x:7:abc"), Some("d"), None)
         );
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "one", 1).unwrap();
