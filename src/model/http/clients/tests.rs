@@ -744,6 +744,15 @@ async fn usage_limit_slots_are_connection_bounded_shared_and_expire_on_tokio_clo
     assert!(one.active_usage_limit().is_some());
     tokio::time::advance(std::time::Duration::from_secs(2)).await;
     assert!(one.active_usage_limit().is_none());
+
+    one.remember_usage_limit(fact);
+    let mut newer = fact;
+    newer.resets_at += 60;
+    one.remember_usage_limit(newer);
+    one.clear_usage_limit_if(fact);
+    assert_eq!(one.active_usage_limit().unwrap().resets_at, newer.resets_at);
+    one.clear_usage_limit_if(newer);
+    assert!(one.active_usage_limit().is_none());
 }
 
 #[tokio::test]

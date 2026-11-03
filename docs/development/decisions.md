@@ -3038,3 +3038,6 @@ Less certain choices, with recheck conditions:
 - The Revisit count is derived from receipts through a new partial index
   instead of a stored counter. Recheck if the index shows up in write cost.
 
+## D-188: honor explicit usage-limit reset facts
+
+2026-11-03, user-approved for #188. When a provider explicitly identifies `usage_limit_reached` and supplies a valid reset time, skip automatic retries only if that reset is later than the complete remaining retry schedule; keep the ordinary retry policy for shorter resets or absent/invalid facts. Use existing recovery reason wording/symbols, preserve the fact and reset time, add no guessed values, settings, or provider fallback. Validate with synthetic responses and three-OS CI.

@@ -1792,6 +1792,34 @@ async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_ex
 }
 
 #[tokio::test]
+async fn short_explicit_usage_limit_keeps_the_normal_retry_schedule() {
+    let mut f = Fixture::new(8, 60_000, 120_000).await;
+    let reset = chrono::Utc::now().timestamp() + 30;
+    let body = json!({"error":{"type":"usage_limit_reached","resets_at":reset}}).to_string();
+    f.incoming()
+        .await
+        .reply
+        .send(Reply::http(429, "application/json", &body, ""))
+        .ok()
+        .unwrap();
+    f.incoming()
+        .await
+        .reply
+        .send(Reply::success())
+        .ok()
+        .unwrap();
+    assert_eq!(f.settled().await, "completed");
+    assert_eq!(usage_limit_log_lines(&f), 2);
+    let attempts = f.attempts().await;
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(
+        attempts[0].1.as_ref().unwrap()["automatic_retry"]["number"],
+        1
+    );
+    f.close().await;
+}
+
+#[tokio::test]
 async fn unknown_429_keeps_retry_policy_without_inferred_cooldown() {
     let mut f = Fixture::new(8, 60_000, 120_000).await;
     // Explicit zero backoff exercises the ordinary retry path without real sleep.

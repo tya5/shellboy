@@ -8920,3 +8920,7 @@ wait; see the rebased run below.
 ## #175 Shift+Enter Keyboard Enhancement
 
 Physical terminal verification is UNVERIFIED. No real terminal emulator or physical TTY was exercised for this change; synthetic PTY tests and 3-OS CI are not counted as physical-terminal success. No configuration setting was added.
+
+## Usage-limit retry cutoff (#188, validation pending)
+
+Synthetic HTTP responses must establish: an explicit reset beyond the complete remaining retry schedule is not resent and is shown through existing recovery reason wording with the reported kind/time; a reset within the schedule follows the regular retry schedule; no reset fact retains the existing retry policy. Run focused integration tests, `cargo check --tests`, and three-OS task CI. This does not establish provider-specific behavior outside represented response formats.

@@ -19,9 +19,6 @@ fn classify_retry(
     facts: &ResponseFacts,
     retry_partial: bool,
 ) -> RetryPolicy {
-    if error.usage_limit.is_some() {
-        return RetryPolicy::Ineligible;
-    }
     if facts.terminal_received && !error.is_context_limit() {
         return RetryPolicy::Ineligible;
     }
@@ -42,6 +39,7 @@ fn classify_retry(
     let transient_status = matches!(facts.status, Some(429 | 500..=599));
     let eligible = match error.kind.as_str() {
         "http" | "provider" => transient_status,
+        "usage_limit" => transient_status && error.usage_limit.is_some(),
         // An unfinished error body may fail before it can be decoded. Its
         // saved retryable HTTP status remains authoritative for this policy.
         "transport" | "timeout" | "incomplete" => {
@@ -114,6 +112,7 @@ pub(super) struct RetryBudget {
     turn: String,
     generation: i64,
     used: u32,
+    usage_limit_retry_fact: Option<model::usage_limit::UsageLimit>,
 }
 impl RetryBudget {
     pub(super) fn observe(&mut self, turn: &str, generation: i64) {
@@ -121,16 +120,32 @@ impl RetryBudget {
             self.turn = turn.into();
             self.generation = generation;
             self.used = 0;
+            self.usage_limit_retry_fact = None;
         }
+    }
+    pub(super) fn usage_limit_retry_bypass(&self) -> Option<model::usage_limit::UsageLimit> {
+        self.usage_limit_retry_fact
+    }
+    pub(super) fn clear_usage_limit_retry_bypass(&mut self) {
+        self.usage_limit_retry_fact = None;
     }
     /// Reset only after the completed response has been durably adopted.
     pub(super) fn succeeded(&mut self) {
         self.used = 0;
+        self.clear_usage_limit_retry_bypass();
     }
     fn delay(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Option<Duration> {
         (self.used < limit).then(|| {
             retry_after
                 .unwrap_or_else(|| Duration::from_millis(1_000u64 << self.used.min(20)).min(cap))
+        })
+    }
+    fn planned_wait(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Duration {
+        (self.used..limit).fold(Duration::ZERO, |total, used| {
+            total.saturating_add(
+                retry_after
+                    .unwrap_or_else(|| Duration::from_millis(1_000u64 << used.min(20)).min(cap)),
+            )
         })
     }
 }
@@ -153,6 +168,31 @@ pub(super) async fn retry_or_recover(
         &failure.facts,
         connection.response_retry_partial,
     );
+    // Only defer explicit provider reset facts beyond the complete remaining
+    // retry schedule; missing or short reset data keeps the ordinary policy.
+    let retryable_usage_limit = failure
+        .error
+        .usage_limit
+        .as_deref()
+        .filter(|fact| !fact.locally_blocked)
+        .copied();
+    let policy = if failure.error.usage_limit.as_deref().is_some_and(|fact| {
+        let remaining = fact
+            .resets_at
+            .saturating_sub(chrono::Utc::now().timestamp());
+        u64::try_from(remaining).is_ok_and(|seconds| {
+            Duration::from_secs(seconds)
+                > budget.planned_wait(
+                    limit,
+                    Duration::from_millis(connection.response_retry_max_delay_ms),
+                    failure.facts.retry_after,
+                )
+        })
+    }) {
+        RetryPolicy::Ineligible
+    } else {
+        policy
+    };
     let mut delay = if matches!(policy, RetryPolicy::Retry { .. }) {
         budget.delay(
             limit,
@@ -256,6 +296,13 @@ pub(super) async fn retry_or_recover(
             return Ok(());
         }
         budget.used += 1;
+        if delay.is_some() {
+            if let Some(fact) = retryable_usage_limit {
+                budget.usage_limit_retry_fact = Some(fact);
+            }
+        } else {
+            budget.clear_usage_limit_retry_bypass();
+        }
         control.changed(&snapshot.thread);
         // Admission is released while waiting; ordinary boundaries are checked
         // again before the next POST. Stop/shutdown wins over even a zero delay.
@@ -316,6 +363,50 @@ mod tests {
         budget.observe("other", 2);
         assert_eq!(budget.used, 0);
     }
+    #[test]
+    fn usage_limit_retry_bypass_is_one_shot_and_clears_on_new_generation() {
+        let mut budget = RetryBudget::default();
+        budget.observe("turn", 1);
+        budget.usage_limit_retry_fact = Some(crate::model::usage_limit::UsageLimit {
+            kind: crate::model::usage_limit::LimitKind::UsageLimitReached,
+            resets_at: chrono::Utc::now().timestamp() + 1,
+            limit_window_minutes: None,
+            locally_blocked: false,
+        });
+        assert!(budget.usage_limit_retry_bypass().is_some());
+        assert!(budget.usage_limit_retry_bypass().is_some());
+        budget.clear_usage_limit_retry_bypass();
+        assert!(budget.usage_limit_retry_bypass().is_none());
+        budget.usage_limit_retry_fact = Some(crate::model::usage_limit::UsageLimit {
+            kind: crate::model::usage_limit::LimitKind::UsageLimitReached,
+            resets_at: chrono::Utc::now().timestamp() + 1,
+            limit_window_minutes: None,
+            locally_blocked: false,
+        });
+        budget.observe("turn", 2);
+        assert!(budget.usage_limit_retry_bypass().is_none());
+    }
+    #[test]
+    fn reset_comparison_uses_only_the_remaining_full_retry_schedule() {
+        let mut budget = RetryBudget::default();
+        assert_eq!(
+            budget.planned_wait(8, Duration::from_secs(60), None),
+            Duration::from_secs(183)
+        );
+        budget.used = 6;
+        assert_eq!(
+            budget.planned_wait(8, Duration::from_secs(60), None),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            budget.planned_wait(2, Duration::from_secs(60), None),
+            Duration::ZERO
+        );
+        assert_eq!(
+            budget.planned_wait(8, Duration::from_secs(60), Some(Duration::from_secs(2))),
+            Duration::from_secs(4)
+        );
+    }
     #[tokio::test(start_paused = true)]
     async fn retry_after_delay_uses_virtual_time_not_runner_speed() {
         let delay = RetryBudget::default()
@@ -350,6 +441,7 @@ mod tests {
         for kind in [
             "http",
             "provider",
+            "usage_limit",
             "transport",
             "timeout",
             "incomplete",
@@ -422,6 +514,40 @@ mod tests {
             RetryPolicy::Retry {
                 partial_output: false
             }
+        );
+        error.provider_code = None;
+        let mut limit_error = crate::model::usage_limit::UsageLimit {
+            kind: crate::model::usage_limit::LimitKind::UsageLimitReached,
+            resets_at: chrono::Utc::now().timestamp() + 1,
+            limit_window_minutes: None,
+            locally_blocked: false,
+        }
+        .error();
+        let mut limit_facts = ResponseFacts {
+            status: Some(429),
+            ..Default::default()
+        };
+        assert_eq!(
+            classify_retry(&limit_error, &limit_facts, true),
+            RetryPolicy::Retry {
+                partial_output: false
+            }
+        );
+        limit_error.usage_limit = None;
+        assert_eq!(
+            classify_retry(&limit_error, &limit_facts, true),
+            RetryPolicy::Ineligible
+        );
+        limit_error.usage_limit = Some(Box::new(crate::model::usage_limit::UsageLimit {
+            kind: crate::model::usage_limit::LimitKind::UsageLimitReached,
+            resets_at: chrono::Utc::now().timestamp() + 1,
+            limit_window_minutes: None,
+            locally_blocked: false,
+        }));
+        limit_facts.retry_after = Some(Duration::from_secs(601));
+        assert_eq!(
+            classify_retry(&limit_error, &limit_facts, true),
+            RetryPolicy::Deferred(Duration::from_secs(601))
         );
         error.provider_code = None;
         for seconds in [0, 600, 601] {

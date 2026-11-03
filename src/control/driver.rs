@@ -194,6 +194,7 @@ pub(super) async fn drive(
             &attempt,
             &client,
             request,
+            retry_budget.usage_limit_retry_bypass(),
             &turn_binding.cancel,
         )
         .await;
@@ -229,6 +230,7 @@ pub(super) async fn drive(
         }
         let response = match outcome {
             Ok(value) => {
+                retry_budget.clear_usage_limit_retry_bypass();
                 if let Some(observation) = &value.stream_observation {
                     // Fixed, bounded classifications only. Adoption owns the received audit data.
                     for difference in &observation.differences {

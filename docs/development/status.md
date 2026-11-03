@@ -4128,3 +4128,7 @@ explains both locations. The other status facts are not removed; their overlap
 and help coverage are documented in issue #174 for user decisions. Local
 macOS type checking and three focused tests passed; exact-tip task CI,
 integration handoff, and three-OS integration CI remain pending.
+
+## Usage-limit retry cutoff (#188, validation pending)
+
+Issue #188 compares a valid explicit provider reset against the remaining scheduled automatic retry waits. Long reset facts go directly to existing recovery wait; short or unavailable facts preserve ordinary retry behavior. No guessed reset or new setting. Focused short-reset test added; see [model HTTP](../design/model-http.md). Exact-tip checks and CI pending.

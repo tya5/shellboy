@@ -134,6 +134,12 @@ impl HttpModelClient {
             fact
         })
     }
+    fn clear_usage_limit_if(&self, expected: super::usage_limit::UsageLimit) {
+        let mut slot = self.usage_limit.lock().expect("usage limit lock poisoned");
+        if slot.as_ref().is_some_and(|timed| timed.fact == expected) {
+            *slot = None;
+        }
+    }
     fn remember_usage_limit(&self, fact: super::usage_limit::UsageLimit) {
         let Some(at) = chrono::DateTime::from_timestamp(fact.resets_at, 0) else {
             return;
@@ -659,7 +665,7 @@ mod observation_tests {
             });
             let (send, mut receive) = mpsc::channel(4);
             let response = tokio::spawn(async move {
-                client.response_observed("fixture-thread", json!({"model":"fixture"}), CancellationToken::new(), Some(send)).await
+                client.response_observed("fixture-thread", json!({"model":"fixture"}), CancellationToken::new(), Some(send), None).await
             });
             // Headers and the first partial error-body bytes are distinct
             // transport facts, even though neither is an assistant delta.

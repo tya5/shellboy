@@ -390,3 +390,12 @@ Unix IPC namespace selection (#163) retains the existing protected temporary
 bases first and may use the validated private data directory as the final base.
 Failure exposes bounded reason/count/errno summaries without filesystem paths;
 see [protocol](protocol.md). Windows named-pipe selection is unchanged.
+
+## Usage-limit retry cutoff (#188)
+
+For an explicit provider `usage_limit_reached` reset, compare the reported reset
+time with the complete remaining automatic retry schedule. If reset is later, go
+directly to existing recovery wait; if shorter, keep ordinary retries.
+Missing/invalid facts do not change current retry behavior. Recovery uses the
+existing reason/message and symbols. No guessed reset, new setting, or automatic
+provider switch. See [model HTTP](model-http.md).

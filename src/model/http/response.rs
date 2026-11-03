@@ -64,7 +64,7 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<Value>>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Plain), None)
+        self.response_inner(request, cancel, events.map(Events::Plain), None, None)
             .await
     }
     /// Attach the continuing Thread identity only to this Responses request.
@@ -77,7 +77,7 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<Value>>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Plain), Some(thread))
+        self.response_inner(request, cancel, events.map(Events::Plain), Some(thread), None)
             .await
     }
     // Preserve the same bounded recovery payload as response().
@@ -88,9 +88,16 @@ impl HttpModelClient {
         request: Value,
         cancel: CancellationToken,
         events: Option<mpsc::Sender<ObservedEvent>>,
+        bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Observed), Some(thread))
-            .await
+        self.response_inner(
+            request,
+            cancel,
+            events.map(Events::Observed),
+            Some(thread),
+            bypass_usage_limit,
+        )
+        .await
     }
     #[allow(clippy::result_large_err)]
     async fn response_inner(
@@ -99,12 +106,21 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<Events>,
         thread: Option<&str>,
+        bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     ) -> Result<ModelResponse, AttemptFailure> {
         if cancel.is_cancelled() {
             return Err(cancelled().into());
         }
-        if let Some(fact) = self.active_usage_limit() {
-            return Err(fact.error().into());
+        // Only a driver-authorized, budgeted retry may bypass the shared block.
+        if let Some(active) = self.active_usage_limit() {
+            let is_scheduled_retry = bypass_usage_limit.is_some_and(|expected| {
+                active.kind == expected.kind
+                    && active.resets_at == expected.resets_at
+                    && active.limit_window_minutes == expected.limit_window_minutes
+            });
+            if !is_scheduled_retry {
+                return Err(active.error().into());
+            }
         }
         let mut deadline = Deadline::new(
             ApiEndpoint::Responses,
@@ -117,20 +133,26 @@ impl HttpModelClient {
             .and_then(Value::as_array)
             .is_some_and(|tools| !tools.is_empty());
         let (request, session_header) = self.wire_request(request, thread)?;
-        self.response_attempt(
-            request,
-            tools_enabled,
-            RequestContext {
-                cancel: &cancel,
-                deadline: &mut deadline,
-                events: events.as_ref(),
-                secrets: &[],
-            },
-            &mut facts,
-            session_header,
-        )
-        .await
-        .map_err(|mut failure| {
+        let result = self
+            .response_attempt(
+                request,
+                tools_enabled,
+                RequestContext {
+                    cancel: &cancel,
+                    deadline: &mut deadline,
+                    events: events.as_ref(),
+                    secrets: &[],
+                },
+                &mut facts,
+                session_header,
+            )
+            .await;
+        if result.is_ok()
+            && let Some(expected) = bypass_usage_limit
+        {
+            self.clear_usage_limit_if(expected);
+        }
+        result.map_err(|mut failure| {
             if let Some(fact) = failure.error.usage_limit.as_deref().copied() {
                 self.remember_usage_limit(fact);
             }
