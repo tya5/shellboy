@@ -5,7 +5,9 @@
 The user answered Q2, Q11 and Q14 of the
 [reply-expected messages](../design/reply-expected-messages.md) memo, accepted
 the recommendations for the rest, chose glyph option B, and ruled that an empty
-end message is a normal result (empty text, exit 0). The user also ruled
+end message is not distinguished from other text: it takes the normal path,
+so with `--schema` it is validated and, not being JSON, exits 3 after repairs
+like any mismatch (a direct consequence, not a separate ruling). The user also ruled
 (correcting an earlier judgement here) that a Turn ended by Esc produced no end
 message: it is not empty text but is treated like a stopped Turn, exit 4, in
 every `--result` mode. These points were decided while finalizing, without an
