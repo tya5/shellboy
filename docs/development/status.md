@@ -8,6 +8,14 @@ request; uncached input -55%. Other agents reuse the 2026-11-02 #151 rows (not
 re-measured). Fake-model CI resource runs 41552141436 / 41553439861 show no
 material change. Report: [bench-report-2026-11-03](../validation/bench-report-2026-11-03.md).
 Next: none for #183; further agent re-measurement needs a new approval.
+## Reply-expected messages design (#194, awaiting approval)
+
+Branch `issue-194/reply-design`: design memo
+[reply-expected-messages](../design/reply-expected-messages.md) turns the
+user's #194 decisions into a data model, CLI, Run-end rule, delegation mapping
+and gap analysis, with 17 open questions. Documentation only; nothing is
+implemented or verified. Next: user answers the open questions and approves,
+then implementation on a new branch.
 
 ## Saved Turn context line (#183, branch `issue-183/append-context`)
 
