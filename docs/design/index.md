@@ -340,9 +340,7 @@ Japanese or English, preserving raw field values and copied/source details as
 #186 does for measured request values. Unknown reason text is not translated.
 No automatic full rebuild is started.
 
-Migration 25 remains unchanged on this review branch. Renumbering must wait for
-explicit confirmation that the 0.7.1 hotfix has landed. The latest planned order
-is hotfix 25, #194 reply 26, then #172 index recovery 27; this supersedes the
-older 25-to-26 checklist on #172. Reconcile that checklist only when authorized.
+Migration 27 adds the interrupted-job recovery index after the history index
+(25) and pending-reply index (26).
 The pre-existing unbounded startup authorization scan is tracked separately as
 #203; it is not fixed here.

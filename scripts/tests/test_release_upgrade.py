@@ -222,6 +222,17 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'receipt_reply_pending'):
             checks.check_migration(db, before, 25, 26)
 
+    def test_recovery_migration_from_24_25_and_26(self):
+        for start in (24, 25, 26):
+            with self.subTest(start=start):
+                db = self.fixture(17)
+                self.upgrade(db, 17, start)
+                before, records = self.upgrade(db, start, 27)
+                self.assertEqual(checks.ledger(db), before + [(n, checks.DERIVED[n].stem) for n in range(start + 1, 28)])
+                self.assertEqual(checks.snapshot(db), records)
+                plan = db.execute("EXPLAIN QUERY PLAN SELECT id FROM embedding_job WHERE state='running' AND id>? ORDER BY id LIMIT 128", ('',)).fetchall()
+                self.assertTrue(any('jobs_running_recovery' in row[3] for row in plan))
+
     def test_schema18_rejects_old_history_index_and_parent_index(self):
         db = self.fixture(17)
         before, _ = self.upgrade(db, 17, 18)
@@ -246,7 +257,7 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'history_tool_group_attempt'):
             checks.check_migration(db, before, 24, 25)
 
-    def test_arguments_default_to_public_v071_schema25_and_target26(self):
+    def test_arguments_default_to_public_v071_schema25_and_target27(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
