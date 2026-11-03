@@ -203,6 +203,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
     let req = request(
         "first",
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -243,6 +244,7 @@ async fn lost_response_replays_original_acceptance_after_message_progress_and_re
     );
     let mut conflicting = req;
     conflicting.command = Command::MessageSend(MessageSendArgs {
+        expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
         thread_id: Some(thread),

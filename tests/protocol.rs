@@ -149,6 +149,7 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
 #[test]
 fn success_and_error_envelopes_match_contract_and_omit_absent_fields() {
     let message = MessageAccepted {
+        expect_reply: false,
         deliver: Deliver::Next,
         message_id: "m".into(),
         thread_id: "t".into(),
@@ -190,6 +191,7 @@ fn assignment_never_exposes_fabricated_or_partial_ids() {
     ] {
         assert!(
             MessageAccepted {
+                expect_reply: false,
                 deliver: Deliver::Next,
                 message_id: "m".into(),
                 thread_id: "t".into(),
@@ -822,6 +824,7 @@ fn current_output_and_history_results_require_observation_fields() {
 fn message_delivery_timing_is_one_optional_wire_field() {
     let command = |deliver| {
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             thread_id: None,
             text: "x".into(),

@@ -187,6 +187,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     request(
         control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.into()),
@@ -599,6 +600,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
     let accepted = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -1061,6 +1063,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
     let resumed = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -1623,6 +1626,7 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
         let resumed = request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),

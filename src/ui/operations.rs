@@ -1211,6 +1211,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
+                        expect_reply: false,
                         sender_label: form.optional("sender_label")?,
                         deliver: form
                             .optional("deliver")?

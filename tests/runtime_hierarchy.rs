@@ -132,6 +132,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
@@ -530,6 +531,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
     let accepted = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some("parent".into()),
