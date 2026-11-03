@@ -1333,7 +1333,7 @@ fn interrupted_tool_results_show_uncertainty_without_fabricated_success() {
         let projected = project("tool_result", &payload, &text_of_payload(&payload), 0);
         let result = projected.blocks.iter().find(|b| b.tool.is_some()).unwrap();
         let tool = result.tool.as_ref().unwrap();
-        assert!(japanese_tool_heading(&tool).contains(label));
+        assert!(japanese_tool_heading(tool).contains(label));
         assert!(tool.requires_attention());
         assert!(result.text.contains(text));
         assert_eq!(tool.exit_code, None);
@@ -1401,7 +1401,7 @@ fn structured_cancellation_renders_saved_cause_and_prerequisite_without_own_exec
             tool.execution_id.is_none(),
             "a prerequisite execution is not the cancelled call's execution"
         );
-        assert!(japanese_tool_heading(&tool).contains("未実行・取消"));
+        assert!(japanese_tool_heading(tool).contains("未実行・取消"));
         assert_eq!(
             block.text,
             "Saved explanation: later call was not executed."
@@ -1451,7 +1451,7 @@ fn human_turn_interruption_keeps_running_shell_distinct_from_run_stop() {
     assert_eq!(tool.execution_id.as_deref(), Some("continuing"));
     assert!(tool.reason.contains("Turnを中断"));
     assert!(!tool.reason.contains("作業停止"));
-    assert!(!japanese_tool_heading(&tool).contains("未実行・取消"));
+    assert!(!japanese_tool_heading(tool).contains("未実行・取消"));
 }
 
 #[test]
