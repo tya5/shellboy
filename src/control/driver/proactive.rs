@@ -104,7 +104,7 @@ pub(super) async fn maybe_compact(
                 && previous != attempt
             {
                 let same_model: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt old JOIN model_attempt new ON old.profile_id=new.profile_id AND old.model_id=new.model_id WHERE old.id=?1 AND new.id=?2)", params![previous,attempt], |row| row.get(0))?;
-                if !same_model {
+                if !same_model || target != ((threshold as u128 * 4) / 5) as u64 {
                     db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
                 } else {
                     if pending["verified"].is_null() {
