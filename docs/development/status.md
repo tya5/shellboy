@@ -4422,3 +4422,10 @@ CI on this requested baseline selects Linux; dispatch and outcome are pending.
 and pending-reply index 26. Synthetic upgrade checks cover starts 24, 25, and
 26; W3 recovery authorization, independent barrier release, bounded bootstrap
 records, and bilingual status remain in the rebased branch.
+
+### #152 DB activity language audit
+
+The DB worker status labels already choose English/Japanese pairs for every
+known operation. This batch pins the 54 Japanese arms as localized UI resources
+and adds exhaustive language-pair coverage; unknown operation identifiers keep
+the neutral fallback. No operation kind or persisted data changes.

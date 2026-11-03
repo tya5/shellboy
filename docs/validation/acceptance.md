@@ -9322,3 +9322,12 @@ no installed binary, real provider traffic, or user data was used.
 from schemas 24, 25, and 26, preserving rows and ledger and checking the recovery
 index plan. Python scripts suite: 193 passed. Rust and 3-OS CI are pending; no
 installed binary, real provider, or user data was exercised.
+
+### #152 DB activity language slice
+
+`src/ui/db_activity.rs`'s 54 previously unclassified Japanese labels are paired
+with explicit English labels in `operation_label`. Added coverage iterates all
+known operation keys and checks both localized values; unknown identifiers keep
+the underscore-normalized fallback. No source values or protocol labels are
+rewritten. Local validation is `cargo fmt --all -- --check` plus Python language
+audit tests; three-OS CI is pending.

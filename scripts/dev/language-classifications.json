@@ -2803,5 +2803,275 @@
     "category": "a",
     "reason": "App-authored browser resync notice. Browser::changed sends complete Japanese and English sentences together; ThreadBrowser::notice_for_language selects the current UI language. Tests preserve Japanese, require ASCII English, and keep raw notices untranslated.",
     "source_tokens_sha256": "43bd8e377b6ef65d54fff8ee6346db3b632b71572c46f3021ac9ed2f326b1349"
+  },
+  "src/ui/db_activity.rs:498e42207efa6a79:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:695a48c03d53a3a5:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:0e206599059eb867:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:bf0cd2434f17ae8f:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:0ed5b51842ece42b:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:b2157d293621e20c:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:0613c6d24583474f:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:df1c7b19dc956160:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:a89c16891b82477f:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:6deae6cdd70ab93c:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:cd4ed8ee26a0aeb6:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:c70a9ea6d4a93fe5:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:12dc578da7dd42e6:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:158539b1bb046b13:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:07dcd896ce2cca9b:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:76415ee05ffbd5ec:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:663dc67182830b20:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:e673bda99669f617:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:4f7fd32917eb53e5:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:386c3fd9e303cc2c:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:25498c959ec33f66:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:6d444f3e2a3496eb:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:0024d751b72ce353:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:32cd3deb061ee302:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:17820b6b06b40ed5:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:6d8c1c860fdb4110:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:e7c163cfb23f209b:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:7b465bb7c4315be0:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:39ff7c16fbf9eda6:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:e1e75c15a063f6f3:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:562e52d6e381cd88:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:aa986c5dfbe21bcf:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:13dca8d07a027f90:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:5aa14b5281a3b8d7:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:053a42a602f47e86:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:cfed8394a6c30482:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:42b4a2e0177a83d7:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:fd8d7102401a0f7a:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:329c262782b56f9b:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:d668d550336840ac:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:e749be0376b99ae9:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:538977e46a9e185c:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:3a9b11f66f8d3d32:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:728279be28675e5f:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:0b84df531a37c247:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:d26b1fe98924eae4:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:b53ee04b9ee8cbdb:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:a3b1c80b6b4cdd55:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:0f62b8a41ede2386:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:0c702933dc87e7a2:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:7cf822a5915b3e56:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:5935275abd2d86c8:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:3f7763614394bdad:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
+  },
+  "src/ui/db_activity.rs:e5f9d29a471cde90:1": {
+    "category": "a",
+    "reason": "UI operation label is selected from a matched English/Japanese pair in operation_label; exhaustive regression checks every known operation key.",
+    "source_tokens_sha256": "1a9d9a392c3510a30559192ac140c7369aa794d7005b7bd9acf72c8bac7329f7"
   }
 }
