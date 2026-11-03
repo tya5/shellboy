@@ -1361,12 +1361,24 @@ fn open_connection(
             "DELETE FROM app_meta WHERE key='integrity.migration_pending'",
             [],
         )?;
+    } else if let Some(diagnostics) = diagnostics {
+        diagnostics.record_startup_stage(
+            StartupStage::DatabaseForeignKeysSkippedNoMigrationPending,
+            Duration::ZERO,
+            None,
+        );
     }
     if !clean_shutdown {
         trace
             .borrow_mut()
             .next(StartupStage::DatabaseQuickCheck, None, None);
         check_integrity(&connection, false, true)?;
+    } else if let Some(diagnostics) = diagnostics {
+        diagnostics.record_startup_stage(
+            StartupStage::DatabaseQuickCheckSkippedCleanShutdown,
+            Duration::ZERO,
+            None,
+        );
     }
     Ok(connection)
 }
@@ -2058,6 +2070,32 @@ mod integrity_policy_tests {
             .unwrap(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn skipped_integrity_checks_emit_explicit_zero_duration_stages() {
+        let temp = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            temp.path().join("logs"),
+            crate::config::Logging::default(),
+        );
+        let db_path = temp.path().join("db");
+        drop(open_connection(&db_path, None, Some(&diagnostics), true).unwrap());
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(temp.path().join("logs/shellboy.log")).unwrap();
+        let stages: Vec<_> = body
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|row| row["event"] == "startup_stage")
+            .map(|row| row["startup_stage"].clone())
+            .collect();
+        for name in [
+            "database_foreign_keys_skipped_no_migration_pending",
+            "database_quick_check_skipped_clean_shutdown",
+        ] {
+            let stage = stages.iter().find(|stage| stage["stage"] == name).unwrap();
+            assert_eq!(stage["elapsed_ms"], 0);
+        }
     }
 
     #[test]
