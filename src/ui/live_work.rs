@@ -67,7 +67,7 @@ impl<'a> WorkMessage<'a> {
                 .map(str::to_owned)
                 .unwrap_or_else(|| Self::State(state).render(language)),
             (En, Self::State(state)) => phase_label(state, language)
-                .unwrap_or_else(|| match state {
+                .unwrap_or(match state {
                     "starting" => "Starting",
                     "running" | "live" => "Running",
                     "stopping" => "Stopping",
@@ -76,7 +76,7 @@ impl<'a> WorkMessage<'a> {
                 })
                 .into(),
             (Ja, Self::State(state)) => phase_label(state, language)
-                .unwrap_or_else(|| match state {
+                .unwrap_or(match state {
                     "starting" => "起動中",
                     "running" | "live" => "実行中",
                     "stopping" => "停止中",
