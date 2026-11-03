@@ -2930,7 +2930,9 @@ fn cancelling_an_inflight_scroll_allows_later_resize_and_rejects_its_stale_body(
 
 #[test]
 fn dense_thread_rows_and_selected_preview_stay_compact() {
-    let mut ui = state();
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     text(&mut ui, "/threads");
     enter(&mut ui);
     ui.apply(UiUpdate::Threads {
@@ -3074,7 +3076,9 @@ fn recovery_node(id: &str) -> UiNode {
     }
 }
 fn recovery_view() -> UiState {
-    let mut ui = UiState::new(&Config::default(), cwd());
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, cwd());
     ui.select_thread("recovery".into());
     ui.apply(UiUpdate::History {
         pending: Default::default(),
@@ -3657,7 +3661,9 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
             "保存された復旧理由を詳細で確認してください",
         ),
     ] {
-        let mut ui = state();
+        let mut config = Config::default();
+        config.ui.language = shellboy::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, cwd());
         ui.select_thread("recovery-thread".into());
         let details = serde_json::from_value(serde_json::json!({
             "agents_path":"/tmp/AGENTS.md", "thread_id":"recovery-thread", "title":"復旧確認", "cwd":"/tmp",
