@@ -442,6 +442,11 @@ fn help_and_version_are_display_success_and_unknown_operation_is_parse_error() {
             ErrorKind::DisplayHelp
         );
     }
+    let wait_help = Cli::try_parse_from(["shellboy", "wait", "--help"]).unwrap_err();
+    assert_eq!(wait_help.kind(), ErrorKind::DisplayHelp);
+    let wait_help = wait_help.to_string();
+    assert!(wait_help.contains("reply_received"));
+    assert!(wait_help.contains("\"message_id\":\"MESSAGE_ID\""));
     assert_eq!(
         Cli::try_parse_from(["shellboy", "--version"])
             .unwrap_err()

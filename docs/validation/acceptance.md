@@ -9605,3 +9605,8 @@ not proof every old shutdown failure was identical or every future run passes.
 New local checks and default/all-OS CI are pending for this replay; any new
 failure must be named and compared rather than automatically called a flake.
 No real data, provider traffic or installed-binary change is part of validation.
+## #213 reply usability (in progress)
+
+- Verified from the adopted reply design: the receiving Thread's reply body is an ordinary `user` node; its node kind is intentional. Provenance sender is being extended to expose the credential-free `reply.by` fact for replies without a delivery receipt.
+- Added `reply_received` / `message_id` to `wait --help`, plus a matching help regression test; CLI reference example now matches delegation documentation.
+- Focused provenance/help tests, doc check, standard checks, pushed-tip default CI, and pushed-tip all-OS CI remain pending.

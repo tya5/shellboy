@@ -12,7 +12,7 @@ use super::sql_error;
 pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenance, ApiError> {
     connection
         .query_row(
-            "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id),(SELECT sender_json FROM receipt WHERE message_node_id=n.id ORDER BY rowid LIMIT 1) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",
+            "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id),COALESCE((SELECT sender_json FROM receipt WHERE message_node_id=n.id ORDER BY rowid LIMIT 1),(SELECT json_extract(result_json,'$.reply.by') FROM receipt WHERE json_extract(result_json,'$.reply.node_id')=n.id ORDER BY rowid LIMIT 1)) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",
             [node_id],
             |row| Ok(NodeProvenance { sender: {
                 let kind: String = row.get(0)?;
@@ -169,4 +169,31 @@ fn invalid_cursor() -> ApiError {
         ErrorCode::CursorExpired,
         "history relation position is unavailable",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reply_node_provenance_follows_original_reply_by_sender() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE node(id TEXT PRIMARY KEY,kind TEXT,created_at TEXT,payload_revision INTEGER,turn_id TEXT); \
+             CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,thread_id TEXT); \
+             CREATE TABLE run(id TEXT PRIMARY KEY,thread_id TEXT); \
+             CREATE TABLE receipt(rowid INTEGER PRIMARY KEY,message_node_id TEXT,result_json TEXT,sender_json TEXT,thread_id TEXT); \
+             INSERT INTO turn VALUES('turn','run','recipient'); \
+             INSERT INTO run VALUES('run','recipient'); \
+             INSERT INTO node VALUES('reply','user','now',0,'turn'); \
+             INSERT INTO receipt(message_node_id,result_json,sender_json,thread_id) VALUES('original','{\"reply\":{\"state\":\"replied\",\"node_id\":\"reply\",\"by\":{\"kind\":\"external_cli\",\"label\":\"reviewer\"}}}',NULL,'recipient');",
+        )
+        .unwrap();
+
+        let provenance = provenance(&db, "reply").unwrap();
+        let sender = provenance.sender.unwrap();
+        assert_eq!(sender.kind, crate::protocol::SenderKind::ExternalCli);
+        assert_eq!(sender.label.as_deref(), Some("reviewer"));
+        assert_eq!(provenance.kind, "user");
+    }
 }
