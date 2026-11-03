@@ -1,5 +1,32 @@
 # 開発判断
 
+## Reply-expected messages: finalization judgements (#194, 2026-11-03)
+
+The user answered Q2, Q11 and Q14 of the
+[reply-expected messages](../design/reply-expected-messages.md) memo, accepted
+the recommendations for the rest, chose glyph option B, and ruled that an empty
+end message is ordinary empty text. These points were decided while finalizing,
+without an explicit user answer:
+
+- `history get --final-answer-only` is kept and renamed `--end-message-only`
+  instead of removed (Q12): `exec --result turn-end|run-end` needs the
+  end-message projection, which ordinary history reads do not provide. Recheck
+  if exec stops needing it.
+- `exec --result turn-end|run-end` keep exit 4 for held, recovery wait,
+  stopped, failed and unavailable, as today; only the reply outcomes cannot
+  occur. The user's "never exit 4" is read as "never exit 4 for an ignored
+  reply". Recheck if the literal reading was meant.
+- A completed Turn with no end-message node (ended by Esc) gives empty text in
+  exec, the same as an empty node; a tombstoned node stays exit 4.
+- exec `reply` mode waits on `run_ended` of the assigned Run, not
+  `thread_settled`, which without a cursor matches an earlier Run's state.
+- Per-mode usage diagnostics: Turn usage (`turn-end`), Run usage (`run-end`),
+  observed Run usage (`reply`).
+- The TUI reply mode (Q7) is in scope but lands last; the `回答` row label is
+  unchanged (Q10) while the `回答node ID` field label follows its field.
+- Reply errors use existing codes (`target_unavailable`, `invalid_state` with
+  `details.reason`); no `forbidden`/`not_found` error code is added.
+
 ## Measured proactive retry gate (#153, 2026-11-02)
 
 Replace #125's permanent per-Run failure flag with a provider-usage growth gate.
