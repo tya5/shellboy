@@ -1024,3 +1024,64 @@ async fn history_maintenance_collects_dead_deliveries_without_losing_history_or_
     .unwrap();
     f.db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn deleted_receipts_are_collected_in_finite_batches_but_live_parties_and_pending_are_roots() {
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        for i in 0..260 {
+            let id=format!("receipt-{i:03}");
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{\"text\":\"synthetic\"}')",[&id])?;
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,'null','deleted',?1,'cancelled','now','{}')",[id])?;
+        }
+        for (id,target,sender,state) in [
+            ("live-target","live","null","replied"),
+            ("live-sender","deleted",r#"{"kind":"model","thread_id":"live"}"#,"recipient_deleted"),
+            ("pending","deleted","null","pending"),
+        ] {
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')",[id])?;
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,?2,?3,?1,'applied','now',?4)",params![id,sender,target,serde_json::json!({"reply":{"state":state}}).to_string()])?;
+        }
+        db.execute("INSERT INTO gc_job(id,kind,root_revision,state)VALUES('receipt-gc','history',0,'pending')",[])?;
+        Ok(())
+    }).await.unwrap();
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    let mut previous = 263;
+    for _ in 0..100 {
+        let step = f.gc.history_step(&job).await.unwrap();
+        assert!(step.scanned <= 128);
+        let count =
+            f.db.call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?)
+            })
+            .await
+            .unwrap();
+        assert!(previous - count <= 128, "receipt deletes must yield");
+        previous = count;
+        if step.complete {
+            break;
+        }
+    }
+    assert_eq!(previous, 3);
+    f.db.call(|db| {
+        for id in ["live-target", "live-sender", "pending"] {
+            let payload: Option<String> =
+                db.query_row("SELECT payload_json FROM node WHERE id=?1", [id], |r| {
+                    r.get(0)
+                })?;
+            assert!(payload.is_some(), "receipt root {id}");
+        }
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM node WHERE id LIKE 'receipt-%' AND payload_json IS NOT NULL",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?,
+            0
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}
