@@ -18,8 +18,13 @@ has not been bumped; this is not a release candidate or publication record.
   no compatibility aliases; the internal database column is unchanged (#194).
 - `revisit set/get/cancel` and the `message send --now` option are removed. Use
   `message send --deliver now` or `message send --deliver complete` instead.
-  `complete` holds an ordinary message until the recipient Run completes
-  normally; `now` releases a foreground shell wait for urgent delivery (#187).
+  `complete` waits while the recipient Run is live. At normal completion,
+  waiting messages are delivered together, in send order, as one new Turn of
+  that Run. A waiting message never outlives its Run: if it stops, is shut
+  down or enters recovery wait instead, the message is released then as
+  ordinary held input, and the usual resume or retry rules decide when it is
+  admitted. Later default or `now` messages overtake waiting `complete`
+  messages. `now` releases a foreground shell wait for urgent delivery (#187).
 
 ## Before upgrading
 
