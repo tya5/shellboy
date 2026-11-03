@@ -590,3 +590,9 @@ PRAGMA user_version=23;
 CREATE INDEX receipt_run_completion ON receipt(run_id) WHERE json_extract(result_json,'$.deliver')='complete';
 INSERT INTO schema_migration(version,name) VALUES(24,'0024_revisit_messages');
 PRAGMA user_version=24;
+
+-- Bounded pending reply lookup (#194).
+CREATE INDEX receipt_reply_pending ON receipt(target_thread_id)
+  WHERE json_extract(result_json,'$.reply.state')='pending';
+INSERT INTO schema_migration(version,name) VALUES(25,'0025_reply_expected');
+PRAGMA user_version=25;
