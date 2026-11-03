@@ -589,7 +589,7 @@ pub(super) fn welcome(
     );
     if !setup.missing.is_empty() {
         return setup
-            .japanese(true)
+            .render(view.language, true)
             .lines()
             .map(|line| Line::from(crate::presentation::sanitize_plain(line, 0).0))
             .collect();
@@ -1240,6 +1240,11 @@ mod tests {
             path: path.clone(),
             present: false,
         });
+        let mut english_ui = UiState::new(&config, root.path().into());
+        let english = frame_text(&mut english_ui, 150, 32);
+        assert!(english.contains("Configuration required:"));
+        assert!(!english.contains("設定が必要です:"));
+        config.ui.language = crate::config::UiLanguage::Ja;
         let mut ui = UiState::new(&config, root.path().into());
         let shown = frame_text(&mut ui, 150, 32);
         for expected in [
