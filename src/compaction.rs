@@ -493,6 +493,11 @@ impl Compactor {
             .await
             .map_err(|error| usage::annotate(error, ledger.usage()))
     }
+    /// Exact replay projection, used only to measure a completed local edit.
+    pub(crate) async fn proactive_history_characters(&self, thread: &str) -> Result<u64, ApiError> {
+        let snapshot = self.snapshot(thread, false).await?;
+        Ok(edit::history_characters(&snapshot))
+    }
     /// #182 proactive order: the ordinary prefix summary only when the prefix
     /// holds something other than earlier summaries.
     pub(crate) async fn summarize_unsummarized_prefix(

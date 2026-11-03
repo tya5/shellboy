@@ -28,6 +28,7 @@ enum Measurement {
 struct Evidence {
     attempt: String,
     input_tokens: u64,
+    input_characters: Option<u64>,
 }
 
 /// Called at the request boundary while the Thread boundary guard is held and
@@ -84,20 +85,17 @@ pub(super) async fn maybe_compact(
             let raw = crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?;
             // Only a provider-reported count triggers; unknown usage never does,
             // and usage measured before an adopted replacement is stale.
-            Ok(raw
-                .latest_reported_input()
-                .and_then(|(attempt, tokens, stale)| {
-                    tokens.filter(|_| !stale).map(|input_tokens| {
-                        if input_tokens < threshold {
-                            Measurement::BelowThreshold
-                        } else {
-                            Measurement::Ready(Evidence {
-                                attempt: attempt.to_owned(),
-                                input_tokens,
-                            })
-                        }
-                    })
-                }))
+            let Some((attempt, Some(input_tokens), false)) = raw.latest_reported_input() else {
+                return Ok(None);
+            };
+            if input_tokens < threshold {
+                return Ok(Some(Measurement::BelowThreshold));
+            }
+            let input_characters = db.query_row(
+                "SELECT CASE WHEN json_valid(input_manifest_json) AND json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END FROM model_attempt WHERE id=?1",
+                [attempt], |row| row.get::<_, Option<i64>>(0),
+            )?.and_then(|n| u64::try_from(n).ok());
+            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters })))
         })
         .await
         .map_err(storage_error);
@@ -289,6 +287,10 @@ pub(super) async fn maybe_compact(
     control.changed(&snapshot.thread);
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
+    let target_plan = evidence.input_characters.and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
+    let before_characters = if target_plan.is_some() {
+        Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
+    } else { None };
     let mut midturn = Value::Null;
     let prefer_active = std::mem::take(&mut budget.prefix_adopted);
     let mut summary_scope = "";
@@ -311,6 +313,22 @@ pub(super) async fn maybe_compact(
         Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope).await
         {
             Ok(mut summary) => {
+                if summary_scope == "prefix" && middle_new && !slot.stop.is_cancelled()
+                    && let (Some(plan), Some(before)) = (target_plan, before_characters)
+                {
+                    let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
+                    if before.saturating_sub(after) < plan.remove_characters {
+                        let active = control.compactor.summarize_active_turn(&snapshot.thread, slot.stop.clone()).await?;
+                        if !active.no_target {
+                            summary.spilled_groups += active.spilled_groups;
+                            summary.source_nodes += active.source_nodes;
+                            summary.original_node_ids.extend(active.original_node_ids);
+                            summary.no_target = false;
+                            midturn = json!({"scope":"active_turn", "reason":"target_shortfall"});
+                            summary_scope = "active_turn";
+                        }
+                    }
+                }
                 summary.spilled_groups += spill.spilled_groups;
                 summary.source_nodes += spill.source_nodes;
                 summary.original_node_ids.extend(spill.original_node_ids);
@@ -461,6 +479,9 @@ pub(super) async fn maybe_compact(
     observation["reason"] = json!(REASON);
     if !midturn.is_null() {
         observation["midturn"] = midturn;
+    }
+    if let Some(plan) = target_plan {
+        observation["target_plan"] = json!({"target_tokens":plan.target_tokens,"remove_characters":plan.remove_characters,"input_characters":evidence.input_characters});
     }
     observation["trigger"] = json!({
         "auto_at_tokens": threshold,
