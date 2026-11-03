@@ -49,4 +49,13 @@ Measure and report the overhead of the hooks, including per-statement tracing,
 on the benchmark, with workload and environment and a baseline without hooks.
 Inspect release-profile backtrace symbols and measure binary-size impact before
 deciding whether to use `debug = "line-tables-only"`; that setting is not yet
-adopted. No overhead or binary-size claim is made until measured.
+adopted. No release-profile overhead or binary-size claim is made until measured.
+
+A preliminary debug-profile measurement on Apple M1, macOS 26.3.1, used an
+in-memory 10,000-row primary-key table and five passes of 50,000 cached point
+reads. The baseline had no hooks; the instrumented run used statement profile
+and row callbacks plus a 1,000-step progress handler. Observed overheads were
+16.60%, 57.44%, 30.61%, 6.99%, and 16.39% (median 16.60%). This noisy debug
+microbenchmark is not a release-performance claim; the release build was
+interrupted before completion and the workload does not exercise slow captures.
+Command: `cargo test --lib storage::statement_observation::tests::measure_hook_overhead -- --ignored --nocapture`.

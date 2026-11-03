@@ -166,6 +166,7 @@ pub(crate) struct NoProgressJob {
 struct ActiveJobState {
     job: ActiveDbJob,
     slow_reported: bool,
+    counters: Option<Arc<Mutex<statement_observation::Counters>>>,
 }
 type ActiveJob = Arc<Mutex<Option<ActiveJobState>>>;
 
@@ -283,6 +284,7 @@ impl ActiveJobGuard {
                 started,
             },
             slow_reported: false,
+            counters: None,
         });
         publish_activity(&updates, &active_job, &no_progress);
         Self {
@@ -521,7 +523,11 @@ impl DbWorker {
                 return;
             }
             active.slow_reported = true;
-            (active.job.kind, active.job.lane, elapsed)
+            let counters = active
+                .counters
+                .as_ref()
+                .and_then(|c| c.try_lock().ok().map(|c| *c));
+            (active.job.kind, active.job.lane, elapsed, counters)
         };
         let Ok(mut limit) = self.shared.slow_limit.try_lock() else {
             return;
@@ -533,7 +539,7 @@ impl DbWorker {
             return;
         };
         if let Some(diagnostics) = diagnostics.as_ref() {
-            diagnostics.record_db_job_active(active.0, active.1.as_str(), active.2);
+            diagnostics.record_db_job_active(active.0, active.1.as_str(), active.2, active.3);
         }
     }
 
@@ -845,6 +851,7 @@ where
             let (handler_budget, hook_budget) = (budget.clone(), budget.clone());
             let waiting = waiting.clone();
             let limit = BACKGROUND_STEP_BUDGET.div_ceil(PROGRESS_GRANULARITY);
+            let mut slow_backtrace = statement_observation::SlowBacktrace::new(Instant::now());
             // Sticky: after the hit every later step is interrupted and every
             // later COMMIT (explicit or autocommit) becomes a rollback, even if
             // the closure swallows the interrupt error.
@@ -852,6 +859,7 @@ where
                 .progress_handler(
                     PROGRESS_GRANULARITY as std::ffi::c_int,
                     Some(move || {
+                        slow_backtrace.observe(Instant::now());
                         if handler_budget.hit.load(Ordering::Acquire) {
                             return true;
                         }
@@ -1128,6 +1136,12 @@ fn run_worker(
                 );
                 let mut observation =
                     statement_observation::StatementObservation::install(&mut connection);
+                if observation.available()
+                    && let Ok(mut active) = state.active_job.lock()
+                    && let Some(active) = active.as_mut().filter(|active| active.job.id == job_id)
+                {
+                    active.counters = Some(observation.shared_counters());
+                }
                 let outcome = job(observation.connection(), &state.foreground_waiting);
                 let counters = observation.available().then(|| observation.counters());
                 drop(observation);
@@ -1140,7 +1154,13 @@ fn run_worker(
                     && let Ok(mut limit) = state.slow_limit.try_lock()
                     && limit.admit(Instant::now())
                 {
-                    diagnostics.record_db_job_with_counters(&name(), queue, run, counters);
+                    diagnostics.record_db_job_with_counters(
+                        &name(),
+                        queue,
+                        run,
+                        counters,
+                        Some(lane.as_str()),
+                    );
                 }
                 if outcome.background {
                     #[cfg(test)]
@@ -1633,8 +1653,11 @@ mod slow_job_tests {
             let job = tokio::spawn(async move {
                 let private_text = String::from("private conversation test marker");
                 job_db
-                    .call(move |_| {
+                    .call(move |connection| {
                         assert!(!private_text.is_empty());
+                        let value: i64 =
+                            connection.query_row("SELECT ?1", [42], |row| row.get(0))?;
+                        assert_eq!(value, 42);
                         let _ = started_tx.send(());
                         release_rx.recv().unwrap();
                         Ok::<_, StorageError>(())
@@ -1681,6 +1704,16 @@ mod slow_job_tests {
                     .contains("active_job_snapshot_can_be_read")
             );
             assert_eq!(active_logs[0]["db_job_active"]["lane"], "foreground");
+            assert_eq!(
+                active_logs[0]["db_job_active"]["statement_counters"]["rows"],
+                1
+            );
+            assert!(
+                active_logs[0]["db_job_active"]["statement_counters"]["vm_steps"]
+                    .as_u64()
+                    .unwrap()
+                    > 0
+            );
             assert!(
                 active_logs[0]["db_job_active"]["elapsed_ms"]
                     .as_u64()
@@ -1689,7 +1722,7 @@ mod slow_job_tests {
             );
             assert_eq!(
                 active_logs[0]["db_job_active"].as_object().unwrap().len(),
-                3
+                4
             );
         })
         .await
@@ -1748,6 +1781,7 @@ mod slow_job_tests {
             "{log}"
         );
         assert!(rows[0]["db_job_slow"]["run_ms"].as_u64().unwrap() >= 1000);
+        assert_eq!(rows[0]["db_job_slow"]["lane"], "foreground");
         assert!(
             rows[1]["db_job_slow"]["kind"]
                 .as_str()
@@ -1758,7 +1792,7 @@ mod slow_job_tests {
         assert!(rows[1]["db_job_slow"]["queue_ms"].as_u64().unwrap() >= 1000);
         assert!(
             rows.iter()
-                .all(|r| r["db_job_slow"].as_object().unwrap().len() == 4)
+                .all(|r| r["db_job_slow"].as_object().unwrap().len() == 5)
         );
     }
 }

@@ -121,6 +121,8 @@ fn millis(duration: std::time::Duration) -> u64 {
 #[derive(Debug, Clone, Serialize)]
 struct DbJobSlowTrace {
     kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane: Option<String>,
     queue_ms: u64,
     run_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,6 +134,8 @@ struct DbJobActiveTrace {
     kind: String,
     lane: String,
     elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    statement_counters: Option<crate::storage::statement_observation::Counters>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -766,7 +770,7 @@ impl Diagnostics {
         queue: std::time::Duration,
         run: std::time::Duration,
     ) {
-        self.record_db_job_with_counters(kind, queue, run, None);
+        self.record_db_job_with_counters(kind, queue, run, None, None);
     }
     pub(crate) fn record_db_job_with_counters(
         &self,
@@ -774,6 +778,7 @@ impl Diagnostics {
         queue: std::time::Duration,
         run: std::time::Duration,
         statement_counters: Option<crate::storage::statement_observation::Counters>,
+        lane: Option<&str>,
     ) {
         if queue < std::time::Duration::from_secs(1) && run < std::time::Duration::from_secs(1) {
             return;
@@ -791,6 +796,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: Some(DbJobTrace::Slow(DbJobSlowTrace {
                 kind: kind.chars().take(160).collect(),
+                lane: lane.map(str::to_owned),
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
                 statement_counters,
@@ -808,6 +814,7 @@ impl Diagnostics {
         kind: &str,
         lane: &str,
         elapsed: std::time::Duration,
+        statement_counters: Option<crate::storage::statement_observation::Counters>,
     ) {
         self.enqueue_record(Record {
             event: DiagnosticEvent::DbJobActive,
@@ -824,6 +831,7 @@ impl Diagnostics {
                 kind: kind.chars().take(160).collect(),
                 lane: lane.into(),
                 elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
+                statement_counters,
             })),
             index_discard: None,
             automatic_compaction_counts: None,

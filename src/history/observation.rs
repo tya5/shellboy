@@ -309,6 +309,18 @@ mod tests {
         )
         .unwrap();
         tx.commit().unwrap();
+        {
+            let mut observation =
+                crate::storage::statement_observation::StatementObservation::install(&mut db);
+            assert!(observation.available());
+            let _ = read_tx(observation.connection(), &["n".into()], Some("t")).unwrap();
+            let counters = observation.counters();
+            assert_eq!(
+                counters.fullscan_steps, 0,
+                "single-node history lookup must seek growing tables"
+            );
+            assert!(counters.vm_steps > 0);
+        }
         assert_eq!(measure(&db), before);
         let plan = db
             .prepare(&format!("EXPLAIN QUERY PLAN {NODE_SQL}"))
