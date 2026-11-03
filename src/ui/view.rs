@@ -323,7 +323,7 @@ impl ThreadView {
                 .as_ref()
                 .and_then(|name| config.connections.get(name))
                 .and_then(|c| c.default_effort.clone()),
-            title: "新しい会話".into(),
+            title: super::i18n::local!(config.ui.language, "新しい会話", "New conversation").into(),
             state: "idle".into(),
             draft: DraftSnapshot::default(),
             generation: 0,
@@ -545,10 +545,21 @@ impl ThreadView {
             "待機中".into()
         };
         if let Some(reason) = details.recovery_reason {
-            let message = serde_json::from_str::<crate::protocol::ApiError>(&reason)
-                .map(|error| crate::config_setup::tui_error(&error))
-                .unwrap_or_else(|_| "保存された復旧理由を詳細で確認してください".into());
-            self.status = format!("復旧待ち: {message}");
+            self.status = match serde_json::from_str::<crate::protocol::ApiError>(&reason) {
+                Ok(error) => {
+                    let message = crate::config_setup::tui_error(&error);
+                    match self.language {
+                        crate::config::UiLanguage::Ja => format!("復旧待ち: {message}"),
+                        crate::config::UiLanguage::En => format!("Recovery pending: {message}"),
+                    }
+                }
+                Err(_) => super::i18n::local!(
+                    self.language,
+                    "復旧待ち: 保存された復旧理由を詳細で確認してください",
+                    "Recovery pending: Check the saved recovery reason in details"
+                )
+                .into(),
+            };
         }
         // Only install the saved draft into an untouched placeholder.
         if let Some(draft) = draft.filter(valid_draft)
@@ -1120,9 +1131,17 @@ impl ThreadView {
             self.navigation
                 .on_event(NavEvent::Read(ReadEvent::RebaseResolved));
             self.status = if relocated {
-                "表示元が選択経路から外れたため、最新ページを表示しました"
+                super::i18n::local!(
+                    self.language,
+                    "表示元が選択経路から外れたため、最新ページを表示しました",
+                    "The display source is no longer on the selected path. Showing the latest page"
+                )
             } else {
-                "履歴の表示位置を再取得しました"
+                super::i18n::local!(
+                    self.language,
+                    "履歴の表示位置を再取得しました",
+                    "Restored the history display position"
+                )
             }
             .into();
         }
@@ -1143,9 +1162,12 @@ impl ThreadView {
             return None;
         }
         self.start_rebase_navigation();
-        self.status = crate::ui::text_width::glyphs::select(
+        self.status = crate::ui::text_width::glyphs::localized!(
+            self.language,
             "履歴の表示位置を再取得中…",
             "履歴の表示位置を再取得中.",
+            "Restoring history position…",
+            "Restoring history position."
         )
         .into();
         let action = UiAction::RebaseHistory {
@@ -1308,7 +1330,12 @@ impl ThreadView {
         draft.literal_paste = true;
         draft.typed_prefix = 0;
         self.draft = draft;
-        self.status = "保存済みの依頼を入力欄へ戻しました".into();
+        self.status = super::i18n::local!(
+            self.language,
+            "保存済みの依頼を入力欄へ戻しました",
+            "Restored the saved request to the input field"
+        )
+        .into();
     }
     pub(super) fn on_clipboard_attachment(
         &mut self,
@@ -1319,16 +1346,18 @@ impl ThreadView {
         if !self.draft.text.is_char_boundary(position)
             || self.draft.text.len().saturating_add(draft::MARKER.len()) > limit
         {
-            self.status = "画像位置または下書きのbyte上限が変わったため採用していません".into();
+            self.status = super::i18n::local!(
+                self.language,
+                "画像位置または下書きのbyte上限が変わったため採用していません",
+                "The image was not attached because its position or the draft byte limit changed"
+            )
+            .into();
             false
         } else {
             self.draft.insert_attachment(attachment, position);
             self.draft.revision += 1;
-            self.status = match self.language {
-                crate::config::UiLanguage::Ja => "画像を添付しました",
-                crate::config::UiLanguage::En => "Image attached",
-            }
-            .into();
+            self.status =
+                super::i18n::local!(self.language, "画像を添付しました", "Image attached").into();
             true
         }
     }
@@ -1843,6 +1872,44 @@ mod completion_notice_tests {
         }
     }
     #[test]
+    fn attachment_feedback_is_localized_without_changing_the_draft_values() {
+        for language in [crate::config::UiLanguage::Ja, crate::config::UiLanguage::En] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut view = ThreadView::new(&config, std::env::temp_dir());
+            let attachment = UiAttachment {
+                id: "id".into(),
+                path: "/synthetic/画像.png".into(),
+                kind: "image".into(),
+                state: "ready".into(),
+                position: None,
+            };
+            assert!(view.on_clipboard_attachment(attachment.clone(), 100));
+            assert_eq!(view.draft.attachments[0].path, attachment.path);
+            assert_eq!(view.draft.attachments[0].kind, attachment.kind);
+            assert_eq!(
+                view.status,
+                if language == crate::config::UiLanguage::Ja {
+                    "画像を添付しました"
+                } else {
+                    "Image attached"
+                }
+            );
+            let draft = view.draft.clone();
+            assert!(!view.on_clipboard_attachment(attachment, 0));
+            assert_eq!(view.draft, draft);
+            assert!(
+                view.status
+                    .contains(if language == crate::config::UiLanguage::Ja {
+                        "採用していません"
+                    } else {
+                        "not attached"
+                    })
+            );
+        }
+    }
+
+    #[test]
     fn completion_notice_requires_the_accepted_owner_revision_anchor_and_paused_view() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("thread".into());
@@ -2343,14 +2410,20 @@ impl ThreadView {
             node.presentation.kind = crate::presentation::PresentationKind::Event;
             node.presentation.event_class = crate::presentation::EventClass::Change;
             node.presentation.title = if kind == "model_stream_observation" {
-                crate::ui::text_width::glyphs::select(
+                crate::ui::text_width::glyphs::localized!(
+                    self.language,
                     "ストリーム差分 · 最終応答は確定済み",
                     "ストリーム差分 | 最終応答は確定済み",
+                    "Stream delta · Final response is already confirmed",
+                    "Stream delta | Final response is already confirmed"
                 )
             } else {
-                crate::ui::text_width::glyphs::select(
+                crate::ui::text_width::glyphs::localized!(
+                    self.language,
                     "途中で切れた応答（保存済み・会話には含めない） · /received 一覧",
                     "途中で切れた応答（保存済み・会話には含めない） | /received 一覧",
+                    "Interrupted response (saved; not part of the conversation) · /received List",
+                    "Interrupted response (saved; not part of the conversation) | /received List"
                 )
             }
             .into();
@@ -2784,8 +2857,74 @@ mod received_tests {
         assert_eq!(ui.view().received_window_revision, Some(6));
     }
     #[test]
+    fn unsaved_conversation_title_follows_language_without_creating_a_thread() {
+        for (language, title) in [
+            (crate::config::UiLanguage::Ja, "新しい会話"),
+            (crate::config::UiLanguage::En, "New conversation"),
+        ] {
+            let mut config = Config::default();
+            config.ui.language = language;
+            let ui = UiState::new(&config, std::env::temp_dir());
+            assert_eq!(ui.view().title, title);
+            assert!(ui.view().thread_id.is_none());
+        }
+    }
+
+    #[test]
+    fn settled_stream_titles_are_localized_without_changing_raw_text_or_identity() {
+        use crate::config::UiLanguage::{En, Ja};
+        use crate::ui::text_width;
+        for language in [Ja, En] {
+            for policy in [Some(1), Some(2), None] {
+                text_width::set_terminal_width(policy);
+                for (kind, ja, en) in [
+                    ("model_stream_observation", "ストリーム差分", "Stream delta"),
+                    (
+                        "incomplete_response",
+                        "途中で切れた応答",
+                        "Interrupted response",
+                    ),
+                ] {
+                    let mut config = Config::default();
+                    config.ui.language = language;
+                    let mut ui = UiState::new(&config, std::env::temp_dir());
+                    ui.view_mut().nodes.push(UiNode {
+                        node_id: "attempt-raw".into(),
+                        role: "assistant".into(),
+                        text: "raw 日本語".into(),
+                        total_chars: 7,
+                        ..Default::default()
+                    });
+                    ui.view_mut().provisional_nodes.insert("attempt-raw".into());
+                    ui.view_mut().retain_incomplete_stream(
+                        "attempt-raw",
+                        "source-raw".into(),
+                        kind,
+                    );
+                    let node = &ui.view().nodes()[0];
+                    assert_eq!(node.node_id, "source-raw");
+                    assert_eq!(node.role, "received_response");
+                    assert_eq!(node.text, "raw 日本語");
+                    assert!(
+                        node.presentation
+                            .title
+                            .contains(if language == Ja { ja } else { en })
+                    );
+                    assert_eq!(node.presentation.title.contains('·'), policy == Some(1));
+                    if kind == "incomplete_response" {
+                        assert!(node.presentation.title.contains("/received"));
+                    }
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
+    #[test]
     fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
         ui.apply(UiUpdate::Stream {

@@ -3166,7 +3166,7 @@ fn expired_history_rebases_without_clearing_content_and_ignores_old_window_failu
     assert_eq!(ui.view().selection_revision, 2);
     assert!(!ui.view().navigation.is_loading());
     assert!(!ui.view().navigation.follow());
-    assert!(ui.view().status.contains("再取得しました"));
+    assert_eq!(ui.view().status, "Restored the history display position");
     let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("visible history old1"));
@@ -3202,7 +3202,10 @@ fn history_rebase_replaces_removed_anchor_and_rejects_old_refresh() {
         ui.view().navigation.anchor.node_id.as_deref(),
         Some("replacement")
     );
-    assert!(ui.view().status.contains("選択経路から外れた"));
+    assert_eq!(
+        ui.view().status,
+        "The display source is no longer on the selected path. Showing the latest page"
+    );
     ui.apply(UiUpdate::History {
         pending: Default::default(),
         read_revision: 0,
@@ -3648,7 +3651,9 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
             "保存された復旧理由を詳細で確認してください",
         ),
     ] {
-        let mut ui = state();
+        let mut config = Config::default();
+        config.ui.language = shellboy::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, cwd());
         ui.select_thread("recovery-thread".into());
         let details = serde_json::from_value(serde_json::json!({
             "agents_path":"/tmp/AGENTS.md", "thread_id":"recovery-thread", "title":"復旧確認", "cwd":"/tmp",

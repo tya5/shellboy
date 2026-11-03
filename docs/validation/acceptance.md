@@ -9124,3 +9124,15 @@ defaults to target schema 24; the Python test covers the argument defaults.
 This is a source comparison, not an executed upgrade test. Run the disposable
 synthetic upgrade test on the candidate; no candidate, tag, publication or
 installed-binary change is claimed by this preparation.
+
+### #152 stage C: Recovery feedback and attachment notices (2026-11-02)
+
+On main 6ad5faee, re-reviewed the three activity-state compatibility values and
+updated their scoped fingerprints after changing `ThreadView::on_thread`; state
+comparisons and localized display projections are unchanged. The complete
+manifest validates and Python audit tests pass 18/18. Scoped view audit reports
+`a=10, b=24, protected=3, c=9`; most pending view C records remain. On macOS,
+`cargo check --tests` and the recovery/attachment unit tests passed. An existing
+recovery integration fixture expected Japanese in the English-default UI; it now
+explicitly selects Japanese and passes. Exact task CI and three-OS integration
+CI remain pending; physical-terminal and OS-clipboard tests were not performed.

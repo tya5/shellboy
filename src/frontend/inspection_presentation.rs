@@ -49,7 +49,7 @@ pub(super) fn prepare_in(
     if matches!(ticket.target, crate::ui::InspectionTarget::Thread(_))
         && value["context_usage"].is_null()
     {
-        value["context_usage"] = serde_json::json!({"observation":"not_yet_read","detail":"保存済み使用量の取得待ち","inspect":"shellboy thread get --thread <thread_id>"});
+        value["context_usage"] = serde_json::json!({"observation":"not_yet_read","detail":crate::ui::i18n::local!(language, "保存済み使用量の取得待ち", "Waiting for saved usage"),"inspect":"shellboy thread get --thread <thread_id>"});
     }
     if !ticket.limited_fields.is_empty() {
         value["view_limits"] = serde_json::json!({"limited_fields":ticket.limited_fields});

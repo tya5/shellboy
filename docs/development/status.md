@@ -4295,3 +4295,9 @@ Annotated tag `v0.7.0` was published at main `abe16a34` at 2026-11-03T09:03:20Z
 from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
 `rag init`. Anonymous download and `SHA256SUMS` verification covered all six
 public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
+### #152 stage C: Recovery feedback and attachment notices (2026-11-02)
+
+Localized the saved-recovery prefix and malformed-reason fallback, clipboard
+attachment feedback, the unsaved conversation title, and retained stream titles.
+The provider error text remains source-provided and unchanged; the canonical
+recovery state remains a stable internal value. Other view/UI C records remain.
