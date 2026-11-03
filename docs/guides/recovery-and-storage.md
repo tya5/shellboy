@@ -384,6 +384,8 @@ successfully isolated conversation defect.
 Stop the owner, then run `shellboy storage check` with the same `--data-dir`
 and configuration. The command acquires the owner lock and runs SQLite
 `quick_check` and `foreign_key_check` without creating or migrating a database.
+It requires write access to open SQLite in read-write mode, but enables
+`query_only` before checking; SQLite may recover existing WAL state on open.
 Use it after suspected storage corruption or when a full manual check is needed.
 Normal startup checks foreign keys after migrations and runs `quick_check` after
 an unclean or unknown previous shutdown; a clean restart skips those scans.

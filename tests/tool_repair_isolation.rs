@@ -270,6 +270,8 @@ async fn check_violating_recovery_json_remains_a_fatal_startup_integrity_error()
         Ok(())
     }).await.unwrap();
     owner.shutdown().await.unwrap();
+    // Simulate an interrupted previous owner so startup must run quick_check.
+    std::fs::write(directory.join("owner.lock"), b"shellboy-owner-active-v1\n").unwrap();
     let error =
         match DataOwner::start(Some(config), Some(directory.clone()), root.path().into()).await {
             Ok(owner) => {
