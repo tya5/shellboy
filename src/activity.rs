@@ -45,6 +45,31 @@ impl ActivityPhase {
         }
     }
 
+    pub fn column_label_for(self, language: crate::config::UiLanguage) -> &'static str {
+        if language == crate::config::UiLanguage::Ja {
+            return self.column_label();
+        }
+        match self {
+            Self::Idle => "Idle",
+            Self::Sending => "Sending",
+            Self::Reflecting => "Loading",
+            Self::Preparing => "Preparing",
+            Self::AwaitingModel => "Awaiting",
+            Self::Retrying => "Retrying",
+            Self::Receiving => "Receiving",
+            Self::Tools => "Tools",
+            Self::Running => "Running",
+            Self::Waiting => "Waiting",
+            Self::Background => "Background",
+            Self::Continuing => "Continuing",
+            Self::Stopping => "Stopping",
+            Self::Recovery => "Recovery",
+            Self::Failed => "Failed",
+            Self::Stopped => "Stopped",
+            Self::Completed => "Done",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Idle => "入力できます",
@@ -64,6 +89,31 @@ impl ActivityPhase {
             Self::Failed => "異常終了",
             Self::Stopped => "中断済み",
             Self::Completed => "完了",
+        }
+    }
+
+    pub fn label_for(self, language: crate::config::UiLanguage) -> &'static str {
+        if language == crate::config::UiLanguage::Ja {
+            return self.label();
+        }
+        match self {
+            Self::Idle => "Ready for input",
+            Self::Sending => "Accepting input",
+            Self::Reflecting => "Loading saved input",
+            Self::Preparing => "Preparing",
+            Self::AwaitingModel => "Waiting for the model",
+            Self::Retrying => "Retrying after a temporary error",
+            Self::Receiving => "Receiving a response",
+            Self::Tools => "Running tools",
+            Self::Running => "Running",
+            Self::Waiting => "Waiting",
+            Self::Background => "Answered; background work continues",
+            Self::Continuing => "Continuing",
+            Self::Stopping => "Stopping",
+            Self::Recovery => "Recovery needed",
+            Self::Failed => "Failed",
+            Self::Stopped => "Stopped",
+            Self::Completed => "Completed",
         }
     }
 }
@@ -137,5 +187,18 @@ mod tests {
             Running
         );
         assert_eq!(serde_json::to_value(Background).unwrap(), "background");
+        assert_eq!(Idle.column_label_for(crate::config::UiLanguage::En), "Idle");
+        assert_eq!(
+            Idle.label_for(crate::config::UiLanguage::En),
+            "Ready for input"
+        );
+        assert_eq!(
+            Idle.column_label_for(crate::config::UiLanguage::Ja),
+            "未実行"
+        );
+        assert_eq!(
+            Idle.label_for(crate::config::UiLanguage::Ja),
+            "入力できます"
+        );
     }
 }
