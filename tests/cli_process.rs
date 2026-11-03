@@ -743,7 +743,7 @@ async fn storage_check_offline_checks_and_refuses_live_owner() {
     assert!(!output.status.success());
     drop(lock);
     let db = rusqlite::Connection::open(root.path().join("shellboy.db")).unwrap();
-    db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at) VALUES('bad','fixture','{}','hash','failed','malformed','now');").unwrap();
+    db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at) VALUES('bad','fixture','{}','hash','failed','malformed','now'); PRAGMA ignore_check_constraints=OFF;").unwrap();
     drop(db);
     let output = run();
     assert!(!output.status.success());
