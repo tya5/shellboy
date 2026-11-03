@@ -894,8 +894,8 @@ pub(crate) fn automatic_candidates_tx(
             add("spill", group);
         }
     }
-    if let Some(range) = policy::active_turn_range(&snapshot) {
-        for group in &snapshot.groups[range] {
+    if let Some(plan) = policy::active_turn_plan(&snapshot) {
+        for group in &snapshot.groups[plan.start..plan.end()] {
             add("middle", group);
         }
     }

@@ -203,6 +203,10 @@ pub fn select_path(
     for pair in path.windows(2) {
         append::insert_edge_if_missing(tx, &pair[0], &pair[1])?;
     }
+    let previous = selected_ids(tx, thread_id)?;
+    if let Some(edit_point) = edit_invalidates_kept_reasoning(tx, &previous, path)? {
+        restart_reasoning_after(tx, thread_id, &path[..edit_point])?;
+    }
     tx.execute("DELETE FROM thread_path WHERE thread_id=?1", [thread_id])?;
     for (ordinal, id) in path.iter().enumerate() {
         tx.execute(
@@ -215,6 +219,142 @@ pub fn select_path(
         params![thread_id,path.last(),now,revision],
     )?;
     bump_root_revision(tx)
+}
+
+fn selected_ids(db: &Connection, thread_id: &str) -> Result<Vec<String>, StorageError> {
+    Ok(db
+        .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+        .query_map([thread_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+/// Whether a node carries assistant output (a response or its spill copy),
+/// which may hold reasoning or signed thinking bound to its prefix, and the
+/// reasoning epoch it was saved with.
+fn output_epoch(db: &Connection, id: &str) -> Result<Option<Option<i64>>, StorageError> {
+    Ok(db
+        .query_row(
+            "SELECT kind<>'tool_result' AND json_type(payload_json,'$.output')='array',json_extract(payload_json,'$.reasoning_epoch') FROM node WHERE id=?1",
+            [id],
+            |row| Ok((row.get::<_, Option<bool>>(0)?, row.get::<_, Option<i64>>(1)?)),
+        )
+        .optional()?
+        .and_then(|(output, epoch)| output.unwrap_or(false).then_some(epoch)))
+}
+fn carries_output(db: &Connection, id: &str) -> Result<bool, StorageError> {
+    Ok(output_epoch(db, id)?.is_some())
+}
+
+/// #182: an edit at the first changed position P keeps assistant output saved
+/// against the old prefix when any node after P carries output; returns P.
+/// The node at P itself (a new spill or restored original) keeps its own
+/// unchanged prefix. Appends and truncations change nothing before a kept
+/// response.
+fn edit_invalidates_kept_reasoning(
+    db: &Connection,
+    previous: &[String],
+    path: &[String],
+) -> Result<Option<usize>, StorageError> {
+    let unchanged = previous
+        .iter()
+        .zip(path)
+        .take_while(|(old, new)| old == new)
+        .count();
+    if unchanged == previous.len() {
+        return Ok(None);
+    }
+    for id in path.iter().skip(unchanged + 1) {
+        if carries_output(db, id)? {
+            return Ok(Some(unchanged));
+        }
+    }
+    Ok(None)
+}
+
+/// Per-Thread set of output nodes whose reasoning stays sendable although it
+/// was saved under an older epoch (#182). Valid only for the epoch it names;
+/// a model change or binding retry advances the epoch and voids it.
+pub(crate) fn reasoning_keep_key(thread_id: &str) -> String {
+    format!("reasoning.keep.{thread_id}")
+}
+pub(crate) fn reasoning_keep(
+    db: &Connection,
+    thread_id: &str,
+    epoch: i64,
+) -> Result<HashSet<String>, StorageError> {
+    let saved: Option<String> = db
+        .query_row(
+            "SELECT value FROM app_meta WHERE key=?1",
+            [reasoning_keep_key(thread_id)],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(value) = saved.and_then(|body| serde_json::from_str::<Value>(&body).ok()) else {
+        return Ok(HashSet::new());
+    };
+    if value["epoch"].as_i64() != Some(epoch) {
+        return Ok(HashSet::new());
+    }
+    Ok(value["nodes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect())
+}
+
+/// #182 positional drop: reasoning strictly before the earliest edited
+/// position stays byte-identical (whatever was sendable there remains so);
+/// reasoning saved at or after it is never sent again. Implemented as a new
+/// epoch plus the kept set of the unchanged prefix.
+fn restart_reasoning_after(
+    tx: &Transaction<'_>,
+    thread_id: &str,
+    unchanged: &[String],
+) -> Result<(), StorageError> {
+    let epoch: i64 = tx.query_row(
+        "SELECT reasoning_epoch FROM thread WHERE id=?1",
+        [thread_id],
+        |row| row.get(0),
+    )?;
+    let previous = reasoning_keep(tx, thread_id, epoch)?;
+    let mut kept = Vec::new();
+    for id in unchanged {
+        if let Some(saved) = output_epoch(tx, id)?
+            && (saved == Some(epoch) || previous.contains(id))
+        {
+            kept.push(id.clone());
+        }
+    }
+    tx.execute(
+        "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",
+        [thread_id],
+    )?;
+    tx.execute(
+        "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![
+            reasoning_keep_key(thread_id),
+            serde_json::json!({"epoch": epoch + 1, "nodes": kept}).to_string()
+        ],
+    )?;
+    Ok(())
+}
+
+/// #182: true while the latest assistant output on the selected path requested
+/// a tool, i.e. the provider tool loop is still open. Selective automatic edits
+/// wait until this is false; only the active-Turn summary may run meanwhile.
+pub(crate) fn open_tool_loop(db: &Connection, thread_id: &str) -> Result<bool, StorageError> {
+    for id in selected_ids(db, thread_id)?.iter().rev() {
+        if carries_output(db, id)? {
+            return Ok(db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM node n, json_each(n.payload_json,'$.output') o WHERE n.id=?1 AND json_extract(o.value,'$.type')='function_call')",
+                [id],
+                |row| row.get(0),
+            )?);
+        }
+    }
+    Ok(false)
 }
 
 fn bump_root_revision(tx: &Transaction<'_>) -> Result<(), StorageError> {
@@ -295,6 +435,15 @@ pub fn fork_thread(
         "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT ?1,ordinal,node_id FROM thread_path WHERE thread_id=?2 AND ordinal<=?3 ORDER BY ordinal",
         params![new_thread_id,args.thread_id,ordinal],
     ).map_err(sql_error)?;
+    // #182: the fork shares the parent's epoch, so it shares its kept set.
+    tx.execute(
+        "INSERT INTO app_meta(key,value) SELECT ?1,value FROM app_meta WHERE key=?2",
+        params![
+            reasoning_keep_key(new_thread_id),
+            reasoning_keep_key(&args.thread_id)
+        ],
+    )
+    .map_err(sql_error)?;
     tx.execute(
         "INSERT INTO thread_replacement(thread_id,replacement_id) SELECT ?1,tr.replacement_id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN thread_path p ON p.node_id=r.output_node_id AND p.thread_id=?1 WHERE tr.thread_id=?2",
         params![new_thread_id,args.thread_id],

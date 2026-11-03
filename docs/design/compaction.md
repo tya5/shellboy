@@ -18,7 +18,7 @@ to automatic as well as explicit compaction. No new counter, schema field or
 worker is needed. Broad Thread metadata changes do not acquire a new compaction
 fence, avoiding unnecessary discard of completed summary API work.
 
-完結tool groupはassistantの全callと全resultを一つの境界として扱う。spillは全callと各結果のplaceholderを一つのnodeへ保存する。placeholderはcall ID、コマンド引数、終了状態、execution IDと原文node IDを含む。通常は最新完結groupを保護し、明確なcontext超過の二段階目だけ保護を解除する。reasoning epochを新しいepochへ付け替えない。
+完結tool groupはassistantの全callと全resultを一つの境界として扱う。spillは全callと各結果のplaceholderを一つのnodeへ保存する。placeholderはcall ID、コマンド引数、終了状態、execution IDと原文node IDを含む。通常は最新完結groupを保護し、明確なcontext超過の二段階目だけ保護を解除する。推論の扱いは [#182](#signed-reasoning-and-history-edits-182) の位置規則に従う（編集位置より前は保持、後ろは送らない）。
 
 通常の要約対象は現在Turnと直近完了Turnより前の連続prefix。未反映のユーザー指示と未完結groupは対象外。64,000 Unicode文字の初期segmentを完結group境界で分け、明確なcontext超過だけ深さ8まで二分する。opaque reasoningは除外し、現在epochの送信対象推論のみを入力へ含める。部分成功はDBへ保存するが、経路採用は全成功時だけ。最終統合APIは呼ばない。
 
@@ -369,8 +369,11 @@ replacement as new input. When the newest tool anchor belongs to the current
 protected Turn, later appended groups there do not unfreeze that rejected older
 summary; an intervening path rewrite or new Turn is evaluated again. The latest tool group, every active-Turn user input, the latest completed
 Turn, pending receipts and held deliveries retain their existing protections.
-The active-Turn middle remains eligible only through the #181/#185 safe range;
-its evidence is separate from the older-Turn summary evidence. Explicit compact and
+The active-Turn summary remains eligible only through the #182 plan (all tool
+rounds of the Turn); its evidence is separate from the older-Turn summary
+evidence. While the tool loop is open, spill opportunities are left out of the
+guard (deferred, not seen), so the closed-loop boundary still treats them as
+new (#182). Explicit compact and
 failure-driven overflow recovery use their original separate policies.
 
 After a no-target decision or no-progress attempt, one bounded `app_meta` guard
@@ -445,33 +448,98 @@ is reused; no extra source lookup or raw error parsing is introduced (#132).
 A second Run triggered by the
 same measurement overwrites the earlier record on that attempt.
 
-## Active-Turn middle summary (#181)
+## Active-Turn middle summary (#181, reshaped by #182)
 
-Adopted design and evidence: [midturn-compaction](midturn-compaction.md). In the
-#125 proactive attempt, after the unchanged spill, `Compactor::summarize_active_turn`
-runs instead of the ordinary prefix summary whenever it has a target; with no
-target, the ordinary summary runs exactly as before. One summary operation per
-attempt. The attempt record adds `midturn: {"scope":"active_turn"}` or
-`{"skipped":"no_target"}`. Manual `/compact` and explicit edits are unchanged.
+Background and the GPT-route evidence: [midturn-compaction](midturn-compaction.md).
+The #182 shape below supersedes its sections 1-4 and 7.
 
-Target (`policy::active_turn_range`, pure): the oldest run of whole groups
-after the current request and before the latest complete tool group. Fences are
-incomplete or protected groups and every user message of the active Turn; the
-latest complete tool group onward is the retained working suffix. A run
-qualifies only if it contains a tool group or spill marker, so an unchanged
-long Turn whose only candidate is the previous summary has no target (#180).
+Order (user decision 2026-11-03, reverses #181's "instead of"): in the #125
+proactive attempt the ordinary summary of earlier Turns runs first, as usual,
+because recent context contributes more to quality. The active-Turn summary
+runs only when that prefix holds nothing but earlier summaries
+(`policy::unsummarized_prefix`), or when the previous attempt in the same Run
+adopted the prefix summary and a fresh measurement is still at or above the
+threshold (ephemeral per-`drive` flag; a fresh measurement below the threshold
+clears it). Still one summary operation per attempt; the #180 progress gate and
+the fresh-measurement rule are unchanged. The attempt record has
+`midturn: {"skipped":"prefix_first"}` when the prefix summary ran,
+`{"scope":"active_turn"}` when the active-Turn summary ran,
+`{"skipped":"no_target"}` when it had no target and `{"skipped":"no_new_target"}`
+when the progress gate saw no new active-Turn source.
 
-Summary: the existing bounded map/reduce, limits, refusal/empty/shrink
-rejections and cache keys. The adopted developer item starts with a fixed
-notice (covered tools already ran; inspect before repeating; originals via
-history get), and the payload has out-of-band `summary_scope: "active_turn"`.
-Adoption is the existing `SummaryAdoption` transaction with the full snapshot
-fence. It additionally advances `thread.reasoning_epoch`, so no reasoning or
-opaque block saved before the adoption is replayed on any adapter (this is an
-explicit exception to "do not re-assign the epoch" above, for this operation
-only). Responses after it carry the new epoch. No schema change, migration or
-setting. A rejected candidate leaves the path and epoch unchanged and uses the
-#153 retry gate like any non-adopted outcome.
+Shape (`policy::active_turn_plan`, pure): ① earlier Turns and ② the active
+Turn's request, plus anything before its first tool round, stay byte-identical.
+All tool rounds of the active Turn, from the first tool round (tool group,
+spill, earlier summary or trim marker) through the latest complete tool group,
+are replaced by one developer summary: ③ the older rounds are summarized with
+the existing bounded map/reduce, and ④ the latest complete tool group is
+appended to the same item as plain text (calls and results; reasoning and
+signed or opaque provider blocks are never included). No thinking, tool call
+or tool result of the active Turn remains after the edit point. User messages
+of the active Turn and protected nodes inside the span are retained verbatim,
+in order, right after the summary (judgement: they cannot stay in place inside
+one replacement; the notice says the summarized work may already address
+them). Groups after ④ stay in place. No target without a current Turn, with an
+incomplete group in the span, or when ③ has no tool group or spill marker (an
+earlier summary alone never re-fires, #180).
+
+Summary: the existing limits, refusal/empty/over-limit/shrink rejections and
+cache keys; covered sources are ③ and ④ minus retained nodes. The fixed notice
+says the covered tools already ran and the latest round follows as text. The
+adoption keeps no later assistant output, so the reasoning epoch is unchanged
+and earlier reasoning keeps replaying (the #181 epoch advance is removed).
+Manual argument-free `/compact` skips its spill while the tool loop is open,
+then runs the ordinary summary and, only while the loop is open and that has no
+target, the active-Turn summary.
+
+## Signed reasoning and history edits (#182)
+
+Claude 5.1+ binds each signed thinking block to the exact request prefix before
+it; a client-side edit before a retained block makes the provider reject it.
+The same rule applies to every adapter (no per-provider branch).
+
+1. History is edited only while the next request is prepared, never between a
+   tool call and its result (existing Thread boundary).
+2. Positional rule for every replacement (ordinary summary, active-Turn
+   summary, trims, spills, omission, restore): reasoning strictly before the
+   earliest edited position P stays byte-identical; reasoning saved at or after
+   P is never sent again. `history::select_path`, the single choke point, finds
+   P by comparing the old and new paths. When a node after P carries assistant
+   output, it advances `thread.reasoning_epoch` and saves the set of output
+   nodes before P whose reasoning was sendable as `app_meta`
+   `reasoning.keep.<thread>` (bound to the new epoch; replay sends reasoning of
+   a node when its epoch is current or it is in that set). Appends, truncations
+   and the active-Turn summary (no output after P) change nothing. A model
+   change or a binding retry advances the epoch and so voids the set. A fork
+   copies the set with the epoch. Bound: the set holds at most the output
+   nodes on the selected path; it is rewritten only at an epoch advance.
+3. Selective automatic edits run only at a boundary where the latest assistant
+   output on the selected path has no tool call (`history::open_tool_loop`):
+   proactive spill, the overflow maximal trim and spill stages, and the
+   large-input trim after transient failures. While the loop is open, an
+   explicit overflow falls back to the active-Turn summary, else the ordinary
+   prefix summary (attempt record `midturn.reason = "open_tool_loop"`); the
+   transient-failure trim is recorded as `{"outcome":"deferred"}`. The ordinary
+   prefix summary itself still runs mid-loop by the order decision above; by
+   rule 2 it stops all reasoning after its edit point, including the open
+   loop's thinking (judgement: documented as tolerated by Anthropic, which
+   degrades a tool turn without its thinking; recheck if a provider rejects
+   it). Explicit user edits (`compact --spill/--omit/--trim/--restore`,
+   `--maximal`) run when requested; rule 2 keeps them safe (judgement: user
+   intent, and refusing would strand an overflowing Thread).
+4. No `drop_block` or other vendor knob is sent. When a provider returns the
+   documented binding rejection ("Invalid `signature` in `thinking` block ...
+   bound to a different conversation"), the Driver saves the failed attempt
+   with `automatic_retry.reason = "thinking_binding"` and
+   `thinking_binding_retry`, advances the reasoning epoch in the same
+   transaction (no reasoning saved before it is sent) and resends once per
+   Turn generation until a success. It does not consume the ordinary retry
+   budget and records the `thinking_binding_retry` diagnostic event. A second
+   rejection follows the ordinary recovery.
+
+Not validated against a real provider (no paid calls, by decision); the basis
+is Anthropic's preserved-thinking documentation and competitors shipping the
+same full-replacement shape.
 
 ## Summary request usage (#133 / D-020)
 

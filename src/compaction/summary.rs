@@ -6,10 +6,10 @@ pub(super) struct SummaryAdoption {
     pub(super) payload: Value,
     pub(super) start: usize,
     pub(super) count: usize,
+    /// Source IDs inside `start..count` kept verbatim right after the summary
+    /// (#182: the active Turn's user messages and protected nodes).
+    pub(super) retained: Vec<String>,
     pub(super) result: CompactResult,
-    /// #181: an active-Turn replacement starts a new reasoning epoch, so no
-    /// reasoning or opaque block saved before it is replayed afterwards.
-    pub(super) new_epoch: bool,
 }
 impl SummaryAdoption {
     pub(super) fn adopt_tx(
@@ -29,6 +29,7 @@ impl SummaryAdoption {
             .flat_map(|group| group.sources.iter().map(|source| source.id.clone()))
             .collect::<Vec<_>>();
         path.push(node.clone());
+        path.extend(self.retained.iter().cloned());
         path.extend(
             self.snapshot.groups[self.count..]
                 .iter()
@@ -41,12 +42,8 @@ impl SummaryAdoption {
             &path,
             &timestamp(),
         )?;
-        if self.new_epoch {
-            tx.execute(
-                "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",
-                [&self.snapshot.thread],
-            )?;
-        }
+        // `select_path` starts a new reasoning epoch only when the edit keeps
+        // later assistant output (#182); the active-Turn summary keeps none.
         self.result.summary_node_id = Some(node);
         Ok(self.result)
     }

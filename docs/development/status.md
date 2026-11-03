@@ -13,6 +13,18 @@ The F6 field label is `終了メッセージnode ID`; the `回答` row label is 
 The `status` item field is shared by all kinds, so message items also say
 `end_message_node_id` (the assigned Turn's end message) until step 2 replaces
 them with `reply_node_id`. Resume point: step 2 (schema 25 and the reply core).
+## Signed reasoning and history edits (#182, branch `issue-182/thinking-edit-guard`)
+
+Every replacement now keeps reasoning before its earliest edited position and
+stops reasoning after it (`history::select_path`, epoch plus `app_meta` kept
+set). Proactive compaction summarizes earlier Turns first, then the active Turn
+as one summary carrying the latest tool round as text (#181's epoch advance and
+retained suffix removed). Spill and trims wait for a closed tool loop; overflow
+before that uses the active-Turn summary. A documented thinking-binding 400 is
+resent once with reasoning dropped and recorded. Design:
+[compaction](../design/compaction.md#signed-reasoning-and-history-edits-182),
+decision D-189. Validation: see acceptance. No paid provider call. Next:
+coordinator merge; real Claude behaviour remains unvalidated.
 
 ## Final benchmark after #183 (2026-11-03, branch `bench/final-2026-11-03`)
 

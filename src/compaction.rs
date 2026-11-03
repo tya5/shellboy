@@ -462,16 +462,19 @@ impl Compactor {
         };
         self.summarize_snapshot(snapshot, range, cancel).await
     }
-    /// #181: replace the oldest eligible run of whole groups inside the active
-    /// Turn with one summary, keeping the request, later user messages and the
-    /// latest complete tool group onward, and start a new reasoning epoch.
+    /// #181/#182: replace every tool round of the active Turn with one summary
+    /// (③ summarized, ④ the latest complete tool group as plain text), keeping
+    /// everything before the first tool round byte-identical and the Turn's
+    /// user messages verbatim after the summary. No signed reasoning or
+    /// tool call of the active Turn remains after the edit point, so the epoch
+    /// is unchanged and earlier reasoning keeps replaying.
     pub async fn summarize_active_turn(
         &self,
         thread: &str,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
-        let Some(range) = policy::active_turn_range(&snapshot) else {
+        let Some(plan) = policy::active_turn_plan(&snapshot) else {
             return Ok(CompactResult {
                 no_target: true,
                 ..Default::default()
@@ -479,9 +482,36 @@ impl Compactor {
         };
         let mut ledger = usage::UsageLedger::new(&snapshot);
         let policy = self.config.compaction.clone();
-        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, true)
+        let range = plan.start..plan.latest;
+        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, Some(plan))
             .await
             .map_err(|error| usage::annotate(error, ledger.usage()))
+    }
+    /// #182 proactive order: the ordinary prefix summary only when the prefix
+    /// holds something other than earlier summaries.
+    pub(crate) async fn summarize_unsummarized_prefix(
+        &self,
+        thread: &str,
+        cancel: CancellationToken,
+    ) -> Result<CompactResult, ApiError> {
+        let snapshot = self.snapshot(thread, true).await?;
+        let Some(range) = policy::unsummarized_prefix(&snapshot) else {
+            return Ok(CompactResult {
+                no_target: true,
+                ..Default::default()
+            });
+        };
+        self.summarize_snapshot(snapshot, range, cancel).await
+    }
+    /// #182: whether the provider tool loop is open on the selected path (the
+    /// latest assistant output requested a tool). Selective automatic edits
+    /// are deferred while it is.
+    pub(crate) async fn tool_loop_open(&self, thread: &str) -> Result<bool, ApiError> {
+        let thread = thread.to_owned();
+        self.database
+            .call(move |db| history::open_tool_loop(db, &thread))
+            .await
+            .map_err(storage_error)
     }
     async fn summarize_snapshot(
         &self,
@@ -500,7 +530,7 @@ impl Compactor {
         policy: crate::config::Compaction,
     ) -> Result<CompactResult, ApiError> {
         let mut ledger = usage::UsageLedger::new(&snapshot);
-        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, false)
+        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, None)
             .await
             .map_err(|error| usage::annotate(error, ledger.usage()))
     }
@@ -511,22 +541,36 @@ impl Compactor {
         cancel: CancellationToken,
         policy: crate::config::Compaction,
         ledger: &mut usage::UsageLedger,
-        active_turn: bool,
+        active: Option<policy::ActiveTurnPlan>,
     ) -> Result<CompactResult, ApiError> {
-        range::validate(
-            &snapshot,
-            std::slice::from_ref(&range),
-            range::RangeMode::Summary,
-        )?;
-        let count = range.end;
+        // The active-Turn plan already requires complete groups; protected and
+        // user nodes inside it are retained verbatim instead of being fences.
+        if active.is_none() {
+            range::validate(
+                &snapshot,
+                std::slice::from_ref(&range),
+                range::RangeMode::Summary,
+            )?;
+        }
+        let count = active
+            .as_ref()
+            .map_or(range.end, policy::ActiveTurnPlan::end);
         let groups = &snapshot.groups[range.clone()];
-        let source_characters = {
-            groups
-                .iter()
-                .flat_map(|g| &g.sources)
-                .map(|s| edit::projection_characters(&s.payload, snapshot.epoch))
-                .fold(0u64, u64::saturating_add)
-        };
+        let retained: Vec<String> = active
+            .as_ref()
+            .map(|plan| plan.retained.clone())
+            .unwrap_or_default();
+        // Covered sources: the summarized groups plus, for the active Turn,
+        // the latest tool round carried as text; retained nodes stay on path.
+        let covered: Vec<Source> = snapshot.groups[range.start..count]
+            .iter()
+            .flat_map(|g| g.sources.clone())
+            .filter(|s| !retained.contains(&s.id))
+            .collect();
+        let source_characters = covered
+            .iter()
+            .map(|s| edit::projection_characters(&s.payload, snapshot.epoch))
+            .fold(0u64, u64::saturating_add);
         let mut budget = SummaryBudget {
             source_characters,
             summary_characters: 0,
@@ -684,20 +728,24 @@ impl Compactor {
         if cancel.is_cancelled() {
             return Err(invalid("Compaction cancelled; original path retained"));
         }
-        let sources: Vec<Source> = groups.iter().flat_map(|g| g.sources.clone()).collect();
+        let sources = covered;
         let originals: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
         let body = self
             .reduce_summary(&snapshot, &parts, budget, &cancel)
             .await?;
         let summary_usage = budget.usage.usage().clone();
-        let body = if active_turn {
-            format!("{}\n\n{body}", active_turn_notice(&originals))
+        let body = if let Some(plan) = &active {
+            format!(
+                "{}\n\n{body}\n\n{}",
+                active_turn_notice(&originals, retained.len()),
+                latest_round_text(&snapshot.groups[plan.latest], &retained)
+            )
         } else {
             body
         };
         // Out-of-band metadata like summary_part_keys: replay sends only `item`.
         let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":body}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_part_keys":parts.iter().filter_map(|p|p.cache_key.as_deref()).collect::<Vec<_>>(),"summary_usage":summary_usage});
-        if active_turn {
+        if active.is_some() {
             payload["summary_scope"] = json!("active_turn");
         }
         if edit::projection_characters(&payload, snapshot.epoch) >= budget.source_characters {
@@ -711,6 +759,7 @@ impl Compactor {
             payload,
             start: range.start,
             count,
+            retained,
             result: CompactResult {
                 source_characters: Some(budget.source_characters),
                 summary_characters: Some(budget.summary_characters),
@@ -723,7 +772,6 @@ impl Compactor {
                 summary_usage: Some(summary_usage),
                 ..Default::default()
             },
-            new_epoch: active_turn,
         };
         self.database
             .call(move |db| {
@@ -739,13 +787,72 @@ impl Compactor {
 
 /// Fixed model-facing notice for an active-Turn summary (#181): covered tools
 /// already ran, so the model must not repeat them blindly.
-fn active_turn_notice(originals: &[String]) -> String {
+fn active_turn_notice(originals: &[String], retained: usize) -> String {
+    let retained = if retained > 0 {
+        format!(
+            " {retained} user message(s) delivered during this work follow this summary verbatim; the work described here may already address them."
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "Shellboy context notice: summary of earlier work in the active Turn, replacing {} source nodes ({} through {}). The tools it describes were already executed and their side effects remain; inspect the current state before repeating an operation. Originals: shellboy history get --node <source_node_id>.",
+        "Shellboy context notice: summary of the tool work in the active Turn, replacing {} source nodes ({} through {}). The tools it describes were already executed and their side effects remain; inspect the current state before repeating an operation. The latest tool round is included as text at the end.{retained} Originals: shellboy history get --node <source_node_id>.",
         originals.len(),
         originals.first().map_or("", String::as_str),
         originals.last().map_or("", String::as_str),
     )
+}
+
+/// #182 ④: the latest complete tool round as plain text. Reasoning, signed
+/// thinking and other opaque provider blocks are never included; calls and
+/// results become text, so no tool_use/tool_result block remains.
+fn latest_round_text(group: &Group, retained: &[String]) -> String {
+    let mut lines = vec!["Latest tool round (already executed; provided as text):".to_owned()];
+    for source in group.sources.iter().filter(|s| !retained.contains(&s.id)) {
+        let items: Vec<Value> = match source.payload.get("output").and_then(Value::as_array) {
+            Some(items) => items.clone(),
+            None => source.payload.get("item").cloned().into_iter().collect(),
+        };
+        for item in items {
+            if item.get("type").and_then(Value::as_str) == Some("reasoning")
+                || crate::model::opaque::is_opaque(&item)
+            {
+                continue;
+            }
+            let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+            match item.get("type").and_then(Value::as_str) {
+                Some("function_call") => lines.push(format!(
+                    "Tool call {} ({}): {}",
+                    text(&item["call_id"]),
+                    text(&item["name"]),
+                    text(&item["arguments"])
+                )),
+                Some("function_call_output") => lines.push(format!(
+                    "Tool result {}: {}",
+                    text(&item["call_id"]),
+                    text(&item["output"])
+                )),
+                _ => {
+                    let content = item
+                        .get("content")
+                        .and_then(Value::as_array)
+                        .map(|parts| {
+                            parts
+                                .iter()
+                                .filter_map(|p| p.get("text").and_then(Value::as_str))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .filter(|t| !t.is_empty());
+                    match content {
+                        Some(body) => lines.push(format!("{}: {body}", text(&item["role"]))),
+                        None => lines.push(item.to_string()),
+                    }
+                }
+            }
+        }
+    }
+    lines.join("\n")
 }
 
 /// The immutable spill projection is shared by explicit spills and the atomic
@@ -1771,14 +1878,15 @@ mod tests {
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('last','t','r','completed','now'),('current','t','r','running','now');
                 INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','current',0,0,'fixture','fixture',0,'completed','{}','now');")?;
             history::append_node(&tx,"t","last-user",Some("last"),"message",&json!({"role":"user","content":"earlier"}),"now")?;
-            history::append_node(&tx,"t","last-answer",Some("last"),"assistant_response",&json!({"reasoning_epoch":0,"output":[{"type":"reasoning","id":"rs-last","summary":[],"encrypted_content":"OLD"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}),"now")?;
+            let thinking = |name: &str| crate::model::opaque::wrap("anthropic_messages", "thinking", json!({"type":"thinking","thinking":"","signature":format!("sig-{name}")}));
+            history::append_node(&tx,"t","last-answer",Some("last"),"assistant_response",&json!({"reasoning_epoch":0,"output":[{"type":"reasoning","id":"rs-last","summary":[],"encrypted_content":"OLD"},thinking("last"),{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}),"now")?;
             history::append_node(&tx,"t","current-user",Some("current"),"message",&json!({"role":"user","content":"long task"}),"now")?;
             for group in ["g1","g2","g3"] {
                 tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'attempt','current','completed','now')",[group])?;
                 tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?1,0,'shell','{}','completed')",[group])?;
                 let (call, result) = (format!("{group}-call"), format!("{group}-result"));
-                history::append_node(&tx,"t",&call,Some("current"),"assistant_response",&json!({"group_id":group,"reasoning_epoch":0,"output":[{"type":"reasoning","id":format!("rs-{group}"),"summary":[],"encrypted_content":"E".repeat(4_000)},{"type":"function_call","call_id":group,"name":"shell","arguments":"{}"}]}),"now")?;
-                history::append_node(&tx,"t",&result,Some("current"),"tool_result",&json!({"group_id":group,"item":{"type":"function_call_output","call_id":group,"output":"{}"}}),"now")?;
+                history::append_node(&tx,"t",&call,Some("current"),"assistant_response",&json!({"group_id":group,"reasoning_epoch":0,"output":[{"type":"reasoning","id":format!("rs-{group}"),"summary":[],"encrypted_content":"E".repeat(4_000)},thinking(group),{"type":"function_call","call_id":group,"name":"shell","arguments":format!("{{\"command\":\"echo {group}\"}}")}]}),"now")?;
+                history::append_node(&tx,"t",&result,Some("current"),"tool_result",&json!({"group_id":group,"item":{"type":"function_call_output","call_id":group,"output":format!("{{\"stdout\":\"out-{group}\"}}")}}),"now")?;
                 tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?1,?2,'completed')",params![group,result])?;
             }
             tx.commit()?;
@@ -1790,12 +1898,109 @@ mod tests {
             .query_map([thread], |row| row.get(0))?
             .collect()
     }
+    /// #182 positional rule for every replacement through `select_path`:
+    /// reasoning strictly before the earliest edited position stays sendable,
+    /// reasoning at or after it never returns; appends and edits without later
+    /// output change nothing; a fork shares the kept set.
     #[tokio::test]
-    async fn active_turn_summary_keeps_request_and_suffix_and_drops_old_reasoning() {
+    async fn edits_keep_reasoning_before_the_edit_point_and_drop_it_after() {
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let thinking = |name: &str| crate::model::opaque::wrap("anthropic_messages", "thinking", json!({"type":"thinking","thinking":"","signature":format!("sig-{name}")}));
+            let answer = |name: &str, epoch: i64| json!({"reasoning_epoch":epoch,"output":[thinking(name),{"type":"message","role":"assistant","content":[{"type":"output_text","text":name}]}]});
+            let user = |text: &str| json!({"role":"user","content":text});
+            let sent = |db: &Connection, thread: &str| -> rusqlite::Result<Vec<String>> {
+                Ok(crate::control::replay::ReplayCache::new(1_000_000).load(db, thread).map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?.materialize().iter()
+                    .filter(|item| crate::model::opaque::is_opaque(item))
+                    .map(|item| item.to_string().split("sig-").nth(1).unwrap().chars().take(2).collect())
+                    .collect())
+            };
+            let node = |tx: &rusqlite::Transaction<'_>, id: &str| tx.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'summary','now',?2)", params![id, json!({"item":{"role":"developer","content":[{"type":"input_text","text":id}]}}).to_string()]);
+            let tx = db.transaction()?;
+            for (id, payload) in [("u1", user("one")), ("a1", answer("a1", 0)), ("u2", user("two")), ("a2", answer("a2", 0)), ("u3", user("three"))] {
+                history::append_node(&tx, "t", id, None, if id.starts_with('a') { "assistant_response" } else { "message" }, &payload, "now")?;
+            }
+            history::append_node(&tx, "t", "a3", None, "assistant_response", &json!({"reasoning_epoch":0,"output":[thinking("a3"),{"type":"function_call","call_id":"c3","name":"shell","arguments":"{}"}]}), "now")?;
+            history::append_node(&tx, "t", "r3", None, "tool_result", &json!({"item":{"type":"function_call_output","call_id":"c3","output":"{}"}}), "now")?;
+            tx.commit()?;
+            assert_eq!(sent(db, "t")?, ["a1", "a2", "a3"]);
+            assert!(history::open_tool_loop(db, "t")?);
+            // Edit at position 2 with later output: a1 stays, a2/a3 stop.
+            let tx = db.transaction()?;
+            node(&tx, "s2")?;
+            let revision = history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
+            history::select_path(&tx, "t", revision, &["u1","a1","s2","a2","u3","a3","r3"].map(String::from), "now")?;
+            tx.commit()?;
+            assert_eq!(db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| r.get::<_, i64>(0))?, 1);
+            assert_eq!(sent(db, "t")?, ["a1"]);
+            // A later response carries the new epoch; appends change nothing.
+            let tx = db.transaction()?;
+            history::append_node(&tx, "t", "a4", None, "assistant_response", &answer("a4", 1), "now")?;
+            history::append_node(&tx, "t", "u5", None, "message", &user("five"), "now")?;
+            history::append_node(&tx, "t", "a5", None, "assistant_response", &answer("a5", 1), "now")?;
+            tx.commit()?;
+            assert_eq!(sent(db, "t")?, ["a1", "a4", "a5"]);
+            assert!(!history::open_tool_loop(db, "t")?);
+            // Second edit at u5: kept a1 (older set) and a4 (current epoch);
+            // a5 after the edit point stops.
+            let tx = db.transaction()?;
+            node(&tx, "s5")?;
+            let revision = history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
+            history::select_path(&tx, "t", revision, &["u1","a1","s2","a2","u3","a3","r3","a4","s5","a5"].map(String::from), "now")?;
+            tx.commit()?;
+            assert_eq!(sent(db, "t")?, ["a1", "a4"]);
+            // A tail replacement keeping no later output leaves the epoch alone.
+            let tx = db.transaction()?;
+            node(&tx, "tail")?;
+            let revision = history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
+            history::select_path(&tx, "t", revision, &["u1","a1","s2","a2","u3","a3","r3","a4","tail"].map(String::from), "now")?;
+            tx.commit()?;
+            assert_eq!(db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| r.get::<_, i64>(0))?, 2);
+            assert_eq!(sent(db, "t")?, ["a1", "a4"]);
+            // A fork shares the epoch and the kept set.
+            let tx = db.transaction()?;
+            history::fork_thread(&tx, &crate::protocol::ThreadForkArgs { agents: None, thread_id: "t".into(), node_id: "a4".into(), cwd: None }, "child", "now").map_err(StorageError::from)?;
+            tx.commit()?;
+            assert_eq!(sent(db, "child")?, ["a1", "a4"]);
+            // A prefix replacement from position 0 keeps nothing.
+            let tx = db.transaction()?;
+            node(&tx, "s0")?;
+            let revision = history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
+            history::select_path(&tx, "t", revision, &["s0","a4","tail"].map(String::from), "now")?;
+            tx.commit()?;
+            assert!(sent(db, "t")?.is_empty());
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+    fn anthropic_wire(items: &[Value]) -> Value {
+        crate::model::dialect::encode_with(
+            crate::config::Api::AnthropicMessages,
+            json!({"model":"m","input":items}),
+            100,
+        )
+        .unwrap()
+    }
+    /// #182: the active-Turn summary keeps ① (earlier Turns, with their signed
+    /// thinking) and ② (the request) byte-identical, replaces every tool round
+    /// with one summary that carries ④ as text, and leaves no thinking,
+    /// tool_use or tool_result of the active Turn after the edit point.
+    #[tokio::test]
+    async fn active_turn_summary_keeps_prefix_byte_identical_and_no_signed_tail() {
         let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"## Goal\nTask\n## Current state\ng1 and g2 ran"}]}]});
         let (url, server) = summary_proxy(vec![raw]).await;
         let (_root, db) = database().await;
         active_turn_fixture(&db).await;
+        let before = db
+            .call(|db| {
+                Ok(crate::control::replay::ReplayCache::new(1_000_000)
+                    .load(db, "t")?
+                    .materialize())
+            })
+            .await
+            .unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let result = compactor
             .summarize_active_turn("t", CancellationToken::new())
@@ -1803,45 +2008,59 @@ mod tests {
             .unwrap();
         assert_eq!(
             result.original_node_ids,
-            ["g1-call", "g1-result", "g2-call", "g2-result"]
+            [
+                "g1-call",
+                "g1-result",
+                "g2-call",
+                "g2-result",
+                "g3-call",
+                "g3-result"
+            ]
         );
         let summary = result.summary_node_id.clone().unwrap();
         let expected = summary.clone();
         db.call(move |db| {
-            assert_eq!(selected_path(db, "t")?, ["last-user", "last-answer", "current-user", expected.as_str(), "g3-call", "g3-result"]);
-            assert_eq!(db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| r.get::<_, i64>(0))?, 1);
+            assert_eq!(selected_path(db, "t")?, ["last-user", "last-answer", "current-user", expected.as_str()]);
+            // No later assistant output was kept, so the epoch is unchanged.
+            assert_eq!(db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| r.get::<_, i64>(0))?, 0);
             let body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&expected], |r| r.get(0))?;
             let payload: Value = serde_json::from_str(&body).unwrap();
             assert_eq!(payload["summary_scope"], "active_turn");
             let text = payload["item"]["content"][0]["text"].as_str().unwrap();
-            assert!(text.starts_with("Shellboy context notice: summary of earlier work in the active Turn, replacing 4 source nodes (g1-call through g2-result)."));
-            assert!(text.ends_with("g1 and g2 ran"));
+            assert!(text.starts_with("Shellboy context notice: summary of the tool work in the active Turn, replacing 6 source nodes (g1-call through g3-result)."), "{text}");
+            assert!(text.contains("g1 and g2 ran"));
+            // ④ as plain text: call and result, never the signature.
+            assert!(text.contains("Tool call g3 (shell): {\"command\":\"echo g3\"}"), "{text}");
+            assert!(text.contains("Tool result g3: {\"stdout\":\"out-g3\"}"), "{text}");
+            assert!(!text.contains("sig-g3") && !text.contains("encrypted"));
             let sources = db.prepare("SELECT s.source_node_id FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id WHERE r.output_node_id=?1 ORDER BY s.ordinal")?
                 .query_map([&expected], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
-            assert_eq!(sources, ["g1-call", "g1-result", "g2-call", "g2-result"]);
-            // Originals are unchanged and remain readable.
+            assert_eq!(sources, ["g1-call", "g1-result", "g2-call", "g2-result", "g3-call", "g3-result"]);
             let original: String = db.query_row("SELECT payload_json FROM node WHERE id='g1-call'", [], |r| r.get(0))?;
-            assert!(original.contains("rs-g1"));
-            // Replay: no reasoning saved before the adoption, in the suffix or
-            // in earlier Turns; calls/results and messages stay.
-            let items = crate::control::replay::ReplayCache::new(1_000_000).load(db, "t")?.materialize();
-            assert!(items.iter().all(|item| item["type"] != "reasoning"), "{items:?}");
-            assert!(items.iter().any(|item| item["type"] == "function_call" && item["call_id"] == "g3"));
-            assert!(items.iter().any(|item| item["type"] == "function_call_output" && item["call_id"] == "g3"));
-            assert!(items.iter().all(|item| item["call_id"] != "g1" && item["call_id"] != "g2"));
-            assert!(items.iter().any(|item| item["role"] == "developer"));
-            // A fork inherits the new epoch and the same replay.
-            let tx = db.transaction()?;
-            history::fork_thread(&tx, &crate::protocol::ThreadForkArgs { agents: None, thread_id: "t".into(), node_id: "g3-result".into(), cwd: None }, "child", "now")
-                .map_err(StorageError::from)?;
-            tx.commit()?;
-            assert_eq!(db.query_row("SELECT reasoning_epoch FROM thread WHERE id='child'", [], |r| r.get::<_, i64>(0))?, 1);
-            let child = crate::control::replay::ReplayCache::new(1_000_000).load(db, "child")?.materialize();
-            assert_eq!(child, items);
+            assert!(original.contains("sig-g1"));
+            let after = crate::control::replay::ReplayCache::new(1_000_000).load(db, "t")?.materialize();
+            // ①② are item-for-item identical, including earlier-Turn reasoning.
+            let request = before.iter().position(|item| item["content"] == "long task").unwrap();
+            assert_eq!(after[..=request], before[..=request]);
+            assert!(after[..request].iter().any(crate::model::opaque::is_opaque));
+            assert_eq!(after.len(), request + 2);
+            assert_eq!(after[request + 1]["role"], "developer");
+            // Encoded Anthropic request: the bytes up to the request are a
+            // prefix of the old request; nothing signed or tool-shaped follows.
+            let (old, new) = (anthropic_wire(&before), anthropic_wire(&after));
+            let (old, new) = (old["messages"].as_array().unwrap(), new["messages"].as_array().unwrap());
+            let edit = new.iter().position(|m| m["content"].to_string().contains("long task")).unwrap();
+            assert_eq!(new[..edit], old[..edit]);
+            assert_eq!(new[edit]["content"][0], old[edit]["content"][0]);
+            assert!(new[..edit].iter().any(|m| m["content"].to_string().contains("sig-last")));
+            for message in &new[edit..] {
+                for block in message["content"].as_array().unwrap() {
+                    assert!(!matches!(block["type"].as_str(), Some("thinking" | "redacted_thinking" | "tool_use" | "tool_result")), "{block}");
+                }
+            }
             Ok(())
         }).await.unwrap();
-        // Unchanged Turn: only the summary remains before the latest group, so
-        // there is no new target and no summary request (#180).
+        // Unchanged Turn: the summary alone is no target (#180).
         let again = compactor
             .summarize_active_turn("t", CancellationToken::new())
             .await

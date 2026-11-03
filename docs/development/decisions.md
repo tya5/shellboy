@@ -3059,6 +3059,38 @@ live-validated. Revisit if a provider rejects the shape (fallback: skip
 predicate on Anthropic thinking in the active Turn), if measured cache or
 quality loss warrants a positional drop, or to keep Responses reasoning later.
 #182 tracks the separate risk to the existing edits.
+## D-189: Signed reasoning and history edits (#182, 2026-11-03)
+
+User decisions on #182 (issue comments, 2026-11-03), applied to every adapter:
+edit history only while preparing the next request; the active-Turn summary
+keeps earlier Turns and the request byte-identical and replaces all tool rounds
+with one summary carrying the latest round as text; selective edits (trim,
+spill) wait for a boundary without a tool call, falling back to the active-Turn
+summary on overflow; no `drop_block`; one recorded resend after the documented
+binding rejection; no paid verification. Follow-up decisions the same day: the
+proactive order is the ordinary summary of earlier Turns first, the active-Turn
+summary only when that prefix has no target left or a fresh measurement after
+it is still at or above the threshold (reverses #181's "instead of"); and the
+general positional rule (reasoning before the earliest edit kept, after it
+dropped) applies to every replacement.
+
+Implementation choices with lower confidence, with recheck conditions:
+- The positional rule is a new epoch plus a per-Thread kept-node set in
+  `app_meta` (`reasoning.keep.<thread>`, bounded by the output nodes on the
+  path, rewritten only at an epoch advance), not a schema column. Recheck if
+  the set's size shows in write cost or if deletion should reclaim it (like
+  `compact.pending.*`, it is left behind by Thread deletion).
+- Retained user messages and protected nodes inside the active-Turn span are
+  moved right after the summary, not kept in place. Recheck if models redo
+  work already done for such a message.
+- The ordinary prefix summary runs while the tool loop is open (required by the
+  order decision); its edit stops the open loop's thinking too. Anthropic
+  documents this as degrading, not failing; recheck on any provider rejection.
+- Explicit user edits are not deferred; they rely on the positional rule.
+  Recheck if users expect them to wait.
+- A binding rejection is detected from the provider message text (the
+  documented sentence), with status 400 or unknown. Recheck if proxies reword it.
+
 ## D-187: Revisit is a delivery timing of an ordinary message (2026-11-03)
 
 Approved by the user. `message send --deliver now|complete` replaces `--now`

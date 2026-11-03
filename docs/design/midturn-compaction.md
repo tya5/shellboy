@@ -1,7 +1,11 @@
 # Mid-Turn Middle-Segment Summary (#181, option B)
 
 Status: **Adopted and implemented (2026-11-03)** after review, the survey and the
-GPT-route validation. Adopted contract summary: [compaction](compaction.md#active-turn-middle-summary-181).
+GPT-route validation. **Superseded in part by #182 (2026-11-03):** the segment,
+retained suffix, epoch rule and trigger order in sections 1-4 and 7 are replaced
+by [compaction #181/#182](compaction.md#active-turn-middle-summary-181-reshaped-by-182)
+(all tool rounds replaced, the latest round as text, no epoch advance, ordinary
+summary first). The evidence and cache sections remain as history. Adopted contract summary: [compaction](compaction.md#active-turn-middle-summary-181).
 Implementation differences from this memo: the readback `compact list` metric
 for the scope is not added (the `midturn` object is in the saved attempt record),
 and the function is named `active_turn_range`/`summarize_active_turn`.

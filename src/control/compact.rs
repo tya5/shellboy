@@ -229,16 +229,29 @@ impl Control {
 }
 
 /// The argument-free `compact` (spill, then bounded summary with the ordinary
-/// protections). Proactive threshold compaction reuses it unchanged.
+/// protections).
 pub(super) async fn argument_free_compact(
     compactor: &crate::compaction::Compactor,
     thread: &str,
     cancel: CancellationToken,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
-    let spill = compactor
-        .spill_cancellable(thread, false, cancel.clone())
-        .await?;
-    let mut summary = compactor.summarize(thread, false, cancel).await?;
+    // #182: while the tool loop is open, spill waits for a closed-loop
+    // boundary; the ordinary summary runs, else the active-Turn summary.
+    let open = compactor.tool_loop_open(thread).await?;
+    let spill = if open {
+        crate::compaction::CompactResult {
+            no_target: true,
+            ..Default::default()
+        }
+    } else {
+        compactor
+            .spill_cancellable(thread, false, cancel.clone())
+            .await?
+    };
+    let mut summary = compactor.summarize(thread, false, cancel.clone()).await?;
+    if open && summary.no_target {
+        summary = compactor.summarize_active_turn(thread, cancel).await?;
+    }
     summary.spilled_groups += spill.spilled_groups;
     summary.source_nodes += spill.source_nodes;
     summary.original_node_ids.extend(spill.original_node_ids);

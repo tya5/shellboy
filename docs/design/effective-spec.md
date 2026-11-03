@@ -69,6 +69,20 @@ Both messages and help are localized in English and Japanese. Do not add a row,
 setting or persisted schema. The indication and timing are observational, not a
 completion-time promise.
 
+## Signed reasoning and history edits (#182, 2026-11-03)
+
+Every replacement keeps reasoning strictly before its earliest edited position
+byte-identical and stops sending reasoning saved at or after it
+(`history::select_path`: new epoch plus a kept set in `app_meta`, no schema
+change). Selective automatic edits (spill, trims) wait until the latest
+assistant output has no tool call; overflow before that falls back to the
+active-Turn summary. Proactive order: ordinary summary of earlier Turns first,
+then the active-Turn summary, which replaces every tool round of the Turn with
+one summary carrying the latest round as text and keeps the request prefix
+byte-identical. A documented thinking-binding rejection is resent once with
+the epoch advanced, and recorded. No vendor knob is sent. See
+[compaction](compaction.md#signed-reasoning-and-history-edits-182).
+
 ## 0.2.0 compatibility boundary
 
 Issue #33 adopts current-only formats: protocol version 2; required Message/Run/Turn/HistoryBody context, HistoryBody provenance and HistorySnippet provenance/context/selection; genuinely optional Thread/fork context; current index profile/query-marker validation; no expired status-operation alias, old-owner field defaults, legacy index fallback, attachment-origin repair, or duplicated RAG degradation warnings in `scope_errors`. Conversation schema advances to v11; standalone RAG schema remains v3. Isolated startup migration removes obsolete non-object index failure counters and the unused receipt-turn-source index; fresh conversation DBs use the complete current schema. Keep the general schema migration runner, ledger/user_version checks, and protocol-version rejection. Historical compatibility notes in adopted designs are superseded by their current-only sections.
