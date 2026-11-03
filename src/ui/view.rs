@@ -2899,7 +2899,9 @@ mod received_tests {
     }
     #[test]
     fn terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("t".into());
         let generation = ui.view().generation;
         ui.apply(UiUpdate::Stream {
