@@ -4,6 +4,23 @@
 
 Configuration is TOML read when the owner (`shellboy` without a subcommand) starts, or when `config check` runs. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner.
 
+## Migrating terminal width configuration
+
+Builds containing the terminal-input redesign remove `ui.ambiguous_width`, the
+manual one/two-column override for East Asian Ambiguous characters introduced
+in v0.7.0. Remove only `ambiguous_width = ...` from your existing `[ui]` section;
+keep its other settings. There is no replacement option. Leaving this key in
+place causes the strict parser to reject the **whole configuration**, rather
+than ignoring it. Restart using the same configuration path after editing.
+
+Terminal capability measurement now starts without blocking input or the first
+frame. A cached successful observation is an initial baseline, not a user
+override; late observations can update rendering. Missing or inconsistent
+measurements remain unknown and use conservative fallback glyphs and widths.
+Guessed measurements are never saved. The release identifier for this change
+is pending the release owner's decision; see the
+[terminal width migration note](../development/release-next-terminal-width-draft.md).
+
 ## First setup without an owner
 
 Published v0.3.0 predates these setup commands. With that older binary, create the
