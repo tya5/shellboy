@@ -1368,7 +1368,9 @@ mod tests {
     #[test]
     fn selection_fixed_header_is_visible_and_exit_preserves_the_source_anchor() {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-        let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
         let before = ui.view().navigation.anchor.clone();
         ui.event(Event::Key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
         let shown = frame_text(&mut ui, 60, 20);
@@ -1394,7 +1396,9 @@ mod tests {
     fn minimum_selection_banner_remains_visible_above_a_readonly_popup() {
         use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
         for (width, height) in [(8, 5), (80, 5), (24, 10), (60, 20)] {
-            let mut ui = UiState::new(&Config::default(), PathBuf::from("/synthetic"));
+            let mut config = Config::default();
+            config.ui.language = crate::config::UiLanguage::Ja;
+            let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
             for code in [KeyCode::F(1), KeyCode::F(2)] {
                 ui.event(Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
             }

@@ -176,7 +176,9 @@ mod tests {
     }
     #[test]
     fn selection_redraw_displays_updates_received_while_frozen_then_freezes_again() {
-        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::Ja;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
         ui.select_thread("fixture-thread".into());
         ui.insert("retained draft", false);
         let generation = ui.view().generation;
