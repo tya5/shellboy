@@ -4052,7 +4052,7 @@ mod tests {
                 let rows = node_lines(language, rendered_node, false, 0, 80, &mut Vec::new());
                 let row = rows
                     .iter()
-                    .find(|row| row.to_string().contains(&notice))
+                    .find(|row| row.to_string().contains(notice))
                     .unwrap_or_else(|| panic!("{language:?}: {}", plain(&rows)));
                 assert!(row.to_string().starts_with("  "), "{language:?}: {row:?}");
             }
