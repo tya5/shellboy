@@ -4,6 +4,32 @@ use super::*;
 use crate::config::UiLanguage;
 use crate::ui::text_width::glyphs;
 
+fn phase_label(state: &str, language: UiLanguage) -> Option<&'static str> {
+    use crate::activity::ActivityPhase::*;
+    [
+        Idle,
+        Sending,
+        Reflecting,
+        Preparing,
+        AwaitingModel,
+        Retrying,
+        Receiving,
+        Tools,
+        Running,
+        Waiting,
+        Background,
+        Continuing,
+        Stopping,
+        Recovery,
+        Failed,
+        Stopped,
+        Completed,
+    ]
+    .into_iter()
+    .find(|phase| phase.column_label() == state || phase.column_label_for(UiLanguage::En) == state)
+    .map(|phase| super::watch::phase_label(phase, language, false))
+}
+
 #[derive(Clone, Copy)]
 enum WorkMessage<'a> {
     State(&'a str),
@@ -37,51 +63,27 @@ impl<'a> WorkMessage<'a> {
     fn render(self, language: UiLanguage) -> String {
         use UiLanguage::{En, Ja};
         let rendered: String = match (language, self) {
-            (_, Self::ChildState(state)) => {
-                // The frontend prepares child states with canonical phase labels.
-                use crate::activity::ActivityPhase::*;
-                [
-                    Idle,
-                    Sending,
-                    Reflecting,
-                    Preparing,
-                    AwaitingModel,
-                    Retrying,
-                    Receiving,
-                    Tools,
-                    Running,
-                    Waiting,
-                    Background,
-                    Continuing,
-                    Stopping,
-                    Recovery,
-                    Failed,
-                    Stopped,
-                    Completed,
-                ]
-                .into_iter()
-                .find(|phase| phase.column_label() == state)
-                .map_or_else(
-                    || Self::State(state).render(language),
-                    |phase| super::watch::phase_label(phase, language, false).into(),
-                )
-            }
-            (En, Self::State(state)) => match state {
-                "starting" => "Starting",
-                "running" | "live" => "Running",
-                "stopping" => "Stopping",
-                "waiting" => "Waiting",
-                other => other,
-            }
-            .into(),
-            (Ja, Self::State(state)) => match state {
-                "starting" => "起動中",
-                "running" | "live" => "実行中",
-                "stopping" => "停止中",
-                "waiting" => "待機中",
-                other => other,
-            }
-            .into(),
+            (_, Self::ChildState(state)) => phase_label(state, language)
+                .map(str::to_owned)
+                .unwrap_or_else(|| Self::State(state).render(language)),
+            (En, Self::State(state)) => phase_label(state, language)
+                .unwrap_or_else(|| match state {
+                    "starting" => "Starting",
+                    "running" | "live" => "Running",
+                    "stopping" => "Stopping",
+                    "waiting" => "Waiting",
+                    other => other,
+                })
+                .into(),
+            (Ja, Self::State(state)) => phase_label(state, language)
+                .unwrap_or_else(|| match state {
+                    "starting" => "起動中",
+                    "running" | "live" => "実行中",
+                    "stopping" => "停止中",
+                    "waiting" => "待機中",
+                    other => other,
+                })
+                .into(),
             (En, Self::Heading { empty: true, .. }) => "Owned work | None".into(),
             (Ja, Self::Heading { empty: true, .. }) => "抱えている作業 | なし".into(),
             (En, Self::Heading { folded: true, .. }) => "Owned work | Folded".into(),
@@ -2329,6 +2331,12 @@ mod language_tests {
                 assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), source);
                 assert_eq!(row.state.as_bytes(), source.as_bytes());
             }
+            row.state = phase.column_label_for(UiLanguage::En).into();
+            assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), english);
+            assert_eq!(
+                WorkMessage::state(&row).render(UiLanguage::Ja),
+                phase.column_label()
+            );
         }
         crate::ui::text_width::clear_terminal_width();
     }
@@ -2351,7 +2359,8 @@ mod language_tests {
                 .column_label()
                 .into();
             if !matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), row.state);
+                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), "Recovery");
+                assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), row.state);
             } else {
                 row.state = "live".into();
                 assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), "Running");
