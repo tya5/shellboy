@@ -218,6 +218,8 @@ class ReleaseUpgradeTests(unittest.TestCase):
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
         self.assertEqual((current.start_schema, current.expected_new_schema), (19, 24))
+        release = checks.parse_args(required + ['--old-version', '0.6.1', '--expected-version', '0.7.0'])
+        self.assertEqual((release.start_schema, release.expected_new_schema), (19, 24))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         staged = checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '16'])

@@ -1,13 +1,7 @@
-# Shellboy Release Notes (Draft)
+# Shellboy v0.7.0
 
 Safer long-running conversations, clearer progress, and more consistent terminal
 behavior.
-
-**Version:** to be decided (`0.7.0` suggested: breaking CLI changes).
-**Scope:** Changes on `main` since the `v0.6.1` release tag (`93e527c`, tag
-commit `45c34c75e266c5bfde3d28e07a303bdea93e137a`), through
-`18103ce70f4a9a1940e06da0087613685e63f78e` (2026-11-03). The package version
-has not been bumped; this is not a release candidate or publication record.
 
 ## Breaking changes
 
@@ -48,6 +42,11 @@ has not been bumped; this is not a release candidate or publication record.
   received-item details follow the selected English or Japanese display language
   (#150, #152). This expands coverage; it does not claim every UI string is
   translated.
+- F6 details of a model answer show the request that produced it: the measured
+  input bytes (UTF-8) in total and by source, beside the provider-reported input
+  and cached-input tokens. Bytes and tokens are different units and are never
+  converted into each other; requests saved before this release show the bytes
+  as not recorded. `shellboy usage get` shows the same facts (#186).
 - A new [Shell guide](../guides/shell.md) covers noninteractive Git use and
   diagnosing stuck shell processes.
 
@@ -92,6 +91,28 @@ has not been bumped; this is not a release candidate or publication record.
 
 ## Downloads and validation
 
-This is a release-notes draft only. No candidate archives, checksums, upgrade
-verification or release publication are claimed here. Those checks belong to the
-release candidate built from the final approved main commit.
+Windows x64, macOS Apple Silicon and Linux x64 archives are intended to include
+an executable, LICENSE, configuration example and offline documentation. Verify
+all archives and installer scripts against `SHA256SUMS` when candidates exist.
+
+**Draft snapshot:** the source cutoff is main
+`0ca891bf3fa1ba6b826547cf683ce688365e9677` (includes #186, #180 and the #152
+operations-form labels), following the `v0.6.1` tag (`93e527c`, tag commit
+`45c34c75e266c5bfde3d28e07a303bdea93e137a`). CI, candidate
+archives/installers/checksums and upgrade verification are separate gates; this
+preparation does not create a tag, publish a release, replace an installed binary
+or modify user data.
+
+After the reviewer builds a candidate, run the synthetic upgrade check on a Unix
+host with the public v0.6.1 binary and the candidate executable. The fixture root
+must not already exist, and must not be a user data directory:
+
+```sh
+python3 scripts/check-release-upgrade.py \
+  --old /path/to/shellboy-0.6.1 --new /path/to/shellboy-0.7.0 \
+  --root /path/to/new-disposable-fixture-dir --old-version 0.6.1 \
+  --expected-version 0.7.0 --expected-new-schema 24
+```
+
+The script uses synthetic data and a loopback provider. Its successful execution
+is not yet claimed by this draft; preserve its output as candidate evidence.

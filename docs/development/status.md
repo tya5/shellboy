@@ -4267,3 +4267,11 @@ language-specific regressions are updated. Only `cargo fmt --all -- --check`
 and `git diff --check` are run locally per the current shared build-slot policy;
 exact-tip three-OS CI is pending. This is one #152 batch, not final issue
 acceptance.
+
+### v0.7.0 release preparation
+
+The 0.7.0 preparation branch updates the package version and finalizes the
+release notes in `docs/development/release-v0.7.0-draft.md` (renamed from the
+unversioned draft). The source cutoff is main
+`0ca891bf3fa1ba6b826547cf683ce688365e9677`. Candidate builds, upgrade
+verification, tagging and publication remain separate gates.
