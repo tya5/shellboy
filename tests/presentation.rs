@@ -317,11 +317,18 @@ fn safe_detail_depth_fallback_uses_the_selected_ui_language() {
         array_source = json!([array_source]);
     }
     let english_array =
-        safe_detail_value_for_language(array_source, shellboy::config::UiLanguage::En);
+        safe_detail_value_for_language(array_source.clone(), shellboy::config::UiLanguage::En);
+    let japanese_array =
+        safe_detail_value_for_language(array_source, shellboy::config::UiLanguage::Ja);
     assert!(
         english_array
             .to_string()
             .contains("[Deep structure omitted; see original]")
+    );
+    assert!(
+        japanese_array
+            .to_string()
+            .contains("[深い構造 · 詳細は元の参照先で確認]")
     );
     assert_eq!(source, before);
 }
