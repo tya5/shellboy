@@ -11,8 +11,8 @@ new table, queue, worker, or dependency.
 ## Connection-level instrumentation
 
 Instrument all SQLite connections used by the DB worker at the lowest practical
-layer, including inspection reads. The always-on fast path subscribes only to
-SQLite `trace_v2` profile events, using SQLite's elapsed time without a separate
+layer, including inspection reads. The always-on fast path subscribes to
+SQLite `trace_v2` profile and row events, using SQLite's elapsed time without a separate
 per-statement timer. Only a statement reported at or above 1 ms is sampled for
 `FULLSCAN_STEP`, `SORT`, `AUTOINDEX`, and `VM_STEP`. SQLite counters can include
 previous executions of a reused prepared statement; report them as cumulative
