@@ -2003,7 +2003,11 @@ mod slow_job_tests {
         assert_eq!(event["db_job_slow"]["kind"], "HistoryGet");
         assert_eq!(event["db_job_slow"]["lane"], "inspection");
         assert_eq!(event["db_job_slow"]["requester"], "external");
-        assert!(event["db_job_slow"].get("statement_counters").is_none());
+        assert_eq!(event["db_job_slow"]["statement_counters"]["rows"], 1);
+        assert_eq!(
+            event["db_job_slow"]["statement_counters"]["row_scope"],
+            "job_cumulative"
+        );
     }
 
     #[tokio::test]
