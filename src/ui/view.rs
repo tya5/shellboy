@@ -346,7 +346,7 @@ impl ThreadView {
                 .as_ref()
                 .and_then(|name| config.connections.get(name))
                 .and_then(|c| c.default_effort.clone()),
-            title: "新しい会話".into(),
+            title: super::i18n::local!(config.ui.language, "新しい会話", "New conversation").into(),
             state: "idle".into(),
             draft: DraftSnapshot::default(),
             generation: 0,
@@ -560,18 +560,35 @@ impl ThreadView {
         self.title = details.title;
         self.run_id = details.run_id;
         self.turn_id = details.turn_id;
-        self.state = if details.recovery_reason.is_some() {
-            "復旧待ち".into()
-        } else if self.run_id.is_some() {
-            "処理中".into()
-        } else {
-            "待機中".into()
-        };
+        self.state = match (
+            self.language,
+            details.recovery_reason.is_some(),
+            self.run_id.is_some(),
+        ) {
+            (crate::config::UiLanguage::Ja, true, _) => "復旧待ち",
+            (crate::config::UiLanguage::En, true, _) => "Recovery pending",
+            (crate::config::UiLanguage::Ja, false, true) => "処理中",
+            (crate::config::UiLanguage::En, false, true) => "Running",
+            (crate::config::UiLanguage::Ja, false, false) => "待機中",
+            (crate::config::UiLanguage::En, false, false) => "Idle",
+        }
+        .into();
         if let Some(reason) = details.recovery_reason {
-            let message = serde_json::from_str::<crate::protocol::ApiError>(&reason)
-                .map(|error| crate::config_setup::tui_error(&error))
-                .unwrap_or_else(|_| "保存された復旧理由を詳細で確認してください".into());
-            self.status = format!("復旧待ち: {message}");
+            self.status = match serde_json::from_str::<crate::protocol::ApiError>(&reason) {
+                Ok(error) => {
+                    let message = crate::config_setup::tui_error(&error);
+                    match self.language {
+                        crate::config::UiLanguage::Ja => format!("復旧待ち: {message}"),
+                        crate::config::UiLanguage::En => format!("Recovery pending: {message}"),
+                    }
+                }
+                Err(_) => super::i18n::local!(
+                    self.language,
+                    "復旧待ち: 保存された復旧理由を詳細で確認してください",
+                    "Recovery pending: Check the saved recovery reason in details"
+                )
+                .into(),
+            };
         }
         // Only install the saved draft into an untouched placeholder.
         if let Some(draft) = draft.filter(valid_draft)
@@ -1143,9 +1160,17 @@ impl ThreadView {
             self.navigation
                 .on_event(NavEvent::Read(ReadEvent::RebaseResolved));
             self.status = if relocated {
-                "表示元が選択経路から外れたため、最新ページを表示しました"
+                super::i18n::local!(
+                    self.language,
+                    "表示元が選択経路から外れたため、最新ページを表示しました",
+                    "The display source is no longer on the selected path. Showing the latest page"
+                )
             } else {
-                "履歴の表示位置を再取得しました"
+                super::i18n::local!(
+                    self.language,
+                    "履歴の表示位置を再取得しました",
+                    "Restored the history display position"
+                )
             }
             .into();
         }
@@ -1166,9 +1191,10 @@ impl ThreadView {
             return None;
         }
         self.start_rebase_navigation();
-        self.status = crate::ui::text_width::glyphs::select(
+        self.status = super::i18n::local!(
+            self.language,
             "履歴の表示位置を再取得中…",
-            "履歴の表示位置を再取得中.",
+            "Restoring history position…"
         )
         .into();
         let action = UiAction::RebaseHistory {
@@ -1346,7 +1372,12 @@ impl ThreadView {
         draft.literal_paste = true;
         draft.typed_prefix = 0;
         self.draft = draft;
-        self.status = "保存済みの依頼を入力欄へ戻しました".into();
+        self.status = super::i18n::local!(
+            self.language,
+            "保存済みの依頼を入力欄へ戻しました",
+            "Restored the saved request to the input field"
+        )
+        .into();
     }
     pub(super) fn on_clipboard_attachment(
         &mut self,
@@ -1357,7 +1388,12 @@ impl ThreadView {
         if !self.draft.text.is_char_boundary(position)
             || self.draft.text.len().saturating_add(draft::MARKER.len()) > limit
         {
-            self.status = "画像位置または下書きのbyte上限が変わったため採用していません".into();
+            self.status = super::i18n::local!(
+                self.language,
+                "画像位置または下書きのbyte上限が変わったため採用していません",
+                "The image was not attached because its position or the draft byte limit changed"
+            )
+            .into();
             false
         } else {
             self.draft.insert_attachment(attachment, position);
