@@ -1076,13 +1076,13 @@ mod tests {
         let en = super::super::inspection_presentation::prepare_in(
             crate::config::UiLanguage::En,
             &projection,
-            usize::MAX,
+            16 * 1024,
         )
         .unwrap();
         let ja = super::super::inspection_presentation::prepare_in(
             crate::config::UiLanguage::Ja,
             &projection,
-            usize::MAX,
+            16 * 1024,
         )
         .unwrap();
         assert_eq!(
@@ -1110,6 +1110,24 @@ mod tests {
             ja.report.detail.as_ref().unwrap()["context_usage"]["detail"],
             "保存済み使用量の取得待ち"
         );
+        for (prepared, expected) in [
+            (&en, "Waiting for saved usage"),
+            (&ja, "保存済み使用量の取得待ち"),
+        ] {
+            let index = prepared
+                .snapshot
+                .fields
+                .iter()
+                .position(|field| field.key == "/context_usage/detail")
+                .unwrap();
+            let field = &prepared.snapshot.fields[index];
+            assert_eq!(field.value, expected);
+            assert_eq!(field.displayed(), expected);
+            assert_eq!(
+                prepared.snapshot.anchors[index].pointer,
+                "/context_usage/detail"
+            );
+        }
         assert!(state.presentation_finished(&projection));
         let (_root, diagnostics) = logger();
         let usage = state.take_usage(Instant::now(), diagnostics).unwrap();
@@ -1131,7 +1149,7 @@ mod tests {
         let ready = state.take_presentation().unwrap();
         for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
             let actual =
-                super::super::inspection_presentation::prepare_in(language, &ready, usize::MAX)
+                super::super::inspection_presentation::prepare_in(language, &ready, 16 * 1024)
                     .unwrap();
             assert_eq!(
                 actual.report.detail.as_ref().unwrap()["context_usage"],
@@ -1141,6 +1159,21 @@ mod tests {
                 actual.report.detail.as_ref().unwrap()["usage_totals"],
                 totals
             );
+            let detail = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/context_usage/detail")
+                .unwrap();
+            assert_eq!(detail.value, "provider 原文");
+            assert_eq!(detail.displayed(), "provider 原文");
+            let usage = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/usage_totals/usage")
+                .unwrap();
+            assert_eq!(usage.displayed(), "provider 原文");
             assert_eq!(ready.metadata.value["title"], "原文");
         }
         assert!(state.presentation_finished(&ready));
@@ -1164,12 +1197,27 @@ mod tests {
         let previous = state.take_presentation().unwrap();
         for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
             let actual =
-                super::super::inspection_presentation::prepare_in(language, &previous, usize::MAX)
+                super::super::inspection_presentation::prepare_in(language, &previous, 16 * 1024)
                     .unwrap();
             let context_usage = &actual.report.detail.as_ref().unwrap()["context_usage"];
             assert_eq!(context_usage["observation"], "previous_configuration");
             assert_eq!(context_usage["last_observation"], original);
             assert_eq!(context_usage["read_at"], "previous-read");
+            let detail = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/context_usage/last_observation/detail")
+                .unwrap();
+            assert_eq!(detail.value, "provider 原文");
+            assert_eq!(detail.displayed(), "provider 原文");
+            let read_at = actual
+                .snapshot
+                .fields
+                .iter()
+                .find(|field| field.key == "/context_usage/read_at")
+                .unwrap();
+            assert_eq!(read_at.value, "previous-read");
         }
     }
 

@@ -8709,8 +8709,12 @@ The Thread observation regression exercises the not-yet-read generated detail in
 English and Japanese, checks the canonical observation identifier and inspect
 command, verifies metadata remains unchanged, and admits matching- and previous-
 scope usage observations to check original values and read time survive both
-locales. On macOS arm64 / Rust 1.99.1, `cargo check --tests` and all 15
-`frontend::inspection_state::tests` passed; the language audit's 18 Python tests
-and test layout check also passed. Exact-tip 3-OS CI is pending; physical terminal,
+locales. A 16 KiB bounded projection verifies actual displayed fields and stable
+anchors, including provider-origin detail. On macOS arm64 / Rust 1.99.1,
+`cargo fmt --check`, `cargo check --tests`, all 15
+`frontend::inspection_state::tests`, the language audit's 18 Python tests and
+test layout check passed. Earlier CI run 41545819848 failed on all three OSes
+because the test used a disallowed wall deadline; the regression now uses the
+actual scheduled deadline. Exact-tip 3-OS CI is pending; physical terminal,
 provider and post-integration behavior are untested. This is one Stage C slice,
 not final #152 acceptance.
