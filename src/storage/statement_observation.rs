@@ -92,6 +92,7 @@ struct TraceContext {
     counters: Arc<Mutex<Counters>>,
     baselines: HashMap<usize, [u64; 4]>,
     exhaustive: bool,
+    sample_every_profile: bool,
     last_sql: Vec<u8>,
     last_shape: Option<Arc<str>>,
 }
@@ -217,7 +218,7 @@ unsafe extern "C" fn profile(
             return 0;
         }
         let duration = unsafe { *(elapsed as *const u64) };
-        if !sample_profile(duration) {
+        if !context.sample_every_profile && !sample_profile(duration) {
             if let Ok(mut counters) = context.counters.lock() {
                 if counters.fingerprint_frozen && counters.captured_statement == stmt as usize {
                     counters.captured_profile_recorded = true;
@@ -319,6 +320,11 @@ unsafe extern "C" fn profile(
 
 impl<'a> StatementObservation<'a> {
     pub fn install(connection: &'a mut Connection) -> Self {
+        let mut observation = Self::install_production(connection);
+        observation._context.sample_every_profile = cfg!(test);
+        observation
+    }
+    fn install_production(connection: &'a mut Connection) -> Self {
         Self::install_using(connection, |db, context| unsafe {
             ffi::sqlite3_trace_v2(
                 db,
@@ -354,6 +360,7 @@ impl<'a> StatementObservation<'a> {
             counters: counters.clone(),
             baselines: HashMap::new(),
             exhaustive: false,
+            sample_every_profile: false,
             last_sql: Vec::new(),
             last_shape: None,
         });
@@ -727,7 +734,7 @@ mod tests {
                 workload(profile_only.connection(), scan);
                 let profile_time = start.elapsed();
                 drop(profile_only);
-                let mut all = StatementObservation::install(&mut db);
+                let mut all = StatementObservation::install_production(&mut db);
                 let capture = SlowBacktrace::new(std::time::Instant::now(), None);
                 all.connection()
                     .progress_handler(
@@ -756,6 +763,22 @@ mod tests {
     }
 
     #[test]
+    fn normal_test_install_samples_fast_profiles() {
+        let mut db = Connection::open_in_memory().unwrap();
+        let mut observation = StatementObservation::install(&mut db);
+        let _: i64 = observation
+            .connection()
+            .query_row("SELECT 1", [], |row| row.get(0))
+            .unwrap();
+        let counters = observation.counters();
+        assert_eq!(
+            counters.counter_scope,
+            Some("statement_lifetime_cumulative")
+        );
+        assert!(counters.vm_steps > 0);
+    }
+
+    #[test]
     fn production_sampling_ignores_fast_statements_and_labels_slow_cumulative_counts() {
         let mut db = Connection::open_in_memory().unwrap();
         db.create_scalar_function(
@@ -768,7 +791,7 @@ mod tests {
             },
         )
         .unwrap();
-        let mut observation = StatementObservation::install(&mut db);
+        let mut observation = StatementObservation::install_production(&mut db);
         let _: i64 = observation
             .connection()
             .query_row("SELECT 1", [], |r| r.get(0))
