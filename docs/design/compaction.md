@@ -477,9 +477,19 @@ appended to the same item as plain text (calls and results; reasoning and
 signed or opaque provider blocks are never included). No thinking, tool call
 or tool result of the active Turn remains after the edit point. User messages
 of the active Turn and protected nodes inside the span are retained verbatim,
-in order, right after the summary (judgement: they cannot stay in place inside
-one replacement; the notice says the summarized work may already address
-them). Groups after ④ stay in place. No target without a current Turn, with an
+in their original order, right before the summary, which comes last as the
+current state (user decision 2026-11-03, the Codex rule: `codex-rs/core/src/compact.rs`
+`build_compacted_history_with_limit` appends the selected user messages and then
+the summary). One summary request (map/reduce bounds unchanged). Groups after
+④ stay in place. When messages were moved, the notice says they were delivered
+during the summarized work, that their order relative to its steps may differ,
+and to follow the originals with `shellboy history relations --node FIRST
+--relation next` when exact order matters. Storage is unchanged in kind: nodes
+and existing edges are never modified or removed; adoption adds the summary
+node, its replacement record with ordered sources, and edges for the new
+selection; the summary payload also records the span's `original_order` and
+`retained_node_ids` (out of band, like #185 markers). The selected path is a
+projection replaced by `select_path`, as for every summary. No target without a current Turn, with an
 incomplete group in the span, or when ③ has no tool group or spill marker (an
 earlier summary alone never re-fires, #180).
 

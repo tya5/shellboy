@@ -6,8 +6,9 @@ pub(super) struct SummaryAdoption {
     pub(super) payload: Value,
     pub(super) start: usize,
     pub(super) count: usize,
-    /// Source IDs inside `start..count` kept verbatim right after the summary
-    /// (#182: the active Turn's user messages and protected nodes).
+    /// Source IDs inside `start..count` kept verbatim, in order, right before
+    /// the summary (#182: the active Turn's user messages and protected nodes;
+    /// the summary comes last as the current state).
     pub(super) retained: Vec<String>,
     pub(super) result: CompactResult,
 }
@@ -28,8 +29,8 @@ impl SummaryAdoption {
             .iter()
             .flat_map(|group| group.sources.iter().map(|source| source.id.clone()))
             .collect::<Vec<_>>();
-        path.push(node.clone());
         path.extend(self.retained.iter().cloned());
+        path.push(node.clone());
         path.extend(
             self.snapshot.groups[self.count..]
                 .iter()

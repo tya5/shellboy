@@ -464,8 +464,9 @@ impl Compactor {
     }
     /// #181/#182: replace every tool round of the active Turn with one summary
     /// (③ summarized, ④ the latest complete tool group as plain text), keeping
-    /// everything before the first tool round byte-identical and the Turn's
-    /// user messages verbatim after the summary. No signed reasoning or
+    /// everything before the first tool round byte-identical. The Turn's later
+    /// user messages stay verbatim, in order, before the summary, which comes
+    /// last as the current state (the Codex rule). No signed reasoning or
     /// tool call of the active Turn remains after the edit point, so the epoch
     /// is unchanged and earlier reasoning keeps replaying.
     pub async fn summarize_active_turn(
@@ -745,8 +746,18 @@ impl Compactor {
         };
         // Out-of-band metadata like summary_part_keys: replay sends only `item`.
         let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":body}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_part_keys":parts.iter().filter_map(|p|p.cache_key.as_deref()).collect::<Vec<_>>(),"summary_usage":summary_usage});
-        if active.is_some() {
+        if let Some(plan) = &active {
             payload["summary_scope"] = json!("active_turn");
+            // Out-of-band provenance (like #185 trim markers): the replaced
+            // span's original order, including the user messages kept before
+            // this node, so the original selection stays reconstructible.
+            payload["original_order"] = json!(
+                snapshot.groups[plan.start..plan.end()]
+                    .iter()
+                    .flat_map(|g| g.sources.iter().map(|s| &s.id))
+                    .collect::<Vec<_>>()
+            );
+            payload["retained_node_ids"] = json!(plan.retained);
         }
         if edit::projection_characters(&payload, snapshot.epoch) >= budget.source_characters {
             return Err(budget.error(
@@ -788,17 +799,17 @@ impl Compactor {
 /// Fixed model-facing notice for an active-Turn summary (#181): covered tools
 /// already ran, so the model must not repeat them blindly.
 fn active_turn_notice(originals: &[String], retained: usize) -> String {
-    let retained = if retained > 0 {
+    let first = originals.first().map_or("", String::as_str);
+    let order = if retained > 0 {
         format!(
-            " {retained} user message(s) delivered during this work follow this summary verbatim; the work described here may already address them."
+            " The {retained} user message(s) just before this summary were delivered during the summarized work; their order relative to its steps may differ from the original. When exact order matters, follow the originals with shellboy history relations --node {first} --relation next."
         )
     } else {
         String::new()
     };
     format!(
-        "Shellboy context notice: summary of the tool work in the active Turn, replacing {} source nodes ({} through {}). The tools it describes were already executed and their side effects remain; inspect the current state before repeating an operation. The latest tool round is included as text at the end.{retained} Originals: shellboy history get --node <source_node_id>.",
+        "Shellboy context notice: the tool work below in the active Turn was summarized, replacing {} source nodes ({first} through {}). The tools it describes were already executed and their side effects remain; inspect the current state before repeating an operation. The latest tool round is included as text at the end.{order} Originals: shellboy history get --node <source_node_id>.",
         originals.len(),
-        originals.first().map_or("", String::as_str),
         originals.last().map_or("", String::as_str),
     )
 }
@@ -1872,7 +1883,10 @@ mod tests {
     /// #181 fixture: a running Turn with three complete tool groups whose
     /// responses carry large current-epoch reasoning items.
     async fn active_turn_fixture(db: &DbWorker) {
-        db.call(|db| {
+        active_turn_fixture_with(db, false).await;
+    }
+    async fn active_turn_fixture_with(db: &DbWorker, messages: bool) {
+        db.call(move |db| {
             let tx=db.transaction()?;
             tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('last','t','r','completed','now'),('current','t','r','running','now');
@@ -1888,6 +1902,10 @@ mod tests {
                 history::append_node(&tx,"t",&call,Some("current"),"assistant_response",&json!({"group_id":group,"reasoning_epoch":0,"output":[{"type":"reasoning","id":format!("rs-{group}"),"summary":[],"encrypted_content":"E".repeat(4_000)},thinking(group),{"type":"function_call","call_id":group,"name":"shell","arguments":format!("{{\"command\":\"echo {group}\"}}")}]}),"now")?;
                 history::append_node(&tx,"t",&result,Some("current"),"tool_result",&json!({"group_id":group,"item":{"type":"function_call_output","call_id":group,"output":format!("{{\"stdout\":\"out-{group}\"}}")}}),"now")?;
                 tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?1,?2,'completed')",params![group,result])?;
+                if messages && group != "g3" {
+                    let id = format!("user-after-{group}");
+                    history::append_node(&tx,"t",&id,Some("current"),"message",&json!({"role":"user","content":format!("instruction after {group}")}),"now")?;
+                }
             }
             tx.commit()?;
             Ok(())
@@ -2027,7 +2045,8 @@ mod tests {
             let payload: Value = serde_json::from_str(&body).unwrap();
             assert_eq!(payload["summary_scope"], "active_turn");
             let text = payload["item"]["content"][0]["text"].as_str().unwrap();
-            assert!(text.starts_with("Shellboy context notice: summary of the tool work in the active Turn, replacing 6 source nodes (g1-call through g3-result)."), "{text}");
+            assert!(text.starts_with("Shellboy context notice: the tool work below in the active Turn was summarized, replacing 6 source nodes (g1-call through g3-result)."), "{text}");
+            assert!(!text.contains("user message(s) just before"), "no messages, no order note");
             assert!(text.contains("g1 and g2 ran"));
             // ④ as plain text: call and result, never the signature.
             assert!(text.contains("Tool call g3 (shell): {\"command\":\"echo g3\"}"), "{text}");
@@ -2066,6 +2085,122 @@ mod tests {
             .await
             .unwrap();
         assert!(again.no_target);
+        assert_eq!(server.await.unwrap(), 1);
+        db.shutdown().await.unwrap();
+    }
+    /// #182 final rule (Codex): user messages delivered during the replaced
+    /// tool rounds stay verbatim in their original order before the one
+    /// summary, which comes last: [②][U1][U2][S(③ + ④ text)]. One request.
+    #[tokio::test]
+    async fn active_turn_summary_puts_mid_turn_messages_before_one_summary() {
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"g1 and g2 ran"}]}]});
+        let (url, server) = summary_proxy(vec![raw]).await;
+        let (_root, db) = database().await;
+        active_turn_fixture_with(&db, true).await;
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let result = compactor
+            .summarize_active_turn("t", CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result.model_requests, Some(1));
+        assert_eq!(
+            result.original_node_ids,
+            [
+                "g1-call",
+                "g1-result",
+                "g2-call",
+                "g2-result",
+                "g3-call",
+                "g3-result"
+            ]
+        );
+        let summary = result.summary_node_id.unwrap();
+        db.call(move |db| {
+            assert_eq!(
+                selected_path(db, "t")?,
+                [
+                    "last-user",
+                    "last-answer",
+                    "current-user",
+                    "user-after-g1",
+                    "user-after-g2",
+                    summary.as_str()
+                ]
+            );
+            let items = crate::control::replay::ReplayCache::new(1_000_000)
+                .load(db, "t")?
+                .materialize();
+            let last = items.last().unwrap().to_string();
+            assert!(last.contains("The 2 user message(s) just before this summary were delivered during the summarized work; their order relative to its steps may differ from the original. When exact order matters, follow the originals with shellboy history relations --node g1-call --relation next."), "{last}");
+            assert!(
+                last.contains("Latest tool round") && last.contains("out-g3"),
+                "{last}"
+            );
+            assert!(
+                items
+                    .iter()
+                    .all(|i| i["type"] != "function_call" && i["type"] != "function_call_output")
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert_eq!(server.await.unwrap(), 1);
+        db.shutdown().await.unwrap();
+    }
+    /// #182 hard requirement: a mid-Turn summary only adds a node, a
+    /// replacement record and edges. Every original node and every original
+    /// edge (parent link) is unchanged, and the original order of the replaced
+    /// span stays readable from the summary's provenance.
+    #[tokio::test]
+    async fn active_turn_summary_leaves_original_nodes_edges_and_order_intact() {
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"g1 and g2 ran"}]}]});
+        let (url, server) = summary_proxy(vec![raw]).await;
+        let (_root, db) = database().await;
+        active_turn_fixture_with(&db, true).await;
+        type Rows = (
+            Vec<(String, String, i64, Option<String>)>,
+            Vec<(String, String)>,
+            Vec<String>,
+        );
+        let read = |db: &mut Connection| -> rusqlite::Result<Rows> {
+            Ok((
+                db.prepare("SELECT id,kind,payload_revision,payload_json FROM node ORDER BY id")?
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                    .collect::<Result<_, _>>()?,
+                db.prepare("SELECT src,dst FROM edge ORDER BY src,dst")?
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<_, _>>()?,
+                selected_path(db, "t")?,
+            ))
+        };
+        let (nodes, edges, path) = db.call(move |db| Ok(read(db)?)).await.unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let summary = compactor
+            .summarize_active_turn("t", CancellationToken::new())
+            .await
+            .unwrap()
+            .summary_node_id
+            .unwrap();
+        db.call(move |db| {
+            let (after_nodes, after_edges, _) = read(db)?;
+            let originals: Vec<_> = after_nodes.iter().filter(|n| n.0 != summary).cloned().collect();
+            assert_eq!(originals, nodes, "original nodes are byte-identical");
+            assert!(edges.iter().all(|e| after_edges.contains(e)), "no original edge removed");
+            assert!(edges.contains(&("g1-result".into(), "user-after-g1".into())));
+            // The original order of the replaced span is in the provenance.
+            let body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&summary], |r| r.get(0))?;
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            let start = path.iter().position(|id| id == "g1-call").unwrap();
+            assert_eq!(payload["original_order"], json!(path[start..]));
+            assert_eq!(payload["retained_node_ids"], json!(["user-after-g1", "user-after-g2"]));
+            let sources: Vec<String> = db.prepare("SELECT s.source_node_id FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id WHERE r.output_node_id=?1 ORDER BY s.ordinal")?
+                .query_map([&summary], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            assert_eq!(sources, ["g1-call", "g1-result", "g2-call", "g2-result", "g3-call", "g3-result"]);
+            Ok(())
+        })
+        .await
+        .unwrap();
         assert_eq!(server.await.unwrap(), 1);
         db.shutdown().await.unwrap();
     }

@@ -106,7 +106,7 @@ pub(super) fn request_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize
 /// byte-identical. Groups `start..latest` (③) are summarized; the latest
 /// complete tool group `latest` (④) is appended to the same summary as plain
 /// text. `retained` are the active Turn's user messages and protected nodes in
-/// that span, kept verbatim right after the summary in their original order.
+/// that span, kept verbatim in their original order right before the summary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ActiveTurnPlan {
     pub(super) start: usize,

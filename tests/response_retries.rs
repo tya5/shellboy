@@ -1551,14 +1551,9 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         .iter()
         .position(|item| {
             item.to_string()
-                .contains("summary of the tool work in the active Turn")
+                .contains("tool work below in the active Turn was summarized")
         })
         .expect("active-Turn summary notice");
-    assert!(
-        input[notice]
-            .to_string()
-            .contains("user message(s) delivered during this work follow this summary verbatim")
-    );
     assert!(
         input
             .iter()
@@ -1569,13 +1564,23 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         .iter()
         .position(|item| item.to_string().contains("TURN_REQUEST_MARKER"))
         .unwrap();
-    let last_message = input
-        .iter()
-        .rposition(|item| item.to_string().contains("MIDTURN_INSTRUCTION_"))
-        .unwrap();
+    let at = |text: &str| {
+        input
+            .iter()
+            .position(|item| item.to_string().contains(text))
+            .unwrap()
+    };
+    // #182 (Codex rule): messages delivered during the replaced tool rounds
+    // stay verbatim in order before the one summary; the last message arrived
+    // after the latest round and stays after it.
+    let (first, second, third) = (
+        at("MIDTURN_INSTRUCTION_0"),
+        at("MIDTURN_INSTRUCTION_1"),
+        at("MIDTURN_INSTRUCTION_2"),
+    );
     assert!(
-        request_at < notice && notice < last_message,
-        "original order: request, notice, retained messages"
+        request_at < first && first < second && second < notice && notice < third,
+        "order: request, messages, summary, later message: {input:?}"
     );
     reduced.reply.send(Reply::success()).ok().unwrap();
     assert_eq!(f.settled().await, "completed");
