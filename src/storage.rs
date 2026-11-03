@@ -203,7 +203,7 @@ async fn wait_for_activity(
     activity: &mut watch::Receiver<DbWorkerActivity>,
     mut matches: impl FnMut(&DbWorkerActivity) -> bool,
 ) -> DbWorkerActivity {
-    tokio::time::timeout(Duration::from_secs(3), async {
+    crate::test_watchdog::watchdog("DB worker activity snapshot", async {
         loop {
             let snapshot = activity.borrow_and_update().clone();
             if matches(&snapshot) {
