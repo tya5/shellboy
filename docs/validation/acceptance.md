@@ -9323,3 +9323,5 @@ from schemas 24, 25, and 26, preserving rows and ledger and checking the recover
 index plan. Python scripts suite: 193 passed. Rust and 3-OS CI are pending; no
 installed binary, real provider, or user data was exercised.
 #203 validation pending: synthetic paged authorization recovery; no real provider or user data used.
+
+2026-11-03 #203 cursor-seek follow-up: synthetic SQLite VM-step coverage checks early, late, and exhausted keyset cursors over 10,000 authorization keys; page-order and restart coverage uses synthetic records. Real user data and process-kill recovery remain untested.
