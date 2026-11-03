@@ -515,41 +515,83 @@ async fn replying_after_sender_deletion_before_gc_cancels_instead_of_replying() 
 #[tokio::test]
 async fn oversized_held_queue_progresses_through_send_and_retry_without_rejection() {
     let (_root, store) = fixture().await;
-    let initial = store.execute(request(send(false)), None).await.unwrap().result;
+    let initial = store
+        .execute(request(send(false)), None)
+        .await
+        .unwrap()
+        .result;
     let old_run = initial["run_id"].as_str().unwrap().to_owned();
     let old_turn = initial["turn_id"].as_str().unwrap().to_owned();
-    store.database.call(move |db| {
-        db.execute("UPDATE run SET state='stopping' WHERE id=?1", [&old_run])?;
-        Ok(())
-    }).await.unwrap();
+    store
+        .database
+        .call(move |db| {
+            db.execute("UPDATE run SET state='stopping' WHERE id=?1", [&old_run])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let mut ids = Vec::new();
     for _ in 0..129 {
-        let result = store.execute(request(send(false)), None).await.unwrap().result;
+        let result = store
+            .execute(request(send(false)), None)
+            .await
+            .unwrap()
+            .result;
         assert_eq!(result["delivery_status"], "held");
         ids.push(result["message_id"].as_str().unwrap().to_owned());
     }
-    store.database.call(move |db| {
-        db.execute("UPDATE turn SET state='stopped' WHERE id=?1", [&old_turn])?;
-        db.execute("UPDATE run SET state='stopped' WHERE thread_id='recipient'", [])?;
-        Ok(())
-    }).await.unwrap();
+    store
+        .database
+        .call(move |db| {
+            db.execute("UPDATE turn SET state='stopped' WHERE id=?1", [&old_turn])?;
+            db.execute(
+                "UPDATE run SET state='stopped' WHERE thread_id='recipient'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let resume = request(send(false));
     let result = store.execute(resume.clone(), None).await.unwrap().result;
     assert_eq!(result["delivery_status"], "held");
     let run = result["run_id"].as_str().unwrap().to_owned();
     assert_eq!(store.execute(resume, None).await.unwrap().result, result);
-    let status = store.execute(request(Command::RunGet(RunGetArgs { run_id: run.clone() })), None).await.unwrap().result;
-    let hint: serde_json::Value = serde_json::from_str(status["recovery_hint"].as_str().unwrap()).unwrap();
+    let status = store
+        .execute(
+            request(Command::RunGet(RunTarget {
+                run_id: run.clone(),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let hint: serde_json::Value =
+        serde_json::from_str(status["recovery_hint"].as_str().unwrap()).unwrap();
     assert_eq!(hint["remaining_held"], 3);
-    let retry = request(Command::RunRetry(RunRetryArgs { run_id: run }));
+    let retry = request(Command::RunRetry(RunTarget { run_id: run }));
     let retried = store.execute(retry.clone(), None).await.unwrap().result;
     assert!(retried["recovery_hint"].is_null());
     assert_eq!(store.execute(retry, None).await.unwrap().result, retried);
-    let (selected, held) = store.database.call(|db| {
-        let selected = db.prepare("SELECT node_id FROM thread_path WHERE thread_id='recipient' ORDER BY ordinal")?.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let held: i64 = db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='recipient' AND state='held'", [], |r| r.get(0))?;
-        Ok((selected, held))
-    }).await.unwrap();
+    let (selected, held) = store
+        .database
+        .call(|db| {
+            let selected = db
+                .prepare(
+                    "SELECT node_id FROM thread_path WHERE thread_id='recipient' ORDER BY ordinal",
+                )?
+                .query_map([], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            let held: i64 = db.query_row(
+                "SELECT count(*) FROM receipt WHERE target_thread_id='recipient' AND state='held'",
+                [],
+                |r| r.get(0),
+            )?;
+            Ok((selected, held))
+        })
+        .await
+        .unwrap();
     // Initial accepted input is recovered before the 129 stopping-held inputs.
     assert_eq!(&selected[1..], ids);
     assert_eq!(held, 0);

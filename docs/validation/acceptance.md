@@ -9227,3 +9227,14 @@ source-scope fingerprint after the form rebase. Re-reviewed its bilingual field
 rendering and updated only that classification record; no Rust or migration
 changes. The full classification audit now passes locally. Replacement exact-tip
 CI remains pending at this record point; prior native test evidence is unchanged.
+
+### #194 chain migration26 checkpoint (2026-11-03)
+
+Synthetic local fixtures only. All 191 Python script tests passed. Strict locked
+all-target Clippy and the real-command oversized-held-queue send/retry/replay
+integration regression passed before owner restart. The interrupted remainder
+of that check is not validation. Final full local checks are restarted on the
+current tree; 257-message ordered/reopen/stale-retry and atomic rollback tests
+are included. Both history index25 and reply index26, their ledger entries and
+fresh/25 upgrade equivalence are asserted. No installed-binary changes, real
+providers, embeddings, user data, final CI success or main integration claimed.

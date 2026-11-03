@@ -2320,7 +2320,9 @@ fn recovery_status(
         return Ok(reason);
     }
     let remaining: i64 = connection.query_row("SELECT count(*) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held'", [thread], |r| r.get(0)).map_err(sql_error)?;
-    if remaining == 0 { return Ok(reason); }
+    if remaining == 0 {
+        return Ok(reason);
+    }
     let mut value = reason
         .as_deref()
         .and_then(|text| serde_json::from_str::<Value>(text).ok())
