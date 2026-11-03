@@ -169,6 +169,7 @@ mod tests {
                 id: id.into(),
                 revision: 0,
                 tombstone: false,
+                kind: "fixture".into(),
             },
             group: group.map(str::to_owned),
             items,
@@ -215,7 +216,7 @@ mod tests {
         ];
         let original = frames.clone();
         let lease = ReplayLease::new(frames).unwrap();
-        let sources: Vec<_> = lease.sourced_items().map(|(id, _)| id).collect();
+        let sources: Vec<_> = lease.sourced_items().map(|(id, _, _)| id).collect();
         assert_eq!(
             sources,
             ["c1", "c1", "r2", "r1", "audit", "attachment", "c2", "r3"]

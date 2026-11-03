@@ -970,13 +970,17 @@ pub(super) fn read_usage_tx(
         InspectionTarget::Usage(args) => {
             let window =
                 crate::readback::Window::new(args.since.as_deref(), args.until.as_deref())?;
-            crate::usage_totals::read_period_logged(
+            let mut value = crate::usage_totals::read_period_logged(
                 db,
                 &scope,
                 ticket.context,
                 Some(&ticket.diagnostics),
                 &window,
-            )?
+            )?;
+            // The latest request's measured bytes beside its reported tokens
+            // (#186); independent of the requested period.
+            value["latest_request"] = crate::usage_totals::read_latest_request(db, &scope)?;
+            value
         }
         _ => {
             crate::usage_totals::read_logged(db, &scope, ticket.context, Some(&ticket.diagnostics))?

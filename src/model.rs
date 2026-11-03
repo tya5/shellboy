@@ -7,6 +7,7 @@ pub mod http;
 pub mod opaque;
 mod reconcile;
 pub mod usage_limit;
+pub mod wire_bytes;
 
 use crate::protocol::ShellToolArgs;
 use serde::{Deserialize, Serialize};

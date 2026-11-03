@@ -16,6 +16,19 @@ Judgements made while landing step 1 of the
 - The exec contract prompt sent to the model ("Final answer contract") and the
   schema-validation messages keep their wording, since changing model-facing
   text is a behaviour change outside a rename.
+## Request input byte accounting attribution (#186, 2026-11-03)
+
+Attribution rules for bytes that do not obviously belong to one item, chosen
+so the partition is exact and deterministic: a merged message's wrapper framing
+goes with the item that created it (for Messages, often a thinking block or a
+tool result); a member's key, colon and one comma go with the member's label,
+and a labelled first member takes the comma after it so cache markers change
+only `other`; tool definitions, model and settings are `other`. All current
+merges split by source, so no `merged` category is emitted. `latest_request`
+searches the newest 33 Turns, mirroring the cache-comparison bound. Impact: small
+framing shifts between categories, never between sent and unsent bytes.
+Revisit if the TUI display (pending approval) needs tools as their own
+category, or a new conversion merges content that cannot be split.
 
 ## DB worker activity display (#190, 2026-11-03)
 

@@ -1,22 +1,31 @@
 //! Chat Completions wire adapter (moved verbatim from `dialect.rs`).
 use super::*;
 
-pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
+pub(super) fn encode(
+    request: Value,
+    tags: Option<&[ItemTag]>,
+) -> Result<(Value, Labels), ModelError> {
     let input = request["input"]
         .as_array()
         .ok_or_else(|| protocol("Conversation input must be an array"))?;
     let mut messages: Vec<Value> = Vec::new();
-    for item in input {
+    for (index, item) in input.iter().enumerate() {
+        // The item's source (#186); a merged message keeps each part's own.
+        let tag = tags.and_then(|tags| tags.get(index));
+        let category = tag.map(|tag| tag.category);
         match item["type"].as_str() {
             // Responses reasoning and other dialects' opaque blocks are not replayed.
             Some("reasoning") | Some(crate::model::opaque::TYPE) => continue,
             Some("function_call") => {
-                let call = json!({"id":item["call_id"],"type":"function","function":{"name":item["name"],"arguments":item["arguments"]}});
+                let mut call = json!({"id":item["call_id"],"type":"function","function":{"name":item["name"],"arguments":item["arguments"]}});
+                wire_bytes::mark(&mut call, category);
                 if !messages
                     .last()
                     .is_some_and(|last| last["role"] == "assistant")
                 {
-                    messages.push(json!({"role":"assistant","content":null,"tool_calls":[]}));
+                    let mut message = json!({"role":"assistant","content":null,"tool_calls":[]});
+                    wire_bytes::mark(&mut message, category);
+                    messages.push(message);
                 }
                 let last = messages.last_mut().expect("assistant message");
                 if last.get("tool_calls").is_none() {
@@ -32,8 +41,10 @@ pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
                     .as_str()
                     .map(str::to_owned)
                     .unwrap_or_else(|| item["output"].to_string());
-                messages
-                    .push(json!({"role":"tool","tool_call_id":item["call_id"],"content":output}));
+                let mut message =
+                    json!({"role":"tool","tool_call_id":item["call_id"],"content":output});
+                wire_bytes::mark(&mut message, category);
+                messages.push(message);
             }
             Some("message") | None => {
                 let role = match item["role"].as_str() {
@@ -49,7 +60,7 @@ pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
                         .as_array()
                         .ok_or_else(|| protocol("Message content must be text or an array"))?;
                     let mut mapped = Vec::new();
-                    for part in parts {
+                    for (index, part) in parts.iter().enumerate() {
                         match part["type"].as_str() {
                             Some("input_text" | "output_text") => {
                                 mapped.push(json!({"type":"text","text":part["text"]}))
@@ -71,6 +82,9 @@ pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
                                 ));
                             }
                         }
+                        if let Some(last) = mapped.last_mut() {
+                            wire_bytes::mark(last, tag.map(|tag| tag.part(index)));
+                        }
                     }
                     json!(mapped)
                 };
@@ -80,19 +94,27 @@ pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
                         .is_some_and(|message| message["role"] == "assistant")
                 {
                     let last = messages.last_mut().expect("existing assistant");
+                    let owner = wire_bytes::marked(last);
                     let previous = last["content"].take();
-                    let parts = |value: Value| -> Vec<Value> {
-                        match value {
-                            Value::Null => vec![],
-                            Value::Array(parts) => parts,
-                            value => vec![json!({"type":"text","text":value})],
-                        }
-                    };
-                    let mut combined = parts(previous);
-                    combined.extend(parts(content));
+                    let parts =
+                        |value: Value, source: Option<wire_bytes::Category>| -> Vec<Value> {
+                            match value {
+                                Value::Null => vec![],
+                                Value::Array(parts) => parts,
+                                value => {
+                                    let mut part = json!({"type":"text","text":value});
+                                    wire_bytes::mark(&mut part, source);
+                                    vec![part]
+                                }
+                            }
+                        };
+                    let mut combined = parts(previous, owner);
+                    combined.extend(parts(content, category));
                     last["content"] = json!(combined);
                 } else {
-                    messages.push(json!({"role":role,"content":content}));
+                    let mut message = json!({"role":role,"content":content});
+                    wire_bytes::mark(&mut message, category);
+                    messages.push(message);
                 }
             }
             _ => {
@@ -131,7 +153,12 @@ pub(super) fn encode(request: Value) -> Result<Value, ModelError> {
             .collect::<Result<Vec<_>, ModelError>>()?;
         result["tools"] = json!(functions);
     }
-    Ok(result)
+    let labels = if tags.is_some() {
+        wire_bytes::extract(&mut result)
+    } else {
+        Labels::new()
+    };
+    Ok((result, labels))
 }
 
 #[derive(Default)]

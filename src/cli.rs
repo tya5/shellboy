@@ -122,7 +122,7 @@ pub enum UsageCommand {
 }
 #[derive(Debug, Clone, Args)]
 pub struct UsageOptions {
-    /// Inspect one saved attempt's usage and cache diagnostic facts.
+    /// Inspect one saved attempt's usage, cache diagnostic and request byte facts.
     #[arg(long="attempt", conflicts_with_all=["thread_id","run_id","turn_id","include_children","since","until","group_by","timezone","limit","cursor"])]
     pub attempt_id: Option<String>,
     /// Return bounded saved-attempt groups instead of ungrouped totals.

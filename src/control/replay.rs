@@ -44,6 +44,7 @@ struct Stamp {
     id: String,
     revision: i64,
     tombstone: bool,
+    kind: String,
 }
 #[derive(Default)]
 struct Ledger {
@@ -345,13 +346,23 @@ impl ReplayLease {
         self.0.frames.iter().flat_map(|frame| &frame.items)
     }
     /// Keep provenance with cached conversion; variable attachment bytes are
-    /// bound after this immutable text plan has been loaded.
-    pub(crate) fn sourced_items(&self) -> impl Iterator<Item = (&str, &Value)> {
+    /// bound after this immutable text plan has been loaded. The category is
+    /// the item's source for request byte accounting (#186), local-only.
+    pub(crate) fn sourced_items(
+        &self,
+    ) -> impl Iterator<Item = (&str, crate::model::wire_bytes::Category, &Value)> {
         self.0.frames.iter().flat_map(|frame| {
-            frame
-                .items
-                .iter()
-                .map(|item| (frame.stamp.id.as_str(), item))
+            frame.items.iter().map(|item| {
+                (
+                    frame.stamp.id.as_str(),
+                    crate::model::wire_bytes::Category::of_history(
+                        &frame.stamp.kind,
+                        frame.spill_marker,
+                        item,
+                    ),
+                    item,
+                )
+            })
         })
     }
     pub fn materialize(&self) -> Vec<Value> {
@@ -464,7 +475,7 @@ impl ReplayCache {
     /// an unchanged prefix can reuse items, and only the new suffix is decoded.
     pub fn load(&self, db: &Connection, thread: &str) -> Result<ReplayLease, StorageError> {
         let context=db.query_row("SELECT selection_revision,profile_revision,profile_id,model_id,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|row|Ok(Context{thread:thread.into(),selection:row.get(0)?,profile_revision:row.get(1)?,profile:row.get(2)?,model:row.get(3)?,epoch:row.get(4)?,adapter_version:ADAPTER_VERSION,tool_schema_version:TOOL_SCHEMA_VERSION}))?;
-        let stamps=db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([thread],|row|Ok(Stamp{id:row.get(0)?,revision:row.get(1)?,tombstone:row.get(2)?}))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let stamps=db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([thread],|row|Ok(Stamp{id:row.get(0)?,revision:row.get(1)?,tombstone:row.get(2)?,kind:row.get(3)?}))?.collect::<rusqlite::Result<Vec<_>>>()?;
         let mut state = self.state.lock().expect("replay cache poisoned");
         let previous = state.entries.remove(thread);
         state.order.retain(|id| id != thread);
@@ -665,6 +676,7 @@ fn decode_frame(
             let items = convert(value, epoch);
             (
                 group,
+                spill,
                 if spill {
                     tool_order::inline_spill(items)?
                 } else {
@@ -679,6 +691,7 @@ fn decode_frame(
     let bytes = size_of::<Frame>()
         + 2 * size_of::<usize>()
         + stamp.id.capacity()
+        + stamp.kind.capacity()
         + group.as_ref().map_or(0, String::capacity)
         + items.capacity() * size_of::<Value>()
         + items.iter().map(heap_bytes).sum::<usize>();
@@ -708,7 +721,7 @@ pub(crate) fn load_uncached(
 ) -> Result<ReplayLease, StorageError> {
     let limit = nodes.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
     let ledger = Arc::new(Ledger::default());
-    let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.payload_json FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
+    let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.payload_json,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
     let mut rows = statement.query(rusqlite::params![thread, limit])?;
     let mut frames = Vec::new();
     while let Some(row) = rows.next()? {
@@ -716,6 +729,7 @@ pub(crate) fn load_uncached(
             id: row.get(0)?,
             revision: row.get(1)?,
             tombstone: row.get(2)?,
+            kind: row.get(4)?,
         };
         let body: Option<String> = if stamp.tombstone { None } else { row.get(3)? };
         frames.push(Arc::new(decode_frame(
@@ -765,6 +779,7 @@ mod tests {
                     id: id.into(),
                     revision: 1,
                     tombstone: false,
+                    kind: "fixture".into(),
                 },
                 items: vec![item],
                 group: group.map(str::to_owned),
@@ -914,6 +929,7 @@ mod tests {
                                     id: id.clone(),
                                     revision: 0,
                                     tombstone: false,
+                                    kind: "fixture".into(),
                                 },
                                 Some(payload.to_string()),
                                 0,
@@ -960,6 +976,7 @@ mod tests {
                             id: id.clone(),
                             revision: 0,
                             tombstone: false,
+                            kind: "fixture".into(),
                         },
                         Some(payload.to_string()),
                         0,
@@ -1029,6 +1046,35 @@ mod tests {
             assert_eq!(serde_json::from_str::<Value>(&saved).unwrap()["output"][0]["id"], "chatcmpl-old");
             assert_eq!(run.stats().parsed_nodes, 2);
             assert_eq!(run.stats().hits, 0);
+            Ok(())
+        }).await.unwrap();
+        worker.shutdown().await.unwrap();
+    }
+
+    /// #186: each replayed item carries its source from the saved node kind;
+    /// a spill's tool results are placeholders.
+    #[tokio::test]
+    async fn replayed_items_carry_their_saved_source_category() {
+        use crate::model::wire_bytes::Category;
+        let root = tempfile::tempdir().unwrap();
+        let worker = crate::storage::DbWorker::open(root.path().join("db"))
+            .await
+            .unwrap();
+        worker.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/AGENTS.md','p','m','now')", [])?;
+            let tx = db.transaction()?;
+            let text = |role: &str| json!({"role":role,"content":[{"type":"input_text","text":"x"}]});
+            crate::history::append_node(&tx, "t", "u", None, "user", &text("user"), "now")?;
+            crate::history::append_node(&tx, "t", "s", None, "summary", &text("developer"), "now")?;
+            crate::history::append_node(&tx, "t", "c", None, "context", &text("developer"), "now")?;
+            crate::history::append_node(&tx, "t", "e", None, "event", &text("developer"), "now")?;
+            crate::history::append_node(&tx, "t", "p", None, "spill", &json!({"spill_version":1,"reasoning_epoch":0,"output":[
+                {"type":"function_call","call_id":"k","name":"shell","arguments":"{}"},
+                {"type":"function_call_output","call_id":"k","output":"{\"omitted\":true}"}]}), "now")?;
+            tx.commit()?;
+            let lease = load_uncached(db, "t", None, 0)?;
+            let categories: Vec<_> = lease.sourced_items().map(|(_, category, _)| category).collect();
+            assert_eq!(categories, vec![Category::User, Category::Summary, Category::Context, Category::Notice, Category::ToolCall, Category::SpillPlaceholder]);
             Ok(())
         }).await.unwrap();
         worker.shutdown().await.unwrap();

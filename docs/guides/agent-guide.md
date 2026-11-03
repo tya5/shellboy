@@ -159,6 +159,13 @@ To inspect your own saved usage, run `shellboy usage get`; add
 `--thread THREAD_ID --include-children` for a bounded conversation-family total.
 These are saved usage/duration facts, not a bill; unknown/unrecorded is not zero.
 Use `usage get --since TIME --until TIME` for a half-open saved-start period.
+To see what fills your context, read `latest_request` in `usage get`:
+`input_bytes.categories` are measured UTF-8 bytes of the last request body by
+source (for example `tool_result`, `summary`, `attachment`), and `usage` holds
+the provider-reported input and cached token totals. Bytes and tokens are
+different units; do not convert one into the other. Compare `input_bytes`
+between attempts (`usage get --attempt ID`) to see which source grows within a
+Turn, then spill or summarize that range. Null means not recorded, not zero.
 Model/shell starts and Run creation select whole lifetimes, not prorated overlap.
 Use `compact list --thread THREAD_ID --limit 20` for retained compaction facts
 and `thread get` for the latest observation. Failed/no-target records do not prove
