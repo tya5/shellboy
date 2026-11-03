@@ -10,6 +10,7 @@ pub(super) fn header_line(
     selection: bool,
     palette: super::theme::Palette,
     frozen_at: Option<&str>,
+    language: crate::config::UiLanguage,
 ) -> ratatui::text::Line<'static> {
     use ratatui::{
         style::{Modifier, Style},
@@ -17,7 +18,7 @@ pub(super) fn header_line(
     };
     if selection {
         return Line::styled(
-            frozen_header_label(width, frozen_at),
+            frozen_header_label(width, frozen_at, language),
             palette.header().add_modifier(Modifier::BOLD),
         );
     }
@@ -90,44 +91,94 @@ pub(super) fn header_line(
     Line::from(spans).style(palette.header())
 }
 
-fn frozen_header_label(width: u16, frozen_at: Option<&str>) -> String {
+fn frozen_header_label(
+    width: u16,
+    frozen_at: Option<&str>,
+    language: crate::config::UiLanguage,
+) -> String {
     let time = frozen_at
         .and_then(|stamp| stamp.get(11..19))
         .filter(|time| time.is_ascii())
         .map(|time| format!("{time}Z"));
-    let mut choices = Vec::new();
-    if let Some(stamp) = frozen_at {
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定開始 {stamp} · F2/Esc解除 · Ctrl+L更新",
-            "表示固定開始 {stamp} | F2/Esc解除 | Ctrl+L更新"
-        ));
-    }
-    if let Some(time) = time {
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定開始 {time} · F2/Esc解除 · Ctrl+L更新",
-            "表示固定開始 {time} | F2/Esc解除 | Ctrl+L更新"
-        ));
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定 {time} · F2/Esc解除",
-            "表示固定 {time} | F2/Esc解除"
-        ));
-        choices.push(format!("表示固定 {time} F2"));
-        choices.push(format!("表示固定 {time}"));
-    } else {
-        choices.push(
-            crate::ui::text_width::glyphs::select(
-                "表示固定 · 時刻未記録 · F2/Esc解除 · Ctrl+L更新",
-                "表示固定 | 時刻未記録 | F2/Esc解除 | Ctrl+L更新",
-            )
-            .into(),
-        );
-        choices.push(
-            crate::ui::text_width::glyphs::select("表示固定 · F2/Esc解除", "表示固定 | F2/Esc解除")
-                .into(),
-        );
-    }
-    choices.push("表示固定".into());
-    choices.push("固定".into());
+    let choices = match language {
+        crate::config::UiLanguage::Ja => {
+            let mut choices = Vec::new();
+            if let Some(stamp) = frozen_at {
+                choices.push(crate::ui::text_width::glyphs::formatted!(
+                    "表示固定開始 {stamp} · F2/Esc解除 · Ctrl+L更新",
+                    "表示固定開始 {stamp} | F2/Esc解除 | Ctrl+L更新"
+                ));
+            }
+            if let Some(time) = time {
+                choices.push(crate::ui::text_width::glyphs::formatted!(
+                    "表示固定開始 {time} · F2/Esc解除 · Ctrl+L更新",
+                    "表示固定開始 {time} | F2/Esc解除 | Ctrl+L更新"
+                ));
+                choices.push(crate::ui::text_width::glyphs::formatted!(
+                    "表示固定 {time} · F2/Esc解除",
+                    "表示固定 {time} | F2/Esc解除"
+                ));
+                choices.push(format!("表示固定 {time} F2"));
+                choices.push(format!("表示固定 {time}"));
+            } else {
+                choices.push(
+                    crate::ui::text_width::glyphs::select(
+                        "表示固定 · 時刻未記録 · F2/Esc解除 · Ctrl+L更新",
+                        "表示固定 | 時刻未記録 | F2/Esc解除 | Ctrl+L更新",
+                    )
+                    .into(),
+                );
+                choices.push(
+                    crate::ui::text_width::glyphs::select(
+                        "表示固定 · F2/Esc解除",
+                        "表示固定 | F2/Esc解除",
+                    )
+                    .into(),
+                );
+            }
+            choices.push("表示固定".into());
+            choices.push("固定".into());
+            choices
+        }
+        crate::config::UiLanguage::En => {
+            let mut choices = Vec::new();
+            if let Some(stamp) = frozen_at {
+                choices.push(crate::ui::text_width::glyphs::formatted!(
+                    "Frozen since {stamp} · F2/Esc to unfreeze · Ctrl+L to refresh",
+                    "Frozen since {stamp} | F2/Esc to unfreeze | Ctrl+L to refresh"
+                ));
+            }
+            if let Some(time) = time {
+                choices.push(crate::ui::text_width::glyphs::formatted!(
+                    "Frozen {time} · F2/Esc to unfreeze · Ctrl+L to refresh",
+                    "Frozen {time} | F2/Esc to unfreeze | Ctrl+L to refresh"
+                ));
+                choices.push(crate::ui::text_width::glyphs::formatted!(
+                    "Frozen {time} · F2/Esc to unfreeze",
+                    "Frozen {time} | F2/Esc to unfreeze"
+                ));
+                choices.push(format!("Frozen {time} F2"));
+                choices.push(format!("Frozen {time}"));
+            } else {
+                choices.push(
+                    crate::ui::text_width::glyphs::select(
+                        "Frozen · time not recorded · F2/Esc to unfreeze · Ctrl+L to refresh",
+                        "Frozen | time not recorded | F2/Esc to unfreeze | Ctrl+L to refresh",
+                    )
+                    .into(),
+                );
+                choices.push(
+                    crate::ui::text_width::glyphs::select(
+                        "Frozen · F2/Esc to unfreeze",
+                        "Frozen | F2/Esc to unfreeze",
+                    )
+                    .into(),
+                );
+            }
+            choices.push("Frozen".into());
+            choices
+        }
+    };
     let label = choices
         .into_iter()
         .find(|label| label.width() <= usize::from(width))
@@ -143,6 +194,7 @@ fn header(view: &ThreadView, width: u16, selection: bool) -> String {
         selection,
         super::theme::Palette::from_capabilities(crate::config::PaletteMode::Dark, false, true),
         None,
+        crate::config::UiLanguage::Ja,
     )
     .spans
     .iter()
@@ -1174,16 +1226,42 @@ mod tests {
     #[test]
     fn frozen_banner_identifies_entry_and_resume_without_inventing_a_time() {
         let at = "2026-10-30T12:34:56Z";
-        let wide = frozen_header_label(100, Some(at));
+        let wide = frozen_header_label(100, Some(at), crate::config::UiLanguage::Ja);
         assert!(wide.contains(at) && wide.contains("F2/Esc解除") && wide.contains("Ctrl+L更新"));
-        let compact = frozen_header_label(40, Some(at));
+        let compact = frozen_header_label(40, Some(at), crate::config::UiLanguage::Ja);
         assert!(compact.contains("12:34:56Z") && compact.contains("F2/Esc解除"));
         for width in [8, 16, 24, 40, 80, 120] {
-            let label = frozen_header_label(width, Some(at));
+            let label = frozen_header_label(width, Some(at), crate::config::UiLanguage::Ja);
             assert!(label.width() <= usize::from(width));
             assert!(label.contains("表示固定"));
         }
-        assert!(frozen_header_label(100, None).contains("時刻未記録"));
+        assert!(
+            frozen_header_label(100, None, crate::config::UiLanguage::Ja).contains("時刻未記録")
+        );
+
+        let mut config = Config::default();
+        config.ui.language = crate::config::UiLanguage::En;
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+        ui.event(crossterm::event::Event::Key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::F(2),
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        ));
+        let shown = frame_text(&mut ui, 100, 20);
+        assert!(shown.lines().next().unwrap().contains("Frozen"), "{shown}");
+        assert!(shown.contains("F2/Esc to unfreeze"), "{shown}");
+        assert!(!shown.contains("表示固定"), "{shown}");
+
+        for width in [8, 16, 24, 40, 80, 120] {
+            let label = frozen_header_label(width, Some(at), crate::config::UiLanguage::En);
+            assert!(label.width() <= usize::from(width));
+            assert!(label.contains("Frozen"), "{width}: {label}");
+        }
+        assert!(
+            frozen_header_label(100, None, crate::config::UiLanguage::En)
+                .contains("time not recorded")
+        );
     }
     #[test]
     fn empty_conversation_uses_measured_separators_without_changing_bindings() {
@@ -1412,7 +1490,14 @@ mod tests {
         ui.view_mut().pending_messages.total = 2;
         for mode in [PaletteMode::Dark, PaletteMode::Light] {
             let palette = super::super::theme::Palette::from_capabilities(mode, false, true);
-            let line = header_line(ui.view(), 100, false, palette, None);
+            let line = header_line(
+                ui.view(),
+                100,
+                false,
+                palette,
+                None,
+                crate::config::UiLanguage::Ja,
+            );
             assert_eq!(line.style, palette.header());
             assert_eq!(line.width(), 100);
             assert!(
@@ -1465,6 +1550,7 @@ mod tests {
             false,
             super::super::theme::Palette::from_capabilities(PaletteMode::Dark, false, false),
             None,
+            crate::config::UiLanguage::Ja,
         );
         assert!(line.width() <= 35);
         assert!(

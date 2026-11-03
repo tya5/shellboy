@@ -2803,5 +2803,80 @@
     "category": "a",
     "reason": "App-authored browser resync notice. Browser::changed sends complete Japanese and English sentences together; ThreadBrowser::notice_for_language selects the current UI language. Tests preserve Japanese, require ASCII English, and keep raw notices untranslated.",
     "source_tokens_sha256": "43bd8e377b6ef65d54fff8ee6346db3b632b71572c46f3021ac9ed2f326b1349"
+  },
+  "src/ui/chrome.rs:b4f7f20867d09b77:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:82cb320704fc74e6:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:bac0f42cf8b68763:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:673ec841e67bf5d6:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:0ca360031fc5eecd:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:12fe515f657521e9:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:13f07d9301968b6d:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:8bb6463a8491168c:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:b377582da1390010:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:287a622782b745b7:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:9ed1fd44b9846311:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:14e68474299f5d86:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:6100bdbec8d39b3a:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:4a18f29c1a60eeed:1": {
+    "category": "a",
+    "reason": "Reviewed frozen_header_label: all candidates belong to its selection-mode header builder. Ja and En now select distinct language-specific bounded choices; tests cover displayed mode, unrecorded time, and narrow widths without changing source timestamp or selection behavior.",
+    "source_tokens_sha256": "350a7e3850d937a365ac289e23b7032412d2706277aab76c1d9d5851e5781cc3"
+  },
+  "src/ui/chrome.rs:a762bed2d0773827:1": {
+    "category": "c",
+    "reason": "Generated navigation loading status is concatenated with caller-provided hint and reaches the header in both languages. English producer/consumer projection is not yet verified; retained pending.",
+    "source_tokens_sha256": "2d03a7a213aaf3dff635a3261724858abf8b604ab1b9ab05b6e0685648ff7304"
   }
 }
