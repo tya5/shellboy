@@ -5571,6 +5571,67 @@ mod writer_lane_audit_measurement {
     }
 
     #[test]
+    #[ignore = "opt-in rollback-only ThreadFork audit on verified disposable copy"]
+    fn measure_thread_fork_rollback_audit() {
+        use rusqlite::OpenFlags;
+        let path = std::path::PathBuf::from(
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let mut db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open disposable copy read-write");
+        let schema: i64 = db
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(schema, 25, "audit copy schema mismatch");
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(capture_sql),
+        );
+        arm_sql_timeout();
+        db.progress_handler(1_000, Some(sql_timed_out)).unwrap();
+        let (thread_id, node_id): (String, String) = db.query_row(
+            "SELECT p.thread_id,p.node_id FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE t.deleted_at IS NULL ORDER BY p.ordinal DESC LIMIT 1",
+            [], |r| Ok((r.get(0)?,r.get(1)?)),
+        ).expect("copy has an existing thread path");
+        let mut timings = Vec::new();
+        for repeat in 1..=4 {
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let tx = db.transaction().unwrap();
+            let fork_id = uuid::Uuid::new_v4().to_string();
+            let args = ThreadForkArgs {
+                agents: None,
+                thread_id: thread_id.clone(),
+                node_id: node_id.clone(),
+                cwd: None,
+            };
+            let start = Instant::now();
+            history::fork_thread(&tx, &args, &fork_id, "2026-11-03T00:00:00Z")
+                .expect("production ThreadFork DB handler");
+            let elapsed_us = start.elapsed().as_micros();
+            timings.push(elapsed_us);
+            eprintln!("AUDIT kind=ThreadForkRollback repeat={repeat} elapsed_us={elapsed_us}");
+            report_sql(&tx, "ThreadForkRollback");
+            tx.rollback().expect("rollback disposable ThreadFork");
+            let exists: bool = db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1)",
+                    [&fork_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert!(!exists, "rollback must remove fork thread");
+        }
+        eprintln!("AUDIT_TIMES kind=ThreadForkRollback values_us={timings:?}");
+    }
+
+    #[test]
     #[ignore = "opt-in rollback-only mutation audit; set WRITER_AUDIT_DB to the disposable copy"]
     fn measure_thread_delete_rollback_audit() {
         use rusqlite::OpenFlags;
@@ -5589,54 +5650,60 @@ mod writer_lane_audit_measurement {
         arm_sql_timeout();
         db.progress_handler(1_000, Some(sql_timed_out))
             .expect("install statement timeout");
-        let thread_id: String = db.query_row(
-            "SELECT t.id FROM thread t WHERE t.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM run r WHERE r.thread_id=t.id AND r.state IN ('live','stopping')) AND NOT EXISTS(SELECT 1 FROM thread child WHERE child.parent_thread_id=t.id AND child.deleted_at IS NULL) AND (SELECT count(*) FROM thread_path p WHERE p.thread_id=t.id) BETWEEN 1 AND 40 ORDER BY (SELECT count(*) FROM thread_path p WHERE p.thread_id=t.id) DESC LIMIT 1",
+        let (source_thread_id, node_id): (String, String) = db.query_row(
+            "SELECT p.thread_id,p.node_id FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE t.deleted_at IS NULL ORDER BY p.ordinal DESC LIMIT 1",
             [],
-            |row| row.get(0),
-        ).expect("disposable copy has an idle leaf thread");
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).expect("disposable copy has a thread path");
 
         for repeat in 1..=3 {
+            eprintln!("AUDIT_START kind=ThreadDeleteRollback repeat={repeat}");
+            let tx = db.transaction().expect("begin mutation transaction");
+            let delete_id = uuid::Uuid::new_v4().to_string();
+            let fork_args = ThreadForkArgs {
+                agents: None,
+                thread_id: source_thread_id.clone(),
+                node_id: node_id.clone(),
+                cwd: None,
+            };
+            history::fork_thread(&tx, &fork_args, &delete_id, "2026-11-03T00:00:00Z")
+                .expect("create isolated no-receipt ThreadDelete fixture");
             SQL_TRACE
                 .get_or_init(Default::default)
                 .lock()
                 .unwrap()
                 .clear();
-            eprintln!("AUDIT_START kind=ThreadDeleteRollback repeat={repeat}");
-            let tx = db.transaction().expect("begin mutation transaction");
             let start = Instant::now();
-            let _ = delete_thread(
+            delete_thread(
                 &tx,
                 &ThreadDeleteArgs {
-                    thread_id: thread_id.clone(),
+                    thread_id: delete_id.clone(),
                     descendants: false,
                     preview_marker: None,
                 },
                 "2026-11-03T00:00:00Z",
             )
-            .expect("production ThreadDelete handler");
-            eprintln!(
-                "AUDIT kind=ThreadDeleteRollback repeat={repeat} elapsed_us={}",
-                start.elapsed().as_micros()
-            );
+            .unwrap_or_else(|error| {
+                eprintln!(
+                    "AUDIT kind=ThreadDeleteRollback status=rejected code={:?}",
+                    error.code
+                );
+                panic!("production ThreadDelete handler rejected synthetic leaf")
+            });
+            let elapsed_us = start.elapsed().as_micros();
+            eprintln!("AUDIT kind=ThreadDeleteRollback repeat={repeat} elapsed_us={elapsed_us}");
             report_sql(&tx, "ThreadDeleteRollback");
             tx.rollback()
-                .expect("restore disposable copy after measurement");
-            let restored: bool = db
+                .expect("rollback disposable ThreadDelete fixture");
+            let exists: bool = db
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
-                    [&thread_id],
+                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1)",
+                    [&delete_id],
                     |row| row.get(0),
                 )
-                .expect("verify rollback restored target thread");
-            assert!(restored, "rollback must leave the measured target intact");
+                .expect("verify deletion fixture rollback");
+            assert!(!exists, "outer rollback must remove the synthetic fixture");
         }
-        let node_id: String = db
-            .query_row(
-                "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1",
-                [&thread_id],
-                |row| row.get(0),
-            )
-            .expect("leaf thread has a path node");
         for repeat in 1..=3 {
             SQL_TRACE
                 .get_or_init(Default::default)
@@ -5647,7 +5714,7 @@ mod writer_lane_audit_measurement {
             let fork_id = uuid::Uuid::new_v4().to_string();
             let args = ThreadForkArgs {
                 agents: None,
-                thread_id: thread_id.clone(),
+                thread_id: source_thread_id.clone(),
                 node_id: node_id.clone(),
                 cwd: None,
             };
