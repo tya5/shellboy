@@ -1798,7 +1798,12 @@ async fn run_with_delivery(
                         let action_args = args.clone();
                         let refusal_args = args.clone();
                         let work = async move {
-                            let result = thread_deletion::guard(thread_deletion::run(&control, action_args, execute)).await;
+                            let language = control.store.config.ui.language;
+                            let result = thread_deletion::guard(
+                                thread_deletion::run(&control, action_args, execute),
+                                language,
+                            )
+                            .await;
                             let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, revision, known_thread_ids, result }).await;
                         };
                         if execute {

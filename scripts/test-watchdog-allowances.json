@@ -922,14 +922,6 @@
   {
     "file": "tests/tui_recovery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "35893c78760932639f8a595a26ec435cb97fede486080bf8d3867c03204479fd",
-    "function": "recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_reasons",
-    "count": 1,
-    "reason": "Deferred #41/shared-read: existing recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_reasons test occurrence only; migrate on #41 integration, no file-wide exemption."
-  },
-  {
-    "file": "tests/tui_recovery.rs",
-    "rule": "raw-timeout",
     "fingerprint": "5abd3a365f816108cc375fcfdf564f685a6427a03acdab633f2322fb475e2bef",
     "function": "request_with_ui",
     "count": 1,

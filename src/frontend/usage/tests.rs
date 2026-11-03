@@ -114,6 +114,16 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
     assert_eq!(field(&nodes[1], FIELD), Some("0"));
     assert_eq!(field(&nodes[2], FIELD), Some("未報告"));
     assert_eq!(field(&nodes[3], FIELD), Some("未報告"));
+    use crate::config::UiLanguage::En;
+    assert_eq!(
+        crate::presentation::fields::attempt_label(FIELD, En),
+        Some("Cached input tokens (provider-reported)")
+    );
+    assert_eq!(
+        crate::presentation::fields::attempt_value(FIELD, field(&nodes[6], FIELD).unwrap(), En,)
+            .as_deref(),
+        Some("Not reported (no request record)")
+    );
     assert_eq!(field(&nodes[4], FIELD), Some("999"));
     assert_eq!(
         field(&nodes[5], FIELD),
