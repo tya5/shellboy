@@ -66,7 +66,7 @@ class CompactionEffectTests(unittest.TestCase):
             self.assertEqual(result['before']['profile/m1']['requests_between_compactions']['intervals'], 1)
             self.assertEqual(result['before']['profile/m1']['requests_between_compactions']['median'], 0)
             self.assertEqual(result['before']['profile/m1']['cached_over_input']['ratio'], 100025 / 200100)
-            self.assertEqual(result['after']['profile/m2']['provider_input_tokens']['median'], 150)
+            self.assertEqual(result['after']['profile/m2']['provider_input_tokens']['median'], 200075.0)
             self.assertEqual(result['after']['profile/m2']['provider_input_tokens']['unknown_requests'], 1)
             self.assertEqual(result['after']['profile/m2']['compaction_attempts']['outcomes']['no_safe_reduction'], 1)
             db.close()
@@ -87,6 +87,7 @@ class CompactionEffectTests(unittest.TestCase):
         for value in (None, True, -1, 3.0, '3', 2**63):
             self.assertIsNone(effect.reported_int(value))
         self.assertIsNone(effect.percentile([], .9))
+        self.assertEqual(effect.statistics.median([100, 200]), 150)
         with self.assertRaises(ValueError):
             effect.parse_timestamp('2026-11-03T00:00:00')
 
