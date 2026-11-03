@@ -445,6 +445,43 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         tx.execute("UPDATE thread SET selection_revision=1 WHERE id='fork'",[])?;
         tx.commit()?;Ok(())
     }).await.unwrap();
+    database
+        .call(|db| {
+            let tx = db.transaction()?;
+            for ordinal in 11..3011 {
+                tx.execute(
+                    "INSERT INTO tool_call VALUES('group',?1,?2,'shell','{}','cancelled',NULL)",
+                    params![format!("extra-{ordinal}"), ordinal],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let indexed_list =
+        serde_json::to_value(history.list(listing("fork", 20, None)).await.unwrap()).unwrap();
+    let indexed_get =
+        serde_json::to_value(history.get(body("calls", 65536, None)).await.unwrap()).unwrap();
+    database
+        .call(|db| {
+            db.execute("DROP INDEX history_tool_group_attempt", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let unindexed_list =
+        serde_json::to_value(history.list(listing("fork", 20, None)).await.unwrap()).unwrap();
+    let unindexed_get =
+        serde_json::to_value(history.get(body("calls", 65536, None)).await.unwrap()).unwrap();
+    assert_eq!(
+        indexed_list, unindexed_list,
+        "list content and order must be index-independent"
+    );
+    assert_eq!(
+        indexed_get, unindexed_get,
+        "get content and order must be index-independent"
+    );
     let page = history.list(listing("fork", 20, None)).await.unwrap();
     assert_eq!(
         page.items.len(),
