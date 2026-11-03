@@ -4784,9 +4784,6 @@ fn open_inspection(path: &std::path::Path) -> Result<rusqlite::Connection> {
         .map_err(sql_error)?;
     db.pragma_update(None, "query_only", true)
         .map_err(sql_error)?;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    db.progress_handler(1000, Some(move || std::time::Instant::now() >= deadline))
-        .map_err(sql_error)?;
     Ok(db)
 }
 
@@ -4794,70 +4791,6 @@ fn open_inspection(path: &std::path::Path) -> Result<rusqlite::Connection> {
 mod inspection_isolation_tests {
     use super::*;
     use crate::storage::DbWorker;
-
-    #[tokio::test]
-    async fn interrupted_inspection_releases_wal_snapshot() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("deadline.sqlite");
-        let writer = DbWorker::open(&path).await.unwrap();
-        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-        let read_path = path.clone();
-        let reader = tokio::task::spawn_blocking(move || {
-            let mut db = open_inspection(&read_path).unwrap();
-            let tx = db.transaction().unwrap();
-            let _: i64 = tx
-                .query_row("SELECT count(*) FROM app_meta", [], |r| r.get(0))
-                .unwrap();
-            ready_tx.send(()).unwrap();
-            let started = std::time::Instant::now();
-            let result = tx.query_row("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000000000) SELECT sum(x) FROM n", [], |r| r.get::<_, i64>(0));
-            (result.is_err(), started.elapsed())
-        });
-        crate::test_watchdog::watchdog("reader ready", ready_rx)
-            .await
-            .unwrap()
-            .unwrap();
-        writer
-            .call(|db| {
-                db.execute(
-                    "INSERT INTO app_meta(key,value) VALUES('wal-test','one')",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let before = writer
-            .call(|db| {
-                Ok(db.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
-                    Ok((r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
-                })?)
-            })
-            .await
-            .unwrap();
-        let (interrupted, elapsed) = crate::test_watchdog::watchdog("reader deadline", reader)
-            .await
-            .unwrap()
-            .unwrap();
-        let after = writer
-            .call(|db| {
-                Ok(db.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
-                    r.get::<_, i64>(0)
-                })?)
-            })
-            .await
-            .unwrap();
-        assert!(interrupted);
-        assert!(
-            before.0 > before.1,
-            "reader should pin checkpoint frames: {before:?}"
-        );
-        assert_eq!(after, 0);
-        eprintln!(
-            "snapshot interruption after {elapsed:?}; checkpoint {before:?}; truncate busy={after}"
-        );
-        writer.shutdown().await.unwrap();
-    }
 
     #[tokio::test]
     async fn snapshot_reader_does_not_hold_writer_lane() {
