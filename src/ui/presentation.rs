@@ -666,7 +666,7 @@ pub(super) fn indented_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'
                 let style = line
                     .spans
                     .first()
-                    .map_or(Style::default(), |span| span.style);
+                    .map_or(line.style, |span| line.style.patch(span.style));
                 line.spans.insert(0, Span::styled("  ", style));
             }
             line
@@ -5165,10 +5165,11 @@ mod conversation_item_tests {
                         width,
                     );
                     assert!(
-                        muted
-                            .iter()
-                            .flat_map(|line| &line.spans)
-                            .all(|span| { span.style.fg == Some(theme::MUTED) })
+                        muted.iter().flat_map(|line| &line.spans).all(|span| line
+                            .style
+                            .patch(span.style)
+                            .fg
+                            == Some(theme::MUTED))
                     );
                 }
             }

@@ -326,6 +326,12 @@ fn compact_label(label: &str, width: usize) -> String {
     output.push_str(crate::ui::text_width::glyphs::ellipsis());
     output
 }
+fn compact_body(text: &str, width: u16) -> Line<'static> {
+    let indent = if width >= 3 { 2 } else { 0 };
+    let body = compact_label(text, usize::from(width.saturating_sub(indent)));
+    Line::from(format!("{}{}", " ".repeat(usize::from(indent)), body))
+}
+
 pub(super) fn draw_compact(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -341,12 +347,10 @@ pub(super) fn draw_compact(
             &crate::presentation::sanitize_plain(&item.label(language), 0).0,
             usize::from(area.width),
         )));
-        lines.push(Line::from(format!(
-            "  {}",
-            crate::presentation::sanitize_plain(&item.excerpt, 0)
-                .0
-                .replace('\n', " "),
-        )));
+        let excerpt = crate::presentation::sanitize_plain(&item.excerpt, 0)
+            .0
+            .replace('\n', " ");
+        lines.push(compact_body(&excerpt, area.width));
     }
     for pending in view
         .pending
@@ -359,10 +363,10 @@ pub(super) fn draw_compact(
         } else {
             i18n::local!(language, "送信受付中", "Submitting")
         }));
-        lines.push(Line::from(format!(
-            "  {}",
-            accepting_excerpt(&pending.snapshot.text)
-        )));
+        lines.push(compact_body(
+            &accepting_excerpt(&pending.snapshot.text),
+            area.width,
+        ));
     }
     lines.truncate(usize::from(area.height.saturating_sub(1)));
     lines.push(Line::from(compact_count(
@@ -616,6 +620,27 @@ mod tests {
             ..Default::default()
         }
     }
+    #[test]
+    fn compact_excerpt_rows_keep_their_fixed_height_and_fit_narrow_widths() {
+        for text in [
+            "A long English compact excerpt that must not wrap.",
+            "狭い表示幅でも折り返さずに省略する日本語の抜粋。",
+        ] {
+            for width in [0, 1, 2, 3, 12, 48] {
+                let row = compact_body(text, width);
+                let shown = row
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>();
+                assert!(row.width() <= usize::from(width), "{width}: {shown}");
+                if width >= 3 {
+                    assert!(shown.starts_with("  "), "{width}: {shown}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn late_paired_history_cannot_resurrect_cancelled_queue_or_replace_newer_history() {
         let mut ui = ui();
