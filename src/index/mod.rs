@@ -446,6 +446,10 @@ impl IndexService {
         };
         for node_id in node_ids {
             let value = serde_json::to_string(&AutoAdmission {
+                recovery: false,
+                recovery_group: None,
+                recovery_witness: None,
+                recovery_body_kind: None,
                 node_id: node_id.clone(),
                 state: "pending".into(),
                 error: None,
@@ -552,7 +556,24 @@ impl IndexService {
             return Ok(discarded);
         };
         self.publish_saved(true); // claim_authorization committed pending -> running
-        match self.enqueue_new(&[admission.node_id.clone()]).await {
+        let authorization = if admission.recovery {
+            "new-finalized-recovery"
+        } else {
+            "new-finalized"
+        };
+        let admission_group = admission.recovery_group.as_deref().unwrap_or("active");
+        match self
+            .enqueue(
+                &[admission.node_id.clone()],
+                admission_group,
+                authorization,
+                admission
+                    .recovery_witness
+                    .as_ref()
+                    .zip(admission.recovery_body_kind.as_deref()),
+            )
+            .await
+        {
             Ok(_) => {
                 let lookup = IndexKeys::new(key).rebuild();
                 let group = self
@@ -560,12 +581,18 @@ impl IndexService {
                     .call(move |db| meta(db, &lookup))
                     .await
                     .map_err(db_error)?;
-                if let Some(group) = &group
+                if !admission.recovery
+                    && let Some(group) = &group
                     && let Err(error) = self
                         .enqueue(
                             std::slice::from_ref(&admission.node_id),
                             group,
-                            "new-finalized-during-rebuild",
+                            if admission.recovery {
+                                "new-finalized-recovery-during-rebuild"
+                            } else {
+                                "new-finalized-during-rebuild"
+                            },
+                            None,
                         )
                         .await
                 {
@@ -617,7 +644,8 @@ impl IndexService {
         if self.profile_key.is_none() || !self.config.indexing.auto_history {
             return Ok(FeePreview::default());
         }
-        self.enqueue(node_ids, "active", "new-finalized").await
+        self.enqueue(node_ids, "active", "new-finalized", None)
+            .await
     }
     /// A named convenience for the collector's finalized full-raw source.
     pub async fn enqueue_tool_raw(&self, node_id: &str) -> Result<FeePreview, ApiError> {
@@ -783,7 +811,8 @@ impl IndexService {
         self.key()?;
         self.write_space(&args).await?;
         let ids = self.selected_sources(&args).await?;
-        self.enqueue(&ids, "active", "explicit-backfill").await
+        self.enqueue(&ids, "active", "explicit-backfill", None)
+            .await
     }
     pub async fn rebuild(&self, args: IndexArgs) -> Result<FeePreview, ApiError> {
         let key = self.key()?.to_owned();
@@ -798,6 +827,7 @@ impl IndexService {
         }
         self.write_space(&args).await?;
         let requested = args.dimensions;
+        let full_rebuild = args.scope == Some(IndexScope::All) && args.space_id.is_none();
         let config = self.config.clone();
         let ids = self.selected_sources(&args).await?;
         if ids.is_empty() {
@@ -860,7 +890,19 @@ impl IndexService {
                 } else {
                     tx.execute("DELETE FROM app_meta WHERE key=?1", [mode_key])?;
                 }
-                set_meta(&tx, &IndexKeys::new(&key).rebuild(), &group_copy)?;
+                let keys = IndexKeys::new(&key);
+                tx.execute(
+                    "DELETE FROM app_meta WHERE key=?1",
+                    [keys.recovery_rebuild()],
+                )?;
+                if full_rebuild && let Some(marker) = meta(&tx, &keys.recovery_required())? {
+                    set_json_meta(
+                        &tx,
+                        &keys.recovery_rebuild(),
+                        &json!({"group": group_copy, "marker": marker}),
+                    )?;
+                }
+                set_meta(&tx, &keys.rebuild(), &group_copy)?;
                 tx.commit()?;
                 Ok(())
             })
@@ -868,18 +910,19 @@ impl IndexService {
             .map_err(db_error)?;
         self.publish_saved(true);
         self.spaces_changed(); // the previous rebuild candidate may be inactive now
-        self.enqueue(&ids, &group, "explicit-rebuild").await
+        self.enqueue(&ids, &group, "explicit-rebuild", None).await
     }
     async fn enqueue(
         &self,
         node_ids: &[String],
         group: &str,
         authorization: &str,
+        expected: Option<(&Witness, &str)>,
     ) -> Result<FeePreview, ApiError> {
         let key = self.key()?.to_owned();
         let mut preview = FeePreview::default();
         let mut seen = HashSet::new();
-        let barrier_required = group != "active" && authorization != "new-finalized-during-rebuild";
+        let barrier_required = group != "active" && !authorization.ends_with("during-rebuild");
         if barrier_required {
             let barrier = IndexKeys::new(&key).enqueueing(group);
             self.database
@@ -897,84 +940,99 @@ impl IndexService {
                 .map_err(db_error)?;
             self.publish_saved(true);
         }
-        for node in node_ids {
-            if !seen.insert(node) {
-                continue;
-            }
-            let Some(source) = self.load_source(node).await? else {
-                preview.unavailable += 1;
-                continue;
-            };
-            preview.sources += 1;
-            for (body_kind, text) in source_bodies(&source) {
-                let segments = split_text(&text, self.config.indexing.split_chars, 0);
-                preview.characters += text.chars().count() as u64;
-                for batch in segments.chunks(128) {
-                    let work: Vec<_> = batch
-                        .iter()
-                        .cloned()
-                        .map(|segment| {
-                            Work::pending(
-                                source.witness.canonical(),
-                                body_kind.clone(),
-                                segment,
-                                group,
-                                authorization,
-                            )
-                        })
-                        .collect();
-                    let inserted = self.enqueue_batch(&key, work).await?;
-                    preview.segments += inserted as u64;
-                    preview.already_indexed += (batch.len() - inserted) as u64;
+        let enqueue_result: Result<(), ApiError> = async {
+            for node in node_ids {
+                if !seen.insert(node) {
+                    continue;
                 }
-            }
-            if let Some(raw) = &source.witness.raw {
-                let stream = self.reader.stream(&raw.execution).await?;
-                if stream.retention_generation() != raw.generation as u64
-                    || stream.saved_sequence() != raw.saved_sequence as u64
+                let Some(source) = self.load_source(node).await? else {
+                    preview.unavailable += 1;
+                    continue;
+                };
+                if expected
+                    .is_some_and(|(witness, kind)| !source.witness.matches_body(witness, kind))
                 {
                     return Err(err(
                         ErrorCode::OperationConflict,
-                        "Raw output changed while authorizing index work",
+                        "Recovered index source changed; explicitly reauthorize it",
                     ));
                 }
-                let mut segments =
-                    source::RawSegments::new(stream, self.config.indexing.split_chars);
-                while let Some((characters, segments)) = segments.next_page().await? {
-                    preview.characters += characters;
-                    let work: Vec<_> = segments
-                        .into_iter()
-                        .map(|segment| {
-                            Work::pending(
-                                source.witness.clone(),
-                                "tool_raw".into(),
-                                segment,
-                                group,
-                                authorization,
-                            )
-                        })
-                        .collect();
-                    for batch in work.chunks(128) {
-                        let inserted = self.enqueue_batch(&key, batch.to_vec()).await?;
+                preview.sources += 1;
+                for (body_kind, text) in source_bodies(&source) {
+                    let segments = split_text(&text, self.config.indexing.split_chars, 0);
+                    preview.characters += text.chars().count() as u64;
+                    for batch in segments.chunks(128) {
+                        let work: Vec<_> = batch
+                            .iter()
+                            .cloned()
+                            .map(|segment| {
+                                Work::pending(
+                                    source.witness.canonical(),
+                                    body_kind.clone(),
+                                    segment,
+                                    group,
+                                    authorization,
+                                )
+                            })
+                            .collect();
+                        let (inserted, total) = self.enqueue_batch(&key, work).await?;
                         preview.segments += inserted as u64;
-                        preview.already_indexed += (batch.len() - inserted) as u64;
+                        preview.already_indexed += (total - inserted) as u64;
                     }
                 }
+                if let Some(raw) = &source.witness.raw {
+                    let stream = self.reader.stream(&raw.execution).await?;
+                    if stream.retention_generation() != raw.generation as u64
+                        || stream.saved_sequence() != raw.saved_sequence as u64
+                    {
+                        return Err(err(
+                            ErrorCode::OperationConflict,
+                            "Raw output changed while authorizing index work",
+                        ));
+                    }
+                    let mut segments =
+                        source::RawSegments::new(stream, self.config.indexing.split_chars);
+                    while let Some((characters, segments)) = segments.next_page().await? {
+                        preview.characters += characters;
+                        let work: Vec<_> = segments
+                            .into_iter()
+                            .map(|segment| {
+                                Work::pending(
+                                    source.witness.clone(),
+                                    "tool_raw".into(),
+                                    segment,
+                                    group,
+                                    authorization,
+                                )
+                            })
+                            .collect();
+                        for batch in work.chunks(128) {
+                            let (inserted, total) =
+                                self.enqueue_batch(&key, batch.to_vec()).await?;
+                            preview.segments += inserted as u64;
+                            preview.already_indexed += (total - inserted) as u64;
+                        }
+                    }
+                }
+                if !self.config.indexing.auto_history && !authorization.starts_with("new-finalized")
+                {
+                    let record = IndexKeys::new(&key).auto(node);
+                    self.database
+                        .call(move |db| {
+                            db.execute("DELETE FROM app_meta WHERE key=?1", [record])?;
+                            Ok(())
+                        })
+                        .await
+                        .map_err(db_error)?;
+                }
             }
-            if !self.config.indexing.auto_history && !authorization.starts_with("new-finalized") {
-                let record = IndexKeys::new(&key).auto(node);
-                self.database
-                    .call(move |db| {
-                        db.execute("DELETE FROM app_meta WHERE key=?1", [record])?;
-                        Ok(())
-                    })
-                    .await
-                    .map_err(db_error)?;
-            }
+            Ok(())
         }
+        .await;
         if barrier_required {
             let key = key.clone();
             let group = group.to_owned();
+            let enqueue_ok = enqueue_result.is_ok();
             self.database
                 .call(move |db| {
                     let tx = db.transaction()?;
@@ -987,7 +1045,12 @@ impl IndexService {
                     } else {
                         set_meta(&tx, &barrier, &(count - 1).to_string())?;
                     }
-                    maybe_activate_candidate(&tx, IndexKeys::new(&key), &group)?;
+                    if !enqueue_ok {
+                        set_meta(&tx, &IndexKeys::new(&key).enqueue_failed(&group), "1")?;
+                    }
+                    if enqueue_ok {
+                        maybe_activate_candidate(&tx, IndexKeys::new(&key), &group)?;
+                    }
                     tx.commit()?;
                     Ok(())
                 })
@@ -995,6 +1058,7 @@ impl IndexService {
                 .map_err(db_error)?;
             self.publish_saved(true);
         }
+        enqueue_result?;
         self.wake();
         Ok(preview)
     }

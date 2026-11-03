@@ -4297,3 +4297,4 @@ from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
 public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
 - #172: startup index recovery uses bounded indexed pages before workers start; a single oversized bootstrap record runs alone.
 - #172: startup index recovery uses bounded indexed pages before workers start. New bootstrap Work records are capped at the existing 1 MiB recovery byte budget; oversized legacy records are deleted before payload selection and receive a compact recorded reason instead of running as an unbounded unit.
+- #172: startup index recovery uses bounded indexed pages before workers start. Oversized work is split to the 1 MiB serialized limit. Identifiable legacy sources return to the existing held-aware admission path; unidentifiable work leaves a visible manual-rebuild requirement. No automatic full rebuild is triggered. Validation and CI are recorded in the handoff.
