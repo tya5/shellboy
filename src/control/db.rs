@@ -664,6 +664,7 @@ impl Store {
                     let result = store.send_content(
                         tx,
                         &MessageSendArgs {
+                            expect_reply: false,
                             sender_label: None,
                             thread_id: Some(target),
                             text: content.text.clone(),
@@ -958,7 +959,7 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs { sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
+                let mut result=store.send_content(&tx,&MessageSendArgs { expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
@@ -1057,6 +1058,7 @@ impl Store {
                     store.send_content(
                         tx,
                         &MessageSendArgs {
+                            expect_reply: false,
                             sender_label: None,
                             thread_id: Some(thread_id),
                             text: text.as_ref().clone(),
@@ -1638,6 +1640,18 @@ impl Store {
             ));
         }
         let id = target(args.thread_id.as_deref(), caller)?;
+        if args.expect_reply {
+            if caller.is_some_and(|origin| origin.thread_id == id) {
+                return Err(error(
+                    ErrorCode::InvalidArgument,
+                    "a model cannot expect a reply from its own Thread",
+                ));
+            }
+            let pending: i64 = tx.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'", [&id], |row| row.get(0)).map_err(sql_error)?;
+            if pending >= 128 {
+                return Err(error(ErrorCode::InputLimit, "too many pending replies"));
+            }
+        }
         let MessageAssignment {
             run: assigned_run,
             turn: assigned_turn,
@@ -1660,6 +1674,7 @@ impl Store {
             _ => unreachable!(),
         };
         let accepted = MessageAccepted {
+            expect_reply: args.expect_reply,
             message_id: message_id.clone(),
             thread_id: id.clone(),
             delivery_status: status,
@@ -1668,8 +1683,11 @@ impl Store {
             run_id: assigned_run,
             turn_id: assigned_turn,
         };
-        let saved_acceptance = serde_json::to_value(&accepted)
+        let mut saved_acceptance = serde_json::to_value(&accepted)
             .map_err(|_| error(ErrorCode::InvalidState, "Cannot encode message acceptance"))?;
+        if args.expect_reply {
+            saved_acceptance["reply"] = json!({"state":"pending"});
+        }
         tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
         tx.execute(
             "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
@@ -1677,7 +1695,7 @@ impl Store {
         )
         .map_err(sql_error)?;
         bump_roots(tx)?;
-        let mut result = MutationResult::value(saved_acceptance)?;
+        let mut result = MutationResult::value(accepted)?;
         if let Some(owner) = owner_changed {
             result.changed_threads.push(owner);
         }
@@ -3704,6 +3722,7 @@ mod agents_reference_tests {
             let accepted = store
                 .execute(
                     req(Command::MessageSend(MessageSendArgs {
+                        expect_reply: false,
                         thread_id: Some(target.clone()),
                         text: "synthetic sender fixture".into(),
                         deliver: Deliver::Next,
@@ -3831,6 +3850,7 @@ mod agents_reference_tests {
         let held = store
             .execute(
                 req(Command::MessageSend(MessageSendArgs {
+                    expect_reply: false,
                     thread_id: Some(target),
                     text: "no authority from label".into(),
                     deliver: Deliver::Next,
@@ -4091,6 +4111,7 @@ mod message_acknowledgement_state_tests {
         let request = Request::new(
             "fixture:typed-ack",
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 thread_id: Some("t".into()),
                 text: "urgent".into(),
@@ -4370,6 +4391,7 @@ mod owned_child_notification_tests {
             let request = Request::new(
                 "fixture:new-child",
                 Command::MessageSend(MessageSendArgs {
+                    expect_reply: false,
                     sender_label: None,
                     thread_id: Some("child".into()),
                     text: "synthetic delegation".into(),
@@ -4435,6 +4457,7 @@ mod owned_child_notification_tests {
                             Request::new(
                                 "fixture:existing-child",
                                 Command::MessageSend(MessageSendArgs {
+                                    expect_reply: false,
                                     sender_label: None,
                                     thread_id: Some("child".into()),
                                     text: "another input".into(),
