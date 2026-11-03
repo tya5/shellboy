@@ -60,11 +60,11 @@ impl ReplyFilter {
                 self.paste = true;
             } else if p == b"\x1b[201~" && self.paste {
                 self.paste = false;
-            } else if p == b"\x1b" || p == b"\x1b[" {
-                continue;
-            } else if p.starts_with(b"\x1b[")
-                && p.len() <= 64
-                && p.last().is_some_and(|v| (0x20..=0x3f).contains(v))
+            } else if p == b"\x1b"
+                || p == b"\x1b["
+                || (p.starts_with(b"\x1b[")
+                    && p.len() <= 64
+                    && p.last().is_some_and(|v| (0x20..=0x3f).contains(v)))
             {
                 continue;
             } else if !self.paste

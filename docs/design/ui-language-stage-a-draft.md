@@ -44,9 +44,11 @@ errors continue to propagate unchanged; do not translate their source text.
 
 ## Terminal width
 
-Implementation pending; this paragraph records the adopted target, not current behavior.
+The session-owned input implementation follows this contract on Unix. Windows
+native console input emits no VT probes; those capabilities remain unmeasured.
+Validation evidence is tracked separately in acceptance.
 
-On every startup, send width, device attributes (DA), and keyboard enhancement
+On every Unix startup, send width, device attributes (DA), and keyboard enhancement
 queries before the first frame without waiting. One capability-probe mechanism
 tracks each as `Unmeasured` or `Measured(value)`. A single input reader removes
 DSR (`ESC [ row ; column R`), DA (`ESC [ ? ... c`), and keyboard flags

@@ -414,9 +414,11 @@ terminal-width diagnostic as examples; other screens remain for stage B. It does
 not translate or rewrite model/user content, saved data, protocol values or CLI
 output.
 
-Implementation pending; this paragraph records the adopted target, not current behavior.
+Unix sessions use one application-owned terminal input reader. Windows retains
+native console input without VT capability queries; unsupported observations
+remain unmeasured rather than exposing query replies as native keystrokes.
 
-At every TUI startup, send terminal width, DA and keyboard enhancement queries
+At every Unix TUI startup, send terminal width, DA and keyboard enhancement queries
 before the first frame without waiting. A common capability-probe mechanism
 represents each capability as `Unmeasured` or `Measured(value)`; the input
 reader consumes matching replies only for outstanding queries, at most one per

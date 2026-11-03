@@ -4404,3 +4404,10 @@ Continue W4's adopted design and filter on a task-isolated branch rebased onto
 Windows native console input sends no VT probes. Implementation and validation
 are pending. #194 is accepted and frozen until explicit hotfix-landed notice;
 no migration changes are included here.
+
+#192 session integration: startup and normal UI share the same input owner;
+queries precede the first draw without awaiting replies. Late measurements
+invalidate width-keyed display caches, redraw, and persist via the existing
+owner guard off the UI thread. Cached width is only the initial baseline.
+macOS strict Clippy and focused decoder/filter/PTY/restoration tests passed;
+three-OS CI and further error-retention coverage follow in the next stage.

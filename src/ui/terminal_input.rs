@@ -193,6 +193,79 @@ impl Input {
     }
 }
 
+pub(super) struct SessionInput {
+    input: Input,
+    pub keyboard_enabled: bool,
+    pub width_observation: Option<u8>,
+    measured_width: Option<u8>,
+    changed: bool,
+    observer: Option<Box<dyn FnMut(u8)>>,
+}
+impl SessionInput {
+    pub fn new(width: Option<u8>, keyboard_enabled: bool) -> io::Result<Self> {
+        let mut input = Input::new()?;
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            let (cols, rows) = input.size;
+            let queries = input.decoder.queries(cols >= 5 && rows >= 11);
+            let mut output = io::stdout();
+            output.write_all(queries)?;
+            output.flush()?;
+        }
+        Ok(Self {
+            input,
+            keyboard_enabled,
+            width_observation: width,
+            measured_width: None,
+            changed: false,
+            observer: None,
+        })
+    }
+    pub fn set_observer(&mut self, mut observer: Box<dyn FnMut(u8)>) {
+        if let Some(width) = self.measured_width {
+            observer(width);
+        }
+        self.observer = Some(observer);
+    }
+    pub fn take_changed(&mut self) -> bool {
+        std::mem::take(&mut self.changed)
+    }
+    pub fn poll(
+        &mut self,
+        guard: &super::terminal_guard::TerminalGuard,
+        diagnostics: Option<&crate::diagnostics::Diagnostics>,
+        timeout: Duration,
+    ) -> io::Result<Option<Event>> {
+        let event = self.input.poll(timeout)?;
+        if self.input.decoder.keyboard == Capability::Measured(true) && !self.keyboard_enabled {
+            match guard.push_keyboard_enhancement() {
+                Ok(()) => {
+                    self.keyboard_enabled = true;
+                    self.changed = true;
+                }
+                Err(e) if e.kind() == io::ErrorKind::Unsupported => {}
+                Err(e) => return Err(e),
+            }
+        }
+        if let Capability::Measured(width) = self.input.decoder.width
+            && self.measured_width != Some(width)
+        {
+            self.measured_width = Some(width);
+            self.changed |= self.width_observation != Some(width);
+            self.width_observation = Some(width);
+            super::text_width::set_process_terminal_width(Some(width));
+            if let Some(diagnostics) = diagnostics {
+                super::record_terminal_width(diagnostics, Some(width));
+            }
+            if let Some(observer) = &mut self.observer {
+                observer(width);
+            }
+        }
+        Ok(event)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

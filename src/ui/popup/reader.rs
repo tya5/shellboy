@@ -24,7 +24,7 @@ pub(in crate::ui) struct ReaderBounds {
 #[derive(Default)]
 pub(in crate::ui) struct ReaderCache {
     language: Option<UiLanguage>,
-    key: Option<(u64, u16)>,
+    key: Option<(u64, u16, Option<u8>)>,
     rows: Vec<Line<'static>>,
     bytes: usize,
     bounds: ReaderBounds,
@@ -99,7 +99,13 @@ impl ReaderCache {
         make_lines: impl FnOnce() -> Vec<Line<'static>>,
     ) -> usize {
         let width = width.max(1);
-        if self.key != Some((revision, width)) {
+        if self.key
+            != Some((
+                revision,
+                width,
+                crate::ui::text_width::terminal_width_observation(),
+            ))
+        {
             self.rebuild(revision, width, &make_lines());
         }
         self.rows.len()
@@ -108,7 +114,11 @@ impl ReaderCache {
         self.rows = Vec::new();
         self.bytes = 0;
         self.limited = false;
-        self.key = Some((revision, width));
+        self.key = Some((
+            revision,
+            width,
+            crate::ui::text_width::terminal_width_observation(),
+        ));
         #[cfg(test)]
         {
             self.builds += 1;
@@ -248,7 +258,13 @@ pub(in crate::ui) fn reader_cached(
         cache.bounds = ReaderBounds::default();
         return 0;
     }
-    if cache.key != Some((revision, width)) {
+    if cache.key
+        != Some((
+            revision,
+            width,
+            crate::ui::text_width::terminal_width_observation(),
+        ))
+    {
         cache.rebuild(revision, width, lines);
     }
     cache.paint(frame, area, requested)
