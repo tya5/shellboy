@@ -799,17 +799,7 @@ fn node_lines_with_header(
         lines[0].spans.push(Span::raw("  "));
         lines[0].spans.extend(first_body.spans);
         if node.presentation.kind == PresentationKind::Spill {
-            let mut wrapped = indented_wrap(vec![lines.remove(0)], width);
-            // Keep the existing first-line placement; the helper's indent is for
-            // wrapped continuations of this inline original-reference row.
-            if wrapped
-                .first()
-                .and_then(|line| line.spans.first())
-                .is_some_and(|span| span.content.as_ref() == "  ")
-            {
-                wrapped[0].spans.remove(0);
-            }
-            lines = wrapped;
+            lines = indented_wrap(vec![lines.remove(0)], width);
         }
     }
     if node.presentation.kind == PresentationKind::Event && lines.len() > 1 {
@@ -5196,6 +5186,7 @@ mod conversation_item_tests {
             let rows = node_lines(language, &node, false, 0, 36, &mut Vec::new());
             let shown = rows.iter().map(ToString::to_string).collect::<Vec<_>>();
             assert!(shown.len() > 1, "{language:?}: {shown:?}");
+            assert!(shown[0].starts_with("  "), "{language:?}: {:?}", shown[0]);
             assert!(
                 shown[0].contains(if language == UiLanguage::En {
                     "Original reference"
