@@ -5164,13 +5164,11 @@ mod conversation_item_tests {
                         vec![Line::styled(text, Style::default().fg(theme::MUTED))],
                         width,
                     );
-                    assert!(
-                        muted.iter().flat_map(|line| &line.spans).all(|span| line
-                            .style
-                            .patch(span.style)
-                            .fg
-                            == Some(theme::MUTED))
-                    );
+                    assert!(muted.iter().all(|line| {
+                        line.spans
+                            .iter()
+                            .all(|span| line.style.patch(span.style).fg == Some(theme::MUTED))
+                    }));
                 }
             }
         }
