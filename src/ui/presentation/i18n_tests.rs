@@ -207,10 +207,7 @@ fn recovery_detail_localizes_only_generated_facts() {
     let snapshot = ActivitySnapshot {
         phase: crate::activity::ActivityPhase::Recovery,
         recovery: Some(RecoverySnapshot {
-            stage: RecoveryStage::ModelContextLimit
-                .localized(UiLanguage::Ja)
-                .into(),
-            stage_kind: Some(RecoveryStage::ModelContextLimit),
+            stage: RecoveryStage::ModelContextLimit,
             stage_details: Some(RecoveryStageDetails {
                 retries: json!(2),
                 retry_limit: json!(3),
@@ -231,8 +228,7 @@ fn recovery_detail_localizes_only_generated_facts() {
     };
     let english = plain(&recovery_lines(&snapshot, UiLanguage::En, 120, 16));
     let mut fallback_recovery = snapshot.recovery.clone().unwrap();
-    fallback_recovery.stage = "recovery".into();
-    fallback_recovery.stage_kind = None;
+    fallback_recovery.stage = RecoveryStage::Unrecorded;
     fallback_recovery.stage_details = None;
     let fallback_only = ActivitySnapshot {
         phase: crate::activity::ActivityPhase::Recovery,
@@ -252,14 +248,14 @@ fn recovery_detail_localizes_only_generated_facts() {
     let source = ActivitySnapshot {
         phase: crate::activity::ActivityPhase::Recovery,
         recovery: Some(RecoverySnapshot {
-            stage: "raw saved stage".into(),
+            stage: RecoveryStage::Unrecorded,
             message: "Provider response: use the supplied reset time".into(),
             ..Default::default()
         }),
         ..Default::default()
     };
     let shown = plain(&recovery_lines(&source, UiLanguage::En, 120, 16));
-    assert!(shown.contains("raw saved stage"));
+    assert!(shown.contains("Processing (stage not recorded)"));
     assert!(shown.contains("Provider response: use the supplied reset time"));
 }
 
