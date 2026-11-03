@@ -75,6 +75,11 @@ Immediately after sending, local `送信受付中` (accepting submission) shows 
 
 The configured send key queues normally at the next boundary. Ctrl+Enter sends immediately unless it is already configured as ordinary send; Ctrl+X then Ctrl+S is always the immediate-delivery chord while the composer owns input. Immediate delivery releases a foreground shell wait and preserves its process; it does not interrupt response generation. Esc first closes popups, completions and selection; in the bare conversation it interrupts the exact observed Turn. Background shells and owned children continue. Ctrl+C or `/stop` stops the whole Run and its owned work. No automatic background timeout is enabled.
 
+The footer status bar also reports slow or stalled DB-worker activity. After an
+active operation exceeds 1 second it shows `DB <operation> <elapsed>`; when the
+worker reports no progress it shows `DB! <operation> no progress`. This is a DB
+activity indicator, not a percentage or estimate of overall task progress.
+
 `準備中` (preparing), `モデル応答待ち` (awaiting model), `応答受信中` (receiving response), and `ツール処理中` (processing tools) use moving text brightness. `待機中` (waiting), `回答済み背景処理中` (answered, background work active), `実行継続中` (execution continuing), and `停止処理中` (stopping) use a slowly pulsing marker. Completed, interrupted, failed, and recovery-wait states are static; failure and recovery wait use an attention color.
 
 When no explicit title is saved, the conversation header derives a short name
@@ -197,6 +202,11 @@ These are defaults. Change send/newline combinations with `ui.send_key` and `ui.
 | Ctrl+C | Stop the current Run and its background/owned work; does not quit |
 | Ctrl+B | Background the current foreground shell |
 | Ctrl+Q | Begin normal shutdown |
+
+With mouse capture enabled, clicking an expandable tool-call/result or grouped
+notice row opens or closes it. Clicks on ordinary user/model message rows and
+received-response rows do not select or toggle them. Use Tab/arrow keys and
+Enter or Space to focus and open/close selectable history items.
 
 Use Ctrl+L if stale characters or old link regions remain. It works in lists, details, popups, and frozen selection; repeated presses are coalesced within the render-rate cap. If it conflicts with send/newline bindings, redraw is disabled and F1 explains why. It does not repair underlying terminal character-width disagreement.
 
@@ -367,6 +377,11 @@ conversation. Ctrl+S confirms a full Run stop; Alt+R confirms retry of a recover
 Turn; Alt+O reads saved output. Confirmation retains the actual Run/Turn/generation:
 a changed target is rejected rather than retargeted. Typing filters; deletion
 stays in List. Esc closes the browser without stopping work.
+
+Thread rows may include a compact completion-delivery summary: `↻N` counts
+messages delivered at Run completion, and a trailing `+` means at least one
+`--deliver complete` message is still waiting (`↻N+`). No badge is shown when
+there is neither a delivered nor waiting completion-delivery message.
 
 Finished rows (completed, failed, stopped, and recovery waits) show the saved
 transition time in local time instead of a growing counter: `13:42 完了`, or

@@ -191,8 +191,11 @@ opening the display does not run, retry or stop the command.
 | Live work | Up / Down; Space | Choose work; open/close the selected shell output |
 | Live work | F6; `o`; Esc | Inspect the selected work; open a child conversation; return to input |
 
-With mouse capture enabled, click an item to open or close it. Empty-composer Up
-still recalls sent messages. Opening details does not submit a new request.
+With mouse capture enabled, clicking an expandable tool-call/result or grouped
+notice row opens or closes it. Ordinary user/model message rows and
+received-response rows do not select or toggle on click. Use keyboard history
+focus to select and open other history items. Empty-composer Up still recalls
+sent messages. Opening details does not submit a new request.
 Copies and originals refer to saved source content, which may contain more than
 the visible preview. F6's original-text page also retains its own copy controls.
 
