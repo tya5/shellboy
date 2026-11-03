@@ -2990,7 +2990,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let details = screen_text(&terminal);
     assert!(details.contains("会話の情報"));
-    assert!(details.contains("Conversation ID: thread-29"));
+    assert!(details.contains("会話ID: thread-29"));
 }
 
 fn quiet_scroll_event(index: usize) -> UiNode {
