@@ -329,5 +329,9 @@ mod rendering_tests {
         );
         assert!(Config::parse("[ui]\nlanguage='fr'").is_err());
         assert!(Config::parse("[ui]\nambiguous_width=2").is_err());
+        for value in ["cached", "probe", "narrow", "wide"] {
+            assert!(Config::parse(&format!("[ui]\nambiguous_width='{value}'")).is_ok());
+        }
+        assert!(Config::parse("[ui]\nambiguous_width='other'").is_err());
     }
 }

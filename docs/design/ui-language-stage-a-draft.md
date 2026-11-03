@@ -53,8 +53,10 @@ may buffer non-position events in the helper during the probe; those events are
 not transferred back to the UI, including when the helper times out. Input
 arriving during the bounded startup interval can therefore be lost. Two agreeing
 responses identify one or two; a timeout, unsupported input path, small terminal,
-error or disagreement is unknown. No terminal name, locale, override, or user's
-choice of language determines width. F1 help reports the result. When measured
+error or disagreement is unknown. The default `cached` mode reuses successful
+observations per terminal program and version (or TERM); missing identity always
+probes. `probe` remeasures and refreshes the observation; `narrow` and `wide`
+fix it explicitly. Neither locale nor terminal name is used to infer width. F1 help reports the result. When measured
 two differs from upstream Ratatui's default of one, TUI status and optional
 diagnostics explicitly record the mismatch.
 
