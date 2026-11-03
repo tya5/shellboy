@@ -844,6 +844,26 @@ pub enum InputSource {
     #[default]
     Unknown,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReplyState {
+    Pending,
+    Replied,
+    Ignored,
+    Cancelled,
+    RecipientDeleted,
+}
+impl ReplyState {
+    pub fn label(self, language: crate::config::UiLanguage) -> &'static str {
+        use crate::ui::i18n::local;
+        match self {
+            Self::Pending => local!(language, "返事待ち", "awaiting reply"),
+            Self::Replied => local!(language, "返事済み", "replied"),
+            Self::Ignored => local!(language, "返事なし", "ignored"),
+            Self::Cancelled => local!(language, "取消", "cancelled"),
+            Self::RecipientDeleted => local!(language, "相手削除", "recipient deleted"),
+        }
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodePresentation {
     /// Display-only sentence provenance; canonical projections remain unchanged.
@@ -855,6 +875,10 @@ pub struct NodePresentation {
     pub input_source: InputSource,
     #[serde(skip)]
     pub input_sender_label: Option<String>,
+    #[serde(skip)]
+    pub reply_state: Option<ReplyState>,
+    #[serde(skip)]
+    pub reply_excerpt: Option<String>,
     /// Worker-derived display identity; never persisted or a source/provenance hash.
     #[serde(skip)]
     pub projection_stamp: Option<[u8; 32]>,
@@ -950,6 +974,7 @@ impl NodePresentation {
             + self.ui_messages.retained_bytes()
             + self.created_at.as_ref().map_or(0, String::capacity)
             + self.input_sender_label.as_ref().map_or(0, String::capacity)
+            + self.reply_excerpt.as_ref().map_or(0, String::capacity)
             + self.title.capacity()
             + self.blocks.capacity() * size_of::<PresentationBlock>()
             + self.fields.capacity() * size_of::<PresentationField>()

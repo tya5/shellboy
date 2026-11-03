@@ -6,6 +6,27 @@ pub struct PendingMessages {
     pub items: Vec<PendingMessage>,
     pub total: u64,
     pub submitted: Vec<SubmittedMessage>,
+    pub awaiting_reply: Vec<ReplyTarget>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReplyTarget {
+    pub message_id: String,
+    pub sender: String,
+    pub created_at: String,
+    pub excerpt: String,
+    pub applied: bool,
+}
+impl ReplyTarget {
+    pub(super) fn caption(&self, language: UiLanguage) -> String {
+        let text =
+            crate::presentation::sanitize_plain(&format!("{}: {}", self.sender, self.excerpt), 0)
+                .0
+                .replace(['\n', '\r'], " ");
+        match language {
+            UiLanguage::Ja => format!("返信先 {text}"),
+            UiLanguage::En => format!("Replying to {text}"),
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubmittedMessage {
@@ -27,6 +48,7 @@ pub struct PendingMessage {
     pub excerpt: String,
     pub excerpt_truncated: bool,
     pub attachment_count: u64,
+    pub expect_reply: bool,
 }
 impl PendingMessage {
     fn sender(&self, language: UiLanguage) -> String {
@@ -59,6 +81,10 @@ impl PendingMessage {
             (UiLanguage::En, false, false, false) => format!("{sender}{sep}Pending"),
             (UiLanguage::En, false, false, true) => format!("{sender}{sep}Pending{sep}Deliver now"),
         };
+        if self.expect_reply {
+            label.push_str(sep);
+            label.push_str(crate::presentation::ReplyState::Pending.label(language));
+        }
         if let Some(reason) = &self.hold_reason {
             // A reason is an independent fact, not a grammatical message fragment.
             label.push_str(sep);
@@ -149,6 +175,7 @@ fn cancel_detail(language: UiLanguage, count: usize, senders: &str) -> String {
 pub(super) struct QueuePopup {
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     pub visible: bool,
+    pub replies: bool,
     pub selected: usize,
     pub archives: Option<Vec<(String, String)>>,
     pub epoch: u64,
@@ -174,6 +201,36 @@ impl QueuePopup {
         language: UiLanguage,
     ) {
         if !self.visible {
+            return;
+        }
+        if self.replies {
+            let body = popup::panel_recorded(
+                frame,
+                area,
+                i18n::local!(language, "返事待ち", "Awaiting replies"),
+                "/replies",
+                i18n::local!(language, "Esc 戻る | Enter 返信", "Esc Back | Enter Reply"),
+                &self.paint,
+            );
+            let items = if pending.awaiting_reply.is_empty() {
+                vec![popup::Item::new(i18n::local!(
+                    language,
+                    "返事待ちはありません",
+                    "No awaiting replies"
+                ))]
+            } else {
+                pending
+                    .awaiting_reply
+                    .iter()
+                    .map(|item| {
+                        popup::Item::new(format!(
+                            "{}  {}\n{}",
+                            item.sender, item.created_at, item.excerpt
+                        ))
+                    })
+                    .collect()
+            };
+            popup::list(frame, body, items, self.selected);
             return;
         }
         if let Some(archives) = &self.archives {
@@ -429,6 +486,44 @@ impl UiState {
         }
     }
     pub(super) fn queue_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
+        if self.queue_popup.replies {
+            let count = self.view().pending_messages.awaiting_reply.len();
+            match key.code {
+                KeyCode::Esc => self.queue_popup.visible = false,
+                KeyCode::Up => {
+                    self.queue_popup.selected =
+                        popup::move_selection(self.queue_popup.selected, -1, count)
+                }
+                KeyCode::Down => {
+                    self.queue_popup.selected =
+                        popup::move_selection(self.queue_popup.selected, 1, count)
+                }
+                KeyCode::Enter => {
+                    if let Some(target) = self
+                        .view()
+                        .pending_messages
+                        .awaiting_reply
+                        .get(self.queue_popup.selected)
+                        .cloned()
+                    {
+                        if target.applied {
+                            self.active_view_mut().composer.reply = Some(target);
+                            self.queue_popup.visible = false;
+                        } else {
+                            self.active_view_mut().status = i18n::local!(
+                                self.config.ui.language,
+                                "反映後に返信できます",
+                                "Reply after the message is applied"
+                            )
+                            .into();
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return vec![];
+        }
+
         let key = key_hints::readonly_key(key);
         let count = self
             .queue_popup
@@ -580,6 +675,7 @@ mod tests {
     }
     fn queued(id: &str) -> PendingMessage {
         PendingMessage {
+            expect_reply: false,
             message_id: id.into(),
             operation_id: format!("op:{id}"),
             sender_thread: None,
@@ -807,6 +903,7 @@ mod tests {
         let mut item = queued("saved");
         item.operation_id = "operation".into();
         let pending = PendingMessages {
+            awaiting_reply: Vec::new(),
             items: vec![item],
             total: 1,
             submitted: vec![SubmittedMessage {
@@ -882,6 +979,7 @@ mod tests {
             generation: *generation,
             nodes: vec![selected("saved")],
             pending: PendingMessages {
+                awaiting_reply: Vec::new(),
                 items: vec![queued("newly-arrived")],
                 total: 1,
                 submitted: vec![binding],
@@ -1269,6 +1367,7 @@ mod language_tests {
     }
     fn item(id: &str) -> PendingMessage {
         PendingMessage {
+            expect_reply: false,
             message_id: id.into(),
             operation_id: format!("operation-{id}"),
             sender_thread: None,

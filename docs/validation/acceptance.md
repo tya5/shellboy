@@ -9088,3 +9088,11 @@ Step-3 review follow-up: deletion uses receipt_reply_pending with target equalit
 and LIMIT 128 per recipient (EXPLAIN asserted); 4096 unrelated pending replies
 remain untouched. Sender deletion is deferred to 128-row GC batches before
 eligibility, with actor/reason and cancellation notice asserted after GC.
+
+### #194 Step 6 Reply TUI Acceptance
+
+Synthetic fixtures cover Japanese/English option B states with unchanged source
+marks, narrow/wide reply popup drawing, applied-only selection, exact saved reply
+correlation, failed reply restoration, per-view reply mode, Escape draft retention,
+and acknowledgement races with newer drafts/targets. Final task CI is pending;
+these fixtures do not establish manual terminal or real-provider behavior.

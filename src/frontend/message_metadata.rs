@@ -52,6 +52,8 @@ struct RawSource {
     // Preserve raw legacy null separately from missing/ambiguous evidence.
     // No sender JSON is interpreted on the DB worker.
     sender: Option<String>,
+    reply_state: Option<String>,
+    reply_excerpt: Option<String>,
 }
 pub(super) struct SourceFacts {
     viewed: Option<String>,
@@ -145,6 +147,8 @@ pub(super) fn read_tx(
             created_at: stamp.filter(|stamp| stamp.len() <= 128),
             revisit,
             sender: None,
+            reply_state: None,
+            reply_excerpt: None,
         });
     }
     // All distinct timestamp/state buckets share one bounded indexed query.
@@ -212,14 +216,25 @@ pub(super) fn read_tx(
             .map(|(_, receipt)| *receipt)
             .collect::<Vec<_>>();
         let encoded = serde_json::to_string(&receipt_ids).expect("Receipt rowids serialize");
-        let mut senders = db.prepare_cached("SELECT r.rowid,substr(r.sender_json,1,8193) FROM json_each(?1) q JOIN receipt r ON r.rowid=q.value")?;
+        let mut senders = db.prepare_cached("SELECT r.rowid,substr(r.sender_json,1,8193),json_extract(r.result_json,'$.reply.state'),CASE WHEN json_extract(r.result_json,'$.reply_to') IS NOT NULL THEN COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=json_extract(r.result_json,'$.reply_to')),'') END FROM json_each(?1) q JOIN receipt r ON r.rowid=q.value")?;
         let mut senders = senders
             .query_map([encoded], |row| {
-                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    (
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ),
+                ))
             })?
             .collect::<rusqlite::Result<HashMap<_, _>>>()?;
         for (index, receipt) in witnesses {
-            rows[index].sender = senders.remove(&receipt);
+            if let Some((sender, state, excerpt)) = senders.remove(&receipt) {
+                rows[index].sender = Some(sender);
+                rows[index].reply_state = state;
+                rows[index].reply_excerpt = excerpt;
+            }
         }
     }
     Ok(SourceFacts {
@@ -243,6 +258,23 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &SourceFacts) {
         node.presentation.created_at = metadata.created_at;
         node.presentation.input_source = metadata.source;
         node.presentation.input_sender_label = metadata.sender_label;
+        use crate::presentation::ReplyState;
+        node.presentation.reply_state = match raw.reply_state.as_deref() {
+            Some("pending") => Some(ReplyState::Pending),
+            Some("replied") => Some(ReplyState::Replied),
+            Some("ignored") => Some(ReplyState::Ignored),
+            Some("cancelled") => Some(ReplyState::Cancelled),
+            Some("recipient_deleted") => Some(ReplyState::RecipientDeleted),
+            _ => None,
+        };
+        node.presentation.reply_excerpt = raw.reply_excerpt.as_deref().map(|v| {
+            crate::presentation::sanitize_plain(v, 0)
+                .0
+                .replace(['\n', '\r'], " ")
+                .chars()
+                .take(512)
+                .collect()
+        });
         node.presentation.bound_metadata();
     }
 }
@@ -340,6 +372,52 @@ mod tests {
         if let Some(sender) = sender {
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at)VALUES(?1,?1,?2,'child',?1,'r','u',?3,?1)",params![id,sender,state]).unwrap();
         }
+    }
+    #[test]
+    fn reply_metadata_uses_saved_exact_node_and_refreshes_terminal_state() {
+        let db = fixture();
+        input(&db, "original", Some(r#"{"kind":"human"}"#), "applied");
+        input(
+            &db,
+            "reply",
+            Some(r#"{"kind":"model","thread_id":"parent"}"#),
+            "applied",
+        );
+        db.execute("UPDATE node SET payload_json=json_object('content',json_array(json_object('type','input_text','text','source request'))) WHERE id='original'",[]).unwrap();
+        db.execute("UPDATE receipt SET result_json=json_object('reply',json_object('state','pending')) WHERE id='original'",[]).unwrap();
+        db.execute(
+            "UPDATE receipt SET result_json=json_object('reply_to','original') WHERE id='reply'",
+            [],
+        )
+        .unwrap();
+        let mut nodes = vec![
+            UiNode {
+                node_id: "original".into(),
+                ..Default::default()
+            },
+            UiNode {
+                node_id: "reply".into(),
+                ..Default::default()
+            },
+        ];
+        let facts = read_tx(&db, Some("child"), &["original".into(), "reply".into()]).unwrap();
+        apply(&mut nodes, &facts);
+        assert_eq!(
+            nodes[0].presentation.reply_state,
+            Some(crate::presentation::ReplyState::Pending)
+        );
+        assert_eq!(
+            nodes[1].presentation.reply_excerpt.as_deref(),
+            Some("source request")
+        );
+        assert_eq!(nodes[1].presentation.input_source, InputSource::Parent);
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','replied') WHERE id='original'",[]).unwrap();
+        let facts = read_tx(&db, Some("child"), &["original".into(), "reply".into()]).unwrap();
+        apply(&mut nodes, &facts);
+        assert_eq!(
+            nodes[0].presentation.reply_state,
+            Some(crate::presentation::ReplyState::Replied)
+        );
     }
     #[test]
     fn common_tool_metadata_uses_fixed_batch_queries_and_deduplicates_ids() {
