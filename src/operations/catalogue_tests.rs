@@ -32,8 +32,8 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 62, "track new CLI lifecycle paths explicitly");
-    for name in ["serve", "shutdown"] {
+    assert_eq!(leaves.len(), 63, "track new CLI lifecycle paths explicitly");
+    for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
             .expect("tracked headless lifecycle path");
@@ -55,7 +55,9 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
                 .collect()
         );
         assert!(
-            !CLI_BINDINGS.iter().any(|binding| binding.path == [name]),
+            !CLI_BINDINGS
+                .iter()
+                .any(|binding| binding.path.join(" ") == name),
             "headless lifecycle must not be offered as a TUI form"
         );
     }

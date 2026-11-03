@@ -1274,9 +1274,13 @@ pub fn manual_check(
     register_vec().map_err(crate::app::storage_error)?;
     let connection = Connection::open_with_flags(
         loaded.data_dir.join("shellboy.db"),
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(|error| crate::app::storage_error(StorageError::Sqlite(error)))?;
+    // SQLite skips CHECK constraints in quick_check on read-only connections.
+    connection
+        .execute_batch("PRAGMA query_only=ON")
+        .map_err(|error| crate::app::storage_error(StorageError::Sqlite(error)))?;
     check_integrity(&connection, true, true).map_err(crate::app::storage_error)
 }
 
