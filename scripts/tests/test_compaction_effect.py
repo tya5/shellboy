@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -77,7 +78,7 @@ class CompactionEffectTests(unittest.TestCase):
             db = self.fixture(path)
             db.close()
             before = path.read_bytes()
-            result = subprocess.run([str(SCRIPT), str(path), '2026-11-03T00:00:00Z'], check=True, capture_output=True, text=True)
+            result = subprocess.run([sys.executable, str(SCRIPT), str(path), '2026-11-03T00:00:00Z'], check=True, capture_output=True, text=True)
             output = json.loads(result.stdout)
             self.assertEqual(output['periods']['before']['profile/m1']['model_requests'], 3)
             self.assertEqual(path.read_bytes(), before)
