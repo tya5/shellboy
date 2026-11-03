@@ -121,10 +121,7 @@ fn read_visible_tx_limited(
     })
 }
 
-fn project(
-    raw: RawVisible,
-    width: u16,
-) -> Result<ProjectedVisible, ApiError> {
+fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
     let RawVisible {
         details,
         history,
