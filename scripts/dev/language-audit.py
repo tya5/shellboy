@@ -98,7 +98,10 @@ def groups(items):
 
 
 def ranges(items, pairs):
-    fixtures, localized, modules = [], [], []
+    # Only syntax that proves the role of a particular literal is classified.
+    # Unknown macros, nonliteral arguments, other match patterns and arbitrary
+    # constants remain pending; identifiers are never inferred from their names.
+    fixtures, localized, excluded, modules = [], [], [], []
     texts = [t.text for t in items]
     for i, token in enumerate(items):
         if token.text == '#' and texts[i + 1:i + 2] == ['[']:
@@ -117,29 +120,79 @@ def ranges(items, pairs):
                     fixtures.append((token.start, items[stop].end))
                     if attr == 'cfg(test)' and texts[item:item + 1] == ['mod'] and texts[j] == ';':
                         modules.append(texts[item + 1])
-        if token.text == 'local' and texts[i + 1:i + 3] == ['!', '(']:
+        # The known macros accept literal Japanese arguments: local! has one,
+        # glyphs::localized! has narrow and fallback variants. Do not infer
+        # nested expressions or a different qualified macro's semantics.
+        if (token.text in ('local', 'localized')
+                and texts[i + 1:i + 3] == ['!', '(']
+                and (i < 2 or texts[i - 2:i] != [':', ':']
+                     or (token.text == 'local' and texts[i - 3:i] == ['i18n', ':', ':'])
+                     or (token.text == 'localized' and texts[i - 3:i] == ['glyphs', ':', ':']))):
             stop = pairs[i + 2]
-            j, arg, begin = i + 3, 0, i + 3
+            args, begin, j = [], i + 3, i + 3
             while j < stop:
                 if texts[j] == ',':
-                    if arg == 1:
-                        localized.append((items[begin].start, items[j].start))
-                    arg += 1
+                    args.append((begin, j))
                     begin = j + 1
                 j = pairs[j] + 1 if j in pairs else j + 1
-        if texts[i:i + 4] == ['UiLanguage', ':', ':', 'Ja']:
-            # Only an explicit Japanese match arm, never a file-wide exemption.
-            j = i + 4
-            while j < len(items) and texts[j] not in ('=', ';', '{'):
-                j += 1
-            if texts[j:j + 2] == ['=', '>']:
-                begin = j + 2
-                j = begin
-                while j < len(items) and texts[j] not in (',', '}', ';'):
+            args.append((begin, stop))
+            expected = 3 if token.text == 'local' else 5
+            if len(args) == expected or (len(args) == expected + 1 and args[-1][0] == args[-1][1]):
+                for begin, end in args[1:2 if token.text == 'local' else 3]:
+                    if end == begin + 1 and items[begin].kind in ('string', 'raw_string'):
+                        localized.append((items[begin].start, items[begin].end))
+        # Explicitly qualified logging macros: the direct format literal only.
+        if (token.text in ('trace', 'debug', 'info', 'warn', 'error')
+                and i >= 3 and texts[i - 3:i] in (['log', ':', ':'], ['tracing', ':', ':'])
+                and texts[i + 1:i + 3] == ['!', '(']):
+            first = i + 3
+            if first < pairs[i + 2] and items[first].kind in ('string', 'raw_string'):
+                excluded.append((items[first].start, items[first].end))
+        # A literal serde rename is a serialization identifier, not UI copy.
+        if texts[i:i + 3] == ['#', '[', 'serde'] and texts[i + 3:i + 4] == ['(']:
+            stop = pairs[i + 3]
+            for j in range(i + 4, stop - 2):
+                if (texts[j] == 'rename' and texts[j + 1] == '='
+                        and items[j + 2].kind in ('string', 'raw_string')):
+                    excluded.append((items[j + 2].start, items[j + 2].end))
+        if token.text == 'match':
+            # Parse only arms of an actual match; a Ja-looking expression or
+            # an alternative pattern is not evidence that this is a Ja arm.
+            j = i + 1
+            while j < len(items) and texts[j] not in ('{', ';', '}'):
+                j = pairs[j] + 1 if j in pairs else j + 1
+            if j >= len(items) or texts[j] != '{':
+                continue
+            stop, j = pairs[j], j + 1
+            while j < stop:
+                begin = j
+                while j < stop and texts[j:j + 2] != ['=', '>']:
+                    if texts[j] == ',':
+                        break
                     j = pairs[j] + 1 if j in pairs else j + 1
-                if begin < len(items):
-                    localized.append((items[begin].start, items[j - 1].end))
-    return fixtures, localized, modules
+                if j >= stop or texts[j:j + 2] != ['=', '>']:
+                    break
+                pattern = texts[begin:j]
+                # Guard expressions are not part of the pattern.
+                if 'if' in pattern:
+                    pattern = pattern[:pattern.index('if')]
+                j += 2
+                expression = j
+                if j < stop and texts[j] == '{' and pairs[j] + 1 < stop and (
+                        items[pairs[j] + 1].kind == 'word' or texts[pairs[j] + 1] == '('):
+                    # A block arm can omit its comma before the next arm.
+                    j = pairs[j] + 1
+                    next_arm = j
+                else:
+                    while j < stop and texts[j] != ',':
+                        j = pairs[j] + 1 if j in pairs else j + 1
+                    next_arm = j + 1
+                if (expression < j and '|' not in pattern
+                        and any(pattern[k:k + 4] == ['UiLanguage', ':', ':', 'Ja']
+                                for k in range(len(pattern) - 3))):
+                    localized.append((items[expression].start, items[j - 1].end))
+                j = next_arm
+    return fixtures, localized, excluded, modules
 
 
 def item_ranges(items, pairs):
@@ -218,9 +271,9 @@ def inventory(root, classifications=None):
         source = path.read_text(encoding='utf-8')
         items = tokens(source)
         pairs = groups(items)
-        fixture, localized, modules = ranges(items, pairs)
+        fixture, localized, excluded, modules = ranges(items, pairs)
         spans = item_ranges(items, pairs)
-        prepared[path] = source, items, fixture, localized, spans
+        prepared[path] = source, items, fixture, localized, excluded, spans
         for module in modules:
             parent = path.parent if path.name in ('lib.rs', 'main.rs', 'mod.rs') else path.with_suffix('')
             fixture_paths.update([parent / (module + '.rs'), parent / module / 'mod.rs'])
@@ -228,7 +281,7 @@ def inventory(root, classifications=None):
         raise ValueError('reviewed decisions must be a JSON object')
     decisions = classifications or {}
     seen, records = set(), []
-    for path, (source, items, fixture, localized, spans) in prepared.items():
+    for path, (source, items, fixture, localized, excluded, spans) in prepared.items():
         occurrences, fingerprints = Counter(), {}
         for index, token in enumerate(items):
             if token.kind not in ('string', 'raw_string') or not JAPANESE.search(decoded(token)):
@@ -243,7 +296,9 @@ def inventory(root, classifications=None):
             if path in fixture_paths or contains(fixture):
                 category, reason = 'b', 'test-only item/module'
             elif contains(localized):
-                category, reason = 'a', 'explicit Japanese local! argument or language arm'
+                category, reason = 'a', 'explicit Japanese macro argument or match arm'
+            elif contains(excluded):
+                category, reason = 'b', 'qualified logging format or serde identifier'
             else:
                 category, reason = 'c', 'review required; not proof this is generated copy'
             if identity in decisions:
@@ -274,7 +329,8 @@ def inventory(root, classifications=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
-        'a: explicit Japanese UI side; b: fixture; c: pending review/English cleanup; '
+        'a: explicit Japanese UI side; b: test-only, logging format or serde identifier; '
+        'c: pending review/English cleanup; '
         'protected: individually reviewed canonical tokens with canonical and UI projection evidence. '
         'Comments and character literals are not string literals. c is conservative, '
         'never authorization to translate source data. No writes, DB or network access. '
