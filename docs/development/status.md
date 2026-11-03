@@ -9,11 +9,13 @@ re-measured). Fake-model CI resource runs 41552141436 / 41553439861 show no
 material change. Report: [bench-report-2026-11-03](../validation/bench-report-2026-11-03.md).
 Next: none for #183; further agent re-measurement needs a new approval.
 ## Nested item-row indentation (#179, rebased on `4a302c9d`; validation pending)
+## Nested item-row indentation (#179, rebased on `ee1c1c37`; validation pending)
 
 A shared presentation helper adds two-space hanging indentation to nested body
-rows while preserving span styles and viewport widths; at widths under three cells
-it omits indentation rather than overflowing. Conversation body/reasoning hints,
-opened owned-work notices and captured output, pending-input excerpts, and
+rows while preserving span styles and viewport widths. Below three cells it omits
+indentation rather than overflowing; at three cells it also omits the indent when
+needed to keep an initial wide character visible. Conversation body/reasoning
+hints, opened owned-work notices and captured output, pending-input excerpts, and
 management preview bodies use it. Compact queue excerpts remain single-row and
 clip to width. Headers, event/tool rows, notices and source-preserving guide
 prose keep their existing structure. Bilingual narrow/wide
