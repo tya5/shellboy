@@ -4792,6 +4792,115 @@ mod inspection_isolation_tests {
     use super::*;
     use crate::storage::DbWorker;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[ignore = "benchmark requires a disposable database copy and explicit environment"]
+    async fn benchmark_history_lane_and_wal() {
+        use std::{
+            path::PathBuf,
+            sync::{
+                Arc,
+                atomic::{AtomicBool, Ordering},
+            },
+            time::Instant,
+        };
+        let path =
+            PathBuf::from(std::env::var_os("SHELLBOY_BENCH_DB").expect("disposable copy required"));
+        let thread_id = std::env::var("SHELLBOY_BENCH_THREAD").expect("thread required");
+        let old = std::env::var_os("SHELLBOY_BENCH_OLD").is_some();
+        let writer = DbWorker::open(&path).await.unwrap();
+        writer.call(|db| { db.execute_batch("CREATE TABLE IF NOT EXISTS benchmark_scratch (x INTEGER); PRAGMA wal_autocheckpoint=0;")?; Ok(()) }).await.unwrap();
+        let wal = PathBuf::from(format!("{}-wal", path.display()));
+        let size = || std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+        let initial = size();
+        let args = crate::protocol::HistoryListArgs {
+            thread_id,
+            limit: 40,
+            excerpt_chars: 1200,
+            cursor: None,
+            run_id: None,
+            since: Some("2026-11-03T09:30:00+09:00".into()),
+            state: None,
+        };
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let started = Instant::now();
+        let done = Arc::new(AtomicBool::new(false));
+        let reader_done = done.clone();
+        let reader = if old {
+            let w = writer.clone();
+            tokio::spawn(async move {
+                let r = w
+                    .call(move |db| {
+                        let tx = db.transaction()?;
+                        let _ = ready_tx.send(());
+                        let r = crate::history::list_nodes(&tx, &args);
+                        tx.commit()?;
+                        Ok(r)
+                    })
+                    .await
+                    .unwrap();
+                reader_done.store(true, Ordering::SeqCst);
+                r
+            })
+        } else {
+            let p = path.clone();
+            tokio::spawn(async move {
+                let r = tokio::task::spawn_blocking(move || {
+                    let mut db = open_inspection(&p).unwrap();
+                    let tx = db.transaction().unwrap();
+                    let _: i64 = tx
+                        .query_row("SELECT count(*) FROM benchmark_scratch", [], |r| r.get(0))
+                        .unwrap();
+                    let _ = ready_tx.send(());
+                    let r = crate::history::list_nodes(&tx, &args);
+                    tx.commit().unwrap();
+                    r
+                })
+                .await
+                .unwrap();
+                reader_done.store(true, Ordering::SeqCst);
+                r
+            })
+        };
+        ready_rx.await.unwrap();
+        let mut maximum = initial;
+        let mut max_write = std::time::Duration::ZERO;
+        let mut writes = 0;
+        while !done.load(Ordering::SeqCst) {
+            let t = Instant::now();
+            writer
+                .call(|db| {
+                    db.execute("INSERT INTO benchmark_scratch VALUES(1)", [])?;
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            max_write = max_write.max(t.elapsed());
+            writes += 1;
+            maximum = maximum.max(size());
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let result = reader.await.unwrap();
+        let elapsed = started.elapsed();
+        assert!(result.is_ok(), "history failed: {:?}", result.err());
+        let final_size = size();
+        let checkpoint = writer
+            .call(|db| {
+                Ok(db.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                })?)
+            })
+            .await
+            .unwrap();
+        eprintln!(
+            "old={old} elapsed={elapsed:?} max_write={max_write:?} writes={writes} wal_start={initial} wal_max={maximum} wal_end={final_size} checkpoint={checkpoint:?}"
+        );
+        writer.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn snapshot_reader_does_not_hold_writer_lane() {
         let dir = tempfile::tempdir().unwrap();
