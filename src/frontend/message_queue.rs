@@ -403,6 +403,26 @@ fn cancelled_summary(outcome: MessageCancelOutcome, count: usize) -> String {
 mod tests {
     use super::*;
     use rusqlite::params;
+
+    #[test]
+    fn cancellation_summary_uses_english_for_all_outcomes_and_counts() {
+        let cases = [
+            (MessageCancelOutcome::Cancelled, "cancelled"),
+            (MessageCancelOutcome::AlreadyCancelled, "already cancelled"),
+            (
+                MessageCancelOutcome::AlreadyAdmitted,
+                "already applied to the conversation",
+            ),
+            (MessageCancelOutcome::NotFound, "not found"),
+            (MessageCancelOutcome::Forbidden, "not permitted"),
+            (MessageCancelOutcome::Unavailable, "unavailable"),
+        ];
+        for (outcome, text) in cases {
+            assert_eq!(cancelled_summary(outcome, 1), format!("1 input {text}"));
+            assert_eq!(cancelled_summary(outcome, 2), format!("2 inputs {text}"));
+        }
+    }
+
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE receipt(message_node_id TEXT,client_operation_id TEXT,sender_json TEXT,created_at TEXT,state TEXT,hold_reason TEXT,path_admission TEXT,result_json TEXT,target_thread_id TEXT); CREATE TABLE node(id TEXT,payload_json TEXT); CREATE TABLE thread_path(thread_id TEXT,node_id TEXT); CREATE TABLE attachment_ref(source_node_id TEXT); CREATE TABLE draft(id TEXT,thread_id TEXT,state TEXT,updated_at TEXT,body_json TEXT);").unwrap();
