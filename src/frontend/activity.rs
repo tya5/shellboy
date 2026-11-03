@@ -407,7 +407,6 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                 });
             let mut stage = RecoveryStage::Unrecorded;
             let mut stage_details = None;
-            let mut stage_detail_values = None;
             if let Some(SavedAttempt {
                 generation: attempt_generation,
                 state: attempt_saved_state,
