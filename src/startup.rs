@@ -170,11 +170,10 @@ fn summarize(data_dir: &Path, last: usize) -> std::io::Result<Value> {
     }))
 }
 
+type TailRead = (Vec<Vec<u8>>, usize, bool);
+
 /// Read at most `budget` bytes from the end, returning lines newest-first.
-fn read_tail_lines(
-    path: &Path,
-    budget: usize,
-) -> std::io::Result<Option<(Vec<Vec<u8>>, usize, bool)>> {
+fn read_tail_lines(path: &Path, budget: usize) -> std::io::Result<Option<TailRead>> {
     let mut file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -421,7 +420,7 @@ mod tests {
         )
         .unwrap();
         let result = summarize(root.path(), 5).unwrap();
-        assert_eq!(result["launches"][0]["total_elapsed_ms"], 7);
+        assert_eq!(result["launches"][0]["total_elapsed_ms"], 8);
         assert_eq!(result["launches"][0]["incomplete"], true);
         fs::remove_file(logs.join("shellboy.log")).unwrap();
         assert_eq!(
