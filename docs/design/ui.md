@@ -213,8 +213,8 @@ the draw itself, not a terminal-response deadline. The common capability-probe m
 or `Measured(value)`. Capabilities start unmeasured; cached width or the conservative fallback is used until a valid width
 reply, and keyboard enhancement stays off until confirmed. The sole input reader
 filters terminal responses throughout startup and normal interaction, preserving
-interleaved keystrokes. Bracketed paste is delivered byte-for-byte and is never
-filtered. Outside paste, replies are consumed only for an outstanding query of
+interleaved keystrokes. Bracketed paste is never filtered and uses the existing
+UTF-8 decoding behavior, including replacement of invalid bytes. Outside paste, replies are consumed only for an outstanding query of
 the matching kind, at most once per query. Plain cursor-position replies can
 collide with Shift+F3; prefer DEC-private DSR when supported. Adoption of a response that changes layout requests one
 redraw. No response is allowed to stall startup or input, and no guessed value
