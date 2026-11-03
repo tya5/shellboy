@@ -284,7 +284,7 @@ fn parse_shell_arguments(raw: &str) -> (Result<ShellToolArgs, String>, Vec<Strin
         }
         for name in ["command", "input_encoding", "output_encoding"] {
             if let Some(text) = object.get(name).and_then(Value::as_str) {
-                if text.is_empty() {
+                if text.trim().is_empty() {
                     return Err(format!(
                         "Invalid shell parameter {name}: expected non-empty string"
                     ));
