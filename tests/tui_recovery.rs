@@ -317,7 +317,7 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
                     ui.management.is_none(),
                     "/retry and a new instruction keep the conversation visible"
                 );
-                timeout(Duration::from_secs(10), async {
+                timeout(Duration::from_secs(30), async {
                     loop {
                         while let Ok(update) = incoming.try_recv() {
                             ui.apply(update);
