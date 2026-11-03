@@ -1412,6 +1412,53 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
     server.abort();
 }
 
+async fn completed_protected_collect<F, Fut>(mut collect: F) -> Value
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Value>,
+{
+    for _ in 0..32 {
+        let report = collect().await;
+        assert_eq!(
+            report["raw_bytes_collected"], 0,
+            "pinned data must remain protected"
+        );
+        if !report["deferred"].as_bool().expect("collect deferred flag") {
+            return report;
+        }
+    }
+    panic!("raw collection remained deferred for 32 attempts");
+}
+
+#[tokio::test]
+async fn protected_collect_retries_a_deferred_report_before_asserting_bytes() {
+    for _ in 0..10 {
+        let mut deferred = serde_json::to_value(shellboy::gc::CollectionReport::default()).unwrap();
+        deferred["deferred"] = json!(true);
+        let mut completed =
+            serde_json::to_value(shellboy::gc::CollectionReport::default()).unwrap();
+        completed["protected_raw_bytes"] = json!(2097152);
+        let mut reports = std::collections::VecDeque::from([deferred, completed]);
+        // The old first-report assertion fails on this legal incomplete response.
+        assert_ne!(reports[0]["protected_raw_bytes"], 2097152);
+        let complete = completed_protected_collect(|| {
+            std::future::ready(reports.pop_front().expect("unexpected extra collection"))
+        })
+        .await;
+        assert!(reports.is_empty());
+        assert_eq!(complete["protected_raw_bytes"], 2097152);
+    }
+}
+
+#[tokio::test]
+#[should_panic(expected = "raw collection remained deferred for 32 attempts")]
+async fn protected_collect_fails_if_every_attempt_is_deferred() {
+    completed_protected_collect(|| {
+        std::future::ready(json!({"deferred":true, "raw_bytes_collected":0}))
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_message_retry() {
     let root = tempfile::tempdir().unwrap();
@@ -1438,14 +1485,15 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
         db.execute("INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at)VALUES('quota-pin',?1,'shell_output','quota-raw',0,?2)",rusqlite::params![instance,chrono::Utc::now().to_rfc3339()])?;
         Ok(())
     }).await.unwrap();
-    let protected = request(
-        &control,
-        Command::StorageCollect(StorageArgs {
-            category: Some(StorageCategory::Raw),
-        }),
-    )
+    let protected = completed_protected_collect(|| {
+        request(
+            &control,
+            Command::StorageCollect(StorageArgs {
+                category: Some(StorageCategory::Raw),
+            }),
+        )
+    })
     .await;
-    assert_eq!(protected["raw_bytes_collected"], 0);
     assert_eq!(protected["protected_raw_bytes"], 2097152);
     let original = "Quota-held instruction 日本語\nretry the original once";
     let accepted: MessageAccepted = serde_json::from_value(
