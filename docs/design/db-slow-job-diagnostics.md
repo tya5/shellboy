@@ -17,8 +17,10 @@ per-statement timer. Only a statement reported at or above 1 ms is sampled for
 `FULLSCAN_STEP`, `SORT`, `AUTOINDEX`, and `VM_STEP`. SQLite counters can include
 previous executions of a reused prepared statement; report them as cumulative
 statement-lifetime snapshots, not per-execution or job totals. No sample means
-unknown, not zero. Production does not install a row callback and does not
-report row counts. Tests may opt into exhaustive observation to check indexed
+unknown, not zero. A row callback counts returned rows across the current job,
+including its active statement; `row_scope` is `job_cumulative`. This count
+is distinct from sampled statement-lifetime counters. Tests may opt into
+exhaustive observation to check indexed
 hot reads independently of the production sampling threshold.
 
 The existing progress handler captures at most one backtrace on the executing
