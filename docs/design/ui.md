@@ -220,3 +220,13 @@ collide with Shift+F3; prefer DEC-private DSR when supported. Adoption of a resp
 redraw. No response is allowed to stall startup or input, and no guessed value
 is cached. The width measurement and cache rules are specified in
 [the terminal width design](ui-language-stage-a-draft.md).
+
+### Crossterm probe thread constraints (investigation)
+
+Crossterm 0.29 ordinarily queues events that do not match a helper's filter,
+but its filtered `read` keeps skipped events in a local queue that is dropped
+on error. Its keyboard helper also performs an unbounded DA read after receiving
+keyboard flags while holding the global event reader mutex. A naive helper thread
+can therefore delay input indefinitely and does not guarantee preservation on
+all error paths. A thread-based implementation must address these cases rather
+than assume a two-second upper bound.
