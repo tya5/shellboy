@@ -121,8 +121,8 @@ class ReleaseUpgradeTests(unittest.TestCase):
                 with closing(sqlite3.connect(uri, uri=True)) as reader:
                     self.assertEqual(reader.execute('SELECT * FROM sample').fetchall(), [(17,)])
 
-    def test_public_schema24_and25_staging_is_a_noop(self):
-        for schema in (24, 25):
+    def test_recent_schema_staging_is_a_noop(self):
+        for schema in (24, 25, 26, 27):
             with self.subTest(schema=schema):
                 db = self.fixture(17)
                 self.upgrade(db, 17, schema)
@@ -233,6 +233,16 @@ class ReleaseUpgradeTests(unittest.TestCase):
                 plan = db.execute("EXPLAIN QUERY PLAN SELECT id FROM embedding_job WHERE state='running' AND id>? ORDER BY id LIMIT 128", ('',)).fetchall()
                 self.assertTrue(any('jobs_running_recovery' in row[3] for row in plan))
 
+    def test_prepare_schema_25_to_27_and_reject_wrong_recovery_index(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 25)
+        before = checks.ledger(db)
+        checks.prepare_schema(db, 27)
+        checks.check_migration(db, before, 25, 27)
+        db.executescript("DROP INDEX jobs_running_recovery; CREATE INDEX jobs_running_recovery ON embedding_job(id);")
+        with self.assertRaisesRegex(AssertionError, "jobs_running_recovery"):
+            checks.check_migration(db, before, 25, 27)
+
     def test_schema18_rejects_old_history_index_and_parent_index(self):
         db = self.fixture(17)
         before, _ = self.upgrade(db, 17, 18)
@@ -261,7 +271,10 @@ class ReleaseUpgradeTests(unittest.TestCase):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.7.1', 25, '0.7.1', 27))
+                         ('0.7.1', 25, '0.7.2', 27))
+        for target in (26, 27):
+            args = checks.parse_args(required + ["--old-version", "0.7.1", "--expected-new-schema", str(target)])
+            self.assertEqual((args.start_schema, args.expected_new_schema), (25, target))
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])

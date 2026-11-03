@@ -483,3 +483,13 @@ Anonymous downloads retrieved all six public files without GitHub credentials,
 and every file listed in the downloaded `SHA256SUMS` verified. Full hashes are
 not recorded here. Native installer and public-byte upgrade checks beyond this
 are not claimed.
+
+## v0.7.2 synthetic upgrade check
+
+For the v0.7.2 candidate, `scripts/check-release-upgrade.py` defaults to the
+independently verified public v0.7.1 binary (conversation schema 25), expected
+candidate version 0.7.2 and target schema 27. It checks the preserved ledger
+and the migration 26 reply and migration 27 recovery indexes. Use only owned
+synthetic fixtures and a new empty fixture path; the helper does not access the
+live owner database. Exact-candidate binary upgrade and release artifact checks
+remain separate gates.

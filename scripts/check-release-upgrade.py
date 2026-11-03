@@ -137,7 +137,7 @@ def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25) and target in (14, 16, 17, 19, 24, 25, 26) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26) and target in (14, 16, 17, 19, 24, 25, 26, 27) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
@@ -153,7 +153,7 @@ def parse_args(argv=None):
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.7.1')
     parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
-    parser.add_argument('--expected-version', default='0.7.1')
+    parser.add_argument('--expected-version', default='0.7.2')
     parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27), default=27,
                         help='27 for the recovery candidate; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
