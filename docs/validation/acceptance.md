@@ -135,11 +135,13 @@ needed an older tool round for the open-loop fallback). Claude behaviour is not
 live-validated.
 
 Follow-ups: Thread deletion removes `reasoning.keep.<thread>` (710dcceb;
-extended deletion test). User decision (final): the active Turn's later user
-messages precede the one summary; `active_turn_summary_puts_mid_turn_messages_before_one_summary`
-checks `[request][U1][U2][S(③ + ④ text)]` with one summary request, and the
-#185 overflow test checks request, messages, summary, then the message that
-arrived after the latest round. CI for these follow-ups is recorded on #182.
+extended deletion test). User decision B (simplified): `active_turn_summary_keeps_instructions_section_and_message_ids`
+checks the path `[request][S]`, notice -> model summary -> ④, no code quotes,
+the "User instructions to keep" prompt, the interleaved summarizer input and
+the on-demand message IDs; `nested_summary_and_spills_preserve_current_turn_boundary`
+checks the same lookup for ordinary and nested summaries;
+`active_turn_summary_leaves_original_nodes_edges_and_order_intact` checks that
+original nodes and edges are unchanged and only request -> summary is added. CI for these follow-ups is recorded on #182.
 
 ## Recovery trim keeps active-Turn inputs (#185, 2026-11-03)
 

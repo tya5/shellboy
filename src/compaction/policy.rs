@@ -105,13 +105,14 @@ pub(super) fn request_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize
 /// the request and anything else ahead of the first tool round) stays
 /// byte-identical. Groups `start..latest` (③) are summarized; the latest
 /// complete tool group `latest` (④) is appended to the same summary as plain
-/// text. `retained` are the active Turn's user messages and protected nodes in
-/// that span, kept verbatim in their original order right before the summary.
+/// text. `messages` are the active Turn's user messages in that span: they
+/// leave the selected path with the rounds and the summary keeps what must
+/// stay in effect under "User instructions to keep" (user decision B).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ActiveTurnPlan {
     pub(super) start: usize,
     pub(super) latest: usize,
-    pub(super) retained: Vec<String>,
+    pub(super) messages: Vec<String>,
 }
 impl ActiveTurnPlan {
     pub(super) fn end(&self) -> usize {
@@ -133,18 +134,17 @@ fn spill_or_tool(group: &Group) -> bool {
             .iter()
             .any(|n| n.payload.get("spill_version").is_some())
 }
-/// A source kept verbatim: a user message of `turn` or a protected node.
-pub(super) fn retained_source(s: &Snapshot, source: &Source, turn: &str) -> bool {
+/// A user message of `turn` inside the span.
+pub(super) fn turn_message(source: &Source, turn: &str) -> bool {
     if source.payload.get("output").is_some() {
         return false;
     }
-    s.protected.contains(&source.id)
-        || (source.turn.as_deref() == Some(turn)
-            && (source.payload["role"] == "user"
-                || source
-                    .payload
-                    .pointer("/item/role")
-                    .is_some_and(|r| r == "user")))
+    source.turn.as_deref() == Some(turn)
+        && (source.payload["role"] == "user"
+            || source
+                .payload
+                .pointer("/item/role")
+                .is_some_and(|r| r == "user"))
 }
 /// Active-Turn summary target (#181, reshaped by #182): all tool rounds of the
 /// active Turn from its first tool round through the latest complete tool
@@ -156,19 +156,27 @@ pub(super) fn active_turn_plan(s: &Snapshot) -> Option<ActiveTurnPlan> {
     let latest = s.groups.iter().rposition(|g| g.complete && g.tool)?;
     let start = (request + 1..latest).find(|&i| work_group(&s.groups[i]))?;
     let span = &s.groups[start..=latest];
-    if span.iter().any(|g| !g.complete) || !span[..span.len() - 1].iter().any(spill_or_tool) {
+    // Protected nodes (pending receipts, revisit events) keep their own
+    // lifecycle; a span holding one is not a target.
+    if span.iter().any(|g| !g.complete)
+        || span
+            .iter()
+            .flat_map(|g| &g.sources)
+            .any(|n| s.protected.contains(&n.id))
+        || !span[..span.len() - 1].iter().any(spill_or_tool)
+    {
         return None;
     }
-    let retained = span
+    let messages = span
         .iter()
         .flat_map(|g| &g.sources)
-        .filter(|source| retained_source(s, source, turn))
+        .filter(|source| turn_message(source, turn))
         .map(|source| source.id.clone())
         .collect();
     Some(ActiveTurnPlan {
         start,
         latest,
-        retained,
+        messages,
     })
 }
 /// Ordinary prefix target for the proactive order (#182): `None` when the
@@ -249,21 +257,20 @@ mod tests {
         // ③ = 3..5 summarized, ④ = 5 as text, nothing before 3 changes.
         let plan = active_turn_plan(&s).unwrap();
         assert_eq!((plan.start, plan.latest, plan.end()), (3, 5, 6));
-        assert!(plan.retained.is_empty());
+        assert!(plan.messages.is_empty());
         // A later user message of the active Turn inside the span is kept
-        // verbatim (retained), no longer a fence that splits the span.
+        // verbatim (summarized), no longer a fence.
         let mut s = staged_snapshot();
         s.groups[2].sources[0].payload = json!({"role":"user","content":"request"});
         s.groups[4].sources[0].turn = Some("current".into());
         s.groups[4].sources[0].payload = json!({"role":"user","content":"more"});
         let plan = active_turn_plan(&s).unwrap();
         assert_eq!((plan.start, plan.latest), (3, 5));
-        assert_eq!(plan.retained, [s.groups[4].sources[0].id.clone()]);
-        // A protected node is retained too.
+        assert_eq!(plan.messages, [s.groups[4].sources[0].id.clone()]);
+        // A protected node in the span means no target.
         let mut s = staged_snapshot();
         s.protected.insert("a-result".into());
-        let plan = active_turn_plan(&s).unwrap();
-        assert_eq!(plan.retained, ["a-result"]);
+        assert_eq!(active_turn_plan(&s), None);
         // Incomplete groups: no target. ③ without a tool group or spill (a
         // previous summary alone) is no target.
         let mut s = staged_snapshot();

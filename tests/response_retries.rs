@@ -1446,10 +1446,11 @@ async fn a_long_turn_defers_the_large_input_trim_while_its_tool_loop_is_open() {
     f.close().await;
 }
 
-/// #185/#182: an overflow inside a huge Turn must not drop user input
-/// delivered in that Turn. With the tool loop open, the overflow falls back to
-/// the active-Turn summary: the request stays in place, every mid-Turn message
-/// follows the summary verbatim, and the tool rounds become summary text.
+/// #185/#182: an overflow inside a huge Turn must not silently drop user
+/// input delivered in that Turn. With the tool loop open, the overflow falls
+/// back to the active-Turn summary: the request stays in place, the summarizer
+/// sees every mid-Turn message in order and must keep its instructions, and a
+/// message after the latest round stays on the path.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
     fn tool(name: &str, command: String) -> Reply {
@@ -1510,6 +1511,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         .unwrap();
     // Map segments and their reduce are tool-free summary requests.
     let mut summaries = 0;
+    let mut material = String::new();
     let reduced = loop {
         let next = f.incoming().await;
         if next.body["tools"] != json!([]) {
@@ -1517,9 +1519,9 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         }
         summaries += 1;
         assert!(summaries <= 8, "bounded summary requests");
-        if summaries == 1 {
-            assert!(next.body.to_string().contains("EARLY-WORK"));
-        }
+        let body = next.body.to_string();
+        assert!(body.contains("User instructions to keep"));
+        material.push_str(&body);
         next.reply
             .send(Reply::http(
                 200,
@@ -1534,15 +1536,15 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
             .unwrap();
     };
     assert!(summaries >= 1, "the active-Turn summary ran");
+    // #182 B: across the map requests, the summarizer sees the messages where
+    // they occurred between the tool rounds.
+    let at = |text: &str| material.find(text).unwrap_or_else(|| panic!("{text}"));
+    assert!(at("EARLY-WORK") < at("MIDTURN_INSTRUCTION_0"));
+    assert!(at("MIDTURN_INSTRUCTION_0") < at("MIDDLE-WORK"));
+    assert!(at("MIDDLE-WORK") < at("MIDTURN_INSTRUCTION_1"));
     let input = reduced.body["input"].as_array().unwrap().clone();
     let reduced_text = reduced.body.to_string();
     assert!(reduced_text.contains("TURN_REQUEST_MARKER"));
-    for text in &sent {
-        assert!(
-            reduced_text.contains(text.as_str()),
-            "{text} must survive the recovery trim: {input:?}"
-        );
-    }
     assert!(
         !reduced_text.contains("EARLY-WORKxxxx"),
         "summarized work proves the reduction ran"
@@ -1564,23 +1566,21 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         .iter()
         .position(|item| item.to_string().contains("TURN_REQUEST_MARKER"))
         .unwrap();
-    let at = |text: &str| {
-        input
-            .iter()
-            .position(|item| item.to_string().contains(text))
-            .unwrap()
-    };
-    // #182 (Codex rule): messages delivered during the replaced tool rounds
-    // stay verbatim in order before the one summary; the last message arrived
-    // after the latest round and stays after it.
-    let (first, second, third) = (
-        at("MIDTURN_INSTRUCTION_0"),
-        at("MIDTURN_INSTRUCTION_1"),
-        at("MIDTURN_INSTRUCTION_2"),
-    );
+    // #182 user decision B (simplified): messages delivered during the
+    // replaced rounds are carried by the summary (the mock does not echo
+    // them); the last message arrived after the latest round and stays.
     assert!(
-        request_at < first && first < second && second < notice && notice < third,
-        "order: request, messages, summary, later message: {input:?}"
+        input[notice]
+            .to_string()
+            .contains("2 user message(s) delivered during the summarized work")
+    );
+    let third = input
+        .iter()
+        .position(|item| item.to_string().contains("MIDTURN_INSTRUCTION_2"))
+        .unwrap();
+    assert!(
+        request_at < notice && notice < third,
+        "order: request, summary, later message: {input:?}"
     );
     reduced.reply.send(Reply::success()).ok().unwrap();
     assert_eq!(f.settled().await, "completed");

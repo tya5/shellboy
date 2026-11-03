@@ -475,21 +475,34 @@ are replaced by one developer summary: ③ the older rounds are summarized with
 the existing bounded map/reduce, and ④ the latest complete tool group is
 appended to the same item as plain text (calls and results; reasoning and
 signed or opaque provider blocks are never included). No thinking, tool call
-or tool result of the active Turn remains after the edit point. User messages
-of the active Turn and protected nodes inside the span are retained verbatim,
-in their original order, right before the summary, which comes last as the
-current state (user decision 2026-11-03, the Codex rule: `codex-rs/core/src/compact.rs`
-`build_compacted_history_with_limit` appends the selected user messages and then
-the summary). One summary request (map/reduce bounds unchanged). Groups after
-④ stay in place. When messages were moved, the notice says they were delivered
-during the summarized work, that their order relative to its steps may differ,
-and to follow the originals with `shellboy history relations --node FIRST
---relation next` when exact order matters. Storage is unchanged in kind: nodes
-and existing edges are never modified or removed; adoption adds the summary
-node, its replacement record with ordered sources, and edges for the new
-selection; the summary payload also records the span's `original_order` and
-`retained_node_ids` (out of band, like #185 markers). The selected path is a
-projection replaced by `select_path`, as for every summary. No target without a current Turn, with an
+or tool result of the active Turn remains after the edit point. User decision B
+(2026-11-03, simplified): the active Turn's user messages inside the span leave
+the selected path with the tool rounds, so the path is `[earlier Turns]
+[request][summary]`, the shape of every summary, and no original node gains an
+edge (only request -> summary is added). Shellboy does not quote them: the
+summarizer input is the span ③ in its original order with the messages
+interleaved where they occurred, and the summary prompt asks for a final
+"User instructions to keep" section listing what must stay in effect
+(constraints, exact values, changes of direction) with node IDs; meaning, not
+byte-exactness, is the requirement. The node content is the notice, the
+model's summary, then ④ rendered as text by code. One summary request
+(map/reduce bounds unchanged). Messages after ④ stay on the path. A span
+holding a protected node (pending receipt or revisit event) is not a target.
+The notice says how many messages were summarized, that their order relative
+to the steps may differ, and to follow the originals with `shellboy history
+relations --node FIRST --relation next` when exact order matters.
+
+General rule for every summary (ordinary, active-Turn, nested): the
+"User instructions to keep" section is part of every summary prompt (map and
+reduce, prompt v3), original nodes and edges are never modified, and the
+message IDs a summary covers (a message ID is its message node ID) are derived
+on demand from the ordered replacement sources by `history::summary_message_ids`
+(nested summaries expanded through their own sources, at most 8 levels and
+65,536 source rows; the `replacement_output_node` and replacement-source
+primary-key indexes keep it bounded). Nothing extra is stored on summary nodes.
+`history relations --relation sources` exposes the same ordered sources.
+Reply-expected messages need nothing in summaries: #194 finds them through
+`thread get awaiting_reply` and the Run-end reminder. No target without a current Turn, with an
 incomplete group in the span, or when ③ has no tool group or spill marker (an
 earlier summary alone never re-fires, #180).
 
