@@ -282,6 +282,16 @@ fn parse_shell_arguments(raw: &str) -> (Result<ShellToolArgs, String>, Vec<Strin
         if !object.contains_key("command") {
             return Err("Missing shell parameter command: expected non-empty string".into());
         }
+        for name in ["command", "input_encoding", "output_encoding"] {
+            if let Some(text) = object.get(name).and_then(Value::as_str) {
+                if text.is_empty() {
+                    return Err(format!("Invalid shell parameter {name}: expected non-empty string"));
+                }
+                if text.contains('\0') {
+                    return Err(format!("Invalid shell parameter {name}: expected string without NUL"));
+                }
+            }
+        }
         let args: ShellToolArgs = serde_json::from_value(value)
             .map_err(|_| "Invalid shell argument object".to_owned())?;
         args.validate().map_err(|error| error.message)?;
