@@ -86,3 +86,5 @@ auto_history = true
 [shell]
 # Model-authored tool-row labels; false removes the parameter from generation tools.
 describe_calls = true
+# Unknown model-supplied shell parameters: warn or strict.
+unknown_arguments = "warn"
