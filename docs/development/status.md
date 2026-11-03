@@ -4422,3 +4422,4 @@ CI on this requested baseline selects Linux; dispatch and outcome are pending.
 and pending-reply index 26. Synthetic upgrade checks cover starts 24, 25, and
 26; W3 recovery authorization, independent barrier release, bounded bootstrap
 records, and bilingual status remain in the rebased branch.
+#203: authorization recovery uses bounded keyset pages; synthetic tests cover restart, corrupt and oversized records. Validation pending.

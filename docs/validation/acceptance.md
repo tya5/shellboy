@@ -9322,3 +9322,4 @@ no installed binary, real provider traffic, or user data was used.
 from schemas 24, 25, and 26, preserving rows and ledger and checking the recovery
 index plan. Python scripts suite: 193 passed. Rust and 3-OS CI are pending; no
 installed binary, real provider, or user data was exercised.
+#203 validation pending: synthetic paged authorization recovery; no real provider or user data used.

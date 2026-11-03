@@ -420,29 +420,50 @@ pub(super) fn recover_inflight_page(
 }
 #[cfg(test)]
 pub(super) fn recover_authorization(db: &mut Connection) -> Result<(), StorageError> {
-    recover_authorization_progress(db).0
+    let mut cursor = None;
+    loop {
+        let (result, _) = recover_authorization_page(db, cursor);
+        match result? {
+            Some(next) => cursor = Some(next),
+            None => return Ok(()),
+        }
+    }
 }
-/// Preserve each existing autocommit before a possible later decode/save error.
-pub(super) fn recover_authorization_progress(
+
+/// Each update autocommits; return its notification even on a later error.
+pub(super) fn recover_authorization_page(
     db: &mut Connection,
-) -> (Result<(), StorageError>, bool) {
+    cursor: Option<String>,
+) -> (Result<Option<String>, StorageError>, bool) {
     let mut changed = false;
     let result = (|| {
-        let app_meta_sql = "SELECT key,value FROM app_meta WHERE key LIKE 'index.auto.%' AND json_extract(value,'$.state')='running'";
-        let mut statement = db.prepare(app_meta_sql)?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        drop(statement);
-        for (key, value) in rows {
-            let mut admission: AutoAdmission = decode_json(&value)?;
-            admission.state = "failed".into();
-            admission.error = Some("Index source preparation interrupted; retry explicitly".into());
-            changed |= update_json_meta(db, &key, &admission)? > 0;
+        let mut last = cursor.unwrap_or_default();
+        let mut count = 0;
+        let mut bytes = 0;
+        loop {
+            let row: Option<(String, i64)> = db.query_row(
+                "SELECT key,octet_length(value) FROM app_meta WHERE key>='index.auto.' AND key>?1 AND key<'index.auto/' ORDER BY key LIMIT 1",
+                [&last], |r| Ok((r.get(0)?, r.get(1)?)),
+            ).optional()?;
+            let Some((key, size)) = row else { return Ok(None) };
+            if count == RECOVERY_ROWS || (count > 0 && size > RECOVERY_BYTES.saturating_sub(bytes)) {
+                return Ok(Some(last));
+            }
+            if size > RECOVERY_BYTES {
+                return Err(StorageError::InvalidInput("oversized index authorization record requires manual repair".into()));
+            }
+            let value: String = db.query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| r.get(0))?;
+            let json: Value = decode_json(&value)?;
+            if json.get("state").and_then(Value::as_str) == Some("running") {
+                let mut admission: AutoAdmission = decode_json(&value)?;
+                admission.state = "failed".into();
+                admission.error = Some("Index source preparation interrupted; retry explicitly".into());
+                changed |= update_json_meta(db, &key, &admission)? > 0;
+            }
+            last = key;
+            count += 1;
+            bytes += size;
         }
-        Ok(())
     })();
     (result, changed)
 }
@@ -813,6 +834,47 @@ mod metadata_tests {
         assert!(claim.is_none());
         assert!(meta(&db, &keys.auto("node")).unwrap().is_none());
     }
+    #[test]
+    fn authorization_recovery_pages_large_set_and_restarts() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)").unwrap();
+        for n in 0..1000 {
+            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![format!("index.auto.{n:04}"), r#"{"node_id":"node","state":"running","error":null}"#]).unwrap();
+        }
+        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT key,octet_length(value) FROM app_meta WHERE key>='index.auto.' AND key>?1 AND key<'index.auto/' ORDER BY key LIMIT 1", [""], |r| r.get(3)).unwrap();
+        assert!(plan.contains("INDEX"), "{plan}");
+        let (first, changed) = recover_authorization_page(&mut db, None);
+        assert!(changed);
+        assert!(first.unwrap().is_some());
+        let failed: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE json_extract(value,'$.state')='failed'", [], |r| r.get(0)).unwrap();
+        assert_eq!(failed, RECOVERY_ROWS);
+        recover_authorization(&mut db).unwrap();
+        let failed: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE json_extract(value,'$.state')='failed'", [], |r| r.get(0)).unwrap();
+        assert_eq!(failed, 1000);
+        let (done, changed) = recover_authorization_page(&mut db, None);
+        assert!(done.is_ok());
+        assert!(!changed);
+    }
+
+    #[test]
+    fn authorization_recovery_preserves_notification_on_error_and_caps_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)").unwrap();
+        db.execute("INSERT INTO app_meta VALUES('index.auto.a',?1)", [r#"{"node_id":"node","state":"running","error":null}"#]).unwrap();
+        db.execute("INSERT INTO app_meta VALUES('index.auto.b',?1)", ["x".repeat(RECOVERY_BYTES as usize + 1)]).unwrap();
+        let (next, changed) = recover_authorization_page(&mut db, None);
+        assert!(changed);
+        let cursor = next.unwrap().unwrap();
+        let (result, changed) = recover_authorization_page(&mut db, Some(cursor));
+        assert!(result.is_err());
+        assert!(!changed);
+        db.execute("UPDATE app_meta SET value=?1 WHERE key='index.auto.b'", [r#"{"state":"running"}"#]).unwrap();
+        db.execute("UPDATE app_meta SET value=?1 WHERE key='index.auto.a'", [r#"{"node_id":"node","state":"running","error":null}"#]).unwrap();
+        let (result, changed) = recover_authorization_page(&mut db, None);
+        assert!(result.is_err());
+        assert!(changed);
+    }
+
     #[test]
     fn interrupted_auto_recovery_keeps_existing_per_row_commit_and_decode_order() {
         let mut db = Connection::open_in_memory().unwrap();
