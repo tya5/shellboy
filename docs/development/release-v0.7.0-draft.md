@@ -23,9 +23,14 @@ behavior.
 ## Before upgrading
 
 - **Stop the owner and back up the complete data directory.** Conversation
-  storage advances from schema 19 in v0.6.1 to schema 24. Standalone RAG remains
-  schema 3 and the local protocol remains version 2. Compatibility with earlier
-  releases is not guaranteed before 1.0.0.
+  storage advances from schema 19 in v0.6.1 to schema 24, and standalone RAG
+  storage advances from schema 3 to schema 4. The local protocol remains version
+  2. Compatibility with earlier releases is not guaranteed before 1.0.0.
+- **Run `shellboy rag init` once after upgrading if you use RAG.** Read-only RAG
+  commands such as `rag search` do not migrate an older store; they report that
+  the schema requires migration. `rag init` upgrades the store without
+  registering materials, indexing or calling an embedding API; then repeat the
+  read.
 - **Update the owner and CLI together, then restart the owner.** Replacing an
   executable does not update an already-running owner.
 

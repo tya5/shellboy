@@ -9080,7 +9080,8 @@ is pending. This is a scoped batch, not final #152 acceptance.
 ## v0.7.0 Release Preparation
 
 At cutoff `0ca891bf3fa1ba6b826547cf683ce688365e9677`, conversation storage is
-schema 24 (v0.6.1: schema 19) and standalone RAG remains schema 3. The
+schema 24 (v0.6.1: schema 19) and standalone RAG is schema 4 (v0.6.1:
+schema 3; commit f41aa775), migrated only by `rag init`. The
 upgrade-check script accepts public 0.6.1 (schema 19) as the old version and
 defaults to target schema 24; the Python test covers the argument defaults.
 This is a source comparison, not an executed upgrade test. Run the disposable

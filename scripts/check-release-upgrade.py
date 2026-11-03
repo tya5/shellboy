@@ -345,6 +345,8 @@ def main():
         usage = cli(new, upgraded, 'usage', 'get', '--thread', seed)['result']
         assert usage['model_attempts']['completed'] == original_usage
         assert usage['model_attempts']['completed']['input_tokens']['known_sum'] == 11
+        # RAG schema 4 is migrated only by the writer; readers ask for `rag init`.
+        cli(new, upgraded, 'rag', 'init')
         assert 'SYNTHETIC_RAG_CONTENT' in json.dumps(cli(new, upgraded, 'rag', 'search', '--scope', 'source:synthetic-documents', '--query', 'SYNTHETIC_RAG_CONTENT'))
         schema = root / 'result.schema.json'
         schema.write_text('{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}', encoding='utf-8')
@@ -367,7 +369,7 @@ def main():
             rag_schema = rag.execute('PRAGMA user_version').fetchone()[0]
         finally:
             rag.close()
-        assert rag_schema == 3, rag_schema
+        assert rag_schema == 4, rag_schema
         result = dict(old_public_version=args.old_version, new_version=args.expected_version,
                       old_binary_sha256=hashlib.sha256(old.read_bytes()).hexdigest(),
                       new_binary_sha256=hashlib.sha256(new.read_bytes()).hexdigest(),
