@@ -9219,3 +9219,11 @@ bilingual reply local-handoff and sender-deletion-before-GC regressions.
 The schema fixture correction separately passed all 190 Python script tests.
 No real provider, installed binary, or user data was used. Final published-tip
 CI, other OSes, and manual terminal/provider behavior remain unverified.
+
+#194 publication correction: CI 41634512059 on 90871f3c failed before native
+compilation at the language classification gate. Exactly one reviewed entry,
+ui/operations.rs's second Japanese end-message-only field label, had a stale
+source-scope fingerprint after the form rebase. Re-reviewed its bilingual field
+rendering and updated only that classification record; no Rust or migration
+changes. The full classification audit now passes locally. Replacement exact-tip
+CI remains pending at this record point; prior native test evidence is unchanged.
