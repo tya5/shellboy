@@ -196,6 +196,11 @@ impl CommandHint {
                 "Move foreground shell to background"
             ),
             "/quit" => local!(language, "通常終了", "Exit normally"),
+            "/replies" => local!(
+                language,
+                "返事待ちを確認して返信",
+                "Inspect awaiting replies and reply"
+            ),
             "/queue" => local!(
                 language,
                 "保存済みの反映待ち・保留入力を確認／取消",
@@ -266,10 +271,13 @@ const COMMANDS: &[CommandHint] = &[
     },
     CommandHint { name: "/quit" },
     CommandHint { name: "/queue" },
+    CommandHint { name: "/replies" },
 ];
 
 #[derive(Debug, Default)]
 pub(super) struct Composer {
+    pub(super) reply: Option<message_queue::ReplyTarget>,
+    pub(super) reply_submission: Option<(u64, String)>,
     selection: Option<(String, usize)>,
     dismissed: Option<String>,
     recall: Option<Recall>,

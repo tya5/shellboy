@@ -206,8 +206,7 @@ pub(super) async fn acknowledge(
                 if rows.is_empty(){break;}
                 let nodes=rows.iter().map(|r|r.1.clone()).collect::<Vec<_>>();
                 let revision=crate::history::selection_revision(&tx,&thread,crate::history::ThreadScope::Live)?;
-                crate::history::append_existing_nodes(&tx,&thread,revision as u64,&nodes,&at)?;
-                message_delivery::mark_admitted_tx(&tx,&thread,&nodes)?;
+                message_delivery::append_admitted_tx(&tx,&thread,revision as u64,&nodes,&at)?;
                 for(receipt,_)in rows {tx.execute("UPDATE receipt SET state='applied',hold_reason='carried_after_turn_interruption',updated_at=?2,result_json=json_set(COALESCE(result_json,'{}'),'$.delivery_context',json(?3)) WHERE id=?1",params![receipt,at,json!({"run_id":run,"turn_id":new_turn,"reason":"carried_after_turn_interruption","interrupted_turn_id":turn,"admitted_at":at}).to_string()])?;}
             }
         }
@@ -272,6 +271,7 @@ mod tests {
                 Request::new(
                     format!("{}:send", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
+                        expect_reply: false,
                         sender_label: None,
                         thread_id: Some(thread.clone()),
                         text: "fixture".into(),

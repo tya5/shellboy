@@ -392,6 +392,8 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
     let replay = control.replay.clone();
     let config = control.store.config.clone();
     let shutting_down = control.shell.start_gate();
+    let wakes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let committed_wakes = wakes.clone();
     let result = control.store.database.call(move|db|{
         let tx=db.transaction()?;
         let run:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND id=?2 AND state='live'",params![thread,run_id],|r|r.get(0)).optional()?;
@@ -413,7 +415,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         // receipt overtake its accepted addition. Roll back partial adoption;
         // the originating group's completion nudges this driver again.
         if attachment_blocked { return Ok(Next::Idle); }
-        let events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND e.kind<>'context_changed' ORDER BY e.created_at,e.id")?.query_map([&run],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
+        let mut events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND e.kind<>'context_changed' ORDER BY e.created_at,e.id")?.query_map([&run],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         if turn.is_none()&&(!events.is_empty()||attachment_count>0){turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);}
         if turn.is_none() {
             let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
@@ -421,6 +423,11 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
             // During shutdown, waiting Revisit messages are handed off at the next start.
             if shutting_down.load(std::sync::atomic::Ordering::SeqCst) && super::revisit::has_pending(&tx,&thread)? { return Ok(Next::Done); }
             turn=super::revisit::release_tx(&tx,&thread,&run,&now())?;
+            if turn.is_none() && !shutting_down.load(std::sync::atomic::Ordering::SeqCst)
+                && let Some(event)=super::reply::complete_tx(&tx,&thread,&run,&now(),&mut wakes.lock().unwrap())? {
+                turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);
+                events.push(tx.query_row("SELECT id,json_object('event_id',id,'kind',kind,'payload',json(payload_ref_json)) FROM event WHERE id=?1",[event],|r|Ok((r.get(0)?,r.get(1)?)))?);
+            }
             if turn.is_none() {
                 super::state::complete_idle_run(&tx, &thread, &run)?;
                 tx.commit()?;return Ok(Next::Done);
@@ -439,8 +446,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         let pending:Vec<(String,String)>=tx.prepare("SELECT id,message_node_id FROM receipt WHERE turn_id=?1 AND state='accepted' ORDER BY created_at,rowid")?.query_map([&turn],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         let nodes:Vec<String>=pending.iter().map(|(_,node)|node.clone()).collect();
         snapshot.receipts=pending.into_iter().map(|(receipt,_)|receipt).collect();
-        history::append_existing_nodes(&tx,&thread,snapshot.selection as u64,&nodes,&now())?;
-        super::message_delivery::mark_admitted_tx(&tx,&thread,&nodes)?;
+        super::message_delivery::append_admitted_tx(&tx,&thread,snapshot.selection as u64,&nodes,&now())?;
         for (event,payload)in &events{
             let node=format!("event-{event}");
             let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node WHERE id=?1)",[&node],|r|r.get(0))?;
@@ -455,6 +461,14 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         snapshot.input=Some(replay.load(&tx,&thread)?);
         tx.commit()?;Ok(Next::Ready(Box::new(snapshot)))
     }).await.map_err(storage_error);
+    if result.is_ok() {
+        let wakes = std::mem::take(&mut *committed_wakes.lock().unwrap());
+        for thread in wakes {
+            control.changed(&thread);
+            control.kick_quiet(thread).await;
+        }
+        control.changed.notify_waiters();
+    }
     if let Err(error) = &result
         && !error.is_storage_failure()
         && error.code != ErrorCode::OperationConflict

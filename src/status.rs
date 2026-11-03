@@ -27,6 +27,12 @@ pub struct WorkItem {
     pub attempt_id: Option<String>,
     pub operation_id: Option<String>,
     pub end_message_node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub expect_reply: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
     pub created_at: Option<String>,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
@@ -365,6 +371,9 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         activity_at: activity.1.into(),
         operation_id: row.get(11).map_err(sql)?,
         end_message_node_id: row.get(12).map_err(sql)?,
+        expect_reply: false,
+        reply: None,
+        reply_to: None,
         attempt_connection: row
             .get::<_, Option<String>>(13)
             .map_err(sql)?
@@ -389,6 +398,18 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         revisit: None,
         targets: Vec::new(),
     };
+
+    if kind == WorkKind::Message {
+        let metadata: Option<String> = row.get(20).map_err(sql)?;
+        if let Some(metadata) = metadata {
+            let metadata: Value = serde_json::from_str(&metadata).map_err(|_| {
+                ApiError::new(ErrorCode::InvalidState, "invalid message reply metadata")
+            })?;
+            item.expect_reply = metadata["expect_reply"] == true || metadata["expect_reply"] == 1;
+            item.reply = metadata.get("reply").filter(|v| !v.is_null()).cloned();
+            item.reply_to = metadata["reply_to"].as_str().map(str::to_owned);
+        }
+    }
     item.targets = links(kind, &item)?;
     let key = SortKey {
         activity: activity.0,
@@ -417,9 +438,9 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
       SELECT 'run',r.id,r.state,r.thread_id,r.id,(SELECT id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),r.owner_run_id,r.created_at,NULL,r.ended_at,NULL,NULL,(SELECT answer_node_id FROM turn WHERE run_id=r.id ORDER BY created_at DESC,id DESC LIMIT 1),NULL,NULL,r.stop_reason FROM run r
       UNION ALL SELECT 'turn',t.id,t.state,t.thread_id,t.run_id,t.id,r.owner_run_id,t.created_at,NULL,t.ended_at,NULL,NULL,t.answer_node_id,NULL,NULL,CASE WHEN json_valid(t.recovery_reason_json) THEN COALESCE(json_extract(t.recovery_reason_json,'$.kind'),json_extract(t.recovery_reason_json,'$.code')) END FROM turn t JOIN run r ON r.id=t.run_id
       UNION ALL SELECT 'shell',s.id,s.state,r.thread_id,s.owner_run_id,s.turn_id,r.owner_run_id,NULL,s.started_at,s.ended_at,NULL,NULL,NULL,NULL,NULL,s.end_reason FROM shell_execution s JOIN run r ON r.id=s.owner_run_id
-      UNION ALL SELECT 'message',m.message_node_id,m.state,m.target_thread_id,m.run_id,m.turn_id,r.owner_run_id,m.created_at,NULL,NULL,NULLIF(m.updated_at,''),CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=m.client_operation_id) THEN m.client_operation_id END,t.answer_node_id,NULL,NULL,m.hold_reason FROM receipt m LEFT JOIN run r ON r.id=m.run_id LEFT JOIN turn t ON t.id=m.turn_id
+      UNION ALL SELECT 'message',m.message_node_id,m.state,m.target_thread_id,m.run_id,m.turn_id,r.owner_run_id,m.created_at,NULL,NULL,NULLIF(m.updated_at,''),CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=m.client_operation_id) THEN m.client_operation_id END,NULL,NULL,NULL,m.hold_reason FROM receipt m LEFT JOIN run r ON r.id=m.run_id LEFT JOIN turn t ON t.id=m.turn_id
       UNION ALL SELECT 'attempt',a.id,a.state,t.thread_id,t.run_id,t.id,r.owner_run_id,NULL,a.started_at,a.ended_at,NULL,NULL,t.answer_node_id,a.profile_id,a.model_id,CASE WHEN json_valid(a.error_json) THEN COALESCE(json_extract(a.error_json,'$.kind'),json_extract(a.error_json,'$.code')) END FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id
-    ) SELECT w.*,t.title,t.parent_thread_id,t.profile_id,t.model_id FROM work w JOIN thread t ON t.id=w.thread_id WHERE (?1 IS NULL OR w.thread_id=?1) AND (?2 IS NULL OR w.run_id=?2) ORDER BY w.kind,w.id";
+    ) SELECT w.*,t.title,t.parent_thread_id,t.profile_id,t.model_id,(SELECT json_object('expect_reply',json_extract(m.result_json,'$.expect_reply'),'reply',json_extract(m.result_json,'$.reply'),'reply_to',json_extract(m.result_json,'$.reply_to')) FROM receipt m WHERE w.kind='message' AND m.message_node_id=w.id) FROM work w JOIN thread t ON t.id=w.thread_id WHERE (?1 IS NULL OR w.thread_id=?1) AND (?2 IS NULL OR w.run_id=?2) ORDER BY w.kind,w.id";
     let mut statement = db.prepare(query).map_err(sql)?;
     let mut rows = statement
         .query(params![args.thread_id, args.run_id])

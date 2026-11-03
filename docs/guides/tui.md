@@ -271,6 +271,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/threads descendants` | Watch descendants of the selected conversation |
 | `/switch THREAD_ID` | Switch by ID |
 | `/model` | Current connection, model, and effort |
+| `/replies` | Pending reply requests for this conversation; Enter selects an applied request for a text-only reply |
 | `/queue` | Saved pending/held input; fixed-ID cancellation and original/delivery inspection |
 | `/restore list` / `/restore draft ID` | Durable archived input and frozen submission recovery |
 | `/models [CONNECTION]` | Live model list: type to filter, Up/Down select, Enter changes, Ctrl+R refreshes, Ctrl+Y copies selected ID, Esc returns |
@@ -623,3 +624,21 @@ are not historical identity. Deleted or missing references remain unavailable.
 Enter follows an exact loaded execution row; otherwise it opens the saved tool
 result's original source when its exact group/call/node relation is available.
 Child navigation uses the saved Thread ID, never a similar short name.
+
+## Replying to a request
+
+`/replies` reuses the pending-message popup and shows up to 128 pending requests
+for the current conversation, with sender, time and original excerpt. Enter
+selects an applied request; queued or held requests cannot yet be replied to.
+The composer shows `Replying to` and the original excerpt. Type text and use the
+configured send key; this sends `message reply`, not an ordinary message. Replies
+cannot contain attachments or edit an existing message. Esc leaves reply mode
+without discarding the draft. A failed or raced reply preserves the draft for
+inspection; a successful acknowledgement clears only its submitted revision,
+not newer edits or another selected reply target.
+
+Option B retains existing sender glyphs. Original rows and queued requests show
+`awaiting reply`, `replied`, `ignored`, `cancelled`, or `recipient deleted` as
+saved state tags. A reply row shows `Reply:` and a width-limited original excerpt.
+Japanese UI uses `返事待ち`, `返事済み`, `返事なし`, `取消`, `相手削除`, and `返事:`.
+No new reply glyph is introduced.

@@ -53,6 +53,7 @@ ThreadList,
     ThreadDelete,
     ThreadSet,
     MessageSend,
+    MessageReply,
     MessageGet,
     OperationGet,
     RunGet,
@@ -1295,6 +1296,7 @@ impl Form {
             OpKind::MessageSend => (
                 vec![
                     thread(),
+                    f("expect_reply", "返信を依頼", "false".into(), Boolean),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
                     f(
                         "sender_label",
@@ -1311,6 +1313,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
+                        expect_reply: form.boolean("expect_reply")?,
                         sender_label: form.optional("sender_label")?,
                         deliver: form
                             .optional("deliver")?
@@ -1318,6 +1321,20 @@ impl Form {
                             .unwrap_or_default(),
                         thread_id: form.optional("thread")?,
                         text: form.owned("text")?,
+                    }))
+                },
+            ),
+            OpKind::MessageReply => (
+                vec![
+                    f("message", "message ID", c.message.clone(), Text),
+                    f("text", "Reply", String::new(), Multiline),
+                    f("sender_label", "Sender label", String::new(), Text),
+                ],
+                |form, _cwd| {
+                    Ok(Command::MessageReply(MessageReplyArgs {
+                        message_id: form.owned("message")?,
+                        text: form.owned("text")?,
+                        sender_label: form.optional("sender_label")?,
                     }))
                 },
             ),
@@ -2268,6 +2285,11 @@ mod tests {
                 json!({"thread_id":id(1),"text":"synthetic text"}),
             ),
             (
+                OpKind::MessageReply,
+                "message.reply",
+                json!({"message_id":id(3),"text":"synthetic text"}),
+            ),
+            (
                 OpKind::MessageGet,
                 "message.get",
                 json!({"message_id":id(3)}),
@@ -2414,6 +2436,7 @@ mod tests {
             "thread.delete",
             "thread.set",
             "message.send",
+            "message.reply",
             "message.cancel",
             "run.retry",
             "run.stop",
@@ -2526,6 +2549,7 @@ mod tests {
                         | "thread.delete"
                         | "thread.set"
                         | "message.send"
+                        | "message.reply"
                         | "message.cancel"
                         | "run.retry"
                         | "run.stop"
@@ -3097,10 +3121,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 58);
+        assert_eq!(rows.len(), 59);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            58
+            59
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3112,7 +3136,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 58);
+        assert_eq!(operations.rows().len(), 59);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

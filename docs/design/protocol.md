@@ -506,3 +506,14 @@ specific summarized conditions and using a short private XDG_RUNTIME_DIR.
 All startup-generated text is English. No setting, transport or endpoint JSON
 schema changes. Actual lower-level syscall failures remain distinct from a
 candidate rejected before mkdir; aggregation must not grant deletion authority.
+
+## Explicit Replies (#194 Step 2)
+
+The adopted [reply design](reply-expected-messages.md) adds `expect_reply` to
+`message.send`, `message.reply` (`message_id`, text, optional sender label),
+`reply_received` to wait conditions, and `reply_cancelled` to cancel outcomes.
+`message.get` removes `answer_node_id` in favor of optional `expect_reply`,
+`reply`, and `reply_to`. `thread.get` exposes up to 128 `awaiting_reply` entries.
+Reply eligibility, authority, body creation, delivery, and terminal-state CAS
+commit atomically. Operation replay returns the saved result, not a second
+reply. Only the recipient model or a human may reply after application.

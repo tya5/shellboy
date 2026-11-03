@@ -4295,3 +4295,31 @@ Annotated tag `v0.7.0` was published at main `abe16a34` at 2026-11-03T09:03:20Z
 from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
 `rag init`. Anonymous download and `SHA256SUMS` verification covered all six
 public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
+### #194 Step 2: Explicit Reply Core
+
+The reply-expected send flag, ordered durable admission notices, 128 pending
+reply cap, explicit reply mutation, reply receipt fields, reply waits, admitted
+duty cancellation, and Thread awaiting-reply projection are implemented on the
+step-1 base. Migration 25 is provisional until integration ordering is known.
+Run-end reminders/deletion outcomes and exec modes belong to subsequent steps.
+Synthetic local validation is in progress; three-OS CI and integration remain
+pending. No real-provider measurements are involved.
+
+### #194 Step 3 and #197: Reply Lifecycle and Receipt Reclamation
+
+Implemented durable once-per-message Run-end reminders with per-message sender
+facts, then ignored outcomes; stopped/recovery work retains pending duties.
+Recipient transitions and outcomes are in the deletion transaction; sender-deleted cancellation is deferred to the bounded history-GC receipt phase.
+History GC now scans a finite receipt horizon in batches of at most 128 before
+marking, retaining pending duties and live endpoint ownership. The branch stays
+based on approved step 2, separate from the 0.7.0 release. Synthetic validation
+and task CI are in progress; no real provider calls are part of this work.
+
+### #194 Step 6: Reply TUI
+
+Option B retains source glyphs and adds bilingual saved reply-state tags and
+reply excerpts. `/replies` reuses the Thread-scoped bounded message popup;
+applied requests enter a per-view, text-only composer mode using message.reply.
+The existing submission acknowledgement path preserves failed and newer drafts.
+Synthetic rendering and source-projection validation are in progress; final task
+CI and review are required. No provider measurements or main integration.

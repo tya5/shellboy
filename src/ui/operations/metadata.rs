@@ -75,6 +75,7 @@ impl Form {
             "descendants" => FieldId::Descendants,
             "sender_label" => FieldId::SenderLabel,
             "deliver" => FieldId::Deliver,
+            "expect_reply" => FieldId::ExpectReply,
             "text" => FieldId::Text,
             "condition" | "target" => FieldId::Conditions,
             "settled_states" => FieldId::SettlementStates,
@@ -574,6 +575,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "Conversation · Deletion impact"
         ),
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
+        OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
         OperationId::MessageGet => local!(
             language,
@@ -724,6 +726,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイルを変更します。",
             "Change a Thread's display title, working folder, connection, model, reasoning effort, and instruction file."
+        ),
+        OperationId::MessageReply => local!(
+            language,
+            "受信した依頼へ一度だけ返信します。",
+            "Reply once to a received request."
         ),
         OperationId::MessageSend => local!(
             language,
@@ -1007,6 +1014,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
+        FieldId::ExpectReply => local!(language, "返信を依頼", "Expect a reply"),
         FieldId::Deliver => local!(language, "届けるとき", "Delivery timing"),
         FieldId::Text => local!(language, "入力本文", "Message text"),
         FieldId::Conditions => local!(language, "観測条件", "Observation conditions"),
@@ -1264,6 +1272,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "自己申告の表示名であり権限を与えません。message sendは最大64Unicode文字です。",
             "A self-declared label; it grants no authority. message send allows at most 64 Unicode characters."
+        ),
+        FieldId::ExpectReply => local!(
+            language,
+            "指定メッセージへの返信を依頼します。",
+            "Request an explicit reply to this message."
         ),
         FieldId::Deliver => local!(
             language,

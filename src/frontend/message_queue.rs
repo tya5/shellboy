@@ -18,7 +18,7 @@ pub(super) fn query(
     )?;
     // SQLite returns bounded text fragments; never load 128 full message blobs
     // merely to draw a preview. Full canonical content stays source-addressable.
-    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,r.sender_json,r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
+    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,r.sender_json,r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id),COALESCE(json_extract(r.result_json,'$.reply.state')='pending',0) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
     let items = stmt
         .query_map([thread], |row| {
             let sender: String = row.get(2)?;
@@ -40,6 +40,7 @@ pub(super) fn query(
                 excerpt_truncated: excerpt.chars().count() > 512,
                 excerpt: excerpt.chars().take(512).collect(),
                 attachment_count: row.get::<_, i64>(9)? as u64,
+                expect_reply: row.get(10)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -54,10 +55,39 @@ pub(super) fn query(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
+    let mut query=db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),'') FROM receipt r WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' ORDER BY r.created_at,r.rowid LIMIT 128")?;
+    let awaiting_reply = query
+        .query_map([thread], |r| {
+            let sender: String = r.get(1)?;
+            let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
+            let sender = sender
+                .label
+                .or(sender.thread_id)
+                .unwrap_or_else(|| format!("{:?}", sender.kind));
+            let excerpt: String = r.get(4)?;
+            Ok(crate::ui::ReplyTarget {
+                message_id: r.get(0)?,
+                sender: crate::presentation::sanitize_plain(&sender, 0)
+                    .0
+                    .replace(['\n', '\r'], " ")
+                    .chars()
+                    .take(128)
+                    .collect(),
+                created_at: r.get::<_, String>(2)?.chars().take(128).collect(),
+                applied: r.get::<_, String>(3)? == "applied",
+                excerpt: crate::presentation::sanitize_plain(&excerpt, 0)
+                    .0
+                    .chars()
+                    .take(512)
+                    .collect(),
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(PendingMessages {
         items,
         total: total as u64,
         submitted,
+        awaiting_reply,
     })
 }
 pub(super) fn submission_snapshot(
@@ -346,6 +376,7 @@ pub(super) async fn cancel(
         let label = match item.outcome {
             MessageCancelOutcome::Cancelled => "取消",
             MessageCancelOutcome::AlreadyCancelled => "取消済み",
+            MessageCancelOutcome::ReplyCancelled => "返信依頼の取消",
             MessageCancelOutcome::AlreadyAdmitted => "すでに会話へ反映済み",
             MessageCancelOutcome::NotFound => "見つかりません",
             MessageCancelOutcome::Forbidden => "権限なし",
@@ -389,6 +420,7 @@ pub(super) async fn cancel(
 fn cancelled_summary(outcome: MessageCancelOutcome, count: usize) -> String {
     let noun = if count == 1 { "input" } else { "inputs" };
     match outcome {
+        MessageCancelOutcome::ReplyCancelled => format!("{count} reply duties cancelled"),
         MessageCancelOutcome::Cancelled => format!("{count} {noun} cancelled"),
         MessageCancelOutcome::AlreadyCancelled => format!("{count} {noun} already cancelled"),
         MessageCancelOutcome::AlreadyAdmitted => {
@@ -404,6 +436,50 @@ mod tests {
     use super::*;
     use rusqlite::params;
 
+    #[test]
+    fn replies_are_thread_scoped_bounded_and_keep_saved_application_state() {
+        let db = fixture();
+        input(
+            &db,
+            "expected",
+            "applied",
+            "admitted",
+            "original",
+            serde_json::json!({"kind":"human"}),
+            false,
+        );
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','pending') WHERE message_node_id='expected'",[]).unwrap();
+        let pending = query(&db, "thread").unwrap();
+        assert_eq!(pending.awaiting_reply.len(), 1);
+        assert_eq!(pending.awaiting_reply[0].message_id, "expected");
+        assert!(pending.awaiting_reply[0].applied);
+        assert!(query(&db, "elsewhere").unwrap().awaiting_reply.is_empty());
+        db.execute(
+            "UPDATE receipt SET state='held',path_admission='unadmitted' WHERE message_node_id='expected'",
+            [],
+        )
+        .unwrap();
+        let pending = query(&db, "thread").unwrap();
+        assert!(!pending.awaiting_reply[0].applied);
+        assert!(pending.items[0].expect_reply);
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','cancelled') WHERE message_node_id='expected'",[]).unwrap();
+        assert!(query(&db, "thread").unwrap().awaiting_reply.is_empty());
+        // Synthetic overflow checks the reader's bound even with corrupt over-cap input.
+        for i in 0..140 {
+            let id = format!("bounded-{i:03}");
+            input(
+                &db,
+                &id,
+                "applied",
+                "admitted",
+                "fixture",
+                serde_json::json!({"kind":"human"}),
+                false,
+            );
+            db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','pending') WHERE message_node_id=?1",[id]).unwrap();
+        }
+        assert_eq!(query(&db, "thread").unwrap().awaiting_reply.len(), 128);
+    }
     #[test]
     fn cancellation_summary_uses_english_for_all_outcomes_and_counts() {
         let cases = [
