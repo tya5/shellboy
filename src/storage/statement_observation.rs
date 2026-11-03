@@ -2,8 +2,8 @@
 use rusqlite::{Connection, ffi};
 use std::{ffi::c_void, ptr};
 
-#[derive(Debug, Default, Clone, Copy)]
-pub(super) struct Counters {
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+pub(crate) struct Counters {
     pub fullscan_steps: u64,
     pub sorts: u64,
     pub autoindexes: u64,
@@ -14,6 +14,7 @@ pub(super) struct Counters {
 pub(super) struct StatementObservation<'a> {
     connection: &'a mut Connection,
     counters: Box<Counters>,
+    installed: bool,
 }
 
 unsafe extern "C" fn profile(
@@ -47,7 +48,7 @@ unsafe extern "C" fn profile(
 }
 
 impl<'a> StatementObservation<'a> {
-    pub fn install(connection: &'a mut Connection) -> rusqlite::Result<Self> {
+    pub fn install(connection: &'a mut Connection) -> Self {
         let mut counters = Box::<Counters>::default();
         // The guard removes the callback before dropping its context.
         let result = unsafe {
@@ -58,16 +59,14 @@ impl<'a> StatementObservation<'a> {
                 (&mut *counters as *mut Counters).cast(),
             )
         };
-        if result != ffi::SQLITE_OK {
-            return Err(rusqlite::Error::SqliteFailure(
-                ffi::Error::new(result),
-                None,
-            ));
-        }
-        Ok(Self {
+        Self {
             connection,
             counters,
-        })
+            installed: result == ffi::SQLITE_OK,
+        }
+    }
+    pub fn available(&self) -> bool {
+        self.installed
     }
     pub fn connection(&mut self) -> &mut Connection {
         self.connection
@@ -79,8 +78,10 @@ impl<'a> StatementObservation<'a> {
 
 impl Drop for StatementObservation<'_> {
     fn drop(&mut self) {
-        unsafe {
-            ffi::sqlite3_trace_v2(self.connection.handle(), 0, None, ptr::null_mut());
+        if self.installed {
+            unsafe {
+                ffi::sqlite3_trace_v2(self.connection.handle(), 0, None, ptr::null_mut());
+            }
         }
     }
 }
@@ -93,7 +94,7 @@ mod tests {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1),(2),(3)")
             .unwrap();
-        let mut trace = StatementObservation::install(&mut db).unwrap();
+        let mut trace = StatementObservation::install(&mut db);
         let n: i64 = trace
             .connection()
             .query_row("SELECT count(*) FROM t WHERE x > ?1", [1], |r| r.get(0))

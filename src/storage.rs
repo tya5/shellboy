@@ -54,8 +54,7 @@ mod migration_integrity;
 #[cfg(test)]
 #[path = "storage/migration_startup_tests.rs"]
 mod migration_startup_tests;
-#[allow(dead_code)]
-mod statement_observation;
+pub(crate) mod statement_observation;
 pub(crate) const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 
 #[derive(Debug, thiserror::Error)]
@@ -1127,7 +1126,11 @@ fn run_worker(
                     state.no_progress.clone(),
                     state.activity_updates.clone(),
                 );
-                let outcome = job(&mut connection, &state.foreground_waiting);
+                let mut observation =
+                    statement_observation::StatementObservation::install(&mut connection);
+                let outcome = job(observation.connection(), &state.foreground_waiting);
+                let counters = observation.available().then(|| observation.counters());
+                drop(observation);
                 let run = started.elapsed();
                 let diagnostics = state.diagnostics.try_lock().ok();
                 let diagnostics = diagnostics.as_ref().and_then(|guard| guard.as_ref());
@@ -1137,7 +1140,7 @@ fn run_worker(
                     && let Ok(mut limit) = state.slow_limit.try_lock()
                     && limit.admit(Instant::now())
                 {
-                    diagnostics.record_db_job(&name(), queue, run);
+                    diagnostics.record_db_job_with_counters(&name(), queue, run, counters);
                 }
                 if outcome.background {
                     #[cfg(test)]
@@ -1755,7 +1758,7 @@ mod slow_job_tests {
         assert!(rows[1]["db_job_slow"]["queue_ms"].as_u64().unwrap() >= 1000);
         assert!(
             rows.iter()
-                .all(|r| r["db_job_slow"].as_object().unwrap().len() == 3)
+                .all(|r| r["db_job_slow"].as_object().unwrap().len() == 4)
         );
     }
 }

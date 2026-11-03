@@ -123,6 +123,8 @@ struct DbJobSlowTrace {
     kind: String,
     queue_ms: u64,
     run_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    statement_counters: Option<crate::storage::statement_observation::Counters>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -757,11 +759,21 @@ impl Diagnostics {
             shell_unknown_parameter: None,
         });
     }
+    #[cfg(test)]
     pub(crate) fn record_db_job(
         &self,
         kind: &str,
         queue: std::time::Duration,
         run: std::time::Duration,
+    ) {
+        self.record_db_job_with_counters(kind, queue, run, None);
+    }
+    pub(crate) fn record_db_job_with_counters(
+        &self,
+        kind: &str,
+        queue: std::time::Duration,
+        run: std::time::Duration,
+        statement_counters: Option<crate::storage::statement_observation::Counters>,
     ) {
         if queue < std::time::Duration::from_secs(1) && run < std::time::Duration::from_secs(1) {
             return;
@@ -781,6 +793,7 @@ impl Diagnostics {
                 kind: kind.chars().take(160).collect(),
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
+                statement_counters,
             })),
             index_discard: None,
             automatic_compaction_counts: None,
