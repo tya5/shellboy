@@ -3211,7 +3211,7 @@ mod entry_tests {
             assert_eq!(buffer[(body.x + 2, body.y)].fg, theme::MUTED);
             assert_eq!(
                 buffer[(body.x, body.y + 1)].symbol(),
-                crate::ui::text_width::glyphs::SELECTED
+                crate::ui::text_width::glyphs::select(crate::ui::text_width::glyphs::SELECTED, ">")
             );
             assert_eq!(buffer[(body.x, body.y + 1)].fg, theme::SELECTION_FOREGROUND);
             assert_eq!(buffer[(body.x, body.y + 1)].bg, theme::SELECTION_BACKGROUND);
@@ -3228,7 +3228,11 @@ mod entry_tests {
                     let buffer = terminal.backend().buffer();
                     let selected_y = (body.y..body.bottom())
                         .find(|&y| {
-                            buffer[(body.x, y)].symbol() == crate::ui::text_width::glyphs::SELECTED
+                            buffer[(body.x, y)].symbol()
+                                == crate::ui::text_width::glyphs::select(
+                                    crate::ui::text_width::glyphs::SELECTED,
+                                    ">",
+                                )
                         })
                         .expect("a selected action row");
                     let selected_row = (body.x..body.right() - 1)
@@ -3261,7 +3265,7 @@ mod entry_tests {
             let last_y = body.bottom() - 1;
             assert_eq!(
                 buffer[(body.x, last_y)].symbol(),
-                crate::ui::text_width::glyphs::SELECTED
+                crate::ui::text_width::glyphs::select(crate::ui::text_width::glyphs::SELECTED, ">")
             );
             assert_eq!(buffer[(body.x, last_y)].fg, theme::SELECTION_FOREGROUND);
             assert_eq!(buffer[(body.x, last_y)].bg, theme::SELECTION_BACKGROUND);

@@ -234,7 +234,7 @@ fn shared_list_keeps_last_wrapped_model_selected_and_footer_fixed() {
     assert!(shown.contains("40 / 40件"));
     let buffer = terminal.backend().buffer();
     let selected_y = (0..24)
-        .find(|y| (0..80).any(|x| buffer[(x, *y)].symbol() == "›"))
+        .find(|y| (0..80).any(|x| matches!(buffer[(x, *y)].symbol(), "›" | ">")))
         .unwrap();
     assert_eq!(
         buffer[(40, selected_y)].bg,
