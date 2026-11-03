@@ -9276,3 +9276,14 @@ transaction took 0.573032 s. Creating the backup took 842.571 s; that is copy
 time, not migration time. This is one machine and one database snapshot, not a
 startup latency guarantee. The source database was not modified. Actual
 provider behavior and billing are not tested.
+
+
+### #172 Oversized Work Recovery
+
+Local synthetic loopback coverage exercises a 1,100,000-character accepted source
+from oversized legacy recovery through held automatic-history and pause states,
+byte-bounded admission, two provider requests and two adopted vector chunks.
+A separate test deletes malformed oversized work and verifies saved status asks
+for explicit rebuild. The Unicode/JSON-escaping split test runs independently.
+The source witness is rechecked before re-admission. Real provider billing,
+physical power loss and the final multi-OS integration SHA are not verified.
