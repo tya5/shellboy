@@ -363,7 +363,15 @@ impl DbWorker {
         path: impl AsRef<Path>,
         owner: Arc<dyn Send + Sync>,
     ) -> Result<Self, StorageError> {
-        Self::open_internal(path, DEFAULT_QUEUE_CAPACITY, Some(owner)).await
+        Self::open_internal(path, DEFAULT_QUEUE_CAPACITY, Some(owner), false).await
+    }
+
+    pub(crate) async fn open_owned_with_clean_shutdown(
+        path: impl AsRef<Path>,
+        owner: Arc<dyn Send + Sync>,
+        clean: bool,
+    ) -> Result<Self, StorageError> {
+        Self::open_internal(path, DEFAULT_QUEUE_CAPACITY, Some(owner), clean).await
     }
 
     /// `capacity` bounds each of the foreground and background lanes.
@@ -371,13 +379,14 @@ impl DbWorker {
         path: impl AsRef<Path>,
         capacity: usize,
     ) -> Result<Self, StorageError> {
-        Self::open_internal(path, capacity, None).await
+        Self::open_internal(path, capacity, None, false).await
     }
 
     async fn open_internal(
         path: impl AsRef<Path>,
         capacity: usize,
         owner: Option<Arc<dyn Send + Sync>>,
+        clean_shutdown: bool,
     ) -> Result<Self, StorageError> {
         if capacity == 0 {
             return Err(StorageError::Configuration(
@@ -420,6 +429,7 @@ impl DbWorker {
                     background_receiver,
                     ready_send,
                     worker,
+                    clean_shutdown,
                 )
             })
             .map_err(|error| StorageError::Worker(error.to_string()))?;
@@ -1011,6 +1021,7 @@ fn run_worker(
     background: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<(), StorageError>>,
     state: WorkerState,
+    clean_shutdown: bool,
 ) -> Result<(), StorageError> {
     let runtime = match tokio::runtime::Builder::new_current_thread().build() {
         Ok(runtime) => runtime,
@@ -1019,7 +1030,7 @@ fn run_worker(
             return Ok(());
         }
     };
-    let mut connection = match open_connection(&path) {
+    let mut connection = match open_connection_with_policy(&path, clean_shutdown) {
         Ok(connection) => connection,
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -1174,7 +1185,10 @@ pub(crate) fn register_vec() -> Result<(), StorageError> {
     Ok(())
 }
 
-fn open_connection(path: &Path) -> Result<Connection, StorageError> {
+fn open_connection_with_policy(
+    path: &Path,
+    clean_shutdown: bool,
+) -> Result<Connection, StorageError> {
     register_vec()?;
     let mut connection = Connection::open_with_flags(
         path,
@@ -1206,6 +1220,7 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
             "FULL/FK required, found synchronous={synchronous}, foreign_keys={foreign_keys}"
         )));
     }
+    let migrated = version > 0 && version < SCHEMA_VERSION;
     let version = if version == 0 {
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1217,14 +1232,50 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
     };
     migrate::run(&mut connection, version)?;
     validate_schema(&connection)?;
-    if connection.prepare("PRAGMA foreign_key_check")?.exists([])? {
+    check_integrity(&connection, migrated, !clean_shutdown)?;
+    Ok(connection)
+}
+
+/// Run both integrity checks without starting an owner or creating a database.
+pub fn manual_check(
+    config: Option<&Path>,
+    data_dir: Option<&Path>,
+    cwd: &Path,
+) -> Result<(), crate::protocol::ApiError> {
+    let loaded = crate::config::Config::load_with_overrides(
+        config,
+        data_dir,
+        cwd,
+        &crate::config::PathEnvironment::current(),
+    )
+    .map_err(|error| {
+        crate::protocol::ApiError::new(crate::protocol::ErrorCode::ConfigInvalid, error.to_string())
+    })?;
+    let _lock = crate::app::OwnerLock::acquire(&loaded.data_dir)?;
+    register_vec().map_err(crate::app::storage_error)?;
+    let connection = Connection::open_with_flags(
+        loaded.data_dir.join("shellboy.db"),
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(|error| crate::app::storage_error(StorageError::Sqlite(error)))?;
+    check_integrity(&connection, true, true).map_err(crate::app::storage_error)
+}
+
+pub fn check_integrity(
+    connection: &Connection,
+    foreign_keys: bool,
+    quick: bool,
+) -> Result<(), StorageError> {
+    if foreign_keys && connection.prepare("PRAGMA foreign_key_check")?.exists([])? {
         return Err(StorageError::Schema("foreign key violations".into()));
     }
-    let integrity: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-    if integrity != "ok" {
-        return Err(StorageError::Schema(format!("quick_check: {integrity}")));
+    if quick {
+        let integrity: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(StorageError::Schema(format!("quick_check: {integrity}")));
+        }
     }
-    Ok(connection)
+    Ok(())
 }
 
 fn validate_schema(connection: &Connection) -> Result<i64, StorageError> {
@@ -1831,5 +1882,49 @@ mod lane_budget_tests {
         })
         .await
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod integrity_policy_tests {
+    use super::*;
+
+    #[test]
+    fn reopen_obeys_clean_marker_and_unclean_checks() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("db");
+        drop(open_connection_with_policy(&path, false).unwrap());
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','now');").unwrap();
+        drop(db);
+        assert!(open_connection_with_policy(&path, true).is_ok());
+        assert!(
+            open_connection_with_policy(&path, false)
+                .unwrap_err()
+                .to_string()
+                .contains("quick_check")
+        );
+    }
+
+    #[test]
+    fn integrity_policy_respects_selected_checks() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("PRAGMA foreign_keys=OFF; CREATE TABLE parent(id INTEGER PRIMARY KEY); CREATE TABLE child(parent_id INTEGER REFERENCES parent(id), n INTEGER CHECK(n > 0)); INSERT INTO child VALUES(99, 1);").unwrap();
+        assert!(check_integrity(&db, false, false).is_ok());
+        assert!(
+            check_integrity(&db, true, false)
+                .unwrap_err()
+                .to_string()
+                .contains("foreign key")
+        );
+        assert!(check_integrity(&db, false, true).is_ok());
+        db.execute_batch("PRAGMA ignore_check_constraints=ON; UPDATE child SET n=0; PRAGMA ignore_check_constraints=OFF;")
+            .unwrap();
+        assert!(
+            check_integrity(&db, false, true)
+                .unwrap_err()
+                .to_string()
+                .contains("quick_check")
+        );
     }
 }
