@@ -81,7 +81,9 @@ fn receipts_step(
     let rows=tx.prepare("SELECT rowid,id,octet_length(sender_json)+COALESCE(octet_length(result_json),0) FROM receipt WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT ?3").map_err(sql_error)?
         .query_map(params![progress.last_rowid,progress.receipt_horizon,BATCH as i64],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?))) .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
     let sql = format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE}");
+    let at = Utc::now().to_rfc3339();
     for (rowid, id, bytes) in &rows {
+        crate::control::reply::deleted_sender_receipt_tx(tx, id, &at).map_err(sql_error)?;
         if tx.execute(&sql, [id]).map_err(sql_error)? == 1 {
             report.bytes_collected += (*bytes).max(0) as u64;
         }
