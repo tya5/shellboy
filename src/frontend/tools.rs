@@ -1,5 +1,6 @@
 //! UI-only source correlation. No model/core state or canonical node is changed.
 use crate::{
+    config::UiLanguage,
     control::Control,
     presentation::{BlockKind, ToolReasonKind},
     protocol::{ApiError, ErrorCode},
@@ -542,7 +543,25 @@ fn read_sources_batch(
     Ok(sources)
 }
 
-pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
+fn prior_call_interruption_reason(
+    kind: ToolReasonKind,
+    language: UiLanguage,
+) -> Option<&'static str> {
+    match language {
+        UiLanguage::Ja => match kind {
+            ToolReasonKind::HumanBackgrounded => {
+                Some("先行する呼出しを利用者が背景へ移したため未実行")
+            }
+            ToolReasonKind::AdditionalInput => {
+                Some("追加の指示で先行する呼出しが背景へ移ったため未実行")
+            }
+            _ => None,
+        },
+        UiLanguage::En => None,
+    }
+}
+
+pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts, language: UiLanguage) {
     clear_observations(nodes);
     super::notices::apply(nodes, &facts.notices);
     for source in &facts.sources {
@@ -576,14 +595,10 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
             if tool.status == "cancelled"
                 && tool.reason_kind == ToolReasonKind::PriorCallInterrupted
             {
-                match ToolReasonKind::from_saved(source.prior_reason.as_deref().unwrap_or("")) {
-                    ToolReasonKind::HumanBackgrounded => {
-                        tool.reason = "先行する呼出しを利用者が背景へ移したため未実行".into()
-                    }
-                    ToolReasonKind::AdditionalInput => {
-                        tool.reason = "追加の指示で先行する呼出しが背景へ移ったため未実行".into()
-                    }
-                    _ => {}
+                let prior_reason =
+                    ToolReasonKind::from_saved(source.prior_reason.as_deref().unwrap_or(""));
+                if let Some(reason) = prior_call_interruption_reason(prior_reason, language) {
+                    tool.reason = reason.into();
                 }
             }
             tool.description = crate::tool_description::label(source.description.as_deref());
@@ -637,6 +652,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &ToolFacts) {
 }
 
 pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
+    let language = control.store.config.ui.language;
     clear_observations(nodes);
     let requests = nodes
         .iter()
@@ -671,7 +687,7 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
     let owned = nodes.iter_mut().map(std::mem::take).collect::<Vec<_>>();
     let projected = super::presentation_work(move || {
         let mut owned = owned;
-        apply(&mut owned, &facts);
+        apply(&mut owned, &facts, language);
         owned
     })
     .await?;

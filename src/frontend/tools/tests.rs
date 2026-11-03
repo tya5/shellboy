@@ -2,6 +2,40 @@ use super::*;
 use crate::{app::DataOwner, presentation, ui::UiNode};
 use serde_json::json;
 
+#[test]
+fn prior_call_reason_copy_is_scoped_to_the_ui_language() {
+    for (saved, expected) in [
+        (
+            "human_backgrounded",
+            "先行する呼出しを利用者が背景へ移したため未実行",
+        ),
+        (
+            "additional_input",
+            "追加の指示で先行する呼出しが背景へ移ったため未実行",
+        ),
+    ] {
+        let kind = ToolReasonKind::from_saved(saved);
+        assert_eq!(
+            prior_call_interruption_reason(kind, UiLanguage::Ja),
+            Some(expected)
+        );
+        assert_eq!(prior_call_interruption_reason(kind, UiLanguage::En), None);
+    }
+}
+
+#[test]
+fn english_interruption_uses_the_existing_typed_reason_label() {
+    let tool = presentation::ToolPresentation {
+        reason_kind: ToolReasonKind::PriorCallInterrupted,
+        ..Default::default()
+    };
+    assert_eq!(
+        presentation::messages::tool_reason(&tool, UiLanguage::En),
+        "Cancelled after an earlier call failed or foreground wait was interrupted"
+    );
+    assert_eq!(tool.reason_kind, ToolReasonKind::PriorCallInterrupted);
+}
+
 #[tokio::test]
 async fn repeated_call_ids_in_other_groups_cannot_replace_a_cancelled_calls_source() {
     let root = tempfile::tempdir().unwrap();
@@ -276,7 +310,7 @@ fn preprojection_direct_nodes_are_exact_and_owned_facts_apply_by_node_identity()
             ..Default::default()
         })
         .collect::<Vec<_>>();
-    apply(&mut nodes, &facts);
+    apply(&mut nodes, &facts, UiLanguage::Ja);
     for (node, ordinal) in nodes.iter().zip([1, 0]) {
         let tool = node.presentation.blocks[0].tool.as_ref().unwrap();
         assert_eq!(tool.ordinal, Some(ordinal));
@@ -302,7 +336,7 @@ fn whole_response_candidate_range_is_bounded_and_uncertain_sources_stay_local() 
         node_id: "whole".into(),
         ..Default::default()
     }];
-    apply(&mut nodes, &facts);
+    apply(&mut nodes, &facts, UiLanguage::Ja);
     assert!(nodes[0].presentation.metadata_limited && nodes[0].presentation.details_omitted);
     let uncertain = read_nodes_tx(
         &db,
