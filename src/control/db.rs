@@ -5245,13 +5245,12 @@ mod writer_lane_audit_measurement {
     }
 
     #[test]
-    #[ignore = "opt-in read-only measurement; set SHELLBOY_AUDIT_DB and SHELLBOY_AUDIT_THREAD"]
+    #[ignore = "opt-in read-only measurement; set WRITER_AUDIT_DB and WRITER_AUDIT_THREAD"]
     fn measure_production_inspection_handlers() {
         let path = std::path::PathBuf::from(
-            std::env::var_os("SHELLBOY_AUDIT_DB").expect("verified disposable DB copy required"),
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
         );
-        let thread_id =
-            std::env::var("SHELLBOY_AUDIT_THREAD").expect("existing thread ID required");
+        let thread_id = std::env::var("WRITER_AUDIT_THREAD").expect("existing thread ID required");
         let db = open_inspection(&path).expect("open copy using production read-only connection");
         db.trace_v2(
             TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
@@ -5407,9 +5406,14 @@ mod writer_lane_audit_measurement {
             };
             let config = Config::parse("").expect("default config");
             let start = Instant::now();
-            let raw = crate::compaction::preview::read_tx(&tx, &thread_id, &args, &config)
-                .expect("production CompactPreview projection");
-            let _ = crate::compaction::preview::prepare(raw);
+            let result = crate::compaction::preview::read_tx(&tx, &thread_id, &args, &config);
+            if let Ok(raw) = result {
+                let _ = crate::compaction::preview::prepare(raw);
+                eprintln!("AUDIT kind=CompactPreview repeat={repeat} status=ok");
+            } else {
+                // Keep measuring the bounded production error path without dumping row data.
+                eprintln!("AUDIT kind=CompactPreview repeat={repeat} status=bounded_error");
+            }
             eprintln!(
                 "AUDIT kind=CompactPreview repeat={repeat} elapsed_us={}",
                 start.elapsed().as_micros()
@@ -5417,7 +5421,387 @@ mod writer_lane_audit_measurement {
             tx.commit().expect("close read transaction");
             report_sql(&db, "CompactPreview");
         }
+        let message_id: String = db.query_row(
+            "SELECT message_node_id FROM receipt WHERE target_thread_id=?1 ORDER BY created_at DESC LIMIT 1",
+            [&thread_id], |row| row.get(0),
+        ).expect("thread has a saved message");
+        let operation_id: Option<String> = db
+            .query_row(
+                "SELECT operation_id FROM operation_receipt ORDER BY rowid DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .expect("read operation receipt id");
+        let compact_list_args = CompactListArgs {
+            thread_id: Some(thread_id.clone()),
+            since: None,
+            until: None,
+            limit: 40,
+        };
+
+        for repeat in 1..=3 {
+            eprintln!("AUDIT_START kind=HistoryList repeat={repeat}");
+            let history_args = HistoryListArgs {
+                thread_id: thread_id.clone(),
+                excerpt_chars: 128,
+                limit: 40,
+                cursor: None,
+                run_id: None,
+                since: None,
+                state: None,
+            };
+            let start = Instant::now();
+            let _ =
+                history::list_nodes(&db, &history_args).expect("production HistoryList handler");
+            eprintln!(
+                "AUDIT kind=HistoryList repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&db, "HistoryList");
+
+            eprintln!("AUDIT_START kind=ThreadDeletePreview repeat={repeat}");
+            let preview_args = ThreadDeleteArgs {
+                thread_id: thread_id.clone(),
+                descendants: false,
+                preview_marker: None,
+            };
+            let start = Instant::now();
+            let _ = crate::deletion::preview(&db, &preview_args)
+                .expect("production ThreadDeletePreview handler");
+            eprintln!(
+                "AUDIT kind=ThreadDeletePreview repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&db, "ThreadDeletePreview");
+
+            eprintln!("AUDIT_START kind=ThreadGet repeat={repeat}");
+            let start = Instant::now();
+            let _ = thread_details(&db, &thread_id).expect("production ThreadGet handler");
+            eprintln!(
+                "AUDIT kind=ThreadGet repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&db, "ThreadGet");
+
+            eprintln!("AUDIT_START kind=RunGet repeat={repeat}");
+            let run_id: String = db
+                .query_row(
+                    "SELECT id FROM run WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1",
+                    [&thread_id],
+                    |r| r.get(0),
+                )
+                .expect("thread has run");
+            let start = Instant::now();
+            let _ = run_details(&db, &run_id).expect("production RunGet handler");
+            eprintln!(
+                "AUDIT kind=RunGet repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&db, "RunGet");
+
+            eprintln!("AUDIT_START kind=TurnGet repeat={repeat}");
+            let turn_id: String = db
+                .query_row(
+                    "SELECT id FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1",
+                    [&thread_id],
+                    |r| r.get(0),
+                )
+                .expect("thread has turn");
+            let start = Instant::now();
+            let _ = turn_details(&db, &turn_id).expect("production TurnGet handler");
+            eprintln!(
+                "AUDIT kind=TurnGet repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&db, "TurnGet");
+
+            eprintln!("AUDIT_START kind=HistoryGet repeat={repeat}");
+            let start = Instant::now();
+            let _ = crate::history::get_node(
+                &db,
+                &HistoryGetArgs {
+                    end_message_only: false,
+                    node_id: message_id.clone(),
+                    limit_bytes: 1024,
+                    cursor: None,
+                    encoding: "utf-8".into(),
+                },
+            )
+            .expect("production HistoryGet handler");
+            eprintln!(
+                "AUDIT kind=HistoryGet repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&db, "HistoryGet");
+
+            eprintln!("AUDIT_START kind=OperationGet repeat={repeat}");
+            let start = Instant::now();
+            if let Some(id) = &operation_id {
+                let _ = operation_details(&db, id, "writer-lane-audit")
+                    .expect("production OperationGet handler");
+                eprintln!(
+                    "AUDIT kind=OperationGet repeat={repeat} elapsed_us={}",
+                    start.elapsed().as_micros()
+                );
+                report_sql(&db, "OperationGet");
+            } else {
+                eprintln!(
+                    "AUDIT kind=OperationGet status=not_measured reason=no_operation_receipt"
+                );
+            }
+
+            eprintln!("AUDIT_START kind=CompactList repeat={repeat}");
+            let start = Instant::now();
+            let _ = crate::readback::compactions(&db, &thread_id, &compact_list_args)
+                .expect("production CompactList handler");
+            eprintln!(
+                "AUDIT kind=CompactList repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&db, "CompactList");
+
+            eprintln!(
+                "AUDIT kind=ShellGet status=not_measured reason=DB_backed_async_storage_reader_not_exercised_by_this_read_only_handler_harness"
+            );
+        }
+
         db.progress_handler(0, None::<fn() -> bool>)
             .expect("remove statement timeout");
+    }
+
+    #[test]
+    #[ignore = "opt-in rollback-only mutation audit; set WRITER_AUDIT_DB to the disposable copy"]
+    fn measure_thread_delete_rollback_audit() {
+        use rusqlite::OpenFlags;
+        let path = std::path::PathBuf::from(
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let mut db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open disposable copy read-write");
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(capture_sql),
+        );
+        arm_sql_timeout();
+        db.progress_handler(1_000, Some(sql_timed_out))
+            .expect("install statement timeout");
+        let thread_id: String = db.query_row(
+            "SELECT t.id FROM thread t WHERE t.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM run r WHERE r.thread_id=t.id AND r.state IN ('live','stopping')) AND NOT EXISTS(SELECT 1 FROM thread child WHERE child.parent_thread_id=t.id AND child.deleted_at IS NULL) AND (SELECT count(*) FROM thread_path p WHERE p.thread_id=t.id) BETWEEN 1 AND 40 ORDER BY (SELECT count(*) FROM thread_path p WHERE p.thread_id=t.id) DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        ).expect("disposable copy has an idle leaf thread");
+
+        for repeat in 1..=3 {
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            eprintln!("AUDIT_START kind=ThreadDeleteRollback repeat={repeat}");
+            let tx = db.transaction().expect("begin mutation transaction");
+            let start = Instant::now();
+            let _ = delete_thread(
+                &tx,
+                &ThreadDeleteArgs {
+                    thread_id: thread_id.clone(),
+                    descendants: false,
+                    preview_marker: None,
+                },
+                "2026-11-03T00:00:00Z",
+            )
+            .expect("production ThreadDelete handler");
+            eprintln!(
+                "AUDIT kind=ThreadDeleteRollback repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&tx, "ThreadDeleteRollback");
+            tx.rollback()
+                .expect("restore disposable copy after measurement");
+            let restored: bool = db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+                    [&thread_id],
+                    |row| row.get(0),
+                )
+                .expect("verify rollback restored target thread");
+            assert!(restored, "rollback must leave the measured target intact");
+        }
+        let node_id: String = db
+            .query_row(
+                "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1",
+                [&thread_id],
+                |row| row.get(0),
+            )
+            .expect("leaf thread has a path node");
+        for repeat in 1..=3 {
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let tx = db.transaction().expect("begin fork transaction");
+            let fork_id = uuid::Uuid::new_v4().to_string();
+            let args = ThreadForkArgs {
+                agents: None,
+                thread_id: thread_id.clone(),
+                node_id: node_id.clone(),
+                cwd: None,
+            };
+            let start = Instant::now();
+            history::fork_thread(&tx, &args, &fork_id, "2026-11-03T00:00:00Z")
+                .expect("production ThreadFork DB handler");
+            eprintln!(
+                "AUDIT kind=ThreadForkRollback repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&tx, "ThreadForkRollback");
+            tx.rollback().expect("rollback disposable ThreadFork");
+            let exists: bool = db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1)",
+                    [&fork_id],
+                    |row| row.get(0),
+                )
+                .expect("verify fork rollback");
+            assert!(!exists, "rollback must remove fork thread");
+        }
+        let cancel_message: Option<String> = db.query_row(
+            "SELECT r.message_node_id FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.state IN ('accepted','held') AND r.path_admission<>'admitted' AND t.deleted_at IS NULL ORDER BY r.rowid DESC LIMIT 1",
+            [], |row| row.get(0),
+        ).optional().expect("select pending message candidate");
+        if let Some(message_id) = cancel_message {
+            for repeat in 1..=3 {
+                SQL_TRACE
+                    .get_or_init(Default::default)
+                    .lock()
+                    .unwrap()
+                    .clear();
+                let tx = db.transaction().expect("begin cancel transaction");
+                let args = MessageCancelArgs {
+                    message_ids: vec![message_id.clone()],
+                };
+                let start = Instant::now();
+                let _ = crate::control::pending_messages::cancel_tx(
+                    &tx,
+                    &args,
+                    None,
+                    "2026-11-03T00:00:00Z",
+                )
+                .expect("production MessageCancel DB handler");
+                eprintln!(
+                    "AUDIT kind=MessageCancelRollback repeat={repeat} elapsed_us={}",
+                    start.elapsed().as_micros()
+                );
+                report_sql(&tx, "MessageCancelRollback");
+                tx.rollback().expect("rollback disposable MessageCancel");
+            }
+        } else {
+            eprintln!(
+                "AUDIT kind=MessageCancelRollback status=not_measured reason=no_pending_accepted_or_held_receipt"
+            );
+        }
+        db.progress_handler(0, None::<fn() -> bool>)
+            .expect("remove statement timeout");
+    }
+
+    #[test]
+    #[ignore = "opt-in rollback-only Store mutation audit on verified copy"]
+    fn measure_thread_set_and_message_send_rollback_audit() {
+        use rusqlite::OpenFlags;
+        let path = std::path::PathBuf::from(
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let root = tempfile::tempdir().expect("temporary Store worker fixture");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let worker = runtime
+            .block_on(crate::storage::DbWorker::open(
+                root.path().join("worker.db"),
+            ))
+            .unwrap();
+        let config = Config::parse("default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+        let store = Store::new(
+            worker.clone(),
+            Arc::new(config),
+            root.path().into(),
+            "writer-lane-audit".into(),
+        );
+        let mut db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(capture_sql),
+        );
+        arm_sql_timeout();
+        db.progress_handler(1_000, Some(sql_timed_out)).unwrap();
+        let thread_id: String = db
+            .query_row(
+                "SELECT id FROM thread WHERE deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("copy has live thread");
+
+        let mut thread_set_timings = Vec::new();
+        for repeat in 1..=3 {
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let tx = db.transaction().unwrap();
+            let args = ThreadSetArgs {
+                thread_id: Some(thread_id.clone()),
+                title: Some("audit-title".into()),
+                ..Default::default()
+            };
+            let start = Instant::now();
+            store
+                .set_thread(&tx, &args, None, "2026-11-03T00:00:00Z")
+                .expect("production ThreadSet handler");
+            let elapsed_us = start.elapsed().as_micros();
+            thread_set_timings.push(elapsed_us);
+            eprintln!("AUDIT kind=ThreadSetRollback repeat={repeat} elapsed_us={elapsed_us}");
+            report_sql(&tx, "ThreadSetRollback");
+            tx.rollback().unwrap();
+        }
+        eprintln!("AUDIT_TIMES kind=ThreadSetRollback values_us={thread_set_timings:?}");
+
+        for repeat in 1..=3 {
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let tx = db.transaction().unwrap();
+            let args = MessageSendArgs {
+                sender_label: None,
+                thread_id: Some(thread_id.clone()),
+                text: "writer lane audit".into(),
+                deliver: Deliver::default(),
+            };
+            let operation_id = format!("audit:{}", uuid::Uuid::new_v4());
+            let start = Instant::now();
+            store
+                .send(&tx, &args, None, &operation_id, "2026-11-03T00:00:00Z")
+                .expect("production MessageSend handler");
+            eprintln!(
+                "AUDIT kind=MessageSendRollback repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            report_sql(&tx, "MessageSendRollback");
+            tx.rollback().unwrap();
+        }
+        db.progress_handler(0, None::<fn() -> bool>).unwrap();
+        runtime.block_on(worker.shutdown()).unwrap();
     }
 }
