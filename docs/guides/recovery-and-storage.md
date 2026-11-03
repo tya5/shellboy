@@ -343,7 +343,7 @@ While the model's latest response asked for a tool (the tool loop is still
 open), Shellboy does not omit or spill earlier tool results: signed thinking is
 bound to the exact history before it. In that state an explicit overflow
 summarizes the active Turn instead (all its tool rounds become one summary, the
-latest round as text, user messages kept word for word), else the earlier
+latest round as text, after the user messages kept word for word), else the earlier
 Turns; the omission after transient failures waits and the failure retries
 unchanged. If the provider still rejects replayed thinking as bound to a
 different conversation, Shellboy resends once without earlier reasoning and

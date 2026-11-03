@@ -3570,7 +3570,7 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         assert_eq!(input[..=request], before[..=before_request], "①② unchanged");
         let tail = &input[request + 1..];
         assert!(tail.iter().all(|item| item.get("type").is_none_or(|t| t == "message")), "no call, result or reasoning after the edit: {tail:?}");
-        let notice = tail.iter().find(|item| item.to_string().contains("summary of the tool work in the active Turn")).expect("summary notice");
+        let notice = tail.iter().find(|item| item.to_string().contains("tool work below in the active Turn was summarized")).expect("summary notice");
         let text = notice.to_string();
         assert!(text.contains("STEP3") && text.contains("Latest tool round"), "④ as text: {text}");
         after.reply.send((200, answer("finished"))).unwrap();
