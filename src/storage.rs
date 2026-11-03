@@ -54,6 +54,8 @@ mod migration_integrity;
 #[cfg(test)]
 #[path = "storage/migration_startup_tests.rs"]
 mod migration_startup_tests;
+#[allow(dead_code)]
+mod statement_observation;
 pub(crate) const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 
 #[derive(Debug, thiserror::Error)]
