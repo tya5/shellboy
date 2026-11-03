@@ -203,6 +203,7 @@ pub(super) struct SessionInput {
 }
 impl SessionInput {
     pub fn new(width: Option<u8>, keyboard_enabled: bool) -> io::Result<Self> {
+        #[cfg_attr(windows, allow(unused_mut))]
         let mut input = Input::new()?;
         #[cfg(unix)]
         {
@@ -356,6 +357,55 @@ mod tests {
             Some(Event::Key(KeyCode::Up.into()))
         );
     }
+    #[test]
+    fn shifted_f3_is_not_a_cursor_report() {
+        let mut decoder = Decoder::default();
+        decoder.queries(true);
+        decoder.feed(b"\x1b[1;2R");
+        assert_eq!(
+            decoder.events.pop_front(),
+            Some(Event::Key(KeyEvent::new(
+                KeyCode::F(3),
+                KeyModifiers::SHIFT
+            )))
+        );
+        assert_eq!(decoder.width, Capability::Unmeasured);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn queued_escape_events_are_delivered_before_a_terminal_read_error() {
+        use std::os::fd::FromRawFd;
+        let mut descriptors = [0; 2];
+        // SAFETY: both descriptors are transferred to independently owned Files.
+        assert_eq!(unsafe { libc::pipe(descriptors.as_mut_ptr()) }, 0);
+        let read = unsafe { std::fs::File::from_raw_fd(descriptors[0]) };
+        let write = unsafe { std::fs::File::from_raw_fd(descriptors[1]) };
+        let mut input = Input {
+            decoder: Decoder::default(),
+            tty: read,
+            size: (0, 0),
+        };
+        input.decoder.feed(b"\x1bx\x1b[A");
+        drop(write);
+        assert_eq!(
+            input.poll(Duration::ZERO).unwrap(),
+            Some(Event::Key(KeyEvent::new(
+                KeyCode::Char('x'),
+                KeyModifiers::ALT
+            )))
+        );
+        assert_eq!(
+            input.poll(Duration::ZERO).unwrap(),
+            Some(Event::Key(KeyCode::Up.into()))
+        );
+        // Exercise the failing read directly: resize discovery may be unavailable
+        // when the unit-test process has no controlling terminal.
+        use std::io::Read;
+        assert_eq!(input.tty.read(&mut [0]).unwrap(), 0);
+        assert!(input.decoder.events.is_empty());
+    }
+
     #[test]
     fn inconsistent_measurement_is_not_a_guess() {
         let mut decoder = Decoder::default();

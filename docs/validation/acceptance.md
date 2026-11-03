@@ -9413,3 +9413,22 @@ those are checked. Strict locked all-target Clippy passed after that fix. Python
 checks196 pass; integration-layout/watchdog gates pass with103 suites. Rebased
 cargo check/tests, final-tip CI and external review are recorded in the issue
 handoff rather than claiming them before they finish.
+### #192 session-owned terminal input (2026-11-03)
+
+Design and decoder stages were published separately before session integration.
+Unix uses one session-owned reader, bounded outstanding capability requests,
+private CPR width measurements and crossterm-derived key decoding. Windows keeps
+native console events and does not issue VT capability queries. Missing replies
+remain unknown; cached width is only a baseline and only newly measured widths
+are persisted. The removed `ui.ambiguous_width` configuration is rejected.
+
+macOS integration checks passed: locked strict all-target Clippy; 36 decoder
+(including imported parser) tests, four reply-filter tests, four disposable-PTY
+tests, and four terminal-guard restoration tests. The PTY first-frame handshake
+withholds every response until a completed draw, then checks absent DA, late
+widths 1/2, inconsistent reports, paste and ordinary typing. All 189 Python script
+tests, integration registration/watchdog checks and language classification
+passed. These are synthetic fixtures, not real-terminal latency measurements.
+Further shifted-F3/queued-input and full binary cache tests, and three-OS CI,
+remain pending at this record point. No real provider, installed-binary changes,
+user data, or embedding calls are involved.
