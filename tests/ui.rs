@@ -2975,7 +2975,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
             && !shown.contains("HIDDEN_TAIL")
     );
     assert!(
-        shown.contains("TITLE06") && shown.contains("Ready for input"),
+        shown.contains("TITLE06") && shown.contains("入力できます"),
         "seven dense rows must preserve both application status rows: {shown}"
     );
     ui.event(key(KeyCode::End));
