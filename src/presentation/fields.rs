@@ -289,6 +289,8 @@ pub(crate) fn group(pointer: &str) -> (u8, &'static str) {
             | "observed_at"
             | "activity_at"
             | "cached_tokens"
+            | "input_tokens"
+            | "input_bytes"
     ) {
         return (1, "実行");
     }
@@ -325,6 +327,143 @@ pub(crate) fn group(pointer: &str) -> (u8, &'static str) {
     }
     (4, "その他")
 }
+/// F6 request size fields (#186) for the adopted attempt of an answer. The
+/// saved values are language-neutral: counts, JSON, or a fixed unknown marker.
+pub(crate) const ATTEMPT_INPUT_BYTES: &str = "/ui_model_attempt/input_bytes";
+pub(crate) const ATTEMPT_INPUT_TOKENS: &str = "/ui_model_attempt/input_tokens";
+pub(crate) const ATTEMPT_CACHED_TOKENS: &str = "/ui_model_attempt/cached_tokens";
+pub(crate) const ATTEMPT_ID: &str = "/ui_model_attempt/attempt_id";
+/// Not saved for this request (bytes before #186, or no request record).
+pub(crate) const NOT_RECORDED: &str = "未記録";
+/// The provider did not report this count.
+pub(crate) const NOT_REPORTED: &str = "未報告";
+pub(crate) const NOT_REPORTED_NO_REQUEST: &str = "未報告（要求の記録なし）";
+pub(crate) const NOT_REPORTED_AMBIGUOUS: &str = "未報告（要求との対応が一意でない）";
+
+/// The label of a request size field in `language`, if `key` is one.
+pub(crate) fn attempt_label(
+    key: &str,
+    language: crate::config::UiLanguage,
+) -> Option<&'static str> {
+    use crate::config::UiLanguage::{En, Ja};
+    Some(match (key, language) {
+        (ATTEMPT_INPUT_BYTES, Ja) => "入力のバイト数（UTF-8）",
+        (ATTEMPT_INPUT_BYTES, En) => "Input bytes (UTF-8)",
+        (ATTEMPT_INPUT_TOKENS, Ja) => "入力トークン（提供元の報告）",
+        (ATTEMPT_INPUT_TOKENS, En) => "Input tokens (provider-reported)",
+        (ATTEMPT_CACHED_TOKENS, Ja) => "キャッシュ済み入力トークン（提供元の報告）",
+        (ATTEMPT_CACHED_TOKENS, En) => "Cached input tokens (provider-reported)",
+        (ATTEMPT_ID, Ja) => "モデル要求ID（使用量の記録元）",
+        (ATTEMPT_ID, En) => "Model request ID (usage source)",
+        _ => return None,
+    })
+}
+
+/// The displayed value of a request size field. Bytes and tokens are shown
+/// separately as measured or reported; neither is ever derived from the other.
+pub(crate) fn attempt_value(
+    key: &str,
+    value: &str,
+    language: crate::config::UiLanguage,
+) -> Option<String> {
+    use crate::config::UiLanguage::En;
+    let unknown = |text: &str| -> Option<String> {
+        Some(
+            match (text, language) {
+                (NOT_RECORDED, En) => "Not recorded",
+                (NOT_REPORTED, En) => "Not reported",
+                (NOT_REPORTED_NO_REQUEST, En) => "Not reported (no request record)",
+                (NOT_REPORTED_AMBIGUOUS, En) => "Not reported (request not uniquely matched)",
+                (text, _) if text.parse::<u64>().is_ok() => return None,
+                (text, _) => text,
+            }
+            .to_owned(),
+        )
+    };
+    match key {
+        ATTEMPT_INPUT_BYTES => {
+            let Some(bytes) = serde_json::from_str::<Value>(value)
+                .ok()
+                .and_then(|saved| crate::model::wire_bytes::InputBytes::from_value(&saved))
+            else {
+                return unknown(value);
+            };
+            Some(input_bytes_text(&bytes, language))
+        }
+        ATTEMPT_INPUT_TOKENS | ATTEMPT_CACHED_TOKENS => match value.parse::<u64>() {
+            Ok(count) => Some(digits(count)),
+            Err(_) => unknown(value),
+        },
+        _ => None,
+    }
+}
+
+/// `合計 5,452 / システム 1,491 / ...`: the total, then every nonzero source.
+pub(crate) fn input_bytes_text(
+    bytes: &crate::model::wire_bytes::InputBytes,
+    language: crate::config::UiLanguage,
+) -> String {
+    use crate::config::UiLanguage::{En, Ja};
+    use crate::model::wire_bytes::Category::*;
+    let mut parts = vec![format!(
+        "{} {}",
+        match language {
+            Ja => "合計",
+            En => "Total",
+        },
+        digits(bytes.total)
+    )];
+    for category in crate::model::wire_bytes::Category::ALL {
+        let count = bytes.get(category);
+        if count == 0 {
+            continue;
+        }
+        let name = match (category, language) {
+            (System, Ja) => "システム",
+            (System, En) => "System",
+            (Instructions, Ja) => "指示",
+            (Instructions, En) => "Instructions",
+            (Context, Ja) => "Shellboy context",
+            (Context, En) => "Shellboy context",
+            (User, Ja) => "利用者",
+            (User, En) => "User",
+            (Assistant, Ja) => "モデルの発言",
+            (Assistant, En) => "Assistant",
+            (Reasoning, Ja) => "推論",
+            (Reasoning, En) => "Reasoning",
+            (ToolCall, Ja) => "ツール呼出し",
+            (ToolCall, En) => "Tool calls",
+            (ToolResult, Ja) => "ツール結果",
+            (ToolResult, En) => "Tool results",
+            (SpillPlaceholder, Ja) => "spill参照",
+            (SpillPlaceholder, En) => "Spill placeholders",
+            (Summary, Ja) => "要約",
+            (Summary, En) => "Summary",
+            (Notice, Ja) => "通知・イベント",
+            (Notice, En) => "Notices",
+            (Attachment, Ja) => "添付",
+            (Attachment, En) => "Attachments",
+            (Other, Ja) => "その他",
+            (Other, En) => "Other",
+        };
+        parts.push(format!("{name} {}", digits(count)));
+    }
+    parts.join(" / ")
+}
+
+/// A count with ASCII thousands separators.
+fn digits(count: u64) -> String {
+    let text = count.to_string();
+    let mut out = String::with_capacity(text.len() + text.len() / 3);
+    for (index, ch) in text.chars().enumerate() {
+        if index > 0 && (text.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 pub(crate) fn state_label(value: &str) -> &str {
     match value {
         "accepted" => "受付済み",

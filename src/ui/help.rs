@@ -477,8 +477,8 @@ impl Page {
             "F6",
             local!(
                 config.ui.language,
-                "会話の内容を選び、詳細・原文・IDを確認（/details）",
-                "Select conversation content to inspect details, original, and ID (/details)"
+                "会話の内容を選び、詳細・原文・ID・回答の要求サイズを確認（/details）",
+                "Select conversation content to inspect details, original, ID, and an answer's request size (/details)"
             ),
         );
         page.entry(

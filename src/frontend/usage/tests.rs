@@ -93,7 +93,15 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
         .call(move |db| read_tx(db, &requested))
         .await
         .unwrap();
-    assert_eq!(observations[0].sources, vec![("old".into(), Some(16000))]);
+    assert_eq!(
+        observations[0].sources,
+        vec![Source {
+            attempt: "old".into(),
+            input_tokens: Some(20000),
+            cached_tokens: Some(16000),
+            input_bytes: None,
+        }]
+    );
     assert_eq!(observations[5].sources.len(), 2);
     assert!(observations[6].sources.is_empty());
     apply(&mut nodes, observations);
@@ -168,9 +176,141 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        screen.contains("cached_tokens") && screen.contains("16000"),
+        screen.contains("Cached input tokens (provider-reported): 16,000")
+            && screen.contains("Input tokens (provider-reported): 20,000")
+            && screen.contains("Input bytes (UTF-8): Not recorded"),
         "{screen}"
     );
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+fn render_details(ui: &mut UiState, nodes: Vec<UiNode>) -> String {
+    ui.select_thread("t".into());
+    let generation = ui.view().generation;
+    ui.apply(UiUpdate::History {
+        pending: Default::default(),
+        read_revision: 0,
+        thread_id: "t".into(),
+        generation,
+        nodes,
+        before_cursor: None,
+        append: false,
+        first_ordinal: 0,
+        selection_revision: 1,
+        total_nodes: 1,
+    });
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    for key in [KeyCode::F(6), KeyCode::Enter] {
+        ui.event(Event::Key(KeyEvent::new(key, KeyModifiers::NONE)));
+    }
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 35)).unwrap();
+    terminal.draw(|frame| crate::ui::draw(frame, ui)).unwrap();
+    (0..35)
+        .map(|y| {
+            (0..160)
+                .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// #186: F6 shows the adopted request's measured bytes by source beside the
+/// provider-reported tokens, in both languages; unknown is never zero.
+#[tokio::test]
+async fn details_show_request_bytes_beside_reported_tokens_in_both_languages() {
+    use crate::model::wire_bytes::{Category, Label, measure};
+    let wire = json!({"input":[{"role":"user","content":"日本語の質問"},{"type":"function_call_output","output":"result"}],"model":"m"});
+    let bytes = measure(
+        &wire,
+        &[
+            ("/input/0".into(), Label::Whole(Category::User)),
+            ("/input/1".into(), Label::Whole(Category::ToolResult)),
+        ],
+    )
+    .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(&config, "").unwrap();
+    let owner = DataOwner::start(
+        Some(config),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    let manifest = json!({"input_bytes":bytes.to_value()}).to_string();
+    owner.db.call(move |db| {
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','p','m','now');
+        INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
+        INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
+        for (id, manifest, usage) in [
+            ("measured", manifest.as_str(), r#"{"input_tokens":4500,"input_tokens_details":{"cached_tokens":3000}}"#),
+            ("legacy", "{}", "{}"),
+        ] {
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at)VALUES(?1,'u',0,0,'p','m',0,'completed',?2,?3,'now')",rusqlite::params![id,manifest,usage])?;
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES(?1,'u','assistant_response','now','{}',2)",[id])?;
+            db.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES(?1,0,'message','completed','{}',?1)",[id])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    let mut nodes = ["measured", "legacy"].map(node);
+    enrich(&control, &mut nodes).await.unwrap();
+    assert_eq!(
+        field(&nodes[0], BYTES),
+        Some(&*bytes.to_value().to_string())
+    );
+    assert_eq!(field(&nodes[1], BYTES), Some(NOT_RECORDED));
+    assert_eq!(field(&nodes[1], TOKENS), Some(NOT_REPORTED));
+    let user = bytes.get(Category::User);
+    let tool = bytes.get(Category::ToolResult);
+    let other = bytes.get(Category::Other);
+    for (language, expected) in [
+        (
+            crate::config::UiLanguage::Ja,
+            vec![
+                format!(
+                    "入力のバイト数（UTF-8）: 合計 {} / 利用者 {user} / ツール結果 {tool} / その他 {other}",
+                    bytes.total
+                ),
+                "入力トークン（提供元の報告）: 4,500".into(),
+                "キャッシュ済み入力トークン（提供元の報告）: 3,000".into(),
+            ],
+        ),
+        (
+            crate::config::UiLanguage::En,
+            vec![
+                format!(
+                    "Input bytes (UTF-8): Total {} / User {user} / Tool results {tool} / Other {other}",
+                    bytes.total
+                ),
+                "Input tokens (provider-reported): 4,500".into(),
+                "Cached input tokens (provider-reported): 3,000".into(),
+            ],
+        ),
+    ] {
+        let mut config = (*control.store.config).clone();
+        config.ui.language = language;
+        let mut ui = UiState::new(&config, root.path().into());
+        let screen = render_details(&mut ui, vec![nodes[0].clone()]);
+        // Wide cells leave padding cells; compare without spaces.
+        let compact = |text: &str| text.replace(' ', "");
+        for line in &expected {
+            assert!(
+                compact(&screen).contains(&compact(line)),
+                "{line}\n{screen}"
+            );
+        }
+        let mut ui = UiState::new(&config, root.path().into());
+        let screen = render_details(&mut ui, vec![nodes[1].clone()]);
+        let unknown = match language {
+            crate::config::UiLanguage::Ja => "入力のバイト数（UTF-8）: 未記録",
+            crate::config::UiLanguage::En => "Input bytes (UTF-8): Not recorded",
+        };
+        assert!(compact(&screen).contains(&compact(unknown)), "{screen}");
+    }
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }

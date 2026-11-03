@@ -653,17 +653,21 @@ pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiE
 
 /// The saved request byte accounting (#186): measured UTF-8 bytes of the sent
 /// body by source. A bounded projection; never the manifest's other members.
-const INPUT_BYTES_SQL: &str = "CASE WHEN json_valid(a.input_manifest_json) THEN
+pub(crate) const INPUT_BYTES_SQL: &str = "CASE WHEN json_valid(a.input_manifest_json) THEN
              CASE WHEN json_type(a.input_manifest_json,'$.input_bytes')='object'
                   AND octet_length(json_extract(a.input_manifest_json,'$.input_bytes'))<=1024
              THEN json_extract(a.input_manifest_json,'$.input_bytes') END END";
 /// A valid saved accounting, or null (unrecorded, legacy or invalid): unknown,
 /// never zero.
 fn saved_input_bytes(saved: Option<String>) -> Value {
+    parse_input_bytes(saved).map_or(Value::Null, |bytes| bytes.to_value())
+}
+pub(crate) fn parse_input_bytes(
+    saved: Option<String>,
+) -> Option<crate::model::wire_bytes::InputBytes> {
     saved
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .and_then(|value| crate::model::wire_bytes::InputBytes::from_value(&value))
-        .map_or(Value::Null, |bytes| bytes.to_value())
 }
 /// Turns searched for the latest request, newest first, as in the cache
 /// comparison selection: one attempt index seek per Turn.

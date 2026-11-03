@@ -477,6 +477,19 @@ fn conversation_fields(node: &UiNode) -> Vec<PresentationField> {
     conversation_fields_for(node, UiLanguage::Ja)
 }
 fn conversation_fields_for(node: &UiNode, language: UiLanguage) -> Vec<PresentationField> {
+    let mut fields = answer_fields_for(node, language);
+    // The adopted request's size facts (#186): measured bytes and reported
+    // tokens, each localized on its own; never converted into each other.
+    for field in &mut fields {
+        if let Some(label) = crate::presentation::fields::attempt_label(&field.key, language) {
+            field.label = label.into();
+            field.display =
+                crate::presentation::fields::attempt_value(&field.key, &field.value, language);
+        }
+    }
+    fields
+}
+fn answer_fields_for(node: &UiNode, language: UiLanguage) -> Vec<PresentationField> {
     let fields = &node.presentation.fields;
     if node.presentation.kind != PresentationKind::Assistant {
         return fields.clone();
