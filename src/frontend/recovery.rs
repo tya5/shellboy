@@ -438,7 +438,7 @@ mod tests {
         enrich(&control, &mut nodes).await.unwrap();
         assert_eq!(
             nodes[0].presentation.blocks[0].text,
-            "直近の保存理由: provider: literal saved reason"
+            "Most recent saved reason: provider: literal saved reason"
         );
         assert!(
             nodes[0]
