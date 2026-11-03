@@ -1403,7 +1403,11 @@ mod startup_stage_tests {
     async fn startup_trace_has_only_fixed_noncontent_fields() {
         let root = tempfile::tempdir().unwrap();
         let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
-        diagnostics.record_startup_stage(crate::app::StartupStage::DatabaseMigration, std::time::Duration::from_millis(123), Some(22));
+        diagnostics.record_startup_stage(
+            crate::app::StartupStage::DatabaseMigration,
+            std::time::Duration::from_millis(123),
+            Some(22),
+        );
         diagnostics.shutdown().await;
         let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
         let row: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
