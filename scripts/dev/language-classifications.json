@@ -2778,5 +2778,25 @@
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
     "source_tokens_sha256": "82020571e79eac2ee9267b06c613b5764b50a82ee38ca71858a5e07c7c6af1b6"
+  },
+  "src/presentation/time_text.rs:2721e3380759d54f:1": {
+    "category": "a",
+    "reason": "Japanese elapsed-seconds label used by the legacy Japanese duration helper. The same UI message has an explicit English branch in presentation/messages.rs::Message::render producing ASCII s/suffixes. Source durations remain numeric and unchanged; no provider or persisted data is localized.",
+    "source_tokens_sha256": "385fcec8df673a58a4d57cf540ffe8fcf53658b6f5f7f64afcf1a70ddfeb33e3"
+  },
+  "src/presentation/time_text.rs:4c774c19875ca1ab:1": {
+    "category": "a",
+    "reason": "Japanese elapsed-minutes label used by the legacy Japanese duration helper. The same UI message has an explicit English branch in presentation/messages.rs::Message::render producing ASCII m/s units. Source durations remain numeric and unchanged.",
+    "source_tokens_sha256": "385fcec8df673a58a4d57cf540ffe8fcf53658b6f5f7f64afcf1a70ddfeb33e3"
+  },
+  "src/presentation/time_text.rs:8b298b31ccb1ddb2:1": {
+    "category": "a",
+    "reason": "Japanese elapsed-hours label used by the legacy Japanese duration helper. The same UI message has an explicit English branch in presentation/messages.rs::Message::render producing ASCII h/m units. Source durations remain numeric and unchanged.",
+    "source_tokens_sha256": "385fcec8df673a58a4d57cf540ffe8fcf53658b6f5f7f64afcf1a70ddfeb33e3"
+  },
+  "src/presentation/time_text.rs:46e6ab96cd7c9f26:1": {
+    "category": "a",
+    "reason": "Japanese generated missing-end-time label retained by the legacy Japanese ended_text API. The selected-language UI footer uses FooterText::EndedUnknown.localized(UiLanguage::En) for the same missing-time condition. Actual saved timestamps are formatted, not rewritten.",
+    "source_tokens_sha256": "385fcec8df673a58a4d57cf540ffe8fcf53658b6f5f7f64afcf1a70ddfeb33e3"
   }
 }
