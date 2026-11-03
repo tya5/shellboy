@@ -277,7 +277,8 @@ pub(super) async fn run(
             let result=match browser_result {
                 Some(Ok(raw))=>{
                     let project=views.clone();
-                    presentation_work(move||super::view_read::prepare(raw,sequence,&project)).await.map(|prepared|(prepared,sequence))
+                    let language=control.store.config.ui.language;
+                    presentation_work(move||super::view_read::prepare(raw,sequence,&project,language)).await.map(|prepared|(prepared,sequence))
                 },
                 Some(Err(error))=>Err(error),
                 None=>Err(ApiError::new(ErrorCode::InvalidState,"Visible observations unavailable")),
@@ -945,7 +946,7 @@ mod tests {
         let frame = project(visible, 80).unwrap();
         assert_eq!(frame.details.title, "coupled title");
         assert_eq!(frame.info.read_revision, sequence);
-        let prepared = view_read::prepare(facts, sequence, &tickets);
+        let prepared = view_read::prepare(facts, sequence, &tickets, crate::config::UiLanguage::Ja);
         let (updates, received) = std::sync::mpsc::sync_channel(16);
         view_read::complete(
             control.diagnostics(),

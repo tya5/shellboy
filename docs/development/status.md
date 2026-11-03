@@ -4168,3 +4168,9 @@ observations and clarifies that cold interactive startup includes owner startup.
 These are historical fake-model measurements, not new provider measurements.
 The historical sampler is not yet integrated into main; the guide identifies
 its exact source and workflow. Review and integration CI remain pending.
+
+### #152 Frontend Reader Localization (In Progress)
+
+History detail facts, Watch bounded fallbacks, and streaming rebase notices use
+the configured UI language. Persisted titles, bodies, and raw errors remain
+unchanged. Validation and three-OS CI for this batch are pending.

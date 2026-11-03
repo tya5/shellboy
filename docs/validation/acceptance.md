@@ -8962,3 +8962,11 @@ On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 history-interaction suites passed (24, 2, and 15 tests respectively). Final-tip three-OS CI run `41561161744` succeeded on UI/code/test SHA
 `499e764407` across Windows, macOS, and Ubuntu. This follow-up commit changes
 only validation documentation; the tested UI implementation is unchanged.
+
+### #152 Frontend Reader Localization
+
+The reader batch covers localized bounded-detail labels, Watch fallbacks, and
+streaming-to-saved-body correspondence notices. Tests include typed rebase
+failure cases and a bilingual Watch fallback with a user title identical to the
+Japanese fallback. Local test execution and three-OS CI remain pending; the
+three assigned files also retain Japanese fixture data and localized literals.
