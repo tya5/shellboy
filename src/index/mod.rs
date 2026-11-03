@@ -386,13 +386,16 @@ impl IndexService {
         }
         let mut cursor = None;
         loop {
-            let (result, changed) = self.database
+            let (result, changed) = self
+                .database
                 .call(move |db| Ok(queue::recover_authorization_page(db, cursor)))
                 .await
                 .map_err(db_error)?;
             self.publish_saved(changed);
             let (next, done) = result.map_err(db_error)?;
-            if done { break; }
+            if done {
+                break;
+            }
             cursor = next;
         }
         let cancel = self.stop.child_token();

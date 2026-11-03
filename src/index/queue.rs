@@ -424,7 +424,9 @@ pub(super) fn recover_authorization(db: &mut Connection) -> Result<(), StorageEr
     loop {
         let (result, _) = recover_authorization_page(db, cursor);
         let (next, done) = result?;
-        if done { return Ok(()); }
+        if done {
+            return Ok(());
+        }
         cursor = next;
     }
 }
@@ -444,19 +446,27 @@ pub(super) fn recover_authorization_page(
                 "SELECT key,length(CAST(key AS BLOB))+length(CAST(value AS BLOB)) FROM app_meta WHERE key>?1 AND key<?2 ORDER BY key LIMIT 1",
                 params![last, "index.auto/"], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional()?;
-            let Some((key, size)) = row else { return Ok((None, true)); };
+            let Some((key, size)) = row else {
+                return Ok((None, true));
+            };
             if size > RECOVERY_BYTES {
-                return Err(StorageError::InvalidInput("authorization recovery record exceeds byte limit".into()));
+                return Err(StorageError::InvalidInput(
+                    "authorization recovery record exceeds byte limit".into(),
+                ));
             }
             if count == RECOVERY_ROWS || (count > 0 && size > RECOVERY_BYTES - bytes) {
                 return Ok((Some(last), false));
             }
-            let value: String = db.query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |row| row.get(0))?;
+            let value: String =
+                db.query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |row| {
+                    row.get(0)
+                })?;
             let json: Value = decode_json(&value)?;
             if json.get("state").and_then(Value::as_str) == Some("running") {
                 let mut admission: AutoAdmission = decode_json(&value)?;
                 admission.state = "failed".into();
-                admission.error = Some("Index source preparation interrupted; retry explicitly".into());
+                admission.error =
+                    Some("Index source preparation interrupted; retry explicitly".into());
                 changed |= update_json_meta(db, &key, &admission)? > 0;
             }
             last = key;
@@ -837,7 +847,14 @@ mod metadata_tests {
     fn authorization_recovery_pages_restart_and_preserve_errors() {
         let mut db = recovery_db();
         for n in 0..300 {
-            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![format!("index.auto.{n:04}"), r#"{"node_id":"n","state":"running","error":null}"#]).unwrap();
+            db.execute(
+                "INSERT INTO app_meta VALUES(?1,?2)",
+                params![
+                    format!("index.auto.{n:04}"),
+                    r#"{"node_id":"n","state":"running","error":null}"#
+                ],
+            )
+            .unwrap();
         }
         let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT key,length(CAST(key AS BLOB))+length(CAST(value AS BLOB)) FROM app_meta WHERE key>?1 AND key<?2 ORDER BY key LIMIT 1", params!["index.auto.", "index.auto/"], |r| r.get(3)).unwrap();
         assert!(plan.contains("INDEX"), "{plan}");
@@ -845,22 +862,53 @@ mod metadata_tests {
         assert!(changed);
         let (cursor, done) = result.unwrap();
         assert!(!done);
-        assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE json_extract(value, '$.state')='failed'", [], |r| r.get::<_, i64>(0)).unwrap(), RECOVERY_ROWS);
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE json_extract(value, '$.state')='failed'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            RECOVERY_ROWS
+        );
         assert!(cursor.is_some());
         let (result, changed) = recover_authorization_page(&mut db, cursor);
         assert!(changed && !result.unwrap().1);
         recover_authorization(&mut db).unwrap();
-        assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE json_extract(value, '$.state')='running'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE json_extract(value, '$.state')='running'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
     }
 
     #[test]
     fn authorization_recovery_reports_commits_on_decode_and_size_errors() {
         let mut db = recovery_db();
-        db.execute("INSERT INTO app_meta VALUES(?1,?2)", params!["index.auto.a", r#"{"node_id":"n","state":"running","error":null}"#]).unwrap();
-        db.execute("INSERT INTO app_meta VALUES(?1,?2)", params!["index.auto.b", r#"{"state":"running"}"#]).unwrap();
+        db.execute(
+            "INSERT INTO app_meta VALUES(?1,?2)",
+            params![
+                "index.auto.a",
+                r#"{"node_id":"n","state":"running","error":null}"#
+            ],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO app_meta VALUES(?1,?2)",
+            params!["index.auto.b", r#"{"state":"running"}"#],
+        )
+        .unwrap();
         let (result, changed) = recover_authorization_page(&mut db, None);
         assert!(result.is_err() && changed);
-        db.execute("UPDATE app_meta SET value=?1 WHERE key=?2", params!["x".repeat(RECOVERY_BYTES as usize + 1), "index.auto.b"]).unwrap();
+        db.execute(
+            "UPDATE app_meta SET value=?1 WHERE key=?2",
+            params!["x".repeat(RECOVERY_BYTES as usize + 1), "index.auto.b"],
+        )
+        .unwrap();
         let (result, changed) = recover_authorization_page(&mut db, None);
         assert!(result.is_err() && !changed);
     }
@@ -868,9 +916,13 @@ mod metadata_tests {
     #[test]
     fn authorization_recovery_stops_at_byte_budget_and_save_error() {
         let mut db = recovery_db();
-        let payload = format!(r#"{{"node_id":"{}","state":"running","error":null}}"#, "x".repeat(600_000));
+        let payload = format!(
+            r#"{{"node_id":"{}","state":"running","error":null}}"#,
+            "x".repeat(600_000)
+        );
         for key in ["index.auto.a", "index.auto.b"] {
-            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, payload]).unwrap();
+            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, payload])
+                .unwrap();
         }
         let (result, changed) = recover_authorization_page(&mut db, None);
         assert!(changed);
