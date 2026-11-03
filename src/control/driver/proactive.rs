@@ -30,6 +30,8 @@ struct Evidence {
     input_tokens: u64,
     input_characters: Option<u64>,
     insufficient_prefix: bool,
+    exhausted_active: bool,
+    baseline_marks: Option<Vec<String>>,
 }
 
 /// Called at the request boundary while the Thread boundary guard is held and
@@ -91,9 +93,10 @@ pub(super) async fn maybe_compact(
                 return Ok(None);
             };
             let target_key = crate::compaction::CompactionKeys::new(&thread).automatic_target();
-            let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=4096", [&target_key], |row| row.get(0)).optional()?;
+            let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=1048576", [&target_key], |row| row.get(0)).optional()?;
             let mut insufficient_prefix = false;
             let mut exhausted_current_turn = false;
+            let mut baseline_marks = None;
             if let Some(mut pending) = pending.and_then(|s| serde_json::from_str::<Value>(&s).ok())
                 && let (Some(previous), Some(target)) = (pending["attempt"].as_str().map(str::to_owned), pending["target_tokens"].as_u64())
                 && previous != attempt
@@ -116,17 +119,18 @@ pub(super) async fn maybe_compact(
                         insufficient_prefix = true;
                     } else if pending["scope"] == "active_turn" && pending["turn"] == current_turn {
                         exhausted_current_turn = true;
+                        baseline_marks = serde_json::from_value(pending["marks"].clone()).ok();
                     }
                 }
             }
-            if exhausted_current_turn || (input_tokens < threshold && !insufficient_prefix) {
+            if input_tokens < threshold && !insufficient_prefix && !exhausted_current_turn {
                 return Ok(Some(Measurement::BelowThreshold));
             }
             let input_characters = db.query_row(
                 "SELECT CASE WHEN json_valid(input_manifest_json) AND json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END FROM model_attempt WHERE id=?1",
                 [attempt], |row| row.get::<_, Option<i64>>(0),
             )?.and_then(|n| u64::try_from(n).ok());
-            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix })))
+            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix, exhausted_active: exhausted_current_turn, baseline_marks })))
         })
         .await
         .map_err(storage_error);
@@ -214,14 +218,19 @@ pub(super) async fn maybe_compact(
             .as_ref()
             .is_none_or(|marks| marks.iter().any(|mark| mark.starts_with(kind))),
     };
-    let spill_new = !evidence.insufficient_prefix && has_kind("spill:");
-    let summary_new = !evidence.insufficient_prefix && has_kind("summary:")
+    let widened_active = evidence.exhausted_active && match (&evidence.baseline_marks, &marks) {
+        (Some(previous), Some(current)) => guard::has_new_marks(previous, current, "middle:"),
+        _ => false,
+    };
+    let spill_new = !evidence.insufficient_prefix && !evidence.exhausted_active && has_kind("spill:");
+    let summary_new = !evidence.insufficient_prefix
+        && has_kind("summary:")
         && !(marks.is_none()
             && budget
                 .guard
                 .as_ref()
                 .is_some_and(|guard| guard.blocks_unknown_summary(snapshot)));
-    let middle_new = has_kind("middle:");
+    let middle_new = if evidence.exhausted_active { widened_active } else { has_kind("middle:") };
     let any_summary_new = middle_new || summary_new;
     let no_growth = !spill_new && !any_summary_new;
     let ids = crate::diagnostics::DiagnosticIds {
@@ -318,7 +327,9 @@ pub(super) async fn maybe_compact(
     control.changed(&snapshot.thread);
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
-    let target_plan = evidence.input_characters.and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
+    let target_plan = evidence
+        .input_characters
+        .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
     let mut midturn = Value::Null;
     let prefer_active = evidence.insufficient_prefix || std::mem::take(&mut budget.prefix_adopted);
     let mut summary_scope = "";
@@ -530,7 +541,17 @@ pub(super) async fn maybe_compact(
     });
     // Record on the attempt whose reported usage triggered this decision, in the
     // existing automatic-compaction field and partial index (no new table).
-    let pending_target = if adopted { target_plan.map(|plan| json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":summary_scope,"turn":snapshot.turn}).to_string()) } else { None };
+    let baseline = if adopted && target_plan.is_some() && summary_scope == "active_turn" {
+        guard::candidates(control, &snapshot.thread, None).await.ok().flatten().map(|c| c.marks)
+    } else { None };
+    let pending_target = if adopted {
+        target_plan.and_then(|plan| {
+            let value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":summary_scope,"turn":snapshot.turn,"marks":baseline}).to_string();
+            (value.len() <= 1_048_576).then_some(value)
+        })
+    } else {
+        None
+    };
     let target_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_target();
     let body = observation.to_string();
     let attempt = evidence.attempt;

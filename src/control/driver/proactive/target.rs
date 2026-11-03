@@ -14,7 +14,10 @@ pub(super) fn plan(threshold: u64, input_tokens: u64, input_characters: u64) -> 
     let excess = input_tokens.saturating_sub(target_tokens) as u128;
     let chars = excess * input_characters as u128;
     let remove_characters = chars.div_ceil(input_tokens as u128).min(u64::MAX as u128) as u64;
-    Some(Plan { target_tokens, remove_characters })
+    Some(Plan {
+        target_tokens,
+        remove_characters,
+    })
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,7 +27,11 @@ pub(super) enum Verification {
 }
 
 pub(super) fn verify(target: u64, input: u64) -> Verification {
-    if input <= target { Verification::Met } else { Verification::Insufficient }
+    if input <= target {
+        Verification::Met
+    } else {
+        Verification::Insufficient
+    }
 }
 
 #[cfg(test)]
@@ -33,7 +40,13 @@ mod tests {
 
     #[test]
     fn calibrated_removal_uses_the_paired_request_and_rounds_up() {
-        assert_eq!(plan(200_000, 200_000, 800_000), Some(Plan { target_tokens: 160_000, remove_characters: 160_000 }));
+        assert_eq!(
+            plan(200_000, 200_000, 800_000),
+            Some(Plan {
+                target_tokens: 160_000,
+                remove_characters: 160_000
+            })
+        );
         assert_eq!(plan(5, 6, 7).unwrap().remove_characters, 3);
         assert_eq!(plan(200_000, 0, 800_000), None);
         assert_eq!(plan(200_000, 200_000, 0), None);
@@ -48,9 +61,11 @@ mod tests {
         // The old policy waited for 3-8 requests until 200K was crossed again.
         // A 184K fresh report is already insufficient and selects a wider plan.
         let usage = [184_622, 188_000, 195_000, 203_895];
-        assert_eq!(verify(first.target_tokens, usage[0]), Verification::Insufficient);
+        assert_eq!(
+            verify(first.target_tokens, usage[0]),
+            Verification::Insufficient
+        );
         assert!(usage[0] < threshold);
         assert_eq!(verify(first.target_tokens, 159_999), Verification::Met);
     }
-
 }

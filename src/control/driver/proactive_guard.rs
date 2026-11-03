@@ -207,6 +207,16 @@ impl Guard {
     }
 }
 
+pub(super) fn has_new_marks(previous: &[String], current: &[String], kind: &str) -> bool {
+    current.iter().filter(|mark| mark.starts_with(kind)).any(|mark| {
+        let Some((key, chars)) = parse_mark(mark) else { return false; };
+        match previous.binary_search_by(|old| mark_key(old).cmp(key)) {
+            Ok(index) => parse_mark(&previous[index]).is_some_and(|(_, old)| chars > old),
+            Err(_) => true,
+        }
+    })
+}
+
 fn hex_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
