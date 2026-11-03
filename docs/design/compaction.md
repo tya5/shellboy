@@ -618,6 +618,13 @@ nearest-request observations, not proof of causal intervals or of what each
 summary retained. The 160,000 target is the upper bound of the observed
 120,000-159,999 band and retains more context than the 8,000-14,000 outcomes.
 
+The #153 token-growth retry gate was replaced by #180's eligible-source witness:
+current `proactive.rs` clears that witness on a successful adoption. An adopted
+200K-to-190K reduction is therefore not a no-progress outcome; the next fresh
+report below 200K returns normally, and 10K of subsequent growth can cross the
+threshold again in a few requests. Neither gate required a useful post-adoption
+target.
+
 Calibrate the character-reduction plan from input tokens and serialized input
 characters recorded for the same completed request on the same connection and
 model. Use integer arithmetic and round the required reduction upward. This is a
