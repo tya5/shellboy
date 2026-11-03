@@ -116,10 +116,13 @@ struct Progress {
     last_rowid: i64,
     horizon: i64,
     revalidate_roots: bool,
+    #[serde(default)]
+    receipt_horizon: i64,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum Stage {
+    Receipts,
     Roots,
     Provenance,
     Sweep,
@@ -127,6 +130,7 @@ enum Stage {
 impl Stage {
     fn as_str(self) -> &'static str {
         match self {
+            Self::Receipts => "receipts",
             Self::Roots => "roots",
             Self::Provenance => "provenance",
             Self::Sweep => "sweep",
@@ -950,7 +954,7 @@ fn reset(tx: &Transaction<'_>, job: &str, root: i64) -> Result<()> {
             row.get(0)
         })
         .map_err(sql_error)?;
-    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Roots,last_rowid:0,horizon,revalidate_roots:false}).unwrap()]).map_err(sql_error)?;
+    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Receipts,last_rowid:0,horizon,revalidate_roots:false,receipt_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt",[],|r|r.get(0)).map_err(sql_error)?}).unwrap()]).map_err(sql_error)?;
     Ok(())
 }
 fn start_history(db: &mut Connection) -> Result<Option<String>> {
