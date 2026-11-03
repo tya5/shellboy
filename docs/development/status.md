@@ -61,8 +61,10 @@ to tool and notice rows; user, assistant, and received-response rows remain iner
 The running-work section keeps its independent click behavior. Links and key
 handling are unchanged. The branch is rebased onto current main (fd23d321, with
 c090fa79 as an ancestor). Formatting and the focused presentation (24), Details
-(2), and history-interaction (15) tests pass. The branch is not yet pushed or
-validated by three-OS CI.
+(2), and history-interaction (15) tests pass. The branch is pushed on `issue-177/tool-row-disclosure`. GitHub Actions run
+`41559188009` passed on code/test SHA `59256f8b` across Windows, macOS, and
+Ubuntu. This status-only follow-up will receive its own three-OS run before
+handoff.
 
 ## Paused index consumption (#173)
 
