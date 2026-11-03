@@ -1,7 +1,18 @@
-# Next release: terminal width configuration removal (draft)
+# Next release after v0.7.1: terminal width configuration migration
 
-Implementation pending. The `ui.ambiguous_width` option introduced in v0.7.0
-will be removed. Delete that key from existing configuration before upgrading:
-strict configuration parsing rejects unknown keys. Shellboy will measure terminal
-width on each launch without waiting for the reply, using the last successful
-measurement for the first frame when available. It will never cache a guess.
+Release identifier pending: the release owner must set the numeric version before
+publication. This note describes the implemented change, not a published release.
+
+The manual `ui.ambiguous_width` setting introduced in v0.7.0 is removed. It let
+users choose whether East Asian Ambiguous characters occupied one or two terminal
+columns. Shellboy now measures terminal capabilities at startup without waiting
+for replies before accepting input or drawing the first frame. A successful
+measurement cached for that terminal supplies the initial baseline; unavailable
+measurements remain unknown, with conservative fallback glyphs and widths.
+Shellboy never persists a guessed measurement.
+
+Before upgrading, remove only `ambiguous_width = ...` from the `[ui]` section of
+your configuration, keeping all other settings. No replacement setting is needed.
+The strict parser rejects the whole configuration if the obsolete key remains;
+it does not silently ignore the key or choose a default. If startup reports this
+unknown field, remove it and restart with the same configuration path.
