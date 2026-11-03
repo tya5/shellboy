@@ -847,6 +847,8 @@ mod metadata_tests {
         assert!(!done);
         assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE json_extract(value, '$.state')='failed'", [], |r| r.get::<_, i64>(0)).unwrap(), RECOVERY_ROWS);
         assert!(cursor.is_some());
+        let (result, changed) = recover_authorization_page(&mut db, cursor);
+        assert!(changed && !result.unwrap().1);
         recover_authorization(&mut db).unwrap();
         assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE json_extract(value, '$.state')='running'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
