@@ -3096,29 +3096,18 @@ Less certain choices, with recheck conditions:
 
 2026-11-03, user-approved for #188. When a provider explicitly identifies `usage_limit_reached` and supplies a valid reset time, skip automatic retries only if that reset is later than the complete remaining retry schedule; keep the ordinary retry policy for shorter resets or absent/invalid facts. Use existing recovery reason wording/symbols, preserve the fact and reset time, add no guessed values, settings, or provider fallback. Validate with synthetic responses and three-OS CI.
 
-## D-189: Reduce duplicate and queued native CI work (2026-11-03)
+## D-189: Reduce task-branch CI queueing (2026-11-03)
 
-User-approved. On `main` pushes, the `Rust checks` workflow asks the Actions API
-for completed runs on the exact `github.sha` and reuses only a same-repository,
-first-attempt successful run whose Ubuntu, macOS and Windows check jobs all
-succeeded. The small gate uses the existing `actions: read` `GITHUB_TOKEN`
-permission. Missing evidence, API errors, reruns, partial matrices, or reuse-only
-runs do not qualify; they run all three checks. The gate applies to main pushes,
-not manual dispatch.
-
+User-approved.
 Workflow dispatch on task branches defaults to Linux only. `all_oses=true` opts a
 task branch into all three OSes for Windows, PTY or path-specific work. `land/*`
-and `integration/*` always run all three; main runs all three unless exact-SHA
-reuse safely skips the already-qualified checks.
+and `integration/*` always run all three. The existing
+`windows_test_threads=4` Windows-only experiment and `=2` all-OS diagnostic
+remain unchanged.
 
-Reason: measured macOS queueing had 4.5 minutes median and 19 minutes maximum,
-and 13 duplicate main runs occurred on 2026-11-03. The change avoids waiting for
-macOS/Windows on ordinary task-branch iteration while preserving the full
-landing gate and avoiding a second native matrix for main SHAs already tested
-before landing.
+Reason: measured macOS queueing on task branches had 4.5 minutes median and
+19 minutes maximum. Linux-only default avoids that queue for ordinary task-branch
+iteration while preserving three-OS coverage for landing branches.
 
-Validation: dispatch on this task branch and confirm Linux-only default, then
-dispatch with `all_oses=true` and confirm all three OSes. The main reuse path
-cannot be induced directly on this task branch without changing the event/ref
-under test; unit tests cover API filtering and fallback, and the workflow wiring
-keeps the reuse job restricted to main pushes.
+Validation: dispatch on this task branch and confirm Linux-only default; retain
+the existing Windows-only (`=4`) and all-OS (`=2`) modes.
