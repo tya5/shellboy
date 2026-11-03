@@ -1266,7 +1266,8 @@ pub enum UiUpdate {
 }
 #[derive(Clone, Debug)]
 pub struct PendingSend {
-    command_cleared: Option<DraftSnapshot>,
+    cleared_draft: Option<DraftSnapshot>,
+    restored_revision: Option<u64>,
     pub snapshot: DraftSnapshot,
     pub status: ReceiptStatus,
     pub message: Option<String>,
@@ -3674,22 +3675,26 @@ impl UiState {
                 run_id,
             } => {
                 let active = self.view().draft.draft_id == draft_id;
-                if let Some(view) = self
-                    .views
-                    .values_mut()
-                    .find(|v| v.draft.draft_id == draft_id && v.draft.revision == revision)
+                if let Some(view) = self.views.values_mut().find(|v| {
+                    v.pending.get(&revision).is_some_and(|pending| {
+                        pending.snapshot.draft_id == draft_id && pending.snapshot.edit.is_some()
+                    })
+                }) && view.on_receipt(
+                    draft_id.clone(),
+                    revision,
+                    None,
+                    ReceiptStatus::Failed,
+                    Some("旧作業停止の確認が必要です".into()),
+                ) && view.pending[&revision].restored_revision == Some(view.draft.revision)
                 {
                     if let Some(edit) = &mut view.draft.edit {
                         edit.run_id = Some(run_id.clone());
                     }
-                    if let Some(pending) = view.pending.get_mut(&revision) {
-                        pending.status = ReceiptStatus::Failed;
-                        pending.message = Some("旧作業停止の確認が必要です".into());
-                    }
+                    let restored_revision = view.draft.revision;
                     if active {
                         self.set_confirmation(Confirmation::EditStop {
                             draft_id,
-                            revision,
+                            revision: restored_revision,
                             run_id,
                         });
                     }
@@ -3790,7 +3795,7 @@ impl UiState {
         let Some(pending) = view.pending.get_mut(&submission.revision) else {
             return;
         };
-        let Some(cleared) = &pending.command_cleared else {
+        let Some(cleared) = &pending.cleared_draft else {
             return;
         };
         if pending.status != ReceiptStatus::Accepting {
@@ -4241,11 +4246,7 @@ impl UiState {
         draft.literal_paste = false;
         draft.typed_prefix = 0;
         draft.edit = None;
-        let action = UiAction::DraftAttachments {
-            draft_id: draft.draft_id.clone(),
-            revision: draft.revision,
-            attachment_ids: vec![],
-        };
+        let action = self.view().draft_attachment_retention();
         self.deferred_actions.push(action);
         self.dirty = true;
     }
@@ -4257,11 +4258,7 @@ impl UiState {
         self.begin_edit();
         let draft = &mut self.active_view_mut().draft;
         draft.delete_at_cursor(backwards);
-        let action = UiAction::DraftAttachments {
-            draft_id: draft.draft_id.clone(),
-            revision: draft.revision,
-            attachment_ids: draft.attachments.iter().map(|a| a.id.clone()).collect(),
-        };
+        let action = self.view().draft_attachment_retention();
         self.deferred_actions.push(action);
         self.dirty = true;
     }
@@ -4536,7 +4533,8 @@ impl UiState {
                         original.revision,
                         PendingSend {
                             snapshot: original,
-                            command_cleared: Some(cleared),
+                            cleared_draft: Some(cleared),
+                            restored_revision: None,
                             status: ReceiptStatus::Accepting,
                             message: None,
                             source_node_id: None,
@@ -4609,6 +4607,17 @@ impl UiState {
             view.draft.revision += 1;
         }
         let draft = view.draft.clone();
+        // PendingSend owns the submitted copy while the worker waits for DB
+        // admission. The composer is already the next input, not a saved ACK.
+        view.draft.text.clear();
+        view.draft.attachments.clear();
+        view.draft.folds.clear();
+        view.draft.cursor = 0;
+        view.draft.literal_paste = false;
+        view.draft.typed_prefix = 0;
+        view.draft.edit = None;
+        view.draft.revision += 1;
+        let cleared = view.draft.clone();
         view.pending.retain(|_, pending| {
             !matches!(
                 pending.status,
@@ -4618,7 +4627,8 @@ impl UiState {
         view.pending.insert(
             draft.revision,
             PendingSend {
-                command_cleared: None,
+                cleared_draft: Some(cleared),
+                restored_revision: None,
                 snapshot: draft.clone(),
                 status: ReceiptStatus::Accepting,
                 message: None,
@@ -5033,17 +5043,7 @@ impl UiState {
                 {
                     self.begin_edit();
                     self.active_view_mut().draft.remove_attachment(argument);
-                    vec![UiAction::DraftAttachments {
-                        draft_id: self.view().draft.draft_id.clone(),
-                        revision: self.view().draft.revision,
-                        attachment_ids: self
-                            .view()
-                            .draft
-                            .attachments
-                            .iter()
-                            .map(|a| a.id.clone())
-                            .collect(),
-                    }]
+                    vec![self.view().draft_attachment_retention()]
                 } else if let Some(thread_id) = thread_id {
                     vec![UiAction::Command(Command::AttachmentRemove(
                         AttachmentRemoveArgs {

@@ -9124,3 +9124,38 @@ defaults to target schema 24; the Python test covers the argument defaults.
 This is a source comparison, not an executed upgrade test. Run the disposable
 synthetic upgrade test on the candidate; no candidate, tag, publication or
 installed-binary change is claimed by this preparation.
+
+## Slow-DB TUI submission responsiveness (#198)
+
+Synthetic fixtures only, branch `hotfix/tui-db-stall` from `f864c313`.
+New state/rendering tests cover immediate composer handoff, unchanged-input
+restoration on rejection, newer edits and attachments, edited requests, and
+late commit after an observed failure. The frontend regression holds a real
+foreground DB job behind a test-only channel gate; operation acknowledgement,
+DB-watch delivery, status delivery, next-input editing/rendering and truthful
+Submitting state are checked before release in both UI languages. Elapsed
+rendering uses injected monotonic instants; no assertion waits by sleeping.
+The existing raw DB debug wording is intentionally unchanged. Local validation
+and final three-OS CI results are pending. Real interactive terminal latency,
+minutes-long production history queries and provider traffic are not validated
+by these synthetic tests. No user database or installed binary is changed.
+Build-free checks on macOS: all 189 Python script tests passed; integration
+layout/watchdog policy, language classification consistency, append-only record
+deltas and `git diff --check` passed. The exact native-check tip/run and its
+conclusion must be checked separately at handoff; earlier branch CI is not
+validation of this change.
+Additional ownership coverage: next-input deletion retains pending image IDs in
+the existing lease declaration. Delayed edited-send confirmation targets the
+pending request and only confirms an untouched restored revision; the existing
+new-Run-confirmation integration regression remains part of the UI suite.
+Latest local macOS checks: strict `cargo clippy --locked --all-targets -- -D
+warnings` passed; `cargo test --locked --lib ui::` passed 760 tests (3 existing
+ignored tests); the channel-gated foreground-DB frontend regression passed in
+both languages. The UI integration subset and final exact-tip 3-OS CI remain
+pending at this record point. Legacy assertions now check immutable pending
+input and the new composer separately, preserving stale-generation and
+mismatched-projection rejection rather than weakening those checks.
+The final local UI integration subset also passed: 86 passed, 1 existing ignored
+(`cargo test --locked --test integration ui::`), including the new-Run edit
+confirmation regression. Only final-tip 3-OS CI and the explicitly untested
+interactive/production cases remain outstanding.

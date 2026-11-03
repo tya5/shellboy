@@ -786,7 +786,7 @@ mod tests {
                 "DB projection owns the saved input before its ACK"
             );
             assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
-            assert_eq!(ui.view().draft.text, "original newer");
+            assert_eq!(ui.view().draft.text, " newer");
             assert_eq!(ui.view().pending_messages.total, u64::from(!admitted));
         }
     }
@@ -957,6 +957,8 @@ mod tests {
                         total_nodes: 0,
                     }
                 };
+                ui.insert("next input", false);
+                let next = ui.view().draft.clone();
                 ui.apply(UiUpdate::SavedMessage {
                     draft_id: draft_id.clone(),
                     revision: *revision,
@@ -965,7 +967,8 @@ mod tests {
                     status: ReceiptStatus::Accepted,
                     history: Box::new(history),
                 });
-                assert_eq!(ui.view().draft.text, "original");
+                assert_eq!(ui.view().draft, next);
+                assert_eq!(ui.view().pending[revision].snapshot.text, "original");
                 assert!(ui.view().thread_id.is_none());
                 assert!(ui.view().pending.contains_key(revision));
             }
@@ -997,6 +1000,8 @@ mod tests {
             selection_revision: 0,
             total_nodes: 0,
         };
+        ui.insert("next input", false);
+        let next = ui.view().draft.clone();
         ui.active_view_mut().generation += 1;
         ui.apply(UiUpdate::SavedMessage {
             draft_id: draft_id.clone(),
@@ -1006,7 +1011,8 @@ mod tests {
             status: ReceiptStatus::Accepted,
             history: Box::new(history),
         });
-        assert_eq!(ui.view().draft.text, "original");
+        assert_eq!(ui.view().draft, next);
+        assert_eq!(ui.view().pending[revision].snapshot.text, "original");
         assert!(ui.view().thread_id.is_none());
         assert!(ui.view().pending.contains_key(revision));
     }

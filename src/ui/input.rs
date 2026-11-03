@@ -461,8 +461,8 @@ mod tests {
     fn clear_keeps_accepted_snapshots_and_rejects_late_receipts_while_custom_bindings_win() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.insert("original request", false);
-        ui.event(key(KeyCode::Enter, KeyModifiers::NONE));
         let revision = ui.view().draft.revision;
+        ui.event(key(KeyCode::Enter, KeyModifiers::NONE));
         let draft_id = ui.view().draft.draft_id.clone();
         ui.insert("\nnew draft\n".repeat(6).as_str(), true);
         ui.view_mut().draft.attachments.push(UiAttachment {

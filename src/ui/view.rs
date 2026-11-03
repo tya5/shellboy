@@ -64,6 +64,29 @@ pub struct ThreadView {
     pub(super) composer: composer::Composer,
 }
 impl ThreadView {
+    pub(super) fn draft_attachment_retention(&self) -> UiAction {
+        // The next composer's deletions cannot release a pending/restoreable
+        // send's images. Both local owners use the existing draft-image lease.
+        let attachment_ids = self
+            .draft
+            .attachments
+            .iter()
+            .chain(
+                self.pending
+                    .values()
+                    .filter(|pending| {
+                        pending.send.is_some() && pending.snapshot.draft_id == self.draft.draft_id
+                    })
+                    .flat_map(|pending| pending.snapshot.attachments.iter()),
+            )
+            .map(|attachment| attachment.id.clone())
+            .collect::<BTreeSet<_>>();
+        UiAction::DraftAttachments {
+            draft_id: self.draft.draft_id.clone(),
+            revision: self.draft.revision,
+            attachment_ids: attachment_ids.into_iter().collect(),
+        }
+    }
     pub(super) fn finish_saved_input(
         &mut self,
         draft_id: String,
@@ -1232,6 +1255,17 @@ impl ThreadView {
         {
             send.started_at = Instant::now();
         }
+        if pending.send.is_some()
+            && pending.status == ReceiptStatus::Accepting
+            && pending.source_node_id.is_none()
+            && matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled)
+            && pending.cleared_draft.as_ref() == Some(&self.draft)
+        {
+            let next = self.draft.revision + 1;
+            self.draft = pending.snapshot.clone();
+            self.draft.revision = next;
+            pending.restored_revision = Some(next);
+        }
         pending.status = status.clone();
         pending.message = message.clone();
         if let Some(thread_id) = thread_id {
@@ -1245,7 +1279,11 @@ impl ThreadView {
                 | ReceiptStatus::Applied
                 | ReceiptStatus::Completed
         );
-        if accepted && self.draft.draft_id == draft_id && self.draft.revision == revision {
+        if accepted
+            && self.draft.draft_id == draft_id
+            && (self.draft.revision == revision
+                || pending.restored_revision == Some(self.draft.revision))
+        {
             self.draft.text = String::new();
             self.draft.attachments = Vec::new();
             self.draft.folds = Vec::new();
@@ -3589,7 +3627,8 @@ mod footer85_tests {
             ui.active_view_mut().pending.insert(
                 revision,
                 PendingSend {
-                    command_cleared: None,
+                    cleared_draft: None,
+                    restored_revision: None,
                     snapshot: draft.clone(),
                     status,
                     message: None,

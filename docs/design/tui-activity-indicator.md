@@ -153,3 +153,44 @@ provider response or input content is logged. These events share the existing
 best-effort bounded queue and can be dropped under pressure; a missing pair is
 not evidence that no compaction occurred. The older initial-scope statement above
 excluding a compaction indication is superseded by this section.
+
+## Slow foreground DB jobs (#198)
+
+Submitting is a local, uncommitted request, not a successful save. On submission,
+the existing PendingSend owns the immutable original (including attachments and
+edit target); the composer immediately becomes a new revision for the next input.
+No UI or frontend-loop DB wait is introduced. The send worker can wait in
+`prepare_draft_submission` and ordered send admission; the paired saved projection
+still alone transfers ownership to persisted history/queue. A failed admission
+restores the original only if the cleared composer is unchanged. Newer edits are
+never overwritten; the existing restore route retains the original. Durable
+commit evidence after an observed failure clears an untouched automatic restore,
+but never newer human edits.
+
+The foreground DB watch and local animation remain independent of the writer
+queue. Preserve the existing DB debug item and its wording (user scope update:
+no #198 label rewrite). Reserve the current phase's cells before fitting that
+trailing item: a long compiler-derived debug identifier must not erase the
+conversation state. Keep the same two footer rows and existing glyphs. Persisted
+activity cannot advance before a DB commit; do not invent progress from a clock.
+
+The regression hook holds a real foreground closure with an explicit channel
+gate, with drop releasing it on failure. Tests receive the operation/status/watch
+updates while that gate is still closed, edit and render the next input, and
+release the gate before checking the late saved projection. Inject monotonic
+instants for elapsed rendering; no wall-clock sleep establishes an assertion.
+This does not speed up history SQL (#164) or establish real-terminal latency.
+
+The status-loss bug also involved span fitting, not a DB wait: shimmer splits
+its phase label into single-character styled spans. Applying whole-label
+whitespace normalization to each span treated the first space as truncation
+and discarded the rest of the phase. Cell fitting must preserve whitespace
+spans and their styles, truncating only at the available grapheme/cell boundary.
+Draft-image retention follows both local owners: attachment release declarations
+include the current composer and pending send snapshots. Deleting/clearing the
+next input cannot unpin an image needed by a delayed or failed send's restore.
+This reuses the existing draft-image leases, with no new queue or DB request.
+A late edited-send stop-confirmation is likewise matched to the pending request,
+not the next composer's revision. Restore the unchanged composer first and bind
+the confirmation to that restored revision. If newer input exists, keep it and
+the failed snapshot, without opening a confirmation for unrelated text.

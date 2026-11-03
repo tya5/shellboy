@@ -114,9 +114,10 @@ fn acceptance_clears_only_its_captured_draft() {
     text(&mut ui, "first");
     let actions = enter(&mut ui);
     let (draft_id, revision) = sent(&actions);
-    assert_eq!(ui.view().draft.text, "first");
+    assert!(ui.view().draft.text.is_empty());
+    assert_eq!(ui.view().pending[&revision].snapshot.text, "first");
     text(&mut ui, "next");
-    assert_eq!(ui.view().draft.text, "firstnext");
+    assert_eq!(ui.view().draft.text, "next");
     ui.apply(UiUpdate::Receipt {
         draft_id,
         revision,
@@ -124,7 +125,7 @@ fn acceptance_clears_only_its_captured_draft() {
         status: ReceiptStatus::Accepted,
         message: None,
     });
-    assert_eq!(ui.view().draft.text, "firstnext");
+    assert_eq!(ui.view().draft.text, "next");
     assert!(
         ui.view()
             .status
@@ -158,6 +159,7 @@ fn queue_rejection_and_save_failure_keep_text_and_snapshot() {
     let retried = enter(&mut ui);
     let (draft_id, new_revision) = sent(&retried);
     assert!(new_revision > old_revision);
+    let next = ui.view().draft.clone();
     ui.apply(UiUpdate::Receipt {
         draft_id,
         revision: old_revision,
@@ -165,8 +167,9 @@ fn queue_rejection_and_save_failure_keep_text_and_snapshot() {
         status: ReceiptStatus::Accepted,
         message: None,
     });
-    assert_eq!(ui.view().draft.revision, new_revision);
-    assert_eq!(ui.view().draft.text, "retain me");
+    assert_eq!(ui.view().draft, next);
+    assert!(ui.view().draft.text.is_empty());
+    assert_eq!(ui.view().pending[&new_revision].snapshot.text, "retain me");
 }
 #[test]
 fn paste_never_executes_or_sends_and_preserves_unicode_newlines() {
@@ -3398,7 +3401,7 @@ fn rejected_slash_quit_recovers_but_cannot_undo_acknowledged_shutdown() {
 }
 
 #[test]
-fn editing_while_accepting_keeps_text_attachments_and_counts_the_full_byte_limit() {
+fn editing_while_accepting_uses_next_inputs_own_byte_budget_and_preserves_frozen_copy() {
     let mut config = Config::default();
     config.limits.draft_bytes = 11;
     let mut ui = UiState::new(&config, cwd());
@@ -3416,13 +3419,14 @@ fn editing_while_accepting_keeps_text_attachments_and_counts_the_full_byte_limit
     });
     let actions = enter(&mut ui);
     let (draft_id, revision) = sent(&actions);
-    let attachments = ui.view().draft.attachments.clone();
-    ui.insert("abc", false);
-    assert_eq!(ui.view().draft.text, "日本\u{fffc}");
-    assert_eq!(ui.view().draft.attachments, attachments);
+    let attachments = ui.view().pending[&revision].snapshot.attachments.clone();
+    assert_eq!(attachments.len(), 1);
+    assert!(ui.view().draft.text.is_empty());
+    assert!(ui.view().draft.attachments.is_empty());
+    ui.insert("abcdefghijk", false);
+    assert_eq!(ui.view().draft.text, "abcdefghijk");
     ui.insert("!", false);
-    assert_eq!(ui.view().draft.text, "日本\u{fffc}!");
-    assert_eq!(ui.view().draft.attachments, attachments);
+    assert_eq!(ui.view().draft.text, "abcdefghijk");
     ui.apply(UiUpdate::Receipt {
         draft_id,
         revision,
@@ -3430,7 +3434,12 @@ fn editing_while_accepting_keeps_text_attachments_and_counts_the_full_byte_limit
         status: ReceiptStatus::Failed,
         message: Some("not accepted".into()),
     });
-    assert_eq!(ui.view().draft.text, "日本\u{fffc}!");
+    assert_eq!(ui.view().draft.text, "abcdefghijk");
+    assert!(ui.view().draft.attachments.is_empty());
+    assert_eq!(
+        ui.view().pending[&revision].snapshot.attachments,
+        attachments
+    );
     assert!(ui.view().status.contains(&format!("/restore {revision}")));
     assert!(!ui.view().status.contains("<revision>"));
     assert_eq!(ui.view().pending[&revision].snapshot.text, "日本\u{fffc}");

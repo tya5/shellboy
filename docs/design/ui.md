@@ -6,7 +6,18 @@ TUIはメインOSスレッドでRatatui/Crosstermを使う。端末描画/入力
 
 `run(&Config, Sender<UiAction>, Receiver<UiUpdate>)` に入る前にworkerから `Initialize{cwd}` を送る。UI自身はcurrent_dirすら呼ばない。終了はQuit要求後のShutdown更新まで画面を継続する。端末はRAIIでraw mode、alternate screen、bracketed paste、mouse captureを復元する。
 
-`UiState::event` と `apply` はテスト可能な純粋な状態操作。Sendはdraft ID/revision、Thread、cwd、本文、添付指定、connection/model/effortをsnapshot化する。DB受付までは表示を消さない。送信中の次の編集は新revisionの別本文になり、古いreceiptは新本文を消せない。失敗/取消しsnapshotはpendingに残し、復元できる。受付失敗後の再送は新revisionで受け付け、古い遅延受付から隔離する。receiptの受理・準備・保留・失敗・取消し・完了を文字で識別し、色だけに依存しない。受付済みを実行完了と表示しない。
+`UiState::event` and `apply` are pure, testable state operations. Send captures
+draft ID/revision, Thread, cwd, text, attachments, connection/model/effort. On
+submission (#198), the local pending snapshot owns that input immediately and
+the composer advances to a cleared next revision, without a DB round trip.
+Submitting means locally pending, not saved or completed. Later DB updates
+adopt saved facts without clearing newer editing. Precommit failures restore
+only an unchanged composer; other failed/cancelled snapshots remain available
+through restore. An untouched automatic restore can be cleared by later durable
+commit evidence, but newer human edits cannot. Retries use a new revision and
+remain isolated from older results. Distinguish accepted, preparing, held,
+failed, cancelled and completed in text, not color alone; acceptance is not
+execution completion. See [slow DB submissions](tui-activity-indicator.md#slow-foreground-db-jobs-198).
 
 Threadごとに下書き、node ID＋Unicode本文位置anchor、追従状態を持つ。切替で実行停止を要求しない。保存要求はworkerへ送る。履歴/Thread snapshotには選択generationを付け、古い結果を別画面へ適用しない。先頭へ移動すると前pageを非同期要求する。新着中も過去anchorを維持し、追従中/停止/停止中の新着を区別する。Ctrl+Endで追従を再開する。新しい未送信チャットを作っても元の下書きを残し、Thread一覧に「未送信の下書き」として選択可能にする。
 
@@ -194,11 +205,14 @@ height-zero and resized cases with rendered-frame tests.
 
 ### #190 DB worker activity in the existing footer
 
-While an active DB job exceeds one second, place the fixed, localized operation
+While an active DB job exceeds one second, place the existing DB debug operation
 label and elapsed time at the right edge of the existing first footer row. If
 `db_job_no_progress` state exists, show its first sorted operation instead as
 `DB! <operation> no progress` (Japanese: `DB! <operation> 進捗なし`). Otherwise
-show no DB text. Keep the current row count and reserve space by fitting
-secondary footer facts; do not move the indicator to a new line. The existing UI
+show no DB text. Keep the current row count. Reserve the primary phase before
+fitting the trailing DB item and secondary footer facts (#198), so a long debug
+identifier cannot erase conversation state. Keep the existing DB debug wording
+as requested by the user; label rewriting is deferred. Do not move the indicator
+to a new line. The existing UI
 clock updates the elapsed value, while the frontend receives job transitions
 through the in-memory watch snapshot.

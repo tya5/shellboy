@@ -2221,3 +2221,5 @@ async fn external_refresh_failure_keeps_exact_accepted_result_and_reports_failur
     let other = inspection_external::request_identity("thread:b", &"same request", 3).unwrap();
     assert!(inspection_external::retained_result(&slot, &other, kind).is_none());
 }
+
+mod db_stall;

@@ -4295,3 +4295,25 @@ Annotated tag `v0.7.0` was published at main `abe16a34` at 2026-11-03T09:03:20Z
 from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
 `rag init`. Anonymous download and `SHA256SUMS` verification covered all six
 public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
+
+## Slow-DB TUI submission responsiveness (#198)
+
+Branch `hotfix/tui-db-stall`, based on main `f864c313`. The send worker, not the
+UI thread, waits for DB admission/preparation. Previously the composer cleared
+only on the saved receipt/projection, and the DB debug item reserved the entire
+footer width before fitting the phase. Local pending snapshots now own submitted
+input immediately; next-input editing is independent, failed submissions restore
+only an unchanged composer, and late commits cannot clear newer edits. The phase
+keeps its cells ahead of the unchanged DB debug item. Per the user's update,
+label rewriting is out of scope; #172 review is deferred. No DB schema or Core
+lifecycle change. Validation and untested scope are recorded in acceptance.
+The disappearing phase also traced to `fit_spans`: its whole-label whitespace
+normalization discarded a shimmer's first space span and then the remaining
+phase. Span fitting now preserves whitespace/style and clips by cell width.
+Local strict Clippy, 760 UI unit tests and the deterministic bilingual DB-gate
+frontend regression passed. Delayed edit confirmations bind the pending request
+and an untouched restored revision; draft-image retention includes both local
+owners. Full UI integration and exact-tip three-OS CI are still pending at this
+record point; this branch is not integrated into main.
+The final local UI integration subset passed (86 tests; 1 existing ignored).
+Handoff still requires the final pushed tip's 3-OS CI, not an earlier run.

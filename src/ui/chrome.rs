@@ -287,8 +287,18 @@ pub(super) fn footer_lines_with_db(
     };
     let FooterTrailing { context, db_status } = trailing;
     let phase = view.footer_phase();
+    // The debug DB item must not crowd out the current conversation state.
+    let activity_width: usize = activity_spans.iter().map(|s| s.content.width()).sum();
+    let db_room = usize::from(width).saturating_sub(
+        activity_width.min(usize::from(width))
+            + if activity_width > 0 {
+                glyphs::separator().width()
+            } else {
+                0
+            },
+    );
     let db_status = db_status
-        .map(|status| fit(status, usize::from(width), false))
+        .map(|status| fit(status, db_room, false))
         .filter(|status| !status.is_empty());
     let status_reserve = db_status
         .as_ref()
@@ -658,8 +668,25 @@ fn fit_spans(
         if remaining == 0 {
             break;
         }
-        let full_width = span.content.width();
-        let text = fit(span.content.as_ref(), remaining, false);
+        // Shimmer emits one span per character. In particular, a whitespace
+        // span is a real cell, not an empty label or a truncation boundary.
+        let safe = crate::presentation::sanitize_plain(span.content.as_ref(), 0).0;
+        let full_width = safe.width();
+        let text = if full_width <= remaining {
+            safe
+        } else {
+            let mut text = String::new();
+            let mut cells = 1;
+            for grapheme in safe.graphemes(true) {
+                if cells + grapheme.width() > remaining {
+                    break;
+                }
+                text.push_str(grapheme);
+                cells += grapheme.width();
+            }
+            text.push_str(glyphs::ellipsis());
+            text
+        };
         let used = text.width();
         if used > 0 {
             fitted.push(Span::styled(text, span.style));
@@ -1689,5 +1716,53 @@ mod context_wait_footer_tests {
             .map(|s| s.content.as_ref())
             .collect::<String>();
         assert!(!text.contains("会話要約の完了待ち"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod span_fitting_tests {
+    use super::*;
+    use ratatui::{
+        style::{Color, Style},
+        text::Span,
+    };
+
+    #[test]
+    fn animated_character_spans_preserve_spaces_labels_and_styles() {
+        for label in ["* Accepting input", "* 送信受付中", "* Waiting for model"] {
+            let style = Style::default().fg(Color::Green);
+            let spans: Vec<_> = label
+                .chars()
+                .map(|ch| Span::styled(ch.to_string(), style))
+                .collect();
+            let fitted = fit_spans(spans, label.width());
+            assert_eq!(
+                fitted
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>(),
+                label
+            );
+            assert!(fitted.iter().all(|s| s.style == style));
+        }
+    }
+
+    #[test]
+    fn fitting_truncates_at_cell_boundaries_without_discarding_whitespace_spans() {
+        let style = Style::default().fg(Color::Green);
+        let spans = vec![
+            Span::raw("*"),
+            Span::raw(" "),
+            Span::styled("日本語", style),
+        ];
+        let fitted = fit_spans(spans, 5);
+        assert_eq!(
+            fitted
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<String>(),
+            format!("* 日{}", glyphs::ellipsis())
+        );
+        assert_eq!(fitted.last().unwrap().style, style);
     }
 }

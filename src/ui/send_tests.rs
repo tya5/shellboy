@@ -121,7 +121,10 @@ fn saved(
     });
 }
 fn footer(ui: &UiState) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(100, 2)).unwrap();
+    footer_at(ui, 100)
+}
+fn footer_at(ui: &UiState, width: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, 2)).unwrap();
     terminal
         .draw(|frame| {
             let area = frame.area();
@@ -132,7 +135,7 @@ fn footer(ui: &UiState) -> String {
     let mut text = String::new();
     for y in 0..2 {
         let mut x = 0;
-        while x < 100 {
+        while x < width {
             let symbol = buffer[(x, y)].symbol();
             text.push_str(symbol);
             x += unicode_width::UnicodeWidthStr::width(symbol).max(1) as u16;
@@ -428,16 +431,17 @@ fn unknown_activity_is_not_displayed_as_known_idle() {
 }
 
 #[test]
-fn noop_delete_during_send_preserves_revision_and_clears_after_commit() {
+fn noop_delete_of_next_input_during_send_preserves_revision_after_commit() {
     for (key, at_start) in [(KeyCode::Delete, false), (KeyCode::Backspace, true)] {
         let mut ui = ui();
         let (id, revision, _) = send(&mut ui, "synthetic queued input");
+        let next_revision = ui.view().draft.revision;
         if at_start {
             ui.active_view_mut().draft.cursor = 0;
         }
         ui.event(Event::Key(KeyEvent::new(key, KeyModifiers::NONE)));
-        assert_eq!(ui.view().draft.revision, revision);
-        assert_eq!(ui.view().draft.text, "synthetic queued input");
+        assert_eq!(ui.view().draft.revision, next_revision);
+        assert!(ui.view().draft.text.is_empty());
         saved(&mut ui, &id, revision, "m1", 1, false);
         assert_eq!(ui.view().pending_messages.total, 1);
         assert!(ui.view().draft.text.is_empty());
@@ -449,11 +453,275 @@ fn noop_delete_during_send_preserves_revision_and_clears_after_commit() {
 fn effective_delete_during_send_preserves_user_edit_after_commit() {
     let mut ui = ui();
     let (id, revision, _) = send(&mut ui, "synthetic queued input");
+    ui.insert("next input", false);
     ui.event(Event::Key(KeyEvent::new(
         KeyCode::Backspace,
         KeyModifiers::NONE,
     )));
     assert!(ui.view().draft.revision > revision);
     saved(&mut ui, &id, revision, "m1", 1, false);
-    assert_eq!(ui.view().draft.text, "synthetic queued inpu");
+    assert_eq!(ui.view().draft.text, "next inpu");
+}
+
+#[test]
+fn submitting_owns_a_frozen_copy_and_composer_accepts_only_the_next_input() {
+    for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+        let mut ui = ui_in(language);
+        let (id, revision, _) = send(&mut ui, "submitted copy");
+        assert!(ui.view().draft.text.is_empty());
+        assert_eq!(ui.view().pending[&revision].snapshot.text, "submitted copy");
+        assert_eq!(
+            ui.view().pending[&revision].status,
+            ReceiptStatus::Accepting
+        );
+        assert!(
+            ui.submit().is_empty(),
+            "Enter cannot resubmit the pending copy"
+        );
+        ui.insert("next input", false);
+        let next = ui.view().draft.clone();
+        saved(&mut ui, &id, revision, "saved", 1, false);
+        assert_eq!(
+            ui.view().draft,
+            next,
+            "late commit cannot clear new editing"
+        );
+    }
+}
+
+#[test]
+fn failed_submissions_restore_only_an_unchanged_composer_including_attachment_metadata() {
+    for edited in [false, true] {
+        let mut ui = ui();
+        ui.insert("original", false);
+        ui.apply(UiUpdate::ClipboardAttachment {
+            draft_id: ui.view().draft.draft_id.clone(),
+            revision: ui.view().draft.revision,
+            attachment: UiAttachment {
+                id: "attachment".into(),
+                kind: "file".into(),
+                path: "/synthetic".into(),
+                state: "ready".into(),
+                position: Some(8),
+            },
+        });
+        let original = ui.view().draft.clone();
+        let action = ui.submit().remove(0);
+        assert!(ui.view().draft.attachments.is_empty());
+        if edited {
+            ui.insert("newer!", false);
+            ui.delete(true);
+            assert!(ui.take_deferred_actions().iter().any(|action| matches!(action,
+                UiAction::DraftAttachments { attachment_ids, .. } if attachment_ids == &["attachment".to_owned()]
+            )), "editing the next input cannot unpin the pending snapshot's image");
+        }
+        ui.action_rejected(&action);
+        assert_eq!(
+            ui.view().draft.text,
+            if edited { "newer" } else { &original.text }
+        );
+        assert_eq!(ui.view().pending[&original.revision].snapshot, original);
+        if !edited {
+            assert_eq!(ui.view().draft.attachments, original.attachments);
+        }
+        assert!(ui.view().sending().is_none());
+        let restored = ui.view().draft.clone();
+        ui.action_rejected(&action);
+        assert_eq!(
+            ui.view().draft,
+            restored,
+            "duplicate failure must not restore twice"
+        );
+    }
+}
+
+#[test]
+fn long_unchanged_db_debug_item_cannot_hide_submitting_or_later_state_updates() {
+    use crate::storage::{ActiveDbJob, DbJobLane, DbWorkerActivity};
+    for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+        let mut ui = ui_in(language);
+        let _ = send(&mut ui, "queued while DB is busy");
+        let started = Instant::now();
+        ui.apply(UiUpdate::DbWorkerActivity(DbWorkerActivity {
+            active: Some(ActiveDbJob {
+                id: 1,
+                kind: "control::db::execute_kind::history_list",
+                lane: DbJobLane::Foreground,
+                started_at: std::time::SystemTime::now(),
+                started,
+            }),
+            no_progress: vec![],
+        }));
+        ui.animation_tick(started + Duration::from_secs(227));
+        let text = footer(&ui);
+        assert!(
+            text.contains(if language == crate::config::UiLanguage::En {
+                "Accepting input"
+            } else {
+                "送信受付中"
+            }),
+            "{text}"
+        );
+        assert!(
+            text.contains("DB control::db::execute kind::history list"),
+            "debug wording is unchanged: {text}"
+        );
+        ui.apply(UiUpdate::Status {
+            thread_id: None,
+            text: "live status update".into(),
+        });
+        assert!(footer(&ui).contains("live status update"));
+        ui.insert("next input", false);
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
+        let screen = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(screen.contains("next input"));
+        assert_eq!(
+            ui.view().pending.values().next().unwrap().status,
+            ReceiptStatus::Accepting
+        );
+    }
+}
+
+#[test]
+fn durable_commit_after_observed_failure_clears_only_untouched_automatic_restore() {
+    for edited in [false, true] {
+        let mut ui = ui();
+        let (id, revision, action) = send(&mut ui, "original request");
+        ui.action_rejected(&action);
+        assert_eq!(ui.view().draft.text, "original request");
+        if edited {
+            ui.insert(" changed", false);
+        }
+        saved(&mut ui, &id, revision, "saved-after-error", 1, false);
+        assert_eq!(
+            ui.view().draft.text,
+            if edited {
+                "original request changed"
+            } else {
+                ""
+            }
+        );
+        assert!(!ui.view().pending.contains_key(&revision));
+    }
+}
+
+#[test]
+fn edited_send_uses_the_same_local_handoff_and_failure_restore() {
+    let mut ui = ui();
+    ui.insert("edited request", false);
+    let target = EditRequestTarget {
+        thread_id: "t".into(),
+        node_id: "original".into(),
+        run_id: None,
+    };
+    ui.view_mut().draft.edit = Some(target.clone());
+    let revision = ui.view().draft.revision;
+    let action = ui.submit().remove(0);
+    assert!(
+        matches!(&action, UiAction::SendEdited { source_node_id, .. } if source_node_id == "original")
+    );
+    assert!(ui.view().draft.text.is_empty());
+    assert!(ui.view().draft.edit.is_none());
+    assert_eq!(
+        ui.view().pending[&revision].snapshot.edit,
+        Some(target.clone())
+    );
+    ui.action_rejected(&action);
+    assert_eq!(ui.view().draft.text, "edited request");
+    assert_eq!(ui.view().draft.edit, Some(target));
+}
+
+#[test]
+fn narrow_footer_preserves_primary_state_ahead_of_any_long_db_job() {
+    for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
+        let mut ui = ui_in(language);
+        let _ = send(&mut ui, "pending input");
+        for width in [24, 40, 60] {
+            ui.db_status = Some("DB control::db::execute kind::history list 3m47s".into());
+            let text = footer_at(&ui, width);
+            assert!(
+                text.contains(if language == crate::config::UiLanguage::En {
+                    "Accepting input"
+                } else {
+                    "送信受付中"
+                }),
+                "width {width}: {text}"
+            );
+            assert!(text.contains("DB"), "width {width}: {text}");
+            assert_eq!(text.lines().count(), 2);
+        }
+    }
+}
+
+#[test]
+fn autosave_and_thread_switch_own_next_draft_not_the_pending_request() {
+    let mut ui = ui();
+    let _ = ui.select_thread("t".into());
+    let (_, revision, action) = send(&mut ui, "pending request");
+    for request in ui.persist_active() {
+        assert!(
+            matches!(request, UiAction::SaveDraft { draft, .. } if draft.text.is_empty() && draft.revision > revision)
+        );
+    }
+    ui.insert("new input", false);
+    let key = ui.active.clone();
+    let actions = ui.select_thread("other".into());
+    assert!(
+        actions
+            .iter()
+            .any(|a| matches!(a, UiAction::SaveDraft { draft, .. } if draft.text == "new input"))
+    );
+    ui.insert("other thread input", false);
+    ui.action_rejected(&action);
+    assert_eq!(ui.view().draft.text, "other thread input");
+    assert_eq!(ui.views[&key].draft.text, "new input");
+    assert_eq!(
+        ui.views[&key].pending[&revision].snapshot.text,
+        "pending request"
+    );
+    assert!(matches!(
+        ui.views[&key].pending[&revision].status,
+        ReceiptStatus::Failed
+    ));
+}
+
+#[test]
+fn delayed_edit_confirmation_restores_only_the_untouched_composer() {
+    for edited in [false, true] {
+        let mut ui = ui();
+        ui.insert("edited original", false);
+        ui.view_mut().draft.edit = Some(EditRequestTarget {
+            thread_id: "old".into(),
+            node_id: "original".into(),
+            run_id: None,
+        });
+        let draft_id = ui.view().draft.draft_id.clone();
+        let revision = ui.view().draft.revision;
+        let _ = ui.submit();
+        if edited {
+            ui.insert("next input", false);
+        }
+        ui.apply(UiUpdate::EditConfirmationRequired {
+            draft_id,
+            revision,
+            run_id: "new-run".into(),
+        });
+        if edited {
+            assert_eq!(ui.view().draft.text, "next input");
+            assert!(ui.confirmation.is_none());
+        } else {
+            assert_eq!(ui.view().draft.text, "edited original");
+            assert!(
+                matches!(&ui.confirmation, Some(Confirmation::EditStop { revision: restored, .. }) if *restored == ui.view().draft.revision && *restored > revision)
+            );
+        }
+        assert_eq!(ui.view().pending[&revision].status, ReceiptStatus::Failed);
+    }
 }

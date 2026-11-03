@@ -522,7 +522,10 @@ mod tests {
         )));
         assert!(matches!(actions.first(), Some(UiAction::Send { .. })));
         ui.action_rejected(&actions[0]);
-        assert_eq!(ui.view().draft, snapshot);
+        let mut restored = ui.view().draft.clone();
+        assert!(restored.revision > snapshot.revision);
+        restored.revision = snapshot.revision;
+        assert_eq!(restored, snapshot);
         ui.insert("編集", false);
         ui.slash(&format!("/restore {}", snapshot.revision));
         let restored = &ui.view().draft;
