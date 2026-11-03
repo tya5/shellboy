@@ -93,7 +93,7 @@ pub struct MutationResult {
     pub compact_threads: Vec<String>,
 }
 impl MutationResult {
-    fn value(result: impl Serialize) -> Result<Self> {
+    pub(super) fn value(result: impl Serialize) -> Result<Self> {
         Ok(Self {
             result: serde_json::to_value(result)
                 .map_err(|_| error(ErrorCode::InvalidState, "cannot serialize operation result"))?,
@@ -1284,6 +1284,7 @@ impl Store {
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }
+            Command::MessageReply(args) => self.reply(tx, args, caller, operation_id, now),
             Command::MessageSend(args) => self.send(tx, args, caller, operation_id, now),
             Command::MessageGet(args) => {
                 MutationResult::value(message_details(tx, &args.message_id)?)
@@ -1603,7 +1604,7 @@ impl Store {
         Ok(result)
     }
 
-    fn send(
+    pub(super) fn send(
         &self,
         tx: &Transaction<'_>,
         args: &MessageSendArgs,
@@ -2172,6 +2173,11 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
     struct SavedAssignment {
         assignment: Assignment,
     }
+    let metadata: Value = row
+        .4
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| json!({}));
     let saved: Option<SavedAssignment> = row.4.and_then(|json| serde_json::from_str(&json).ok());
     let assignment = if row.2.is_none() {
         Assignment::Pending
@@ -2190,7 +2196,9 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
         assignment,
         run_id: row.2,
         turn_id: row.3,
-        answer_node_id: row.5,
+        expect_reply: metadata["expect_reply"] == true,
+        reply: metadata.get("reply").cloned(),
+        reply_to: metadata["reply_to"].as_str().map(str::to_owned),
     })
 }
 

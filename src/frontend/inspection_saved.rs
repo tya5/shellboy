@@ -419,7 +419,21 @@ pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
                 assignment,
                 run_id: raw.run,
                 turn_id: raw.turn,
-                answer_node_id: raw.answer,
+                expect_reply: raw
+                    .assignment
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                    .is_some_and(|v| v["expect_reply"] == true),
+                reply: raw
+                    .assignment
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                    .and_then(|v| v.get("reply").cloned()),
+                reply_to: raw
+                    .assignment
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                    .and_then(|v| v["reply_to"].as_str().map(str::to_owned)),
             };
             let mut value = encode(details)?;
             if assignment_limited {
