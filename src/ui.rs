@@ -8268,6 +8268,7 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
+            awaiting_reply: Vec::new(),
             last_end_message: None,
             last_input: None,
             last_compaction: None,

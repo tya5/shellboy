@@ -574,6 +574,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "Conversation · Deletion impact"
         ),
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
+        OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
         OperationId::MessageGet => local!(
             language,
@@ -724,6 +725,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイルを変更します。",
             "Change a Thread's display title, working folder, connection, model, reasoning effort, and instruction file."
+        ),
+        OperationId::MessageReply => local!(
+            language,
+            "受信した依頼へ一度だけ返信します。",
+            "Reply once to a received request."
         ),
         OperationId::MessageSend => local!(
             language,

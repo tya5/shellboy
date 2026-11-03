@@ -1164,8 +1164,8 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     },
     OperationSpec {
         id: OperationId::MessageReply,
-        label: "Message reply",
-        meaning: "Reply once to a specific received request.",
+        label: "依頼 · 返信",
+        meaning: "受信した依頼へ一度だけ返信します。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,

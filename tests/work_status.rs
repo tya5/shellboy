@@ -171,12 +171,9 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         })
         .await
         .unwrap();
-    assert_eq!(
-        applied.items[0].end_message_node_id.as_deref(),
-        Some("answer")
-    );
+    assert!(applied.items[0].end_message_node_id.is_none());
     assert!(
-        applied.items[0]
+        !applied.items[0]
             .targets
             .iter()
             .any(|c| matches!(c,Command::HistoryGet(a)if a.node_id=="answer"))

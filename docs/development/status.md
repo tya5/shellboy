@@ -4317,3 +4317,12 @@ owners. Full UI integration and exact-tip three-OS CI are still pending at this
 record point; this branch is not integrated into main.
 The final local UI integration subset passed (86 tests; 1 existing ignored).
 Handoff still requires the final pushed tip's 3-OS CI, not an earlier run.
+### #194 Step 2: Explicit Reply Core
+
+The reply-expected send flag, ordered durable admission notices, 128 pending
+reply cap, explicit reply mutation, reply receipt fields, reply waits, admitted
+duty cancellation, and Thread awaiting-reply projection are implemented on the
+step-1 base. Migration 25 is provisional until integration ordering is known.
+Run-end reminders/deletion outcomes and exec modes belong to subsequent steps.
+Synthetic local validation is in progress; three-OS CI and integration remain
+pending. No real-provider measurements are involved.

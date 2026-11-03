@@ -9159,3 +9159,11 @@ The final local UI integration subset also passed: 86 passed, 1 existing ignored
 (`cargo test --locked --test integration ui::`), including the new-Run edit
 confirmation regression. Only final-tip 3-OS CI and the explicitly untested
 interactive/production cases remain outstanding.
+### #194 Step 2: Reply Core
+
+Synthetic fixtures cover fresh/upgrade partial-index plans, once-only ordered
+admission with rollback, 128-duty capacity, replay and fingerprint conflicts,
+applied/pending and recipient authority checks, reply correlation, queued and
+admitted cancellation, terminal reply wait states, and observer cleanup.
+Terminal `ignored`/`recipient_deleted` facts are injected for wait tests; their
+production transitions are step 3. Final-tip three-OS CI remains pending.
