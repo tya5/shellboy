@@ -230,9 +230,13 @@ fn recovery_detail_localizes_only_generated_facts() {
         ..Default::default()
     };
     let english = plain(&recovery_lines(&snapshot, UiLanguage::En, 120, 16));
+    let mut fallback_recovery = snapshot.recovery.clone().unwrap();
+    fallback_recovery.stage = "recovery".into();
+    fallback_recovery.stage_kind = None;
+    fallback_recovery.stage_details = None;
     let fallback_only = ActivitySnapshot {
         phase: crate::activity::ActivityPhase::Recovery,
-        recovery: snapshot.recovery.clone(),
+        recovery: Some(fallback_recovery),
         ..Default::default()
     };
     let english_detail = plain(&recovery_lines(&fallback_only, UiLanguage::En, 120, 20));
