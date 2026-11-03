@@ -1,5 +1,9 @@
 # Development status
 
+## Startup timing CLI (#212)
+
+A read-only `shellboy startup [--last N]` command is being added over the existing bounded diagnostic log, without owner startup or new storage/workers. Initial synthetic-log unit tests pass (12 matching library tests including existing startup tests), and the standalone subprocess test passes. Two more parser/version guard tests were added afterward and await final rerun. Completion requires final local checks and both default-scope and all-OS CI on the pushed tip.
+
 ## Shell unknown argument policy
 
 Warn is the default; strict rejects individual calls. Argument failures no longer cancel otherwise valid calls in the same group. See [Control design](../design/control.md#shell-argument-policy). Three-OS CI and independent review are pending.

@@ -21,7 +21,7 @@ configuration worker has loaded the configured language; it then uses that
 language for the remaining startup stages, cancellation, and failure screen.
 Before configuration is available, terminal-adapter failures also use English.
 
-Startup timing diagnostics are JSON lines in `<data-dir>/logs/shellboy.log` (and rotated files). Search for `startup_stage`; the fixed `stage`, `elapsed_ms`, and optional `migration_version` describe the same stages shown at startup, without conversation content or IDs. Logging is bounded and best-effort: rotation, queue saturation, I/O failure, or termination can omit records, so missing is not zero. Configuration failures before a data directory and owner lock are available cannot be recorded there. Review logs for private data before sharing.
+Use `shellboy startup [--last N]` (default 5, maximum 20) to inspect recent startup-stage timings without starting or contacting the owner. It reads `<data-dir>/logs/shellboy.log` and rotated files, with a 16 MiB / 64-file bound. Output includes stage timestamps, elapsed milliseconds, migration versions, application versions when present, totals and incomplete-launch flags; it never emits other log fields. Logs are bounded and best-effort, so missing stages are not zero; the result explicitly warns that records may be missing. Configuration failures before a data directory and owner lock are available cannot be recorded.
 
 Language changes UI captions, explanations, command diagnostics, and generated
 status notices. It does not translate or rewrite conversation text, model/tool

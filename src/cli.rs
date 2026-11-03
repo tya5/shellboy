@@ -12,7 +12,7 @@ pub const MAX_STDIN_TEXT_BYTES: usize = wire::MAX_FRAME_BYTES;
     version,
     about = "Native conversational agent",
     disable_help_subcommand = false,
-    after_help = "Start here:\n  shellboy docs list\n  shellboy docs search --query background\n  shellboy docs get --id shellboy/agent-guide\n\nUse docs for operation guides, history for conversation evidence, and rag for explicit document/history search. Owner commands require the matching --data-dir; docs and rag do not start an owner."
+    after_help = "Start here:\n  shellboy docs list\n  shellboy docs search --query background\n  shellboy docs get --id shellboy/agent-guide\n\nUse docs for operation guides, history for conversation evidence, and rag for explicit document/history search. Owner commands require the matching --data-dir; docs, startup and rag do not start an owner."
 )]
 pub struct Cli {
     /// Data directory for the owner and RAG defaults; independent from shell/thread cwd.
@@ -47,6 +47,8 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: UsageCommand,
     },
+    /// Read startup-stage timings from bounded diagnostic logs without starting an owner.
+    Startup(crate::startup::StartupOptions),
     /// Read and search the guides bundled with this executable; no owner or API needed.
     Docs {
         #[command(subcommand)]
@@ -793,6 +795,7 @@ impl Cli {
             | CliCommand::Shutdown
             | CliCommand::Exec(_)
             | CliCommand::Docs { .. }
+            | CliCommand::Startup(_)
             | CliCommand::Rag(_)
             | CliCommand::Config { .. } => {
                 return Ok(None);

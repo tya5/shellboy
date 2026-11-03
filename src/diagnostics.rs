@@ -287,6 +287,7 @@ pub(crate) struct StartupStageTrace {
     pub elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub migration_version: Option<u32>,
+    pub app_version: &'static str,
 }
 
 #[derive(Serialize)]
@@ -891,6 +892,7 @@ impl Diagnostics {
                 stage,
                 elapsed_ms: millis(elapsed),
                 migration_version,
+                app_version: env!("CARGO_PKG_VERSION"),
             }),
         });
     }
@@ -1526,7 +1528,11 @@ mod startup_stage_tests {
         assert_eq!(row["startup_stage"]["stage"], "database_migration");
         assert_eq!(row["startup_stage"]["elapsed_ms"], 123);
         assert_eq!(row["startup_stage"]["migration_version"], 22);
-        assert_eq!(row["startup_stage"].as_object().unwrap().len(), 3);
+        assert_eq!(row["startup_stage"].as_object().unwrap().len(), 4);
+        assert_eq!(
+            row["startup_stage"]["app_version"],
+            env!("CARGO_PKG_VERSION")
+        );
         assert_eq!(row["ids"].as_object().unwrap().len(), 0);
     }
 }

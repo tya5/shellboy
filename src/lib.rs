@@ -38,6 +38,7 @@ pub mod request_inspect;
 pub mod serve;
 pub mod shell;
 pub mod status;
+pub mod startup;
 pub mod storage;
 pub mod terminal_links;
 pub(crate) mod tool_description;

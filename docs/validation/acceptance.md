@@ -1,5 +1,9 @@
 # Validation record
 
+## Startup timing CLI (#212; validation pending)
+
+Synthetic logs cover multiple launches, schema migration versions, app-version increase, rotation, missing final stages, and malformed lines; the CLI subprocess verifies no owner is started and unrelated log fields are not emitted. Focused unit tests passed (12 passed, 0 failed). The standalone integration test passed (1 passed, 0 failed); two additional parser/version guard tests await the final rerun; final local checks, default-scope CI, and all-OS CI are pending.
+
 ## End-message rename (#194 step 1)
 
 Branch `issue-194/step1-end-message`, code at `de9b618f` (tip `bc7175af` adds

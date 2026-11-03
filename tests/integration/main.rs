@@ -209,3 +209,6 @@ pub(crate) mod count_after;
 mod reply;
 #[path = "../thread_observation.rs"]
 mod thread_observation;
+
+#[path = "../startup_cli.rs"]
+mod startup_cli;

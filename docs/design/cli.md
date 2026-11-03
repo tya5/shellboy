@@ -1,6 +1,6 @@
 # User CLI syntax
 
-採用状態: parser実装済み。CLIの公開構文と設定解決を具体化する。`src/cli.rs` のClap parserは公開操作を既存の `protocol::Command` へ変換する。TUIと同じ操作を使い、独自のshell start、daemon、headless製品コマンドを追加しない。現行の操作契約は [protocol](protocol.md) と [CLIガイド](../guides/cli-reference.md) を参照する。初期CLI資料は非同梱。
+採用状態: parser実装済み。CLIの公開構文と設定解決を具体化する。`src/cli.rs` のClap parserはowner操作を既存の `protocol::Command` へ変換する。TUIと同じ操作を使い、独自のshell start、daemon、headless製品コマンドを追加しない。ownerを使わないローカル読取専用の `docs` / `startup` などはstandalone CLI routeで処理する。現行の操作契約は [protocol](protocol.md) と [CLIガイド](../guides/cli-reference.md) を参照する。初期CLI資料は非同梱。
 
 `Cli` はclone可能で、globalの `--data-dir PATH / --config PATH / --operation-id ID` をどのsubcommand階層でも受付する。無subcommandはTUI起動を表す。data-dir/configの基準パスと優先順位、接続CLIの設定非上書き、handshake後のoperation ID生成は起動/接続層が担当する。parserは設定やendpointへI/Oしない。`Cli::try_parse_from` を利用し、help/version表示は正常表示、操作のparse失敗は呼出し元がJSONのinvalid_argument/exit1へ変換する。Clapの自動exitは使用しない。
 
@@ -52,6 +52,10 @@ Control driver統合後、2026-10-24 macOSのrepo本体で `cargo test --test cl
 
 Shell readの `--encoding` は任意で、未指定時はexecutionの保存済みoutput encodingを維持する。明示指定時だけ再decode設定を変更する（`ShellReadArgs.encoding: Option<String>`）。起動ツールのUTF-8既定で保存されたexecutionでは引数省略もUTF-8となる。
 
+
+## Startup timing inspection (#212)
+
+`startup [--last N]` is a standalone read-only command, not a protocol operation. It resolves the same configuration/data-directory overrides as the owner, but never starts/connects to the owner or opens the database. It scans at most 16 MiB across the current log and up to 63 rotated `shellboy.log.N` files newest-first; `N` is 1..=20 and defaults to 5. Launches begin at `configuration`. Only allowlisted timestamps, stage names, elapsed milliseconds, app/migration versions and derived totals/flags reach JSON; malformed lines are skipped and reported. Output always warns records may be absent because diagnostics are best-effort, and a launch missing any required startup-stage record is marked incomplete. `--operation-id` is invalid.
 
 ## 受付結果照会の引数ID
 

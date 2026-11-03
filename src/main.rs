@@ -188,6 +188,7 @@ fn main() -> ExitCode {
             cli.command,
             Some(
                 CliCommand::Docs { .. }
+                    | CliCommand::Startup(_)
                     | CliCommand::Storage {
                         command: shellboy::cli::StorageCommand::Check
                     }
@@ -202,7 +203,7 @@ fn main() -> ExitCode {
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidArgument,
-                "--operation-id applies to owner RPCs; docs, rag, config and thread request are standalone commands",
+                "--operation-id applies to owner RPCs; docs, startup, rag, config and thread request are standalone commands",
             ),
             cli.operation_id,
         );
@@ -299,6 +300,9 @@ fn main() -> ExitCode {
             }
         }
         Some(CliCommand::Docs { command }) => standalone_response(docs_response(command)),
+        Some(CliCommand::Startup(options)) => standalone_response(runtime.block_on(
+            shellboy::startup::execute(options, cli.config, cli.data_dir, &cwd),
+        )),
         Some(CliCommand::Thread {
             command: shellboy::cli::ThreadCommand::Request(options),
         }) => standalone_response(runtime.block_on(shellboy::request_inspect::execute(
