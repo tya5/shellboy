@@ -403,6 +403,39 @@ fn tool_state_text(state: &str, code: Option<i64>) -> String {
     let (_, label) = tool_state_heading(state, code);
     code.map_or_else(|| label.into(), |code| format!("{label} {code}"))
 }
+fn short(text: &str, limit: usize) -> String {
+    let mut out: String = text.chars().take(limit).collect();
+    if out.len() < text.len() {
+        out.push_str(crate::ui::text_width::glyphs::select("…", "..."));
+    }
+    out
+}
+fn tool_reason(value: &str) -> String {
+    match ToolReasonKind::from_saved(value) {
+        ToolReasonKind::RunStopped => "作業停止のため取消".into(),
+        ToolReasonKind::PriorCallInterrupted => {
+            "先行する呼出しの失敗、または前景待機の中断により取消".into()
+        }
+        ToolReasonKind::PriorCallFailed => "先行する呼出しの失敗により未実行".into(),
+        ToolReasonKind::PriorOutputIncomplete => "先行する呼出しの出力が不完全なため未実行".into(),
+        ToolReasonKind::PriorWaitNewInput => {
+            "追加の指示で先行する呼出しの待機を解除したため未実行".into()
+        }
+        ToolReasonKind::PriorWaitHumanBackground => {
+            "利用者が先行する呼出しを背景へ移したため未実行".into()
+        }
+        ToolReasonKind::PriorWaitReleased => "先行する呼出しの待機結果により未実行".into(),
+        ToolReasonKind::HumanTurnInterrupted => "利用者がTurnを中断".into(),
+        ToolReasonKind::PriorTurnInterrupted => "利用者がTurnを中断したため未実行".into(),
+        ToolReasonKind::OwnerShutdown => "アプリ終了処理のため未実行".into(),
+        ToolReasonKind::GroupValidation => "呼出し群の検証失敗により未実行".into(),
+        ToolReasonKind::AdditionalInput => "追加の指示を受けて背景へ移行".into(),
+        ToolReasonKind::HumanBackgrounded => "利用者の操作で背景へ移行".into(),
+        ToolReasonKind::ForegroundTimeout => "前景の待機時間上限で背景へ移行".into(),
+        ToolReasonKind::OutputLimit => "出力上限に到達".into(),
+        ToolReasonKind::Unknown => sanitize_plain(&short(value, 256), 0).0,
+    }
+}
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresentationBlock {
     pub kind: BlockKind,
