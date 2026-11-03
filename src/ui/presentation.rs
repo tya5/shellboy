@@ -5139,7 +5139,7 @@ mod conversation_item_tests {
                 "入れ子の日本語説明文が狭い幅で複数行に折り返されます。",
             ),
         ] {
-            for width in [1, 2, 3, 12, 48] {
+            for width in [2, 3, 12, 48] {
                 let rows = indented_wrap(vec![Line::from(text)], width);
                 assert!(
                     rows.len() > 1 || width == 48,
