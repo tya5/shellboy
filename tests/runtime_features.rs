@@ -4713,18 +4713,18 @@ async fn proactive_prefix_shortfall_reconsiders_older_turn() {
         incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("turn A finished", 184_622))).unwrap();
         settled(&control, &target).await;
         send(&control, &target, "TURN_B_MARKER").await;
-        let mut saw_turn_a = false;
+        let mut saw_new_older = false;
         let mut next = incoming(&control, &mut receive).await;
         assert_eq!(next.body["tools"], json!([]), "older Turn A must become eligible despite the prior shortfall");
         for _ in 0..20 {
             if next.body["tools"] != json!([]) {
                 break;
             }
-            saw_turn_a |= next.body["input"].to_string().contains("TURN_A_MARKER");
+            saw_new_older |= next.body["input"].to_string().contains("old-1");
             next.reply.send((200, answer("## Goal\nOlder work retained"))).unwrap();
             next = incoming(&control, &mut receive).await;
         }
-        assert!(saw_turn_a, "summary must include the newly eligible older Turn");
+        assert!(saw_new_older, "summary must include the newly eligible older Turn");
         assert_ne!(next.body["tools"], json!([]), "summary requests must terminate");
         next.reply.send((200, answer_with_usage("turn B finished", 140_000))).unwrap();
         settled(&control, &target).await;
