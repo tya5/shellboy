@@ -41,7 +41,7 @@ Issue #170 adds schema21 derived event-retention lookup indexes and bounded
 maintenance of terminal-Run pending deliveries and unreferenced shell
 completion events. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
 
-Conversation schema25 records selected-path admission (13), Turn interruption
+Conversation schema26 records selected-path admission (13), Turn interruption
 and draft indexes (14), derived readback indexes (15), bounded Thread
 observation lookup indexes (16), the F parent lookup index (17), summary usage
 metadata accounting (18), the completed-attempt scope index (19), index-source
@@ -116,7 +116,7 @@ assistant text is the "end message", not a reply; public `answer_node_id` /
 an empty end message is a successful empty result (exit 0, not
 Schema-validated), while a Turn ended by
 Esc has no end message and exits 4 like a stopped Turn. No table, worker or queue is
-added; schema 25 adds one partial index when step 2 lands. Until then the
+added; schema 26 adds one partial index when step 2 lands. Until then the
 current schema and contracts below remain in force.
 
 ## Interrupted tool groups (#37)

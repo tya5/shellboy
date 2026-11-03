@@ -162,19 +162,19 @@ exactly 128/129 and record the size of a 128-entry reminder notice; no timing
 or size is assumed here. The cap is per recipient Thread because the recipient
 is the one that must work through the list (decision Q15).
 
-### Migration 25
+### Migration 26
 
 Main is at schema 24 (`0024_revisit_messages.sql`). The Run-end check, the cap
 check and the `thread get` list all ask "pending reply-expected messages of
 Thread T". Without an index that scans every receipt the Thread ever received,
-at every Run completion, which the hot-query rules forbid. Migration 25 adds
+at every Run completion, which the hot-query rules forbid. Migration 26 adds
 only:
 
 ```sql
 CREATE INDEX receipt_reply_pending ON receipt(target_thread_id)
   WHERE json_extract(result_json,'$.reply.state')='pending';
-INSERT INTO schema_migration(version,name) VALUES(25,'0025_reply_expected');
-PRAGMA user_version=25;
+INSERT INTO schema_migration(version,name) VALUES(26,'0026_reply_expected');
+PRAGMA user_version=26;
 ```
 
 It moves no data. Message lookups by ID use the existing
@@ -695,7 +695,7 @@ text. `message get` `answer_node_id` stays until step 2.
   owner guard), `conversation-redesign.md`, `effective-spec.md` (#65 and #74
   paragraphs).
 
-### Step 2 — Schema 25 and the reply core
+### Step 2 — Schema 26 and the reply core
 
 `message send --expect-reply` (flag in `MessageSendArgs`, `MessageAccepted`,
 the operation fingerprint), `message reply` (`Command::MessageReply`,
@@ -708,7 +708,7 @@ message items `answer_node_id` → `reply_node_id`,
 (`reply_expected`, `reply`), the 128 cap, and model-self-target rejection.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
-- Schema: `migrations/0025_reply_expected.sql`, `src/storage/current.sql`,
+- Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,
   `src/storage/migrate.rs`, `src/storage.rs`, `scripts/check-release-upgrade.py`,
   `scripts/tests/test_release_upgrade.py`, `scripts/error_catalog.py`.
 - Core: new `src/control/reply.rs` (state transitions, reply operation,
@@ -725,7 +725,7 @@ Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 - Guides: `cli-reference.md` (send flag, `message reply`, `message get`,
   `wait`, cancel outcome, `thread get`).
 - Designs: `protocol.md`, `cli.md`, `wait.md`, `pending-messages.md`,
-  `storage.md`, `effective-spec.md` (schema 25 in "Current conversation
+  `storage.md`, `effective-spec.md` (schema 26 in "Current conversation
   storage").
 
 ### Step 3 — Run-end rule and terminal outcomes

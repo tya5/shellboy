@@ -236,7 +236,7 @@ async fn history_attempt_index_migration_from_24_matches_fresh() {
     let expected = fresh.call(|db| Ok(schema(db)?)).await.unwrap();
     fresh.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX history_tool_group_attempt; DELETE FROM schema_migration WHERE version=25; PRAGMA user_version=24;").unwrap();
+    db.execute_batch("DROP INDEX history_tool_group_attempt; DROP INDEX receipt_reply_pending; DELETE FROM schema_migration WHERE version>=25; PRAGMA user_version=24;").unwrap();
     db.close().unwrap();
     let upgraded = DbWorker::open(&path).await.unwrap();
     assert_eq!(upgraded.call(|db| Ok(schema(db)?)).await.unwrap(), expected);

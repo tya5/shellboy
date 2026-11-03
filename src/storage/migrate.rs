@@ -278,19 +278,22 @@ mod activity_migration_tests {
     use super::*;
 
     #[test]
-    fn reply_pending_index_is_present_on_fresh_and_24_upgrade() {
+    fn reply_pending_index_is_present_on_fresh_and_25_upgrade() {
         for upgrade in [false, true] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             if upgrade {
-                db.execute_batch("DROP INDEX receipt_reply_pending; DELETE FROM schema_migration WHERE version=25; PRAGMA user_version=24;").unwrap();
-                run(&mut db, 24, &|_, _| {}, &|| {}).unwrap();
+                db.execute_batch("DROP INDEX receipt_reply_pending; DELETE FROM schema_migration WHERE version=26; PRAGMA user_version=25;").unwrap();
+                run(&mut db, 25, &|_, _| {}, &|| {}).unwrap();
             }
             assert_eq!(
                 db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                     .unwrap(),
                 crate::storage::SCHEMA_VERSION
             );
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=25", [], |row| row.get::<_, String>(0)).unwrap(), "0025_history_attempt_index");
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=26", [], |row| row.get::<_, String>(0)).unwrap(), "0026_reply_expected");
+            assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
             let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get(3)).unwrap();
             assert!(plan.contains("receipt_reply_pending"), "{plan}");
         }
@@ -309,7 +312,7 @@ mod activity_migration_tests {
             &|| {},
         )
         .unwrap();
-        assert_eq!(*observed.borrow(), vec![(1, 3), (2, 3), (3, 3)]);
+        assert_eq!(*observed.borrow(), vec![(1, 4), (2, 4), (3, 4), (4, 4)]);
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(

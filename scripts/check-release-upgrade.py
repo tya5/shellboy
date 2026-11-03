@@ -22,8 +22,8 @@ import time
 
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25)}
-PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24}
+           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26)}
+PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25}
 
 
 def read_only_uri(path, stopped=False):
@@ -106,8 +106,8 @@ def check_migration(db, before, start, target):
             assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
                 f'{name} differs from migration 23'
 
-    if target >= 25:
-        expected_index = DERIVED[25].read_text(encoding='utf-8').split(';')[0]
+    if target >= 26:
+        expected_index = DERIVED[26].read_text(encoding='utf-8').split(';')[0]
         actual = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='receipt_reply_pending'").fetchone()
         assert actual and ' '.join(actual[0].split()) == ' '.join(expected_index.split()), 'receipt_reply_pending missing or changed'
     if target >= 24:
@@ -143,12 +143,12 @@ def parse_args(argv=None):
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.7.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24), default=None,
+    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.7.1')
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default='0.7.1')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25), default=25,
-                        help='25 for the current candidate; 14/15/17/18/19/20/21/22/23/24 retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26), default=26,
+                        help='26 for the reply candidate; 14/15/17/18/19/20/21/22/23/24/25 retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:
