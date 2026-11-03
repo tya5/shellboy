@@ -336,7 +336,7 @@ fn terminal_admission_is_not_answered_or_cancelled_and_keeps_late_source_binding
     let (id, rev, _) = send(&mut ui, "interrupted after admission");
     receipt(&mut ui, &id, rev, ReceiptStatus::Accepted);
     receipt(&mut ui, &id, rev, ReceiptStatus::Applied);
-    assert!(ui.view().status.contains("会話へ反映済み"));
+    assert!(ui.view().status.contains("Applied to conversation"));
     assert!(!ui.view().status.contains("完了"));
     assert!(!ui.view().status.contains("取消"));
     assert!(!ui.view().status.contains("/restore"));
