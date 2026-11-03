@@ -1867,3 +1867,95 @@ async fn f8_history_list_keeps_captured_foreign_page_when_selected_path_changes(
     sender.try_send(UiAction::Quit).unwrap();
     super::control_tests::finish_bridge(bridge, &incoming).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn f8_history_repeat_hint_uses_service_language_and_renders_at_80_columns() {
+    let ja = "aから同じ履歴照会と引数を指定して再取得。現在状態の更新は元の結果を取り直しません";
+    let en = "Use a to enter the same query/args; refresh does not rerun.";
+    for language in ["en", "ja"] {
+        for command in ["history get", "history list"] {
+            let (root, owner, control, server) =
+                super::control_tests::fixture_with_language(language).await;
+            owner.db.call(|db| {
+                db.execute_batch("INSERT INTO node(id,kind,created_at,payload_revision,payload_json) VALUES('hint-node','user','now',7,'{\"role\":\"user\",\"content\":\"retained original\"}'); INSERT INTO thread_path VALUES('independent',0,'hint-node'); UPDATE thread SET cursor_node_id='hint-node' WHERE id='independent';")?;
+                Ok(())
+            }).await.unwrap();
+            let mut ui = UiState::new(&owner.loaded.config, root.path().into());
+            let (sender, receiver) = actions::channel(64);
+            let (updates, incoming) = std::sync::mpsc::sync_channel(128);
+            let bridge = tokio::spawn(super::run_with_clipboard(
+                control,
+                receiver,
+                updates,
+                root.path().into(),
+                owner,
+                server,
+                Arc::new(NoClipboard),
+            ));
+            dispatch(&sender, ui.select_thread("thread".into()));
+            let mut proofs = Vec::new();
+            pump_until(&mut ui, &sender, &incoming, &mut proofs, |ui, _| {
+                ui.view().thread_id.as_deref() == Some("thread")
+                    && !ui.view().navigation.is_loading()
+            })
+            .await;
+            key(&mut ui, &sender, KeyCode::F(8), KeyModifiers::NONE);
+            dispatch(&sender, ui.event(Event::Paste(command.into())));
+            key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+            if command == "history list" {
+                key(&mut ui, &sender, KeyCode::Char('u'), KeyModifiers::CONTROL);
+                dispatch(&sender, ui.event(Event::Paste("independent".into())));
+            } else {
+                dispatch(&sender, ui.event(Event::Paste("hint-node".into())));
+            }
+            key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
+            pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
+                p.last()
+                    .is_some_and(|p| field(&p.snapshot, "/current_source/repeat_result").is_some())
+            })
+            .await;
+            let snapshot = &proofs.last().unwrap().snapshot;
+            let expected = if language == "ja" { ja } else { en };
+            assert_eq!(
+                field(snapshot, "/current_source/repeat_result"),
+                Some(expected)
+            );
+            assert_eq!(
+                field(snapshot, "/current_source/nodes/0/node_id"),
+                Some("hint-node")
+            );
+            if language == "en" {
+                let index = snapshot
+                    .fields
+                    .iter()
+                    .position(|f| f.key == "/current_source/repeat_result")
+                    .unwrap();
+                // Retained results can preserve a selection after the current fields.
+                for _ in 0..256 {
+                    key(&mut ui, &sender, KeyCode::Up, KeyModifiers::NONE);
+                }
+                for _ in 0..index {
+                    key(&mut ui, &sender, KeyCode::Down, KeyModifiers::NONE);
+                }
+                let mut terminal =
+                    ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 40)).unwrap();
+                terminal
+                    .draw(|frame| crate::ui::draw(frame, &mut ui))
+                    .unwrap();
+                let buffer = terminal.backend().buffer();
+                let mut screen = String::new();
+                for y in 0..40 {
+                    for x in 0..80 {
+                        screen.push_str(buffer[(x, y)].symbol());
+                    }
+                    screen.push('\n');
+                }
+                let interior = screen.replace(['|', '│', '┃', '#'], " ");
+                let words = interior.split_whitespace().collect::<Vec<_>>().join(" ");
+                assert!(words.contains(&format!("repeat_result: {en}")), "{screen}");
+            }
+            sender.try_send(UiAction::Quit).unwrap();
+            super::control_tests::finish_bridge(bridge, &incoming).await;
+        }
+    }
+}
