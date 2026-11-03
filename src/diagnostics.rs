@@ -123,6 +123,8 @@ struct DbJobSlowTrace {
     kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     lane: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    requester: Option<&'static str>,
     queue_ms: u64,
     run_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,6 +137,8 @@ struct DbJobSlowTrace {
 struct DbJobActiveTrace {
     kind: String,
     lane: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    requester: Option<&'static str>,
     elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     statement_counters: Option<crate::storage::statement_observation::Counters>,
@@ -774,7 +778,7 @@ impl Diagnostics {
         queue: std::time::Duration,
         run: std::time::Duration,
     ) {
-        self.record_db_job_with_counters(kind, queue, run, None, None, None);
+        self.record_db_job_with_counters(kind, queue, run, None, (None, None), None);
     }
     pub(crate) fn record_db_job_with_counters(
         &self,
@@ -782,9 +786,10 @@ impl Diagnostics {
         queue: std::time::Duration,
         run: std::time::Duration,
         statement_counters: Option<crate::storage::statement_observation::Counters>,
-        lane: Option<&str>,
+        attribution: (Option<&str>, Option<&'static str>),
         backtrace_symbols: Option<Vec<String>>,
     ) {
+        let (lane, requester) = attribution;
         if queue < std::time::Duration::from_secs(1) && run < std::time::Duration::from_secs(1) {
             return;
         }
@@ -802,6 +807,7 @@ impl Diagnostics {
             db_job: Some(DbJobTrace::Slow(DbJobSlowTrace {
                 kind: kind.chars().take(160).collect(),
                 lane: lane.map(str::to_owned),
+                requester,
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
                 statement_counters,
@@ -822,6 +828,7 @@ impl Diagnostics {
         elapsed: std::time::Duration,
         statement_counters: Option<crate::storage::statement_observation::Counters>,
         backtrace_symbols: Option<Vec<String>>,
+        requester: Option<&'static str>,
     ) {
         self.enqueue_record(Record {
             event: DiagnosticEvent::DbJobActive,
@@ -837,6 +844,7 @@ impl Diagnostics {
             db_job: Some(DbJobTrace::Active(DbJobActiveTrace {
                 kind: kind.chars().take(160).collect(),
                 lane: lane.into(),
+                requester,
                 elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
                 statement_counters,
                 backtrace_symbols,

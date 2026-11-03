@@ -166,6 +166,7 @@ pub(crate) struct NoProgressJob {
 struct ActiveJobState {
     job: ActiveDbJob,
     slow_reported: bool,
+    requester: Option<&'static str>,
     counters: Option<Arc<Mutex<statement_observation::Counters>>>,
     backtrace: Option<statement_observation::SlowBacktrace>,
 }
@@ -195,6 +196,7 @@ enum Command {
         queued_at: Instant,
         kind: &'static str,
         lane: Lane,
+        requester: Option<&'static str>,
     },
     Shutdown,
 }
@@ -293,6 +295,7 @@ impl ActiveJobGuard {
                 started,
             },
             slow_reported: false,
+            requester: None,
             counters: None,
             backtrace: None,
         });
@@ -506,6 +509,7 @@ impl DbWorker {
         connection: &mut Connection,
         kind: &str,
         queued_at: Instant,
+        requester: Option<&'static str>,
         operation: impl FnOnce(&mut Connection) -> T,
     ) -> T {
         let started = Instant::now();
@@ -543,6 +547,7 @@ impl DbWorker {
                                 elapsed,
                                 snapshot,
                                 capture.symbols(),
+                                requester,
                             );
                         }
                     }
@@ -572,7 +577,7 @@ impl DbWorker {
                 queue,
                 run,
                 counters,
-                Some("inspection"),
+                (Some("inspection"), requester),
                 backtrace.symbols(),
             );
         }
@@ -635,6 +640,7 @@ impl DbWorker {
                 elapsed,
                 counters,
                 active.backtrace.clone(),
+                active.requester,
             )
         };
         let Ok(mut limit) = self.shared.slow_limit.try_lock() else {
@@ -653,6 +659,7 @@ impl DbWorker {
                 active.2,
                 active.3,
                 active.4.and_then(|trace| trace.symbols()),
+                active.5,
             );
         }
     }
@@ -727,6 +734,26 @@ impl DbWorker {
         F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
     {
         let (command, reply) = make_job(operation);
+        self.admit(Lane::Foreground, command).await?;
+        reply.receive().await
+    }
+
+    pub(crate) async fn call_with_requester<T, F>(
+        &self,
+        requester: Option<&'static str>,
+        operation: F,
+    ) -> Result<T, StorageError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
+    {
+        let (mut command, reply) = make_job(operation);
+        if let Command::Run {
+            requester: slot, ..
+        } = &mut command
+        {
+            *slot = requester;
+        }
         self.admit(Lane::Foreground, command).await?;
         reply.receive().await
     }
@@ -953,6 +980,7 @@ where
             queued_at: Instant::now(),
             kind: job_kind::<F>(),
             lane: Lane::Foreground,
+            requester: None,
         },
         DbReply { receiver },
     )
@@ -1033,6 +1061,7 @@ where
             queued_at: Instant::now(),
             kind: job_kind::<F>(),
             lane: Lane::Background,
+            requester: None,
         },
         DbReply { receiver },
     )
@@ -1243,6 +1272,7 @@ fn run_worker(
                 queued_at,
                 kind,
                 lane,
+                requester,
             } => {
                 if lane == Lane::Foreground {
                     state.foreground_waiting.fetch_sub(1, Ordering::AcqRel);
@@ -1270,6 +1300,7 @@ fn run_worker(
                         active.counters = Some(observation.shared_counters());
                     }
                     active.backtrace = Some(slow_backtrace.clone());
+                    active.requester = requester;
                 }
                 let outcome = job(
                     observation.connection(),
@@ -1292,7 +1323,7 @@ fn run_worker(
                         queue,
                         run,
                         counters,
-                        Some(lane.as_str()),
+                        (Some(lane.as_str()), requester),
                         slow_backtrace.symbols(),
                     );
                 }
@@ -1865,6 +1896,29 @@ mod slow_job_tests {
     }
 
     #[tokio::test]
+    async fn writer_job_retains_requester_category() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            root.path().join("logs"),
+            crate::config::Logging::default(),
+        );
+        let db = DbWorker::open(root.path().join("db")).await.unwrap();
+        db.attach_diagnostics(diagnostics.clone());
+        db.call_with_requester(Some("shell"), |_| {
+            std::thread::sleep(SLOW_JOB_THRESHOLD + Duration::from_millis(20));
+            Ok::<_, StorageError>(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+        diagnostics.shutdown().await;
+        let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        let event: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+        assert_eq!(event["db_job_slow"]["requester"], "shell");
+        assert_eq!(event["db_job_slow"]["lane"], "foreground");
+    }
+
+    #[tokio::test]
     async fn inspection_active_event_is_emitted_once() {
         let root = tempfile::tempdir().unwrap();
         let diagnostics = crate::diagnostics::Diagnostics::start(
@@ -1885,7 +1939,7 @@ mod slow_job_tests {
                 },
             )
             .unwrap();
-        db.observe_inspection(&mut connection, "HistoryList", Instant::now(), |conn| {
+        db.observe_inspection(&mut connection, "HistoryList", Instant::now(), Some("shell"), |conn| {
             conn.query_row("SELECT test_pause()", [], |r| r.get::<_, i64>(0)).unwrap();
             conn.query_row("WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<10000) SELECT sum(x) FROM n", [], |r| r.get::<_, i64>(0)).unwrap();
         });
@@ -1900,6 +1954,7 @@ mod slow_job_tests {
         assert_eq!(active.len(), 1, "{log}");
         assert_eq!(active[0]["db_job_active"]["kind"], "HistoryList");
         assert_eq!(active[0]["db_job_active"]["lane"], "inspection");
+        assert_eq!(active[0]["db_job_active"]["requester"], "shell");
         assert!(!log.contains("test_pause"));
     }
 
@@ -1914,10 +1969,16 @@ mod slow_job_tests {
         db.attach_diagnostics(diagnostics.clone());
         let mut connection = Connection::open_in_memory().unwrap();
         let queued = Instant::now() - SLOW_JOB_THRESHOLD;
-        let value: String = db.observe_inspection(&mut connection, "HistoryGet", queued, |conn| {
-            conn.query_row("SELECT ?1", ["private inspection marker"], |row| row.get(0))
-                .unwrap()
-        });
+        let value: String = db.observe_inspection(
+            &mut connection,
+            "HistoryGet",
+            queued,
+            Some("external"),
+            |conn| {
+                conn.query_row("SELECT ?1", ["private inspection marker"], |row| row.get(0))
+                    .unwrap()
+            },
+        );
         assert_eq!(value, "private inspection marker");
         db.shutdown().await.unwrap();
         diagnostics.shutdown().await;
@@ -1926,6 +1987,7 @@ mod slow_job_tests {
         let event: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
         assert_eq!(event["db_job_slow"]["kind"], "HistoryGet");
         assert_eq!(event["db_job_slow"]["lane"], "inspection");
+        assert_eq!(event["db_job_slow"]["requester"], "external");
         assert_eq!(event["db_job_slow"]["statement_counters"]["rows"], 1);
         assert!(
             event["db_job_slow"]["statement_counters"]["vm_steps"]

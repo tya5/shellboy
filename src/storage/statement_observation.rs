@@ -163,22 +163,33 @@ impl Drop for StatementObservation<'_> {
 pub(super) struct SlowBacktrace {
     started: std::time::Instant,
     captured: Arc<Mutex<Option<std::backtrace::Backtrace>>>,
+    attempted: Arc<std::sync::atomic::AtomicBool>,
 }
 impl SlowBacktrace {
     pub fn new(started: std::time::Instant) -> Self {
         Self {
             started,
             captured: Arc::new(Mutex::new(None)),
+            attempted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
     pub fn observe(&self, now: std::time::Instant) {
+        self.observe_using(now, std::backtrace::Backtrace::force_capture);
+    }
+    fn observe_using(
+        &self,
+        now: std::time::Instant,
+        capture: impl FnOnce() -> std::backtrace::Backtrace + std::panic::UnwindSafe,
+    ) {
         if now.saturating_duration_since(self.started) < super::SLOW_JOB_THRESHOLD {
             return;
         }
         if let Ok(mut captured) = self.captured.try_lock()
-            && captured.is_none()
+            && !self
+                .attempted
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
-            *captured = Some(std::backtrace::Backtrace::force_capture());
+            *captured = std::panic::catch_unwind(capture).ok();
         }
     }
     pub fn symbols(&self) -> Option<Vec<String>> {
@@ -270,6 +281,17 @@ mod tests {
             safe_symbols(input),
             vec!["shellboy::storage::run_worker", "shellboy::ok_42"]
         );
+    }
+
+    #[test]
+    fn failed_backtrace_capture_is_not_retried() {
+        let started = std::time::Instant::now();
+        let trace = SlowBacktrace::new(started);
+        let later = started + super::super::SLOW_JOB_THRESHOLD;
+        trace.observe_using(later, || panic!("injected capture failure"));
+        assert!(trace.captured.lock().unwrap().is_none());
+        trace.observe_using(later, std::backtrace::Backtrace::force_capture);
+        assert!(trace.captured.lock().unwrap().is_none());
     }
 
     #[test]

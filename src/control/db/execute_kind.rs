@@ -23,13 +23,20 @@ macro_rules! named_jobs {
             }
         }
 
-        $(async fn $function(db: &DbWorker, operation: Operation) -> Result<Output, StorageError> {
-            db.call(move |connection| operation(connection)).await
+        $(async fn $function(db: &DbWorker, requester: Option<&'static str>, operation: Operation) -> Result<Output, StorageError> {
+            db.call_with_requester(requester, move |connection| operation(connection)).await
         })+
 
-        pub(super) async fn call<T, F>(
+        #[cfg(test)]
+        pub(super) async fn call<T, F>(db: &DbWorker, kind: Kind, operation: F) -> Result<T, StorageError>
+        where T: Send + 'static, F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static {
+            call_with_requester(db, kind, None, operation).await
+        }
+
+        pub(super) async fn call_with_requester<T, F>(
             db: &DbWorker,
             kind: Kind,
+            requester: Option<&'static str>,
             operation: F,
         ) -> Result<T, StorageError>
         where
@@ -41,7 +48,7 @@ macro_rules! named_jobs {
                 operation(connection).map(|value| Box::new(value) as Output)
             });
             let value = match kind {
-                $(Kind::$variant => $function(db, boxed).await,)+
+                $(Kind::$variant => $function(db, requester, boxed).await,)+
             }?;
             Ok(*value.downcast::<T>().unwrap_or_else(|_| unreachable!("job output type")))
         }

@@ -237,6 +237,7 @@ impl Store {
     async fn receipt_attempt<T, F>(
         &self,
         kind: Option<execute_kind::Kind>,
+        requester: Option<&'static str>,
         attempt: F,
     ) -> Result<(Result<T>, bool, u64)>
     where
@@ -251,8 +252,10 @@ impl Store {
             Ok((result, pressure, db.total_changes()))
         };
         match kind {
-            Some(kind) => execute_kind::call(&self.database, kind, job).await,
-            None => self.database.call(job).await,
+            Some(kind) => {
+                execute_kind::call_with_requester(&self.database, kind, requester, job).await
+            }
+            None => self.database.call_with_requester(requester, job).await,
         }
         .map_err(storage_error)
     }
@@ -260,7 +263,12 @@ impl Store {
     /// Retry admission outside the writer between bounded background windows.
     /// Concurrent writes invalidate an exhausted scan, so refusal is based on
     /// a complete pass with no intervening changes outside our own windows.
-    async fn receipt_job<T, F>(&self, kind: Option<execute_kind::Kind>, operation: F) -> Result<T>
+    async fn receipt_job<T, F>(
+        &self,
+        kind: Option<execute_kind::Kind>,
+        origin_kind: Option<&'static str>,
+        operation: F,
+    ) -> Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection, &mut bool) -> std::result::Result<Result<T>, StorageError>
@@ -275,7 +283,8 @@ impl Store {
         let mut dirty = false;
         loop {
             let attempt = operation.clone();
-            let (result, pressure, changes) = self.receipt_attempt(kind, attempt).await?;
+            let (result, pressure, changes) =
+                self.receipt_attempt(kind, origin_kind, attempt).await?;
             if !pressure {
                 return result;
             }
@@ -302,7 +311,8 @@ impl Store {
                     // requester waited for the background lane.
                     dirty = true;
                     let attempt = operation.clone();
-                    let (result, pressure, changes) = self.receipt_attempt(kind, attempt).await?;
+                    let (result, pressure, changes) =
+                        self.receipt_attempt(kind, origin_kind, attempt).await?;
                     if !pressure {
                         return result;
                     }
@@ -369,9 +379,14 @@ impl Store {
             let observer = self.database.clone();
             let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
             let queued_at = std::time::Instant::now();
+            let requester = Some(if caller.is_some() {
+                "shell"
+            } else {
+                "external"
+            });
             return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                observer.observe_inspection(&mut db, &kind, queued_at, |db| {
+                observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
                     let tx = db.transaction().map_err(sql_error)?;
                     let result = crate::status::snapshot(&tx, &args, &instance)?;
                     tx.commit().map_err(sql_error)?;
@@ -388,15 +403,21 @@ impl Store {
             let observer = self.database.clone();
             let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
             let queued_at = std::time::Instant::now();
+            let requester = Some(if caller.is_some() {
+                "shell"
+            } else {
+                "external"
+            });
             return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                let raw = observer.observe_inspection(&mut db, &kind, queued_at, |db| {
-                    let tx = db.transaction().map_err(sql_error)?;
-                    let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
-                        .map_err(storage_error)?;
-                    tx.commit().map_err(sql_error)?;
-                    Ok::<_, ApiError>(raw)
-                })?;
+                let raw =
+                    observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
+                        let tx = db.transaction().map_err(sql_error)?;
+                        let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
+                            .map_err(storage_error)?;
+                        tx.commit().map_err(sql_error)?;
+                        Ok::<_, ApiError>(raw)
+                    })?;
                 drop(db);
                 MutationResult::value(crate::compaction::preview::prepare(raw))
             })
@@ -408,9 +429,14 @@ impl Store {
             let observer = self.database.clone();
             let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
             let queued_at = std::time::Instant::now();
+            let requester = Some(if caller.is_some() {
+                "shell"
+            } else {
+                "external"
+            });
             let mut items = inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                observer.observe_inspection(&mut db, &kind, queued_at, |db| {
+                observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
                     let tx = db.transaction().map_err(sql_error)?;
                     let items = crate::attachments::list_tx(&tx, &thread)?;
                     tx.commit().map_err(sql_error)?;
@@ -434,9 +460,14 @@ impl Store {
             let observer = self.database.clone();
             let kind = format!("{:?}", execute_kind::Kind::of(&request.command));
             let queued_at = std::time::Instant::now();
+            let requester = Some(if caller.is_some() {
+                "shell"
+            } else {
+                "external"
+            });
             return inspection_work(move || {
                 let mut db = open_inspection(&path)?;
-                observer.observe_inspection(&mut db, &kind, queued_at, |db| {
+                observer.observe_inspection(&mut db, &kind, queued_at, requester, |db| {
                     let tx = db.transaction().map_err(sql_error)?;
                     let value = store.dispatch(
                         &tx,
@@ -463,7 +494,12 @@ impl Store {
                 "Command is not admitted to the writer lane",
             ));
         }
-        self.receipt_job(Some(kind), move |connection, pressure| {
+        let requester = Some(if caller.is_some() {
+            "shell"
+        } else {
+            "external"
+        });
+        self.receipt_job(Some(kind), requester, move |connection, pressure| {
             Ok(store.execute_transaction(
                 connection,
                 &request,
@@ -487,7 +523,12 @@ impl Store {
         let plan = Arc::new(plan);
         let fingerprint = Arc::new(std::sync::OnceLock::new());
         let store = self.clone();
-        self.receipt_job(None, move |db, pressure| {
+        let requester = Some(if caller.is_some() {
+            "shell"
+        } else {
+            "external"
+        });
+        self.receipt_job(None, requester, move |db, pressure| {
                 let fingerprint = match request_fingerprint(&fingerprint, &request, caller.as_ref()) {
                     Ok(fingerprint) => fingerprint,
                     Err(error) => return Ok(Err(error)),
@@ -657,7 +698,7 @@ impl Store {
         let options = Arc::new(options);
         let content = Arc::new(content);
         let files = Arc::new(files);
-        self.receipt_job(None, move |db, pressure| {
+        self.receipt_job(None, None, move |db, pressure| {
             Ok(store.transact(
                 db,
                 &operation_id,
@@ -806,7 +847,7 @@ impl Store {
         admission: Admission,
     ) -> Result<RuntimeReservation> {
         let instance_id = self.instance_id.clone();
-        self.receipt_job(None, move|db,pressure| {
+        self.receipt_job(None, None, move|db,pressure| {
             let tx=db.transaction()?;
             let saved:Option<(String,Option<String>)>=tx.query_row("SELECT request_hash,result_ref_json FROM operation_receipt WHERE operation_id=?1",[&operation_id],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
             if let Some((previous,body))=saved {
@@ -1067,7 +1108,7 @@ impl Store {
         let store = self.clone();
         let args = Arc::new(args);
         let text = Arc::new(text);
-        self.receipt_job(None, move |connection, pressure| {
+        self.receipt_job(None, None, move |connection, pressure| {
             Ok(store.transact(
                 connection,
                 &operation_id,
@@ -3091,7 +3132,7 @@ mod receipt_wait_tests {
         let notify = pressure_seen.clone();
         let task = tokio::spawn(async move {
             waiting_store
-                .receipt_job(None, move |db, pressure| {
+                .receipt_job(None, None, move |db, pressure| {
                     let tx = db.transaction()?;
                     match super::super::receipt::reserve(
                         &tx,
@@ -3334,7 +3375,7 @@ mod receipt_wait_tests {
         }).await.unwrap();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let observed = calls.clone();
-        let result = crate::test_watchdog::watchdog("receipt admission completes", store.receipt_job(None, move |db, pressure| {
+        let result = crate::test_watchdog::watchdog("receipt admission completes", store.receipt_job(None, None, move |db, pressure| {
             if observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
                 db.execute("UPDATE operation_receipt SET state='completed' WHERE operation_id='old:pending:0'", [])?;
             }
