@@ -4326,3 +4326,13 @@ step-1 base. Migration 25 is provisional until integration ordering is known.
 Run-end reminders/deletion outcomes and exec modes belong to subsequent steps.
 Synthetic local validation is in progress; three-OS CI and integration remain
 pending. No real-provider measurements are involved.
+
+### #194 Step 3 and #197: Reply Lifecycle and Receipt Reclamation
+
+Implemented durable once-per-message Run-end reminders with per-message sender
+facts, then ignored outcomes; stopped/recovery work retains pending duties.
+Deleted endpoint transitions and sender notices are in the deletion transaction.
+History GC now scans a finite receipt horizon in batches of at most 128 before
+marking, retaining pending duties and live endpoint ownership. The branch stays
+based on approved step 2, separate from the 0.7.0 release. Synthetic validation
+and task CI are in progress; no real provider calls are part of this work.

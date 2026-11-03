@@ -9167,3 +9167,13 @@ applied/pending and recipient authority checks, reply correlation, queued and
 admitted cancellation, terminal reply wait states, and observer cleanup.
 Terminal `ignored`/`recipient_deleted` facts are injected for wait tests; their
 production transitions are step 3. Final-tip three-OS CI remains pending.
+
+### #194 Step 3 / #197 Synthetic Acceptance
+
+Fixtures exercise the 128-entry reminder (each message ID and sender), ignored
+outcomes after normal completion/Esc, stopping and recovery gates, rollback and
+reopening with a different Run, recipient/sender/both deletion precedence, idle
+sender non-start, and 260 deleted-target receipt rows reclaimed in bounded GC
+steps. Pending duties, live recipients, and live model senders retain receipt
+roots and associated bodies. These are synthetic fixtures, not real-provider or
+power-loss tests. Final task CI and review remain required.
