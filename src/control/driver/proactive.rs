@@ -98,7 +98,7 @@ pub(super) async fn maybe_compact(
             {
                 let same_model: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt old JOIN model_attempt new ON old.profile_id=new.profile_id AND old.model_id=new.model_id WHERE old.id=?1 AND new.id=?2)", params![previous,attempt], |row| row.get(0))?;
                 if same_model {
-                    let insufficient = input_tokens > target;
+                    let insufficient = target::verify(target, input_tokens) == target::Verification::Insufficient;
                     let verification = json!({"attempt_id":attempt,"input_tokens":input_tokens,"target_tokens":target,"outcome":if insufficient {"insufficient"} else {"met"}}).to_string();
                     db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.target_verification',json(?1)) WHERE id=?2 AND json_valid(error_json)", params![verification,previous])?;
                     if insufficient {
