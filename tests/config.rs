@@ -34,7 +34,10 @@ fn unconfigured_defaults_are_valid_and_do_not_invent_models() {
 }
 #[test]
 fn shell_unknown_argument_policy_validates_values() {
-    for (value, expected) in [("warn", UnknownArguments::Warn), ("strict", UnknownArguments::Strict)] {
+    for (value, expected) in [
+        ("warn", UnknownArguments::Warn),
+        ("strict", UnknownArguments::Strict),
+    ] {
         let config = Config::parse(&format!("[shell]\nunknown_arguments = '{value}'")).unwrap();
         assert_eq!(config.shell.unknown_arguments, expected);
     }
