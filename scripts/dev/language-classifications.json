@@ -646,32 +646,32 @@
   },
   "src/frontend/message_queue.rs:4fa6cdbf13079926:1": {
     "category": "a",
-    "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
-    "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
+    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
   },
   "src/frontend/message_queue.rs:608fe041d34bd512:1": {
     "category": "a",
-    "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
-    "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
+    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
   },
   "src/frontend/message_queue.rs:7f700320a8e9130b:1": {
     "category": "a",
-    "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
-    "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
+    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
   },
   "src/frontend/message_queue.rs:2f9cd041aebb9dfa:1": {
     "category": "a",
-    "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
-    "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
+    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
   },
   "src/frontend/message_queue.rs:ef2584fefd34143b:1": {
     "category": "a",
-    "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
-    "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
+    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
   },
   "src/frontend/message_queue.rs:53d2d615b808d023:1": {
     "category": "a",
-    "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
-    "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
+    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
   }
 }
