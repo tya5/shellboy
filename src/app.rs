@@ -33,6 +33,33 @@ impl Drop for OwnerLock {
     }
 }
 impl OwnerLock {
+    fn begin_session(&self) -> Result<bool, ApiError> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        let mut file = &self._file;
+        file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+        let mut previous = Vec::new();
+        file.take(128)
+            .read_to_end(&mut previous)
+            .map_err(io_error)?;
+        let clean = previous == b"shellboy-owner-clean-v1\n";
+        file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+        file.set_len(0).map_err(io_error)?;
+        file.write_all(b"shellboy-owner-active-v1\n")
+            .map_err(io_error)?;
+        file.sync_all().map_err(io_error)?;
+        Ok(clean)
+    }
+
+    fn finish_session(&self) -> Result<(), ApiError> {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut file = &self._file;
+        file.seek(SeekFrom::Start(0)).map_err(io_error)?;
+        file.set_len(0).map_err(io_error)?;
+        file.write_all(b"shellboy-owner-clean-v1\n")
+            .map_err(io_error)?;
+        file.sync_all().map_err(io_error)
+    }
+
     /// Blocking file I/O: call from startup's file worker, never the UI thread.
     pub fn acquire(data_dir: &Path) -> Result<Arc<Self>, ApiError> {
         #[cfg(unix)]
@@ -204,6 +231,10 @@ impl DataOwner {
         let lock = tokio::task::spawn_blocking(move || OwnerLock::acquire(&directory))
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner lock worker failed"))??;
+        let marker_lock = lock.clone();
+        let clean = tokio::task::spawn_blocking(move || marker_lock.begin_session())
+            .await
+            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))??;
         let diagnostics = crate::diagnostics::Diagnostics::start(
             loaded.data_dir.join("logs"),
             loaded.config.logging.clone(),
@@ -216,6 +247,7 @@ impl DataOwner {
             lock.clone(),
             migration_progress,
             diagnostics.clone(),
+            clean,
         )
         .await
         .map_err(storage_error)?;
@@ -358,7 +390,11 @@ impl DataOwner {
         )
         .await;
         let metadata_result = metadata_result?;
-        database_result.and(metadata_result)
+        database_result.and(metadata_result)?;
+        let lock = self._lock.clone();
+        tokio::task::spawn_blocking(move || lock.finish_session())
+            .await
+            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))?
     }
 }
 
@@ -541,5 +577,27 @@ mod owner_lock_tests {
             OwnerLock::acquire(root.path()).is_err(),
             "new owner remains exclusive after the old duplicate closes"
         );
+    }
+}
+
+#[cfg(test)]
+mod integrity_marker_tests {
+    use super::*;
+
+    #[test]
+    fn owner_marker_defaults_to_unclean_and_requires_explicit_finish() {
+        let root = tempfile::tempdir().unwrap();
+        let lock = OwnerLock::acquire(root.path()).unwrap();
+        assert!(!lock.begin_session().unwrap());
+        drop(lock);
+        let lock = OwnerLock::acquire(root.path()).unwrap();
+        assert!(!lock.begin_session().unwrap());
+        lock.finish_session().unwrap();
+        drop(lock);
+        let lock = OwnerLock::acquire(root.path()).unwrap();
+        assert!(lock.begin_session().unwrap());
+        drop(lock);
+        let lock = OwnerLock::acquire(root.path()).unwrap();
+        assert!(!lock.begin_session().unwrap());
     }
 }

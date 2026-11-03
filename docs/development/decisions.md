@@ -3049,3 +3049,10 @@ Less certain choices, with recheck conditions:
 ## D-188: honor explicit usage-limit reset facts
 
 2026-11-03, user-approved for #188. When a provider explicitly identifies `usage_limit_reached` and supplies a valid reset time, skip automatic retries only if that reset is later than the complete remaining retry schedule; keep the ordinary retry policy for shorter resets or absent/invalid facts. Use existing recovery reason wording/symbols, preserve the fact and reset time, add no guessed values, settings, or provider fallback. Validate with synthetic responses and three-OS CI.
+
+### Startup integrity scan policy (#192)
+
+The 2026-11-03 decision supersedes earlier unconditional startup quick_check
+claims: quick_check runs on unclean or unknown previous shutdown, and
+foreign_key_check runs after migrations. Clean startup skips these scans.
+`storage check` explicitly runs both; a clean marker is not a corruption proof.
