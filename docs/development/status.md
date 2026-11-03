@@ -4463,3 +4463,9 @@ the current reconcile-34 source tree reports `a=2808, b=1555, c=104`; strict `--
 counterpart checks and the frontend title regression test are pending local
 execution. Other assigned branch reconciliation and integration acceptance
 remain open.
+### #152 DB activity language audit
+
+The DB worker status labels already choose English/Japanese pairs for every
+known operation. This batch pins the 54 Japanese arms as localized UI resources
+and adds exhaustive language-pair coverage; unknown operation identifiers keep
+the neutral fallback. No operation kind or persisted data changes.

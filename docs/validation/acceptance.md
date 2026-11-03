@@ -9429,3 +9429,11 @@ strings using per-token source hashes. Counts: `a=2808, b=1555, c=104`;
 strict audit still fails for 104 other pending literals. This is not final
 Stage C acceptance. Native checks, branch verdict completion, formal acceptance
 and exact integration-tip all-OS CI remain pending.
+### #152 DB activity language slice
+
+`src/ui/db_activity.rs`'s 54 previously unclassified Japanese labels are paired
+with explicit English labels in `operation_label`. Added coverage iterates all
+known operation keys and checks both localized values; unknown identifiers keep
+the underscore-normalized fallback. No source values or protocol labels are
+rewritten. Local validation is `cargo fmt --all -- --check` plus Python language
+audit tests; three-OS CI is pending.
