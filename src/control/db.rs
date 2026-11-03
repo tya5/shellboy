@@ -5282,8 +5282,10 @@ mod writer_lane_audit_measurement {
 
             eprintln!("AUDIT_START kind=Status repeat={repeat}");
             let tx = db.unchecked_transaction().expect("read transaction");
-            let mut args = StatusArgs::default();
-            args.thread_id = Some(thread_id.clone());
+            let args = StatusArgs {
+                thread_id: Some(thread_id.clone()),
+                ..Default::default()
+            };
             let start = Instant::now();
             let _ = crate::status::snapshot(&tx, &args, "writer-lane-audit")
                 .expect("production Status handler");
