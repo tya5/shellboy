@@ -136,6 +136,20 @@ class PssTests(unittest.TestCase):
 
 
 class StartupTests(unittest.TestCase):
+    def test_terminal_replies_for_da_keyboard_and_sequential_width_dsr(self):
+        pending, replies, count = bench.terminal_replies('prefix\x1b[?u\x1b[c\x1b[6n', 0)
+        self.assertEqual(replies, [b'\x1b[?0u', b'\x1b[?1;2c', b'\x1b[11;2R'])
+        self.assertEqual(count, 1)
+        pending, replies, count = bench.terminal_replies(pending + '\x1b[6n', count)
+        self.assertEqual(replies, [b'\x1b[11;3R'])
+        self.assertEqual(count, 2)
+
+    def test_terminal_reply_parser_keeps_partial_escape_sequences(self):
+        pending, replies, count = bench.terminal_replies('noise\x1b[?', 0)
+        self.assertEqual((pending, replies, count), ('se\x1b[?', [], 0))
+        pending, replies, count = bench.terminal_replies(pending + 'u', count)
+        self.assertEqual((pending, replies, count), ('', [b'\x1b[?0u'], 0))
+
     def test_input_readiness_label_in_either_language(self):
         self.assertTrue(bench.input_ready('Ready for input'))
         self.assertTrue(bench.input_ready('\u5165\u529b\u3067\u304d\u307e\u3059'))

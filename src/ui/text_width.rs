@@ -126,18 +126,29 @@ pub fn probe_child() -> i32 {
     }
 }
 
-pub(super) fn probe() -> Option<u8> {
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ProbeTiming {
+    pub spawn: std::time::Duration,
+    pub wait: std::time::Duration,
+}
+
+pub(super) fn probe() -> (Option<u8>, ProbeTiming) {
     use std::{
         process::{Command, Stdio},
         time::{Duration, Instant},
     };
-    if std::env::var_os("SHELLBOY_INTERNAL_WIDTH_PROBE").is_some() {
-        return None;
+    let zero = ProbeTiming {
+        spawn: Duration::ZERO,
+        wait: Duration::ZERO,
+    };
+    if std::env::var_os("SHELLBOY_INTERNAL_WIDTH_PROBE").is_some()
+        || !crossterm::terminal::size().is_ok_and(|(cols, rows)| cols >= 5 && rows >= 11)
+    {
+        return (None, zero);
     }
-    if !crossterm::terminal::size().is_ok_and(|(cols, rows)| cols >= 5 && rows >= 11) {
-        return None;
-    }
-    let exe = std::env::current_exe().ok()?;
+    let Ok(exe) = std::env::current_exe() else {
+        return (None, zero);
+    };
     let mut command = Command::new(exe);
     command
         .env("SHELLBOY_INTERNAL_WIDTH_PROBE", "1")
@@ -150,8 +161,19 @@ pub(super) fn probe() -> Option<u8> {
         "ui::text_width_pty_tests::probe_child_fixture",
         "--nocapture",
     ]);
-    let mut child = command.spawn().ok()?;
-    let deadline = Instant::now() + Duration::from_millis(300);
+    let spawn_started = Instant::now();
+    let Ok(mut child) = command.spawn() else {
+        return (
+            None,
+            ProbeTiming {
+                spawn: spawn_started.elapsed(),
+                wait: Duration::ZERO,
+            },
+        );
+    };
+    let spawn = spawn_started.elapsed();
+    let wait_started = Instant::now();
+    let deadline = wait_started + Duration::from_millis(300);
     let result = loop {
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -169,10 +191,11 @@ pub(super) fn probe() -> Option<u8> {
             }
         }
     };
+    let wait = wait_started.elapsed();
     use std::io::Write;
     let _ = std::io::stdout().write_all(b"\x1b[2J\x1b[H");
     let _ = std::io::stdout().flush();
-    result
+    (result, ProbeTiming { spawn, wait })
 }
 
 /// App-owned decoration selected only from the measured terminal policy.

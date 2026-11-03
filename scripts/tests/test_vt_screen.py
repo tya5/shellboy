@@ -15,6 +15,11 @@ class VtScreenTests(unittest.TestCase):
         screen.feed('u')
         self.assertTrue(screen.text().startswith('ready'))
 
+    def test_keyboard_enhancement_mode_reply_is_ignored(self):
+        screen = vt.Screen(12, 2)
+        screen.feed('ready\x1b[>1u')
+        self.assertTrue(screen.text().startswith('ready'))
+
     def test_cursor_erase_and_split_control_sequences(self):
         screen = vt.Screen(12, 3)
         for chunk in ['abc', '\x1b[2;', '3Hxy', '\x1b[1G!', '\x1b[K']:

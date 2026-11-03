@@ -107,6 +107,27 @@ fn stage_text(stage: StartupStage, language: UiLanguage) -> &'static str {
             "DBの整合性を確認しています",
             "Checking database integrity"
         ),
+        StartupStage::DatabaseForeignKeysSkippedNoMigrationPending
+        | StartupStage::DatabaseQuickCheckSkippedCleanShutdown => {
+            i18n::local!(
+                language,
+                "DB検査を省略しています",
+                "Skipping database check"
+            )
+        }
+        StartupStage::TerminalSession => {
+            i18n::local!(language, "端末を準備しています", "Preparing terminal")
+        }
+        StartupStage::WidthProbeSpawn => i18n::local!(
+            language,
+            "端末幅の確認を開始しています",
+            "Starting terminal-width probe"
+        ),
+        StartupStage::WidthProbeWait => i18n::local!(
+            language,
+            "端末幅の応答を待っています",
+            "Waiting for terminal-width reply"
+        ),
         StartupStage::InterruptedWork => i18n::local!(
             language,
             "前回中断した処理を整理しています",

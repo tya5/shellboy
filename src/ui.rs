@@ -6718,10 +6718,14 @@ pub struct TerminalSession {
     keyboard_enhancement_enabled: bool,
     diagnostics: Option<crate::diagnostics::Diagnostics>,
     width_observation: Option<u8>,
+    startup_timings: [(crate::app::StartupStage, std::time::Duration); 3],
 }
 impl TerminalSession {
     pub fn set_diagnostics(&mut self, diagnostics: crate::diagnostics::Diagnostics) {
         record_terminal_width(&diagnostics, self.width_observation);
+        for (stage, elapsed) in self.startup_timings {
+            diagnostics.record_startup_stage(stage, elapsed, None);
+        }
         self.diagnostics = Some(diagnostics);
     }
 
@@ -6745,6 +6749,7 @@ impl TerminalSession {
     }
 
     fn enter_inner(support_override: Option<bool>, width: Option<u8>) -> io::Result<Self> {
+        let terminal_started = Instant::now();
         let guard = TerminalGuard::new();
         terminal::enable_raw_mode()?;
         execute!(
@@ -6771,7 +6776,17 @@ impl TerminalSession {
             io::stdout(),
             std::rc::Rc::clone(&link_snapshot),
         ))?;
-        let width_observation = width.or_else(text_width::probe);
+        let terminal_session = terminal_started.elapsed();
+        let (width_observation, probe_timing) = match width {
+            Some(width) => (
+                Some(width),
+                text_width::ProbeTiming {
+                    spawn: Duration::ZERO,
+                    wait: Duration::ZERO,
+                },
+            ),
+            None => text_width::probe(),
+        };
         text_width::set_process_terminal_width(width_observation);
         Ok(Self {
             terminal,
@@ -6780,6 +6795,14 @@ impl TerminalSession {
             keyboard_enhancement_enabled,
             diagnostics: None,
             width_observation,
+            startup_timings: [
+                (crate::app::StartupStage::TerminalSession, terminal_session),
+                (
+                    crate::app::StartupStage::WidthProbeSpawn,
+                    probe_timing.spawn,
+                ),
+                (crate::app::StartupStage::WidthProbeWait, probe_timing.wait),
+            ],
         })
     }
 }

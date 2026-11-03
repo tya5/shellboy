@@ -1477,6 +1477,54 @@ mod startup_stage_tests {
         assert_eq!(row["startup_stage"]["migration_version"], 22);
         assert_eq!(row["startup_stage"].as_object().unwrap().len(), 3);
         assert_eq!(row["ids"].as_object().unwrap().len(), 0);
+        let names = [
+            crate::app::StartupStage::Configuration,
+            crate::app::StartupStage::OwnerLock,
+            crate::app::StartupStage::Database,
+            crate::app::StartupStage::DatabasePragmas,
+            crate::app::StartupStage::DatabaseMigration,
+            crate::app::StartupStage::DatabaseValidate,
+            crate::app::StartupStage::DatabaseForeignKeys,
+            crate::app::StartupStage::DatabaseForeignKeysSkippedNoMigrationPending,
+            crate::app::StartupStage::DatabaseQuickCheck,
+            crate::app::StartupStage::DatabaseQuickCheckSkippedCleanShutdown,
+            crate::app::StartupStage::InterruptedWork,
+            crate::app::StartupStage::Control,
+            crate::app::StartupStage::Endpoint,
+            crate::app::StartupStage::TerminalSession,
+            crate::app::StartupStage::WidthProbeSpawn,
+            crate::app::StartupStage::WidthProbeWait,
+            crate::app::StartupStage::Closing,
+        ]
+        .map(|stage| {
+            serde_json::to_value(stage)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        });
+        assert_eq!(
+            names,
+            [
+                "configuration",
+                "owner_lock",
+                "database",
+                "database_pragmas",
+                "database_migration",
+                "database_validate",
+                "database_foreign_keys",
+                "database_foreign_keys_skipped_no_migration_pending",
+                "database_quick_check",
+                "database_quick_check_skipped_clean_shutdown",
+                "interrupted_work",
+                "control",
+                "endpoint",
+                "terminal_session",
+                "width_probe_spawn",
+                "width_probe_wait",
+                "closing",
+            ]
+        );
     }
 }
 

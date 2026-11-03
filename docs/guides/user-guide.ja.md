@@ -113,7 +113,7 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 
 引数なしの起動には対話端末が必要です。同じdata-dirではownerを二重起動できません。別ターミナルからのサブコマンドは起動済みownerを使い、ownerを自動起動しません。独立した環境が必要なら別のdata-dirを選びます。
 
-起動段階の所要時間は `<data-dir>/logs/shellboy.log` とローテーション済みファイルの JSON 行で `startup_stage` を探すと確認できます。固定の `stage`、`elapsed_ms`、必要な場合の `migration_version` は表示と同じ段階を示し、会話内容やIDは含みません。ログは容量制限付きのベストエフォートで、ローテーション、キュー満杯、I/O失敗、強制終了などにより欠落します。欠落は所要時間ゼロを意味しません。データ保存先と所有権を確保できる前の設定エラーはそこに記録できません。共有前にログ全体の機密情報を確認してください。
+起動段階の所要時間は `<data-dir>/logs/shellboy.log` とローテーション済みファイルの JSON 行で `startup_stage` を探すと確認できます。固定の `stage`、`elapsed_ms`、必要な場合の `migration_version` は起動段階を示し、会話内容やIDは含みません。段階名は `configuration`、`owner_lock`、`database`、`database_pragmas`、`database_migration`、`database_validate`、`database_foreign_keys`、`database_foreign_keys_skipped_no_migration_pending`、`database_quick_check`、`database_quick_check_skipped_clean_shutdown`、`interrupted_work`、`control`、`endpoint`、`terminal_session`、`width_probe_spawn`、`width_probe_wait`、`closing` です。`database_foreign_keys_skipped_no_migration_pending` はmigration pendingなし、`database_quick_check_skipped_clean_shutdown` は前回が正常終了のため検査しなかった記録で、どちらも未実行なので所要時間は0です。ログは容量制限付きのベストエフォートで、ローテーション、キュー満杯、I/O失敗、強制終了などにより欠落します。欠落は所要時間ゼロを意味しません。データ保存先と所有権を確保できる前の設定エラーはそこに記録できません。共有前にログ全体の機密情報を確認してください。
 
 起動中は設定・DB更新・前回中断した処理の整理など、現在の準備内容を表示します。 migration の印は構造更新の段数を示し、起動全体の進行割合ではありません。長い段では印が変わらず、残り時間の推測は表示しません。幅が足りないときは段数だけを表示します。会話入力は起動完了後に行います。Esc / Ctrl+C / Ctrl+Qで終了を要求すると、開始済みの初期化と保存処理を安全な境界まで進めてから閉じます。DB更新を巻き戻したり、直ちにlockを解放したりする操作ではありません。起動に失敗した場合は表示された理由を確認し、EnterかEscで閉じます。
 
