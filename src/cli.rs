@@ -458,6 +458,9 @@ pub struct TextOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageSendOptions {
+    /// Require a deliberate reply to this message.
+    #[arg(long)]
+    pub expect_reply: bool,
     /// Self-asserted name (at most 64 Unicode characters); grants no authority.
     #[arg(long)]
     pub sender_label: Option<String>,
@@ -835,6 +838,7 @@ impl Cli {
             },
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
+                    expect_reply: a.expect_reply,
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,

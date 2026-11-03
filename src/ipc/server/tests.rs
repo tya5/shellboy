@@ -95,6 +95,7 @@ impl Fixture {
         self.connect_command(
             number,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
                 thread_id: Some("t".into()),

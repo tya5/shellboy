@@ -234,6 +234,7 @@ impl Fixture {
             request(
                 &control,
                 Command::MessageSend(MessageSendArgs {
+                    expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
                     thread_id: Some(thread),
@@ -1460,6 +1461,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         request(
             &f.control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: Some("leader".into()),
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -1658,6 +1660,7 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
         request(
             &f.control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread),

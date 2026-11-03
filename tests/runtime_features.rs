@@ -274,6 +274,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     request(
         control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.into()),
@@ -296,6 +297,7 @@ async fn preparation_failure_preserves_accepted_message_and_retry_reuses_its_tur
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -901,6 +903,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
     let accepted = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -995,6 +998,7 @@ async fn edited_request_requires_exact_run_consent_and_waits_for_old_run_to_stop
     let accepted = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -1310,6 +1314,7 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -1464,6 +1469,7 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -1640,6 +1646,7 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -1698,6 +1705,7 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -1794,6 +1802,7 @@ async fn accepted_quit_prevents_tools_from_a_late_model_response_without_cancell
     let waiting = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             thread_id: Some(thread.clone()),
             text: "Do not fire after Quit admission".into(),
@@ -1964,6 +1973,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(parent.clone()),
@@ -2171,6 +2181,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -2290,6 +2301,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -2434,6 +2446,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -2467,6 +2480,7 @@ async fn working_instruction_header_preserves_empty_and_original_snapshots() {
         let first = request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -2499,6 +2513,7 @@ async fn working_instruction_header_preserves_empty_and_original_snapshots() {
         let next = request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(thread.clone()),
@@ -2542,6 +2557,7 @@ async fn unreadable_working_instructions_recover_without_an_outbound_header() {
     let sent = request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),
@@ -4209,6 +4225,7 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
                     request(
                         &control,
                         Command::MessageSend(MessageSendArgs {
+                            expect_reply: false,
                             sender_label: None,
                             deliver: Deliver::Next,
                             thread_id: Some(target.clone()),

@@ -272,6 +272,7 @@ mod tests {
                 Request::new(
                     format!("{}:send", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
+                        expect_reply: false,
                         sender_label: None,
                         thread_id: Some(thread.clone()),
                         text: "fixture".into(),
