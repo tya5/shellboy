@@ -1,21 +1,145 @@
 //! Startup-only schema upgrades. Runtime readers use the current schema only.
-use super::{StorageError, validate_schema};
+use super::{StorageError, migration_integrity::Impact, validate_schema};
 use rusqlite::Connection;
 
-const HOT_QUERY_INDEX_MIGRATION: &str = include_str!("../../migrations/0010_hot_query_indexes.sql");
-const GC_INDEX_MIGRATION: &str = include_str!("../../migrations/0002_gc_indexes.sql");
-const ATTACHMENT_PROVENANCE_MIGRATION: &str =
-    include_str!("../../migrations/0004_attachment_provenance.sql");
-const ORIGIN_CREDENTIAL_MIGRATION: &str =
-    include_str!("../../migrations/0005_origin_credentials.sql");
-const RECEIPT_BUDGET_MIGRATION: &str = include_str!("../../migrations/0006_receipt_budget.sql");
-const USAGE_SOURCE_INDEX_MIGRATION: &str =
-    include_str!("../../migrations/0007_usage_and_source_indexes.sql");
-const RECEIPT_ACCOUNTING_COMPAT_MIGRATION: &str =
-    include_str!("../../migrations/0008_receipt_accounting_compat.sql");
-const COMPACTION_TURN_INDEX_MIGRATION: &str =
-    include_str!("../../migrations/0009_compaction_turn_indexes.sql");
-const CONTEXT_INDEX_MIGRATION: &str = include_str!("../../migrations/0003_context_indexes.sql");
+pub(super) struct Migration {
+    pub version: i64,
+    pub sql: &'static str,
+    pub foreign_keys: Option<Impact>,
+}
+
+pub(super) const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 2,
+        sql: include_str!("../../migrations/0002_gc_indexes.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 3,
+        sql: include_str!("../../migrations/0003_context_indexes.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 4,
+        sql: include_str!("../../migrations/0004_attachment_provenance.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 5,
+        sql: include_str!("../../migrations/0005_origin_credentials.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 6,
+        sql: include_str!("../../migrations/0006_receipt_budget.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 7,
+        sql: include_str!("../../migrations/0007_usage_and_source_indexes.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 8,
+        sql: include_str!("../../migrations/0008_receipt_accounting_compat.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 9,
+        sql: include_str!("../../migrations/0009_compaction_turn_indexes.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 10,
+        sql: include_str!("../../migrations/0010_hot_query_indexes.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 11,
+        sql: include_str!("../../migrations/0011_current_index_metadata.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 12,
+        sql: include_str!("../../migrations/0012_revisit_metadata.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 13,
+        sql: include_str!("../../migrations/0013_message_path_admission.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 14,
+        sql: include_str!("../../migrations/0014_turn_interrupt.sql"),
+        foreign_keys: Some(Impact::Tables(&["turn", "draft"])),
+    },
+    Migration {
+        version: 15,
+        sql: include_str!("../../migrations/0015_readback_indexes.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 16,
+        sql: include_str!("../../migrations/0016_thread_observation.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 17,
+        sql: include_str!("../../migrations/0017_thread_parent.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 18,
+        sql: include_str!("../../migrations/0018_summary_usage_metadata.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 19,
+        sql: include_str!("../../migrations/0019_context_attempt_scope.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 20,
+        sql: include_str!("../../migrations/0020_gc_index_source.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 21,
+        sql: include_str!("../../migrations/0021_event_retention.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 22,
+        sql: include_str!("../../migrations/0022_logical_usage_counters.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 23,
+        sql: include_str!("../../migrations/0023_activity_bounded.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 24,
+        sql: include_str!("../../migrations/0024_revisit_messages.sql"),
+        foreign_keys: None,
+    },
+    Migration {
+        version: 25,
+        sql: include_str!("../../migrations/0025_history_attempt_index.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
+    Migration {
+        version: 26,
+        sql: include_str!("../../migrations/0026_reply_expected.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
+    Migration {
+        version: 27,
+        sql: include_str!("../../migrations/0027_index_recovery.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
+];
 
 pub(super) fn run(
     connection: &mut Connection,
@@ -23,184 +147,18 @@ pub(super) fn run(
     report: &dyn Fn(i64, i64),
     validation: &dyn Fn(),
 ) -> Result<(), StorageError> {
-    if version < 2 {
-        report(2 - version, super::SCHEMA_VERSION - version);
+    for migration in MIGRATIONS
+        .iter()
+        .filter(|migration| migration.version > version)
+    {
+        report(migration.version - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(GC_INDEX_MIGRATION)?;
+        transaction.execute_batch(migration.sql)?;
+        if migration.version == 4 {
+            migrate_attachment_sources(&transaction)?;
+        }
         transaction.commit()?;
-    }
-    if version < 3 {
-        report(3 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(CONTEXT_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 4 {
-        report(4 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(ATTACHMENT_PROVENANCE_MIGRATION)?;
-        migrate_attachment_sources(&transaction)?;
-        transaction.commit()?;
-    }
-    if version < 5 {
-        report(5 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(ORIGIN_CREDENTIAL_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 6 {
-        report(6 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(RECEIPT_BUDGET_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 7 {
-        report(7 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(USAGE_SOURCE_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 8 {
-        report(8 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(RECEIPT_ACCOUNTING_COMPAT_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 9 {
-        report(9 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(COMPACTION_TURN_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 10 {
-        report(10 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(HOT_QUERY_INDEX_MIGRATION)?;
-        transaction.commit()?;
-    }
-    if version < 11 {
-        report(11 - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(include_str!(
-            "../../migrations/0011_current_index_metadata.sql"
-        ))?;
-        transaction.commit()?;
-    }
-    if version < 12 {
-        report(12 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0012_revisit_metadata.sql"))?;
-        tx.commit()?;
-    }
-    if version < 13 {
-        report(13 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!(
-            "../../migrations/0013_message_path_admission.sql"
-        ))?;
-        tx.commit()?;
-    }
-    if version < 14 {
-        report(14 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0014_turn_interrupt.sql"))?;
-        tx.commit()?;
-    }
-    if version < 15 {
-        report(15 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0015_readback_indexes.sql"))?;
-        tx.commit()?;
-    }
-    if version < 16 {
-        report(16 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0016_thread_observation.sql"))?;
-        tx.commit()?;
-    }
-    if version < 17 {
-        report(17 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0017_thread_parent.sql"))?;
-        tx.commit()?;
-    }
-    if version < 18 {
-        report(18 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!(
-            "../../migrations/0018_summary_usage_metadata.sql"
-        ))?;
-        tx.commit()?;
-    }
-    if version < 19 {
-        report(19 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!(
-            "../../migrations/0019_context_attempt_scope.sql"
-        ))?;
-        tx.commit()?;
-    }
-    if version < 20 {
-        report(20 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0020_gc_index_source.sql"))?;
-        tx.commit()?;
-    }
-    if version < 21 {
-        report(21 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0021_event_retention.sql"))?;
-        tx.commit()?;
-    }
-    if version < 22 {
-        report(22 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!(
-            "../../migrations/0022_logical_usage_counters.sql"
-        ))?;
-        tx.commit()?;
-    }
-    if version < 23 {
-        report(23 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0023_activity_bounded.sql"))?;
-        tx.commit()?;
-    }
-    if version < 24 {
-        report(24 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0024_revisit_messages.sql"))?;
-        tx.commit()?;
-    }
-    if version < 25 {
-        report(25 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!(
-            "../../migrations/0025_history_attempt_index.sql"
-        ))?;
-        tx.commit()?;
-    }
-    if version < 26 {
-        report(26 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0026_reply_expected.sql"))?;
-        tx.commit()?;
-    }
-    if version < 27 {
-        report(27 - version, super::SCHEMA_VERSION - version);
-        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        tx.execute_batch(include_str!("../../migrations/0027_index_recovery.sql"))?;
-        tx.commit()?;
     }
     validation();
     validate_schema(connection)?;

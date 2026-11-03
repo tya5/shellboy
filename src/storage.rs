@@ -50,6 +50,10 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
 mod migrate;
+mod migration_integrity;
+#[cfg(test)]
+#[path = "storage/migration_startup_tests.rs"]
+mod migration_startup_tests;
 pub(crate) const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 
 #[derive(Debug, thiserror::Error)]
@@ -1319,9 +1323,13 @@ fn open_connection(
     // Persist before the first migration transaction so a crash cannot bypass
     // the post-migration foreign-key scan on the next startup.
     if migrated {
-        connection.execute(
-            "INSERT OR REPLACE INTO app_meta(key,value) VALUES('integrity.migration_pending','1')",
-            [],
+        migration_integrity::persist(
+            &connection,
+            migration_integrity::Check::for_migrations(
+                migrate::MIGRATIONS,
+                version,
+                SCHEMA_VERSION,
+            ),
         )?;
     }
     let version = if version == 0 {
@@ -1350,26 +1358,23 @@ fn open_connection(
         },
     )?;
     validate_schema(&connection)?;
-    let migration_pending: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key='integrity.migration_pending')",
-        [],
-        |row| row.get(0),
-    )?;
-    if migration_pending {
-        trace
-            .borrow_mut()
-            .next(StartupStage::DatabaseForeignKeys, None, None);
-        check_integrity(&connection, true, false)?;
-        connection.execute(
-            "DELETE FROM app_meta WHERE key='integrity.migration_pending'",
-            [],
-        )?;
+    let migration_pending = migration_integrity::pending(&connection)?;
+    if let Some(scope) = &migration_pending {
+        if scope.required() {
+            trace
+                .borrow_mut()
+                .next(StartupStage::DatabaseForeignKeys, None, None);
+        }
+        scope.run(&connection)?;
     }
     if !clean_shutdown {
         trace
             .borrow_mut()
             .next(StartupStage::DatabaseQuickCheck, None, None);
         check_integrity(&connection, false, true)?;
+    }
+    if migration_pending.is_some() {
+        migration_integrity::clear(&connection)?;
     }
     Ok(connection)
 }

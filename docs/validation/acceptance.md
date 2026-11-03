@@ -9360,3 +9360,15 @@ and the deliberately caught screen-diagnostic panic; log
 blocks, causing a missing-method compile error; the subsequent exact-once
 replacement and validation succeeded. No production exit cause is inferred
 from this synthetic writer. Exact-tip CI and fresh hosted comparison pending.
+
+## #210 Migration-Scoped Startup FK Validation
+
+Prepared focused regressions cover index-only skip, selected-table checks,
+a changed parent's referencing children, missing/empty metadata fallback,
+pending-scope union, legacy-marker fallback, SQLite interruption and reopening
+at current version. Real temporary-file startup cases cover migration27 skip,
+unknown-metadata upgrades, scoped restart, migration failure and later quick_check
+failure retaining pending. The manual timing test uses fresh disposable copies
+of one closed snapshot and emits only numeric startup-stage measurements. Results,
+exact-tip CI and independent review remain pending; no provider or owner is
+started on copies and no installed binary is changed.

@@ -728,3 +728,8 @@ creation has no upgrade check. Ordinary current-schema reopen has no upgrade FK
 scan. This policy is for applied schema migrations, not arbitrary package-version
 changes without a migration. Manual integrity checks remain full; unclean-start
 quick_check is independent and unchanged. No new schema version or worker is added.
+
+The reviewed registry initially marks only migrations25-27 as `IndexOnly` and
+migration14 as `Tables([turn, draft])` (turn-column addition and draft indexes).
+Other historical entries remain unclassified/full. Ledger/version writes are
+inherent migration bookkeeping, not application-table changes requiring a scan.
