@@ -144,7 +144,7 @@ fn project(
     let (mut nodes, info, _) = history.project_page(width, None);
     message_metadata::apply(&mut nodes, &sources);
     tools::apply(&mut nodes, &tools);
-    recovery::apply(&mut nodes, recovery, language);
+    recovery::apply(&mut nodes, recovery);
     usage::apply(&mut nodes, usage);
     if let Some(scope) = &mut tool_scope {
         message_metadata::apply(&mut scope.nodes, &sources);
