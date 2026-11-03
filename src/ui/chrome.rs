@@ -1209,6 +1209,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("chosen.toml");
         let mut config = Config::default();
+        // This fixture asserts the legacy Japanese first-run copy explicitly.
+        config.ui.language = crate::config::UiLanguage::Ja;
         config.source = Some(crate::config::ConfigSource {
             path: path.clone(),
             present: false,
