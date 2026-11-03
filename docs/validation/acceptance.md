@@ -9432,3 +9432,12 @@ passed. These are synthetic fixtures, not real-terminal latency measurements.
 Further shifted-F3/queued-input and full binary cache tests, and three-OS CI,
 remain pending at this record point. No real provider, installed-binary changes,
 user data, or embedding calls are involved.
+
+#192 follow-up diagnostics: 38 decoder tests and 38 configuration integration
+tests passed locally. The full-binary PTY cache fixture found that the synthetic
+VT renderer did not recognize private CPR queries; it now treats that query as
+non-painting and has an every-split regression. All 190 Python tests passed.
+Linux CI 41639027639 stopped at strict Clippy on openpty's platform-dependent
+winsize pointer signature; passing an explicit raw pointer keeps Linux's const
+and macOS's mutable signatures compatible. This is a test-harness correction,
+not a production timing workaround. Final corrected-tip checks remain pending.
