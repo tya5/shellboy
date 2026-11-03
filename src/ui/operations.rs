@@ -1296,6 +1296,7 @@ impl Form {
             OpKind::MessageSend => (
                 vec![
                     thread(),
+                    f("expect_reply", "返信を依頼", "false".into(), Boolean),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
                     f(
                         "sender_label",
@@ -1312,7 +1313,7 @@ impl Form {
                 ],
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
-                        expect_reply: false,
+                        expect_reply: form.boolean("expect_reply")?,
                         sender_label: form.optional("sender_label")?,
                         deliver: form
                             .optional("deliver")?
@@ -2548,6 +2549,7 @@ mod tests {
                         | "thread.delete"
                         | "thread.set"
                         | "message.send"
+                        | "message.reply"
                         | "message.cancel"
                         | "run.retry"
                         | "run.stop"
