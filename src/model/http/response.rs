@@ -77,8 +77,14 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<Value>>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Plain), Some(thread), None)
-            .await
+        self.response_inner(
+            request,
+            cancel,
+            events.map(Events::Plain),
+            Some(thread),
+            None,
+        )
+        .await
     }
     // Preserve the same bounded recovery payload as response().
     #[allow(clippy::result_large_err)]

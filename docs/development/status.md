@@ -4129,6 +4129,6 @@ and help coverage are documented in issue #174 for user decisions. Local
 macOS type checking and three focused tests passed; exact-tip task CI,
 integration handoff, and three-OS integration CI remain pending.
 
-## Usage-limit retry cutoff (#188, validation pending)
+## Usage-limit retry cutoff (#188, local checks passed; CI pending)
 
-Issue #188 compares a valid explicit provider reset against the remaining scheduled automatic retry waits. Long reset facts go directly to existing recovery wait; short or unavailable facts preserve ordinary retry behavior. No guessed reset or new setting. Focused short-reset test added; see [model HTTP](../design/model-http.md). Exact-tip checks and CI pending.
+Issue #188 compares explicit provider resets with remaining automatic retry waits. Long resets go directly to existing recovery wait; short resets allow only budgeted retries through the matching shared local guard. No guessed reset or new setting. `cargo fmt --all -- --check`, `cargo check --tests`, the short-reset and long-reset integration tests, the retry-window unit tests, and Python checks passed. The shared cache-clear unit test and exact-tip three-OS CI remain pending; see [model HTTP](../design/model-http.md).

@@ -78,7 +78,7 @@ response_max_retriesは既定8、0〜20。連続した失敗に対する追加�
 
 Retry-Afterの秒/HTTP dateが有効なら指数待機上限と別に、その指示を短縮せず待つ。固定600秒を超える場合は自動再送せず、指定待機時間と上限、automatic_retry_deferredを保全して復旧へ進む。不正な値は指数待機へ戻す。再起動後に自動継続しない。
 
-HTTP 429 bodyの明示的な `usage_limit_reached` / reset事実（解除時刻または解除までの秒数）が、現在の連続retry予算に残る指数待機予定の合計より後なら、追加POSTを行わず既存の復旧待ちへ進む。既定8回の残り予定は1/2/4/8/16/32/60/60秒（合計183秒）で、接続別retry上限と使用済みbudgetから同じ式で計算する。解除がその範囲内なら通常のretry判定を使い、そのretryだけ接続共有のローカルreset guardをbypassし、成功時は同じ事実が更新されていない場合に限り解除する。reset事実が無い/不正なら通常のretry動作を維持する。復旧理由には提供元の種類と時刻を既存の文言・記号で表示する。推測reset値、新設定、provider switchは加えない。
+HTTP 429 bodyの明示的な `usage_limit_reached` / reset事実（解除時刻または解除までの秒数）が、現在の連続retry予算に残る指数待機予定の合計より後なら、追加POSTを行わず既存の復旧待ちへ進む。既定8回の残り予定は1/2/4/8/16/32/60/60秒（合計183秒）で、接続別retry上限と使用済みbudgetから同じ式で計算する。現在の応答のRetry-Afterは次の待機だけに適用し、未来の応答ヘッダーは推測しない。解除がその範囲内なら通常のretry判定を使い、そのretryだけ接続共有のローカルreset guardをbypassし、成功時は同じ事実が更新されていない場合に限り解除する。reset事実が無い/不正なら通常のretry動作を維持する。復旧理由には提供元の種類と時刻を既存の文言・記号で表示する。推測reset値、新設定、provider switchは加えない。
 
 失敗attemptをfailedへ保存し、error_json.automatic_retryへnumber/limit/delay_ms/partial_response_discarded/possible_duplicate_chargeを残してからChanged通知と取消し可能なsleepへ進む。部分出力の場合は同じtransactionでincomplete_responseの監査nodeも保存し、GC root_revisionを更新する。通常の復旧保存と同じ処理を使う。保存した本文・完了item・raw responseは/receivedから参照でき、採用pathや次のモデル入力へ混入しない。失敗した途中のtool callは実行せず、正常な最終responseの採用成功後だけ実行する。
 

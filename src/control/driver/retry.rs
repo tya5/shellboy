@@ -142,10 +142,12 @@ impl RetryBudget {
     }
     fn planned_wait(&self, limit: u32, cap: Duration, retry_after: Option<Duration>) -> Duration {
         (self.used..limit).fold(Duration::ZERO, |total, used| {
-            total.saturating_add(
-                retry_after
-                    .unwrap_or_else(|| Duration::from_millis(1_000u64 << used.min(20)).min(cap)),
-            )
+            let backoff = Duration::from_millis(1_000u64 << used.min(20)).min(cap);
+            total.saturating_add(if used == self.used {
+                retry_after.unwrap_or(backoff)
+            } else {
+                backoff
+            })
         })
     }
 }
@@ -296,12 +298,8 @@ pub(super) async fn retry_or_recover(
             return Ok(());
         }
         budget.used += 1;
-        if delay.is_some() {
-            if let Some(fact) = retryable_usage_limit {
-                budget.usage_limit_retry_fact = Some(fact);
-            }
-        } else {
-            budget.clear_usage_limit_retry_bypass();
+        if let Some(fact) = retryable_usage_limit {
+            budget.usage_limit_retry_fact = Some(fact);
         }
         control.changed(&snapshot.thread);
         // Admission is released while waiting; ordinary boundaries are checked
@@ -320,6 +318,7 @@ pub(super) async fn retry_or_recover(
             delay.as_secs()
         ));
     }
+    budget.clear_usage_limit_retry_bypass();
     overflow::retry_or_recover(
         control,
         snapshot,
@@ -404,7 +403,7 @@ mod tests {
         );
         assert_eq!(
             budget.planned_wait(8, Duration::from_secs(60), Some(Duration::from_secs(2))),
-            Duration::from_secs(4)
+            Duration::from_secs(62)
         );
     }
     #[tokio::test(start_paused = true)]
