@@ -30,7 +30,8 @@ Branch `issue-194/reply-design`: the design
 the user's answers to all 17 questions (Q2, Q11, Q14 individually; the rest as
 recommended; option B for the glyph) and the `exec --result
 reply|turn-end|run-end` design, including the user's rules that an empty end
-message is ordinary text on the normal validation path and an Esc-ended Turn has none
+message is a successful empty result (exit 0, even with `--schema`) and an
+Esc-ended Turn has none
 (exit 4). Judgements made without an explicit answer are
 marked in the memo and logged in decisions. Documentation only; nothing is
 implemented or verified. Resume point: implementation step 1 (rename "answer"
