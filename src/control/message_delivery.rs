@@ -110,7 +110,7 @@ pub(crate) fn recover_on_resume_tx(
     let terminal = format!("({TERMINAL} AND NOT EXISTS(SELECT 1 FROM run live_run WHERE live_run.id=receipt.run_id AND live_run.state IN ('live','stopping')))");
     // Merge interrupted and current recovery input before applying LIMIT: neither
     // source may overtake an older receipt from the other source.
-    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id,COALESCE(run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait',0) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND ((path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted')))) OR (run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait')) ORDER BY created_at,rowid LIMIT 128"))?;
+    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id,COALESCE(run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait',0) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND ((path_admission='unadmitted' AND ({terminal} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted')))) OR (run_id=?2 AND turn_id=?3 AND hold_reason='recovery_wait')) AND EXISTS(SELECT 1 FROM node source WHERE source.id=receipt.message_node_id AND source.payload_json IS NOT NULL AND source.deleted_reason IS NULL) ORDER BY created_at,rowid LIMIT 128"))?;
     let rows = q
         .query_map(params![thread,run,turn], |r| {
             Ok((
@@ -283,6 +283,21 @@ mod tests {
         assert_eq!(state(&tx, "removed").0, "applied");
         tx.commit().unwrap();
     }
+    #[test]
+    fn oversized_unavailable_sources_make_repair_progress_without_partial_admission() {
+        let mut db = fixture();
+        for n in 0..257 { input(&db, &format!("n{n:03}"), "unadmitted", "0"); }
+        db.execute("UPDATE node SET payload_json=NULL,deleted_reason='collected'", []).unwrap();
+        for cancelled in [128,256,257] {
+            let tx = db.transaction().unwrap();
+            assert_eq!(recover_on_resume_tx(&tx,"t","new","next",json!({"kind":"human"}),"resume").unwrap(),0);
+            assert_eq!(tx.query_row("SELECT count(*) FROM receipt WHERE state='cancelled'", [], |r| r.get::<_,i64>(0)).unwrap(), cancelled);
+            assert_eq!(tx.query_row("SELECT count(*) FROM thread_path", [], |r| r.get::<_,i64>(0)).unwrap(), 0);
+            tx.commit().unwrap();
+        }
+        assert!(!interrupted_remaining(&db,"t").unwrap());
+    }
+
     #[test]
     fn recipient_repair_writes_at_most_128_and_retains_unrelated_rows() {
         let db = fixture();
