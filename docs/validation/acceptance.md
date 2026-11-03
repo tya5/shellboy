@@ -9159,3 +9159,7 @@ The final local UI integration subset also passed: 86 passed, 1 existing ignored
 (`cargo test --locked --test integration ui::`), including the new-Run edit
 confirmation regression. Only final-tip 3-OS CI and the explicitly untested
 interactive/production cases remain outstanding.
+
+## Shell unknown argument policy
+
+Coverage includes both policies, valid calls alongside invalid calls, unknown keys with invalid known types, configuration validation and the argument byte limit. Local focused tests and three-OS CI results must be reported for the final tip; real provider behavior has not been tested.

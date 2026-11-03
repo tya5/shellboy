@@ -560,3 +560,7 @@ finish event; an interrupted instance removes leftover witnesses during recovery
 Selected-view activity reads validate ownership against the latest live Run and
 preparing/running Turn. This is not the receipt-backed explicit context-edit
 wait, and does not add a table, queue, worker, setting or new lifecycle phase.
+
+## Shell argument policy
+
+The model response envelope is validated before any call runs: duplicate or missing call IDs, disabled tools, malformed envelopes and the argument byte limit reject the group. Shell argument, encoding and initial-stdin errors instead produce a result for that call; other valid calls continue in order. Unknown keys are ignored with a result warning by default, or reject that call in strict mode. Both messages name keys and accepted parameters, never their values. The existing bounded diagnostics queue records one fixed ignored/rejected event per unknown key, with Turn identifiers for correlation; it does not store keys or values. NUL and size checks remain in effect.
