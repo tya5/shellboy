@@ -2068,7 +2068,12 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
             .all(|field| field.key != "/request_operation_id"),
         "receipt-free history reads must not advertise a saved operation result"
     );
-    assert!(field(&fields, "/text").contains("詳細"));
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.key == "/text" && field.value_omitted),
+        "long history text should retain its omission marker"
+    );
     send.send(UiAction::LoadManagementDetail {
         detail_request_id: 1,
         request_id: report_id,
