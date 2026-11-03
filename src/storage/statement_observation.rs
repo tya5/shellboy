@@ -254,7 +254,11 @@ impl<'a> StatementObservation<'a> {
         connection: &'a mut Connection,
         register: impl FnOnce(*mut ffi::sqlite3, *mut c_void) -> i32,
     ) -> Self {
-        let counters = Arc::new(Mutex::new(Counters::default()));
+        let counters = Arc::new(Mutex::new(Counters {
+            rows: Some(0),
+            row_scope: Some("job_cumulative"),
+            ..Counters::default()
+        }));
         let mut context = Box::new(TraceContext {
             counters: counters.clone(),
             baselines: HashMap::new(),

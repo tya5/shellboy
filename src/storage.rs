@@ -2076,7 +2076,7 @@ mod slow_job_tests {
         assert!(rows[1]["db_job_slow"]["queue_ms"].as_u64().unwrap() >= 1000);
         assert!(
             rows.iter()
-                .all(|r| r["db_job_slow"].get("statement_counters").is_none())
+                .all(|r| r["db_job_slow"]["statement_counters"]["rows"] == 0)
         );
     }
 }
