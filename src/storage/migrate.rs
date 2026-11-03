@@ -17,20 +17,28 @@ const COMPACTION_TURN_INDEX_MIGRATION: &str =
     include_str!("../../migrations/0009_compaction_turn_indexes.sql");
 const CONTEXT_INDEX_MIGRATION: &str = include_str!("../../migrations/0003_context_indexes.sql");
 
-pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), StorageError> {
+pub(super) fn run(
+    connection: &mut Connection,
+    version: i64,
+    report: &dyn Fn(i64, i64),
+    validation: &dyn Fn(),
+) -> Result<(), StorageError> {
     if version < 2 {
+        report(2 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(GC_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 3 {
+        report(3 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(CONTEXT_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 4 {
+        report(4 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(ATTACHMENT_PROVENANCE_MIGRATION)?;
@@ -38,42 +46,49 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         transaction.commit()?;
     }
     if version < 5 {
+        report(5 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(ORIGIN_CREDENTIAL_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 6 {
+        report(6 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(RECEIPT_BUDGET_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 7 {
+        report(7 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(USAGE_SOURCE_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 8 {
+        report(8 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(RECEIPT_ACCOUNTING_COMPAT_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 9 {
+        report(9 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(COMPACTION_TURN_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 10 {
+        report(10 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(HOT_QUERY_INDEX_MIGRATION)?;
         transaction.commit()?;
     }
     if version < 11 {
+        report(11 - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         transaction.execute_batch(include_str!(
@@ -82,11 +97,13 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         transaction.commit()?;
     }
     if version < 12 {
+        report(12 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0012_revisit_metadata.sql"))?;
         tx.commit()?;
     }
     if version < 13 {
+        report(13 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!(
             "../../migrations/0013_message_path_admission.sql"
@@ -94,26 +111,31 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         tx.commit()?;
     }
     if version < 14 {
+        report(14 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0014_turn_interrupt.sql"))?;
         tx.commit()?;
     }
     if version < 15 {
+        report(15 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0015_readback_indexes.sql"))?;
         tx.commit()?;
     }
     if version < 16 {
+        report(16 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0016_thread_observation.sql"))?;
         tx.commit()?;
     }
     if version < 17 {
+        report(17 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0017_thread_parent.sql"))?;
         tx.commit()?;
     }
     if version < 18 {
+        report(18 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!(
             "../../migrations/0018_summary_usage_metadata.sql"
@@ -121,6 +143,7 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         tx.commit()?;
     }
     if version < 19 {
+        report(19 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!(
             "../../migrations/0019_context_attempt_scope.sql"
@@ -128,16 +151,19 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         tx.commit()?;
     }
     if version < 20 {
+        report(20 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0020_gc_index_source.sql"))?;
         tx.commit()?;
     }
     if version < 21 {
+        report(21 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0021_event_retention.sql"))?;
         tx.commit()?;
     }
     if version < 22 {
+        report(22 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!(
             "../../migrations/0022_logical_usage_counters.sql"
@@ -145,15 +171,18 @@ pub(super) fn run(connection: &mut Connection, version: i64) -> Result<(), Stora
         tx.commit()?;
     }
     if version < 23 {
+        report(23 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0023_activity_bounded.sql"))?;
         tx.commit()?;
     }
     if version < 24 {
+        report(24 - version, super::SCHEMA_VERSION - version);
         let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute_batch(include_str!("../../migrations/0024_revisit_messages.sql"))?;
         tx.commit()?;
     }
+    validation();
     validate_schema(connection)?;
     Ok(())
 }
@@ -240,7 +269,15 @@ mod activity_migration_tests {
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("DROP INDEX activity_attempt_turn; DROP INDEX activity_turn_run; DROP INDEX activity_turn_run_state; DROP INDEX activity_group_turn_state; DROP INDEX activity_shell_spawned_turn; DROP INDEX activity_shell_uncollected_owner; DROP INDEX receipt_run_completion; DELETE FROM schema_migration WHERE version>=23; PRAGMA user_version=22; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');").unwrap();
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); PRAGMA ignore_check_constraints=ON; INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('bad','r','u','bad','exited','/','broken json','UTF-8','UTF-8','closed','now'),('good','r','u','good','exited','/','{\"spawned\":true}','UTF-8','UTF-8','closed','now'); PRAGMA ignore_check_constraints=OFF;").unwrap();
-        run(&mut db, 22).unwrap();
+        let observed = std::cell::RefCell::new(Vec::new());
+        run(
+            &mut db,
+            22,
+            &|current, total| observed.borrow_mut().push((current, total)),
+            &|| {},
+        )
+        .unwrap();
+        assert_eq!(*observed.borrow(), vec![(1, 2), (2, 2)]);
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(

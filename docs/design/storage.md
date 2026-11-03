@@ -3,6 +3,19 @@
 Schema21 adds derived event-retention indexes; it does not rewrite event or
 delivery data. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
 
+## Startup observations (#191)
+
+The startup screen and diagnostics must use the same fixed stage definitions.
+The user-approved display reports total elapsed time and, only during an
+existing-database migration, the current step out of the known number of
+steps. Steps are not equal-cost and are not startup-wide progress. New and
+already-current databases have no migration step count. When stage markers do
+not fit, show the numeric count without markers. The startup trace uses fixed
+stage classifications and numeric durations, never IDs, data or SQL. It is
+bounded per startup, nonblocking, and best-effort through the existing rotating
+diagnostics writer; a dropped record is not a zero-duration stage. Do not
+perform additional full-table scans merely to derive a progress denominator.
+
 ## DB job timing (#164)
 
 The DB worker observes each accepted job from queue admission through execution.

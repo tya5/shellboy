@@ -225,7 +225,23 @@ impl DbWorker {
         path: impl AsRef<Path>,
         owner: Arc<dyn Send + Sync>,
     ) -> Result<Self, StorageError> {
-        Self::open_internal(path, DEFAULT_QUEUE_CAPACITY, Some(owner)).await
+        Self::open_internal(path, DEFAULT_QUEUE_CAPACITY, Some(owner), None, None).await
+    }
+
+    pub(crate) async fn open_owned_reporting(
+        path: impl AsRef<Path>,
+        owner: Arc<dyn Send + Sync>,
+        progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+        startup_diagnostics: crate::diagnostics::Diagnostics,
+    ) -> Result<Self, StorageError> {
+        Self::open_internal(
+            path,
+            DEFAULT_QUEUE_CAPACITY,
+            Some(owner),
+            progress,
+            Some(startup_diagnostics),
+        )
+        .await
     }
 
     /// `capacity` bounds each of the foreground and background lanes.
@@ -233,13 +249,15 @@ impl DbWorker {
         path: impl AsRef<Path>,
         capacity: usize,
     ) -> Result<Self, StorageError> {
-        Self::open_internal(path, capacity, None).await
+        Self::open_internal(path, capacity, None, None, None).await
     }
 
     async fn open_internal(
         path: impl AsRef<Path>,
         capacity: usize,
         owner: Option<Arc<dyn Send + Sync>>,
+        progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+        startup_diagnostics: Option<crate::diagnostics::Diagnostics>,
     ) -> Result<Self, StorageError> {
         if capacity == 0 {
             return Err(StorageError::Configuration(
@@ -273,6 +291,8 @@ impl DbWorker {
                     background_receiver,
                     ready_send,
                     worker,
+                    progress,
+                    startup_diagnostics,
                 )
             })
             .map_err(|error| StorageError::Worker(error.to_string()))?;
@@ -822,6 +842,8 @@ fn run_worker(
     background: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<(), StorageError>>,
     state: WorkerState,
+    progress: Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+    startup_diagnostics: Option<crate::diagnostics::Diagnostics>,
 ) -> Result<(), StorageError> {
     let runtime = match tokio::runtime::Builder::new_current_thread().build() {
         Ok(runtime) => runtime,
@@ -830,13 +852,14 @@ fn run_worker(
             return Ok(());
         }
     };
-    let mut connection = match open_connection(&path) {
-        Ok(connection) => connection,
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            return Ok(());
-        }
-    };
+    let mut connection =
+        match open_connection(&path, progress.as_ref(), startup_diagnostics.as_ref()) {
+            Ok(connection) => connection,
+            Err(error) => {
+                let _ = ready.send(Err(error));
+                return Ok(());
+            }
+        };
     if ready.send(Ok(())).is_err() {
         return Ok(());
     }
@@ -975,7 +998,55 @@ pub(crate) fn register_vec() -> Result<(), StorageError> {
     Ok(())
 }
 
-fn open_connection(path: &Path) -> Result<Connection, StorageError> {
+struct StartupDbTrace<'a> {
+    stage: crate::app::StartupStage,
+    start: Instant,
+    version: Option<u32>,
+    diagnostics: Option<&'a crate::diagnostics::Diagnostics>,
+    progress: Option<&'a tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+}
+impl StartupDbTrace<'_> {
+    fn next(
+        &mut self,
+        stage: crate::app::StartupStage,
+        version: Option<u32>,
+        migration: Option<(u32, u32)>,
+    ) {
+        if let Some(diagnostics) = self.diagnostics {
+            diagnostics.record_startup_stage(self.stage, self.start.elapsed(), self.version);
+        }
+        self.stage = stage;
+        self.version = version;
+        self.start = Instant::now();
+        if let Some(progress) = self.progress {
+            progress.send_modify(|state| {
+                state.stage = stage;
+                state.migration = migration;
+            });
+        }
+    }
+}
+impl Drop for StartupDbTrace<'_> {
+    fn drop(&mut self) {
+        if let Some(diagnostics) = self.diagnostics {
+            diagnostics.record_startup_stage(self.stage, self.start.elapsed(), self.version);
+        }
+    }
+}
+
+fn open_connection(
+    path: &Path,
+    progress: Option<&tokio::sync::watch::Sender<crate::app::StartupProgress>>,
+    diagnostics: Option<&crate::diagnostics::Diagnostics>,
+) -> Result<Connection, StorageError> {
+    use crate::app::StartupStage;
+    let trace = std::cell::RefCell::new(StartupDbTrace {
+        stage: StartupStage::Database,
+        start: Instant::now(),
+        version: None,
+        diagnostics,
+        progress,
+    });
     register_vec()?;
     let mut connection = Connection::open_with_flags(
         path,
@@ -983,6 +1054,9 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
             | OpenFlags::SQLITE_OPEN_CREATE
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
+    trace
+        .borrow_mut()
+        .next(StartupStage::DatabasePragmas, None, None);
     connection.busy_timeout(Duration::from_secs(2))?;
     let vec_version: String = connection.query_row("SELECT vec_version()", [], |row| row.get(0))?;
     if vec_version != "v0.1.9" {
@@ -1016,11 +1090,32 @@ fn open_connection(path: &Path) -> Result<Connection, StorageError> {
     } else {
         version
     };
-    migrate::run(&mut connection, version)?;
+    migrate::run(
+        &mut connection,
+        version,
+        &|current, total| {
+            trace.borrow_mut().next(
+                StartupStage::DatabaseMigration,
+                Some((version + current) as u32),
+                Some((current as u32, total as u32)),
+            );
+        },
+        &|| {
+            trace
+                .borrow_mut()
+                .next(StartupStage::DatabaseValidate, None, None)
+        },
+    )?;
     validate_schema(&connection)?;
+    trace
+        .borrow_mut()
+        .next(StartupStage::DatabaseForeignKeys, None, None);
     if connection.prepare("PRAGMA foreign_key_check")?.exists([])? {
         return Err(StorageError::Schema("foreign key violations".into()));
     }
+    trace
+        .borrow_mut()
+        .next(StartupStage::DatabaseQuickCheck, None, None);
     let integrity: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
     if integrity != "ok" {
         return Err(StorageError::Schema(format!("quick_check: {integrity}")));

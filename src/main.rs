@@ -418,6 +418,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     let (send, mut pending) = std::sync::mpsc::sync_channel(1);
     let token = cancel.clone();
     let observations = progress.clone();
+    let startup_started = std::time::Instant::now();
     let mut initializer = runtime.spawn(async move {
         let result = shellboy::owner_session::initialize_localized(
             cli.config,
@@ -435,6 +436,7 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
             &pending,
             &cancel,
             &termination,
+            startup_started,
         ) {
             Ok(Ok(Some(prepared))) if cancel.is_cancelled() => {
                 // Cancellation may race the single ready delivery. Never

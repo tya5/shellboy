@@ -59,6 +59,11 @@ impl Page {
             rows: Vec::new(),
             language: config.ui.language,
         };
+        page.note(local!(
+            config.ui.language,
+            "起動中の構造更新の段数は、起動全体の進行割合ではありません。",
+            "Startup schema-update steps are not a percentage of overall startup."
+        ));
         page.section(local!(config.ui.language, "よく使う操作", "Common actions"));
         use super::key_hints::Action;
         for action in [
