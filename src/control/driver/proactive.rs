@@ -2,6 +2,8 @@
 //! Uses ordinary safe boundaries, recording partial spill adoption separately.
 use super::*;
 
+mod target;
+
 pub(super) const REASON: &str = "proactive_threshold";
 
 /// Loaded lazily from durable Thread metadata; unlike token growth, the
