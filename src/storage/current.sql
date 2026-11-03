@@ -590,3 +590,8 @@ PRAGMA user_version=23;
 CREATE INDEX receipt_run_completion ON receipt(run_id) WHERE json_extract(result_json,'$.deliver')='complete';
 INSERT INTO schema_migration(version,name) VALUES(24,'0024_revisit_messages');
 PRAGMA user_version=24;
+
+-- Execution links seek groups by saved attempt without scanning other groups.
+CREATE INDEX history_tool_group_attempt ON tool_group(attempt_id);
+INSERT INTO schema_migration(version,name) VALUES(25,'0025_history_attempt_index');
+PRAGMA user_version=25;

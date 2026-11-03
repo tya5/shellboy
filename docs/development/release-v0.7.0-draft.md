@@ -23,7 +23,7 @@ behavior.
 ## Before upgrading
 
 - **Stop the owner and back up the complete data directory.** Conversation
-  storage advances from schema 19 in v0.6.1 to schema 24, and standalone RAG
+  storage advances from schema 19 in v0.6.1 to schema 25, and standalone RAG
   storage advances from schema 3 to schema 4. The local protocol remains version
   2. Compatibility with earlier releases is not guaranteed before 1.0.0.
 - **Run `shellboy rag init` once after upgrading if you use RAG.** Read-only RAG

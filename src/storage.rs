@@ -43,6 +43,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (22, "0022_logical_usage_counters"),
     (23, "0023_activity_bounded"),
     (24, "0024_revisit_messages"),
+    (25, "0025_history_attempt_index"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

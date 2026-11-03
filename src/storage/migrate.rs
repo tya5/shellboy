@@ -182,6 +182,14 @@ pub(super) fn run(
         tx.execute_batch(include_str!("../../migrations/0024_revisit_messages.sql"))?;
         tx.commit()?;
     }
+    if version < 25 {
+        report(25 - version, super::SCHEMA_VERSION - version);
+        let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        tx.execute_batch(include_str!(
+            "../../migrations/0025_history_attempt_index.sql"
+        ))?;
+        tx.commit()?;
+    }
     validation();
     validate_schema(connection)?;
     Ok(())

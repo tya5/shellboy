@@ -227,3 +227,25 @@ async fn summary_usage_accounting_migration_matches_fresh_schema() {
     .await
     .expect("summary usage migration watchdog");
 }
+
+#[tokio::test]
+async fn history_attempt_index_migration_from_24_matches_fresh() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("history-upgrade.sqlite");
+    let fresh = DbWorker::open(&path).await.unwrap();
+    let expected = fresh.call(|db| Ok(schema(db)?)).await.unwrap();
+    fresh.shutdown().await.unwrap();
+    let db = Connection::open(&path).unwrap();
+    db.execute_batch("DROP INDEX history_tool_group_attempt; DELETE FROM schema_migration WHERE version=25; PRAGMA user_version=24;").unwrap();
+    db.close().unwrap();
+    let upgraded = DbWorker::open(&path).await.unwrap();
+    assert_eq!(upgraded.call(|db| Ok(schema(db)?)).await.unwrap(), expected);
+    upgraded.call(|db| {
+        let sql = "EXPLAIN QUERY PLAN SELECT c.group_id,c.call_id FROM output_item o JOIN tool_group g ON g.attempt_id=o.attempt_id JOIN tool_call c ON c.group_id=g.id WHERE o.node_id=?1";
+        let plan = db.prepare(sql)?.query_map(["none"], |r| r.get::<_,String>(3))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        assert!(plan.iter().any(|s| s.contains("history_tool_group_attempt")), "{plan:?}");
+        assert!(!plan.iter().any(|s| s.contains("SCAN c") || s.contains("SCAN g")), "{plan:?}");
+        Ok(())
+    }).await.unwrap();
+    upgraded.shutdown().await.unwrap();
+}
