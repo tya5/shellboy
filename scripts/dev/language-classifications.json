@@ -673,5 +673,20 @@
     "category": "a",
     "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
     "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+  },
+  "src/ui/history_interaction.rs:453abb19c1710843:1": {
+    "category": "a",
+    "reason": "Generated send/ready status has an exact English i18n::local counterpart in ui.rs; preserve it as a non-notice in both languages without changing provider-supplied status text.",
+    "source_tokens_sha256": "756fe3c37c6eec11366852036f62e2dad0dea9063bad9e599b9edf21d42e4a53"
+  },
+  "src/ui/history_interaction.rs:09521f69eadb528c:1": {
+    "category": "a",
+    "reason": "Generated send/ready status has an exact English i18n::local counterpart in ui.rs; preserve it as a non-notice in both languages without changing provider-supplied status text.",
+    "source_tokens_sha256": "756fe3c37c6eec11366852036f62e2dad0dea9063bad9e599b9edf21d42e4a53"
+  },
+  "src/ui/history_interaction.rs:7577a434ce924ea3:1": {
+    "category": "a",
+    "reason": "Generated send/ready status has an exact English i18n::local counterpart in ui.rs; preserve it as a non-notice in both languages without changing provider-supplied status text.",
+    "source_tokens_sha256": "a0f0c58bf677c1e5178b104ed50ac790d3132ee94bf5c4896223f16d4eb6964b"
   }
 }
