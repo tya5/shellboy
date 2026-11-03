@@ -146,7 +146,7 @@ pub(crate) fn point_sql(kind: Kind) -> String {
             "LEFT JOIN run t ON t.id=r.run_id LEFT JOIN turn u ON u.id=r.turn_id",
             "r.target_thread_id",
             "t.owner_run_id",
-            "u.answer_node_id",
+            "NULL",
             "CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=r.client_operation_id) THEN r.client_operation_id END",
             "NULL",
             "NULL",
@@ -172,6 +172,8 @@ pub(crate) fn point_sql(kind: Kind) -> String {
             format!("{pending}||':'||{delivered}"),
             "CASE WHEN EXISTS(SELECT 1 FROM turn INDEXED BY turns_by_run WHERE run_id=r.id AND created_at=(SELECT max(created_at) FROM turn INDEXED BY turns_by_run WHERE run_id=r.id) LIMIT 1 OFFSET 200) THEN 'latest_turn_prefix_limit' END",
         )
+    } else if kind == Kind::Message {
+        ("json_object('expect_reply',json_extract(r.result_json,'$.expect_reply'),'reply',json_extract(r.result_json,'$.reply'),'reply_to',json_extract(r.result_json,'$.reply_to'))".into(), "NULL")
     } else {
         ("NULL".into(), "NULL")
     };
@@ -500,6 +502,9 @@ fn canonical_item(
         attempt_id: (fact.key.kind == Kind::Attempt).then(|| id.clone()),
         operation_id: get(10),
         end_message_node_id: get(11),
+        expect_reply: false,
+        reply: None,
+        reply_to: None,
         activity_at: activity.1.into(),
         elapsed_ms,
         last_output_at: get(20),
@@ -518,6 +523,16 @@ fn canonical_item(
             }),
         targets: Vec::new(),
     };
+
+    if kind == super::WorkKind::Message
+        && let Some(metadata) = get(18)
+    {
+        let metadata: serde_json::Value = serde_json::from_str(&metadata)
+            .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid reply metadata"))?;
+        item.expect_reply = metadata["expect_reply"] == true || metadata["expect_reply"] == 1;
+        item.reply = metadata.get("reply").filter(|v| !v.is_null()).cloned();
+        item.reply_to = metadata["reply_to"].as_str().map(str::to_owned);
+    }
     item.targets = super::links(kind, &item)?;
     Ok(item)
 }

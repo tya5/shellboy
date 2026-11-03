@@ -143,6 +143,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         return Err(header_scalar_limit(&field));
     }
     let details = ThreadDetails {
+        awaiting_reply: Vec::new(),
         last_end_message: None,
         last_input: None,
         last_compaction: None,

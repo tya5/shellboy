@@ -17,8 +17,7 @@ pub(crate) fn admission_notice_tx(
     let saved: Value = serde_json::from_str(&saved)
         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     let payload = if saved["expect_reply"] == true {
-        let sender: Value = serde_json::from_str(&sender)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
         Some(
             json!({"kind":"reply_expected","message_id":message,"sender":sender,"command":format!("shellboy message reply --message {message}")}),
         )
@@ -94,6 +93,42 @@ fn append_notice_tx(
         db.execute("INSERT INTO delivery(event_id,recipient_id,state) SELECT ?1,run_id,'processed' FROM turn WHERE id=?2",params![event,turn])?;
     }
     Ok(())
+}
+
+pub(crate) fn awaiting_reply_tx(db: &Connection, thread: &str) -> rusqlite::Result<Vec<Value>> {
+    let mut statement = db.prepare("SELECT message_node_id,sender_json,created_at,state,result_json FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT 128")?;
+    statement.query_map([thread], |r| {
+        let saved: String = r.get(4)?;
+        let saved: Value = serde_json::from_str(&saved).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        let sender: String = r.get(1)?;
+        Ok(json!({"message_id":r.get::<_,String>(0)?,"sender":crate::protocol::MessageSender::from_saved(Some(&sender)),"created_at":r.get::<_,String>(2)?,"delivery_status":r.get::<_,String>(3)?,"reminded":saved["reply"].get("reminded_at").is_some()}))
+    })?.collect()
+}
+
+pub(crate) fn cancel_reply_tx(
+    db: &Connection,
+    thread: &str,
+    message: &str,
+    at: &str,
+    actor: &Value,
+    admitted: bool,
+) -> rusqlite::Result<bool> {
+    let changed = db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"by":actor}).to_string(),at])?;
+    if changed == 1 && admitted {
+        // Leave the current selected path and inflight manifest intact. The
+        // ordinary event admission path presents this notice without waking a Run.
+        db.execute(
+            "INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed','{\"kind\":\"shellboy\"}',?2,?3,?4)",
+            params![format!("reply-cancelled-{message}"), thread, json!({"kind":"reply_cancelled","message_id":message}).to_string(), at],
+        )?;
+    }
+    if changed == 1 {
+        db.execute(
+            "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
+            params![thread, at],
+        )?;
+    }
+    Ok(changed == 1)
 }
 
 #[cfg(test)]
@@ -187,16 +222,16 @@ impl super::db::Store {
                     .details(json!({"reason":"not_recipient"})),
             );
         }
-        if row.1 != "applied" {
-            return Err(
-                ApiError::new(ErrorCode::InvalidState, "message has not been applied")
-                    .details(json!({"delivery_status":row.1})),
-            );
-        }
         if saved["reply"]["state"] != "pending" {
             return Err(
                 ApiError::new(ErrorCode::InvalidState, "reply is already terminal")
                     .details(json!({"reply_state":saved["reply"]["state"]})),
+            );
+        }
+        if row.1 != "applied" {
+            return Err(
+                ApiError::new(ErrorCode::InvalidState, "message has not been applied")
+                    .details(json!({"delivery_status":row.1})),
             );
         }
         if args.text.len() as u64 > self.config.limits.draft_bytes {
