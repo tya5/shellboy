@@ -9160,3 +9160,20 @@ CI are pending. Production data, billable embeddings, process-crash injection,
 and additional OS checks beyond the requested default CI are untested here.
 Migration version is deliberately not changed; #172 carries the integration
 checklist and #203 tracks the existing unbounded authorization recovery.
+
+### #172 review follow-up local validation (2026-11-03)
+
+On macOS, the final source tree passed the chained rust-slot commands:
+`cargo fmt --all`, `cargo clippy --locked --all-targets -- -D warnings`,
+`cargo test --locked --lib index::` (67 passed, two manual measurements ignored),
+and `cargo test --locked --lib manual_rebuild` (two passed). A fresh library
+rebuild preceded the tests; all selected filters ran matching tests. This covers
+all three explicit authorizations with automatic history disabled, retained
+recovered work under pause, failed activation and failed failure-marker saving
+without resurrecting the admission fence, and bilingual display/raw separation.
+All 190 Python script tests, 12 CI-reuse Node tests, language classification,
+integration registration/watchdog policy, and diff whitespace checks passed.
+An extra standalone watchdog-script invocation failed because that file does
+not exist; the real watchdog check is included in the successful layout script.
+Final published-SHA CI is pending. Synthetic fixtures and loopback mocks only;
+no installed binary, real provider traffic, or user data was used.
