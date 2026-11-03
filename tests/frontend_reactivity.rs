@@ -271,15 +271,20 @@ impl Fixture {
         for action in self.ui.take_deferred_actions() {
             self.actions.send(action).await.unwrap();
         }
-        self.terminal
+        // Read the completed frame, not TestBackend's diff-applied cells:
+        // TestBackend does not clear a wide glyph's trailing cell when a later
+        // diff skips it, so stale halves could appear in the text read below.
+        let buffer = self
+            .terminal
             .draw(|frame| shellboy::ui::draw(frame, &mut self.ui))
-            .unwrap();
+            .unwrap()
+            .buffer
+            .clone();
         // Painting can produce observation/viewport actions. Send them before
         // awaiting the very update that those actions will produce.
         for action in self.ui.take_deferred_actions() {
             self.actions.send(action).await.unwrap();
         }
-        let buffer = self.terminal.backend().buffer();
         let mut screen = String::new();
         for y in 0..40 {
             let mut x = 0;
