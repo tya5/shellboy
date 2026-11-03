@@ -313,7 +313,9 @@ the read snapshot closes, with current capture revisions and explicit limits.
 Positioning: in normal operation the conversation stays at a low token count.
 A momentarily huge input is never blocked or pre-checked; it is sent. Only after
 its response reports input tokens at or above the threshold does the Driver
-compact, at the next safe request boundary (one step late is accepted). The
+start proactive compaction, at the next safe request boundary (one step late is
+accepted). A measured #209 target shortfall can continue at a subsequent safe
+boundary below the threshold. The
 existing explicit-overflow reduction (#50) remains the last-resort fallback, so
 the conversation always continues. Users who want a persistently large context
 opt out with `auto_at_tokens = 0`.
@@ -351,8 +353,8 @@ propagate; cancellation keeps its existing error behavior. Manual compact keeps
 its existing contract. Replay character reduction is not a guarantee of provider
 token reduction.
 
-Progress gate (#180): crossing the provider threshold is necessary but not
-sufficient. Before starting, a bounded read-only forecast applies the same
+Progress gate (#180): crossing the provider threshold, or verifying a #209
+target shortfall, is necessary but not sufficient. Before starting, a bounded read-only forecast applies the same
 ordinary Turn/tool fences, protection checks and reducing-spill projection. If
 there are no eligible sources, no compaction is started, no summary request is
 sent and no `no_safe_reduction` attempt is written. If an attempt or its summary
@@ -456,12 +458,11 @@ The #182 shape below supersedes its sections 1-4 and 7.
 Order (user decision 2026-11-03, reverses #181's "instead of"): in the #125
 proactive attempt the ordinary summary of earlier Turns runs first, as usual,
 because recent context contributes more to quality. The active-Turn summary
-runs only when that prefix holds nothing but earlier summaries
-(`policy::unsummarized_prefix`), or when the previous attempt in the same Run
-adopted the prefix summary and a fresh measurement is still at or above the
-threshold (ephemeral per-`drive` flag; a fresh measurement below the threshold
-clears it). Still one summary operation per attempt; the #180 progress gate and
-the fresh-measurement rule are unchanged. The attempt record has
+runs when the prefix holds nothing but earlier summaries, or when a previous
+prefix summary remains above the measured #209 target. With a calibrated plan,
+a prefix and an active-Turn summary may also run in the same attempt if their
+measured replay-character reduction is short of the planned reduction. The
+#180 progress gate and the fresh-measurement rule remain in force. The attempt record has
 `midturn: {"skipped":"prefix_first"}` when the prefix summary ran,
 `{"scope":"active_turn"}` when the active-Turn summary ran,
 `{"skipped":"no_target"}` when it had no target and `{"skipped":"no_new_target"}`
