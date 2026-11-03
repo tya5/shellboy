@@ -4437,3 +4437,12 @@ continues readiness-driven draining through child exit and emits bounded VT
 and screen diagnostics on exit failure. A real PTY writer exceeding capacity
 covers this observation gap. New-tip checks and a fresh full comparison remain
 pending; the first tip's successful 3-OS CI does not cover this follow-up.
+
+#213 reply usability: adopted design confirms reply bodies are ordinary `user`
+nodes on the recipient-side Turn when there is no sender Thread; that design
+intent was reported on the issue before implementation. The design now states
+how history provenance obtains the credential-free replier identity from
+`reply.by` for replies without a delivery receipt. `wait --help` now documents
+`reply_received` with its `message_id` example, and the CLI reference includes
+the same invocation as the delegation guide. Focused local tests and default /
+all-OS hosted CI are pending; W8 owns review and landing.

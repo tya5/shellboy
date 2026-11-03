@@ -797,7 +797,13 @@ there can be at most 128 pending duties per recipient Thread. A recipient model
 Use `history get --node REPLY_NODE_ID` for the body.
 
 `wait reply_received` uses a JSON condition
-`{"type":"reply_received","message_id":"MESSAGE_ID"}`. Inspect the snapshot:
+`{"type":"reply_received","message_id":"MESSAGE_ID"}`. Example:
+
+```bash
+shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE_ID"}]' --timeout-ms 30000
+```
+
+Inspect the snapshot:
 `satisfied` can mean replied, ignored, cancelled, or recipient deleted. Timeout
 does not cancel the duty. `thread get` includes `awaiting_reply` (up to 128,
 oldest first). Cancelling a queued request cancels both input and duty;

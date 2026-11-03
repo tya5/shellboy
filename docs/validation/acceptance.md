@@ -9360,3 +9360,9 @@ and the deliberately caught screen-diagnostic panic; log
 blocks, causing a missing-method compile error; the subsequent exact-once
 replacement and validation succeeded. No production exit cause is inferred
 from this synthetic writer. Exact-tip CI and fresh hosted comparison pending.
+
+## #213 reply usability (in progress)
+
+- Verified from the adopted reply design: the receiving Thread's reply body is an ordinary `user` node; its node kind is intentional. Provenance sender is being extended to expose the credential-free `reply.by` fact for replies without a delivery receipt.
+- Added `reply_received` / `message_id` to `wait --help`, plus a matching help regression test; CLI reference example now matches delegation documentation.
+- Focused provenance/help tests, doc check, standard checks, pushed-tip default CI, and pushed-tip all-OS CI remain pending.
