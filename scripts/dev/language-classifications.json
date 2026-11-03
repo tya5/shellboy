@@ -2776,8 +2776,8 @@
   },
   "src/ui/operations.rs:80aab534242d8deb:2": {
     "category": "a",
-    "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "82020571e79eac2ee9267b06c613b5764b50a82ee38ca71858a5e07c7c6af1b6"
+    "reason": "Re-reviewed after the #194 rebase onto 226c4f6d: this Japanese end-message-only form label remains UI-only; English uses the catalog translation or english_field_label fallback. Reply form additions do not change command field values.",
+    "source_tokens_sha256": "1ff53e677689d9fd735a0766993931f3264e40ae2b45f8bf2e3799251e881430"
   },
   "src/presentation/time_text.rs:2721e3380759d54f:1": {
     "category": "a",
