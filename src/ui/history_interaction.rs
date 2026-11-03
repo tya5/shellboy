@@ -58,6 +58,20 @@ fn is_ready_status(status: &str) -> bool {
     matches!(status, "入力できます" | "Ready for input")
 }
 
+fn is_idle_status(status: &str) -> bool {
+    matches!(
+        status,
+        "待機中"
+            | "Waiting"
+            | "処理中"
+            | "Processing"
+            | "完了"
+            | "Complete"
+            | "操作を準備しました"
+            | "Operation is ready"
+    )
+}
+
 impl ThreadView {
     pub(super) fn clear_operation_notice(&mut self) {
         if self.operation_notice.take().is_some() {
@@ -76,10 +90,7 @@ impl ThreadView {
             || self.status == self.state
             || self.status == self.footer_phase().label()
             || is_ready_status(&self.status)
-            || matches!(
-                self.status.as_str(),
-                "待機中" | "処理中" | "完了" | "操作を準備しました"
-            )
+            || is_idle_status(&self.status)
             || self
                 .operation_notice
                 .as_ref()
@@ -756,6 +767,19 @@ mod tests {
         }
         assert!(is_ready_status("入力できます"));
         assert!(is_ready_status("Ready for input"));
+        for status in [
+            "待機中",
+            "Waiting",
+            "処理中",
+            "Processing",
+            "完了",
+            "Complete",
+            "操作を準備しました",
+            "Operation is ready",
+        ] {
+            assert!(is_idle_status(status), "{status}");
+        }
+        assert!(!is_idle_status("Provider supplied status"));
         assert!(!is_send_progress_status("Provider supplied error"));
         assert!(!is_ready_status("Provider supplied status"));
     }
