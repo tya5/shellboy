@@ -363,15 +363,15 @@ impl Store {
                 args.thread_id = caller.as_ref().map(|origin| origin.thread_id.clone());
             }
             let instance = self.instance_id.clone();
-            return execute_kind::call(&self.database, execute_kind::Kind::Status, move |db| {
-                let tx = db.transaction()?;
-                let result = crate::status::snapshot(&tx, &args, &instance);
-                tx.commit()?;
-                Ok(result)
+            let path = self.database.path().to_path_buf();
+            return crate::presentation::work(move || {
+                let mut db = open_inspection(&path)?;
+                let tx = db.transaction().map_err(sql_error)?;
+                let result = crate::status::snapshot(&tx, &args, &instance)?;
+                tx.commit().map_err(sql_error)?;
+                MutationResult::value(result)
             })
-            .await
-            .map_err(storage_error)?
-            .and_then(MutationResult::value);
+            .await?;
         }
         if let Command::CompactPreview(args) = &request.command {
             let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
@@ -379,13 +379,7 @@ impl Store {
             let config = self.config.clone();
             let path = self.database.path().to_path_buf();
             return crate::presentation::work(move || {
-                let mut db =
-                    Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-                        .map_err(sql_error)?;
-                db.busy_timeout(std::time::Duration::from_millis(250))
-                    .map_err(sql_error)?;
-                db.pragma_update(None, "query_only", true)
-                    .map_err(sql_error)?;
+                let mut db = open_inspection(&path)?;
                 let tx = db.transaction().map_err(sql_error)?;
                 let raw = crate::compaction::preview::read_tx(&tx, &thread, &args, &config)
                     .map_err(storage_error)?;
@@ -399,15 +393,7 @@ impl Store {
             let thread = target(args.thread_id.as_deref(), caller.as_ref())?;
             let path = self.database.path().to_path_buf();
             let mut items = crate::presentation::work(move || {
-                let mut db = rusqlite::Connection::open_with_flags(
-                    path,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-                )
-                .map_err(sql_error)?;
-                db.busy_timeout(std::time::Duration::from_millis(250))
-                    .map_err(sql_error)?;
-                db.pragma_update(None, "query_only", true)
-                    .map_err(sql_error)?;
+                let mut db = open_inspection(&path)?;
                 let tx = db.transaction().map_err(sql_error)?;
                 let items = crate::attachments::list_tx(&tx, &thread)?;
                 tx.commit().map_err(sql_error)?;
@@ -424,28 +410,12 @@ impl Store {
                     .await?,
             );
         }
-        if matches!(
-            request.command,
-            Command::UsageGet(_)
-                | Command::ThreadGet(_)
-                | Command::RunGet(_)
-                | Command::TurnGet(_)
-                | Command::CompactList(_)
-                | Command::ShellList(_)
-        ) {
+        if request.command.is_read_only() {
             let mut store = self.clone();
             store.usage_context = crate::usage_totals::read_context();
             let path = self.database.path().to_path_buf();
             return crate::presentation::work(move || {
-                let mut db = rusqlite::Connection::open_with_flags(
-                    path,
-                    rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-                )
-                .map_err(sql_error)?;
-                db.busy_timeout(std::time::Duration::from_millis(250))
-                    .map_err(sql_error)?;
-                db.pragma_update(None, "query_only", true)
-                    .map_err(sql_error)?;
+                let mut db = open_inspection(&path)?;
                 let tx = db.transaction().map_err(sql_error)?;
                 let value = store.dispatch(
                     &tx,
@@ -465,21 +435,13 @@ impl Store {
         let mut store = self.clone();
         store.usage_context = crate::usage_totals::read_context();
         let kind = execute_kind::Kind::of(&request.command);
+        if !kind.writer_allowed(&request.command) {
+            return Err(error(
+                ErrorCode::InvalidState,
+                "Command is not admitted to the writer lane",
+            ));
+        }
         self.receipt_job(Some(kind), move |connection, pressure| {
-            if !request.command.requires_receipt() {
-                // Use the canonical query projections without reserving,
-                // replaying, or collecting immutable mutation receipts.
-                let tx = connection.transaction()?;
-                let result = store.dispatch(
-                    &tx,
-                    &request.command,
-                    caller.as_ref(),
-                    &request.operation_id,
-                    &chrono::Utc::now().to_rfc3339(),
-                );
-                tx.commit()?;
-                return Ok(result);
-            }
             Ok(store.execute_transaction(
                 connection,
                 &request,
@@ -4811,5 +4773,67 @@ mod browser_creation_notification_tests {
             ErrorCode::SaveFailed
         );
         owner.shutdown().await.unwrap();
+    }
+}
+
+fn open_inspection(path: &std::path::Path) -> Result<rusqlite::Connection> {
+    let db =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(sql_error)?;
+    db.busy_timeout(std::time::Duration::from_millis(250))
+        .map_err(sql_error)?;
+    db.pragma_update(None, "query_only", true)
+        .map_err(sql_error)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    db.progress_handler(1000, Some(move || std::time::Instant::now() >= deadline))
+        .map_err(sql_error)?;
+    Ok(db)
+}
+
+#[cfg(test)]
+mod inspection_isolation_tests {
+    use super::*;
+    use crate::storage::DbWorker;
+
+    #[tokio::test]
+    async fn snapshot_reader_does_not_hold_writer_lane() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("inspection.sqlite");
+        let writer = DbWorker::open(&path).await.unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let read_path = path.clone();
+        let reader = tokio::task::spawn_blocking(move || {
+            let mut db = open_inspection(&read_path).unwrap();
+            let tx = db.transaction().unwrap();
+            let _: i64 = tx
+                .query_row("SELECT count(*) FROM app_meta", [], |r| r.get(0))
+                .unwrap();
+            ready_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            tx.commit().unwrap();
+        });
+        crate::test_watchdog::watchdog("inspection reader started", ready_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let start = std::time::Instant::now();
+        let result = crate::test_watchdog::watchdog(
+            "writer during inspection",
+            writer.call(|db| {
+                db.execute(
+                    "INSERT INTO app_meta(key,value) VALUES('inspection-isolation','ok')",
+                    [],
+                )?;
+                Ok(())
+            }),
+        )
+        .await;
+        let elapsed = start.elapsed();
+        release_tx.send(()).unwrap();
+        reader.await.unwrap();
+        result.unwrap().unwrap();
+        eprintln!("writer while read held: {elapsed:?}");
+        writer.shutdown().await.unwrap();
     }
 }
