@@ -225,6 +225,8 @@ impl IndexService {
     }
 }
 
+pub(super) const RECOVERY_REQUIRED_MESSAGE: &str =
+    "Oversized legacy index work could not be recovered; explicitly rebuild this profile";
 const RECOVERY_ROWS: i64 = 128;
 // A work record must fit one bounded recovery page, including its JSON metadata.
 const RECOVERY_BYTES: i64 = 1024 * 1024;
