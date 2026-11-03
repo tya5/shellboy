@@ -4,6 +4,14 @@ on:
     branches: ["main"]
   workflow_dispatch:
     inputs:
+      shutdown_repeats:
+        description: Run only the shutdown PTY test 50 times on native macOS, before and after
+        type: boolean
+        default: false
+      shutdown_baseline:
+        description: Exact baseline SHA for the focused shutdown comparison
+        type: string
+        default: '62a4c4def58dcf4a66327d37c343670f1bf3d68a'
       conpty_repro:
         description: Observe synthetic Windows ConPTY send behavior
         type: boolean
@@ -55,7 +63,7 @@ jobs:
             await reuse({github, context, core});
   check:
     needs: reuse
-    if: always() && needs.reuse.outputs.reuse != 'true'
+    if: always() && !inputs.shutdown_repeats && needs.reuse.outputs.reuse != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -253,3 +261,43 @@ jobs:
           path: .local/compare
           include-hidden-files: true
           if-no-files-found: warn
+
+  shutdown-repeats:
+    if: inputs.shutdown_repeats == true
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: current
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.shutdown_baseline }}
+          path: baseline
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            baseline -> ../shared-target
+            current -> ../shared-target
+          shared-key: shutdown-repeat-v1
+          cache-on-failure: true
+      - name: Repeat unchanged baseline 50 times
+        id: baseline
+        continue-on-error: true
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+        run: python3 current/scripts/dev/repeat-shutdown-test.py --source baseline --output evidence/before --count 50
+      - name: Repeat current tip 50 times
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+        run: python3 current/scripts/dev/repeat-shutdown-test.py --source current --output evidence/after --count 50
+      - name: Retain both exact-source results and PTY failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shutdown-repeats-macOS
+          path: evidence
