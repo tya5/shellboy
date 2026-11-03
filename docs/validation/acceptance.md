@@ -8921,6 +8921,6 @@ wait; see the rebased run below.
 
 Physical terminal verification is UNVERIFIED. No real terminal emulator or physical TTY was exercised for this change; synthetic PTY tests and 3-OS CI are not counted as physical-terminal success. No configuration setting was added.
 
-## Usage-limit retry cutoff (#188, validation pending)
+## Usage-limit retry cutoff (#188, local validation passed; CI pending)
 
-Synthetic HTTP responses must establish: an explicit reset beyond the complete remaining retry schedule is not resent and is shown through existing recovery reason wording with the reported kind/time; a reset within the schedule follows the regular retry schedule; no reset fact retains the existing retry policy. Run focused integration tests, `cargo check --tests`, and three-OS task CI. This does not establish provider-specific behavior outside represented response formats.
+Synthetic HTTP responses establish: a long explicit reset is not resent and is shown with the existing reason/kind/time; a short reset follows the normal retry schedule while bypassing only its matching shared local guard; missing reset data retains the ordinary policy. The retry bypass is cleared only on success when the shared fact is unchanged. Post-rebase formatting, `cargo check --tests`, focused long/short-reset integration tests, retry-window/bypass/cache unit tests, and Python checks passed. Exact-tip three-OS task CI remains pending. Synthetic cases do not establish provider-specific behavior, live billing, or real-backlog performance.
