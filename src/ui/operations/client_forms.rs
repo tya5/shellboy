@@ -714,6 +714,46 @@ mod tests {
         }
     }
     #[test]
+    fn every_client_form_field_has_an_english_label_without_changing_values() {
+        for kind in OpKind::ALL
+            .iter()
+            .copied()
+            .filter(|kind| !OpKind::OWNER.contains(kind))
+        {
+            let mut form = fixture(kind);
+            let values: Vec<_> = form
+                .fields
+                .iter()
+                .map(|field| field.value.clone())
+                .collect();
+            form.language = UiLanguage::En;
+            for field in &form.fields {
+                let label = form.field_label_for(field);
+                assert!(label.is_ascii(), "{kind:?} {}: {label}", field.name);
+            }
+            assert_eq!(
+                values,
+                form.fields
+                    .iter()
+                    .map(|field| field.value.clone())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+    #[test]
+    fn bounded_validation_selects_paired_labels_without_changing_bounds() {
+        assert_eq!(
+            bounded(0, 1, 200, "件数", "Count", UiLanguage::Ja).unwrap_err(),
+            "件数は1〜200です"
+        );
+        assert_eq!(
+            bounded(0, 1, 200, "件数", "Count", UiLanguage::En).unwrap_err(),
+            "Count must be 1 through 200"
+        );
+        assert!(bounded(1, 1, 200, "件数", "Count", UiLanguage::En).is_ok());
+        assert!(bounded(200, 1, 200, "件数", "Count", UiLanguage::Ja).is_ok());
+    }
+    #[test]
     fn exec_preserves_owned_text_raw_relative_paths_and_all_new_thread_options() {
         let mut form = fixture(OpKind::Exec);
         set(&mut form, "thread", "");
