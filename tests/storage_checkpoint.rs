@@ -1,81 +1,37 @@
 //! WAL readers must not turn a clean writer close into a save failure.
 use rusqlite::{Connection, OpenFlags};
 use shellboy::storage::DbWorker;
-use std::{
-    ffi::{CStr, c_void},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
+use std::time::Duration;
 
-unsafe extern "C" fn count_passive(
-    mask: u32,
-    context: *mut c_void,
-    statement: *mut c_void,
-    _: *mut c_void,
-) -> i32 {
-    if mask == rusqlite::ffi::SQLITE_TRACE_PROFILE && !statement.is_null() {
-        // SQLite retains the registered Arc until the callback is unregistered.
-        let sql = unsafe { CStr::from_ptr(rusqlite::ffi::sqlite3_sql(statement.cast())) };
-        if sql
-            .to_bytes()
-            .eq_ignore_ascii_case(b"PRAGMA wal_checkpoint(PASSIVE)")
-        {
-            unsafe { &*context.cast::<AtomicUsize>() }.fetch_add(1, Ordering::SeqCst);
-        }
+struct CheckpointCount {
+    db: DbWorker,
+    start: usize,
+}
+impl CheckpointCount {
+    fn checkpoint_attempts(&self) -> usize {
+        self.db.checkpoint_attempts().saturating_sub(self.start)
     }
-    0
 }
 
-async fn trace_checkpoints(
+async fn observe_checkpoints(
     db: &DbWorker,
     initialize: impl FnOnce(&Connection) -> rusqlite::Result<()> + Send + 'static,
-) -> Arc<AtomicUsize> {
-    let count = Arc::new(AtomicUsize::new(0));
-    let retained = Arc::into_raw(count.clone()) as usize;
+) -> CheckpointCount {
+    let count = CheckpointCount {
+        db: db.clone(),
+        start: db.checkpoint_attempts(),
+    };
     db.call(move |connection| {
-        // SAFETY: retained owns an Arc; the callback only accesses its atomic.
-        assert_eq!(
-            unsafe {
-                rusqlite::ffi::sqlite3_trace_v2(
-                    connection.handle(),
-                    rusqlite::ffi::SQLITE_TRACE_PROFILE,
-                    Some(count_passive),
-                    retained as *mut c_void,
-                )
-            },
-            rusqlite::ffi::SQLITE_OK
-        );
-        // Install the observer and mutation in one actor job: the reply can
-        // arrive before idle work, so a second job would miss that attempt.
         initialize(connection)?;
         Ok(())
     })
     .await
     .unwrap();
-    // The fixture unregisters before shutdown; on panic leaking the retained Arc
-    // is safer than leaving SQLite with a dangling callback context.
     count
 }
 
-async fn stop_trace(db: &DbWorker, count: &Arc<AtomicUsize>) {
-    let retained = Arc::as_ptr(count) as usize;
-    db.call(move |connection| {
-        assert_eq!(
-            unsafe {
-                rusqlite::ffi::sqlite3_trace_v2(connection.handle(), 0, None, std::ptr::null_mut())
-            },
-            rusqlite::ffi::SQLITE_OK
-        );
-        unsafe {
-            drop(Arc::from_raw(retained as *const AtomicUsize));
-        }
-        Ok(())
-    })
-    .await
-    .unwrap();
+async fn checkpoint_barrier(db: &DbWorker, _count: &CheckpointCount) {
+    read_job(db).await;
 }
 
 async fn read_job(db: &DbWorker) {
@@ -96,14 +52,14 @@ async fn read_only_idle_jobs_do_not_checkpoint() {
     let db = DbWorker::open(root.path().join("fixture.db"))
         .await
         .unwrap();
-    let count = trace_checkpoints(&db, |_| Ok(())).await;
+    let count = observe_checkpoints(&db, |_| Ok(())).await;
     for _ in 0..64 {
         read_job(&db).await;
         // Let the dedicated actor finish the preceding idle boundary.
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
-    let attempts = count.load(Ordering::SeqCst);
-    stop_trace(&db, &count).await;
+    let attempts = count.checkpoint_attempts();
+    checkpoint_barrier(&db, &count).await;
     db.shutdown().await.unwrap();
     assert_eq!(
         attempts, 0,
@@ -111,10 +67,10 @@ async fn read_only_idle_jobs_do_not_checkpoint() {
     );
 }
 
-async fn wait_for_attempt(db: &DbWorker, count: &AtomicUsize, expected: usize) {
+async fn wait_for_attempt(db: &DbWorker, count: &CheckpointCount, expected: usize) {
     let observed =
         crate::test_watchdog::watchdog("tests/storage_checkpoint.rs: wait_for_attempt", async {
-            while count.load(Ordering::SeqCst) < expected {
+            while count.checkpoint_attempts() < expected {
                 // Checkpoints run only at idle opportunities, never on a timer.
                 // Keep driving the actor rather than assuming a fixed sleep made
                 // one particular read job eligible on every scheduler.
@@ -126,12 +82,11 @@ async fn wait_for_attempt(db: &DbWorker, count: &AtomicUsize, expected: usize) {
     assert!(
         observed.is_ok(),
         "idle checkpoint not observed: expected {expected}, actual {}",
-        count.load(Ordering::SeqCst)
+        count.checkpoint_attempts()
     );
-    // The PROFILE callback precedes the actor's checkpoint bookkeeping. A
-    // queued job is a barrier for that previous idle boundary.
+    // A queued job is a barrier for the previous idle boundary.
     read_job(db).await;
-    assert_eq!(count.load(Ordering::SeqCst), expected);
+    assert_eq!(count.checkpoint_attempts(), expected);
 }
 
 #[tokio::test]
@@ -164,10 +119,9 @@ async fn partial_checkpoint_retries_after_interval_then_clean_reads_stay_idle() 
             .unwrap(),
         "old"
     );
-    // Deliberately make the update's own idle boundary eligible. Its trace
-    // must already be installed when the mutation's reply is delivered.
+    // Make the update's own idle boundary eligible and start observing first.
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    let count = trace_checkpoints(&db, |writer| {
+    let count = observe_checkpoints(&db, |writer| {
         writer.execute(
             "UPDATE app_meta SET value='new' WHERE key='checkpoint-fixture'",
             [],
@@ -180,7 +134,7 @@ async fn partial_checkpoint_retries_after_interval_then_clean_reads_stay_idle() 
         read_job(&db).await;
     }
     assert_eq!(
-        count.load(Ordering::SeqCst),
+        count.checkpoint_attempts(),
         1,
         "blocked reader must not cause a retry per job"
     );
@@ -194,11 +148,11 @@ async fn partial_checkpoint_retries_after_interval_then_clean_reads_stay_idle() 
     tokio::time::sleep(Duration::from_millis(1100)).await;
     for _ in 0..8 {
         read_job(&db).await;
-        // Keep idle opportunities observable before unregistering the tracer.
+        // Keep idle opportunities observable before the barrier.
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
-    assert_eq!(count.load(Ordering::SeqCst), 2);
-    stop_trace(&db, &count).await;
+    assert_eq!(count.checkpoint_attempts(), 2);
+    checkpoint_barrier(&db, &count).await;
     db.shutdown().await.unwrap();
 }
 

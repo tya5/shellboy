@@ -127,6 +127,8 @@ struct DbJobSlowTrace {
     run_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     statement_counters: Option<crate::storage::statement_observation::Counters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backtrace_symbols: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +138,8 @@ struct DbJobActiveTrace {
     elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     statement_counters: Option<crate::storage::statement_observation::Counters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backtrace_symbols: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -770,7 +774,7 @@ impl Diagnostics {
         queue: std::time::Duration,
         run: std::time::Duration,
     ) {
-        self.record_db_job_with_counters(kind, queue, run, None, None);
+        self.record_db_job_with_counters(kind, queue, run, None, None, None);
     }
     pub(crate) fn record_db_job_with_counters(
         &self,
@@ -779,6 +783,7 @@ impl Diagnostics {
         run: std::time::Duration,
         statement_counters: Option<crate::storage::statement_observation::Counters>,
         lane: Option<&str>,
+        backtrace_symbols: Option<Vec<String>>,
     ) {
         if queue < std::time::Duration::from_secs(1) && run < std::time::Duration::from_secs(1) {
             return;
@@ -800,6 +805,7 @@ impl Diagnostics {
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
                 statement_counters,
+                backtrace_symbols,
             })),
             index_discard: None,
             automatic_compaction_counts: None,
@@ -815,6 +821,7 @@ impl Diagnostics {
         lane: &str,
         elapsed: std::time::Duration,
         statement_counters: Option<crate::storage::statement_observation::Counters>,
+        backtrace_symbols: Option<Vec<String>>,
     ) {
         self.enqueue_record(Record {
             event: DiagnosticEvent::DbJobActive,
@@ -832,6 +839,7 @@ impl Diagnostics {
                 lane: lane.into(),
                 elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
                 statement_counters,
+                backtrace_symbols,
             })),
             index_discard: None,
             automatic_compaction_counts: None,

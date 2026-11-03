@@ -167,6 +167,7 @@ struct ActiveJobState {
     job: ActiveDbJob,
     slow_reported: bool,
     counters: Option<Arc<Mutex<statement_observation::Counters>>>,
+    backtrace: Option<statement_observation::SlowBacktrace>,
 }
 type ActiveJob = Arc<Mutex<Option<ActiveJobState>>>;
 
@@ -179,7 +180,15 @@ struct JobOutcome {
     background: bool,
 }
 
-type Job = Box<dyn FnOnce(&mut Connection, &Arc<AtomicUsize>) -> JobOutcome + Send + 'static>;
+type Job = Box<
+    dyn FnOnce(
+            &mut Connection,
+            &Arc<AtomicUsize>,
+            statement_observation::SlowBacktrace,
+        ) -> JobOutcome
+        + Send
+        + 'static,
+>;
 enum Command {
     Run {
         job: Job,
@@ -285,6 +294,7 @@ impl ActiveJobGuard {
             },
             slow_reported: false,
             counters: None,
+            backtrace: None,
         });
         publish_activity(&updates, &active_job, &no_progress);
         Self {
@@ -331,6 +341,7 @@ struct Shared {
     slow_limit: Arc<Mutex<SlowJobLimit>>,
     /// Committed-change signals for background maintenance requesters.
     signals: Arc<crate::maintenance::Signals>,
+    checkpoint_attempts: Arc<AtomicUsize>,
     #[cfg(test)]
     background_steps: StepLog,
     join: Mutex<Option<thread::JoinHandle<Result<(), StorageError>>>>,
@@ -428,6 +439,7 @@ impl DbWorker {
         drop(activity_receiver);
         let slow_limit = Arc::new(Mutex::new(SlowJobLimit::new()));
         let next_job_id = Arc::new(AtomicU64::new(0));
+        let checkpoint_attempts = Arc::new(AtomicUsize::new(0));
         #[cfg(test)]
         let background_steps = Arc::new(Mutex::new(Vec::new()));
         let worker = WorkerState {
@@ -438,6 +450,7 @@ impl DbWorker {
             activity_updates: activity_updates.clone(),
             slow_limit: slow_limit.clone(),
             next_job_id: next_job_id.clone(),
+            checkpoint_attempts: checkpoint_attempts.clone(),
             #[cfg(test)]
             background_steps: background_steps.clone(),
         };
@@ -477,6 +490,7 @@ impl DbWorker {
                 activity_updates,
                 slow_limit,
                 signals: Arc::default(),
+                checkpoint_attempts,
                 #[cfg(test)]
                 background_steps,
                 join: Mutex::new(Some(join)),
@@ -484,6 +498,12 @@ impl DbWorker {
                 shutdown_done: Notify::new(),
             }),
         })
+    }
+
+    /// Number of idle checkpoint attempts, including partial or failed attempts.
+    #[doc(hidden)]
+    pub fn checkpoint_attempts(&self) -> usize {
+        self.shared.checkpoint_attempts.load(Ordering::SeqCst)
     }
 
     /// The path used to open this worker, including custom database filenames.
@@ -527,7 +547,13 @@ impl DbWorker {
                 .counters
                 .as_ref()
                 .and_then(|c| c.try_lock().ok().map(|c| *c));
-            (active.job.kind, active.job.lane, elapsed, counters)
+            (
+                active.job.kind,
+                active.job.lane,
+                elapsed,
+                counters,
+                active.backtrace.clone(),
+            )
         };
         let Ok(mut limit) = self.shared.slow_limit.try_lock() else {
             return;
@@ -539,7 +565,13 @@ impl DbWorker {
             return;
         };
         if let Some(diagnostics) = diagnostics.as_ref() {
-            diagnostics.record_db_job_active(active.0, active.1.as_str(), active.2, active.3);
+            diagnostics.record_db_job_active(
+                active.0,
+                active.1.as_str(),
+                active.2,
+                active.3,
+                active.4.and_then(|trace| trace.symbols()),
+            );
         }
     }
 
@@ -810,13 +842,25 @@ where
     F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
 {
     let (sender, receiver) = oneshot::channel();
-    let job: Job = Box::new(move |connection: &mut Connection, _| {
+    let job: Job = Box::new(move |connection: &mut Connection, _, slow_backtrace| {
+        let installed = connection
+            .progress_handler(
+                PROGRESS_GRANULARITY as std::ffi::c_int,
+                Some(move || {
+                    slow_backtrace.observe(Instant::now());
+                    false
+                }),
+            )
+            .is_ok();
         let mut result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             operation(connection)
         })) {
             Ok(result) => result,
             Err(_) => Err(StorageError::JobPanicked),
         };
+        if installed {
+            let _ = connection.progress_handler(0, None::<fn() -> bool>);
+        }
         finish_transaction(connection, &mut result);
         let _ = sender.send(result);
         JobOutcome::default()
@@ -846,12 +890,11 @@ where
 {
     let (sender, receiver) = oneshot::channel();
     let job: Job = Box::new(
-        move |connection: &mut Connection, waiting: &Arc<AtomicUsize>| {
+        move |connection: &mut Connection, waiting: &Arc<AtomicUsize>, slow_backtrace| {
             let budget = Arc::new(StepBudget::default());
             let (handler_budget, hook_budget) = (budget.clone(), budget.clone());
             let waiting = waiting.clone();
             let limit = BACKGROUND_STEP_BUDGET.div_ceil(PROGRESS_GRANULARITY);
-            let mut slow_backtrace = statement_observation::SlowBacktrace::new(Instant::now());
             // Sticky: after the hit every later step is interrupted and every
             // later COMMIT (explicit or autocommit) becomes a rollback, even if
             // the closure swallows the interrupt error.
@@ -985,6 +1028,7 @@ struct WorkerState {
     activity_updates: watch::Sender<DbWorkerActivity>,
     slow_limit: Arc<Mutex<SlowJobLimit>>,
     next_job_id: Arc<AtomicU64>,
+    checkpoint_attempts: Arc<AtomicUsize>,
     #[cfg(test)]
     background_steps: StepLog,
 }
@@ -1136,13 +1180,20 @@ fn run_worker(
                 );
                 let mut observation =
                     statement_observation::StatementObservation::install(&mut connection);
-                if observation.available()
-                    && let Ok(mut active) = state.active_job.lock()
+                let slow_backtrace = statement_observation::SlowBacktrace::new(started);
+                if let Ok(mut active) = state.active_job.lock()
                     && let Some(active) = active.as_mut().filter(|active| active.job.id == job_id)
                 {
-                    active.counters = Some(observation.shared_counters());
+                    if observation.available() {
+                        active.counters = Some(observation.shared_counters());
+                    }
+                    active.backtrace = Some(slow_backtrace.clone());
                 }
-                let outcome = job(observation.connection(), &state.foreground_waiting);
+                let outcome = job(
+                    observation.connection(),
+                    &state.foreground_waiting,
+                    slow_backtrace.clone(),
+                );
                 let counters = observation.available().then(|| observation.counters());
                 drop(observation);
                 let run = started.elapsed();
@@ -1160,6 +1211,7 @@ fn run_worker(
                         run,
                         counters,
                         Some(lane.as_str()),
+                        slow_backtrace.symbols(),
                     );
                 }
                 if outcome.background {
@@ -1218,6 +1270,7 @@ fn run_worker(
                 })
                 .unwrap_or(false);
             checkpoint.attempted(now, changes, complete);
+            state.checkpoint_attempts.fetch_add(1, Ordering::SeqCst);
         }
     }
     // A concurrent reader may keep an older snapshot, preventing truncation.
