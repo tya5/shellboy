@@ -317,23 +317,26 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
                     ui.management.is_none(),
                     "/retry and a new instruction keep the conversation visible"
                 );
-                timeout(Duration::from_secs(30), async {
-                    loop {
-                        while let Ok(update) = incoming.try_recv() {
-                            ui.apply(update);
-                            deliver(&sender, ui.take_deferred_actions());
+                crate::test_watchdog::watchdog(
+                    "tests/tui_recovery.rs: recovery title after resume",
+                    async {
+                        loop {
+                            while let Ok(update) = incoming.try_recv() {
+                                ui.apply(update);
+                                deliver(&sender, ui.take_deferred_actions());
+                            }
+                            if ui
+                                .view()
+                                .nodes()
+                                .iter()
+                                .any(|node| node.presentation.title.contains(failure_note))
+                            {
+                                break;
+                            }
+                            tokio::time::sleep(Duration::from_millis(5)).await;
                         }
-                        if ui
-                            .view()
-                            .nodes()
-                            .iter()
-                            .any(|node| node.presentation.title.contains(failure_note))
-                        {
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_millis(5)).await;
-                    }
-                })
+                    },
+                )
                 .await
                 .unwrap();
                 let mut history = screen(&mut ui);
