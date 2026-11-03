@@ -99,14 +99,58 @@ pub(crate) fn count_label(count: u64, capped: bool, language: UiLanguage) -> Str
     }
 }
 
+/// Stable stage kinds; their labels are localized only when rendered.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RecoveryStage {
+    #[default]
+    Unrecorded,
+    ModelRequest,
+    ModelContextLimit,
+}
+impl RecoveryStage {
+    pub fn localized(self, language: UiLanguage) -> &'static str {
+        match self {
+            Self::Unrecorded => crate::ui::i18n::local!(
+                language,
+                "処理（段階の記録なし）",
+                "Processing (stage not recorded)"
+            ),
+            Self::ModelRequest => crate::ui::i18n::local!(language, "モデル要求", "Model request"),
+            Self::ModelContextLimit => crate::ui::i18n::local!(
+                language,
+                "モデル要求（入力容量超過）",
+                "Model request (input capacity exceeded)"
+            ),
+        }
+    }
+}
+
+pub(crate) fn saved_recovery_reason_unavailable(language: UiLanguage) -> &'static str {
+    crate::ui::i18n::local!(
+        language,
+        "保存された復旧理由を詳細で確認してください",
+        "Review the saved recovery reason in Details."
+    )
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecoveryStageDetails {
+    pub retries: serde_json::Value,
+    pub retry_limit: serde_json::Value,
+    pub request_bytes: serde_json::Value,
+    pub tool_bytes: serde_json::Value,
+}
+
 /// Existing saved facts for human recovery; never a new lifecycle state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecoverySnapshot {
     pub resolved: bool,
     pub usage_limit: Option<crate::model::usage_limit::UsageLimit>,
     pub content_filter: Option<crate::model::content_filter::ContentFilterFacts>,
-    pub stage: String,
+    pub stage: RecoveryStage,
+    pub stage_details: Option<RecoveryStageDetails>,
     pub message: String,
+    pub message_is_fallback: bool,
     pub pending_messages: u64,
     pub saved_tool_results: u64,
     pub live_shells: u64,
@@ -115,6 +159,34 @@ pub struct RecoverySnapshot {
     pub stop_reason: Option<String>,
 }
 impl RecoverySnapshot {
+    pub fn stage_localized(&self, language: UiLanguage) -> String {
+        let stage = self.stage.localized(language);
+        let Some(details) = &self.stage_details else {
+            return stage.to_owned();
+        };
+        match language {
+            UiLanguage::En => format!(
+                "{stage} | Retry {}/{}; request: {} B; tool: {} B",
+                details.retries, details.retry_limit, details.request_bytes, details.tool_bytes
+            ),
+            UiLanguage::Ja => {
+                let separator = crate::ui::text_width::glyphs::separator();
+                format!(
+                    "{stage}{separator}retry {}/{}{separator}request {}B{separator}tool {}B",
+                    details.retries, details.retry_limit, details.request_bytes, details.tool_bytes
+                )
+            }
+        }
+    }
+
+    pub fn message_localized(&self, language: UiLanguage) -> String {
+        if self.message_is_fallback {
+            saved_recovery_reason_unavailable(language).to_owned()
+        } else {
+            self.message.clone()
+        }
+    }
+
     pub fn limit_summary_localized(&self, language: UiLanguage) -> Option<String> {
         if language == UiLanguage::Ja {
             return self.limit_summary();

@@ -848,7 +848,10 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
     );
     assert!(!projection.snapshot.turn_in_progress);
     let recovery = projection.snapshot.recovery.unwrap();
-    assert_eq!(recovery.stage, "モデル要求");
+    assert_eq!(
+        recovery.stage,
+        crate::ui::activity::RecoveryStage::ModelRequest
+    );
     assert_eq!(recovery.message, "fixture failure");
     assert_eq!(recovery.pending_messages, 1);
     assert_eq!(recovery.saved_tool_results, 1);
@@ -858,7 +861,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
     }).await.unwrap();
     assert_eq!(
         context_projection.snapshot.recovery.unwrap().stage,
-        "モデル要求（入力容量超過）"
+        crate::ui::activity::RecoveryStage::ModelContextLimit
     );
     // An automatic reduction may fail after a model attempt was marked failed.
     // Matching error text alone is not proof that recovery was caused by it.
@@ -877,6 +880,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
             .recovery
             .unwrap()
             .stage
+            .localized(crate::config::UiLanguage::Ja)
             .contains("記録なし")
     );
     // The saved attempt belongs to a previous generation; it cannot explain
@@ -902,6 +906,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
             .as_ref()
             .unwrap()
             .stage
+            .localized(crate::config::UiLanguage::Ja)
             .contains("記録なし")
     );
     let projection = control.store.database.call(|db| {
@@ -969,6 +974,7 @@ async fn recovery_projection_uses_saved_failure_and_freezes_time_without_guessin
             .recovery
             .unwrap()
             .stage
+            .localized(crate::config::UiLanguage::Ja)
             .contains("記録なし")
     );
     server.shutdown().await.unwrap();
