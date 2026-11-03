@@ -981,13 +981,6 @@ fn secret(key: &str) -> bool {
     .any(|s| key.contains(s))
         || key == "token"
 }
-fn short(text: &str, limit: usize) -> String {
-    let mut out: String = text.chars().take(limit).collect();
-    if out.len() < text.len() {
-        out.push_str(crate::ui::text_width::glyphs::select("…", "..."));
-    }
-    out
-}
 // Persisted envelope values may be scalar JSON. Detail decoding intentionally
 // accepts only containers and trims before checking their shape.
 fn parse_envelope(text: &str) -> Option<Value> {
