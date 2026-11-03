@@ -1868,5 +1868,240 @@
     "category": "a",
     "reason": "Retained Japanese tool-reason wording for the Ja renderer; English UI rendering uses the typed ToolReasonKind mapping in presentation.messages::tool_reason.",
     "source_tokens_sha256": "4856848a037c0dd47e4ae48a7f7e276ed6578d4de977aa571159b5d1d429124b"
+  },
+  "src/operations.rs:5f95d31e5a4a57d7:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "ab8a1d1ffd3eb6960735302bf873f86bdf58334617ec26d00f1eec6812f68817"
+  },
+  "src/operations.rs:4ad830df49a9d45c:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "ab8a1d1ffd3eb6960735302bf873f86bdf58334617ec26d00f1eec6812f68817"
+  },
+  "src/operations.rs:347a8deb9c7df368:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "ab8a1d1ffd3eb6960735302bf873f86bdf58334617ec26d00f1eec6812f68817"
+  },
+  "src/operations.rs:8c07c2eb3a7ad3f0:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "ab8a1d1ffd3eb6960735302bf873f86bdf58334617ec26d00f1eec6812f68817"
+  },
+  "src/operations.rs:8672d2332ec5ea86:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "ab8a1d1ffd3eb6960735302bf873f86bdf58334617ec26d00f1eec6812f68817"
+  },
+  "src/operations.rs:3b0fb3115ac37f9a:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "ab8a1d1ffd3eb6960735302bf873f86bdf58334617ec26d00f1eec6812f68817"
+  },
+  "src/operations.rs:8eb869a9870560e0:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "890d4c83e3d677c0269ab7d4196f946db7585871a80096ffd19ee8253da20d6d"
+  },
+  "src/operations.rs:07d264a4b16248aa:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "890d4c83e3d677c0269ab7d4196f946db7585871a80096ffd19ee8253da20d6d"
+  },
+  "src/operations.rs:6201e742cf268a24:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "e5c8293e4d0bd060109edf13f848cd5d54109a96b1a723a372709d17f1dc7ea1"
+  },
+  "src/operations.rs:61432acf1347c076:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "9877a07c5e3bcd9853c31d3b922ef4266a1954832bf711f71caacbb31be941af"
+  },
+  "src/operations.rs:0e0b469c3aa70f07:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "9877a07c5e3bcd9853c31d3b922ef4266a1954832bf711f71caacbb31be941af"
+  },
+  "src/operations.rs:9af0a1a8ad593e5b:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "9877a07c5e3bcd9853c31d3b922ef4266a1954832bf711f71caacbb31be941af"
+  },
+  "src/operations.rs:40b6eaf668e0a2cf:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "9877a07c5e3bcd9853c31d3b922ef4266a1954832bf711f71caacbb31be941af"
+  },
+  "src/operations.rs:e46785e1249319c1:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "9877a07c5e3bcd9853c31d3b922ef4266a1954832bf711f71caacbb31be941af"
+  },
+  "src/operations.rs:37f9b5f6cb38651e:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "9877a07c5e3bcd9853c31d3b922ef4266a1954832bf711f71caacbb31be941af"
+  },
+  "src/operations.rs:cb809c2006ed619a:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "11143eb091ce617799f5431927f8d486fee23cae207a67fb0f7fd637372cf9af"
+  },
+  "src/operations.rs:992e0232646846ff:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "11143eb091ce617799f5431927f8d486fee23cae207a67fb0f7fd637372cf9af"
+  },
+  "src/operations.rs:d95e97c8a621a0a1:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "13f21e86ba617956c2fc247dfa5fc1aa1dcf63df7fe249bc6f7d60c806d61796"
+  },
+  "src/operations.rs:18f0f082174eac9d:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "13f21e86ba617956c2fc247dfa5fc1aa1dcf63df7fe249bc6f7d60c806d61796"
+  },
+  "src/operations.rs:a291c9f787cc2e03:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "13f21e86ba617956c2fc247dfa5fc1aa1dcf63df7fe249bc6f7d60c806d61796"
+  },
+  "src/operations.rs:80dfd650006591a0:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "c95a4ed60a5cf08e18339f6ce5088bfac90e60a5f2a5a47dcf6c930be4adbbc4"
+  },
+  "src/operations.rs:cf3c793ba104a057:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "c95a4ed60a5cf08e18339f6ce5088bfac90e60a5f2a5a47dcf6c930be4adbbc4"
+  },
+  "src/operations.rs:992086c573d48f5f:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "c95a4ed60a5cf08e18339f6ce5088bfac90e60a5f2a5a47dcf6c930be4adbbc4"
+  },
+  "src/operations.rs:84fd956cfb5fa8f3:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "284830be2a45dba6bfb4b467ef62b387b924713173228f5f6f7a86c5d4d02190"
+  },
+  "src/operations.rs:10af677fed2fe3f2:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "284830be2a45dba6bfb4b467ef62b387b924713173228f5f6f7a86c5d4d02190"
+  },
+  "src/operations.rs:fdcaea91186e28f9:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "284830be2a45dba6bfb4b467ef62b387b924713173228f5f6f7a86c5d4d02190"
+  },
+  "src/operations.rs:ec9f81170d8e3ffc:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "284830be2a45dba6bfb4b467ef62b387b924713173228f5f6f7a86c5d4d02190"
+  },
+  "src/operations.rs:3c942aec3160cda3:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:9c9a07f09e7994ca:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:072608fda3dfcd00:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:d507f50a84f5454d:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:36ca3705a99f5e89:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:00abf1fec5548d6b:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:aa16b17387bd9520:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:3f3559c897bab632:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:9322e6806f224a47:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:06a98a43199dd835:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:c71cb4755138f710:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:4b5574cbfc7cf74b:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:443d0471fe12dbd7:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:081c8b7d8c599f17:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:890e988cf948c1f8:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:dbb0fda73fec6bf8:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:e2b267aba400026c:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:86c31d6acefb0316:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:932f405fde561bf9:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
+  },
+  "src/operations.rs:f81e6712103e5b70:1": {
+    "category": "a",
+    "reason": "Retained Japanese catalogue fallback is rendered through the UI-only projection in src/ui/operations/metadata.rs: typed TextKey variants use explicit En/Ja local! messages, while global arguments use explicit spelling-based bilingual messages. The catalogue fallback and CLI metadata remain unchanged; japanese_catalogue_fallbacks_remain_exact_and_english_is_defined and global_argument_messages_preserve_cli_spelling_and_japanese_metadata verify the boundary.",
+    "source_tokens_sha256": "da0e1312cb7cafeb256f2479a3369d9e7df11d0ddf23606fa0bb5462a8fec175"
   }
 }
