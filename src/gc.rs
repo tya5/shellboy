@@ -1005,7 +1005,7 @@ fn sql_error(error: rusqlite::Error) -> ApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::INDEX_SOURCES_PAGE;
+    use super::{INDEX_SOURCES_PAGE, RAW_PAGE, logical_usage, raw_stats_tx};
     use rusqlite::{Connection, params};
     use std::time::Instant;
 
@@ -1118,5 +1118,160 @@ mod tests {
         time("jobs_source only");
         db.execute_batch("DROP INDEX jobs_source").unwrap();
         time("before (no new indexes)");
+    }
+
+    #[test]
+    #[ignore = "opt-in read-only StorageCollect raw-page projection audit"]
+    fn measure_storage_collect_raw_page_projection_audit() {
+        use rusqlite::{
+            OpenFlags, StatementStatus,
+            trace::{TraceEvent, TraceEventCodes},
+        };
+        use std::sync::{Mutex, OnceLock};
+        static TRACE: OnceLock<Mutex<Vec<(String, std::time::Duration, i32)>>> = OnceLock::new();
+        let path = std::path::PathBuf::from(
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open verified copy read-only");
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let TraceEvent::Profile(stmt, elapsed) = event {
+                    TRACE.get_or_init(Default::default).lock().unwrap().push((
+                        stmt.sql().into_owned(),
+                        elapsed,
+                        stmt.get_status(StatementStatus::FullscanStep),
+                    ));
+                }
+            }),
+        );
+        let mut timings = Vec::new();
+        for repeat in 1..=4 {
+            TRACE.get_or_init(Default::default).lock().unwrap().clear();
+            let start = Instant::now();
+            let _ = super::usage::raw_total(&db).expect("production raw total projection");
+            let mut statement = db
+                .prepare(RAW_PAGE)
+                .expect("prepare production collection page");
+            let _ids = statement
+                .query_map(params!["", 0i64, 32i64], |row| row.get::<_, String>(0))
+                .expect("run production collection page")
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .expect("collect bounded page");
+            let elapsed_us = start.elapsed().as_micros();
+            if repeat > 1 {
+                timings.push(elapsed_us);
+            }
+            eprintln!(
+                "AUDIT kind=StorageCollectRawProjection repeat={repeat} elapsed_us={elapsed_us}"
+            );
+            let statements = { TRACE.get_or_init(Default::default).lock().unwrap().clone() };
+            for (sql, elapsed, fullscan) in statements {
+                eprintln!(
+                    "AUDIT_SQL kind=StorageCollectRawProjection elapsed_us={} fullscan_step={} sql={}",
+                    elapsed.as_micros(),
+                    fullscan,
+                    sql
+                );
+                if let Ok(mut plan) = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")) {
+                    let values =
+                        std::iter::repeat_n(rusqlite::types::Value::Null, plan.parameter_count());
+                    if let Ok(rows) = plan.query_map(rusqlite::params_from_iter(values), |row| {
+                        row.get::<_, String>(3)
+                    }) {
+                        for detail in rows.flatten() {
+                            eprintln!(
+                                "AUDIT_PLAN kind=StorageCollectRawProjection detail={detail}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("AUDIT_TIMES kind=StorageCollectRawProjection values_us={timings:?}");
+    }
+
+    static STORAGE_AUDIT_TRACE: std::sync::OnceLock<
+        std::sync::Mutex<Vec<(String, std::time::Duration, i32)>>,
+    > = std::sync::OnceLock::new();
+
+    #[test]
+    #[ignore = "opt-in StorageStatus DB projections on a verified copy; physical filesystem scan excluded"]
+    fn measure_storage_status_db_audit() {
+        use rusqlite::{
+            OpenFlags, StatementStatus,
+            trace::{TraceEvent, TraceEventCodes},
+        };
+        let path = std::path::PathBuf::from(
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open verified copy read-only");
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let TraceEvent::Profile(stmt, elapsed) = event {
+                    STORAGE_AUDIT_TRACE
+                        .get_or_init(Default::default)
+                        .lock()
+                        .unwrap()
+                        .push((
+                            stmt.sql().into_owned(),
+                            elapsed,
+                            stmt.get_status(StatementStatus::FullscanStep),
+                        ));
+                }
+            }),
+        );
+        let mut timings: Vec<u128> = Vec::new();
+        for repeat in 1..=3 {
+            STORAGE_AUDIT_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let start = Instant::now();
+            let _logical = logical_usage(&db).expect("production StorageStatus logical projection");
+            let _raw =
+                raw_stats_tx(&db, None).expect("production StorageStatus raw-output projection");
+            let elapsed_us = start.elapsed().as_micros();
+            timings.push(elapsed_us);
+            println!(
+                "AUDIT kind=StorageStatusDbProjections repeat={repeat} elapsed_us={elapsed_us}"
+            );
+            let statements = STORAGE_AUDIT_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clone();
+            for (sql, elapsed, fullscan) in statements {
+                println!(
+                    "AUDIT_SQL kind=StorageStatusDbProjections elapsed_us={} fullscan_step={} sql={}",
+                    elapsed.as_micros(),
+                    fullscan,
+                    sql
+                );
+                let explain = format!("EXPLAIN QUERY PLAN {sql}");
+                if let Ok(mut stmt) = db.prepare(&explain) {
+                    let params =
+                        std::iter::repeat_n(rusqlite::types::Value::Null, stmt.parameter_count());
+                    if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+                        row.get::<_, String>(3)
+                    }) {
+                        for detail in rows.flatten() {
+                            println!("AUDIT_PLAN kind=StorageStatusDbProjections detail={detail}");
+                        }
+                    }
+                }
+            }
+        }
+        println!("AUDIT_TIMES kind=StorageStatusDbProjections values_us={timings:?}");
     }
 }

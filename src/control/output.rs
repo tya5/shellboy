@@ -854,3 +854,174 @@ fn sql_error(error: rusqlite::Error) -> ApiError {
 fn storage_error(error: StorageError) -> ApiError {
     error.into_api_error()
 }
+
+#[cfg(test)]
+mod writer_lane_audit_tests {
+    use super::*;
+    use rusqlite::{OpenFlags, params_from_iter, types::Value};
+    use std::{path::PathBuf, time::Instant};
+
+    #[test]
+    #[ignore = "opt-in ShellGet DB projection audit on schema-25 copy; storage-reader latency excluded"]
+    fn measure_shell_get_projection_audit() {
+        let path =
+            PathBuf::from(std::env::var_os("WRITER_AUDIT_DB").expect("verified copy required"));
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        let schema: i64 = db
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            schema, 25,
+            "audit copy schema mismatch: expected 25, found {schema}"
+        );
+        let execution: String = db
+            .query_row(
+                "SELECT id FROM shell_execution ORDER BY rowid DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let statements = [
+            (
+                "snapshot",
+                "SELECT owner_run_id,state,exit_code,end_reason,output_complete,saved_sequence,retention_generation,output_encoding FROM shell_execution WHERE id=?1",
+            ),
+            (
+                "details",
+                "SELECT json_extract(s.shell_json,'$.command'),s.cwd,r.thread_id,s.turn_id,CASE json_type(s.shell_json,'$.completion.forced') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END,CASE WHEN json_type(s.shell_json,'$.completion.exit_signal')='integer' AND json_extract(s.shell_json,'$.completion.exit_signal') BETWEEN -2147483648 AND 2147483647 THEN json_extract(s.shell_json,'$.completion.exit_signal') END,CASE json_type(s.shell_json,'$.completion.group_cleanup_confirmed') WHEN 'true' THEN 1 WHEN 'false' THEN 0 END FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE s.id=?1",
+            ),
+            (
+                "timing",
+                "SELECT s.started_at,s.state,CASE WHEN json_type(s.shell_json,'$.completion.elapsed_ms')='integer' AND json_extract(s.shell_json,'$.completion.elapsed_ms') BETWEEN 0 AND 9223372036854775807 THEN json_extract(s.shell_json,'$.completion.elapsed_ms') END,(SELECT received_at FROM output_chunk WHERE execution_id=s.id ORDER BY sequence DESC LIMIT 1) FROM shell_execution s WHERE s.id=?1",
+            ),
+        ];
+        let mut plans = Vec::new();
+        for (name, sql) in statements {
+            let values = std::iter::repeat_n(Value::Text(execution.clone()), 1);
+            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            plans.push((
+                name,
+                plan.query_map(params_from_iter(values), |r| r.get::<_, String>(3))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap(),
+            ));
+        }
+        for repeat in 1..=3 {
+            let started = Instant::now();
+            for (_, sql) in statements {
+                let mut stmt = db.prepare_cached(sql).unwrap();
+                let mut rows = stmt.query([&execution]).unwrap();
+                while rows.next().unwrap().is_some() {}
+            }
+            eprintln!(
+                "AUDIT kind=ShellGetDbProjection repeat={repeat} elapsed_us={}",
+                started.elapsed().as_micros()
+            );
+        }
+        for (name, details) in plans {
+            eprintln!(
+                "AUDIT_PLAN kind=ShellGetDbProjection statement={name} detail={}",
+                details.join("; ")
+            );
+        }
+        eprintln!(
+            "AUDIT kind=ShellGet end_to_end=not_measured reason=async_storage_reader_not_exercised"
+        );
+    }
+
+    #[test]
+    #[ignore = "opt-in ShellRead DB projection audit on schema-25 copy; async storage reader excluded"]
+    fn measure_shell_read_projection_audit() {
+        let path =
+            PathBuf::from(std::env::var_os("WRITER_AUDIT_DB").expect("verified copy required"));
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .unwrap();
+        let schema: i64 = db
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            schema, 25,
+            "audit copy schema mismatch: expected 25, found {schema}"
+        );
+        let (execution, sequence): (String, i64) = db.query_row("SELECT e.id,MIN(o.sequence) FROM shell_execution e JOIN output_chunk o ON o.execution_id=e.id WHERE e.saved_sequence>0 GROUP BY e.id ORDER BY e.rowid DESC LIMIT 1", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+        let statements = [
+            (
+                "snapshot",
+                "SELECT owner_run_id,state,exit_code,end_reason,output_complete,saved_sequence,retention_generation,output_encoding FROM shell_execution WHERE id=?1",
+            ),
+            ("tombstone", "SELECT value FROM app_meta WHERE key=?1"),
+            (
+                "retention_generation",
+                "SELECT retention_generation FROM shell_execution WHERE id=?1",
+            ),
+            (
+                "raw_page",
+                "SELECT stream,length(bytes),substr(bytes,?3+1,?4) FROM output_chunk WHERE execution_id=?1 AND sequence=?2",
+            ),
+            (
+                "first_sequence",
+                "SELECT MIN(sequence) FROM output_chunk WHERE execution_id=?1 AND sequence<?2",
+            ),
+        ];
+        let bind = |name: &str, sql: &str| -> Vec<Value> {
+            let count = db
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .parameter_count();
+            if name == "tombstone" {
+                vec![Value::Text(format!("raw_tombstone.{execution}"))]
+            } else if name == "raw_page" {
+                vec![
+                    Value::Text(execution.clone()),
+                    Value::Integer(sequence),
+                    Value::Integer(0),
+                    Value::Integer(65_536),
+                ]
+            } else if name == "first_sequence" {
+                vec![Value::Text(execution.clone()), Value::Integer(i64::MAX)]
+            } else {
+                (0..count).map(|_| Value::Text(execution.clone())).collect()
+            }
+        };
+        let mut plans = Vec::new();
+        for (name, sql) in statements {
+            let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let details = plan
+                .query_map(params_from_iter(bind(name, sql)), |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            plans.push((name, details));
+        }
+        for repeat in 1..=3 {
+            let started = Instant::now();
+            for (name, sql) in statements {
+                let values = bind(name, sql);
+                let mut stmt = db.prepare_cached(sql).unwrap();
+                let mut rows = stmt.query(params_from_iter(values)).unwrap();
+                while rows.next().unwrap().is_some() {}
+            }
+            eprintln!(
+                "AUDIT kind=ShellReadDbProjection repeat={repeat} elapsed_us={}",
+                started.elapsed().as_micros()
+            );
+        }
+        for (name, details) in plans {
+            eprintln!(
+                "AUDIT_PLAN kind=ShellReadDbProjection statement={name} detail={}",
+                details.join("; ")
+            );
+        }
+        eprintln!(
+            "AUDIT kind=ShellRead end_to_end=not_measured reason=async_storage_reader_and_streaming_decoder_excluded"
+        );
+    }
+}

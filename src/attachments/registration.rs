@@ -140,3 +140,98 @@ pub fn add_tx(
     }
     Ok(result)
 }
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use rusqlite::{
+        OpenFlags, StatementStatus,
+        trace::{TraceEvent, TraceEventCodes},
+    };
+    use std::{sync::Mutex, time::Instant};
+
+    static TRACE: std::sync::OnceLock<Mutex<Vec<(String, std::time::Duration, i32)>>> =
+        std::sync::OnceLock::new();
+
+    #[test]
+    #[ignore = "opt-in rollback-only AttachmentAdd registration audit"]
+    fn measure_attachment_add_rollback_audit() {
+        let path = std::path::PathBuf::from(
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let mut db = rusqlite::Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open disposable copy read-write for rollback-only add_tx");
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let TraceEvent::Profile(stmt, elapsed) = event {
+                    TRACE.get_or_init(Default::default).lock().unwrap().push((
+                        stmt.sql().into_owned(),
+                        elapsed,
+                        stmt.get_status(StatementStatus::FullscanStep),
+                    ));
+                }
+            }),
+        );
+        let (thread, source, revision): (String,String,i64) = db.query_row(
+            "SELECT t.id,n.id,t.selection_revision FROM thread t JOIN thread_path p ON p.thread_id=t.id JOIN node n ON n.id=p.node_id WHERE t.deleted_at IS NULL LIMIT 1",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))
+        ).expect("copy has attachment-bearing source");
+        let mut timings = Vec::new();
+        for repeat in 1..=4 {
+            TRACE.get_or_init(Default::default).lock().unwrap().clear();
+            let tx = db.transaction().expect("begin rollback-only transaction");
+            let attachment_id = uuid::Uuid::new_v4().to_string();
+            let payload = serde_json::to_string(
+                &json!({"content":[{"type":"attachment_ref","attachment_id":attachment_id}]}),
+            )
+            .unwrap();
+            tx.execute(
+                "UPDATE node SET payload_json=?2 WHERE id=?1",
+                params![source, payload],
+            )
+            .expect("install synthetic final attachment declaration inside rollback");
+            let plan = AddPlan {
+                thread_id: thread.clone(),
+                selection_revision: revision,
+                files: vec![PlannedAttachment {
+                    path: PathBuf::from(format!("/audit/{}.bin", uuid::Uuid::new_v4())),
+                    kind: crate::protocol::AttachmentKind::File,
+                    observed_bytes: Some(1),
+                    managed_id: None,
+                }],
+            };
+            let start = Instant::now();
+            let _ =
+                add_tx(&tx, &plan, Some(&source)).expect("production AttachmentAdd registration");
+            let elapsed_us = start.elapsed().as_micros();
+            timings.push(elapsed_us);
+            eprintln!("AUDIT kind=AttachmentAddRollback repeat={repeat} elapsed_us={elapsed_us}");
+            let statements = TRACE.get_or_init(Default::default).lock().unwrap().clone();
+            for (sql, elapsed, fullscan) in statements {
+                eprintln!(
+                    "AUDIT_SQL kind=AttachmentAddRollback elapsed_us={} fullscan_step={} sql={}",
+                    elapsed.as_micros(),
+                    fullscan,
+                    sql
+                );
+                if let Ok(mut plan) = tx.prepare(&format!("EXPLAIN QUERY PLAN {sql}")) {
+                    let values =
+                        std::iter::repeat_n(rusqlite::types::Value::Null, plan.parameter_count());
+                    if let Ok(rows) = plan.query_map(rusqlite::params_from_iter(values), |r| {
+                        r.get::<_, String>(3)
+                    }) {
+                        for detail in rows.flatten() {
+                            eprintln!("AUDIT_PLAN kind=AttachmentAddRollback detail={detail}");
+                        }
+                    }
+                }
+            }
+            tx.rollback().expect("restore attachment audit target");
+        }
+        eprintln!("AUDIT_TIMES kind=AttachmentAddRollback values_us={timings:?}");
+    }
+}

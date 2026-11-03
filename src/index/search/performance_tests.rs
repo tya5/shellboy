@@ -198,3 +198,99 @@ async fn performance_semantic_ranking_writer_contention() {
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+static RANKING_TRACE: std::sync::OnceLock<Mutex<Vec<(String, std::time::Duration, i32)>>> =
+    std::sync::OnceLock::new();
+
+#[test]
+#[ignore = "no-embedding fixed-vector HistorySearch ranking measurement on a verified copy"]
+fn measure_fixed_vector_search_ranking_audit() {
+    use super::*;
+    use crate::index::store::{load_space, meta};
+    use crate::{index::IndexKeys, protocol::HistorySearchArgs};
+    use rusqlite::{
+        Connection, OpenFlags, StatementStatus,
+        trace::{TraceEvent, TraceEventCodes},
+    };
+
+    let path = std::path::PathBuf::from(
+        std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+    );
+    crate::storage::register_vec().expect("register sqlite-vec");
+    let db = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .expect("open verified copy read-only");
+    db.trace_v2(
+        TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+        Some(|event| {
+            if let TraceEvent::Profile(stmt, elapsed) = event {
+                RANKING_TRACE
+                    .get_or_init(Default::default)
+                    .lock()
+                    .unwrap()
+                    .push((
+                        stmt.sql().into_owned(),
+                        elapsed,
+                        stmt.get_status(StatementStatus::FullscanStep),
+                    ));
+            }
+        }),
+    );
+    let active = meta(&db, IndexKeys::ACTIVE_SPACE)
+        .expect("read active index space")
+        .expect("snapshot has active index space");
+    let space = load_space(&db, &active)
+        .expect("load active index space")
+        .expect("active space exists");
+    let query_vector =
+        serde_json::to_string(&vec![0.0f32; space.dimension]).expect("encode fixed dummy vector");
+    let args = HistorySearchArgs {
+        query: "history audit query".into(),
+        limit: 10,
+        ..Default::default()
+    };
+
+    for repeat in 1..=3 {
+        RANKING_TRACE
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clear();
+        eprintln!("AUDIT_START kind=HistorySearchRankingFixedVector repeat={repeat}");
+        let start = Instant::now();
+        let _ = ranked_hits(&db, &space, &query_vector, &args, None)
+            .expect("production semantic ranking function");
+        eprintln!(
+            "AUDIT kind=HistorySearchRankingFixedVector repeat={repeat} elapsed_us={}",
+            start.elapsed().as_micros()
+        );
+        let statements = RANKING_TRACE
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .clone();
+        for (sql, elapsed, fullscan) in statements {
+            eprintln!(
+                "AUDIT_SQL kind=HistorySearchRankingFixedVector elapsed_us={} fullscan_step={} sql={}",
+                elapsed.as_micros(),
+                fullscan,
+                sql
+            );
+            if let Ok(mut plan) = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")) {
+                let values =
+                    std::iter::repeat_n(rusqlite::types::Value::Null, plan.parameter_count());
+                if let Ok(rows) = plan.query_map(rusqlite::params_from_iter(values), |row| {
+                    row.get::<_, String>(3)
+                }) {
+                    for detail in rows.flatten() {
+                        eprintln!(
+                            "AUDIT_PLAN kind=HistorySearchRankingFixedVector detail={detail}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}

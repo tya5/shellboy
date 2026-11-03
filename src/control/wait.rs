@@ -606,6 +606,10 @@ mod tests {
     use super::*;
     use crate::app::DataOwner;
 
+    static WAIT_AUDIT_TRACE: std::sync::OnceLock<
+        StdMutex<Vec<(String, std::time::Duration, i32)>>,
+    > = std::sync::OnceLock::new();
+
     async fn fixture() -> (tempfile::TempDir, DataOwner, Arc<Control>) {
         let directory = tempfile::tempdir().unwrap();
         let config = directory.path().join("config.toml");
@@ -1629,6 +1633,100 @@ mod tests {
         .unwrap();
         assert_eq!(immediate["status"], "satisfied");
         owner.shutdown().await.unwrap();
+    }
+
+    #[test]
+    #[ignore = "opt-in Wait DB projection audit; set WRITER_AUDIT_DB to the verified copy"]
+    fn measure_wait_db_projection_audit() {
+        use rusqlite::{
+            Connection, OpenFlags, StatementStatus,
+            trace::{TraceEvent, TraceEventCodes},
+        };
+        use std::time::Instant;
+        let path = std::path::PathBuf::from(
+            std::env::var_os("WRITER_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let db = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .expect("open verified copy read-only");
+        let run_id:String=db.query_row("SELECT id FROM run WHERE state NOT IN ('live','stopping') ORDER BY rowid DESC LIMIT 1",[],|r|r.get(0)).expect("copy has completed run");
+        let turn_id: String = db
+            .query_row(
+                "SELECT id FROM turn WHERE run_id=?1 ORDER BY rowid DESC LIMIT 1",
+                [&run_id],
+                |r| r.get(0),
+            )
+            .expect("run has turn");
+        let shell_id:Option<String>=db.query_row("SELECT id FROM shell_execution WHERE owner_run_id=?1 AND state NOT IN ('running','stopping') ORDER BY rowid DESC LIMIT 1",[&run_id],|r|r.get(0)).optional().expect("read shell target");
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let TraceEvent::Profile(stmt, elapsed) = event {
+                    WAIT_AUDIT_TRACE
+                        .get_or_init(Default::default)
+                        .lock()
+                        .unwrap()
+                        .push((
+                            stmt.sql().into_owned(),
+                            elapsed,
+                            stmt.get_status(StatementStatus::FullscanStep),
+                        ));
+                }
+            }),
+        );
+        let mut conditions = vec![
+            WaitCondition::RunEnded { run_id },
+            WaitCondition::TurnCompleted { turn_id },
+        ];
+        if let Some(execution_id) = shell_id {
+            conditions.push(WaitCondition::ShellEnded { execution_id });
+        }
+        let args = WaitArgs {
+            conditions,
+            timeout_ms: 0,
+            after: None,
+        };
+        let mut timings = Vec::new();
+        for repeat in 1..=3 {
+            WAIT_AUDIT_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let start = Instant::now();
+            let _ =
+                inspect(&db, &args, None, true).expect("production Wait DB observation projection");
+            let elapsed_us = start.elapsed().as_micros();
+            timings.push(elapsed_us);
+            eprintln!("AUDIT kind=WaitDbProjection repeat={repeat} elapsed_us={elapsed_us}");
+            let statements = WAIT_AUDIT_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clone();
+            for (sql, elapsed, fullscan) in statements {
+                eprintln!(
+                    "AUDIT_SQL kind=WaitDbProjection elapsed_us={} fullscan_step={} sql={}",
+                    elapsed.as_micros(),
+                    fullscan,
+                    sql
+                );
+                if let Ok(mut stmt) = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")) {
+                    let params =
+                        std::iter::repeat_n(rusqlite::types::Value::Null, stmt.parameter_count());
+                    if let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(params), |r| {
+                        r.get::<_, String>(3)
+                    }) {
+                        for detail in rows.flatten() {
+                            eprintln!("AUDIT_PLAN kind=WaitDbProjection detail={detail}");
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!("AUDIT_TIMES kind=WaitDbProjection values_us={timings:?}");
     }
 }
 
