@@ -8,23 +8,47 @@ use std::{
 };
 
 /// Profile counters cover completed statements; rows also include the active statement.
-#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Counters {
     pub fullscan_steps: u64,
     pub sorts: u64,
     pub autoindexes: u64,
     pub vm_steps: u64,
     pub elapsed_ns: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub rows: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row_scope: Option<&'static str>,
     pub counter_scope: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub fingerprint: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub plan: Option<[Option<&'static str>; 8]>,
-    #[serde(skip)]
     current_fingerprint: Option<&'static str>,
+}
+
+impl serde::Serialize for Counters {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(scope) = self.counter_scope {
+            map.serialize_entry("counter_scope", scope)?;
+            map.serialize_entry("fullscan_steps", &self.fullscan_steps)?;
+            map.serialize_entry("sorts", &self.sorts)?;
+            map.serialize_entry("autoindexes", &self.autoindexes)?;
+            map.serialize_entry("vm_steps", &self.vm_steps)?;
+            map.serialize_entry("elapsed_ns", &self.elapsed_ns)?;
+        }
+        if let Some(rows) = self.rows {
+            map.serialize_entry("rows", &rows)?;
+        }
+        if let Some(scope) = self.row_scope {
+            map.serialize_entry("row_scope", scope)?;
+        }
+        if let Some(fingerprint) = self.fingerprint {
+            map.serialize_entry("fingerprint", fingerprint)?;
+        }
+        if let Some(plan) = self.plan {
+            map.serialize_entry("plan", &plan)?;
+        }
+        map.end()
+    }
 }
 
 pub(crate) struct StatementObservation<'a> {
@@ -111,6 +135,13 @@ unsafe extern "C" fn profile(
     let context = unsafe { &mut *context.cast::<TraceContext>() };
     let stmt = statement.cast::<ffi::sqlite3_stmt>();
     if !context.exhaustive {
+        if event == ffi::SQLITE_TRACE_ROW {
+            if let Ok(mut counters) = context.counters.lock() {
+                counters.rows = Some(counters.rows.unwrap_or_default().saturating_add(1));
+                counters.row_scope = Some("job_cumulative");
+            }
+            return 0;
+        }
         if event != ffi::SQLITE_TRACE_PROFILE || elapsed.is_null() {
             return 0;
         }
@@ -177,6 +208,7 @@ unsafe extern "C" fn profile(
         let Ok(mut c) = context.counters.lock() else {
             return 0;
         };
+        c.counter_scope = Some("job_cumulative");
         c.fullscan_steps = c
             .fullscan_steps
             .saturating_add(current[0].saturating_sub(baseline[0]));
@@ -197,7 +229,12 @@ unsafe extern "C" fn profile(
 impl<'a> StatementObservation<'a> {
     pub fn install(connection: &'a mut Connection) -> Self {
         Self::install_using(connection, |db, context| unsafe {
-            ffi::sqlite3_trace_v2(db, ffi::SQLITE_TRACE_PROFILE, Some(profile), context)
+            ffi::sqlite3_trace_v2(
+                db,
+                ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_ROW,
+                Some(profile),
+                context,
+            )
         })
     }
     #[cfg(test)]
@@ -540,6 +577,9 @@ mod tests {
             .query_row("SELECT 1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(observation.counters().counter_scope, None);
+        let fast = serde_json::to_value(observation.counters()).unwrap();
+        assert_eq!(fast["rows"], 1);
+        assert!(fast.get("vm_steps").is_none());
         let _: i64 = observation
             .connection()
             .query_row("SELECT pause()", [], |r| r.get(0))
@@ -551,7 +591,8 @@ mod tests {
         );
         assert!(counters.vm_steps > 0);
         assert!(counters.elapsed_ns >= 1_000_000);
-        assert_eq!(counters.rows, None);
+        assert_eq!(counters.rows, Some(2));
+        assert_eq!(counters.row_scope, Some("job_cumulative"));
     }
 
     #[test]

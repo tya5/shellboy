@@ -542,7 +542,7 @@ impl DbWorker {
                             let snapshot = counters
                                 .as_ref()
                                 .and_then(|c| c.try_lock().ok().map(|c| *c))
-                                .filter(|c| c.counter_scope.is_some());
+                                .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
                             diagnostics.record_db_job_active(
                                 &label,
                                 "inspection",
@@ -568,7 +568,7 @@ impl DbWorker {
         let counters = observation
             .available()
             .then(|| observation.counters())
-            .filter(|c| c.counter_scope.is_some());
+            .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
         drop(observation);
         let run = started.elapsed();
         if (queue >= SLOW_JOB_THRESHOLD || run >= SLOW_JOB_THRESHOLD)
@@ -643,7 +643,7 @@ impl DbWorker {
                 .counters
                 .as_ref()
                 .and_then(|c| c.try_lock().ok().map(|c| *c))
-                .filter(|c| c.counter_scope.is_some());
+                .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
             (
                 active.job.kind,
                 active.job.lane,
@@ -1323,7 +1323,7 @@ fn run_worker(
                 let counters = observation
                     .available()
                     .then(|| observation.counters())
-                    .filter(|c| c.counter_scope.is_some());
+                    .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
                 drop(observation);
                 let run = started.elapsed();
                 let diagnostics = state.diagnostics.try_lock().ok();
