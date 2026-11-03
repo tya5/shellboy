@@ -56,7 +56,13 @@ routing remain unchanged. Synthetic viewport checks and native CI are recorded
 in the handoff; physical-terminal behavior remains unverified.
 ## #177 Tool Row Disclosure and Click Targets
 
-Command and Details previews now follow tool-row disclosure. Mouse toggles are restricted to tool and notice rows; user, assistant, and received-response rows are inert. The running-work section keeps its independent click behavior; link and keyboard handling are unchanged. The task branch is based on current `origin/main`. Source formatting passed, but the post-rebase test run must be repeated with the shared build target refreshed before push. #177 is not yet pushed or validated by three-OS CI.
+Command and Details previews follow tool-row disclosure. Mouse toggles are limited
+to tool and notice rows; user, assistant, and received-response rows remain inert.
+The running-work section keeps its independent click behavior. Links and key
+handling are unchanged. The branch is rebased onto current main (fd23d321, with
+c090fa79 as an ancestor). Formatting and the focused presentation (24), Details
+(2), and history-interaction (15) tests pass. The branch is not yet pushed or
+validated by three-OS CI.
 
 ## Paused index consumption (#173)
 

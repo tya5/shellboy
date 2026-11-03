@@ -8936,12 +8936,13 @@ change. Exact-tip CI and post-integration validation remain pending.
 ## #177 Tool Row Disclosure and Click Targets
 
 The command preview and Details command context follow the tool row's disclosure
-state. Mouse toggles are limited to tool rows and notice rows, including grouped
-and standalone notices; ordinary user, assistant, and received-response rows are
-inert. The running-work section retains its separate click behavior. Link and
-keyboard handling are unchanged; no UI symbols or wording change.
+state. Mouse toggles are limited to tool and notice rows, including grouped and
+standalone notices; ordinary user, assistant, and received-response rows are
+inert. TestBackend coverage verifies command visibility on mouse and keyboard
+open/close, while the running-work section retains its separate click behavior.
+Link and keyboard behavior and all UI symbols/wording remain unchanged.
 
-`cargo fmt --all -- --check` passed. The focused Rust test output observed before
-refreshing the shared build target did not include the new regression tests and is
-not accepted as evidence. Re-run the focused presentation, Details, and history
-interaction tests after refreshing the shared build; three-OS CI is pending.
+On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
+`cargo fmt --all -- --check` passed, and the focused presentation, Details, and
+history-interaction suites passed (24, 2, and 15 tests respectively). Three-OS
+CI remains pending.
