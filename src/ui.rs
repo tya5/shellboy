@@ -8639,7 +8639,7 @@ mod tool_refresh_tests {
             Some("observation_unavailable")
         );
         assert_eq!(tool.current_exit_code, None);
-        assert!(tool.heading().contains("現在状態は未確認"));
+        assert!(tool.heading_ja().contains("現在状態は未確認"));
         assert_eq!(ui.view().nodes()[0].text, original.text);
         assert_eq!(ui.view().navigation.anchor, anchor);
     }

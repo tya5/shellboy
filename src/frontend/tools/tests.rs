@@ -46,7 +46,7 @@ async fn repeated_call_ids_in_other_groups_cannot_replace_a_cancelled_calls_sour
     let tool = nodes[0].presentation.blocks[0].tool.as_ref().unwrap();
     assert_eq!(tool.ordinal, None);
     assert!(tool.command.is_empty());
-    assert!(tool.heading().contains("原文参照"));
+    assert!(tool.heading_ja().contains("原文参照"));
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
@@ -117,12 +117,12 @@ async fn call_and_background_result_share_current_exit_facts_and_failed_reads_cl
                 tool.exit_code, None,
                 "saved background return has no terminal code"
             );
-            assert!(tool.heading().starts_with(match code {
+            assert!(tool.heading_ja().starts_with(match code {
                 Some(0) => "✓ #2 printf fixture",
                 Some(_) => "✗ #2 printf fixture",
                 None => "◌ #2 printf fixture",
             }));
-            assert!(tool.heading().contains("返却時 背景継続"));
+            assert!(tool.heading_ja().contains("返却時 背景継続"));
         }
     }
     let terminal_call = json!({"group_id":"g","output":[{"type":"function_call","name":"shell","call_id":"terminal","arguments":json!({"command":"printf terminal"}).to_string()}]});
@@ -154,9 +154,12 @@ async fn call_and_background_result_share_current_exit_facts_and_failed_reads_cl
         .unwrap();
     assert_eq!(call.status, "completed");
     assert_eq!(call.exit_code, None);
-    assert!(call.heading().starts_with("✗ #3 printf terminal | 終了 7"));
     assert!(
-        !call.heading().contains("返却時"),
+        call.heading_ja()
+            .starts_with("✗ #3 printf terminal | 終了 7")
+    );
+    assert!(
+        !call.heading_ja().contains("返却時"),
         "a call carries no saved result code"
     );
     // A real DB read failure must clear the last observation before returning;

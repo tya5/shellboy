@@ -1,6 +1,10 @@
 use serde_json::json;
 use shellboy::{history::text_of_payload, presentation::*};
 
+fn japanese_tool_heading(tool: &ToolPresentation) -> String {
+    messages::tool_heading(tool, false, shellboy::config::UiLanguage::Ja)
+}
+
 #[test]
 fn trim_markers_remain_visible_replacement_notices_with_immutable_source_text() {
     let notice = "Input prefix removed: first..last. Files and shell effects are unchanged. Use shellboy history get --node first to inspect only needed context.";
@@ -15,7 +19,7 @@ fn trim_markers_remain_visible_replacement_notices_with_immutable_source_text() 
     for kind in ["spill", "context_trim"] {
         let projected = project(kind, &payload, &text, 0);
         assert_eq!(projected.kind, PresentationKind::Spill);
-        assert_eq!(projected.title, "入力範囲を縮小（原文は保持）");
+        assert_eq!(projected.title, "Input scope reduced (original retained)");
         assert!(
             projected
                 .blocks
@@ -265,6 +269,61 @@ fn detail_tree_redacts_nested_json_credentials_and_has_real_json_pointers() {
         );
     }
     assert!(fields.iter().any(|f| f.key == "/a~1b/~0key/0/ok"));
+}
+
+#[test]
+fn generated_tool_heading_keeps_english_and_japanese_renderers_distinct() {
+    let tool = ToolPresentation {
+        ordinal: Some(0),
+        command: "printf fixture".into(),
+        status: "exited".into(),
+        exit_code: Some(7),
+        ..Default::default()
+    };
+    let english = messages::tool_heading(&tool, false, shellboy::config::UiLanguage::En);
+    let japanese = messages::tool_heading(&tool, false, shellboy::config::UiLanguage::Ja);
+    assert_eq!(tool.heading(), english);
+    assert_eq!(
+        tool.call_heading(),
+        messages::tool_heading(&tool, true, shellboy::config::UiLanguage::En)
+    );
+    assert!(english.contains("Exit 7"), "{english}");
+    assert!(!english.contains("終了"), "{english}");
+    assert!(japanese.contains("終了 7"), "{japanese}");
+    assert!(!japanese.contains("Exit"), "{japanese}");
+}
+
+#[test]
+fn safe_detail_depth_fallback_uses_the_selected_ui_language() {
+    let mut source = json!({"value":"kept"});
+    for _ in 0..34 {
+        source = json!({"nested":source});
+    }
+    let before = source.clone();
+    let english = safe_detail_value_for_language(source.clone(), shellboy::config::UiLanguage::En);
+    let japanese = safe_detail_value_for_language(source.clone(), shellboy::config::UiLanguage::Ja);
+    assert!(
+        english
+            .to_string()
+            .contains("[Deep structure omitted; see original]")
+    );
+    assert!(
+        japanese
+            .to_string()
+            .contains("[深い構造 · 詳細は元の参照先で確認]")
+    );
+    let mut array_source = json!("kept");
+    for _ in 0..34 {
+        array_source = json!([array_source]);
+    }
+    let english_array =
+        safe_detail_value_for_language(array_source, shellboy::config::UiLanguage::En);
+    assert!(
+        english_array
+            .to_string()
+            .contains("[Deep structure omitted; see original]")
+    );
+    assert_eq!(source, before);
 }
 
 #[test]
@@ -557,11 +616,11 @@ fn each_tool_result_keeps_its_own_identity_state_reason_and_partial_source_span(
             .collect::<Vec<_>>(),
         ["one", "two", "three"]
     );
-    assert!(tools[0].heading().contains("終了 0"));
-    assert!(tools[1].heading().contains("背景継続（返却時）"));
+    assert!(japanese_tool_heading(tools[0]).contains("終了 0"));
+    assert!(japanese_tool_heading(tools[1]).contains("背景継続（返却時）"));
     assert_eq!(tools[1].execution_id.as_deref(), Some("execution-two"));
     assert_eq!(tools[1].reason, "利用者の操作で背景へ移行");
-    assert!(tools[2].heading().contains("未実行・取消"));
+    assert!(japanese_tool_heading(tools[2]).contains("未実行・取消"));
     assert!(tools[2].reason.contains("先行する呼出し"));
     let base = p.blocks[1].source_start + 3;
     let partial = text.chars().skip(base).take(12).collect::<String>();
@@ -828,11 +887,8 @@ fn shell_outcome_marker_and_attention_use_current_code_without_overwriting_saved
             current_exit_code: code,
             ..Default::default()
         };
-        assert!(
-            tool.heading()
-                .starts_with(&format!("{marker} #2 printf fixture"))
-        );
-        assert!(tool.heading().contains(label));
+        assert!(japanese_tool_heading(&tool).starts_with(&format!("{marker} #2 printf fixture")));
+        assert!(japanese_tool_heading(&tool).contains(label));
         assert_eq!(tool.requires_attention(), attention);
         assert_eq!(tool.exit_code, None);
     }
@@ -842,23 +898,20 @@ fn shell_outcome_marker_and_attention_use_current_code_without_overwriting_saved
         current_exit_code: Some(7),
         ..Default::default()
     };
-    assert!(tool.heading().starts_with("✗"));
-    assert!(tool.heading().contains("終了 7 | 返却時 背景継続"));
+    assert!(japanese_tool_heading(&tool).starts_with("✗"));
+    assert!(japanese_tool_heading(&tool).contains("終了 7 | 返却時 背景継続"));
     tool.status = "failed".into();
     tool.exit_code = Some(7);
     tool.current_exit_code = Some(0);
-    assert!(tool.heading().contains("終了 0 | 返却時 失敗 7"));
-    assert!(tool.heading().starts_with("✗"));
+    assert!(japanese_tool_heading(&tool).contains("終了 0 | 返却時 失敗 7"));
+    assert!(japanese_tool_heading(&tool).starts_with("✗"));
     tool.current_exit_code = None;
-    assert!(
-        tool.heading()
-            .contains("終了（コード不明） | 返却時 失敗 7")
-    );
+    assert!(japanese_tool_heading(&tool).contains("終了（コード不明） | 返却時 失敗 7"));
     tool.observation_unavailable();
     assert_eq!(tool.current_exit_code, None);
     assert_eq!(tool.exit_code, Some(7));
-    assert!(tool.heading().contains("失敗 7 | 現在状態は未確認"));
-    assert!(!tool.heading().contains("現在 終了"));
+    assert!(japanese_tool_heading(&tool).contains("失敗 7 | 現在状態は未確認"));
+    assert!(!japanese_tool_heading(&tool).contains("現在 終了"));
     tool.clear_observation();
     assert_eq!(tool.current_state, None);
     assert_eq!(tool.current_exit_code, None);
@@ -1203,7 +1256,7 @@ fn terminal_tools_plain_code_and_index_readiness_avoid_internal_noise() {
         current_state: Some("stopped".into()),
         ..Default::default()
     };
-    let heading = terminal.heading();
+    let heading = japanese_tool_heading(&terminal);
     assert!(heading.contains("停止") && heading.contains("返却時 背景継続"));
     assert!(!heading.contains("現在"));
     for language in ["", "text", "plaintext"] {
@@ -1273,7 +1326,7 @@ fn interrupted_tool_results_show_uncertainty_without_fabricated_success() {
         let projected = project("tool_result", &payload, &text_of_payload(&payload), 0);
         let result = projected.blocks.iter().find(|b| b.tool.is_some()).unwrap();
         let tool = result.tool.as_ref().unwrap();
-        assert!(tool.heading().contains(label));
+        assert!(japanese_tool_heading(&tool).contains(label));
         assert!(tool.requires_attention());
         assert!(result.text.contains(text));
         assert_eq!(tool.exit_code, None);
@@ -1341,7 +1394,7 @@ fn structured_cancellation_renders_saved_cause_and_prerequisite_without_own_exec
             tool.execution_id.is_none(),
             "a prerequisite execution is not the cancelled call's execution"
         );
-        assert!(tool.heading().contains("未実行・取消"));
+        assert!(japanese_tool_heading(&tool).contains("未実行・取消"));
         assert_eq!(
             block.text,
             "Saved explanation: later call was not executed."
@@ -1391,7 +1444,7 @@ fn human_turn_interruption_keeps_running_shell_distinct_from_run_stop() {
     assert_eq!(tool.execution_id.as_deref(), Some("continuing"));
     assert!(tool.reason.contains("Turnを中断"));
     assert!(!tool.reason.contains("作業停止"));
-    assert!(!tool.heading().contains("未実行・取消"));
+    assert!(!japanese_tool_heading(&tool).contains("未実行・取消"));
 }
 
 #[test]

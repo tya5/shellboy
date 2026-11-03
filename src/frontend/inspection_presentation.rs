@@ -64,7 +64,7 @@ pub(super) fn prepare_in(
     if ticket.target.retains_history() {
         value = serde_json::json!({"current_source":value});
     }
-    let mut source = crate::presentation::safe_detail_value(value);
+    let mut source = crate::presentation::safe_detail_value_for_language(value, language);
     // A private JSON-encoded cursor is an opaque navigation token, not a field
     // tree to expand or rewrite. Its list row never displays the token.
     if let Some(cursor) = &current_cursor {

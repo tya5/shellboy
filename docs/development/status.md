@@ -4168,3 +4168,14 @@ observations and clarifies that cold interactive startup includes owner startup.
 These are historical fake-model measurements, not new provider measurements.
 The historical sampler is not yet integrated into main; the guide identifies
 its exact source and workflow. Review and integration CI remain pending.
+
+## #152 Presentation-core English default (validation pending)
+
+The scoped presentation-core slice makes the public tool/call heading defaults
+English while retaining an explicit Japanese renderer; it also carries the
+selected UI language through safe-detail recursion and uses English for the
+trim marker's machine-facing title. Related inspection/management consumers and
+language-specific regressions are updated. Only `cargo fmt --all -- --check`
+and `git diff --check` are run locally per the current shared build-slot policy;
+exact-tip three-OS CI is pending. This is one #152 batch, not final issue
+acceptance.

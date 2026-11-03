@@ -8962,3 +8962,14 @@ On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 history-interaction suites passed (24, 2, and 15 tests respectively). Final-tip three-OS CI run `41561161744` succeeded on UI/code/test SHA
 `499e764407` across Windows, macOS, and Ubuntu. This follow-up commit changes
 only validation documentation; the tested UI implementation is unchanged.
+
+### #152 Presentation-core English default (validation pending)
+
+Tool/call heading convenience methods now default to English and keep explicit
+Japanese behavior behind the language-aware presentation message renderer.
+Inspection/management safe-detail output passes the configured UI language
+through objects, arrays, and reparsed JSON values; deep-value fallback has
+English/Japanese coverage including nested arrays. The scoped test changes make
+Japanese expectations explicit and assert English defaults. Local validation is
+limited to `cargo fmt --all -- --check` and `git diff --check`; exact-tip 3-OS CI
+is pending. This is a scoped batch, not final #152 acceptance.
