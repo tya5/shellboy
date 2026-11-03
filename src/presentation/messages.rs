@@ -1209,9 +1209,9 @@ impl PresentationMessages {
 pub fn tool_heading(tool: &super::ToolPresentation, request: bool, language: UiLanguage) -> String {
     if language == UiLanguage::Ja {
         return if request {
-            tool.call_heading()
+            tool.call_heading_ja()
         } else {
-            tool.heading()
+            tool.heading_ja()
         };
     }
     let current = tool

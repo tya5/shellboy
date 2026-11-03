@@ -4247,3 +4247,14 @@ counts. Three-OS CI is pending.
 History detail facts, Watch bounded fallbacks, and streaming rebase notices use
 the configured UI language. Persisted titles, bodies, and raw errors remain
 unchanged. Validation and three-OS CI for this batch are pending.
+
+## #152 Presentation-core English default (validation pending)
+
+The scoped presentation-core slice makes the public tool/call heading defaults
+English while retaining an explicit Japanese renderer; it also carries the
+selected UI language through safe-detail recursion and uses English for the
+trim marker's machine-facing title. Related inspection/management consumers and
+language-specific regressions are updated. Only `cargo fmt --all -- --check`
+and `git diff --check` are run locally per the current shared build-slot policy;
+exact-tip three-OS CI is pending. This is one #152 batch, not final issue
+acceptance.

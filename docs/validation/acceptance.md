@@ -9052,3 +9052,14 @@ streaming-to-saved-body correspondence notices. Tests include typed rebase
 failure cases and a bilingual Watch fallback with a user title identical to the
 Japanese fallback. Local test execution and three-OS CI remain pending; the
 three assigned files also retain Japanese fixture data and localized literals.
+
+### #152 Presentation-core English default (validation pending)
+
+Tool/call heading convenience methods now default to English and keep explicit
+Japanese behavior behind the language-aware presentation message renderer.
+Inspection/management safe-detail output passes the configured UI language
+through objects, arrays, and reparsed JSON values; deep-value fallback has
+English/Japanese coverage including nested arrays. The scoped test changes make
+Japanese expectations explicit and assert English defaults. Local validation is
+limited to `cargo fmt --all -- --check` and `git diff --check`; exact-tip 3-OS CI
+is pending. This is a scoped batch, not final #152 acceptance.

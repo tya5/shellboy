@@ -58,7 +58,7 @@ pub fn revisit_label(summary: &crate::protocol::RevisitSummary) -> Option<String
 
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_FIELDS: usize = 128;
-pub(crate) const CONTEXT_TRIM_TITLE: &str = "入力範囲を縮小（原文は保持）";
+pub(crate) const CONTEXT_TRIM_TITLE: &str = "Input scope reduced (original retained)";
 const MAX_LINKS: usize = 128;
 const MAX_BLOCKS: usize = 128;
 
@@ -205,7 +205,11 @@ pub struct ToolPresentation {
     pub exit_code: Option<i64>,
 }
 impl ToolPresentation {
+    /// Render with the English default; use `messages::tool_heading` for an explicit locale.
     pub fn heading(&self) -> String {
+        crate::presentation::messages::tool_heading(self, false, crate::config::UiLanguage::En)
+    }
+    pub(crate) fn heading_ja(&self) -> String {
         let current = self
             .current_state
             .as_deref()
@@ -294,6 +298,9 @@ impl ToolPresentation {
     }
     /// A call shows the request; exit facts belong to its result card.
     pub fn call_heading(&self) -> String {
+        crate::presentation::messages::tool_heading(self, true, crate::config::UiLanguage::En)
+    }
+    pub(crate) fn call_heading_ja(&self) -> String {
         let live = self.current_state.as_deref().filter(|state| {
             matches!(
                 *state,
@@ -396,33 +403,6 @@ fn tool_state_text(state: &str, code: Option<i64>) -> String {
     let (_, label) = tool_state_heading(state, code);
     code.map_or_else(|| label.into(), |code| format!("{label} {code}"))
 }
-fn tool_reason(value: &str) -> String {
-    match ToolReasonKind::from_saved(value) {
-        ToolReasonKind::RunStopped => "作業停止のため取消".into(),
-        ToolReasonKind::PriorCallInterrupted => {
-            "先行する呼出しの失敗、または前景待機の中断により取消".into()
-        }
-        ToolReasonKind::PriorCallFailed => "先行する呼出しの失敗により未実行".into(),
-        ToolReasonKind::PriorOutputIncomplete => "先行する呼出しの出力が不完全なため未実行".into(),
-        ToolReasonKind::PriorWaitNewInput => {
-            "追加の指示で先行する呼出しの待機を解除したため未実行".into()
-        }
-        ToolReasonKind::PriorWaitHumanBackground => {
-            "利用者が先行する呼出しを背景へ移したため未実行".into()
-        }
-        ToolReasonKind::PriorWaitReleased => "先行する呼出しの待機結果により未実行".into(),
-        ToolReasonKind::HumanTurnInterrupted => "利用者がTurnを中断".into(),
-        ToolReasonKind::PriorTurnInterrupted => "利用者がTurnを中断したため未実行".into(),
-        ToolReasonKind::OwnerShutdown => "アプリ終了処理のため未実行".into(),
-        ToolReasonKind::GroupValidation => "呼出し群の検証失敗により未実行".into(),
-        ToolReasonKind::AdditionalInput => "追加の指示を受けて背景へ移行".into(),
-        ToolReasonKind::HumanBackgrounded => "利用者の操作で背景へ移行".into(),
-        ToolReasonKind::ForegroundTimeout => "前景の待機時間上限で背景へ移行".into(),
-        ToolReasonKind::OutputLimit => "出力上限に到達".into(),
-        ToolReasonKind::Unknown => sanitize_plain(&short(value, 256), 0).0,
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresentationBlock {
     pub kind: BlockKind,
@@ -1004,10 +984,7 @@ fn secret(key: &str) -> bool {
 fn short(text: &str, limit: usize) -> String {
     let mut out: String = text.chars().take(limit).collect();
     if out.len() < text.len() {
-        out.push_str(crate::ui::text_width::glyphs::select(
-            "… [詳細は原文参照]",
-            ". [詳細は原文参照]",
-        ));
+        out.push_str(crate::ui::text_width::glyphs::select("…", "..."));
     }
     out
 }
@@ -1030,12 +1007,17 @@ fn parse_container_detail(text: &str) -> Option<Value> {
 
 /// Remove opaque/credential fields for explicit diagnostic pages as well as summaries.
 pub fn safe_detail_value(value: Value) -> Value {
-    fn safe(value: Value, depth: usize) -> Value {
+    safe_detail_value_for_language(value, crate::config::UiLanguage::En)
+}
+
+pub fn safe_detail_value_for_language(value: Value, language: crate::config::UiLanguage) -> Value {
+    fn safe(value: Value, depth: usize, language: crate::config::UiLanguage) -> Value {
         if depth > 32 {
             return Value::String(
-                crate::ui::text_width::glyphs::select(
+                crate::ui::i18n::local!(
+                    language,
                     "[深い構造 · 詳細は元の参照先で確認]",
-                    "[深い構造 | 詳細は元の参照先で確認]",
+                    "[Deep structure omitted; see original]"
                 )
                 .into(),
             );
@@ -1045,15 +1027,18 @@ pub fn safe_detail_value(value: Value) -> Value {
                 object
                     .into_iter()
                     .filter(|(key, _)| !secret(key))
-                    .map(|(key, value)| (key, safe(value, depth + 1)))
+                    .map(|(key, value)| (key, safe(value, depth + 1, language)))
                     .collect(),
             ),
-            Value::Array(values) => {
-                Value::Array(values.into_iter().map(|v| safe(v, depth + 1)).collect())
-            }
+            Value::Array(values) => Value::Array(
+                values
+                    .into_iter()
+                    .map(|value| safe(value, depth + 1, language))
+                    .collect(),
+            ),
             Value::String(text) => {
                 if let Some(parsed) = parse_container_detail(&text) {
-                    safe(parsed, depth + 1)
+                    safe(parsed, depth + 1, language)
                 } else {
                     Value::String(sanitize_plain(&text, 0).0)
                 }
@@ -1061,7 +1046,7 @@ pub fn safe_detail_value(value: Value) -> Value {
             other => other,
         }
     }
-    safe(value, 0)
+    safe(value, 0, language)
 }
 pub use fields::fields_of_value;
 fn add_link(out: &mut Vec<PresentationLink>, label: &str, url: &str, start: usize, end: usize) {
@@ -1406,7 +1391,7 @@ mod stream_projection_tests {
         let original = serde_json::to_value(&value).unwrap();
         for (policy, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
             crate::ui::text_width::set_terminal_width(policy);
-            let shown = value.heading();
+            let shown = value.heading_ja();
             assert!(
                 shown.contains(&format!("#8 {raw}{separator}")),
                 "{policy:?}: {shown}"

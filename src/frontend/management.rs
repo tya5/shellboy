@@ -103,7 +103,7 @@ pub(super) fn report(value: Value, budget: usize) -> Report {
 pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Report {
     let mut filter_fields = Vec::new();
     presentation::content_filter::append_fields(&mut filter_fields, &value, language);
-    let safe = presentation::safe_detail_value(value);
+    let safe = presentation::safe_detail_value_for_language(value, language);
     if safe.get("filters").is_some() && safe.get("items").is_some() {
         return work_report(language, safe, budget);
     }
@@ -748,7 +748,8 @@ mod tests {
             assert!(completion_text(language, "RAW_TITLE", false, &response).contains(raw));
             assert!(completion_text(language, "RAW_TITLE", false, &response).contains("RAW_TITLE"));
             let value = serde_json::json!({"error":ApiError::new(ErrorCode::SaveFailed,raw).hint(raw),"raw_status":"native-state","id":"id-42"});
-            let expected = crate::presentation::safe_detail_value(value.clone());
+            let expected =
+                crate::presentation::safe_detail_value_for_language(value.clone(), language);
             let localized = report_in(language, value.clone(), usize::MAX);
             assert_eq!(localized.detail.as_ref(), Some(&expected));
             let reference = report(value, usize::MAX);
@@ -1157,7 +1158,7 @@ mod content_filter_tests {
             }));
             assert_eq!(
                 report.detail.unwrap(),
-                presentation::safe_detail_value(source)
+                presentation::safe_detail_value_for_language(source, language)
             );
         }
     }
@@ -1190,7 +1191,7 @@ mod opaque_filter_string_tests {
             );
             assert_eq!(
                 report.detail.unwrap(),
-                presentation::safe_detail_value(source.clone())
+                presentation::safe_detail_value_for_language(source.clone(), language)
             );
         }
     }
