@@ -541,7 +541,7 @@ impl DbWorker {
                         {
                             let snapshot = counters
                                 .as_ref()
-                                .and_then(|c| c.try_lock().ok().map(|c| c.clone()))
+                                .and_then(|c| c.try_lock().ok().map(|c| c.snapshot()))
                                 .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
                             diagnostics.record_db_job_active(
                                 &label,
@@ -642,7 +642,7 @@ impl DbWorker {
             let counters = active
                 .counters
                 .as_ref()
-                .and_then(|c| c.try_lock().ok().map(|c| c.clone()))
+                .and_then(|c| c.try_lock().ok().map(|c| c.snapshot()))
                 .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
             (
                 active.job.kind,

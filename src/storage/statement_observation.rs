@@ -19,6 +19,7 @@ pub(crate) struct Counters {
     pub vm_steps: u64,
     pub elapsed_ns: u64,
     pub rows: Option<u64>,
+    row_count: Arc<std::sync::atomic::AtomicU64>,
     pub row_scope: Option<&'static str>,
     pub counter_scope: Option<&'static str>,
     pub fingerprint: Option<&'static str>,
@@ -33,6 +34,13 @@ pub(crate) struct Counters {
 }
 
 impl Counters {
+    pub(super) fn snapshot(&self) -> Self {
+        let mut result = self.clone();
+        if result.rows.is_some() {
+            result.rows = Some(self.row_count.load(std::sync::atomic::Ordering::Relaxed));
+        }
+        result
+    }
     fn clear_current_if(&mut self, statement: usize) {
         if self.current_statement == statement {
             self.current_statement = 0;
@@ -93,6 +101,7 @@ struct TraceContext {
     baselines: HashMap<usize, [u64; 4]>,
     exhaustive: bool,
     sample_every_profile: bool,
+    row_count: Arc<std::sync::atomic::AtomicU64>,
     last_sql: Vec<u8>,
     last_shape: Option<Arc<str>>,
 }
@@ -208,10 +217,11 @@ unsafe extern "C" fn profile(
             return 0;
         }
         if event == ffi::SQLITE_TRACE_ROW {
-            if let Ok(mut counters) = context.counters.lock() {
-                counters.rows = Some(counters.rows.unwrap_or_default().saturating_add(1));
-                counters.row_scope = Some("job_cumulative");
-            }
+            let _ = context.row_count.try_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |rows| Some(rows.saturating_add(1)),
+            );
             return 0;
         }
         if event != ffi::SQLITE_TRACE_PROFILE || elapsed.is_null() {
@@ -281,9 +291,11 @@ unsafe extern "C" fn profile(
     }
     if event == ffi::SQLITE_TRACE_ROW {
         // SQLite reports one callback for each generated result row.
-        if let Ok(mut c) = context.counters.lock() {
-            c.rows = Some(c.rows.unwrap_or_default().saturating_add(1));
-        }
+        let _ = context.row_count.try_update(
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+            |rows| Some(rows.saturating_add(1)),
+        );
         return 0;
     }
     if event != ffi::SQLITE_TRACE_PROFILE || elapsed.is_null() {
@@ -361,6 +373,7 @@ impl<'a> StatementObservation<'a> {
             baselines: HashMap::new(),
             exhaustive: false,
             sample_every_profile: false,
+            row_count: counters.lock().unwrap().row_count.clone(),
             last_sql: Vec::new(),
             last_shape: None,
         });
@@ -383,7 +396,10 @@ impl<'a> StatementObservation<'a> {
         self.connection
     }
     pub fn counters(&self) -> Counters {
-        self.counters.lock().map(|c| c.clone()).unwrap_or_default()
+        self.counters
+            .lock()
+            .map(|c| c.snapshot())
+            .unwrap_or_default()
     }
     pub(super) fn shared_counters(&self) -> Arc<Mutex<Counters>> {
         self.counters.clone()
@@ -496,7 +512,7 @@ mod tests {
                     trace.observe(start + super::super::SLOW_JOB_THRESHOLD);
                     let mut snapshot = snapshot.lock().unwrap();
                     if snapshot.is_none() {
-                        *snapshot = Some(shared.lock().unwrap().clone());
+                        *snapshot = Some(shared.lock().unwrap().snapshot());
                     }
                     false
                 }),
