@@ -210,18 +210,34 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             checks.check_migration(db, before, 17, 18)
 
-    def test_arguments_default_to_public_v050_schema17_and_target25(self):
+
+    def test_schema24_to25_adds_attempt_lookup_index_and_preserves_rows(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 24)
+        before, records = self.upgrade(db, 24, 25)
+        self.assertEqual(checks.ledger(db), before + [(25, '0025_history_attempt_index')])
+        self.assertEqual(checks.snapshot(db), records)
+        self.assertEqual([row[2] for row in db.execute('PRAGMA index_info(history_tool_group_attempt)')],
+                         ['attempt_id'])
+        db.executescript('DROP INDEX history_tool_group_attempt; CREATE INDEX history_tool_group_attempt ON tool_group(id);')
+        with self.assertRaisesRegex(AssertionError, 'history_tool_group_attempt'):
+            checks.check_migration(db, before, 24, 25)
+
+    def test_arguments_default_to_public_v070_schema24_and_target25(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
-        self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema), ('0.5.0', 17, 25))
+        self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
+                         ('0.7.0', 24, '0.7.1', 25))
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
         self.assertEqual((current.start_schema, current.expected_new_schema), (19, 25))
-        release = checks.parse_args(required + ['--old-version', '0.6.1', '--expected-version', '0.7.0'])
-        self.assertEqual((release.start_schema, release.expected_new_schema), (19, 25))
+        release = checks.parse_args(required + ['--old-version', '0.7.0', '--expected-version', '0.7.1'])
+        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 25))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
+        explicit_public_schema = checks.parse_args(required + ['--old-version', '0.7.0', '--start-schema', '24'])
+        self.assertEqual(explicit_public_schema.start_schema, 24)
         staged = checks.parse_args(required + ['--old-version', '0.4.0', '--start-schema', '16'])
         self.assertEqual(staged.start_schema, 16)
         with self.assertRaises(SystemExit):

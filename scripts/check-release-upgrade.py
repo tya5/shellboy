@@ -23,7 +23,7 @@ import time
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
            for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25)}
-PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19}
+PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24}
 
 
 def read_only_uri(path, stopped=False):
@@ -116,6 +116,14 @@ def check_migration(db, before, start, target):
         assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
             'receipt_run_completion differs from migration 24'
 
+    if target >= 25:
+        row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'").fetchone()
+        expected_index = next(line for line in DERIVED[25].read_text(encoding='utf-8').splitlines()
+                              if line.startswith('CREATE INDEX IF NOT EXISTS history_tool_group_attempt '))
+        expected_index = expected_index.replace(' IF NOT EXISTS', '')
+        assert row and ' '.join(row[0].rstrip(';').split()) == ' '.join(expected_index.rstrip(';').split()), \
+            'history_tool_group_attempt differs from migration 25'
+
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     assert start in (14, 17, 19) and target in (14, 16, 17, 19) and start <= target, 'unexpected synthetic fixture schema'
@@ -131,12 +139,12 @@ def parse_args(argv=None):
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.5.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19), default=None,
+    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.7.0')
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
-    parser.add_argument('--expected-version', default='0.5.0')
+    parser.add_argument('--expected-version', default='0.7.1')
     parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25), default=25,
-                        help='24 for the current candidate; 14/15/17/18/19/20/21/22/23 retain historical release checks')
+                        help='25 for the current candidate; 14/15/17/18/19/20/21/22/23/24 retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

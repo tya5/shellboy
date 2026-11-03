@@ -440,24 +440,24 @@ private pre-#117 build does not qualify final release bytes. Build, release, tag
 and install still require separate explicit permission. The unmodified workflow
 supplies candidate mode; no publication permission/workflow change is needed.
 
-## Post-v0.5.0 synthetic upgrade check
+## v0.7.1 synthetic upgrade check
 
-For the next candidate, `check-release-upgrade.py` defaults to the independently
-verified public v0.5.0 binary (schema 17) and candidate schema 18. Supply an
-empty, nonexistent fixture path and the candidate's actual version if it changes:
+For the v0.7.1 candidate, `check-release-upgrade.py` defaults to the independently
+verified public v0.7.0 binary (schema 24), expected candidate version 0.7.1, and
+target schema 25. This verifies migration 25's `history_tool_group_attempt`
+index. Supply an empty, nonexistent fixture path:
 
 ```sh
-python3 scripts/check-release-upgrade.py --old VERIFIED_PUBLIC_050_BINARY \
-  --new EXACT_CANDIDATE_BINARY --expected-version CANDIDATE_VERSION \
-  --root NEW_EMPTY_PATH
+python3 scripts/check-release-upgrade.py --old VERIFIED_PUBLIC_070_BINARY \
+  --new EXACT_V071_CANDIDATE_BINARY --root NEW_EMPTY_PATH
 ```
 
-The script checks the original migration ledger plus entry 18, the complete
-history-accounting and thread-parent indexes, saved records, integrity, pending
+The script checks the original migration ledger plus entry 25, the new attempt
+lookup index and earlier preserved indexes, saved records, integrity, pending
 work, synthetic search, RAG and mock exec. `public_schema`, `schema_before`, and
 `synthetic_schema_staging` distinguish a real public start from a staged copy.
-Historical v0.3.0/v0.4.0 paths remain selectable explicitly; only synthetic,
-owned fixtures and loopback mock endpoints are used.
+Historical public versions remain selectable explicitly; only synthetic, owned
+fixtures and loopback mock endpoints are used.
 
 ## v0.7.0 publication (2026-11-03)
 
