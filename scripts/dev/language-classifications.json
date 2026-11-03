@@ -61,33 +61,33 @@
   },
   "src/presentation/fields.rs:cf3c793ba104a057:1": {
     "category": "a",
-    "reason": "Semantic group IDs render via group_label in details Fields mode; Japanese group remains the compatibility label and English uses complete ASCII labels.",
-    "source_tokens_sha256": "3f4a34a9b49d5ce6a5d7fe98f2e6821653cd48ea6d4f69c16a98125e42e24cc3"
+    "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
+    "source_tokens_sha256": "b51fc9cf4647d76aaf8d148aabbac1ceee1f1f01dc4c0647afd40cc6419330a9"
   },
   "src/presentation/fields.rs:3b13281cd9c74396:1": {
     "category": "a",
-    "reason": "Semantic group IDs render via group_label in details Fields mode; Japanese group remains the compatibility label and English uses complete ASCII labels.",
-    "source_tokens_sha256": "3f4a34a9b49d5ce6a5d7fe98f2e6821653cd48ea6d4f69c16a98125e42e24cc3"
+    "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
+    "source_tokens_sha256": "b51fc9cf4647d76aaf8d148aabbac1ceee1f1f01dc4c0647afd40cc6419330a9"
   },
   "src/presentation/fields.rs:cf3c793ba104a057:2": {
     "category": "a",
-    "reason": "Semantic group IDs render via group_label in details Fields mode; Japanese group remains the compatibility label and English uses complete ASCII labels.",
-    "source_tokens_sha256": "3f4a34a9b49d5ce6a5d7fe98f2e6821653cd48ea6d4f69c16a98125e42e24cc3"
+    "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
+    "source_tokens_sha256": "b51fc9cf4647d76aaf8d148aabbac1ceee1f1f01dc4c0647afd40cc6419330a9"
   },
   "src/presentation/fields.rs:967e34304c32c1b8:1": {
     "category": "a",
-    "reason": "Semantic group IDs render via group_label in details Fields mode; Japanese group remains the compatibility label and English uses complete ASCII labels.",
-    "source_tokens_sha256": "3f4a34a9b49d5ce6a5d7fe98f2e6821653cd48ea6d4f69c16a98125e42e24cc3"
+    "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
+    "source_tokens_sha256": "b51fc9cf4647d76aaf8d148aabbac1ceee1f1f01dc4c0647afd40cc6419330a9"
   },
   "src/presentation/fields.rs:b7717629563883d0:1": {
     "category": "a",
-    "reason": "Semantic group IDs render via group_label in details Fields mode; Japanese group remains the compatibility label and English uses complete ASCII labels.",
-    "source_tokens_sha256": "3f4a34a9b49d5ce6a5d7fe98f2e6821653cd48ea6d4f69c16a98125e42e24cc3"
+    "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
+    "source_tokens_sha256": "b51fc9cf4647d76aaf8d148aabbac1ceee1f1f01dc4c0647afd40cc6419330a9"
   },
   "src/presentation/fields.rs:84e2338840f9909e:1": {
     "category": "a",
-    "reason": "Semantic group IDs render via group_label in details Fields mode; Japanese group remains the compatibility label and English uses complete ASCII labels.",
-    "source_tokens_sha256": "3f4a34a9b49d5ce6a5d7fe98f2e6821653cd48ea6d4f69c16a98125e42e24cc3"
+    "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
+    "source_tokens_sha256": "b51fc9cf4647d76aaf8d148aabbac1ceee1f1f01dc4c0647afd40cc6419330a9"
   },
   "src/presentation/messages.rs:850486352b42fc11:1": {
     "category": "a",
