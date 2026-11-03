@@ -44,6 +44,20 @@ pub(super) fn region_bytes(sources: &[presentation::RowSource]) -> usize {
         .sum()
 }
 
+fn is_send_progress_status(status: &str) -> bool {
+    matches!(
+        status,
+        "送信要求を受け付け中"
+            | "Accepting the send request"
+            | "受付処理中です"
+            | "Accepting the request"
+    )
+}
+
+fn is_ready_status(status: &str) -> bool {
+    matches!(status, "入力できます" | "Ready for input")
+}
+
 impl ThreadView {
     pub(super) fn clear_operation_notice(&mut self) {
         if self.operation_notice.take().is_some() {
@@ -54,19 +68,17 @@ impl ThreadView {
         // Send/receipt progress already has typed, reactive footer ownership.
         if kind != NoticeKind::Failure
             && self.sending().is_some()
-            && matches!(
-                self.status.as_str(),
-                "送信要求を受け付け中" | "受付処理中です"
-            )
+            && is_send_progress_status(&self.status)
         {
             return;
         }
         if self.status.is_empty()
             || self.status == self.state
             || self.status == self.footer_phase().label()
+            || is_ready_status(&self.status)
             || matches!(
                 self.status.as_str(),
-                "入力できます" | "待機中" | "処理中" | "完了" | "操作を準備しました"
+                "待機中" | "処理中" | "完了" | "操作を準備しました"
             )
             || self
                 .operation_notice
@@ -732,6 +744,22 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+    #[test]
+    fn english_and_japanese_receipt_statuses_remain_non_notices() {
+        for status in [
+            "送信要求を受け付け中",
+            "Accepting the send request",
+            "受付処理中です",
+            "Accepting the request",
+        ] {
+            assert!(is_send_progress_status(status), "{status}");
+        }
+        assert!(is_ready_status("入力できます"));
+        assert!(is_ready_status("Ready for input"));
+        assert!(!is_send_progress_status("Provider supplied error"));
+        assert!(!is_ready_status("Provider supplied status"));
+    }
+
     #[test]
     fn notification_enter_follows_exact_loaded_tool_without_fetching_output() {
         let mut ui = fixture();
