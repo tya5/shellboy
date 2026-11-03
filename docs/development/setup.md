@@ -123,18 +123,14 @@ and candidate on Windows with two test threads, plus a separate four-thread
 contention comparison. Cache/runner conditions
 and build versus execution times must accompany any claimed improvement.
 
-For a four-thread Windows check without rerunning the baseline profiling matrix,
-use the manual `windows_test_threads=4` input with `performance=false`; on a
-task branch, also set `all_oses=true` so Windows is included. The thread input
-sets Windows test concurrency; it does not change OS selection. Workflow dispatch
-on an ordinary task branch runs Linux only by default. Set `all_oses=true` for
-Windows/PTY/path-specific changes. `main`, `land/*` and `integration/*` always
-select Ubuntu, macOS and Windows; `windows_test_threads=2` changes Windows test
-concurrency without changing that matrix. Nothing lands on `main` without an
-exact-SHA three-OS pass. A later push to main reuses that pass only when the
-read-only Actions API finds a successful exact-SHA `Rust checks` run; otherwise
-all three checks run. Experimental failures are retained and never automatically
-retried into success.
+For a four-thread Windows-only check without rerunning the baseline profiling
+matrix, use the manual `windows_test_threads=4` input with `performance=false`.
+The `=2` setting selects all three OSes, preserving the existing two-thread
+diagnostic. Otherwise, task-branch dispatch runs Linux only by default; set
+`all_oses=true` for Windows/PTY/path-specific changes. `main`, `land/*` and
+`integration/*` always select Ubuntu, macOS and Windows. Nothing lands on `main`
+without an exact-SHA three-OS pass. Experimental failures are retained and never
+automatically retried into success.
 
 ## CI execution policy (#57)
 
@@ -165,11 +161,7 @@ checks (`windows_test_threads=default`); both `land/*` and `integration/*`
 always select all three OSes. After the three native jobs pass on the first
 attempt, fetch again and
 fast-forward main to **that same SHA**. If main moved, rebuild the batch and
-repeat CI. A main push still creates a workflow run: its read-only Actions API gate
-queries completed runs for the exact `github.sha` and filters successful
-conclusions, then verifies the qualifying three-OS jobs and records the source
-run URL in logs and summary. It skips native jobs only when evidence qualifies.
-Missing evidence or an API error executes all three checks. Manual
+repeat CI. The existing main-push exact-SHA reuse remains unchanged. Manual
 dispatch always executes checks; reuse-only or rerun successes never qualify as
 fresh evidence. See the [design](../design/ci-test-performance.md#exact-sha-reuse-and-integration-batches-92).
 
