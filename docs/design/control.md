@@ -576,11 +576,13 @@ sender's Run, or is saved as a context_changed notice for its next actual Turn
 when no Run is live; it never starts an idle sender. External senders observe
 terminal receipt facts with message get / wait reply_received, not an inbox.
 
-Deletion transitions pending recipient duties to recipient_deleted, and pending
-duties sent by a deleted model Thread to cancelled with cancelled_by and
-cancel_reason=sender_deleted. These CAS transitions, sender/recipient notices,
-and deletion are one transaction; recipient deletion wins if both ends are
-selected. No pending-reply receipt is collected. The history-GC owner reclaims
+Deletion transitions pending recipient duties to recipient_deleted using indexed
+per-recipient lookups (at most 128 each). These CAS transitions and outcome
+notices are atomic with deletion. Sender-deleted cancellation and its notice
+are deferred to the history-GC receipt phase, bounded to 128 scanned rows per
+transaction, with cancelled_by and cancel_reason=sender_deleted. No foreground
+sender-JSON scan or new schema is needed. Recipient deletion takes precedence
+when both ends are deleted. No pending-reply receipt is collected. The history-GC owner reclaims
 eligible deleted-target terminal receipts in batches of 128, preserving those
 still owned by a live sender. Receipts targeting live recipients remain rooted
 even if the sender was deleted. See gc.md and storage.md.

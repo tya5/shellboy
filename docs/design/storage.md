@@ -677,11 +677,15 @@ reminded_at/reminded_run_id fact and one reply_reminder event containing each
 message ID and credential-free sender. Stop, recovery wait and shutdown do not
 consume or ignore duties. The reminder is once per message across restart.
 
-Thread deletion terminalizes pending replies in the same transaction before
-making their receipt rows eligible for history GC. A deleted recipient produces
-recipient_deleted; a deleted sender produces cancelled with cancelled_by and
-cancel_reason=sender_deleted. Recipient deletion takes precedence when both
-endpoints are selected. Terminal receipts with a live model sender remain owned
+Thread deletion terminalizes recipient duties in the delete transaction using
+one target_thread_id-indexed lookup per deleted Thread, bounded by the 128-duty
+cap. It does not scan sender JSON or all pending replies. Deleted model senders
+are handled later in the existing history-GC receipt phase, at most 128 rows
+per transaction: pending becomes cancelled with cancelled_by and
+cancel_reason=sender_deleted before reclamation eligibility is checked. This
+reuses the existing deletion-triggered collector and needs no migration or
+sender index. Recipient deletion wins if both endpoints are deleted.
+Terminal receipts with a live model sender remain owned
 by that sender, while receipts targeting a live recipient remain recipient
 owned. Other deleted-target receipts are reclaimed by history GC in at-most-128
 row background transactions, before payload marking. See gc.md for visibility
