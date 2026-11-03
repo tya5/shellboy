@@ -187,6 +187,35 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_escapes_are_byte_exact_at_every_read_boundary() {
+        for count in [2, 3] {
+            let encoded = vec![0x1b; count];
+            for boundaries in 0..(1 << (count - 1)) {
+                let mut filter = ReplyFilter::default();
+                filter.expect(Kind::Keyboard);
+                let mut input = Vec::new();
+                let mut replies = Vec::new();
+                let mut start = 0;
+                for end in 1..=count {
+                    if end == count || boundaries & (1 << (end - 1)) != 0 {
+                        filter.feed(&encoded[start..end], &mut input, &mut replies);
+                        start = end;
+                    }
+                }
+                assert!(filter.lone_escape());
+                filter.flush_input(&mut input);
+                assert_eq!(input, encoded, "count={count}, reads={boundaries}");
+                assert!(replies.is_empty());
+                assert!(!filter.lone_escape());
+                filter.feed(b"x\x1b[?1u", &mut input, &mut replies);
+                assert_eq!(input.last(), Some(&b'x'));
+                assert_eq!(replies.len(), 1);
+                assert_eq!(replies[0].kind, Kind::Keyboard);
+            }
+        }
+    }
+
+    #[test]
     fn unanswered_query_preserves_unrelated_input() {
         let mut filter = ReplyFilter::default();
         filter.expect(Kind::Cursor);

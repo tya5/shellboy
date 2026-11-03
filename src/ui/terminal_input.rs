@@ -79,6 +79,13 @@ impl Decoder {
     }
     fn decode(&mut self, input: &[u8]) {
         for byte in input {
+            // A new Escape cannot extend a lone Escape into one key: preserve
+            // both presses. CSI, Alt and paste buffers remain parser-owned.
+            if *byte == 0x1b && self.bytes == b"\x1b" {
+                self.events
+                    .push_back(Event::Key(crossterm::event::KeyCode::Esc.into()));
+                self.bytes.clear();
+            }
             self.bytes.push(*byte);
             match parse::parse_event(&self.bytes, true) {
                 Ok(Some(InternalEvent::Event(event))) => {
@@ -285,6 +292,76 @@ mod tests {
             })
             .collect()
     }
+    #[test]
+    fn consecutive_escapes_survive_every_read_and_idle_boundary() {
+        for queries in [None, Some(false), Some(true)] {
+            for count in [2, 3] {
+                let bytes = vec![0x1b; count];
+                for boundaries in 0..(1 << (count - 1)) {
+                    for idle_boundaries in 0..(1 << (count - 1)) {
+                        let mut decoder = Decoder::default();
+                        if let Some(width) = queries {
+                            decoder.queries(width);
+                        }
+                        let mut start = 0;
+                        for end in 1..=count {
+                            if end == count || boundaries & (1 << (end - 1)) != 0 {
+                                decoder.feed(&bytes[start..end]);
+                                start = end;
+                                if end < count && idle_boundaries & (1 << (end - 1)) != 0 {
+                                    decoder.finish_escape();
+                                }
+                            }
+                        }
+                        decoder.finish_escape();
+                        assert_eq!(
+                            decoder.events.drain(..).collect::<Vec<_>>(),
+                            vec![Event::Key(KeyCode::Esc.into()); count],
+                            "queries={queries:?}, count={count}, reads={boundaries}, idle={idle_boundaries}"
+                        );
+                        assert!(decoder.bytes.is_empty());
+                        assert!(!decoder.filter.lone_escape());
+                        decoder.feed(b"x");
+                        assert_eq!(typed(&mut decoder), "x");
+                        if queries.is_some() {
+                            decoder.feed(b"\x1b[?1");
+                            decoder.finish_escape();
+                            assert!(decoder.events.is_empty());
+                            decoder.feed(b"u");
+                            assert!(decoder.events.is_empty());
+                            assert_eq!(decoder.keyboard, Capability::Measured(true));
+                        } else {
+                            decoder.feed(b"\x1b[?1u");
+                            assert_eq!(decoder.keyboard, Capability::Unmeasured);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn consecutive_escapes_inside_paste_remain_paste() {
+        let bytes = b"\x1b[200~a\x1b\x1b\x1b[b\x1b[201~";
+        for queries in [None, Some(false), Some(true)] {
+            for chunk in 1..=bytes.len() {
+                let mut decoder = Decoder::default();
+                if let Some(width) = queries {
+                    decoder.queries(width);
+                }
+                for part in bytes.chunks(chunk) {
+                    decoder.feed(part);
+                    decoder.finish_escape();
+                }
+                assert_eq!(
+                    decoder.events.drain(..).collect::<Vec<_>>(),
+                    [Event::Paste("a\x1b\x1b\x1b[b".into())]
+                );
+                assert!(decoder.bytes.is_empty());
+            }
+        }
+    }
+
     #[test]
     fn silent_queries_leave_capabilities_unknown_and_typing_available() {
         let mut decoder = Decoder::default();
