@@ -1890,10 +1890,13 @@ mod slow_job_tests {
                     .contains("active_job_snapshot_can_be_read")
             );
             assert_eq!(active_logs[0]["db_job_active"]["lane"], "foreground");
-            assert!(
-                active_logs[0]["db_job_active"]
-                    .get("statement_counters")
-                    .is_none()
+            assert_eq!(
+                active_logs[0]["db_job_active"]["statement_counters"]["rows"],
+                1
+            );
+            assert_eq!(
+                active_logs[0]["db_job_active"]["statement_counters"]["row_scope"],
+                "job_cumulative"
             );
             assert!(
                 active_logs[0]["db_job_active"]["elapsed_ms"]
@@ -1903,7 +1906,7 @@ mod slow_job_tests {
             );
             assert_eq!(
                 active_logs[0]["db_job_active"].as_object().unwrap().len(),
-                3
+                4
             );
         })
         .await
