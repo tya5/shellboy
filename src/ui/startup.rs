@@ -24,6 +24,10 @@ use tokio_util::sync::CancellationToken;
 #[derive(Default)]
 struct Screen {
     language: UiLanguage,
+    motion: crate::config::MotionMode,
+    elapsed_seconds: u64,
+    migration: Option<(u32, u32)>,
+    blink_dim: bool,
     stopping: bool,
     ignored_input: bool,
     error: Option<ApiError>,
@@ -77,6 +81,31 @@ fn stage_text(stage: StartupStage, language: UiLanguage) -> &'static str {
             language,
             "DBの確認・更新を進めています",
             "Checking and updating the database"
+        ),
+        StartupStage::DatabasePragmas => i18n::local!(
+            language,
+            "DBの設定を確認しています",
+            "Checking database settings"
+        ),
+        StartupStage::DatabaseMigration => i18n::local!(
+            language,
+            "DBの確認・更新を進めています",
+            "Checking and updating the database"
+        ),
+        StartupStage::DatabaseValidate => i18n::local!(
+            language,
+            "DBの構造を確認しています",
+            "Validating database schema"
+        ),
+        StartupStage::DatabaseForeignKeys => i18n::local!(
+            language,
+            "DBの参照を確認しています",
+            "Checking database references"
+        ),
+        StartupStage::DatabaseQuickCheck => i18n::local!(
+            language,
+            "DBの整合性を確認しています",
+            "Checking database integrity"
         ),
         StartupStage::InterruptedWork => i18n::local!(
             language,
@@ -132,18 +161,83 @@ fn draw(frame: &mut Frame<'_>, screen: &Screen, stage: StartupStage, tick: usize
         )
         .0
     } else {
-        format!(
-            "{} {}",
-            [
-                super::text_width::glyphs::select("·", "|"),
-                super::text_width::glyphs::select("··", "||"),
-                super::text_width::glyphs::select("···", "|||"),
-                super::text_width::glyphs::select("··", "||")
-            ][tick % 4],
-            stage_text(stage, language)
-        )
+        let tick = if screen.motion == crate::config::MotionMode::Off {
+            0
+        } else {
+            tick
+        };
+        let ascii = crate::presentation::rows::SPINNER_CANDIDATES[2];
+        let spinner = super::text_width::glyphs::select(
+            super::motion::spinner_frame(tick),
+            ascii[tick % ascii.len()],
+        );
+        let elapsed = screen.elapsed_seconds;
+        let time = match language {
+            UiLanguage::Ja => format!("経過 {elapsed}秒"),
+            UiLanguage::En => format!("Elapsed {elapsed}s"),
+        };
+        format!("{spinner} {}  {time}", stage_text(stage, language))
     };
-    frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), zones[1]);
+    let mut lines = vec![Line::from(text)];
+    if screen.error.is_none()
+        && let Some((current, total)) = screen.migration
+        && current > 0
+        && current <= total
+        && total <= crate::storage::SCHEMA_VERSION as u32
+    {
+        use super::text_width::UnicodeWidthStr;
+        let label = match language {
+            UiLanguage::Ja => format!("構造の更新 {current} / {total} 段"),
+            UiLanguage::En => format!("Schema update {current} / {total}"),
+        };
+        let narrow = super::text_width::glyphs::narrow();
+        let needed = if narrow {
+            (total as usize).saturating_mul(2).saturating_sub(1)
+        } else {
+            total as usize + 2
+        };
+        let mut line = Vec::new();
+        if needed + 2 + label.as_str().width() <= zones[1].width as usize {
+            if narrow {
+                let palette = theme::Palette::detect(crate::config::PaletteMode::Dark);
+                for step in 1..=total {
+                    if step > 1 {
+                        line.push(Span::raw(" "));
+                    }
+                    let symbol = if step < current {
+                        "●"
+                    } else if step == current {
+                        "◐"
+                    } else {
+                        "○"
+                    };
+                    let style = if step == current && screen.blink_dim {
+                        palette.live_work_dim().unwrap_or_default()
+                    } else {
+                        palette.live_work()
+                    };
+                    line.push(Span::styled(symbol, style));
+                }
+            } else {
+                let mut marks = String::from("[");
+                for step in 1..=total {
+                    marks.push(if step < current {
+                        '#'
+                    } else if step == current {
+                        '>'
+                    } else {
+                        '-'
+                    });
+                }
+                marks.push(']');
+                line.push(Span::raw(marks));
+            }
+            line.push(Span::raw("  "));
+        }
+        line.push(Span::raw(label));
+        lines.push(Line::from(line));
+    }
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), zones[1]);
     let footer = if screen.error.is_some() {
         i18n::local!(language, "Enter / Esc 閉じる", "Enter / Esc Close")
     } else if screen.stopping {
@@ -195,7 +289,7 @@ pub fn wait<T>(
     result: &Receiver<Result<Option<T>, ApiError>>,
     cancel: &CancellationToken,
 ) -> io::Result<Result<Option<T>, ApiError>> {
-    wait_inner(session, stages, result, cancel, None)
+    wait_inner(session, stages, result, cancel, None, Instant::now())
 }
 pub fn wait_with_termination<T>(
     session: &mut TerminalSession,
@@ -203,8 +297,9 @@ pub fn wait_with_termination<T>(
     result: &Receiver<Result<Option<T>, ApiError>>,
     cancel: &CancellationToken,
     termination: &super::termination::Termination,
+    start: Instant,
 ) -> io::Result<Result<Option<T>, ApiError>> {
-    wait_inner(session, stages, result, cancel, Some(termination))
+    wait_inner(session, stages, result, cancel, Some(termination), start)
 }
 fn wait_inner<T>(
     session: &mut TerminalSession,
@@ -212,14 +307,15 @@ fn wait_inner<T>(
     result: &Receiver<Result<Option<T>, ApiError>>,
     cancel: &CancellationToken,
     termination: Option<&super::termination::Termination>,
+    start: Instant,
 ) -> io::Result<Result<Option<T>, ApiError>> {
     let mut detached = false;
     let mut screen = Screen {
         stopping: cancel.is_cancelled(),
         ..Default::default()
     };
-    let start = Instant::now();
     let mut drawn = None;
+    let mut animation = super::activity::Animation::new(start);
     let mut ready = None;
     loop {
         if let Some(termination) = termination {
@@ -268,15 +364,39 @@ fn wait_inner<T>(
             super::termination::check_terminal()?;
             let progress = *stages.borrow();
             screen.language = progress.language;
+            screen.motion = progress.motion;
+            screen.elapsed_seconds = start.elapsed().as_secs();
+            screen.migration = progress.migration;
+            let palette = theme::Palette::detect(crate::config::PaletteMode::Dark);
+            let now = Instant::now();
+            let demand = super::activity::MotionDemand {
+                footer: super::activity::ActivityPhase::Idle,
+                spinner: true,
+                blink: progress
+                    .migration
+                    .and_then(|_| palette.live_work_dim().map(|_| start)),
+            };
+            animation.tick_demand(
+                now,
+                demand,
+                true,
+                10,
+                screen.motion == crate::config::MotionMode::On,
+            );
+            screen.blink_dim = animation.blink_dim(now);
             let stage = progress.stage;
-            let tick = if screen.error.is_some() {
+            let tick = if screen.error.is_some() || screen.motion == crate::config::MotionMode::Off
+            {
                 0
             } else {
-                (start.elapsed().as_millis() / 150) as usize
+                (start.elapsed().as_millis() / 100) as usize
             };
             let signature = (
                 stage,
                 screen.language,
+                screen.elapsed_seconds,
+                screen.migration,
+                screen.blink_dim,
                 tick,
                 screen.stopping,
                 screen.ignored_input,
@@ -340,9 +460,9 @@ mod tests {
         use crate::ui::text_width::{self, UnicodeWidthStr};
         use ratatui::{Terminal, backend::TestBackend};
         for (policy, dots, separator) in [
-            (Some(1), "···", " · "),
-            (Some(2), "|||", " | "),
-            (None, "|||", " | "),
+            (Some(1), "⠹", " · "),
+            (Some(2), "-", " | "),
+            (None, "-", " | "),
         ] {
             text_width::set_terminal_width(policy);
             for width in [80, 120] {
@@ -380,6 +500,117 @@ mod tests {
     }
     use ratatui::{Terminal, backend::TestBackend};
     #[test]
+    fn spinner_frames_keep_the_stage_at_the_same_column() {
+        use crate::ui::text_width;
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let screen = Screen {
+                    language,
+                    ..Default::default()
+                };
+                let first = stage_text(StartupStage::Database, language)
+                    .chars()
+                    .next()
+                    .unwrap()
+                    .to_string();
+                let mut positions = Vec::new();
+                for tick in 0..20 {
+                    let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+                    terminal
+                        .draw(|frame| draw(frame, &screen, StartupStage::Database, tick))
+                        .unwrap();
+                    let buffer = terminal.backend().buffer();
+                    let pos = (0..buffer.area.height)
+                        .flat_map(|y| (0..buffer.area.width).map(move |x| (x, y)))
+                        .find(|&(x, y)| buffer[(x, y)].symbol() == first)
+                        .unwrap();
+                    positions.push(pos);
+                }
+                assert!(
+                    positions.iter().all(|position| *position == positions[0]),
+                    "{policy:?} {language:?}: {positions:?}"
+                );
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+    #[test]
+    fn motion_off_freezes_the_same_spinner_for_all_frames() {
+        for policy in [Some(1), None] {
+            crate::ui::text_width::set_terminal_width(policy);
+            let screen = Screen {
+                motion: crate::config::MotionMode::Off,
+                ..Default::default()
+            };
+            let mut snapshots = Vec::new();
+            for tick in 0..20 {
+                let mut terminal = Terminal::new(TestBackend::new(80, 20)).unwrap();
+                terminal
+                    .draw(|frame| draw(frame, &screen, StartupStage::Database, tick))
+                    .unwrap();
+                snapshots.push(terminal.backend().buffer().clone());
+            }
+            assert!(snapshots.iter().all(|buffer| *buffer == snapshots[0]));
+        }
+        crate::ui::text_width::clear_terminal_width();
+    }
+    #[test]
+    fn migration_markers_and_elapsed_use_real_counts_and_fit_width() {
+        use crate::ui::text_width::{self, UnicodeWidthStr};
+        fn visible(buffer: &ratatui::buffer::Buffer) -> String {
+            let mut text = String::new();
+            for y in 0..buffer.area.height {
+                let mut x = 0;
+                while x < buffer.area.width {
+                    let symbol = buffer[(x, y)].symbol();
+                    text.push_str(symbol);
+                    x += symbol.width().max(1) as u16;
+                }
+                text.push('\n');
+            }
+            text
+        }
+        for (policy, expected) in [(Some(1), "● ● ◐ ○ ○"), (None, "[##>--]")] {
+            text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                let screen = Screen {
+                    language,
+                    migration: Some((3, 5)),
+                    elapsed_seconds: 12,
+                    ..Default::default()
+                };
+                let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
+                terminal
+                    .draw(|frame| draw(frame, &screen, StartupStage::Database, 2))
+                    .unwrap();
+                let shown = visible(terminal.backend().buffer());
+                assert!(shown.contains(expected), "{shown}");
+                assert!(
+                    shown.contains(if language == UiLanguage::Ja {
+                        "経過 12秒"
+                    } else {
+                        "Elapsed 12s"
+                    }),
+                    "{shown}"
+                );
+                let mut small = Terminal::new(TestBackend::new(27, 20)).unwrap();
+                small
+                    .draw(|frame| draw(frame, &screen, StartupStage::Database, 2))
+                    .unwrap();
+                let shown = small
+                    .backend()
+                    .buffer()
+                    .content
+                    .iter()
+                    .map(|c| c.symbol())
+                    .collect::<String>();
+                assert!(!shown.contains(expected), "{shown}");
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+    #[test]
     fn localized_startup_screens_preserve_controls_raw_errors_and_width() {
         for policy in [Some(1), Some(2), None] {
             crate::ui::text_width::set_terminal_width(policy);
@@ -397,6 +628,10 @@ mod tests {
                         for mode in 0..4 {
                             let screen = Screen {
                                 language,
+                                motion: crate::config::MotionMode::On,
+                                elapsed_seconds: 0,
+                                migration: None,
+                                blink_dim: false,
                                 stopping: mode == 2,
                                 ignored_input: mode == 1,
                                 error: (mode == 3).then(|| {

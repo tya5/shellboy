@@ -61,9 +61,21 @@ pub async fn initialize_localized(
     cancel: CancellationToken,
     progress: watch::Sender<crate::app::StartupProgress>,
 ) -> Result<Option<Prepared>, ApiError> {
-    initialize_localized_reporting(config, data, cancel, move |stage, language| {
-        progress.send_replace(crate::app::StartupProgress { stage, language });
-    })
+    let migration_progress = Some(progress.clone());
+    initialize_localized_reporting(
+        config,
+        data,
+        cancel,
+        migration_progress,
+        move |stage, language, motion| {
+            progress.send_replace(crate::app::StartupProgress {
+                stage,
+                language,
+                motion,
+                migration: None,
+            });
+        },
+    )
     .await
 }
 
@@ -75,13 +87,14 @@ pub async fn initialize_reporting(
     cancel: CancellationToken,
     progress: impl Fn(StartupStage) + Send + Sync,
 ) -> Result<Option<Prepared>, ApiError> {
-    initialize_localized_reporting(config, data, cancel, |stage, _| progress(stage)).await
+    initialize_localized_reporting(config, data, cancel, None, |stage, _, _| progress(stage)).await
 }
 async fn initialize_localized_reporting(
     config: Option<PathBuf>,
     data: Option<PathBuf>,
     cancel: CancellationToken,
-    progress: impl Fn(StartupStage, crate::config::UiLanguage) + Send + Sync,
+    migration_progress: Option<watch::Sender<crate::app::StartupProgress>>,
+    progress: impl Fn(StartupStage, crate::config::UiLanguage, crate::config::MotionMode) + Send + Sync,
 ) -> Result<Option<Prepared>, ApiError> {
     let cwd = tokio::task::spawn_blocking(std::env::current_dir)
         .await
@@ -90,36 +103,53 @@ async fn initialize_localized_reporting(
     if cancel.is_cancelled() {
         return Ok(None);
     }
-    let owner =
-        DataOwner::start_with_localized_progress(config, data, cwd.clone(), &progress).await?;
+    let owner = DataOwner::start_with_localized_progress(
+        config,
+        data,
+        cwd.clone(),
+        migration_progress,
+        &progress,
+    )
+    .await?;
     let language = owner.loaded.config.ui.language;
+    let motion = owner.loaded.config.ui.motion;
     if cancel.is_cancelled() {
-        progress(StartupStage::Closing, language);
+        progress(StartupStage::Closing, language, motion);
         owner.shutdown().await?;
         return Ok(None);
     }
-    progress(StartupStage::Control, language);
+    let control_started = std::time::Instant::now();
+    progress(StartupStage::Control, language, motion);
     let control = Control::new(&owner, cwd.clone());
     if let Err(error) = control.start().await {
-        progress(StartupStage::Closing, language);
+        progress(StartupStage::Closing, language, motion);
         let _ = close(owner, Some(control), None).await;
         return Err(error);
     }
+    owner
+        .diagnostics
+        .record_startup_stage(StartupStage::Control, control_started.elapsed(), None);
     if cancel.is_cancelled() {
-        progress(StartupStage::Closing, language);
+        progress(StartupStage::Closing, language, motion);
         close(owner, Some(control), None).await?;
         return Ok(None);
     }
-    progress(StartupStage::Endpoint, language);
+    let endpoint_started = std::time::Instant::now();
+    progress(StartupStage::Endpoint, language, motion);
     let (send, requests) = async_mpsc::channel(128);
     let server = match LocalServer::bind(&owner, send).await {
         Ok(server) => server,
         Err(error) => {
-            progress(StartupStage::Closing, language);
+            progress(StartupStage::Closing, language, motion);
             let _ = close(owner, Some(control), None).await;
             return Err(error);
         }
     };
+    owner.diagnostics.record_startup_stage(
+        StartupStage::Endpoint,
+        endpoint_started.elapsed(),
+        None,
+    );
     let prepared = Prepared {
         owner,
         control,
@@ -128,7 +158,7 @@ async fn initialize_localized_reporting(
         cwd,
     };
     if cancel.is_cancelled() {
-        progress(StartupStage::Closing, language);
+        progress(StartupStage::Closing, language, motion);
         prepared.shutdown().await?;
         return Ok(None);
     }
@@ -190,11 +220,14 @@ mod tests {
                 Some(config),
                 Some(data.clone()),
                 token,
-                |stage, observed| {
+                None,
+                |stage, observed, motion| {
                     events.lock().unwrap().push((stage, observed));
                     send.send_replace(StartupProgress {
                         stage,
                         language: observed,
+                        motion,
+                        migration: None,
                     });
                     if stage == StartupStage::Database {
                         cancel.cancel();
@@ -216,7 +249,9 @@ mod tests {
                 *watch.borrow(),
                 StartupProgress {
                     stage: StartupStage::Closing,
-                    language
+                    language,
+                    motion: crate::config::MotionMode::On,
+                    migration: None,
                 }
             );
             assert!(OwnerLock::acquire(&data).is_ok());
@@ -242,7 +277,9 @@ mod tests {
             *watch.borrow(),
             StartupProgress {
                 stage: StartupStage::Configuration,
-                language: UiLanguage::En
+                language: UiLanguage::En,
+                motion: crate::config::MotionMode::On,
+                migration: None,
             }
         );
     }
@@ -384,7 +421,9 @@ mod tests {
                 *progress.borrow(),
                 crate::app::StartupProgress {
                     stage: StartupStage::Closing,
-                    language
+                    language,
+                    motion: crate::config::MotionMode::On,
+                    migration: None,
                 }
             );
             let lock = OwnerLock::acquire(&data).unwrap();

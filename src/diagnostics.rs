@@ -18,6 +18,7 @@ use std::{
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticEvent {
     Startup,
+    StartupStage,
     Shutdown,
     DatabaseFailure,
     ModelFailure,
@@ -260,6 +261,14 @@ pub(crate) struct ShutdownTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<crate::protocol::ErrorCode>,
 }
+#[derive(Debug, Clone, Copy, Serialize)]
+pub(crate) struct StartupStageTrace {
+    pub stage: crate::app::StartupStage,
+    pub elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub migration_version: Option<u32>,
+}
+
 #[derive(Serialize)]
 struct Entry {
     at: String,
@@ -286,6 +295,8 @@ struct Entry {
     db_job: Option<DbJobTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     index_discard: Option<IndexDiscardTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    startup_stage: Option<StartupStageTrace>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -366,6 +377,7 @@ struct Record {
     lineage_slow: Option<LineageSlowTrace>,
     db_job: Option<DbJobTrace>,
     index_discard: Option<IndexDiscardTrace>,
+    startup_stage: Option<StartupStageTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -407,6 +419,7 @@ impl Diagnostics {
                     lineage_slow,
                     db_job,
                     index_discard,
+                    startup_stage,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -425,6 +438,7 @@ impl Diagnostics {
                         lineage_slow,
                         db_job,
                         index_discard,
+                        startup_stage,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -597,6 +611,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            startup_stage: None,
         });
     }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
@@ -618,6 +633,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            startup_stage: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -643,6 +659,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            startup_stage: None,
         });
     }
     pub(crate) fn record_db_job(
@@ -671,6 +688,7 @@ impl Diagnostics {
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
             })),
             index_discard: None,
+            startup_stage: None,
         });
     }
     /// An active DB job crossed the display threshold. Fixed fields only;
@@ -744,6 +762,33 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: Some(trace),
             index_discard: None,
+            startup_stage: None,
+        });
+    }
+    pub(crate) fn record_startup_stage(
+        &self,
+        stage: crate::app::StartupStage,
+        elapsed: std::time::Duration,
+        migration_version: Option<u32>,
+    ) {
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::StartupStage,
+            ids: DiagnosticIds::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: None,
+            index_discard: None,
+            startup_stage: Some(StartupStageTrace {
+                stage,
+                elapsed_ms: millis(elapsed),
+                migration_version,
+            }),
         });
     }
     /// One aggregate observation after the query; fast queries emit nothing at any level.
@@ -776,6 +821,7 @@ impl Diagnostics {
                 truncated,
             }),
             index_discard: None,
+            startup_stage: None,
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -856,6 +902,7 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            startup_stage: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -872,6 +919,7 @@ impl Diagnostics {
             lineage_slow,
             db_job,
             index_discard,
+            startup_stage,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -904,6 +952,7 @@ impl Diagnostics {
                     lineage_slow,
                     db_job,
                     index_discard,
+                    startup_stage,
                 })
                 .is_err()
         }) {
@@ -1343,6 +1392,27 @@ mod lineage_slow_tests {
         );
         assert!(!diagnostics.has_failed());
         }).await.expect("lineage diagnostic watchdog");
+    }
+}
+
+#[cfg(test)]
+mod startup_stage_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn startup_trace_has_only_fixed_noncontent_fields() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        diagnostics.record_startup_stage(crate::app::StartupStage::DatabaseMigration, std::time::Duration::from_millis(123), Some(22));
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let row: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+        assert_eq!(row["event"], "startup_stage");
+        assert_eq!(row["startup_stage"]["stage"], "database_migration");
+        assert_eq!(row["startup_stage"]["elapsed_ms"], 123);
+        assert_eq!(row["startup_stage"]["migration_version"], 22);
+        assert_eq!(row["startup_stage"].as_object().unwrap().len(), 3);
+        assert_eq!(row["ids"].as_object().unwrap().len(), 0);
     }
 }
 
