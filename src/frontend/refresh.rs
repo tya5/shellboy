@@ -11,6 +11,7 @@ pub(super) struct Query {
     pub visible: bool,
     pub epoch: u64,
     pub render_width: u16,
+    pub language: crate::config::UiLanguage,
     pub tool_scope: Option<ToolObservation>,
     pub views: view_read::Tickets,
 }
@@ -141,7 +142,7 @@ fn project(
         index_pause,
         observed_at,
     } = raw;
-    let (mut nodes, info, _) = history.project_page(width, None);
+    let (mut nodes, info, _) = history.project_page(width, None, language);
     message_metadata::apply(&mut nodes, &sources);
     tools::apply(&mut nodes, &tools);
     recovery::apply(&mut nodes, recovery, language);
@@ -153,7 +154,7 @@ fn project(
             node.presentation.read_revision = info.read_revision;
         }
     }
-    let mut received = received.map(|snapshot| received::prepare(snapshot, width));
+    let mut received = received.map(|snapshot| received::prepare(snapshot, width, language));
     if let Some(prepared) = &mut received {
         for (_, node) in &mut prepared.nodes {
             node.presentation.read_revision = info.read_revision;
@@ -235,6 +236,7 @@ pub(super) async fn run(
         visible,
         epoch,
         render_width,
+        language,
         tool_scope,
         views,
     } = query;
@@ -627,6 +629,7 @@ mod tests {
                         visible: true,
                         epoch: 0,
                         render_width: 80,
+                        language: crate::config::UiLanguage::Ja,
                         tool_scope: None,
                         views: view_read::Tickets::default(),
                     },
@@ -716,6 +719,7 @@ mod tests {
                     visible: true,
                     epoch: 0,
                     render_width: 80,
+                    language: crate::config::UiLanguage::Ja,
                     tool_scope: None,
                     views: view_read::Tickets {
                         browser: Some(ticket),
