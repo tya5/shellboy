@@ -8,6 +8,10 @@ terminal startup, not response quality, capability, token costs or true peak mem
 Only compare agents **within the same comparison run and artifact**. Even two
 jobs of one workflow are separate runners; do not combine their measurements.
 
+Real-model token usage and prompt-cache results (paid, N=1), including Shellboy
+before and after the strict-append fix (#183), are in the
+[2026-11-03 benchmark report](../validation/bench-report-2026-11-03.md).
+
 ## Sources and runners
 
 Except where another source is explicitly identified, memory and startup results
