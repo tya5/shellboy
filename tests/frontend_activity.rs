@@ -35,12 +35,13 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
         Ok(())
     }).await.unwrap();
     let observed = projection(&db).await;
-    let summary = observed.snapshot.context_reduction.clone().unwrap();
-    assert!(summary.contains("spill 3組"));
-    assert!(summary.contains("省略 7件"));
-    assert!(summary.contains("90000>40000"));
+    let summary = observed.snapshot.context_reduction.unwrap();
+    let summary_ja = summary.localized(shellboy::config::UiLanguage::Ja);
+    assert!(summary_ja.contains("spill 3組"));
+    assert!(summary_ja.contains("省略 7件"));
+    assert!(summary_ja.contains("90000>40000"));
     assert!(
-        summary.len() < 256,
+        summary_ja.len() < 256,
         "only bounded numeric facts are projected"
     );
     assert_eq!(
@@ -72,15 +73,22 @@ async fn automatic_reduction_summary_survives_later_failures_without_crossing_ge
         }
         shown.push('\n');
     }
-    assert!(shown.contains(&summary), "{shown}");
+    assert!(
+        shown.contains(&summary.localized(shellboy::config::UiLanguage::En)),
+        "{shown}"
+    );
     // The current attempt has no automatic_trim; earlier evidence remains in
     // the activity summary while the next retry wait is running too.
     change(&db,"UPDATE turn SET state='running',recovery_reason_json=NULL; UPDATE model_attempt SET state='failed',error_json='{\"automatic_retry\":{\"number\":1,\"limit\":8,\"delay_ms\":1000,\"partial_response_discarded\":false}}' WHERE id='latest';").await;
     let retry = projection(&db).await;
     assert_eq!(retry.snapshot.phase, ActivityPhase::Retrying);
     assert_eq!(
-        retry.snapshot.context_reduction.as_deref(),
-        Some(summary.as_str())
+        retry
+            .snapshot
+            .context_reduction
+            .unwrap()
+            .localized(shellboy::config::UiLanguage::Ja),
+        summary_ja
     );
     change(&db, "UPDATE turn SET generation=3;").await;
     assert!(projection(&db).await.snapshot.context_reduction.is_none());

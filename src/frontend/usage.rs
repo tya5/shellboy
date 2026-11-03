@@ -1,5 +1,6 @@
 //! Saved attempt usage for F6; never infer the attempt from the latest Turn.
 use crate::{
+    config::UiLanguage,
     control::Control,
     presentation::{PresentationField, PresentationKind},
     protocol::ApiError,
@@ -112,16 +113,17 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
         .call(move |db| read_tx(db, &requests))
         .await
         .map_err(|error| error.into_api_error())?;
-    apply(nodes, observations);
+    let language = control.store.config.ui.language;
+    apply(nodes, observations, language);
     Ok(())
 }
 
-fn field(key: &str, value: String) -> PresentationField {
+fn field(key: &str, value: String, language: UiLanguage) -> PresentationField {
     PresentationField {
         value_omitted: false,
         display: None,
         key: key.into(),
-        label: crate::presentation::fields::attempt_label(key, crate::config::UiLanguage::Ja)
+        label: crate::presentation::fields::attempt_label(key, language)
             .expect("request size field")
             .into(),
         value,
@@ -130,7 +132,7 @@ fn field(key: &str, value: String) -> PresentationField {
 
 /// Values stay language-neutral (counts, saved JSON, fixed unknown markers);
 /// F6 renders and localizes them. Bytes and tokens are separate facts.
-pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>) {
+pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>, language: UiLanguage) {
     for observation in observations {
         let index = observation.index;
         let (attempt, tokens, cached, bytes) = match observation.sources.as_slice() {
@@ -161,12 +163,12 @@ pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>) {
             .fields
             .retain(|field| !matches!(field.key.as_str(), FIELD | ATTEMPT | TOKENS | BYTES));
         let mut added = vec![
-            field(BYTES, bytes),
-            field(TOKENS, tokens),
-            field(FIELD, cached),
+            field(BYTES, bytes, language),
+            field(TOKENS, tokens, language),
+            field(FIELD, cached, language),
         ];
         if let Some(attempt) = attempt {
-            added.push(field(ATTEMPT, attempt));
+            added.push(field(ATTEMPT, attempt, language));
         }
         presentation.fields.splice(0..0, added);
         if presentation.fields.len() > crate::presentation::MAX_FIELDS {

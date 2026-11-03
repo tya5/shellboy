@@ -33,6 +33,89 @@ fn field<'a>(node: &'a UiNode, key: &str) -> Option<&'a str> {
         .find(|field| field.key == key)
         .map(|field| field.value.as_str())
 }
+fn field_label<'a>(node: &'a UiNode, key: &str) -> Option<&'a str> {
+    node.presentation
+        .fields
+        .iter()
+        .find(|field| field.key == key)
+        .map(|field| field.label.as_str())
+}
+
+#[test]
+fn generated_usage_labels_follow_language_without_changing_saved_facts() {
+    let mut nodes = [node("known"), node("missing"), node("ambiguous")];
+    let observations = || {
+        vec![
+            Observation {
+                index: 0,
+                sources: vec![Source {
+                    attempt: "attempt-1".into(),
+                    input_tokens: Some(23),
+                    cached_tokens: Some(17),
+                    input_bytes: None,
+                }],
+            },
+            Observation {
+                index: 1,
+                sources: Vec::new(),
+            },
+            Observation {
+                index: 2,
+                sources: vec![
+                    Source {
+                        attempt: "attempt-2".into(),
+                        input_tokens: Some(1),
+                        cached_tokens: Some(1),
+                        input_bytes: None,
+                    },
+                    Source {
+                        attempt: "attempt-3".into(),
+                        input_tokens: Some(2),
+                        cached_tokens: Some(2),
+                        input_bytes: None,
+                    },
+                ],
+            },
+        ]
+    };
+
+    apply(&mut nodes, observations(), crate::config::UiLanguage::Ja);
+    assert_eq!(field(&nodes[0], FIELD), Some("17"));
+    assert_eq!(
+        field_label(&nodes[0], FIELD),
+        Some("キャッシュ済み入力トークン（提供元の報告）")
+    );
+    assert_eq!(
+        field_label(&nodes[0], ATTEMPT),
+        Some("モデル要求ID（使用量の記録元）")
+    );
+    assert_eq!(field(&nodes[1], FIELD), Some(NOT_REPORTED_NO_REQUEST));
+    assert_eq!(field(&nodes[2], FIELD), Some(NOT_REPORTED_AMBIGUOUS));
+    assert_eq!(field(&nodes[2], ATTEMPT), None);
+
+    apply(&mut nodes, observations(), crate::config::UiLanguage::En);
+    assert_eq!(field(&nodes[0], FIELD), Some("17"));
+    assert_eq!(
+        field_label(&nodes[0], FIELD),
+        Some("Cached input tokens (provider-reported)")
+    );
+    assert_eq!(
+        field_label(&nodes[0], ATTEMPT),
+        Some("Model request ID (usage source)")
+    );
+    assert_eq!(field(&nodes[1], FIELD), Some(NOT_REPORTED_NO_REQUEST));
+    assert_eq!(field(&nodes[2], FIELD), Some(NOT_REPORTED_AMBIGUOUS));
+    assert_eq!(
+        crate::presentation::fields::attempt_value(
+            FIELD,
+            field(&nodes[1], FIELD).unwrap(),
+            crate::config::UiLanguage::En
+        )
+        .as_deref(),
+        Some("Not reported (no request record)")
+    );
+    assert_eq!(field(&nodes[2], ATTEMPT), None);
+}
 
 #[tokio::test]
 async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_unchanged() {
@@ -104,7 +187,7 @@ async fn history_usage_is_bound_to_exact_adopted_attempt_and_keeps_saved_json_un
     );
     assert_eq!(observations[5].sources.len(), 2);
     assert!(observations[6].sources.is_empty());
-    apply(&mut nodes, observations);
+    apply(&mut nodes, observations, crate::config::UiLanguage::Ja);
     assert_eq!(field(&nodes[0], FIELD), Some("16000"));
     assert_eq!(
         field(&nodes[0], ATTEMPT),

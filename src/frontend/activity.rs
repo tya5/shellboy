@@ -5,7 +5,10 @@ use crate::{
     protocol::ApiError,
     ui::{
         UiUpdate,
-        activity::{ActivitySnapshot, AutomaticRetrySnapshot, RecoverySnapshot},
+        activity::{
+            ActivitySnapshot, AutomaticRetrySnapshot, RecoverySnapshot, RecoveryStage,
+            RecoveryStageDetails,
+        },
     },
 };
 use rusqlite::{Connection, OptionalExtension};
@@ -392,11 +395,19 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             // Startup interruption writes a different saved reason schema. Its
             // presence alone is not evidence that this Turn awaited recovery.
             let error = serde_json::from_str::<ApiError>(&reason).ok();
+            let message_is_fallback = error.is_none();
             let mut message = error
                 .as_ref()
                 .map(crate::config_setup::tui_error)
-                .unwrap_or_else(|| "保存された復旧理由を詳細で確認してください".into());
-            let mut stage = "処理（段階の記録なし）".to_owned();
+                .unwrap_or_else(|| {
+                    crate::ui::activity::saved_recovery_reason_unavailable(
+                        crate::config::UiLanguage::Ja,
+                    )
+                    .into()
+                });
+            let mut stage = RecoveryStage::Unrecorded;
+            let mut stage_details = None;
+            let mut stage_detail_values = None;
             if let Some(SavedAttempt {
                 generation: attempt_generation,
                 state: attempt_saved_state,
@@ -414,23 +425,27 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                 // diagnostic kind; retain canonical JSON and project only the message.
                 message = projected_message;
                 stage = if model.is_context_limit() {
-                    "モデル要求（入力容量超過）"
+                    RecoveryStage::ModelContextLimit
                 } else {
-                    "モデル要求"
-                }
-                .into();
+                    RecoveryStage::ModelRequest
+                };
             }
             if let Some(details) = error.as_ref().and_then(|e| e.details.as_ref()) {
                 let facts = &details["recovery"];
                 if facts.is_object() {
-                    stage.push_str(&crate::ui::text_width::glyphs::formatted!(
-                        " · retry {}/{} · request {}B · tool {}B",
-                        " | retry {}/{} | request {}B | tool {}B",
-                        details["automatic_retries"],
-                        details["retry_limit"],
-                        facts["protected_request"]["bytes"],
-                        facts["protected_latest_tool"]["bytes"]
-                    ));
+                    let values = (
+                        details["automatic_retries"].clone(),
+                        details["retry_limit"].clone(),
+                        facts["protected_request"]["bytes"].clone(),
+                        facts["protected_latest_tool"]["bytes"].clone(),
+                    );
+                    stage_detail_values = Some(values.clone());
+                    stage_details = Some(RecoveryStageDetails {
+                        retries: values.0,
+                        retry_limit: values.1,
+                        request_bytes: values.2,
+                        tool_bytes: values.3,
+                    });
                     if let Some(actions) = facts["actions"].as_array() {
                         message.push_str(crate::ui::text_width::glyphs::separator());
                         message.push_str(
@@ -459,8 +474,28 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
                     .and_then(|e| e.details.as_ref())
                     .and_then(|d| d.get("content_filter"))
                     .and_then(|v| serde_json::from_value(v.clone()).ok()),
-                stage,
-                message,
+                stage: if let Some((retries, retry_limit, request_bytes, tool_bytes)) =
+                    stage_detail_values
+                {
+                    let separator = crate::ui::text_width::glyphs::separator();
+                    format!(
+                        "{}{separator}retry {retries}/{retry_limit}{separator}request {request_bytes}B{separator}tool {tool_bytes}B",
+                        stage.localized(crate::config::UiLanguage::Ja)
+                    )
+                } else {
+                    stage.localized(crate::config::UiLanguage::Ja).into()
+                },
+                stage_kind: Some(stage),
+                stage_details,
+                message: if message_is_fallback {
+                    crate::ui::activity::saved_recovery_reason_unavailable(
+                        crate::config::UiLanguage::Ja,
+                    )
+                    .into()
+                } else {
+                    message
+                },
+                message_is_fallback,
                 pending_messages,
                 saved_tool_results,
                 live_shells,
@@ -716,13 +751,19 @@ mod tests {
         assert_eq!(projection.snapshot.run_id.as_deref(), Some("r"));
         assert_eq!(projection.snapshot.attempt_id.as_deref(), Some("a"));
         assert_eq!(projection.snapshot.revisit.as_deref(), Some("↻3"));
+        let reduction = projection.snapshot.context_reduction.unwrap();
         assert_eq!(
-            projection.snapshot.context_reduction.as_deref(),
-            Some("自動縮小済み | spill 3組 | 省略 7件 | 90000>40000 chars")
+            reduction.localized(crate::config::UiLanguage::Ja),
+            "自動縮小済み | spill 3組 | 省略 7件 | 90000>40000 chars"
+        );
+        assert!(
+            reduction
+                .localized(crate::config::UiLanguage::En)
+                .is_ascii()
         );
         let recovery = projection.snapshot.recovery.unwrap();
         assert_eq!(recovery.message, "saved reason");
-        assert_eq!(recovery.stage, "モデル要求");
+        assert_eq!(recovery.stage_kind, Some(RecoveryStage::ModelRequest));
         assert_eq!(recovery.live_shells, 0);
         assert!(
             projection.poll_running,

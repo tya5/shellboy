@@ -145,7 +145,7 @@ fn project(
     message_metadata::apply(&mut nodes, &sources);
     tools::apply(&mut nodes, &tools);
     recovery::apply(&mut nodes, recovery, language);
-    usage::apply(&mut nodes, usage);
+    usage::apply(&mut nodes, usage, language);
     if let Some(scope) = &mut tool_scope {
         message_metadata::apply(&mut scope.nodes, &sources);
         tools::apply(&mut scope.nodes, &tools);
