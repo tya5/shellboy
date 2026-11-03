@@ -133,7 +133,7 @@ pub(super) async fn maybe_compact(
                 return Ok(Some(Measurement::BelowThreshold));
             }
             let input_characters = db.query_row(
-                "SELECT CASE WHEN json_valid(input_manifest_json) AND json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END FROM model_attempt WHERE id=?1",
+                "SELECT CASE WHEN json_valid(input_manifest_json) THEN CASE WHEN json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END END FROM model_attempt WHERE id=?1",
                 [attempt], |row| row.get::<_, Option<i64>>(0),
             )?.and_then(|n| u64::try_from(n).ok());
             Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix, insufficient_spill, exhausted_active: exhausted_current_turn, baseline_marks })))
