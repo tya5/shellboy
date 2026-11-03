@@ -78,6 +78,7 @@ SELECT r.item_index,e.failure_count,e.id,e.error_json,e.source
 FROM resolved r JOIN evidence e ON e.saved_turn=r.saved_turn AND e.observed_at=r.observed_at
 ORDER BY r.position";
 
+#[derive(Clone)]
 #[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 pub(super) struct Evidence {
     index: usize,
@@ -173,11 +174,15 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
         .call(move |db| read_tx(db, &requests))
         .await
         .map_err(|error| error.into_api_error())?;
-    apply(nodes, evidence);
+    apply(nodes, evidence, control.store.config.ui.language);
     Ok(())
 }
 
-pub(super) fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>) {
+pub(super) fn apply(
+    nodes: &mut [UiNode],
+    evidence: Vec<Evidence>,
+    language: crate::config::UiLanguage,
+) {
     for saved in evidence {
         let error = saved
             .error_json
@@ -186,9 +191,18 @@ pub(super) fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>) {
                 serde_json::from_value::<crate::model::ModelError>(body["error"].clone()).ok()
             });
         let presentation = &mut nodes[saved.index].presentation;
-        let note = format!("再開前にこの応答処理で記録したモデル失敗{}件", saved.count);
-        presentation.title =
-            crate::ui::text_width::glyphs::formatted!("復旧再開 · {note}", "復旧再開 | {note}");
+        let note = match language {
+            crate::config::UiLanguage::Ja => {
+                format!("再開前にこの応答処理で記録したモデル失敗{}件", saved.count)
+            }
+            crate::config::UiLanguage::En => {
+                format!("{} model failures recorded before resume", saved.count)
+            }
+        };
+        presentation.title = match language {
+            crate::config::UiLanguage::Ja => format!("復旧再開 · {note}"),
+            crate::config::UiLanguage::En => format!("Resume · {note}"),
+        };
         if let Some(block) = presentation
             .blocks
             .iter_mut()
@@ -198,23 +212,33 @@ pub(super) fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>) {
                 .as_ref()
                 .map(|error| {
                     let message = &error.message;
-                    format!("直近の保存理由: {}", {
-                        let excerpt = message.chars().take(256).collect::<String>();
-                        let suffix = if message.chars().count() > 256 {
-                            crate::ui::text_width::glyphs::select(
-                                "… · 完全な理由はF6 詳細",
-                                ". | 完全な理由はF6 詳細",
-                            )
-                        } else {
-                            ""
-                        };
-                        format!(
-                            "{}{suffix}",
-                            crate::presentation::sanitize_plain(&excerpt, 0).0
-                        )
-                    })
+                    let excerpt = message.chars().take(256).collect::<String>();
+                    let suffix = if message.chars().count() > 256 {
+                        match language {
+                            crate::config::UiLanguage::Ja => "… · 完全な理由はF6 詳細",
+                            crate::config::UiLanguage::En => "… · Full reason in F6 Details",
+                        }
+                    } else {
+                        ""
+                    };
+                    let excerpt = crate::presentation::sanitize_plain(&excerpt, 0).0;
+                    match language {
+                        crate::config::UiLanguage::Ja => {
+                            format!("直近の保存理由: {excerpt}{suffix}")
+                        }
+                        crate::config::UiLanguage::En => {
+                            format!("Most recent saved reason: {excerpt}{suffix}")
+                        }
+                    }
                 })
-                .unwrap_or_else(|| "直近の理由は保存記録で確認してください".into());
+                .unwrap_or_else(|| match language {
+                    crate::config::UiLanguage::Ja => {
+                        "直近の理由は保存記録で確認してください".into()
+                    }
+                    crate::config::UiLanguage::En => {
+                        "See the saved record for the most recent reason".into()
+                    }
+                });
             block.source_exact = false;
         }
         // These explicitly named projection fields are DB references, not JSON
@@ -228,17 +252,27 @@ pub(super) fn apply(nodes: &mut [UiNode], evidence: Vec<Evidence>) {
                 display: None,
             })
         };
-        field(
-            "count",
-            "再開前の保存済みモデル失敗",
-            saved.count.to_string(),
-        );
-        field("attempt_id", "直近の失敗のAttempt ID", saved.attempt);
+        let (count_label, attempt_label, reason_label, source_label) = match language {
+            crate::config::UiLanguage::Ja => (
+                "再開前の保存済みモデル失敗",
+                "直近の失敗のAttempt ID",
+                "直近の保存理由",
+                "直近の失敗原文",
+            ),
+            crate::config::UiLanguage::En => (
+                "Saved model failures before resume",
+                "Latest failed attempt ID",
+                "Latest saved reason",
+                "Source node for latest failure",
+            ),
+        };
+        field("count", count_label, saved.count.to_string());
+        field("attempt_id", attempt_label, saved.attempt);
         if let Some(error) = error {
-            field("error/message", "直近の保存理由", error.to_string());
+            field("error/message", reason_label, error.to_string());
         }
         if let Some(source) = saved.source {
-            field("source_node_id", "直近の失敗原文", source);
+            field("source_node_id", source_label, source);
         }
         presentation.bound_metadata();
     }
@@ -299,7 +333,40 @@ mod tests {
                 .unwrap()
                 .contains("保存済み二回目🦀")
         );
-        apply(&mut nodes, evidence);
+        let mut english_nodes = nodes.clone();
+        apply(
+            &mut english_nodes,
+            evidence.clone(),
+            crate::config::UiLanguage::En,
+        );
+        let english = &english_nodes[0].presentation;
+        assert_eq!(
+            english.title,
+            "Resume · 2 model failures recorded before resume"
+        );
+        assert_eq!(
+            english.blocks[0].text, "Most recent saved reason: 保存済み二回目🦀",
+            "provider-authored reason remains source text"
+        );
+        assert!(english.fields.iter().any(|field| {
+            field.key.ends_with("attempt_id") && field.label == "Latest failed attempt ID"
+        }));
+        let mut long_evidence = evidence.clone();
+        long_evidence[0].error_json = Some(
+            serde_json::json!({"error": crate::model::ModelError::new("provider", "x".repeat(300))})
+                .to_string(),
+        );
+        apply(
+            &mut english_nodes,
+            long_evidence,
+            crate::config::UiLanguage::En,
+        );
+        assert!(
+            english_nodes[0].presentation.blocks[0]
+                .text
+                .ends_with("… · Full reason in F6 Details")
+        );
+        apply(&mut nodes, evidence, crate::config::UiLanguage::Ja);
         assert_eq!(nodes[0].text, text);
         let p = &nodes[0].presentation;
         assert_eq!(

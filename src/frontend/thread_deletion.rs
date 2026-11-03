@@ -22,14 +22,19 @@ fn cleanup_warning(error: &ApiError, language: UiLanguage) -> String {
 /// an uncertain mutation must be checked again, never automatically replayed.
 pub(super) async fn guard<T>(
     work: impl std::future::Future<Output = Result<T, ApiError>>,
+    language: UiLanguage,
 ) -> Result<T, ApiError> {
     std::panic::AssertUnwindSafe(work)
         .catch_unwind()
         .await
         .unwrap_or_else(|_| {
+            let message = match language {
+                UiLanguage::En => "Deletion stopped unexpectedly. The outcome is unknown. Refresh the list and review the deletion impact before trying again.",
+                UiLanguage::Ja => "削除処理が予期せず停止しました。結果は未確認です。一覧を再取得し、削除影響を確認してから再操作してください",
+            };
             Err(ApiError::new(
                 ErrorCode::IoFailed,
-                "削除処理が予期せず停止しました。結果は未確認です。一覧を再取得し、削除影響を確認してから再操作してください",
+                message,
             ).details(serde_json::json!({"deletion_outcome_uncertain": true})))
         })
 }
@@ -256,22 +261,29 @@ mod tests {
 
     #[tokio::test]
     async fn panicked_delete_returns_uncertain_outcome_without_claiming_not_applied() {
-        let result: Result<Outcome, ApiError> = guard(async {
-            tokio::task::yield_now().await;
-            panic!("fixture deletion panic");
-        })
-        .await;
-        let error = result.err().expect("panic must become a terminal error");
-        assert_eq!(error.code, ErrorCode::IoFailed);
-        assert!(error.message.contains("結果は未確認"));
-        assert!(error.message.contains("一覧を再取得"));
-        assert!(!error.is_storage_failure());
-        assert_eq!(
-            error.details.as_ref().unwrap()["deletion_outcome_uncertain"],
-            true
-        );
+        for (language, expected) in [
+            (UiLanguage::En, "The outcome is unknown"),
+            (UiLanguage::Ja, "結果は未確認"),
+        ] {
+            let result: Result<Outcome, ApiError> = guard(
+                async {
+                    tokio::task::yield_now().await;
+                    panic!("fixture deletion panic");
+                },
+                language,
+            )
+            .await;
+            let error = result.err().expect("panic must become a terminal error");
+            assert_eq!(error.code, ErrorCode::IoFailed);
+            assert!(error.message.contains(expected));
+            assert!(!error.is_storage_failure());
+            assert_eq!(
+                error.details.as_ref().unwrap()["deletion_outcome_uncertain"],
+                true
+            );
+        }
         assert!(matches!(
-            guard(async { Ok(Outcome::Applied) }).await,
+            guard(async { Ok(Outcome::Applied) }, UiLanguage::Ja).await,
             Ok(Outcome::Applied)
         ));
     }
