@@ -4826,6 +4826,11 @@ mod inspection_isolation_tests {
             PathBuf::from(std::env::var_os("SHELLBOY_BENCH_DB").expect("disposable copy required"));
         let thread_id = std::env::var("SHELLBOY_BENCH_THREAD").expect("thread required");
         let old = std::env::var_os("SHELLBOY_BENCH_OLD").is_some();
+        let hold_snapshot = std::env::var("SHELLBOY_BENCH_HOLD_SNAPSHOT_SECS")
+            .ok()
+            .map(|value| value.parse::<u64>().expect("snapshot hold must be seconds"))
+            .map(std::time::Duration::from_secs)
+            .unwrap_or_default();
         let writer = DbWorker::open(&path).await.unwrap();
         writer.call(|db| { db.execute_batch("CREATE TABLE IF NOT EXISTS benchmark_scratch (x INTEGER); PRAGMA wal_autocheckpoint=0;")?; Ok(()) }).await.unwrap();
         let wal = PathBuf::from(format!("{}-wal", path.display()));
@@ -4869,8 +4874,11 @@ mod inspection_isolation_tests {
                     let _: i64 = tx
                         .query_row("SELECT count(*) FROM benchmark_scratch", [], |r| r.get(0))
                         .unwrap();
+                    let snapshot_started = Instant::now();
                     let _ = ready_tx.send(());
                     let r = crate::history::list_nodes(&tx, &args);
+                    let remaining = hold_snapshot.saturating_sub(snapshot_started.elapsed());
+                    std::thread::sleep(remaining);
                     tx.commit().unwrap();
                     r
                 })
@@ -4915,7 +4923,7 @@ mod inspection_isolation_tests {
             .await
             .unwrap();
         eprintln!(
-            "old={old} elapsed={elapsed:?} max_write={max_write:?} writes={writes} wal_start={initial} wal_max={maximum} wal_end={final_size} checkpoint={checkpoint:?}"
+            "old={old} elapsed={elapsed:?} snapshot_hold_target={hold_snapshot:?} max_write={max_write:?} writes={writes} wal_start={initial} wal_max={maximum} wal_end={final_size} checkpoint={checkpoint:?}"
         );
         writer.shutdown().await.unwrap();
     }
