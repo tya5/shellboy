@@ -127,7 +127,11 @@ integration`): `proactive_summarizes_earlier_turns_first_then_the_active_turn`
 partial-spill fixtures moved to a closed-loop boundary, and the overflow and
 #180 tests reshaped to the open-loop fallback all passed; `cargo fmt
 --check` and `cargo clippy --locked --all-targets -D warnings` passed.
-Three-OS CI is recorded below when it completes. Claude behaviour is not
+GitHub Actions run 41592555032 (`all_oses=true`) on 926e7b0a passed on
+ubuntu-latest, macos-latest and windows-latest (fmt, clippy, full tests). Two
+earlier runs failed and were fixed: 41589963535 (a raw timeout in a test, layout
+gate) and 41591402774 (`automatic_summary_limit_failure_enters_recovery_without_adoption_or_resend`
+needed an older tool round for the open-loop fallback). Claude behaviour is not
 live-validated.
 
 ## Recovery trim keeps active-Turn inputs (#185, 2026-11-03)
