@@ -39,8 +39,9 @@ class ActivityIndexVmHelperTests(unittest.TestCase):
         result = self.run_helper('--base', LANDED_171)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(LANDED_171, result.stdout)
-        self.assertEqual(result.stdout.count('VM-steps:'), 10)
-        for label in ('turn_insert', 'turn_running', 'shell_insert', 'shell_spawn', 'shell_exit'):
+        self.assertEqual(result.stdout.count('VM-steps:'), 18)
+        for label in ('turn_insert', 'turn_running', 'attempt_insert', 'attempt_inflight',
+                      'group_insert', 'group_completed', 'shell_insert', 'shell_spawn', 'shell_exit'):
             self.assertEqual(result.stdout.count(label), 2)
 
 

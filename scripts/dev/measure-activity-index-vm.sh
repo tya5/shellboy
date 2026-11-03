@@ -38,12 +38,22 @@ for variant in before after; do
 INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/AGENTS.md','p','m','2026-11-02T00:00:00Z');
 INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','2026-11-02T00:00:00Z');
 WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000) INSERT INTO turn(id,thread_id,run_id,state,created_at) SELECT 'old-turn-'||i,'t','r','completed','2026-11-01T00:00:00Z' FROM n;
+WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000) INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) SELECT 'old-attempt-'||i,'old-turn-'||i,0,0,'p','m',0,'completed','{}','2026-11-01T00:00:00Z' FROM n;
+WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000) INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) SELECT 'old-group-'||i,'old-attempt-'||i,'old-turn-'||i,'completed','2026-11-01T00:00:00Z' FROM n;
 WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<1000) INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,output_complete,started_at) SELECT 'old-shell-'||i,'r','old-turn-'||i,'old-op-'||i,'exited','/','{"spawned":true}','UTF-8','UTF-8','closed',1,'2026-11-01T00:00:00Z' FROM n;
 .stats vmstep
 .print turn_insert
 INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('current-turn','t','r','preparing','2026-11-02T00:00:00Z');
 .print turn_running
 UPDATE turn SET state='running' WHERE id='current-turn';
+.print attempt_insert
+INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('current-attempt','current-turn',0,0,'p','m',0,'preparing','{}','2026-11-02T00:00:00Z');
+.print attempt_inflight
+UPDATE model_attempt SET state='inflight' WHERE id='current-attempt';
+.print group_insert
+INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at) VALUES('current-group','current-attempt','current-turn','running','2026-11-02T00:00:00Z');
+.print group_completed
+UPDATE tool_group SET state='completed' WHERE id='current-group';
 .print shell_insert
 INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('current-shell','r','current-turn','current-op','starting','/','{"spawned":false}','UTF-8','UTF-8','open','2026-11-02T00:00:00Z');
 .print shell_spawn

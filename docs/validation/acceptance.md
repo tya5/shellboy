@@ -25,13 +25,17 @@ Reproduced the earlier fixture against the landed schema 22 at
 `scripts/dev/measure-activity-index-vm.sh --base c090fa799f1c5d873a36ea07994c936244377437`.
 The `after` case adds the six migration 23 indexes. SQLite CLI 3.51.0 on macOS
 uses disposable in-memory databases, foreign keys, identical seeds of 1,000
-completed Turns and 1,000 exited shell executions, and the schema 22 quota
-triggers. No user database is opened.
+completed Turns, 1,000 model attempts, 1,000 tool groups and 1,000 exited shell
+executions, and the schema 22 quota triggers. No user database is opened.
 
 | Synthetic SQL statement | Before VM steps | After VM steps | Delta |
 | --- | ---: | ---: | ---: |
 | Insert preparing Turn | 133 | 148 | +15 |
 | Update Turn to running | 105 | 116 | +11 |
+| Insert model attempt | 170 | 176 | +6 |
+| Update model attempt to inflight | 68 | 68 | 0 |
+| Insert tool group | 39 | 46 | +7 |
+| Update tool group to completed | 23 | 35 | +12 |
 | Insert starting shell execution | 585 | 617 | +32 |
 | Update shell as spawned/running | 146 | 208 | +62 |
 | Update shell as exited | 167 | 234 | +67 |
