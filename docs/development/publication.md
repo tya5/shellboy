@@ -458,3 +458,28 @@ work, synthetic search, RAG and mock exec. `public_schema`, `schema_before`, and
 `synthetic_schema_staging` distinguish a real public start from a staged copy.
 Historical v0.3.0/v0.4.0 paths remain selectable explicitly; only synthetic,
 owned fixtures and loopback mock endpoints are used.
+
+## v0.7.0 publication (2026-11-03)
+
+The reviewer published annotated tag `v0.7.0` at main
+`abe16a341dd42e9ef27b5bfa970d6b60f7a7270c`, whose ordinary three-OS Rust checks
+([run 41604406955](https://github.com/tya5/shellboy/actions/runs/41604406955))
+passed. The GitHub Release was published at **2026-11-03T09:03:20Z** by tag-push
+[release run 41607818833](https://github.com/tya5/shellboy/actions/runs/41607818833).
+The release body is [the v0.7.0 notes](release-v0.7.0-draft.md).
+
+[Candidate run 41606289933](https://github.com/tya5/shellboy/actions/runs/41606289933)
+was a separate validation run and created no tag or Release.
+
+The synthetic upgrade check from the public v0.6.1 binary to the candidate passed
+(`scripts/check-release-upgrade.py`, `--old-version 0.6.1 --expected-version 0.7.0
+--expected-new-schema 24`): conversation schema 24, and standalone RAG schema 4
+after `rag init`. An earlier candidate built before the RAG schema correction
+failed this check at `rag search` with `schema_unsupported`, because the RAG store
+moved from schema 3 to 4 in `f41aa775` and only `rag init` migrates it. The notes
+and script were corrected before publication.
+
+Anonymous downloads retrieved all six public files without GitHub credentials,
+and every file listed in the downloaded `SHA256SUMS` verified. Full hashes are
+not recorded here. Native installer and public-byte upgrade checks beyond this
+are not claimed.

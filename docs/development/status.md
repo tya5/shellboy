@@ -4275,3 +4275,11 @@ release notes in `docs/development/release-v0.7.0-draft.md` (renamed from the
 unversioned draft). The source cutoff is main
 `0ca891bf3fa1ba6b826547cf683ce688365e9677`. Candidate builds, upgrade
 verification, tagging and publication remain separate gates.
+
+### v0.7.0 published (2026-11-03)
+
+Annotated tag `v0.7.0` was published at main `abe16a34` at 2026-11-03T09:03:20Z
+(release run 41607818833; candidate run 41606289933). The synthetic upgrade check
+from public v0.6.1 passed with conversation schema 24 and RAG schema 4 after
+`rag init`. Anonymous download and `SHA256SUMS` verification covered all six
+public files. Details are in [publication](publication.md#v070-publication-2026-11-03).
