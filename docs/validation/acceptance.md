@@ -9334,3 +9334,29 @@ markers. The pending macOS comparison runs the unchanged baseline and the
 corrected test 50 times each on one native runner, with per-iteration logs and
 exact source SHA in each result. Repeat counts, independent checks and 3-OS CI
 are pending; do not infer a failure rate or successful fix from this entry.
+
+First published tip `34051d44287ecd3e339ed243ed3ef24e49f821ac` passed explicit
+three-OS run 41721982147. Hosted comparison 41721976597 attempt 3 used that tip
+and baseline `62a4c4def58dcf4a66327d37c343670f1bf3d68a` on the same arm64
+macOS26 runner (image 20261026.0455.2): baseline 11/50 failures; fixed 1/50.
+Attempts 1/2 acquired no runner and executed no tests. Fixed iteration 45
+received the final notice prefix then exceeded the unchanged 60-second
+child-wait watchdog; it had no exit-wait screen dump. This does not prove a
+production exit defect or output backpressure. Twenty-four fixed logs directly
+showed a completed `W/Enter:` screen without that action-relative raw marker.
+
+The follow-up drains the PTY concurrently with child exit and diagnoses both
+exit errors and deadline expiry. Its synthetic real-PTY regression writes a
+notice prefix, then one MiB (exceeding PTY capacity), then a tail marker. It
+requires an initially live child, successful exit and the retained tail, without
+changing the watchdog or production code. New-tip focused checks and exact-tip
+hosted 50-before/50-after comparison are pending. Do not discard the first
+comparison or claim zero failures; W8 landing remains gated.
+
+Follow-up local native macOS checks: locked strict all-target Clippy and the
+six focused shutdown tests passed (5.45s), including the >capacity regression
+and the deliberately caught screen-diagnostic panic; log
+`/tmp/211-exit-drain.log`. One initial helper invocation applied no replacement
+blocks, causing a missing-method compile error; the subsequent exact-once
+replacement and validation succeeded. No production exit cause is inferred
+from this synthetic writer. Exact-tip CI and fresh hosted comparison pending.

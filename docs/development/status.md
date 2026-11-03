@@ -4427,3 +4427,13 @@ records, and bilingual status remain in the rebased branch.
 with readiness-driven reads and bounded VT/screen diagnostics. Production grace,
 input and shutdown behavior are unchanged. Local checks and native 50-before /
 50-after observations are pending; W8 owns review and landing.
+
+#211 follow-up: hosted native arm64 macOS run 41721976597 attempt 3 completed
+50 baseline and 50 first-fix repetitions: 11 baseline failures, one first-fix
+failure. In 24 fixed logs the rendered marker was absent from action-relative
+raw output. The remaining failure was after the notice prefix, in child exit
+waiting; its cause is not established by the available log. The helper now
+continues readiness-driven draining through child exit and emits bounded VT
+and screen diagnostics on exit failure. A real PTY writer exceeding capacity
+covers this observation gap. New-tip checks and a fresh full comparison remain
+pending; the first tip's successful 3-OS CI does not cover this follow-up.

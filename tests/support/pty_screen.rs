@@ -146,6 +146,43 @@ impl Pty {
         );
     }
 
+    pub async fn until_exit(
+        &mut self,
+        child: &mut tokio::process::Child,
+    ) -> std::process::ExitStatus {
+        // A prefix of the final notice is not an acknowledgement that every
+        // writer has finished. Drain until exit to avoid PTY backpressure.
+        let result = crate::test_watchdog::watchdog("PTY child exit while draining output", async {
+            loop {
+                tokio::select! {
+                    status = child.wait() => return status,
+                    ready = self.terminal.readable() => {
+                        let mut ready = ready.unwrap();
+                        let mut bytes = [0; 8192];
+                        match ready.try_io(|fd| fd.get_ref().read(&mut bytes)) {
+                            Ok(Ok(0)) => return child.wait().await,
+                            Ok(Ok(n)) => self.screen.feed(&bytes[..n]),
+                            Ok(Err(error)) if error.raw_os_error() == Some(libc::EIO) => return child.wait().await,
+                            Ok(Err(error)) if error.kind() == std::io::ErrorKind::Interrupted => {},
+                            Err(_) => {},
+                            other => panic!("PTY exit read failed: {other:?}\n{}", self.screen.diagnostic()),
+                        }
+                    }
+                }
+            }
+        }).await;
+        match result {
+            Ok(Ok(status)) => {
+                self.drain();
+                status
+            }
+            other => panic!(
+                "PTY child did not exit: {other:?}\n{}",
+                self.screen.diagnostic()
+            ),
+        }
+    }
+
     pub fn drain(&mut self) {
         loop {
             let mut bytes = [0; 8192];
@@ -238,4 +275,32 @@ async fn watchdog_failure_prints_the_last_screen_state() {
     assert!(message.contains("last completed screen"));
     assert!(message.contains("retained shutdown screen"));
     assert!(message.contains("SHUTDOWN_VT_CAPTURE_JSON="));
+}
+
+#[tokio::test]
+async fn exit_wait_continues_draining_after_the_first_notice() {
+    let (master, slave) = super::pty();
+    let mut child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg("printf 'Forced exit:'; head -c 1048576 /dev/zero; printf 'drained tail'")
+        .stdin(std::process::Stdio::null())
+        .stdout(slave.try_clone().unwrap())
+        .stderr(slave)
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut terminal = Pty::new(master, 28, 100);
+    terminal.until_raw(b"Forced exit:").await;
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "the fixture must exceed PTY capacity"
+    );
+    assert!(terminal.until_exit(&mut child).await.success());
+    assert!(
+        terminal
+            .screen
+            .raw
+            .windows(12)
+            .any(|part| part == b"drained tail")
+    );
 }

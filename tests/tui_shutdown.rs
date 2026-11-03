@@ -116,12 +116,8 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     // continuously drains output; waiting for exit first can lose the Darwin
     // PTY's queued bytes when its final slave descriptor closes.
     terminal.until_raw(b"Forced exit:").await;
-    let status = crate::test_watchdog::watchdog("tests/tui_shutdown.rs: explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes", child.wait())
-        .await
-        .unwrap()
-        .unwrap();
+    let status = terminal.until_exit(&mut child).await;
     assert_eq!(status.code(), Some(1));
-    terminal.drain();
     let output = &terminal.screen.raw[restoration_start..];
     for sequence in [b"\x1b[?1049l".as_slice(), b"\x1b[?2004l".as_slice()] {
         assert!(
