@@ -1312,6 +1312,14 @@ fn open_connection(
         )));
     }
     let migrated = version > 0 && version < SCHEMA_VERSION;
+    // Persist before the first migration transaction so a crash cannot bypass
+    // the post-migration foreign-key scan on the next startup.
+    if migrated {
+        connection.execute(
+            "INSERT OR REPLACE INTO app_meta(key,value) VALUES('integrity.migration_pending','1')",
+            [],
+        )?;
+    }
     let version = if version == 0 {
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -1338,11 +1346,20 @@ fn open_connection(
         },
     )?;
     validate_schema(&connection)?;
-    if migrated {
+    let migration_pending: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key='integrity.migration_pending')",
+        [],
+        |row| row.get(0),
+    )?;
+    if migration_pending {
         trace
             .borrow_mut()
             .next(StartupStage::DatabaseForeignKeys, None, None);
         check_integrity(&connection, true, false)?;
+        connection.execute(
+            "DELETE FROM app_meta WHERE key='integrity.migration_pending'",
+            [],
+        )?;
     }
     if !clean_shutdown {
         trace
@@ -2009,6 +2026,32 @@ mod integrity_policy_tests {
                 .unwrap_err()
                 .to_string()
                 .contains("quick_check")
+        );
+    }
+
+    #[test]
+    fn pending_migration_rechecks_foreign_keys_even_after_version_is_current() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("db");
+        drop(open_connection(&path, None, None, false).unwrap());
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("PRAGMA foreign_keys=OFF; INSERT INTO app_meta(key,value) VALUES('integrity.migration_pending','1'); INSERT INTO run(id,thread_id,state,created_at) VALUES('orphan','missing','completed','now');").unwrap();
+        drop(db);
+        assert!(
+            open_connection(&path, None, None, true)
+                .unwrap_err()
+                .to_string()
+                .contains("foreign key")
+        );
+        let db = Connection::open(&path).unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key='integrity.migration_pending'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
         );
     }
 

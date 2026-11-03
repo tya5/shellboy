@@ -717,3 +717,35 @@ async fn headless_failed_ready_write_closes_endpoint_and_releases_owner() {
     .await
     .unwrap();
 }
+#[tokio::test]
+async fn storage_check_offline_checks_and_refuses_live_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let db = shellboy::storage::DbWorker::open(root.path().join("shellboy.db"))
+        .await
+        .unwrap();
+    db.shutdown().await.unwrap();
+    let run = || {
+        std::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(root.path())
+            .args(["storage", "check"])
+            .output()
+            .unwrap()
+    };
+    let output = run();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let lock = shellboy::app::OwnerLock::acquire(root.path()).unwrap();
+    let output = run();
+    assert!(!output.status.success());
+    drop(lock);
+    let db = rusqlite::Connection::open(root.path().join("shellboy.db")).unwrap();
+    db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at) VALUES('bad','fixture','{}','hash','failed','malformed','now');").unwrap();
+    drop(db);
+    let output = run();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("quick_check"));
+}
