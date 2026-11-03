@@ -157,3 +157,129 @@ mod tests {
         );
     }
 }
+
+impl super::db::Store {
+    pub(super) fn reply(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        args: &crate::protocol::MessageReplyArgs,
+        caller: Option<&crate::protocol::Origin>,
+        operation: &str,
+        at: &str,
+    ) -> Result<super::db::MutationResult, crate::protocol::ApiError> {
+        use crate::protocol::*;
+        let sql = |e: rusqlite::Error| crate::app::storage_error(e.into());
+        let row = tx.query_row("SELECT target_thread_id,state,turn_id,result_json,sender_json FROM receipt WHERE message_node_id=?1",[&args.message_id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,String>(4)?))).optional().map_err(sql)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"message not found"))?;
+        let saved: Value = row
+            .3
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_else(|| json!({}));
+        if saved["expect_reply"] != true {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "message does not expect a reply",
+            ));
+        }
+        if caller.is_some_and(|c| c.thread_id != row.0) {
+            return Err(
+                ApiError::new(ErrorCode::InvalidState, "only the recipient may reply")
+                    .details(json!({"reason":"not_recipient"})),
+            );
+        }
+        if row.1 != "applied" {
+            return Err(
+                ApiError::new(ErrorCode::InvalidState, "message has not been applied")
+                    .details(json!({"delivery_status":row.1})),
+            );
+        }
+        if saved["reply"]["state"] != "pending" {
+            return Err(
+                ApiError::new(ErrorCode::InvalidState, "reply is already terminal")
+                    .details(json!({"reply_state":saved["reply"]["state"]})),
+            );
+        }
+        if args.text.len() as u64 > self.config.limits.draft_bytes {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                "reply exceeds draft byte limit",
+            ));
+        }
+        let by = MessageSender::recorded(caller, args.sender_label.clone(), caller.is_none());
+        let sender = MessageSender::from_saved(Some(&row.4));
+        let target = sender
+            .thread_id
+            .as_deref()
+            .filter(|_| sender.kind == SenderKind::Model);
+        let target = match target {
+            Some(target)
+                if tx
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+                        [target],
+                        |r| r.get::<_, bool>(0),
+                    )
+                    .map_err(sql)? =>
+            {
+                Some(target)
+            }
+            _ => None,
+        };
+        let (mut result, node, delivery) = if let Some(target) = target {
+            let result = self.send(
+                tx,
+                &MessageSendArgs {
+                    expect_reply: false,
+                    sender_label: args.sender_label.clone(),
+                    thread_id: Some(target.into()),
+                    text: args.text.clone(),
+                    deliver: Deliver::Next,
+                },
+                caller,
+                operation,
+                at,
+            )?;
+            let node = result.result["message_id"]
+                .as_str()
+                .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "missing reply node"))?
+                .to_owned();
+            tx.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply_to',?2) WHERE message_node_id=?1",params![node,args.message_id]).map_err(sql)?;
+            let delivery = Some(result.result.clone());
+            (result, node, delivery)
+        } else {
+            let node = uuid::Uuid::new_v4().to_string();
+            let body = json!({"role":"user","content":[{"type":"input_text","text":args.text}]})
+                .to_string();
+            tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,?2,'user',?3,?4,?5,?6)",params![node,row.2,at,body,body.len() as i64,crate::digest::sha256_hex(body.as_bytes())]).map_err(sql)?;
+            self.index
+                .authorize_new_tx(tx, std::slice::from_ref(&node))?;
+            (super::db::MutationResult::value(json!({}))?, node, None)
+        };
+        let reply = json!({"state":"replied","at":at,"node_id":node,"by":by});
+        let changed = tx.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![args.message_id,reply.to_string(),at]).map_err(sql)?;
+        if changed != 1 {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "reply state changed",
+            ));
+        }
+        tx.execute(
+            "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
+            params![row.0, at],
+        )
+        .map_err(sql)?;
+        tx.execute(
+            "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
+            [],
+        )
+        .map_err(sql)?;
+        if !result.changed_threads.contains(&row.0) {
+            result.changed_threads.push(row.0);
+        }
+        result.result = json!({"reply_to":args.message_id,"message_id":node});
+        if let Some(delivery) = delivery {
+            result.result["delivery"] = delivery;
+        }
+        Ok(result)
+    }
+}
