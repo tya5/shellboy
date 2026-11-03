@@ -5,7 +5,10 @@
 The per-request `Shellboy context v1` tail item is now a saved `context` node,
 appended at the Turn start, after a mid-Turn setting change and after a
 replacement removed it; requests within a Turn are strict appends. Loopback
-evidence and checks are in acceptance; 3-OS CI 41545744676 passed on `d71c1e76`. Paid cache-hit re-measurement (#151
+evidence and checks are in acceptance; 3-OS CI 41545744676 passed on `d71c1e76`.
+The approved paid re-measurement (#151 harness, `gpt-6.1-terra`, N=1) gave a
+cached/input ratio of 84.34% excluding the first request, against 49.76% on main
+`c090fa79`; details in acceptance and on #183. Paid cache-hit re-measurement (#151
 conditions) awaits the user's approval.
 
 ## Paused index consumption (#173)

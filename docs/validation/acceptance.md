@@ -8726,5 +8726,28 @@ and `completed_shell_cannot_be_backgrounded_while_excerpt_is_loading` passed twi
 fails the same way on unmodified main `777c100d` in this local environment (the
 spawned `serve` printed no ready line), so it is not attributed to this change.
 3-OS CI run 41545744676 on `d71c1e76` passed (macOS, Ubuntu, Windows check jobs,
-including Format, Clippy and Tests). Not verified: a real provider's cache hit
-rate (#151 conditions; needs the user's approval), physical terminal.
+including Format, Clippy and Tests). Not verified: physical terminal.
+
+Paid re-measurement (user-approved, 2026-11-03 00:13:08-00:13:47 UTC): macOS
+arm64, the `litellm` route (existing LiteLLM at 127.0.0.1:4000, ChatGPT
+subscription backend), `gpt-6.1-terra`, the #151 harness (`meter_relay`,
+`usage_trial.shellboy`, sandbox-exec isolation, synthetic workspace, the same
+five instructions, output cap 2,048), N=1 each, at most 15 requests, stop at the
+first error. Debug builds of origin/main `c090fa79` and then the branch
+`d71c1e76` ran back to back; both completed with 10 requests and no error.
+
+| Build | Requests | Input | Cached | Output | Cached/input | Excluding first | Reference cost (1/0.05/5 per 1M) |
+|---|---|---|---|---|---|---|---|
+| main `c090fa79` | 10 | 42,521 | 19,712 | 214 | 46.36% | 49.76% | $0.0249 |
+| branch `d71c1e76` | 10 | 45,101 | 37,376 | 218 | 82.87% | 84.34% | $0.0107 |
+
+Per-request (input, cached, output) values are on #183. The captured request
+`input` arrays (bodies not stored) were a strict append for all 9 consecutive
+pairs on the branch, including across Turns, and for none on main (each split
+at the previous request's trailing context line). N=1 caveats: the branch's
+first request reused 1,792 cached tokens of the shared system/tools prefix from
+the main run just before it; branch request 4 still missed (1,792 cached),
+cause not determined; branch input is 2,580 tokens higher in total because
+earlier Turns' context lines remain in history (581 tokens at the last
+request, four earlier lines). LiteLLM-internal retry usage is unknown. The
+subscription is not billed per token; cost is reference only.
