@@ -9441,3 +9441,11 @@ Linux CI 41639027639 stopped at strict Clippy on openpty's platform-dependent
 winsize pointer signature; passing an explicit raw pointer keeps Linux's const
 and macOS's mutable signatures compatible. This is a test-harness correction,
 not a production timing workaround. Final corrected-tip checks remain pending.
+
+#192 Windows test diagnostics: c8aa227e compiled and passed strict Clippy on
+Windows, then four rendering tests failed because they hard-coded the narrow
+selected marker even under unknown/wide policy. Assertions now select the
+policy-specific marker (or accept the two supported markers in the public
+integration test), keeping row background, content, scrollbar and layout checks.
+The live-work test still explicitly checks all three width policies and both
+languages. No production glyph policy is changed by this correction.

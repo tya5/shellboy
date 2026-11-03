@@ -519,7 +519,12 @@ mod tests {
             if width >= 80 {
                 let buffer = terminal.backend().buffer();
                 let y = (0..height)
-                    .find(|y| (0..width).any(|x| buffer[(x, *y)].symbol() == "›"))
+                    .find(|y| {
+                        (0..width).any(|x| {
+                            buffer[(x, *y)].symbol()
+                                == crate::ui::text_width::glyphs::select("›", ">")
+                        })
+                    })
                     .unwrap();
                 assert_eq!(
                     buffer[(width / 2, y)].bg,
