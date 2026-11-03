@@ -113,6 +113,7 @@ impl Kind {
             | Kind::HistoryGet
             | Kind::HistoryRelations
             | Kind::AttachmentList => PureRead,
+            Kind::MessageReply => MutationDeclaredBound,
             Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
@@ -176,7 +177,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            45,
+            46,
             "classify new kinds and update this ratchet"
         );
     }
@@ -184,6 +185,7 @@ mod tests {
     #[test]
     fn every_writer_kind_has_a_bound_or_a_ratchet_exemption() {
         let writers = [
+            Kind::MessageReply,
             Kind::OwnerShutdown,
             Kind::ThreadCreate,
             Kind::ThreadFork,
@@ -261,6 +263,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn reply_declares_its_recipient_scoped_batch_without_growing_exemptions() {
+        let command: Command = serde_json::from_value(serde_json::json!({"command":"message.reply","args":{"message_id":"synthetic","text":"reply"}})).unwrap();
+        assert_eq!(Kind::of(&command), Kind::MessageReply);
+        assert!(Kind::MessageReply.declared_writer_bound());
+        assert!(Kind::MessageReply.writer_allowed(&command));
+        assert!(!UNDECLARED_WRITER_BOUNDS.contains(&Kind::MessageReply));
     }
 
     #[test]

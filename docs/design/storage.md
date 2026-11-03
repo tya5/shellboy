@@ -690,3 +690,16 @@ by that sender, while receipts targeting a live recipient remain recipient
 owned. Other deleted-target receipts are reclaimed by history GC in at-most-128
 row background transactions, before payload marking. See gc.md for visibility
 and root retention; operation_receipt retention is unchanged.
+
+### Reply foreground writer unit (#194, migration 26)
+
+`MessageReply` declares one recipient-scoped foreground unit, not a background
+VM-step guarantee. Receipt and sender tombstone reads are indexed lookups. Reply
+writes at most one input node, one delivery receipt, one index authorization and
+constant lifecycle metadata. Shared recovery performs at most 128 receipt
+repairs and releases at most 128 oldest held receipts per explicit pass, using
+`receipt_target` for recipient/state lookup and primary keys for writes. It no
+longer runs global terminal repair from a send/reply transaction. New turn/run
+creation and context events are constant-count; previous turn end uses the
+existing thread/end index. Index authorization receives a singleton node list.
+The legacy writer exemption list is not expanded.

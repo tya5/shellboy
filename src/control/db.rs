@@ -1794,7 +1794,7 @@ fn assign_message(
                         if !super::state::resume_recovery_turn_tx(
                             tx, id, &run_id, &turn_id, generation, now,
                         )
-                        .map_err(sql_error)?
+                        .map_err(storage_error)?
                         {
                             return Err(error(
                                 ErrorCode::OperationConflict,
@@ -1810,6 +1810,17 @@ fn assign_message(
                             now,
                         )
                         .map_err(sql_error)?;
+                        let still_recovering: bool = tx
+                            .query_row(
+                                "SELECT state='recovery_wait' FROM turn WHERE id=?1",
+                                [&turn_id],
+                                |r| r.get(0),
+                            )
+                            .map_err(sql_error)?;
+                        if still_recovering {
+                            status = DeliveryStatus::Held;
+                            reason = Some("recovery_wait");
+                        }
                     }
                     wake = true;
                 }
@@ -1865,6 +1876,11 @@ fn assign_message(
                 now,
             )
             .map_err(storage_error)?;
+            if super::message_delivery::interrupted_remaining(tx, id).map_err(sql_error)? {
+                tx.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json='{\"reason\":\"held_messages_remaining\"}' WHERE id=?1", [&turn_id]).map_err(sql_error)?;
+                status = DeliveryStatus::Held;
+                reason = Some("recovery_wait");
+            }
         }
         assigned_run = Some(run_id);
         assigned_turn = Some(turn_id);
@@ -1956,8 +1972,8 @@ pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails
     if let Some(run) = &details.run_id {
         let turn:Option<(String,Option<String>)>=connection.query_row("SELECT id,recovery_reason_json FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run],|row|Ok((row.get(0)?,row.get(1)?))).optional().map_err(sql_error)?;
         if let Some((id, reason)) = turn {
+            details.recovery_reason = recovery_status(connection, &details.thread_id, &id, reason)?;
             details.turn_id = Some(id);
-            details.recovery_reason = reason;
         }
         details.children_count = count(
             connection,
@@ -2256,6 +2272,10 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
         .map_or((None, None, None), |(id, answer, reason)| {
             (Some(id), answer, reason)
         });
+    let recovery_hint = match turn_id.as_deref() {
+        Some(turn) => recovery_status(connection, &row.0, turn, recovery_hint)?,
+        None => recovery_hint,
+    };
     Ok(RunDetails {
         usage_totals: None,
         waiting_reason: crate::readback::run_wait_reason(connection, &row.0, id)?,
@@ -2279,6 +2299,35 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
             id,
         )?,
     })
+}
+
+// Status readback, not reply admission: retain the existing recovery field and
+// add the exact held count so each committed recovery unit is observable.
+fn recovery_status(
+    connection: &Connection,
+    thread: &str,
+    turn: &str,
+    reason: Option<String>,
+) -> Result<Option<String>> {
+    let recovering: bool = connection
+        .query_row(
+            "SELECT state='recovery_wait' FROM turn WHERE id=?1",
+            [turn],
+            |r| r.get(0),
+        )
+        .map_err(sql_error)?;
+    if !recovering {
+        return Ok(reason);
+    }
+    let remaining: i64 = connection.query_row("SELECT count(*) FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held'", [thread], |r| r.get(0)).map_err(sql_error)?;
+    if remaining == 0 { return Ok(reason); }
+    let mut value = reason
+        .as_deref()
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({"reason":reason}));
+    value["remaining_held"] = json!(remaining);
+    Ok(Some(value.to_string()))
 }
 
 pub fn turn_details(connection: &Connection, id: &str) -> Result<TurnDetails> {
@@ -2373,7 +2422,7 @@ fn retry_run(
         ));
     };
     if !super::state::resume_recovery_turn_tx(tx, &details.thread_id, id, &turn, generation, now)
-        .map_err(sql_error)?
+        .map_err(storage_error)?
     {
         return Err(error(
             ErrorCode::InvalidState,

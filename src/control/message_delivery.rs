@@ -78,6 +78,21 @@ pub(crate) fn repair_terminal_tx(db: &Connection, at: &str) -> rusqlite::Result<
     Ok(())
 }
 
+/// Repair only this recipient's oldest 128 rows needing a state change.
+/// The global startup repair must never run inside foreground reply admission.
+fn repair_thread_batch_tx(db: &Connection, thread: &str, at: &str) -> rusqlite::Result<()> {
+    let rows = db.prepare(&format!("SELECT id FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state IN ('accepted','held') AND ((NOT EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NULL) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=receipt.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL)) OR (state='held' AND path_admission='unknown' AND run_id IS NULL AND turn_id IS NULL AND hold_reason IS NOT 'uncertain_path_admission') OR ({TERMINAL} AND (state<>CASE WHEN path_admission='admitted' THEN 'applied' ELSE 'held' END OR hold_reason IS NOT CASE path_admission WHEN 'admitted' THEN 'terminal_after_path_admission' WHEN 'unadmitted' THEN 'terminal_before_path_admission' ELSE 'uncertain_path_admission' END))) ORDER BY created_at,rowid LIMIT 128"))?
+        .query_map([thread], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in rows {
+        db.execute(&format!("UPDATE receipt SET state=CASE WHEN NOT EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NULL) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=receipt.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL) THEN 'cancelled' WHEN {TERMINAL} AND path_admission='admitted' THEN 'applied' ELSE 'held' END, hold_reason=CASE WHEN NOT EXISTS(SELECT 1 FROM thread t WHERE t.id=receipt.target_thread_id AND t.deleted_at IS NULL) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=receipt.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL) THEN 'target_or_source_unavailable' WHEN path_admission='unknown' THEN 'uncertain_path_admission' WHEN {TERMINAL} AND path_admission='admitted' THEN 'terminal_after_path_admission' ELSE 'terminal_before_path_admission' END,updated_at=?2 WHERE id=?1"), params![id,at])?;
+    }
+    Ok(())
+}
+
+pub(super) fn interrupted_remaining(db: &Connection, thread: &str) -> rusqlite::Result<bool> {
+    db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND path_admission='unadmitted' AND ({TERMINAL} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted'))))"), [thread], |r| r.get(0))
+}
+
 /// Caller has established a new Run under human/live-owning-parent authority.
 /// Existing message and receipt provenance stays fixed; only the selected path
 /// and the original delivery outcome advance. All writes share send's transaction.
@@ -89,8 +104,8 @@ pub(crate) fn recover_on_resume_tx(
     actor: Value,
     at: &str,
 ) -> Result<usize, StorageError> {
-    repair_terminal_tx(tx, at)?;
-    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id FROM receipt WHERE target_thread_id=?1 AND state='held' AND path_admission='unadmitted' AND ({TERMINAL} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted'))) ORDER BY created_at,rowid LIMIT 129"))?;
+    repair_thread_batch_tx(tx, thread, at)?;
+    let mut q = tx.prepare(&format!("SELECT id,message_node_id,run_id,turn_id FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND path_admission='unadmitted' AND ({TERMINAL} OR (run_id IS NULL AND turn_id IS NULL AND hold_reason IN ('stopping','previous_instance_interrupted'))) ORDER BY created_at,rowid LIMIT 128"))?;
     let rows = q
         .query_map([thread], |r| {
             Ok((
@@ -102,9 +117,8 @@ pub(crate) fn recover_on_resume_tx(
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(q);
-    if rows.len() > 128 {
-        return Err(ApiError::new(ErrorCode::InputLimit,"More than 128 interrupted messages await recovery; review and cancel or explicitly restore the queue before sending").into());
-    }
+    // A reader's 128-row window is not an admission invariant. Each explicit
+    // resume releases the oldest batch; later passes retain and drain the rest.
     if rows.is_empty() {
         return Ok(0);
     }
@@ -264,16 +278,84 @@ mod tests {
         tx.commit().unwrap();
     }
     #[test]
-    fn recovery_limit_and_partial_path_failure_roll_back_every_change() {
+    fn recovery_passes_preserve_order_restart_and_stale_retry_safety() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("recovery.db");
+        let db = fixture();
+        for n in 0..257 {
+            input(&db, &format!("n{n:03}"), "unadmitted", "0");
+        }
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('new','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('next','t','new','recovery_wait','now','{}');").unwrap();
+        db.execute("VACUUM INTO ?1", [path.to_str().unwrap()])
+            .unwrap();
+        drop(db);
+        for (generation, applied, expected_state) in [
+            (0, 128, "recovery_wait"),
+            (1, 256, "recovery_wait"),
+            (2, 257, "preparing"),
+        ] {
+            let mut db = Connection::open(&path).unwrap();
+            db.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+            let tx = db.transaction().unwrap();
+            assert!(
+                super::super::state::resume_recovery_turn_tx(
+                    &tx, "t", "new", "next", generation, "resume"
+                )
+                .unwrap()
+            );
+            assert!(
+                !super::super::state::resume_recovery_turn_tx(
+                    &tx,
+                    "t",
+                    "new",
+                    "next",
+                    generation,
+                    "stale concurrent retry"
+                )
+                .unwrap()
+            );
+            assert_eq!(
+                tx.query_row(
+                    "SELECT count(*) FROM receipt WHERE state='applied'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                applied
+            );
+            assert_eq!(
+                tx.query_row("SELECT state FROM turn WHERE id='next'", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                expected_state
+            );
+            let selected = tx
+                .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(
+                selected,
+                (0..applied).map(|n| format!("n{n:03}")).collect::<Vec<_>>()
+            );
+            tx.commit().unwrap();
+        }
+    }
+
+    #[test]
+    fn bounded_recovery_and_partial_path_failure_roll_back_every_change() {
         let mut db = fixture();
         for n in 0..129 {
             input(&db, &format!("n{n:03}"), "unadmitted", "0");
         }
         let tx = db.transaction().unwrap();
-        let error = recover_on_resume_tx(&tx, "t", "new", "u", json!({"kind":"human"}), "now")
-            .unwrap_err()
-            .into_api_error();
-        assert_eq!(error.code, ErrorCode::InputLimit);
+        assert_eq!(
+            recover_on_resume_tx(&tx, "t", "new", "u", json!({"kind":"human"}), "now").unwrap(),
+            128
+        );
+        assert_eq!(state(&tx, "n128").0, "held");
         tx.rollback().unwrap();
         assert_eq!(
             db.query_row("SELECT count(*) FROM thread_path", [], |r| r

@@ -291,8 +291,24 @@ mod activity_migration_tests {
                     .unwrap(),
                 crate::storage::SCHEMA_VERSION
             );
-            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=25", [], |row| row.get::<_, String>(0)).unwrap(), "0025_history_attempt_index");
-            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=26", [], |row| row.get::<_, String>(0)).unwrap(), "0026_reply_expected");
+            assert_eq!(
+                db.query_row(
+                    "SELECT name FROM schema_migration WHERE version=25",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+                "0025_history_attempt_index"
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT name FROM schema_migration WHERE version=26",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+                "0026_reply_expected"
+            );
             assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
             let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get(3)).unwrap();
             assert!(plan.contains("receipt_reply_pending"), "{plan}");

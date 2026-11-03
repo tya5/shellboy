@@ -40,7 +40,37 @@ pub(super) fn resume_recovery_turn_tx(
     turn: &str,
     generation: i64,
     at: &str,
-) -> rusqlite::Result<bool> {
+) -> Result<bool, StorageError> {
+    // No global <=128 queue invariant exists: ordinary sends can accumulate.
+    // Keep the Turn recoverable until ordered, committed units drain its queue.
+    let valid: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND thread_id=?2 AND run_id=?3 AND generation=?4 AND state='recovery_wait' AND EXISTS(SELECT 1 FROM run r WHERE r.id=turn.run_id AND r.state='live'))", params![turn,thread,run,generation], |r| r.get(0))?;
+    if !valid {
+        return Ok(false);
+    }
+    let recovered = super::message_delivery::recover_on_resume_tx(
+        tx,
+        thread,
+        run,
+        turn,
+        json!({"kind":"shellboy"}),
+        at,
+    )?;
+    let rows = tx.prepare("SELECT id FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND turn_id=?2 AND run_id=?3 AND hold_reason='recovery_wait' ORDER BY created_at,rowid LIMIT ?4")?
+        .query_map(params![thread,turn,run,128_i64.saturating_sub(recovered as i64)], |r| r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    for id in rows {
+        tx.execute(
+            "UPDATE receipt SET state='accepted',hold_reason=NULL,updated_at=?2 WHERE id=?1",
+            params![id, at],
+        )?;
+    }
+    let remaining: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt INDEXED BY receipt_target WHERE target_thread_id=?1 AND state='held' AND turn_id=?2 AND run_id=?3 AND hold_reason='recovery_wait')", params![thread,turn,run], |r| r.get(0))?;
+    if remaining || super::message_delivery::interrupted_remaining(tx, thread)? {
+        tx.execute(
+            "UPDATE turn SET generation=generation+1 WHERE id=?1 AND generation=?2",
+            params![turn, generation],
+        )?;
+        return Ok(true);
+    }
     let changed = tx.execute(
         "UPDATE turn SET state='preparing',generation=generation+1,recovery_reason_json=NULL
          WHERE id=?1 AND thread_id=?2 AND run_id=?3 AND generation=?4 AND state='recovery_wait'
@@ -50,12 +80,6 @@ pub(super) fn resume_recovery_turn_tx(
     if changed != 1 {
         return Ok(false);
     }
-    tx.execute(
-        "UPDATE receipt SET state='accepted',hold_reason=NULL,updated_at=?4
-        WHERE turn_id=?1 AND target_thread_id=?2 AND run_id=?3
-        AND state='held' AND hold_reason='recovery_wait'",
-        params![turn, thread, run, at],
-    )?;
     Ok(true)
 }
 

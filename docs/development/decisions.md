@@ -3195,3 +3195,13 @@ iteration while preserving three-OS coverage for landing branches.
 
 Validation: dispatch on this task branch and confirm Linux-only default; retain
 the existing Windows-only (`=4`) and all-OS (`=2`) modes.
+
+## 2026-11-03: bounded recovery without oversized-queue rejection (#194)
+
+User decision supersedes the earlier proposed InputLimit rejection: first audit
+queue invariants; if held receipts can exceed 128, release oldest 128 in ordered,
+progressing passes, retain the rest and expose remaining queue through status.
+Audit found reply-duty admission capped at128 but no cap on ordinary held sends.
+Thus shared send/run.retry recovery uses committed units and retains a
+recoverable Turn until drained; no compatibility writer exemption is added.
+Source: user instruction in this #194 chain integration task, 2026-11-03.

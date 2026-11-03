@@ -877,3 +877,21 @@ Other judgements made while finalizing (not covered by a user answer):
 - **Error codes** follow the existing set: unknown targets are
   `target_unavailable`, authority failures `invalid_state` with
   `details.reason`; no `forbidden`/`not_found` error code is added.
+
+### Recovery queue units after integration with main (2026-11-03)
+
+The 128 pending reply-duty cap is not a general held-message admission bound.
+Ordinary sends can accumulate more than 128 held receipts; UI/readback windows
+also do not enforce admission. Per the user's decision, recovery must not refuse
+an oversized queue. Explicit send/retry releases the oldest 128 per pass and
+retains the remainder. The Turn stays in recovery_wait while work remains, so a
+fresh send/retry can progress after interruption/restart. New input is held
+behind the older queue. Each unit commits atomically, and a stale generation
+cannot release a second unit. Existing status retains the remaining held queue;
+only after the final unit does the Turn become preparing. Global startup repair
+is not part of this foreground unit.
+
+`thread get`'s existing `recovery_reason` and `run get`/`run retry`'s existing
+`recovery_hint` include `remaining_held` while the Turn is recovery_wait. This is
+an exact status-readback count over the recipient's held index range, not a
+count or scan inside reply admission. No separate queue or worker is added.
