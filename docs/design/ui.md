@@ -244,3 +244,36 @@ keyboard flags while holding the global event reader mutex. A naive helper threa
 can therefore delay input indefinitely and does not guarantee preservation on
 all error paths. A thread-based implementation must address these cases rather
 than assume a two-second upper bound.
+
+### Session-owned input implementation (#192)
+
+The Unix TUI owns one `/dev/tty` reader for its complete session. A bounded
+incremental reply filter runs before the key decoder; the decoder is adapted
+from pinned crossterm 0.29.0 with its MIT provenance retained. This avoids a new
+runtime dependency and preserves its key, mouse, kitty and paste formats without
+using its process-global reader or any filtered synchronous query helper.
+Already decoded input stays in the reader queue on I/O error. No probe thread,
+helper process or reader-lock wait is introduced. Reads use the existing UI
+poll budget; lone Escape disambiguation is a key-decoding concern, not a
+capability timeout. Probe state is bounded independently of response latency.
+
+Before first draw, write DA/keyboard queries and two private DSR measurements
+at a known cursor location, restoring/clearing the probe area immediately.
+Their responses are independent; keyboard adoption never waits for DA. Two
+consistent cursor advances establish width 1 or 2. No response means unmeasured,
+not a guessed observation. Cached width is an initial layout baseline only.
+Adoption requests redraw and only successful measurements may refresh the cache.
+
+Windows retains crossterm's native console event reader and does not emit VT
+capability queries into that input mode. Unsupported capabilities remain
+unmeasured; native key and resize events continue to work. This is a deliberate
+platform boundary, not a claim that Windows measured width or kitty support.
+A future VT-native Windows input backend must own response filtering too.
+
+The Unix filter accepts only outstanding matching replies, once per query;
+private CPR avoids plain Shift+F3 collisions. Paste contents remain literal,
+including response-shaped bytes and invalid UTF-8 replacement behavior.
+Synthetic unit/PTY fixtures cover missing DA after keyboard flags, silent
+terminals, fragmented/delayed replies, interleaved typing/paste, error retention
+and terminal restoration. Real terminals and Windows behavior require separate
+platform evidence; three-OS CI is required before handoff.
