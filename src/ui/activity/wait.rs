@@ -31,6 +31,33 @@ pub(crate) fn label_localized(
 mod tests {
     use super::*;
     #[test]
+    fn all_wait_actions_select_language_without_changing_saved_reason() {
+        let mut reason = crate::protocol::RunWaitReason {
+            kind: "context_edit_boundary".into(),
+            operation_id: "opaque-operation".into(),
+            action: String::new(),
+            accepted_at: "saved-time".into(),
+            operation_count: 7,
+        };
+        for (action, expected) in [
+            ("summary", "Waiting for conversation summary"),
+            ("spill", "Waiting for output spill"),
+            ("restore", "Waiting for history restoration"),
+            ("omit", "Waiting for history editing"),
+            ("trim", "Waiting for history editing"),
+            ("maximal", "Waiting for history editing"),
+            ("unknown-provider-action", "Waiting for conversation compaction"),
+        ] {
+            reason.action = action.into();
+            assert_eq!(label_localized(&reason, crate::config::UiLanguage::En), expected);
+            assert_eq!(label_localized(&reason, crate::config::UiLanguage::Ja), label(&reason));
+            assert_eq!(reason.action, action);
+            assert_eq!(reason.operation_id, "opaque-operation");
+            assert_eq!(reason.accepted_at, "saved-time");
+            assert_eq!(reason.operation_count, 7);
+        }
+    }
+    #[test]
     fn labels_describe_saved_owner_not_background_completion_or_time() {
         let mut reason = crate::protocol::RunWaitReason {
             kind: "context_edit_boundary".into(),

@@ -893,5 +893,30 @@
     "category": "a",
     "reason": "client form field Ja fallback; English field_label_for uses typed catalogue or explicit db/input_mode labels; exhaustive client form label test preserves field values",
     "source_tokens_sha256": "eb79a3d462a0c754f4d02b2d79e200f411c8432a7bd441699bc377e1002d3c06"
+  },
+  "src/ui/activity/wait.rs:2990239b6433936c:1": {
+    "category": "a",
+    "reason": "Ja wait action label; chrome renders label_localized with UI language and typed reason; English action arms and saved reason preservation covered by tests",
+    "source_tokens_sha256": "c6de609e4a8d41c74e3e8a17298fd09a932e4f10999eaeed42e920964751399c"
+  },
+  "src/ui/activity/wait.rs:fe237decfe467492:1": {
+    "category": "a",
+    "reason": "Ja wait action label; chrome renders label_localized with UI language and typed reason; English action arms and saved reason preservation covered by tests",
+    "source_tokens_sha256": "c6de609e4a8d41c74e3e8a17298fd09a932e4f10999eaeed42e920964751399c"
+  },
+  "src/ui/activity/wait.rs:b17001d12989b8f6:1": {
+    "category": "a",
+    "reason": "Ja wait action label; chrome renders label_localized with UI language and typed reason; English action arms and saved reason preservation covered by tests",
+    "source_tokens_sha256": "c6de609e4a8d41c74e3e8a17298fd09a932e4f10999eaeed42e920964751399c"
+  },
+  "src/ui/activity/wait.rs:87e6b19be4326828:1": {
+    "category": "a",
+    "reason": "Ja wait action label; chrome renders label_localized with UI language and typed reason; English action arms and saved reason preservation covered by tests",
+    "source_tokens_sha256": "c6de609e4a8d41c74e3e8a17298fd09a932e4f10999eaeed42e920964751399c"
+  },
+  "src/ui/activity/wait.rs:62116f07c73c88a9:1": {
+    "category": "a",
+    "reason": "Ja wait action label; chrome renders label_localized with UI language and typed reason; English action arms and saved reason preservation covered by tests",
+    "source_tokens_sha256": "c6de609e4a8d41c74e3e8a17298fd09a932e4f10999eaeed42e920964751399c"
   }
 }
