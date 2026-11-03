@@ -8962,3 +8962,17 @@ On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 history-interaction suites passed (24, 2, and 15 tests respectively). Final-tip three-OS CI run `41561161744` succeeded on UI/code/test SHA
 `499e764407` across Windows, macOS, and Ubuntu. This follow-up commit changes
 only validation documentation; the tested UI implementation is unchanged.
+### #152 stage C: Watch resource classification (2026-11-02)
+
+On current main `9e822267d4`, the scoped Watch manifest validates all 33 reviewed
+resource fingerprints; Watch totals are `a=34, b=32, c=0` including its test
+fixtures. The repository-wide inventory has `c=904`; zero-pending acceptance is
+not claimed. No product code or symbols changed. Exact task CI is pending.
+### #152 stage C: Thread browser resource classification (2026-11-02)
+
+On current main `9e822267d4`, the scoped thread-browser manifest validates all
+79 reviewed resource fingerprints; totals are `a=79, b=105, c=0` including
+test fixtures. The intervening source changes only added compact Revisit
+rendering tests; the reviewed localized arms remain unchanged. Repository-wide
+`c=904` remains outside this scoped batch. No product strings or symbols
+changed. Exact task CI is pending.

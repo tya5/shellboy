@@ -4168,3 +4168,21 @@ observations and clarifies that cold interactive startup includes owner startup.
 These are historical fake-model measurements, not new provider measurements.
 The historical sampler is not yet integrated into main; the guide identifies
 its exact source and workflow. Review and integration CI remain pending.
+### #152 stage C: Watch resource classification (2026-11-02)
+
+Reviewed 33 `src/ui/watch.rs` Japanese UI literals on main
+`9e822267d4` as Japanese arms of `WatchText::render` and
+`WatchMessage::render`; each typed variant has a separate English arm. The
+source remains unchanged from the earlier review base. No product source,
+symbols or dynamic values changed. Other assigned files and cross-boundary
+source-value provenance are not covered by this classification. Task CI is
+pending.
+### #152 stage C: Thread browser resource classification (2026-11-02)
+
+Re-reviewed 79 `src/ui/threads.rs` Japanese UI literals on main
+`9e822267d4` as Japanese arms of `BrowserText::render` and
+`BrowserMessage::render` with separate English variants. Intervening changes
+were limited to compact Revisit rendering and tests; the reviewed localized
+resource arms were unchanged. No product resource, canonical symbol or dynamic
+value changed. Other assigned files and cross-boundary source-value provenance
+remain under review.
