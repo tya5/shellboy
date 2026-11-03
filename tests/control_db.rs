@@ -1303,7 +1303,7 @@ async fn old_receipt_and_compaction_companion_collection_roll_back_together_on_f
 }
 
 #[tokio::test]
-async fn repeated_quota_refusals_commit_bounded_housekeeping_without_accepting_new_work() {
+async fn quota_refusal_follows_complete_bounded_reclamation_without_accepting_new_work() {
     let (_directory, store) = store().await;
     store.database.call(|db|{
         let tx=db.transaction()?;
@@ -1324,7 +1324,9 @@ async fn repeated_quota_refusals_commit_bounded_housekeeping_without_accepting_n
         text: "no side effect".into(),
         encoding: "UTF-8".into(),
     }));
-    for (n, remaining) in [172, 44, 0].into_iter().enumerate() {
+    // Each unit remains bounded, but the first refusal must wait for the
+    // entire reclaimable set rather than returning after one unit.
+    for n in 0..3 {
         let error = if n == 1 {
             store
                 .reserve_runtime(write.clone(), None)
@@ -1346,7 +1348,7 @@ async fn repeated_quota_refusals_commit_bounded_housekeeping_without_accepting_n
                         [],
                         |r| r.get::<_, i64>(0)
                     )?,
-                    remaining
+                    0
                 );
                 assert_eq!(
                     db.query_row(
