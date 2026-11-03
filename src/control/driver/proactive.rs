@@ -95,6 +95,7 @@ pub(super) async fn maybe_compact(
             let target_key = crate::compaction::CompactionKeys::new(&thread).automatic_target();
             let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=1048576", [&target_key], |row| row.get(0)).optional()?;
             let mut insufficient_prefix = false;
+            let mut insufficient_spill = false;
             let mut exhausted_current_turn = false;
             let mut baseline_marks = None;
             if let Some(mut pending) = pending.and_then(|s| serde_json::from_str::<Value>(&s).ok())
@@ -117,13 +118,15 @@ pub(super) async fn maybe_compact(
                         db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
                     } else if pending["scope"] == "prefix" {
                         insufficient_prefix = true;
+                    } else if pending["scope"] == "spill" {
+                        insufficient_spill = true;
                     } else if pending["scope"] == "active_turn" && pending["turn"] == current_turn {
                         exhausted_current_turn = true;
                         baseline_marks = serde_json::from_value(pending["marks"].clone()).ok();
                     }
                 }
             }
-            if input_tokens < threshold && !insufficient_prefix && !exhausted_current_turn {
+            if input_tokens < threshold && !insufficient_prefix && !insufficient_spill && !exhausted_current_turn {
                 return Ok(Some(Measurement::BelowThreshold));
             }
             let input_characters = db.query_row(
@@ -545,9 +548,13 @@ pub(super) async fn maybe_compact(
         guard::candidates(control, &snapshot.thread, None).await.ok().flatten().map(|c| c.marks)
     } else { None };
     let pending_target = if adopted {
-        target_plan.and_then(|plan| {
-            let value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":summary_scope,"turn":snapshot.turn,"marks":baseline}).to_string();
-            (value.len() <= 1_048_576).then_some(value)
+        target_plan.map(|plan| {
+            let scope = if summary_scope.is_empty() { "spill" } else { summary_scope };
+            let mut value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":scope,"turn":snapshot.turn,"marks":baseline});
+            if value.to_string().len() > 1_048_576 {
+                value["marks"] = Value::Null;
+            }
+            value.to_string()
         })
     } else {
         None
