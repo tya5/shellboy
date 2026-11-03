@@ -4,7 +4,9 @@ use shellboy::{config::Config, ui::*};
 use unicode_width::UnicodeWidthStr;
 
 fn state() -> UiState {
-    let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+    let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
+    let mut ui = UiState::new(&config, std::env::temp_dir());
     ui.select_thread("composer-thread".into());
     ui
 }
@@ -85,6 +87,7 @@ fn restore_completion_explains_the_context_and_draft_argument_distinction() {
 #[test]
 fn completion_and_recalled_text_respect_the_current_draft_byte_limit() {
     let mut config = Config::default();
+    config.ui.language = shellboy::config::UiLanguage::Ja;
     config.limits.draft_bytes = 4;
     let mut ui = UiState::new(&config, std::env::temp_dir());
     ui.select_thread("composer-thread".into());
