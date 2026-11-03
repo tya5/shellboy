@@ -13,9 +13,14 @@ admission, stable-pass refusal, validation-byte continuation, concurrent updates
 requester fairness and canonical fingerprint reuse. Five focused capacity,
 replay and stop integration tests passed, as did two first-send/draft tests and
 one attachment-plan test. The Python suite passed 170 and the corrected
-test-layout/watchdog check passed. The activity branch is now rebased onto #171
-landing `c090fa799` with migration 23; combined validation and three-OS CI are
-pending. SQLite JSON work, exact usage accounting and elapsed time
+test-layout/watchdog check passed. After rebasing onto #171 landing
+`c090fa799` with migration 23, macOS Rust 1.99.1 through `rust-slot` passed
+`cargo check --tests`, 8 waiting/fingerprint tests, 10 receipt tests (one
+ignored), 2 execute-kind tests, the schema 22-to-23 migration test, 6 event
+retention tests, the accepting-footer test, 49 live-work tests, and 2 focused
+capacity/stop integration tests. The Python suite passed 174 tests; the VM
+helper's 2 tests passed again after adding all six index paths. Test layout,
+watchdog and language classification passed. Three-OS CI is pending. SQLite JSON work, exact usage accounting and elapsed time
 have no wall-clock bound. No user database was opened for synthetic preparation.
 
 ## Activity index write cost after #171 landing (2026-11-03, synthetic)

@@ -742,7 +742,11 @@ impl LiveWorkView {
         let timing = self
             .seconds
             .first()
-            .filter(|_| self.snapshot.as_ref().is_none_or(|snapshot| !snapshot.counts_capped))
+            .filter(|_| {
+                self.snapshot
+                    .as_ref()
+                    .is_none_or(|snapshot| !snapshot.counts_capped)
+            })
             .and_then(|(elapsed, _)| *elapsed)
             .map(|s| {
                 format!(
@@ -1182,7 +1186,10 @@ mod tests {
         view.accept(Some(capped), at);
         let footer = view.footer().unwrap();
         assert!(footer.contains("at least"));
-        assert!(!footer.contains("Oldest work"), "a truncated sample cannot identify the oldest work: {footer}");
+        assert!(
+            !footer.contains("Oldest work"),
+            "a truncated sample cannot identify the oldest work: {footer}"
+        );
     }
 
     fn snapshot(at: Instant) -> LiveWorkSnapshot {
