@@ -837,7 +837,9 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
     match kind.unwrap_or("") {
         "shell_ended" => glyphs::SHELL,
         "child_turn_completed" | "child_run_ended" | "child_report" => glyphs::CHILD,
-        "recovery_wait" | "child_recovery_wait" => glyphs::WAIT,
+        "recovery_wait" | "child_recovery_wait" | "reply_reminder" | "reply_outcome" => {
+            glyphs::WAIT
+        }
         "thread_settings"
         | "connection_changed"
         | "model_changed"

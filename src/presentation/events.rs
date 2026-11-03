@@ -4,6 +4,8 @@ use super::{PresentationField, short};
 
 pub(super) fn event_title(kind: &str) -> &str {
     match kind {
+        "reply_reminder" => "返信待ちの依頼",
+        "reply_outcome" => "返信の結果",
         "index_state" => "索引の状態",
         "previous_instance_interrupted" => "前回の中断記録",
         "app_shutdown" => "終了時の保存記録",
