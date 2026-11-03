@@ -255,10 +255,13 @@ impl QueuePopup {
                         ],
                         body.width.saturating_sub(3).max(1),
                     );
-                    lines.push(Line::from(
-                        crate::presentation::sanitize_plain(&item.excerpt, 0)
-                            .0
-                            .replace('\n', " "),
+                    lines.extend(presentation::indented_wrap(
+                        vec![Line::from(
+                            crate::presentation::sanitize_plain(&item.excerpt, 0)
+                                .0
+                                .replace('\n', " "),
+                        )],
+                        body.width.saturating_sub(3),
                     ));
                     popup::Item::new(lines)
                 })
@@ -338,11 +341,12 @@ pub(super) fn draw_compact(
             &crate::presentation::sanitize_plain(&item.label(language), 0).0,
             usize::from(area.width),
         )));
-        lines.push(Line::from(
+        lines.push(Line::from(format!(
+            "  {}",
             crate::presentation::sanitize_plain(&item.excerpt, 0)
                 .0
                 .replace('\n', " "),
-        ));
+        )));
     }
     for pending in view
         .pending
@@ -355,7 +359,10 @@ pub(super) fn draw_compact(
         } else {
             i18n::local!(language, "送信受付中", "Submitting")
         }));
-        lines.push(Line::from(accepting_excerpt(&pending.snapshot.text)));
+        lines.push(Line::from(format!(
+            "  {}",
+            accepting_excerpt(&pending.snapshot.text)
+        )));
     }
     lines.truncate(usize::from(area.height.saturating_sub(1)));
     lines.push(Line::from(compact_count(

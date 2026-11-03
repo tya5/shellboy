@@ -233,6 +233,7 @@ fn node_lines_inner(
     };
     let mut out = NodeLines::new(header);
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
+        out.role = LineRole::Body;
         out.push(Line::from(Text::Uncached.render(language)));
         return out;
     }
@@ -654,6 +655,25 @@ pub(super) fn hanging_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'s
     }
     out
 }
+
+pub(super) fn indented_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+    // Preserve the viewport at widths too narrow to fit both the indent and text.
+    let indent = if width >= 3 { 2 } else { 0 };
+    hanging_wrap(lines, width.saturating_sub(indent).max(1))
+        .into_iter()
+        .map(|mut line| {
+            if line.width() > 0 && indent > 0 {
+                let style = line
+                    .spans
+                    .first()
+                    .map_or(Style::default(), |span| span.style);
+                line.spans.insert(0, Span::styled("  ", style));
+            }
+            line
+        })
+        .collect()
+}
+
 fn node_lines(
     language: UiLanguage,
     node: &UiNode,
@@ -699,6 +719,10 @@ fn node_lines_with_header(
         source.role = LineRole::Body;
         source.push(Line::default());
     }
+    let body_hint = node.presentation.body_evicted
+        || (node.text.is_empty() && node.total_chars > 0)
+        || (node.presentation.blocks.is_empty()
+            && matches!(node.role.as_str(), "developer" | "system" | "tool"));
     let mut lines = Vec::new();
     let mut body_marked = false;
     for (role, mut line) in source.rows {
@@ -707,8 +731,23 @@ fn node_lines_with_header(
             &node.presentation.links,
             links,
         );
+        let inline_summary = !conversational
+            && !tool_only
+            && !body_hint
+            && lines.len() == 1
+            && matches!(
+                node.presentation.kind,
+                PresentationKind::Spill | PresentationKind::Unknown
+            );
+        let indent_body = !conversational
+            && !tool_only
+            && node.presentation.kind != PresentationKind::Event
+            && matches!(role, LineRole::Body | LineRole::Reasoning)
+            && !inline_summary;
         let rows = if conversational && !tool_only {
             hanging_wrap(vec![line], width.saturating_sub(2).max(1))
+        } else if indent_body {
+            indented_wrap(vec![line], width)
         } else {
             vec![line]
         };
@@ -759,10 +798,7 @@ fn node_lines_with_header(
     }
     if node.presentation.kind == PresentationKind::Event && lines.len() > 1 {
         let body = lines.split_off(1);
-        for mut line in hanging_wrap(body, width.saturating_sub(2).max(1)) {
-            line.spans.insert(0, Span::raw("  "));
-            lines.push(line);
-        }
+        lines.extend(indented_wrap(body, width));
     }
     while lines.last().is_some_and(|line| line.spans.is_empty()) {
         lines.pop();
@@ -1831,10 +1867,9 @@ fn tool_note(text: &str, width: u16, palette: theme::Palette) -> Vec<Line<'stati
     let style = Style::default()
         .fg(palette.muted())
         .underline_color(INPUT_DECORATION_MARKER);
-    hanging_wrap(vec![Line::from(safe)], width.saturating_sub(2).max(1))
+    indented_wrap(vec![Line::from(safe)], width)
         .into_iter()
         .map(|mut line| {
-            line.spans.insert(0, Span::raw("  "));
             for span in &mut line.spans {
                 span.style = style;
             }
@@ -5044,6 +5079,102 @@ mod conversation_item_tests {
         );
         assert_eq!(line.width(), 30);
     }
+    #[test]
+    fn uncached_and_details_hints_remain_indented_body_rows() {
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            for width in [12, 48] {
+                let uncached = UiNode {
+                    node_id: "uncached".into(),
+                    role: "assistant".into(),
+                    total_chars: 200,
+                    presentation: crate::presentation::NodePresentation {
+                        kind: PresentationKind::Unknown,
+                        title: "Hint".into(),
+                        body_evicted: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                let details = UiNode {
+                    node_id: "details".into(),
+                    role: "developer".into(),
+                    text: "synthetic system body".into(),
+                    total_chars: 20,
+                    presentation: crate::presentation::NodePresentation {
+                        kind: PresentationKind::Unknown,
+                        title: "Policy".into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                };
+                for node in [&uncached, &details] {
+                    let rows = node_lines(language, node, false, 0, width, &mut Vec::new());
+                    assert!(rows.len() >= 2, "{language:?} {width}: {}", plain(&rows));
+                    for row in rows.iter().skip(1).filter(|row| row.width() > 0) {
+                        let shown = row
+                            .spans
+                            .iter()
+                            .map(|span| span.content.as_ref())
+                            .collect::<String>();
+                        assert!(shown.starts_with("  "), "{language:?} {width}: {shown}");
+                        assert!(
+                            row.width() <= usize::from(width),
+                            "{language:?} {width}: {shown}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn indented_wrap_keeps_nested_rows_and_continuations_aligned_bilingually() {
+        for (language, text) in [
+            (
+                UiLanguage::En,
+                "A nested English explanation that wraps across several rows.",
+            ),
+            (
+                UiLanguage::Ja,
+                "入れ子の日本語説明文が狭い幅で複数行に折り返されます。",
+            ),
+        ] {
+            for width in [1, 2, 3, 12, 48] {
+                let rows = indented_wrap(vec![Line::from(text)], width);
+                assert!(
+                    rows.len() > 1 || width == 48,
+                    "{language:?} {width}: {rows:?}"
+                );
+                for row in &rows {
+                    let shown = row
+                        .spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>();
+                    if width >= 3 {
+                        assert!(shown.starts_with("  "), "{language:?} {width}: {shown}");
+                    }
+                    assert!(
+                        row.width() <= usize::from(width),
+                        "{language:?} {width}: {shown}"
+                    );
+                }
+                if width >= 3 {
+                    let muted = indented_wrap(
+                        vec![Line::styled(text, Style::default().fg(theme::MUTED))],
+                        width,
+                    );
+                    assert!(
+                        muted
+                            .iter()
+                            .flat_map(|line| &line.spans)
+                            .all(|span| { span.style.fg == Some(theme::MUTED) })
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn wrapped_tool_notes_share_two_space_indent_and_are_not_output_body() {
         let palette =
