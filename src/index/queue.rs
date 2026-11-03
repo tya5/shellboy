@@ -922,6 +922,26 @@ mod metadata_tests {
     }
 
     #[test]
+    fn authorization_recovery_limits_aggregate_page_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        let value = serde_json::json!({"node_id":"node", "state":"running", "error":null, "padding":"x".repeat(600_000)}).to_string();
+        for key in ["index.auto.a", "index.auto.b"] {
+            db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![key, value])
+                .unwrap();
+        }
+        let (page, changed) = recover_authorization_page(&mut db, None);
+        assert!(changed);
+        assert_eq!(page.unwrap().as_deref(), Some("index.auto.a"));
+        let second: Value = json_meta(&db, "index.auto.b").unwrap().unwrap();
+        assert_eq!(second["state"], "running");
+        recover_authorization(&mut db).unwrap();
+        let second: AutoAdmission = json_meta(&db, "index.auto.b").unwrap().unwrap();
+        assert_eq!(second.state, "failed");
+    }
+
+    #[test]
     fn authorization_save_failure_reports_prior_commit_and_retry_resumes() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
