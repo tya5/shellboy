@@ -785,6 +785,7 @@ fn node_lines_with_header(
     }
     if !conversational
         && !tool_only
+        && !body_hint
         && matches!(
             node.presentation.kind,
             PresentationKind::Spill | PresentationKind::Unknown
