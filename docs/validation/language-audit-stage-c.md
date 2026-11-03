@@ -504,3 +504,15 @@ covered by `japanese_catalogue_fallbacks_remain_exact_and_english_is_defined`
 and `global_argument_messages_preserve_cli_spelling_and_japanese_metadata`;
 the frontend title test checks both languages. This is a scoped exclusion from
 pending `c`, not a claim that the audit is complete.
+
+## #152 Deletion, Key Hint, And Count Message Audit
+
+On current main `fc1c603ec9`, the deletion review, key-hint, and typed count
+message surfaces retain explicit Japanese UI branches with language-selected
+English alternatives. Existing source evidence includes the bilingual deletion
+loading/failure screen test in `src/ui/thread_deletion.rs`, the measured-width
+guide-key test in `src/ui/help.rs`, and localized generated-title/count
+projections in `src/presentation/projection.rs` and
+`src/presentation/messages.rs`. These are UI-owned labels; provider errors,
+source titles, IDs, and stored values remain unchanged. The current-source audit on reconcile-34 reports `a=2808, b=1555, c=104`; strict `--check` still fails for 104 candidates. Fingerprint consistency is not a zero gate. This note records reviewed surfaces only and does not claim the Stage C
+zero gate, physical PTY, Windows, or integration acceptance.
