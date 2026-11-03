@@ -673,5 +673,145 @@
     "category": "a",
     "reason": "cancel groups outcomes by Japanese labels to retain stable ordering; Ja formats the label, En renders the typed outcome via cancelled_summary. No outcome or order changes.",
     "source_tokens_sha256": "3ec9ec0807f917fab9fe1b51ac9eb31a0142b0377bb49b1764c5c859582fb261"
+  },
+  "src/presentation.rs:5c6cec8330dacaff:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:37181c31ecd8b639:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:47eccf6439d59145:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:dc1acd895fe318a4:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:b9347dac4ba87027:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:5d94fbabe6e87291:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:eb08fc591c8f7eb9:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:7aee8ab3b2d81460:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:ad5c29fb372ef770:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:237b4ce015a657d2:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "1a8661feaebd180fead1cb3f8ee09b7a9c977b4357519f2e4c882d0c4d453cc0"
+  },
+  "src/presentation.rs:d3869504e5f64b1b:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "5446e974906c27933625e7e17fc0939de953e5ec78fb00ca45ae84e64c05afa2"
+  },
+  "src/presentation.rs:abf7e343c00cb233:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "5446e974906c27933625e7e17fc0939de953e5ec78fb00ca45ae84e64c05afa2"
+  },
+  "src/presentation.rs:d2deeb848be13849:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:810aa84d14201ae7:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:286d3cba4dbcd899:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:d9122fbf26437187:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:31d5aaafba03d686:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:44b295c1ea507023:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:34c69b23118fcb16:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:b13cd63d1f62d84a:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:b13cd63d1f62d84a:2": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:6a390a8ff9eb778f:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:86b86ee263bb3e7c:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:0b81a51ac3823137:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:fafc8de292c10311:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:545f79b623bede84:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:636104acd09c9719:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
+  },
+  "src/presentation.rs:157398e93d7916d9:1": {
+    "category": "a",
+    "reason": "Reviewed as the explicit Japanese-only ToolPresentation heading renderer; English convenience methods and the UI-selected English renderer use presentation.messages::tool_heading.",
+    "source_tokens_sha256": "4e60228624d644b1f00fa960b590ca09d7b2b9c51648521fd456c14b474ac2bb"
   }
 }
