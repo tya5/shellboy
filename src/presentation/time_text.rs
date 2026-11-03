@@ -22,6 +22,43 @@ pub fn elapsed_text(ms: u64, tenths: bool) -> String {
     }
 }
 
+/// Format UI-owned elapsed time without changing the legacy Japanese projection.
+pub fn elapsed_text_localized(
+    ms: u64,
+    tenths: bool,
+    language: crate::config::UiLanguage,
+) -> String {
+    if language == crate::config::UiLanguage::Ja {
+        return elapsed_text(ms, tenths);
+    }
+    let seconds = ms / 1000;
+    if seconds < 60 {
+        if tenths {
+            format!("{seconds}.{}s", (ms % 1000) / 100)
+        } else {
+            format!("{seconds}s")
+        }
+    } else if seconds < 3600 {
+        format!("{}m{}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{}h{}m", seconds / 3600, (seconds / 60) % 60)
+    }
+}
+
+/// Localize only the generated missing-time label; source timestamps stay unchanged.
+pub fn ended_text_localized(
+    at: Option<&chrono::DateTime<chrono::FixedOffset>>,
+    now: chrono::DateTime<chrono::Utc>,
+    offset: chrono::FixedOffset,
+    language: crate::config::UiLanguage,
+) -> String {
+    if at.is_none() && language == crate::config::UiLanguage::En {
+        "End time unavailable".into()
+    } else {
+        ended_text(at, now, offset)
+    }
+}
+
 pub fn ended_text(
     at: Option<&chrono::DateTime<chrono::FixedOffset>>,
     now: chrono::DateTime<chrono::Utc>,
@@ -67,6 +104,47 @@ mod tests {
             .map(|x| x.0)
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(keys.len(), 4);
+    }
+    #[test]
+    fn localized_elapsed_preserves_japanese_and_uses_ascii_english() {
+        use crate::config::UiLanguage::{En, Ja};
+        for (ms, tenths, english) in [
+            (0, false, "0s"),
+            (400, true, "0.4s"),
+            (59_999, false, "59s"),
+            (60_000, true, "1m0s"),
+            (3_599_999, false, "59m59s"),
+            (3_600_000, false, "1h0m"),
+            (3_780_000, false, "1h3m"),
+        ] {
+            assert_eq!(
+                elapsed_text_localized(ms, tenths, Ja),
+                elapsed_text(ms, tenths)
+            );
+            assert_eq!(elapsed_text_localized(ms, tenths, En), english);
+        }
+        assert!(elapsed_text_localized(u64::MAX, false, En).is_ascii());
+    }
+    #[test]
+    fn localized_end_does_not_rewrite_timestamps() {
+        use crate::config::UiLanguage::{En, Ja};
+        let at = chrono::DateTime::parse_from_rfc3339("2026-10-31T12:16:00Z").unwrap();
+        let now = at.with_timezone(&chrono::Utc);
+        let offset = chrono::FixedOffset::east_opt(9 * 3600).unwrap();
+        assert_eq!(
+            ended_text_localized(None, now, offset, Ja),
+            ended_text(None, now, offset)
+        );
+        assert_eq!(
+            ended_text_localized(None, now, offset, En),
+            "End time unavailable"
+        );
+        for language in [Ja, En] {
+            assert_eq!(
+                ended_text_localized(Some(&at), now, offset, language),
+                ended_text(Some(&at), now, offset)
+            );
+        }
     }
     #[test]
     fn saved_end_uses_viewer_date_not_observation_time() {
