@@ -503,11 +503,26 @@ Owner binary replacement does not inherit live tools or automatically resume wor
 
 Accepted parameters are `command`, `description`, `background`, `stdin_open`,
 `initial_stdin`, `input_encoding`, and `output_encoding`. Unknown parameters
-are ignored with a warning by default; strict configuration rejects that call.
+are ignored with a warning under `[shell] unknown_arguments = "warn"` (default);
+`"strict"` rejects only the affected call with `Unknown parameter(s): NAME.
+Accepted: command, description, background, stdin_open, initial_stdin,
+input_encoding, output_encoding.` Other calls in the group still run.
+
+Invalid known values likewise fail only their call, with field-specific errors:
+for example `Invalid shell parameter background: expected boolean`,
+`Missing shell parameter command: expected non-empty string`, or
+`Invalid shell parameter input_encoding: expected supported encoding; ...`.
+`description` and `initial_stdin` accept a string or null; booleans are required
+for `background` / `stdin_open`; `command` and encoding names must be nonempty
+and contain no NUL. Unsupported encoding, invalid stdin encoding, or stdin over
+the configured byte limit gets a per-call error. Tool-argument JSON is bounded
+to 1 MiB. Duplicate parameter names and malformed JSON are rejected for that
+call; a malformed protocol group is rejected as a whole. Shell calls execute in order:
+a tool-level command failure may cancel later calls, but argument-validation
+errors do not.
+
 Do not use `timeout` or `workdir`: set the working directory in the command
-and use the background shell observation commands for long-running work. An
-invalid call returns its own error without preventing other valid calls in the
-same group; malformed protocol groups are still rejected as a whole.
+and use the background shell observation commands for long-running work.
 
 ### Shell call descriptions
 

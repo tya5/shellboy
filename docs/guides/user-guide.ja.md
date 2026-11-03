@@ -287,7 +287,7 @@ shellboy docs get --id shellboy/delegation をshellで読んでください。
 子への依頼は `message send --expect-reply` を使い、`reply_received` で待ち、返信状態と原文を確認して結果をまとめてください。
 ```
 
-親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。
+親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。返信を要求した依頼が反映されると、受け手にはmessage IDと返信CLIを含む`reply_expected`通知が届きます。通常のRun終了時に、未返信IDを1度通知します。次の通常Run終了時にも未返信なら`ignored`になります。依頼元は`message get`と`thread get`の`awaiting_reply`で状態を確認できます。元のRunが動作中なら結果通知を受け取り、止まっていれば次のTurnで確認します（通知だけでTurnは開始しません）。利用者はTUIの`/replies`から現在の会話で反映済みの依頼を開き、返信文を作成できます。
 
 Threadの`AGENTS.md`参照先は作業上の指示です。新しいルートThreadの既定はcwdの`AGENTS.md`で、新Turnの準備で読み、同じTurnのretryは保存済みsnapshotを使います。Agent Guideは操作の説明書、リポジトリ直下の`AGENTS.md`はそのリポジトリの作業指示で、用途が異なります。
 
@@ -311,6 +311,8 @@ Ctrl+Cは現在会話のRunと所有する背景処理の停止です。Escは�
 `/retry` で行い、追加料金が発生することがあります。省いた本文は
 `/restore` で戻せます。token推定と75kの閾値はなくなりました。
 最後に成功したときの実測使用量と時刻は `shellboy thread get` で確認できます。
+`auto_at_tokens`による先回り圧縮は、測定済みのtokenと依頼文字数から削る量を調整し、
+圧縮後の新しい使用量で確認して閾値の80%を目標にし、未達なら次の対象範囲を安全な範囲で広げます。tokenizerによる厳密な保証値ではありません。
 
 大切な範囲を変更する前に `shellboy compact --dry-run --thread THREAD` で見込みを確認できます。
 これは開発版の機能で、summary・spill・trim・omit・maximal にも指定できます。

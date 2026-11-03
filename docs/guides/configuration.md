@@ -685,15 +685,24 @@ therefore one request late by design. Only the provider-reported count is used;
 there is no estimate, and providers or gateways that report no input tokens never
 trigger it. Context-overflow reduction remains the last-resort fallback.
 
+The planned post-compaction target is 80% of `auto_at_tokens` (rounded down).
+The removal size is calibrated from that request's provider-reported input tokens
+and measured request characters. Fresh provider usage later verifies the
+outcome; if it is still above target, an eligible later attempt escalates to a
+wider safe source scope (older Turns first, then the active-Turn middle). If no
+wider safe source exists, it defers rather than repeating the same summary.
+This is a target, not a guaranteed token count: provider usage is not a local
+tokenizer measurement, and summaries can change the character/token ratio.
+The 80% ratio is fixed, not a configuration key.
+
 If the compaction is not adopted (summary failure, nothing safely compactable),
-the request continues. Another proactive attempt in the same Run requires the
-provider's reported input count to increase by at least 10% of `auto_at_tokens`
-(rounded up) from the last non-adopted attempt, while still meeting the threshold.
-Unknown, unchanged or decreasing usage does not retry. If a spill succeeds but
-the summary is rejected, `compact list` records an adopted spill with
-`metrics.summary_rejected: true` and the failed summary's reported usage; the
-same growth gate applies before another attempt. Proactive spill selects only
-safe groups whose replayed JSON becomes shorter; this is not a token estimate.
+the request continues. Another attempt in the same Run is gated by at least 10%
+growth over the previous attempt's reported input count (rounded up), while
+still meeting the threshold; unknown, unchanged or decreasing usage does not
+retry. A successful spill is retained if its summary is rejected; `compact list`
+records `metrics.summary_rejected: true` and any reported summary usage. The same
+growth gate applies. Proactive spill selects only safe groups whose replayed JSON
+becomes shorter; this is not a token estimate.
 Ordinary summary protects
 the current and latest completed Turns; a long current Turn's old tool outputs
 can be spilled, but its text is not included in that summary.
@@ -711,8 +720,18 @@ provider does not report stay unknown; reused cached summary parts send nothing.
 
 `[shell] unknown_arguments = "warn"` is the default: unknown model-supplied
 shell parameters are ignored and named in the call result. Set it to `"strict"`
-to reject calls containing unknown parameters. Invalid known parameters are
-errors in either mode.
+to reject only calls containing unknown parameters. A strict rejection is
+`Unknown parameter(s): NAME. Accepted: command, description, background,
+stdin_open, initial_stdin, input_encoding, output_encoding.` Invalid known
+parameters are errors in either mode and affect only that call; valid calls in
+the same tool group still run. Examples include `Invalid shell parameter
+background: expected boolean`, `Missing shell parameter command: expected
+non-empty string`, `Invalid shell parameter COMMAND: expected non-empty string`,
+`Invalid shell parameter ENCODING_NAME: expected supported encoding; ...`, and
+`Invalid shell parameter initial_stdin: expected valid input within the
+configured byte limit; ...`. Malformed argument JSON can report
+`Invalid shell arguments: ...`; tool arguments are limited to 1 MiB. A malformed
+protocol group (as distinct from one invalid call) is rejected as a whole.
 
 ### Shell call descriptions
 
@@ -751,7 +770,7 @@ usage counters. `shellboy thread request --thread THREAD_ID --attempt ATTEMPT_ID
 also shows the observation under `saved.prompt_cache_diagnostics`, and rebuilds
 the saved comparison ID instead of borrowing the Thread's current last ID.
 
-## Terminal Ambiguous Width
+## Terminal ambiguous character width
 
 `ui.ambiguous_width` controls characters whose terminal width varies:
 

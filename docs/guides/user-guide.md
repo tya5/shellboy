@@ -304,7 +304,7 @@ Send each request with `message send --expect-reply`, wait for `reply_received`,
 check the reply state, retrieve the original reply, and summarize the results.
 ```
 
-[Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions.
+[Delegation](delegation.md) covers parent/child stopping scope, progress reports, and recovery-wait decisions. For each expected reply, the recipient sees a `reply_expected` notice with the message ID and reply command. At normal Run end, one reminder lists the pending IDs; if still unanswered at the next normal Run end, the duty becomes `ignored`. The sender can inspect `message get` / `thread get` (`awaiting_reply`); a live sender Run receives the outcome, while an inactive sender sees it on the next Turn without starting one. The TUI `/replies` opens the current conversation's applied reply requests so a person can compose a deliberate response.
 
 A Thread's `AGENTS.md` reference points to working instructions. A new root Thread defaults to the cwd's `AGENTS.md`; it is read when preparing a new Turn, while a retry in the same Turn uses the saved snapshot. The Agent Guide explains product operations; a repository's root `AGENTS.md` supplies that repository's work instructions. They serve different purposes.
 
@@ -328,6 +328,10 @@ After a failure, inspect Run/Turn context in F8. `/compact-max` reduces safe
 context without a summary API; `/retry` separately resends and may charge again.
 `/restore` can recover omitted text. Core no longer estimates tokens or uses a
 75k threshold. Last successful measured usage and its time are in thread get.
+Proactive compaction at `auto_at_tokens` plans to reduce input to 80% of that
+threshold, calibrating character removal against the provider's measured usage
+and checking fresh usage; a later eligible attempt widens its safe source scope if
+that usage remains above target. This is not a guaranteed tokenizer count.
 
 Before changing a valuable range, use `shellboy compact --dry-run --thread THREAD`
 (or add `--dry-run` to summary/spill/trim/omit/maximal). This current-main feature

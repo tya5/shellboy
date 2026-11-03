@@ -258,6 +258,15 @@ Common flag: `[--category raw|managed-images|history|index|all]`. Omitted collec
 
 Logical usage, reclaimable bytes, DB/WAL physical size, and SQLite reusable pages differ. GC need not shrink files by the same amount; no automatic VACUUM. History GC targets unreachable portions after explicit deletion, never surviving conversations by age alone. See [recovery and storage](recovery-and-storage.md).
 
+### Database schema version
+
+Startup schema upgrades are run by `src/storage/migrate.rs` from the numbered SQL
+files. Version 25 adds index `history_tool_group_attempt` on
+`tool_group(attempt_id)` for attempt-based history lookups. Version 26 adds the
+partial index `receipt_reply_pending` on `receipt(target_thread_id)` where
+`json_extract(result_json, '$.reply.state') = 'pending'`, for pending reply-duty
+lookups. These are automatic migrations, not user-managed indexes.
+
 ## Cursors
 
 List/get/read cursors are opaque continuation tokens. Pass the exact returned string to the same operation, target, filters, and encoding; never construct, edit, or reuse elsewhere. A list without next_cursor ends that enumeration. Shell read returns an observation cursor for subsequent reads until output_complete.
@@ -344,6 +353,9 @@ successful measured usage, start/end time and next_request_pending after an edit
 
 ## Reply-expected delegation
 
+`wait --help` lists `reply_received` with a `message_id`. Timeout does not cancel
+the reply duty.
+
 Send with `shellboy message send --thread THREAD --expect-reply --text 'Task'`;
 the receipt's `message_id` identifies the duty, independently of assignment or
 `--deliver now|complete`. The recipient replies after application with
@@ -360,8 +372,9 @@ shellboy history get --node REPLY_NODE_ID
 The reply arrives in a model sender's conversation, or external senders read
 `reply.node_id`. `satisfied` includes `replied`, `ignored`, `cancelled`, and
 `recipient_deleted`; inspect the snapshot. Timeouts do not cancel the request.
-An unanswered applied request gets one Run-end reminder, then `ignored` if still
-unanswered. Stop/recovery leaves it pending; combine a reply wait with
+An unanswered applied request gets one reminder at normal Run end; if it remains
+unanswered at the next normal Run end, it becomes `ignored`. Stop/recovery leaves
+it pending; combine a reply wait with
 `thread_settled` to detect stalls. See [Delegation](delegation.md).
 
 ## Noninteractive work with a JSON result
@@ -797,9 +810,15 @@ there can be at most 128 pending duties per recipient Thread. A recipient model
 Use `history get --node REPLY_NODE_ID` for the body.
 
 `wait reply_received` uses a JSON condition
-`{"type":"reply_received","message_id":"MESSAGE_ID"}`. Inspect the snapshot:
+`{"type":"reply_received","message_id":"MESSAGE_ID"}`. Conditions use any
+semantics when combined with other wait conditions. Inspect the snapshot:
 `satisfied` can mean replied, ignored, cancelled, or recipient deleted. Timeout
 does not cancel the duty. `thread get` includes `awaiting_reply` (up to 128,
-oldest first). Cancelling a queued request cancels both input and duty;
+oldest first). When an expected-reply message is admitted, its recipient gets a
+`reply_expected` notice with the CLI reply command. An unanswered applied duty gets one reminder at normal Run end; if still
+unanswered at a later normal Run end, it becomes `ignored`. The sender receives a `reply_outcome` notice for ignored or
+deleted-recipient outcomes; without a live sender Run, that notice appears on
+the next Turn and does not start one. Cancelling a queued request cancels both
+input and duty;
 cancelling an admitted duty returns `reply_cancelled`, retains history, and
 notifies the recipient without waking it.
