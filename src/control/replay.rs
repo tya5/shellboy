@@ -676,7 +676,6 @@ fn decode_frame(
             let items = convert(value, epoch);
             (
                 group,
-                spill,
                 if spill {
                     tool_order::inline_spill(items)?
                 } else {
