@@ -746,6 +746,7 @@ impl Diagnostics {
                 elapsed_ms: u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX),
             })),
             index_discard: None,
+            automatic_compaction_counts: None,
         });
     }
 
