@@ -3562,35 +3562,46 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         assert!(material.contains("EARLY-ONE"), "earlier Turn first");
         assert!(!material.contains("STEP0"), "the active Turn waits");
         first.reply.send((200, answer("## Goal\nEarly work summarized"))).unwrap();
-        // The measured target needs more reduction, so the same attempt widens
-        // into the active Turn before admitting another ordinary request.
+        let after_prefix = incoming(&control, &mut receive).await;
+        assert_ne!(after_prefix.body["tools"], json!([]));
+        let input = after_prefix.body["input"].as_array().unwrap();
+        // The edit precedes every kept response: no reasoning from before it.
+        assert!(input.iter().all(|item| item["type"] != "reasoning"), "{input:?}");
+        assert!(input.iter().any(|item| item["call_id"] == "step-2"));
+        // Still at or above the threshold on a fresh measurement: active Turn.
+        after_prefix.reply.send((200, step(3, 260))).unwrap();
         let second = incoming(&control, &mut receive).await;
         assert_eq!(second.body["tools"], json!([]));
         let material = second.body["input"].to_string();
-        assert!(material.contains("STEP0") && material.contains("STEP1"));
-        assert!(!material.contains("STEP2"), "the latest round is carried verbatim");
-        assert!(!material.contains("EEEE"));
-        second.reply.send((200, answer("## Goal\nRun steps\n## Current state\nSTEP0-1 ran"))).unwrap();
+        assert!(material.contains("STEP0") && material.contains("STEP2"), "③ is summary input");
+        assert!(!material.contains("STEP3"), "④ is carried as text, not summarized");
+        assert!(!material.contains("EEEE"), "encrypted reasoning is never summary material");
+        second.reply.send((200, answer("## Goal\nRun steps\n## Current state\nSTEP0-2 ran"))).unwrap();
         let after = incoming(&control, &mut receive).await;
         assert_ne!(after.body["tools"], json!([]));
         let input = after.body["input"].as_array().unwrap();
         let request = input.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
+        let before = after_prefix.body["input"].as_array().unwrap();
+        let before_request = before.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
+        assert_eq!(input[..=request], before[..=before_request], "①② unchanged");
         let tail = &input[request + 1..];
+        assert!(tail.iter().all(|item| item.get("type").is_none_or(|t| t == "message")), "no call, result or reasoning after the edit: {tail:?}");
         let notice = tail.iter().find(|item| item.to_string().contains("tool work below in the active Turn was summarized")).expect("summary notice");
-        assert!(notice.to_string().contains("STEP2"));
-        after.reply.send((200, answer_with_usage("finished", 190))).unwrap();
+        let text = notice.to_string();
+        assert!(text.contains("STEP3") && text.contains("Latest tool round"), "④ as text: {text}");
+        after.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
-        assert_eq!(events.len(), 1, "{events:#?}");
-        let attempt_id = events[0]["attempt_id"].as_str().unwrap().to_owned();
-        let (record, executions): (String, i64) = control.store.database.call(move |db| Ok((
-            db.query_row("SELECT error_json FROM model_attempt WHERE id=?1", [attempt_id], |r| r.get(0))?,
+        assert_eq!(events.len(), 2, "{events:#?}");
+        let ids: Vec<String> = events.iter().map(|e| e["attempt_id"].as_str().unwrap().to_owned()).collect();
+        let (records, executions): (Vec<String>, i64) = control.store.database.call(move |db| Ok((
+            ids.iter().map(|id| db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.midturn') FROM model_attempt WHERE id=?1", [id], |r| r.get(0))).collect::<Result<Vec<_>, _>>()?,
             db.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get(0))?,
         ))).await.unwrap();
-        let record: Value = serde_json::from_str(&record).unwrap();
-        assert_eq!(record["automatic_trim_attempt"]["midturn"]["reason"], "target_shortfall");
-        assert_eq!(record["automatic_trim_attempt"]["target_plan"]["target_tokens"], 160);
-        assert_eq!(executions, 3, "saved tools are never executed again");
+        let mut records: Vec<Value> = records.iter().map(|r| serde_json::from_str(r).unwrap()).collect();
+        records.sort_by_key(|r| r.to_string());
+        assert_eq!(records, [json!({"scope":"active_turn"}), json!({"skipped":"prefix_first"})]);
+        assert_eq!(executions, 4, "no saved tool is executed again");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
 }
