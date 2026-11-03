@@ -307,12 +307,10 @@ Startup embedding recovery runs before index consumers. It marks interrupted
 embedding jobs failed in transactions of at most 128 jobs using a partial
 running-state index. Bootstrap records are visited in key order using the
 `index.bootstrap.` prefix range, at most 128 records and 1 MiB of values per
-transaction. New serialized Work records are capped at 1 MiB, including JSON
-metadata. A legacy record above that cap is measured with `octet_length`,
-deleted without selecting or decoding its payload, and replaced by a compact
-error record carrying its digest, observed size, limit, and reason. This keeps
-each recovery unit bounded without attempting to split an indivisible record.
-The cursor is ephemeral: restart scans the prefix again and already failed
+transaction. Serialized Work records are split to fit 1 MiB including JSON
+metadata. Oversized legacy rows are inspected with bounded incremental reads and
+replaced with a source admission or a profile-level manual-rebuild status, as
+described above. The cursor is ephemeral: restart scans the prefix again and already failed
 records remain failed. Each committed page is published before the next one;
 workers start only after recovery completes. Interrupted requests require an
 explicit retry and may already have incurred billing.
