@@ -164,6 +164,12 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .unwrap()
             .result;
         assert_eq!(details["reply"]["state"], "cancelled");
+        assert_eq!(
+            details["reply"]["cancelled_by"],
+            serde_json::json!({"kind":"human"})
+        );
+        assert_eq!(details["reply"]["cancel_reason"], "sender");
+        assert!(details["reply"].get("by").is_none());
         store.database.call(move |db| {
             assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'", [], |r| r.get::<_, i64>(0))?, if admitted { 1 } else { 0 });
             assert_eq!(db.query_row("SELECT count(*) FROM thread_path", [], |r| r.get::<_, i64>(0))?, 0);
