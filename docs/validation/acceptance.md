@@ -8944,5 +8944,6 @@ Link and keyboard behavior and all UI symbols/wording remain unchanged.
 
 On the rebased branch (latest `origin/main` fd23d321; c090fa79 is an ancestor):
 `cargo fmt --all -- --check` passed, and the focused presentation, Details, and
-history-interaction suites passed (24, 2, and 15 tests respectively). Three-OS
-CI remains pending.
+history-interaction suites passed (24, 2, and 15 tests respectively). Three-OS CI run `41559188009` succeeded on code/test SHA `59256f8b` across
+Windows, macOS, and Ubuntu. A documentation-only status update follows; the
+final pushed tip will receive another three-OS run before handoff.
