@@ -2861,7 +2861,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
                 ..
             } => {
                 assert_eq!(anchor.char_offset, expected_offset);
-                assert_eq!(message.contains("先頭"), expected_offset == 0);
+                assert_eq!(message.contains("beginning"), expected_offset == 0);
                 Some(())
             }
             _ => None,

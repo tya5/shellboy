@@ -1012,6 +1012,13 @@ mod anchor_tests {
         }
     }
     #[test]
+    fn rebase_failures_are_localized_without_inspecting_user_text() {
+        use crate::config::UiLanguage;
+        assert_eq!(RebaseFailure::DifferentBody.message(UiLanguage::Ja), "生成途中と確定本文が異なる");
+        assert_eq!(RebaseFailure::DifferentBody.message(UiLanguage::En), "The streamed and saved bodies differ");
+        assert_eq!(RebaseFailure::Ambiguous.message(UiLanguage::En), "The same body occurs multiple times; correspondence is ambiguous");
+    }
+    #[test]
     fn exact_whole_body_and_unique_unicode_window_preserve_only_proven_positions() {
         let whole = source("あいうあいう");
         assert_eq!(corresponding_offset(&whole, &whole, 4), Ok(4));
