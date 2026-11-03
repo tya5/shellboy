@@ -1,5 +1,14 @@
 # Development status
 
+## Final benchmark after #183 (2026-11-03, branch `bench/final-2026-11-03`)
+
+Paid real-model before/after (same day, back to back, release builds, N=1):
+main `c090fa79` 42.81% vs `2669c1ba` 79.43% cached/input excluding the first
+request; uncached input -55%. Other agents reuse the 2026-11-02 #151 rows (not
+re-measured). Fake-model CI resource runs 41552141436 / 41553439861 show no
+material change. Report: [bench-report-2026-11-03](../validation/bench-report-2026-11-03.md).
+Next: none for #183; further agent re-measurement needs a new approval.
+
 ## Saved Turn context line (#183, branch `issue-183/append-context`)
 
 The per-request `Shellboy context v1` tail item is now a saved `context` node,

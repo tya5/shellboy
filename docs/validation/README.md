@@ -16,3 +16,6 @@ Conversation redesign evidence is split into [B+C](conversation-redesign-bc.md),
 [E list qualification](conversation-redesign-e.md) and
 [F Watch qualification](conversation-redesign-f.md). Each records its own source,
 observations and remaining gates; evidence is not transferable between increments.
+
+The [2026-11-03 benchmark report](bench-report-2026-11-03.md) records the
+paid real-model before/after of #183 and Shellboy's fake-model resource runs.
