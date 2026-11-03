@@ -180,3 +180,68 @@ fn observed_age_and_unknown_saved_age_remain_distinct_in_both_languages() {
         Some("経過未取得")
     );
 }
+
+#[test]
+fn activity_footer_resources_select_matching_languages() {
+    use super::FooterText;
+    use crate::config::UiLanguage;
+
+    for (item, japanese, english) in [
+        (FooterText::Observed, "観測 ", "Observed "),
+        (
+            FooterText::UnknownAge,
+            "経過未取得",
+            "Elapsed time unavailable",
+        ),
+        (FooterText::UsageLimit, "使用量上限", "Usage limit"),
+        (FooterText::RateLimit, "要求頻度の制限", "Rate limit"),
+        (
+            FooterText::RecoveryActions,
+            "待つ・時刻後も明示的に再試行 / /model で接続を選ぶ",
+            "Retry is manual after reset · /model to switch connection",
+        ),
+    ] {
+        assert_eq!(item.localized(UiLanguage::Ja), japanese);
+        assert_eq!(
+            item.localized(UiLanguage::En).replace(" | ", " · "),
+            english
+        );
+    }
+}
+
+#[test]
+fn automatic_compaction_skip_resources_preserve_each_state_in_both_languages() {
+    use super::AutomaticCompactionSkip as Skip;
+    use crate::config::UiLanguage;
+
+    for (skip, japanese, english) in [
+        (
+            Skip::NoTarget,
+            "自動圧縮を見送り（対象なし）",
+            "Auto-compaction deferred (no eligible history)",
+        ),
+        (
+            Skip::NoNewTarget,
+            "自動圧縮を見送り（新たな対象なし）",
+            "Auto-compaction deferred (no new eligible history)",
+        ),
+        (
+            Skip::RejectedInvalidState,
+            "自動圧縮を見送り（前回は拒否）",
+            "Auto-compaction deferred (previous attempt rejected)",
+        ),
+        (
+            Skip::RejectedOther,
+            "自動圧縮を見送り（前回は拒否）",
+            "Auto-compaction deferred (previous attempt rejected)",
+        ),
+        (
+            Skip::CoverageLimited,
+            "自動圧縮の対象を確認できません",
+            "Auto-compaction eligibility unavailable",
+        ),
+    ] {
+        assert_eq!(skip.label_localized(UiLanguage::Ja), japanese);
+        assert_eq!(skip.label_localized(UiLanguage::En), english);
+    }
+}
