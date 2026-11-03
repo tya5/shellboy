@@ -927,6 +927,106 @@ impl Operations {
         }
     }
 }
+
+fn english_field_label(label: &str) -> &str {
+    match label {
+        "会話ID" => "Thread ID",
+        "作業ID" | "現在の作業ID" => "Run ID",
+        "件数" => "Count",
+        "続きcursor（空=先頭）" => "Cursor (empty = first)",
+        "対象（空=未指定）" => "Target (empty = unspecified)",
+        "索引領域ID（空=現在）" => "Index scope ID (empty = current)",
+        "会話ID（空白区切り）" => "Thread IDs (space-separated)",
+        "出典node ID（空白区切り）" => "Source node IDs (space-separated)",
+        "絞込み" => "Filter",
+        "開始日時" => "Start time",
+        "終了日時（未満）" => "End time (exclusive)",
+        "コマンドを含む" => "Include commands",
+        "状態" => "State",
+        "状態（空=全体）" => "Status (empty = all)",
+        "終了コード" => "Exit code",
+        "続きcursor" => "Next cursor",
+        "モデル試行ID（他の指定は空に）" => {
+            "Model attempt ID (leave other filters empty)"
+        }
+        "作業ID（指定時は会話を空に）" => "Run ID (leave thread empty)",
+        "応答処理ID（指定時は会話を空に）" => "Response ID (leave thread empty)",
+        "子会話を含む" | "子孫も対象" => "Include descendants",
+        "内訳（空=合計）" => "Breakdown (empty = totals)",
+        "時間帯（内訳指定時）" => "Time bucket (when breakdown is set)",
+        "区切り上限（内訳指定時）" => "Bucket limit (when breakdown is set)",
+        "続きcursor（同じ内訳）" => "Next cursor (same breakdown)",
+        "作業場所（空=継承/既定）" => "Working directory (empty = inherit/default)",
+        "AGENTS参照（空=継承/既定）" => "AGENTS references (empty = inherit/default)",
+        "接続（空=継承）" => "Connection (empty = inherit)",
+        "モデル（空=継承）" => "Model (empty = inherit)",
+        "推論強度（none=解除）" => "Reasoning effort (none = clear)",
+        "親会話（空=独立）" => "Parent thread (empty = independent)",
+        "作業場所（空=継承）" => "Working directory (empty = inherit)",
+        "AGENTS参照（空=継承）" => "AGENTS references (empty = inherit)",
+        "タイトル操作" => "Title action",
+        "タイトル（set時）" => "Title (for set)",
+        "新cwd（空=変更なし）" => "New working directory (empty = unchanged)",
+        "AGENTS参照（空=変更なし）" => "AGENTS references (empty = unchanged)",
+        "接続（空=変更なし）" => "Connection (empty = unchanged)",
+        "モデル（空=変更なし）" => "Model (empty = unchanged)",
+        "effort（空=変更なし/none=解除）" => {
+            "Reasoning effort (empty = unchanged; none = clear)"
+        }
+        "依頼本文（Ctrl+J改行）" | "stdin本文（Ctrl+J改行）" => {
+            "Request text (Ctrl+J for newline)"
+        }
+        "送信者の表示名（任意）" => "Sender display name (optional)",
+        "届けるとき（空=次の区切り）" => "Delivery time (empty = next boundary)",
+        "取消する入力ID（空白区切り）" => "Input IDs to cancel (space-separated)",
+        "応答処理ID" => "Response ID",
+        "観測する条件" => "Condition to observe",
+        "対象ID" => "Target ID",
+        "出力観測の開始cursor" => "Output observation start cursor",
+        "前回waitのcursor" => "Previous wait cursor",
+        "会話の観測状態（空白区切り）" => {
+            "Thread observation states (space-separated)"
+        }
+        "観測の待機上限 ms" => "Observation wait limit (ms)",
+        "作業（空=全体）" => "Run (empty = all)",
+        "開始日時（RFC3339）" => "Start time (RFC3339)",
+        "抜粋文字数（0=省略）" => "Excerpt characters (0 = omit)",
+        "最終回答のみ" => "Final answer only",
+        "取得byte数" => "Bytes to retrieve",
+        "検索語" => "Search query",
+        "会話（空=全体）" => "Thread (empty = all)",
+        "種類（空白区切り）" => "Kinds (space-separated)",
+        "除外する種類（空白区切り）" => "Kinds to exclude (space-separated)",
+        "開始日時（RFC3339・含む）" => "Start time (RFC3339, inclusive)",
+        "終了日時（RFC3339・含まない）" => "End time (RFC3339, exclusive)",
+        "文字コード（空=保存値）" => "Encoding (empty = stored value)",
+        "絶対パスまたは作業場所からの相対パス" => {
+            "Absolute path or path relative to working directory"
+        }
+        "添付の種類" => "Attachment kind",
+        "圧縮・編集方法" => "Compaction/edit method",
+        "範囲先頭node ID" => "Range start node ID",
+        "範囲末尾node ID" => "Range end node ID",
+        "要約文字数上限（空=設定値）" => {
+            "Summary character limit (empty = configured)"
+        }
+        "要約割合上限（空=設定値）" => "Summary ratio limit (empty = configured)",
+        "要求次元（空=設定値）" => "Requested dimensions (empty = configured)",
+        "保存データの種類" => "Stored data kind",
+        "接続（空=会話/既定）" => "Connection (empty = thread/default)",
+        "関係" => "Relation",
+        "続きcursor（空白区切り）" => "Next cursor (space-separated)",
+        "メモリを観測（絞込みと併用不可）" => {
+            "Observe memory (cannot combine with filters)"
+        }
+        "所有作業（空=指定なし）" => "Owning run (empty = any)",
+        "記録日時以降（RFC3339）" => "Recorded since (RFC3339)",
+        "保存された状態（空白区切り）" => "Saved states (space-separated)",
+        "終端状態を含む" => "Include terminal states",
+        _ => label,
+    }
+}
+
 impl Form {
     fn field_label_for<'a>(&self, field: &'a Field) -> &'a str {
         if self.language == UiLanguage::Ja {
@@ -946,7 +1046,7 @@ impl Form {
                     self.language,
                 )
             })
-            .unwrap_or(field.label)
+            .unwrap_or_else(|| english_field_label(field.label))
     }
     fn new(operation: OpKind, c: &Context) -> Self {
         use Kind::*;
@@ -3214,6 +3314,57 @@ mod language_rendering_tests {
     use super::{Command, Context, Form, OpKind};
     use crate::{config::UiLanguage, ui::UiState};
     use std::path::Path;
+
+    #[test]
+    fn field_localization_does_not_change_values_or_japanese_labels() {
+        for &operation in OpKind::ALL {
+            let mut form = Form::new(operation, &Context::default());
+            let original: Vec<_> = form
+                .fields
+                .iter()
+                .map(|field| (field.name, field.value.clone(), field.label))
+                .collect();
+            form.language = UiLanguage::En;
+            for field in &form.fields {
+                assert!(
+                    form.field_label_for(field).is_ascii(),
+                    "{operation:?} {}",
+                    field.name
+                );
+            }
+            assert_eq!(
+                form.fields
+                    .iter()
+                    .map(|field| field.value.clone())
+                    .collect::<Vec<_>>(),
+                original
+                    .iter()
+                    .map(|(_, value, _)| value.clone())
+                    .collect::<Vec<_>>(),
+                "language selection changed command field values for {operation:?}"
+            );
+            form.language = UiLanguage::Ja;
+            for field in &form.fields {
+                assert_eq!(
+                    form.field_label_for(field),
+                    field.label,
+                    "{operation:?} {}",
+                    field.name
+                );
+            }
+            assert_eq!(
+                form.fields
+                    .iter()
+                    .map(|field| field.value.clone())
+                    .collect::<Vec<_>>(),
+                original
+                    .iter()
+                    .map(|(_, value, _)| value.clone())
+                    .collect::<Vec<_>>(),
+                "language selection changed command field values for {operation:?}"
+            );
+        }
+    }
 
     #[test]
     fn every_english_form_field_has_an_english_label() {

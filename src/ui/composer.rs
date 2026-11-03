@@ -1,20 +1,28 @@
 //! Completion is local; prompt recall is a bounded asynchronous DB read.
+use super::i18n::local;
 use super::theme;
 use super::*;
 use std::collections::VecDeque;
 
 // Named text keys keep this local UI copy ready for the #35 translation layer.
+#[derive(Clone, Copy)]
 enum ComposerText {
     LiteralPasteWarning,
     RetypeCommandHint,
 }
 impl ComposerText {
-    fn text(self) -> &'static str {
+    fn text(self, language: crate::config::UiLanguage) -> &'static str {
         match self {
-            Self::LiteralPasteWarning => "貼り付けた文として送ります（コマンドは実行しません）",
-            Self::RetypeCommandHint => {
-                "実行するには先頭の /コマンド名 を消して手で入力してください"
-            }
+            Self::LiteralPasteWarning => local!(
+                language,
+                "貼り付けた文として送ります（コマンドは実行しません）",
+                "This pasted text will be sent as a message, not run as a command."
+            ),
+            Self::RetypeCommandHint => local!(
+                language,
+                "実行するには先頭の /コマンド名 を消して手で入力してください",
+                "To run a command, remove the leading slash and type it yourself."
+            ),
         }
     }
 }
@@ -37,175 +45,227 @@ impl DraftSnapshot {
     }
 }
 
+fn recalled_input_status(language: crate::config::UiLanguage) -> &'static str {
+    crate::ui::text_width::glyphs::select(
+        local!(
+            language,
+            "入力履歴 · ↑古い / ↓新しい・下書きへ",
+            "Input history · ↑ older / ↓ newer · Down returns to draft"
+        ),
+        local!(
+            language,
+            "入力履歴 | ^古い / v新しい・下書きへ",
+            "Input history | ^ older / v newer | Down returns to draft"
+        ),
+    )
+}
+
+fn completion_hint(language: crate::config::UiLanguage) -> &'static str {
+    crate::ui::text_width::glyphs::select(
+        local!(
+            language,
+            "↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる",
+            "↑↓ Select · Tab/Enter complete · Esc close"
+        ),
+        local!(
+            language,
+            "^v 選択 | Tab/Enter 補完 | Esc 閉じる",
+            "^v Select | Tab/Enter complete | Esc close"
+        ),
+    )
+}
+
+fn input_history_error(language: crate::config::UiLanguage, error: &str) -> String {
+    match language {
+        crate::config::UiLanguage::Ja => format!("入力履歴エラー: {error}"),
+        crate::config::UiLanguage::En => format!("Input history error: {error}"),
+    }
+}
+
 struct CommandHint {
     name: &'static str,
-    help: &'static str,
 }
+impl CommandHint {
+    fn help(&self, language: crate::config::UiLanguage) -> &'static str {
+        match self.name {
+            "/agents" => local!(
+                language,
+                "指示ファイル参照を確認／変更",
+                "Inspect or change instruction file"
+            ),
+            "/received" => local!(
+                language,
+                "受信記録（失敗・ストリーム差分）を読む",
+                "Read received records and stream diffs"
+            ),
+            "/status" => local!(
+                language,
+                "作業状態・背景コマンド・子の作業を確認",
+                "Inspect work, background shells, and child Runs"
+            ),
+            "/help" => local!(language, "操作ガイド", "Usage guide"),
+            "/new" => local!(language, "新しい会話", "New conversation"),
+            "/threads" => local!(language, "会話一覧", "List conversations"),
+            "/threads active" => local!(language, "作業を優先順に監視", "Watch work by priority"),
+            "/threads descendants" => local!(
+                language,
+                "現在の会話の子孫を監視",
+                "Watch descendants of this conversation"
+            ),
+            "/switch" => local!(language, "IDで会話を切替", "Switch conversation by ID"),
+            "/model" => local!(
+                language,
+                "接続・モデルを確認／変更",
+                "Inspect or change connection and model"
+            ),
+            "/models" => local!(
+                language,
+                "接続先のモデル一覧・選択",
+                "List and select models for the connection"
+            ),
+            "/effort" => local!(language, "推論強度を変更", "Change reasoning effort"),
+            "/cwd" => local!(
+                language,
+                "作業ディレクトリを確認／変更",
+                "Inspect or change working directory"
+            ),
+            "/attach" => local!(language, "ファイルを添付", "Attach a file"),
+            "/attachments" => local!(language, "添付一覧", "List attachments"),
+            "/detach" => local!(language, "添付を外す", "Remove an attachment"),
+            "/reload-attachments" => local!(language, "添付を再読込", "Reload attachments"),
+            "/image" => local!(
+                language,
+                "クリップボードの画像を下書きに添付",
+                "Attach clipboard image to draft"
+            ),
+            "/paste-image" => local!(language, "画像を貼付け（別名）", "Paste image (alias)"),
+            "/search" => local!(language, "履歴を検索", "Search history"),
+            "/index" => local!(language, "検索索引を管理", "Manage search index"),
+            "/fork" => local!(
+                language,
+                "履歴から会話を分岐",
+                "Fork conversation from history"
+            ),
+            "/edit" => local!(language, "依頼を編集して分岐", "Edit request and fork"),
+            "/compact-max" => local!(
+                language,
+                "APIなしで最大縮小",
+                "Maximum compaction without API"
+            ),
+            "/compact" => local!(language, "会話を圧縮", "Compact conversation"),
+            "/details" => local!(
+                language,
+                "履歴の詳細・原文",
+                "History details and original text"
+            ),
+            "/links" => local!(language, "完全URL一覧", "List full URLs"),
+            "/actions" => local!(language, "操作フォーム", "Operation forms"),
+            "/operations" => local!(language, "操作フォーム（別名）", "Operation forms (alias)"),
+            "/copy" => local!(
+                language,
+                "原文・コードをコピー",
+                "Copy original text or code"
+            ),
+            "/reasoning" => local!(language, "推論の表示を切替", "Toggle reasoning display"),
+            "/select" => local!(language, "端末の選択モード", "Terminal selection mode"),
+            "/paste" => local!(
+                language,
+                "貼付けblockの確認・編集",
+                "Review or edit pasted block"
+            ),
+            "/restore" => local!(
+                language,
+                "入力範囲を戻す。番号付きは失敗した下書きを復元",
+                "Restore input range; numbered form restores a failed draft"
+            ),
+            "/retry" => local!(
+                language,
+                "現在の復旧待ちを同じ内容で再試行",
+                "Retry current recovery with the same content"
+            ),
+            "/stop" => local!(
+                language,
+                "現在の会話の作業を停止",
+                "Stop work in this conversation"
+            ),
+            "/cancel-wait" => local!(language, "待機の観測を取消", "Cancel wait observation"),
+            "/cancel" => local!(language, "実行を中断", "Interrupt execution"),
+            "/background" => local!(
+                language,
+                "foreground shellを背景化",
+                "Move foreground shell to background"
+            ),
+            "/quit" => local!(language, "通常終了", "Exit normally"),
+            "/queue" => local!(
+                language,
+                "保存済みの反映待ち・保留入力を確認／取消",
+                "Inspect or cancel queued and held input"
+            ),
+            _ => "",
+        }
+    }
+}
+
 const COMMANDS: &[CommandHint] = &[
-    CommandHint {
-        name: "/agents",
-        help: "指示ファイル参照を確認／変更",
-    },
-    CommandHint {
-        name: "/received",
-        help: "受信記録（失敗・ストリーム差分）を読む",
-    },
-    CommandHint {
-        name: "/status",
-        help: "作業状態・背景コマンド・子の作業を確認",
-    },
-    CommandHint {
-        name: "/help",
-        help: "操作ガイド",
-    },
-    CommandHint {
-        name: "/new",
-        help: "新しい会話",
-    },
-    CommandHint {
-        name: "/threads",
-        help: "会話一覧",
-    },
+    CommandHint { name: "/agents" },
+    CommandHint { name: "/received" },
+    CommandHint { name: "/status" },
+    CommandHint { name: "/help" },
+    CommandHint { name: "/new" },
+    CommandHint { name: "/threads" },
     CommandHint {
         name: "/threads active",
-        help: "作業を優先順に監視",
     },
     CommandHint {
         name: "/threads descendants",
-        help: "現在の会話の子孫を監視",
     },
-    CommandHint {
-        name: "/switch",
-        help: "IDで会話を切替",
-    },
-    CommandHint {
-        name: "/model",
-        help: "接続・モデルを確認／変更",
-    },
-    CommandHint {
-        name: "/models",
-        help: "接続先のモデル一覧・選択",
-    },
-    CommandHint {
-        name: "/effort",
-        help: "推論強度を変更",
-    },
-    CommandHint {
-        name: "/cwd",
-        help: "作業ディレクトリを確認／変更",
-    },
-    CommandHint {
-        name: "/attach",
-        help: "ファイルを添付",
-    },
+    CommandHint { name: "/switch" },
+    CommandHint { name: "/model" },
+    CommandHint { name: "/models" },
+    CommandHint { name: "/effort" },
+    CommandHint { name: "/cwd" },
+    CommandHint { name: "/attach" },
     CommandHint {
         name: "/attachments",
-        help: "添付一覧",
     },
-    CommandHint {
-        name: "/detach",
-        help: "添付を外す",
-    },
+    CommandHint { name: "/detach" },
     CommandHint {
         name: "/reload-attachments",
-        help: "添付を再読込",
     },
-    CommandHint {
-        name: "/image",
-        help: "クリップボードの画像を下書きに添付",
-    },
+    CommandHint { name: "/image" },
     CommandHint {
         name: "/paste-image",
-        help: "画像を貼付け（別名）",
     },
-    CommandHint {
-        name: "/search",
-        help: "履歴を検索",
-    },
-    CommandHint {
-        name: "/index",
-        help: "検索索引を管理",
-    },
-    CommandHint {
-        name: "/fork",
-        help: "履歴から会話を分岐",
-    },
-    CommandHint {
-        name: "/edit",
-        help: "依頼を編集して分岐",
-    },
+    CommandHint { name: "/search" },
+    CommandHint { name: "/index" },
+    CommandHint { name: "/fork" },
+    CommandHint { name: "/edit" },
     CommandHint {
         name: "/compact-max",
-        help: "APIなしで最大縮小",
     },
-    CommandHint {
-        name: "/compact",
-        help: "会話を圧縮",
-    },
-    CommandHint {
-        name: "/details",
-        help: "履歴の詳細・原文",
-    },
-    CommandHint {
-        name: "/links",
-        help: "完全URL一覧",
-    },
-    CommandHint {
-        name: "/actions",
-        help: "操作フォーム",
-    },
+    CommandHint { name: "/compact" },
+    CommandHint { name: "/details" },
+    CommandHint { name: "/links" },
+    CommandHint { name: "/actions" },
     CommandHint {
         name: "/operations",
-        help: "操作フォーム（別名）",
     },
-    CommandHint {
-        name: "/copy",
-        help: "原文・コードをコピー",
-    },
-    CommandHint {
-        name: "/reasoning",
-        help: "推論の表示を切替",
-    },
-    CommandHint {
-        name: "/select",
-        help: "端末の選択モード",
-    },
-    CommandHint {
-        name: "/paste",
-        help: "貼付けblockの確認・編集",
-    },
-    CommandHint {
-        name: "/restore",
-        help: "入力範囲を戻す。番号付きは失敗した下書きを復元",
-    },
-    CommandHint {
-        name: "/retry",
-        help: "現在の復旧待ちを同じ内容で再試行",
-    },
-    CommandHint {
-        name: "/stop",
-        help: "現在の会話の作業を停止",
-    },
+    CommandHint { name: "/copy" },
+    CommandHint { name: "/reasoning" },
+    CommandHint { name: "/select" },
+    CommandHint { name: "/paste" },
+    CommandHint { name: "/restore" },
+    CommandHint { name: "/retry" },
+    CommandHint { name: "/stop" },
     CommandHint {
         name: "/cancel-wait",
-        help: "待機の観測を取消",
     },
-    CommandHint {
-        name: "/cancel",
-        help: "実行を中断",
-    },
+    CommandHint { name: "/cancel" },
     CommandHint {
         name: "/background",
-        help: "foreground shellを背景化",
     },
-    CommandHint {
-        name: "/quit",
-        help: "通常終了",
-    },
-    CommandHint {
-        name: "/queue",
-        help: "保存済みの反映待ち・保留入力を確認／取消",
-    },
+    CommandHint { name: "/quit" },
+    CommandHint { name: "/queue" },
 ];
 
 #[derive(Debug, Default)]
@@ -252,7 +312,7 @@ impl UiState {
     pub(super) fn cancel_input_recall(&mut self) {
         let view = self.active_view_mut();
         if view.composer.cancel_request() {
-            view.status = "入力できます".into();
+            view.status = local!(view.language, "入力できます", "Ready for input").into();
         }
     }
     pub(super) fn has_completions(&self) -> bool {
@@ -321,8 +381,13 @@ impl UiState {
                     }
                     let completed = format!("{name} ");
                     if completed.len() as u64 > self.config.limits.draft_bytes {
-                        self.active_view_mut().status =
-                            "補完結果が下書きのbyte上限を超えます".into();
+                        let language = self.view().language;
+                        self.active_view_mut().status = local!(
+                            language,
+                            "補完結果が下書きのbyte上限を超えます",
+                            "The completion exceeds the draft byte limit."
+                        )
+                        .into();
                         return Some(vec![]);
                     }
                     self.begin_edit();
@@ -408,7 +473,7 @@ impl UiState {
         let view = self.active_view_mut();
         let recall = view.composer.recall.as_mut().unwrap();
         recall.pending = Some((request_id, older));
-        view.status = "入力履歴を読込み中".into();
+        view.status = local!(view.language, "入力履歴を読込み中", "Loading input history").into();
         vec![UiAction::RecallInput {
             thread_id,
             generation: view.generation,
@@ -424,7 +489,12 @@ impl UiState {
             let revision = view.draft.revision.wrapping_add(1);
             view.draft = recall.original;
             view.draft.revision = revision;
-            view.status = "編集中の下書きに戻りました".into();
+            view.status = local!(
+                view.language,
+                "編集中の下書きに戻りました",
+                "Restored the draft being edited"
+            )
+            .into();
         }
     }
     fn queue_recall_key(&mut self, key: RecallKey) {
@@ -435,8 +505,12 @@ impl UiState {
         if recall.queued.len() < 256 {
             recall.queued.push_back(key);
         } else {
-            view.status =
-                "入力履歴の操作待ちが上限です。読み込み後にもう一度操作してください".into();
+            view.status = local!(
+                view.language,
+                "入力履歴の操作待ちが上限です。読み込み後にもう一度操作してください",
+                "The input-history action queue is full. Try again after loading completes."
+            )
+            .into();
         }
     }
     pub(super) fn apply_recalled_input(
@@ -470,8 +544,13 @@ impl UiState {
                 text,
             })) => {
                 if text.len() as u64 > self.config.limits.draft_bytes {
-                    self.active_view_mut().status =
-                        "入力履歴が下書き上限を超えます。本文は変更していません".into();
+                    let language = self.view().language;
+                    self.active_view_mut().status = local!(
+                        language,
+                        "入力履歴が下書き上限を超えます。本文は変更していません",
+                        "The recalled input exceeds the draft limit; the draft was not changed."
+                    )
+                    .into();
                     self.active_view_mut()
                         .composer
                         .recall
@@ -510,11 +589,7 @@ impl UiState {
                 recall.ordinal = Some(ordinal);
                 recall.node_id = Some(node_id);
                 recall.shown_revision = view.draft.revision;
-                view.status = crate::ui::text_width::glyphs::select(
-                    "入力履歴 · ↑古い / ↓新しい・下書きへ",
-                    "入力履歴 | ^古い / v新しい・下書きへ",
-                )
-                .into();
+                view.status = recalled_input_status(view.language).into();
             }
             Ok(None) if !older => {
                 let queued = std::mem::take(&mut recall.queued);
@@ -526,13 +601,18 @@ impl UiState {
                 while recall.queued.front() == Some(&RecallKey::Move(true)) {
                     recall.queued.pop_front();
                 }
-                view.status = "これより古い入力はありません".into();
+                view.status = local!(
+                    view.language,
+                    "これより古い入力はありません",
+                    "No older input is available."
+                )
+                .into();
             }
             Err(error) => {
                 recall.queued.clear();
                 recall.ordinal = None;
                 recall.node_id = None;
-                view.status = format!("入力履歴エラー: {error}");
+                view.status = input_history_error(view.language, &error);
                 return;
             }
         }
@@ -582,8 +662,8 @@ impl UiState {
             frame.render_widget(Clear, warning);
             frame.render_widget(
                 Paragraph::new(vec![
-                    Line::from(ComposerText::LiteralPasteWarning.text()),
-                    Line::from(ComposerText::RetypeCommandHint.text()),
+                    Line::from(ComposerText::LiteralPasteWarning.text(self.view().language)),
+                    Line::from(ComposerText::RetypeCommandHint.text(self.view().language)),
                 ])
                 .style(self.palette.header()),
                 warning,
@@ -619,7 +699,7 @@ impl UiState {
                     "{} {:<21} {}",
                     if active { "›" } else { " " },
                     hint.name,
-                    hint.help
+                    hint.help(self.view().language)
                 ))
                 .style(
                     Style::default()
@@ -629,11 +709,8 @@ impl UiState {
             })
             .collect::<Vec<_>>();
         lines.push(
-            Line::from(crate::ui::text_width::glyphs::select(
-                "↑↓ 選択 · Tab/Enter 補完 · Esc 閉じる",
-                "^v 選択 | Tab/Enter 補完 | Esc 閉じる",
-            ))
-            .style(Style::default().fg(theme::MUTED)),
+            Line::from(completion_hint(self.view().language))
+                .style(Style::default().fg(theme::MUTED)),
         );
         frame.render_widget(Paragraph::new(lines), popup);
     }
@@ -642,6 +719,61 @@ impl UiState {
 #[cfg(test)]
 mod contract_tests {
     use super::*;
+    #[test]
+    fn command_hints_are_localized_without_changing_command_names() {
+        for hint in COMMANDS {
+            let ja = hint.help(crate::config::UiLanguage::Ja);
+            let en = hint.help(crate::config::UiLanguage::En);
+            assert!(!ja.is_empty(), "{}", hint.name);
+            assert!(!en.is_empty(), "{}", hint.name);
+            assert!(en.is_ascii(), "{}: {}", hint.name, en);
+        }
+        assert_eq!(
+            COMMANDS.iter().map(|hint| hint.name).collect::<Vec<_>>()[0],
+            "/agents"
+        );
+    }
+
+    #[test]
+    fn recall_and_completion_hints_follow_language_without_changing_glyph_fallbacks() {
+        for (language, expected) in [
+            (crate::config::UiLanguage::Ja, "入力履歴"),
+            (crate::config::UiLanguage::En, "Input history"),
+        ] {
+            assert!(recalled_input_status(language).contains(expected));
+        }
+        for (language, expected) in [
+            (crate::config::UiLanguage::Ja, "選択"),
+            (crate::config::UiLanguage::En, "Select"),
+        ] {
+            assert!(completion_hint(language).contains(expected));
+        }
+    }
+
+    #[test]
+    fn dynamic_input_history_error_is_complete_in_both_languages() {
+        let error = "synthetic reason";
+        assert_eq!(
+            input_history_error(crate::config::UiLanguage::Ja, error),
+            "入力履歴エラー: synthetic reason"
+        );
+        assert_eq!(
+            input_history_error(crate::config::UiLanguage::En, error),
+            "Input history error: synthetic reason"
+        );
+    }
+
+    #[test]
+    fn composer_warnings_have_complete_english_and_japanese_text() {
+        for text in [
+            ComposerText::LiteralPasteWarning,
+            ComposerText::RetypeCommandHint,
+        ] {
+            assert!(!text.text(crate::config::UiLanguage::Ja).is_empty());
+            assert!(text.text(crate::config::UiLanguage::En).is_ascii());
+        }
+    }
+
     fn enter(ui: &mut UiState) -> Vec<UiAction> {
         ui.event(crossterm::event::Event::Key(KeyEvent::new(
             KeyCode::Enter,
