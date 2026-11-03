@@ -38,13 +38,6 @@ pub(super) async fn run_tool_group(
             validation_errors.insert(call.call_id.clone(), error.to_string());
         }
     }
-    if !validation_errors.is_empty() {
-        cancelled = Some(cancelled_call(
-            "tool_group_validation_failed",
-            "Tool group validation failed before any side effect",
-            None,
-        ));
-    }
     let mut cancelled_count = 0usize;
     let mut foreground_release = None;
     for call in calls {
