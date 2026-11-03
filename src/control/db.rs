@@ -5784,6 +5784,7 @@ mod writer_lane_audit_measurement {
                 .clear();
             let tx = db.transaction().unwrap();
             let args = MessageSendArgs {
+                expect_reply: false,
                 sender_label: None,
                 thread_id: Some(thread_id.clone()),
                 text: "writer lane audit".into(),
