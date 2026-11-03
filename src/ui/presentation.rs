@@ -6031,10 +6031,14 @@ pub(super) fn recovery_lines(
     if let Some(limit) = recovery.limit_summary_localized(language) {
         essential.extend(hanging_wrap(vec![Line::from(limit)], width.max(1)));
     }
-    let reason = crate::presentation::sanitize_plain(&recovery.message, 0)
+    let recovery_message = recovery.message_localized(language);
+    let reason = crate::presentation::sanitize_plain(&recovery_message, 0)
         .0
         .replace('\n', " ");
-    let mut details = vec![Line::from(format!("{} | {reason}", recovery.stage))];
+    let mut details = vec![Line::from(format!(
+        "{} | {reason}",
+        recovery.stage_localized(language)
+    ))];
     if let Some(reason) = &recovery.stop_reason {
         details.push(Line::from(match (en, reason.as_str()) {
             (true, "explicit_stop") => "Stopped by the user",
@@ -6074,8 +6078,8 @@ pub(super) fn recovery_lines(
             )
         )
     }));
-    if let Some(summary) = &snapshot.context_reduction {
-        details.push(Line::from(summary.clone()));
+    if let Some(summary) = snapshot.context_reduction {
+        details.push(Line::from(summary.localized(language)));
     }
     let mut lines = hanging_wrap(essential, width.max(1));
     lines.extend(
