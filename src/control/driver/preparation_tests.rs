@@ -1059,6 +1059,7 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
                     call_id: "call".into(),
                     item_id: None,
                     args: Ok(args),
+                    unknown_arguments: Vec::new(),
                 }]
             )
             .await
@@ -1199,6 +1200,7 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
                 call_id: "gate-call".into(),
                 item_id: None,
                 args: Ok(args),
+                unknown_arguments: Vec::new(),
             }],
         )
         .await

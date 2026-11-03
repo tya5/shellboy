@@ -36,6 +36,8 @@ pub enum DiagnosticEvent {
     ThinkingBindingRetry,
     MessageSend,
     ShellFailure,
+    ShellUnknownArgumentsIgnored,
+    ShellUnknownArgumentsRejected,
     StorageLimit,
     IndexPaused,
     UsageTotalsSlow,
