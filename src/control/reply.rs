@@ -113,7 +113,7 @@ pub(crate) fn cancel_reply_tx(
     actor: &Value,
     admitted: bool,
 ) -> rusqlite::Result<bool> {
-    let changed = db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"by":actor}).to_string(),at])?;
+    let changed = db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender"}).to_string(),at])?;
     if changed == 1 && admitted {
         // Leave the current selected path and inflight manifest intact. The
         // ordinary event admission path presents this notice without waking a Run.

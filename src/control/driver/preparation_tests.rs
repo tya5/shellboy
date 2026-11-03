@@ -1549,3 +1549,98 @@ async fn concurrent_absent_driver_stop_and_retirement_do_not_advance_terminal_ge
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+#[tokio::test]
+async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_path() {
+    let (_root, owner, control, first) = fixture("http://127.0.0.1:9/v1").await;
+    let accepted: MessageAccepted = serde_json::from_value(
+        control
+            .store
+            .execute(
+                Request::new(
+                    format!("{}:expected", owner.instance_id),
+                    Command::MessageSend(MessageSendArgs {
+                        expect_reply: true,
+                        sender_label: None,
+                        deliver: crate::protocol::Deliver::Next,
+                        thread_id: Some(first.thread_id.clone()),
+                        text: "synthetic reply duty".into(),
+                    }),
+                ),
+                None,
+            )
+            .await
+            .unwrap()
+            .result,
+    )
+    .unwrap();
+    let admitted = ready(&control, &accepted).await;
+    let result = control
+        .store
+        .execute(
+            Request::new(
+                format!("{}:cancel-duty", owner.instance_id),
+                Command::MessageCancel(crate::protocol::MessageCancelArgs {
+                    message_ids: vec![accepted.message_id.clone()],
+                }),
+            ),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(result["items"][0]["outcome"], "reply_cancelled");
+    let thread = accepted.thread_id.clone();
+    let event = format!("reply-cancelled-{}", accepted.message_id);
+    let before = event.clone();
+    let selection = admitted.selection;
+    control
+        .store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                history::selection_revision(db, &thread, history::ThreadScope::Any)?,
+                selection
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM delivery WHERE event_id=?1",
+                    [before],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let delivered = ready(&control, &accepted).await;
+    assert!(delivered.events.contains(&event));
+    // Repeated preparation reuses the same model-visible event node.
+    ready(&control, &accepted).await;
+    let node = format!("event-{event}");
+    control
+        .store
+        .database
+        .call(move |db| {
+            let body: String =
+                db.query_row("SELECT payload_json FROM node WHERE id=?1", [&node], |r| {
+                    r.get(0)
+                })?;
+            assert!(body.contains("reply_cancelled"));
+            assert!(body.contains(&accepted.message_id));
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM thread_path WHERE node_id=?1",
+                    [node],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                1
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
