@@ -119,6 +119,8 @@ def main():
                 assert events[:3] == ['automatic_compaction_below_threshold', 'automatic_compaction_started', 'automatic_compaction_finished'], events
                 if args.summary_error:
                     assert events[3:] == ['automatic_compaction_rejected_other', 'automatic_compaction_skipped_no_new_target'], events
+                elif args.cancel:
+                    assert events[3:] == ['automatic_compaction_rejected_other'], events
                 else:
                     assert events[3:] == [], events
                 assert recorded[1]['ids'] == recorded[2]['ids'], recorded
