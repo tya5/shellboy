@@ -180,3 +180,78 @@ fn observed_age_and_unknown_saved_age_remain_distinct_in_both_languages() {
         Some("経過未取得")
     );
 }
+
+#[test]
+fn recovery_diagnostics_have_complete_localized_text_and_keep_raw_messages() {
+    let stage = RecoverySnapshot {
+        stage: RecoveryStage::ModelContextLimit
+            .localized(UiLanguage::Ja)
+            .to_owned(),
+        stage_kind: Some(RecoveryStage::ModelContextLimit),
+        stage_details: Some(RecoveryStageDetails {
+            retries: serde_json::json!(2),
+            retry_limit: serde_json::json!(3),
+            request_bytes: serde_json::json!(400),
+            tool_bytes: serde_json::json!(75),
+        }),
+        message: saved_recovery_reason_unavailable(UiLanguage::Ja).into(),
+        message_is_fallback: true,
+        ..Default::default()
+    };
+    let english = stage.stage_localized(UiLanguage::En);
+    assert_eq!(
+        english,
+        "Model request (input capacity exceeded) | Retry 2/3; request: 400 B; tool: 75 B"
+    );
+    assert!(english.is_ascii());
+    assert_eq!(
+        stage.message_localized(UiLanguage::En),
+        "Review the saved recovery reason in Details."
+    );
+    assert_eq!(
+        stage.message_localized(UiLanguage::Ja),
+        "保存された復旧理由を詳細で確認してください"
+    );
+    let separator = crate::ui::text_width::glyphs::separator();
+    assert_eq!(
+        stage.stage_localized(UiLanguage::Ja),
+        format!(
+            "モデル要求（入力容量超過）{separator}retry 2/3{separator}request 400B{separator}tool 75B"
+        )
+    );
+
+    let raw = RecoverySnapshot {
+        message: "Provider response: use the supplied reset time".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        raw.message_localized(UiLanguage::En),
+        "Provider response: use the supplied reset time"
+    );
+    assert_eq!(
+        raw.message_localized(UiLanguage::Ja),
+        "Provider response: use the supplied reset time"
+    );
+}
+
+#[test]
+fn context_reduction_facts_are_localized_only_for_display() {
+    let summary = ContextReductionSummary {
+        before_characters: 90_000,
+        after_characters: 40_000,
+        spilled_groups: 3,
+        omitted_items: 7,
+    };
+    assert!(
+        summary
+            .localized(UiLanguage::En)
+            .contains("from 90000 to 40000 characters")
+    );
+    assert!(
+        summary
+            .localized(UiLanguage::En)
+            .contains("3 groups and omitting 7 items")
+    );
+    assert!(summary.localized(UiLanguage::Ja).contains("spill 3組"));
+    assert!(summary.localized(UiLanguage::Ja).contains("省略 7件"));
+}
