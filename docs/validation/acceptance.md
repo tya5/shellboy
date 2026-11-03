@@ -8983,7 +8983,7 @@ succeeded on SHA `77c29e87`; #177 is handed off.
 
 Static audit in `src/ui` and `src/presentation` after #177 final-tip CI succeeded:
 
-| Surface | Direct line construction | Initial classification |
+| Surface | Direct line construction | Classification |
 | --- | --- | --- |
 | Conversation body | `src/ui/presentation.rs::node_lines_inner` (`Uncached`, `Details`, block/reasoning lines) | `Uncached` and `Details` are `Body`; prose/code and reasoning blocks retain their typed roles. Body and reasoning roles use the shared hanging indenter; tool, header, metadata, and event rows remain distinct. |
 | Notice rows | `src/ui/presentation.rs::notice_row`, `append_notice_run` | Standalone and grouped notice rows use `row_columns` as flat, single-line item headers; grouped children carry tree prefixes. They do not emit wrapped body rows, so keep this left alignment intentional. |

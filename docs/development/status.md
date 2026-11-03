@@ -8,6 +8,16 @@ request; uncached input -55%. Other agents reuse the 2026-11-02 #151 rows (not
 re-measured). Fake-model CI resource runs 41552141436 / 41553439861 show no
 material change. Report: [bench-report-2026-11-03](../validation/bench-report-2026-11-03.md).
 Next: none for #183; further agent re-measurement needs a new approval.
+## Nested item-row indentation (#179, rebased on `4a302c9d`; validation pending)
+
+A shared presentation helper adds two-space hanging indentation to nested body
+rows while preserving span styles and viewport widths; at widths under three cells
+it omits indentation rather than overflowing. Conversation body/reasoning hints,
+opened owned-work notices and captured output, pending-input excerpts, and
+management preview bodies use it. Headers, event/tool rows, notices and
+source-preserving guide prose keep their existing structure. Bilingual narrow/wide
+regressions cover evicted/Details hints, the shared indenter and management
+preview. Local cargo checks and exact-tip CI remain pending.
 
 ## Saved Turn context line (#183, branch `issue-183/append-context`)
 
