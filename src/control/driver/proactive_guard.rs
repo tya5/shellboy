@@ -524,6 +524,16 @@ mod tests {
     }
 
     #[test]
+    fn active_shortfall_requires_a_new_or_larger_middle() {
+        let before = vec![mark("middle", 1, 100)];
+        assert!(!has_new_marks(&before, &before, "middle:"));
+        assert!(!has_new_marks(&before, &[mark("middle", 1, 99)], "middle:"));
+        assert!(has_new_marks(&before, &[mark("middle", 1, 101)], "middle:"));
+        assert!(has_new_marks(&before, &[mark("middle", 2, 1)], "middle:"));
+        assert!(!has_new_marks(&before, &[mark("spill", 2, 1000)], "middle:"));
+    }
+
+    #[test]
     fn removed_and_restored_sources_do_not_retrigger_and_growth_is_monotonic() {
         let old = vec![mark("spill", 1, 50), mark("summary", 3, 100)];
         let merged = merge_marks(
