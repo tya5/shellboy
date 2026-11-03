@@ -911,7 +911,7 @@ mod writer_lane_audit_tests {
                     .unwrap(),
             ));
         }
-        for repeat in 1..=3 {
+        for repeat in 1..=4 {
             let started = Instant::now();
             for (_, sql) in statements {
                 let mut stmt = db.prepare_cached(sql).unwrap();
@@ -1001,7 +1001,7 @@ mod writer_lane_audit_tests {
                 .unwrap();
             plans.push((name, details));
         }
-        for repeat in 1..=3 {
+        for repeat in 1..=4 {
             let started = Instant::now();
             for (name, sql) in statements {
                 let values = bind(name, sql);
