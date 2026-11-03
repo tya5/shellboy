@@ -292,7 +292,7 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
                             ("記録したモデル失敗1件", "fixture recovery failure")
                         }
                         shellboy::config::UiLanguage::En => (
-                            "1 model failures recorded before resume",
+                            "1 model failure recorded before resume",
                             "fixture recovery failure",
                         ),
                     }
