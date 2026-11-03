@@ -436,20 +436,11 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
         .ok()
     });
     let identity = shellboy::width_cache::current_identity();
-    let mode = width_config
-        .as_ref()
-        .map(|c| c.config.ui.ambiguous_width)
-        .unwrap_or(shellboy::config::AmbiguousWidth::Probe);
-    let width = match mode {
-        shellboy::config::AmbiguousWidth::Narrow => Some(1),
-        shellboy::config::AmbiguousWidth::Wide => Some(2),
-        shellboy::config::AmbiguousWidth::Cached => width_config.as_ref().and_then(|c| {
-            identity
-                .as_deref()
-                .and_then(|id| shellboy::width_cache::read(&c.data_dir, id))
-        }),
-        shellboy::config::AmbiguousWidth::Probe => None,
-    };
+    let width = width_config.as_ref().and_then(|c| {
+        identity
+            .as_deref()
+            .and_then(|id| shellboy::width_cache::read(&c.data_dir, id))
+    });
     let mut session = match shellboy::ui::TerminalSession::enter_with_width(width) {
         Ok(session) => session,
         Err(error) => {
@@ -532,11 +523,6 @@ fn run_tui(cli: Cli, runtime: tokio::runtime::Runtime) -> ExitCode {
     } = prepared;
     // Only the active owner writes the cache; never persist an unknown probe.
     if width.is_none()
-        && matches!(
-            mode,
-            shellboy::config::AmbiguousWidth::Cached | shellboy::config::AmbiguousWidth::Probe
-        )
-        && owner.loaded.config.ui.ambiguous_width == mode
         && width_config
             .as_ref()
             .is_some_and(|c| c.data_dir == owner.loaded.data_dir)
