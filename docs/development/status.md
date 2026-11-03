@@ -1,5 +1,14 @@
 # Development status
 
+## Nonblocking terminal capability queries (#192, implementation pending)
+
+The adopted target removes `ui.ambiguous_width` and measures on every launch
+without delaying the first frame. The capability reader, asynchronous cache
+updates, input filtering, config removal, release note and requested fake
+terminal tests remain unimplemented. Existing fallback selection is incomplete:
+`SELECTED` and `CHILD` are rendered directly on some paths.
+
+
 ## #194 step 1: "answer" renamed to "end message" (branch `issue-194/step1-end-message`)
 
 Public names only, no behaviour change, no aliases, no migration (internal
