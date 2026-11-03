@@ -138,8 +138,8 @@ Connection precedence: explicit `--connection` > explicit Thread > authenticated
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `thread list [--limit N] [--cursor C] [--query TEXT]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/updated_at/excerpt), optional `next_cursor`; default 50, range 1–200. Query filters ID/title/cwd |
-| `thread get [--thread THREAD]` | thread_id/title/cwd/connection/model/effort/parent_id, current run_id/turn_id, children_count/shells_count, recovery_reason |
+| `thread list [--limit N] [--cursor C] [--query TEXT]` | `items` (thread_id/title/cwd/parent_id/state/latest_run_stop_reason/optional revisit/updated_at/excerpt/last_end_message), optional `next_cursor`; default 50, range 1–200. Query filters ID/title/cwd |
+| `thread get [--thread THREAD]` | thread_id/title/cwd/connection/model/effort/parent_id, current run_id/turn_id, children_count/shells_count, recovery_reason, `last_end_message` (`node_id`/`turn_id`/`at`/`excerpt`/`body_available`), and `awaiting_reply` (up to 128 pending items, oldest first: message_id/sender/created_at/delivery_status/reminded) |
 | `thread create [--cwd PATH] [--connection NAME] [--model ID] [--effort VALUE] [--parent THREAD]` | New Thread details, without starting instructions or a Run. Parent establishes ancestry; execution ownership is assigned when the parent Run sends. Normally inherits parent settings |
 | `thread fork --thread THREAD --node NODE [--cwd PATH]` | New Thread sharing the selected path through NODE inclusive, without changing the original; invalid boundaries such as incomplete tool groups rejected |
 | `thread delete-preview --thread THREAD [--descendants]` | Read-only impact: deletable_now, blocking Run count/details (max 50), target/descendant counts, direct sharing/replacement-source/attachment-reference counts, update time; reclaimable_bytes null with reason. Rechecked on deletion |
@@ -157,11 +157,13 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
-| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and `reply` state/node when reply is expected |
+| `message send [--thread THREAD] [--deliver now\|complete] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. `--expect-reply` is rejected to the caller's own Thread and with `input_limit` when 128 reply duties are already pending on the recipient. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
+| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and relevant reply fields: `expect_reply: true`, `reply: {state, at?, node_id?, by?, reminded_at?}`, and `reply_to` on a reply message |
 | `message reply --message MESSAGE (--text TEXT | --text-stdin) [--sender-label TEXT]` | Reply once to an applied reply-expected message; result includes `reply_to`, reply `message_id`, and delivery |
-| `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel queued messages or withdraw an admitted pending reply duty; inspect per-item outcomes and receipt. Admitted history remains |
+| `message cancel --message MESSAGE [--message MESSAGE ...]` | A queued reply-expected message becomes `cancelled` without recipient notice; an admitted pending duty returns `reply_cancelled`, changes reply state to `cancelled`, preserves history, and notifies the recipient at its next request boundary without waking it. Models may cancel only their own Thread's messages; humans may cancel any. Inspect per-item outcomes and receipt |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
+
+When an expected-reply message is admitted, the recipient gets a `reply_expected` notice with its message ID and the `shellboy message reply --message ID` command. A reply message is announced as `reply` with its `reply_to` ID. The Run-end reminder lists still-pending IDs.
 
 `message get` returns `sender.kind`: `model` with verified credential-free
 instance/thread/run/turn/execution IDs, `external_cli` for a new external CLI

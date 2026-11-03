@@ -60,7 +60,12 @@ shellboy message reply --message CHILD_MESSAGE_ID --text 'Findings, evidence, an
 ```
 
 A model reply is also delivered to the sender's conversation; an external CLI
-sender reads the original receipt and reply node. Progress reports remain ordinary
+sender reads the original receipt and reply node. If the recipient ends without
+replying (`ignored`), or its Thread is deleted (`recipient_deleted`), a model
+sender receives a `reply_outcome` notice in its live Run. Without a live Run,
+the notice is available at the next Turn and does not start a Run. If an admitted
+duty is cancelled, the recipient receives `reply_cancelled` at its next request
+boundary; this notice does not wake it. Progress reports remain ordinary
 messages. `satisfied` is not necessarily success: inspect the reply snapshot's
 `state` (`replied`, `ignored`, `cancelled`, or `recipient_deleted`). A pending
 reply has no deadline; a timeout limits only that wait call. At normal Run end,
