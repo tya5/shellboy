@@ -214,6 +214,7 @@ pub struct ToolCall {
     pub call_id: String,
     pub item_id: Option<String>,
     pub args: Result<ShellToolArgs, String>,
+    pub unknown_arguments: Vec<String>,
 }
 #[derive(Debug, Clone)]
 pub struct ModelResponse {
@@ -234,6 +235,106 @@ pub struct StreamObservation {
     pub partial_reasoning: String,
     pub completed_items: BTreeMap<u64, Value>,
 }
+pub(crate) const SHELL_ARGUMENTS: [&str; 7] = [
+    "command",
+    "description",
+    "background",
+    "stdin_open",
+    "initial_stdin",
+    "input_encoding",
+    "output_encoding",
+];
+
+struct UniqueShellObject(serde_json::Map<String, Value>);
+
+impl<'de> serde::Deserialize<'de> for UniqueShellObject {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ObjectVisitor;
+        impl<'de> serde::de::Visitor<'de> for ObjectVisitor {
+            type Value = UniqueShellObject;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a JSON object with unique parameter names")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut object = serde_json::Map::new();
+                while let Some(name) = map.next_key::<String>()? {
+                    if object.contains_key(&name) {
+                        return Err(serde::de::Error::custom(format!(
+                            "Duplicate shell parameter {name}"
+                        )));
+                    }
+                    object.insert(name, map.next_value()?);
+                }
+                Ok(UniqueShellObject(object))
+            }
+        }
+        deserializer.deserialize_map(ObjectVisitor)
+    }
+}
+
+fn parse_shell_arguments(raw: &str) -> (Result<ShellToolArgs, String>, Vec<String>) {
+    let mut unknown = Vec::new();
+    let result = (|| {
+        let UniqueShellObject(object) = serde_json::from_str(raw)
+            .map_err(|error| format!("Invalid shell arguments: {error}"))?;
+        let mut value = Value::Object(object);
+        let object = value
+            .as_object_mut()
+            .ok_or_else(|| "Shell arguments must be a JSON object".to_owned())?;
+        unknown = object
+            .keys()
+            .filter(|name| !SHELL_ARGUMENTS.contains(&name.as_str()))
+            .cloned()
+            .collect();
+        for name in &unknown {
+            object.remove(name);
+        }
+        for (name, value) in object.iter() {
+            let valid = match name.as_str() {
+                "command" | "input_encoding" | "output_encoding" => value.is_string(),
+                "description" | "initial_stdin" => value.is_string() || value.is_null(),
+                "background" | "stdin_open" => value.is_boolean(),
+                _ => unreachable!(),
+            };
+            if !valid {
+                let expected = if matches!(name.as_str(), "background" | "stdin_open") {
+                    "boolean"
+                } else {
+                    "string"
+                };
+                return Err(format!(
+                    "Invalid shell parameter {name}: expected {expected}"
+                ));
+            }
+        }
+        if !object.contains_key("command") {
+            return Err("Missing shell parameter command: expected non-empty string".into());
+        }
+        for name in ["command", "input_encoding", "output_encoding"] {
+            if let Some(text) = object.get(name).and_then(Value::as_str) {
+                if text.trim().is_empty() {
+                    return Err(format!(
+                        "Invalid shell parameter {name}: expected non-empty string"
+                    ));
+                }
+                if text.contains('\0') {
+                    return Err(format!(
+                        "Invalid shell parameter {name}: expected string without NUL"
+                    ));
+                }
+            }
+        }
+        let args: ShellToolArgs = serde_json::from_value(value)
+            .map_err(|_| "Invalid shell argument object".to_owned())?;
+        args.validate().map_err(|error| error.message)?;
+        Ok(args)
+    })();
+    (result, unknown)
+}
+
 impl ModelResponse {
     pub fn completed(mut raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
         crate::usage::normalize_response(&mut raw);
@@ -319,23 +420,20 @@ impl ModelResponse {
                             "Tool arguments exceed byte limit",
                         ));
                     }
-                    let args = if item.get("name").and_then(Value::as_str) != Some("shell") {
-                        Err("Unknown tool; only shell is available".into())
-                    } else {
-                        serde_json::from_str::<ShellToolArgs>(arguments)
-                            .map_err(|_| {
-                                "Invalid shell arguments; no calls in this group may execute"
-                                    .to_owned()
-                            })
-                            .and_then(|args| {
-                                args.validate().map_err(|error| error.message)?;
-                                Ok(args)
-                            })
-                    };
+                    let (args, unknown_arguments) =
+                        if item.get("name").and_then(Value::as_str) != Some("shell") {
+                            (
+                                Err("Unknown tool; only shell is available".into()),
+                                Vec::new(),
+                            )
+                        } else {
+                            parse_shell_arguments(arguments)
+                        };
                     calls.push(ToolCall {
                         call_id: id.into(),
                         item_id: item.get("id").and_then(Value::as_str).map(str::to_owned),
                         args,
+                        unknown_arguments,
                     });
                 }
                 _ => {
@@ -707,6 +805,50 @@ impl ResponseStream {
                 ),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod shell_argument_policy_tests {
+    use super::*;
+    #[test]
+    fn unknowns_are_separate_from_valid_and_invalid_fields() {
+        let (args, unknown) = parse_shell_arguments(r#"{"command":"true","timeout":2}"#);
+        assert!(args.is_ok());
+        assert_eq!(unknown, ["timeout"]);
+        let (args, unknown) = parse_shell_arguments(r#"{"command":1,"timeout":2}"#);
+        assert!(args.unwrap_err().contains("command"));
+        assert_eq!(unknown, ["timeout"]);
+        for raw in [r#"{}"#, r#"{"command":""}"#, r#"{"command":false}"#] {
+            assert!(
+                parse_shell_arguments(raw)
+                    .0
+                    .unwrap_err()
+                    .contains("command")
+            );
+        }
+    }
+    #[test]
+    fn duplicate_known_and_unknown_keys_are_rejected() {
+        for (raw, name) in [
+            (r#"{"command":"first","command":"second"}"#, "command"),
+            (r#"{"command":"true","timeout":1,"timeout":2}"#, "timeout"),
+            (r#"{"command":"true","\u0063ommand":"false"}"#, "command"),
+        ] {
+            let error = parse_shell_arguments(raw).0.unwrap_err();
+            assert!(error.contains("Duplicate shell parameter"), "{error}");
+            assert!(error.contains(name), "{error}");
+        }
+    }
+    #[test]
+    fn byte_limit_and_duplicate_ids_remain_protocol_errors() {
+        let item = |id: &str, arguments: String| json!({"type":"function_call","name":"shell","call_id":id,"arguments":arguments});
+        let large = "x".repeat(MAX_TOOL_ARGUMENT_BYTES + 1);
+        let raw = json!({"status":"completed","output":[item("a",large)]});
+        assert!(ModelResponse::completed(raw, true).is_err());
+        let raw =
+            json!({"status":"completed","output":[item("a","{}".into()),item("a","{}".into())]});
+        assert!(ModelResponse::completed(raw, true).is_err());
     }
 }
 

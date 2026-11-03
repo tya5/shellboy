@@ -499,6 +499,16 @@ Without a TUI there is no interactive draft/restore, Turn interrupt or slash-onl
 UI operation, and no late UI attach/reconnect. Existing CLI compact is available.
 Owner binary replacement does not inherit live tools or automatically resume work.
 
+### Shell tool parameters
+
+Accepted parameters are `command`, `description`, `background`, `stdin_open`,
+`initial_stdin`, `input_encoding`, and `output_encoding`. Unknown parameters
+are ignored with a warning by default; strict configuration rejects that call.
+Do not use `timeout` or `workdir`: set the working directory in the command
+and use the background shell observation commands for long-running work. An
+invalid call returns its own error without preventing other valid calls in the
+same group; malformed protocol groups are still rejected as a whole.
+
 ### Shell call descriptions
 
 With the default `[shell] describe_calls = true`, generated shell tool definitions

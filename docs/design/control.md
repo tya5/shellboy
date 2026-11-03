@@ -586,3 +586,7 @@ when both ends are deleted. No pending-reply receipt is collected. The history-G
 eligible deleted-target terminal receipts in batches of 128, preserving those
 still owned by a live sender. Receipts targeting live recipients remain rooted
 even if the sender was deleted. See gc.md and storage.md.
+
+## Shell argument policy
+
+The model response envelope is validated before any call runs: duplicate or missing call IDs, disabled tools, malformed envelopes and the argument byte limit reject the group. Duplicate shell parameter names, including unknown names, reject the affected call rather than choosing a value. Shell argument, encoding and initial-stdin errors instead produce a result for that call; other valid calls continue in order. Preflight reports all detected encoding and initial-stdin failures alongside strict unknown-key failures. Unknown keys are ignored with a result warning by default, or reject that call in strict mode. Both messages name keys and accepted parameters, never their values. The existing bounded diagnostics queue records one fixed ignored/rejected event per unknown key, with Turn identifiers for correlation; it stores a bounded, sanitized parameter name but never the argument value. NUL and size checks remain in effect.

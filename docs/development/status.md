@@ -1,5 +1,9 @@
 # Development status
 
+## Shell unknown argument policy
+
+Warn is the default; strict rejects individual calls. Argument failures no longer cancel otherwise valid calls in the same group. See [Control design](../design/control.md#shell-argument-policy). Three-OS CI and independent review are pending.
+
 ## #194 step 1: "answer" renamed to "end message" (branch `issue-194/step1-end-message`)
 
 Public names only, no behaviour change, no aliases, no migration (internal

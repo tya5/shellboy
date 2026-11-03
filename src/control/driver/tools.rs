@@ -10,22 +10,79 @@ pub(super) async fn run_tool_group(
     let turn_binding = slot.bind_turn(control, &snapshot.turn).await?;
     let mut cancelled: Option<Value> = None;
     let mut validation_errors = std::collections::HashMap::new();
+    fn add_error(
+        errors: &mut std::collections::HashMap<String, String>,
+        id: &str,
+        message: String,
+    ) {
+        errors
+            .entry(id.to_owned())
+            .and_modify(|existing| {
+                existing.push(' ');
+                existing.push_str(&message);
+            })
+            .or_insert(message);
+    }
     // Validate every encoding and initial input before the first OS spawn.
     for call in &calls {
+        if !call.unknown_arguments.is_empty() {
+            let event = match control.store.config.shell.unknown_arguments {
+                crate::config::UnknownArguments::Warn => {
+                    crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsIgnored
+                }
+                crate::config::UnknownArguments::Strict => {
+                    crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsRejected
+                }
+            };
+            for name in &call.unknown_arguments {
+                control.diagnostics().record_shell_unknown_parameter(
+                    event,
+                    crate::diagnostics::DiagnosticIds {
+                        thread_id: Some(snapshot.thread.clone()),
+                        run_id: Some(snapshot.run.clone()),
+                        turn_id: Some(snapshot.turn.clone()),
+                        ..Default::default()
+                    },
+                    name,
+                );
+            }
+        }
+        if !call.unknown_arguments.is_empty()
+            && control.store.config.shell.unknown_arguments
+                == crate::config::UnknownArguments::Strict
+        {
+            validation_errors.insert(
+                call.call_id.clone(),
+                format!(
+                    "Unknown parameter(s): {}. Accepted: {}.",
+                    call.unknown_arguments.join(", "),
+                    model::SHELL_ARGUMENTS.join(", ")
+                ),
+            );
+        }
         let args = match &call.args {
             Ok(args) => args,
             Err(error) => {
-                validation_errors.insert(call.call_id.clone(), error.clone());
+                add_error(&mut validation_errors, &call.call_id, error.clone());
                 continue;
             }
         };
-        for encoding in [&args.input_encoding, &args.output_encoding] {
+        for (parameter, encoding) in [
+            ("input_encoding", &args.input_encoding),
+            ("output_encoding", &args.output_encoding),
+        ] {
             if let Err(error) = crate::shell::encode_input(
                 "",
                 encoding,
                 control.store.config.limits.shell_stdin_bytes,
             ) {
-                validation_errors.insert(call.call_id.clone(), error.to_string());
+                add_error(
+                    &mut validation_errors,
+                    &call.call_id,
+                    format!(
+                        "Invalid shell parameter {parameter}: expected supported encoding; {error}"
+                    ),
+                );
             }
         }
         if let Some(text) = &args.initial_stdin
@@ -35,15 +92,14 @@ pub(super) async fn run_tool_group(
                 control.store.config.limits.shell_stdin_bytes,
             )
         {
-            validation_errors.insert(call.call_id.clone(), error.to_string());
+            add_error(
+                &mut validation_errors,
+                &call.call_id,
+                format!(
+                    "Invalid shell parameter initial_stdin: expected valid input within the configured byte limit; {error}"
+                ),
+            );
         }
-    }
-    if !validation_errors.is_empty() {
-        cancelled = Some(cancelled_call(
-            "tool_group_validation_failed",
-            "Tool group validation failed before any side effect",
-            None,
-        ));
     }
     let mut cancelled_count = 0usize;
     let mut foreground_release = None;
@@ -67,7 +123,7 @@ pub(super) async fn run_tool_group(
                 None,
             ));
         }
-        let result = if let Some(error) = validation_errors.get(&call.call_id) {
+        let mut result = if let Some(error) = validation_errors.get(&call.call_id) {
             json!({"status":"error","error":error})
         } else if let Some(reason) = &cancelled {
             reason.clone()
@@ -107,6 +163,15 @@ pub(super) async fn run_tool_group(
                 }
             }
         };
+        if !call.unknown_arguments.is_empty()
+            && control.store.config.shell.unknown_arguments == crate::config::UnknownArguments::Warn
+        {
+            result["warning"] = json!(format!(
+                "Ignored unknown parameter(s): {}. Accepted: {}.",
+                call.unknown_arguments.join(", "),
+                model::SHELL_ARGUMENTS.join(", ")
+            ));
+        }
         let release = match result.get("reason").and_then(Value::as_str) {
             Some("human_backgrounded") => Some(ForegroundRelease::Background),
             Some("additional_input") => Some(ForegroundRelease::AdditionalInput),

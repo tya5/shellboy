@@ -9253,3 +9253,7 @@ The public-upgrade synthetic provider returns a final message, not an explicit
 reply. Its schema26 exec invocation selects `--result turn-end` to continue
 checking this preserved non-reply compatibility path. The default explicit
 reply mode is covered independently by exec-client integration tests.
+
+## Shell unknown argument policy
+
+Coverage includes both policies, valid calls alongside invalid calls, unknown keys with invalid known types, configuration validation, duplicate-key isolation, combined unknown-key/encoding/stdin failures and the argument byte limit. Local focused tests and three-OS CI results must be reported for the final tip; real provider behavior has not been tested.
