@@ -413,15 +413,23 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
 #[tokio::test]
 async fn replying_after_sender_deletion_before_gc_cancels_instead_of_replying() {
     let (_root, store) = fixture().await;
+    let sender = Origin {
+        instance_id: "fixture".into(),
+        thread_id: "sender".into(),
+        run_id: "sender-run".into(),
+        turn_id: "sender-turn".into(),
+        execution_id: "sender-shell".into(),
+        token: "synthetic".into(),
+    };
     let accepted = store
-        .execute(request(send(true)), None)
+        .execute(request(send(true)), Some(sender))
         .await
         .unwrap()
         .result;
     let message = accepted["message_id"].as_str().unwrap().to_owned();
     let id = message.clone();
     store.database.call(move |db| {
-        db.execute("UPDATE receipt SET sender_json=json_object('kind','model','thread_id','sender'),state='applied',path_admission='admitted' WHERE message_node_id=?1",[id])?;
+        db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1",[id])?;
         db.execute_batch("UPDATE run SET state='stopped',ended_at='now'; UPDATE turn SET state='stopped',ended_at='now';")?;
         Ok(())
     }).await.unwrap();
