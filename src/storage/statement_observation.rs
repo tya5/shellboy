@@ -25,8 +25,8 @@ pub(crate) struct Counters {
     pub plan: Option<[Option<&'static str>; 8]>,
     current_fingerprint: Option<&'static str>,
     fingerprint_frozen: bool,
-    pub sql: Option<String>,
-    current_sql: Option<String>,
+    pub sql: Option<Arc<str>>,
+    current_sql: Option<Arc<str>>,
     current_statement: usize,
     captured_statement: usize,
     captured_profile_recorded: bool,
@@ -64,7 +64,7 @@ impl serde::Serialize for Counters {
             map.serialize_entry("fingerprint", fingerprint)?;
         }
         if let Some(sql) = &self.sql {
-            map.serialize_entry("sql", sql)?;
+            map.serialize_entry("sql", sql.as_ref())?;
             map.serialize_entry(
                 "sql_scope",
                 if self.fingerprint_frozen {
@@ -92,6 +92,28 @@ struct TraceContext {
     counters: Arc<Mutex<Counters>>,
     baselines: HashMap<usize, [u64; 4]>,
     exhaustive: bool,
+    last_sql: Vec<u8>,
+    last_shape: Option<Arc<str>>,
+}
+
+impl TraceContext {
+    fn shape(&mut self, sql: &[u8]) -> Arc<str> {
+        if let Some(shape) = &self.last_shape
+            && self.last_sql == sql
+        {
+            return shape.clone();
+        }
+        let shape: Arc<str> = sql_normalize::normalize(sql).into();
+        if sql.len() <= 4096 {
+            self.last_sql.clear();
+            self.last_sql.extend_from_slice(sql);
+            self.last_shape = Some(shape.clone());
+        } else {
+            self.last_sql.clear();
+            self.last_shape = None;
+        }
+        shape
+    }
 }
 
 // Only exact, reviewed static statements are eligible for diagnostic output.
@@ -171,20 +193,16 @@ unsafe extern "C" fn profile(
     if !context.exhaustive {
         if event == ffi::SQLITE_TRACE_STMT {
             let sql = unsafe { ffi::sqlite3_sql(stmt) };
+            let (shape, fingerprint) = if sql.is_null() {
+                (None, None)
+            } else {
+                let sql = unsafe { CStr::from_ptr(sql) }.to_bytes();
+                (Some(context.shape(sql)), safe_fingerprint(sql))
+            };
             if let Ok(mut counters) = context.counters.lock() {
                 counters.current_statement = stmt as usize;
-                counters.current_sql = if sql.is_null() {
-                    None
-                } else {
-                    Some(sql_normalize::normalize(
-                        unsafe { CStr::from_ptr(sql) }.to_bytes(),
-                    ))
-                };
-                counters.current_fingerprint = if sql.is_null() {
-                    None
-                } else {
-                    safe_fingerprint(unsafe { CStr::from_ptr(sql) }.to_bytes())
-                };
+                counters.current_sql = shape;
+                counters.current_fingerprint = fingerprint;
             }
             return 0;
         }
@@ -336,6 +354,8 @@ impl<'a> StatementObservation<'a> {
             counters: counters.clone(),
             baselines: HashMap::new(),
             exhaustive: false,
+            last_sql: Vec::new(),
+            last_shape: None,
         });
         // The guard removes the callback before dropping its context.
         let result = register(
