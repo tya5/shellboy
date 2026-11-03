@@ -1114,6 +1114,7 @@ impl Store {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn transact(
         &self,
         connection: &mut Connection,
