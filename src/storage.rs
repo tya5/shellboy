@@ -541,7 +541,7 @@ impl DbWorker {
                         {
                             let snapshot = counters
                                 .as_ref()
-                                .and_then(|c| c.try_lock().ok().map(|c| *c))
+                                .and_then(|c| c.try_lock().ok().map(|c| c.clone()))
                                 .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
                             diagnostics.record_db_job_active(
                                 &label,
@@ -642,7 +642,7 @@ impl DbWorker {
             let counters = active
                 .counters
                 .as_ref()
-                .and_then(|c| c.try_lock().ok().map(|c| *c))
+                .and_then(|c| c.try_lock().ok().map(|c| c.clone()))
                 .filter(|c| c.counter_scope.is_some() || c.rows.is_some());
             (
                 active.job.kind,
@@ -1960,6 +1960,7 @@ mod slow_job_tests {
         db.observe_inspection(&mut connection, "HistoryList", Instant::now(), Some("shell"), |conn| {
             conn.query_row("SELECT test_pause()", [], |r| r.get::<_, i64>(0)).unwrap();
             conn.query_row("WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<10000) SELECT sum(x) FROM n", [], |r| r.get::<_, i64>(0)).unwrap();
+            conn.query_row("SELECT test_pause()", [], |r| r.get::<_, i64>(0)).unwrap();
         });
         db.shutdown().await.unwrap();
         diagnostics.shutdown().await;
@@ -1973,6 +1974,18 @@ mod slow_job_tests {
         assert_eq!(active[0]["db_job_active"]["kind"], "HistoryList");
         assert_eq!(active[0]["db_job_active"]["lane"], "inspection");
         assert_eq!(active[0]["db_job_active"]["requester"], "shell");
+        let observed = &active[0]["db_job_active"]["statement_counters"];
+        assert_eq!(observed["sql_scope"], "overrun_statement");
+        assert!(observed["sql"].as_str().unwrap().contains("WITH RECURSIVE"));
+        let slow = log
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .find(|row| row["event"] == "db_job_slow")
+            .unwrap();
+        assert_eq!(
+            observed["sql"],
+            slow["db_job_slow"]["statement_counters"]["sql"]
+        );
         assert!(!log.contains("test_pause"));
     }
 
@@ -2010,6 +2023,53 @@ mod slow_job_tests {
         assert_eq!(
             event["db_job_slow"]["statement_counters"]["row_scope"],
             "job_cumulative"
+        );
+    }
+
+    #[tokio::test]
+    async fn slow_sql_with_embedded_message_does_not_reach_log() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = crate::diagnostics::Diagnostics::start(
+            root.path().join("logs"),
+            crate::config::Logging::default(),
+        );
+        let db = DbWorker::open(root.path().join("db")).await.unwrap();
+        db.attach_diagnostics(diagnostics.clone());
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .create_scalar_function(
+                "test_delay",
+                0,
+                rusqlite::functions::FunctionFlags::empty(),
+                |_| {
+                    std::thread::sleep(Duration::from_millis(5));
+                    Ok("ok")
+                },
+            )
+            .unwrap();
+        let message = "private_message_body_marker";
+        let sql = format!("SELECT test_delay() || '{message}'");
+        let value = db.observe_inspection(
+            &mut connection,
+            "HistoryGet",
+            Instant::now() - SLOW_JOB_THRESHOLD,
+            Some("shell"),
+            |conn| {
+                conn.query_row(&sql, [], |row| row.get::<_, String>(0))
+                    .unwrap()
+            },
+        );
+        assert!(value.contains(message));
+        db.shutdown().await.unwrap();
+        diagnostics.shutdown().await;
+        let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        assert!(!log.contains(message), "{log}");
+        let event: serde_json::Value = serde_json::from_str(log.lines().next().unwrap()).unwrap();
+        assert!(
+            event["db_job_slow"]["statement_counters"]["sql"]
+                .as_str()
+                .is_some(),
+            "{log}"
         );
     }
 

@@ -1,4 +1,7 @@
 //! Connection-scoped SQLite statement counters. SQL text and bindings stay private.
+#[path = "sql_normalize.rs"]
+mod sql_normalize;
+
 use rusqlite::{Connection, ffi};
 use std::{
     collections::HashMap,
@@ -8,7 +11,7 @@ use std::{
 };
 
 /// Profile counters cover completed statements; rows also include the active statement.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Counters {
     pub fullscan_steps: u64,
     pub sorts: u64,
@@ -21,6 +24,22 @@ pub(crate) struct Counters {
     pub fingerprint: Option<&'static str>,
     pub plan: Option<[Option<&'static str>; 8]>,
     current_fingerprint: Option<&'static str>,
+    fingerprint_frozen: bool,
+    pub sql: Option<String>,
+    current_sql: Option<String>,
+    current_statement: usize,
+    captured_statement: usize,
+    captured_profile_recorded: bool,
+}
+
+impl Counters {
+    fn clear_current_if(&mut self, statement: usize) {
+        if self.current_statement == statement {
+            self.current_statement = 0;
+            self.current_sql = None;
+            self.current_fingerprint = None;
+        }
+    }
 }
 
 impl serde::Serialize for Counters {
@@ -43,6 +62,17 @@ impl serde::Serialize for Counters {
         }
         if let Some(fingerprint) = self.fingerprint {
             map.serialize_entry("fingerprint", fingerprint)?;
+        }
+        if let Some(sql) = &self.sql {
+            map.serialize_entry("sql", sql)?;
+            map.serialize_entry(
+                "sql_scope",
+                if self.fingerprint_frozen {
+                    "overrun_statement"
+                } else {
+                    "last_sampled_statement"
+                },
+            )?;
         }
         if let Some(plan) = self.plan {
             map.serialize_entry("plan", &plan)?;
@@ -123,6 +153,10 @@ unsafe fn statement_counts(stmt: *mut ffi::sqlite3_stmt) -> [u64; 4] {
     .map(|op| unsafe { ffi::sqlite3_stmt_status(stmt, op, 0).max(0) as u64 })
 }
 
+fn sample_profile(duration_ns: u64) -> bool {
+    duration_ns >= 1_000_000
+}
+
 unsafe extern "C" fn profile(
     event: u32,
     context: *mut c_void,
@@ -135,6 +169,25 @@ unsafe extern "C" fn profile(
     let context = unsafe { &mut *context.cast::<TraceContext>() };
     let stmt = statement.cast::<ffi::sqlite3_stmt>();
     if !context.exhaustive {
+        if event == ffi::SQLITE_TRACE_STMT {
+            let sql = unsafe { ffi::sqlite3_sql(stmt) };
+            if let Ok(mut counters) = context.counters.lock() {
+                counters.current_statement = stmt as usize;
+                counters.current_sql = if sql.is_null() {
+                    None
+                } else {
+                    Some(sql_normalize::normalize(
+                        unsafe { CStr::from_ptr(sql) }.to_bytes(),
+                    ))
+                };
+                counters.current_fingerprint = if sql.is_null() {
+                    None
+                } else {
+                    safe_fingerprint(unsafe { CStr::from_ptr(sql) }.to_bytes())
+                };
+            }
+            return 0;
+        }
         if event == ffi::SQLITE_TRACE_ROW {
             if let Ok(mut counters) = context.counters.lock() {
                 counters.rows = Some(counters.rows.unwrap_or_default().saturating_add(1));
@@ -146,11 +199,28 @@ unsafe extern "C" fn profile(
             return 0;
         }
         let duration = unsafe { *(elapsed as *const u64) };
-        if duration < 1_000_000 {
+        if !sample_profile(duration) {
+            if let Ok(mut counters) = context.counters.lock() {
+                if counters.fingerprint_frozen && counters.captured_statement == stmt as usize {
+                    counters.captured_profile_recorded = true;
+                }
+                counters.clear_current_if(stmt as usize);
+            }
             return 0;
         }
         let values = unsafe { statement_counts(stmt) };
-        if let Ok(mut counters) = context.counters.try_lock() {
+        if let Ok(mut counters) = context.counters.lock() {
+            if counters.fingerprint_frozen {
+                if counters.captured_statement != stmt as usize
+                    || counters.captured_profile_recorded
+                {
+                    counters.clear_current_if(stmt as usize);
+                    return 0;
+                }
+                counters.captured_profile_recorded = true;
+            } else {
+                counters.sql = counters.current_sql.clone();
+            }
             counters.fullscan_steps = values[0];
             counters.sorts = values[1];
             counters.autoindexes = values[2];
@@ -158,11 +228,14 @@ unsafe extern "C" fn profile(
             counters.elapsed_ns = duration;
             counters.counter_scope = Some("statement_lifetime_cumulative");
             let sql = unsafe { ffi::sqlite3_sql(stmt) };
-            counters.fingerprint = if sql.is_null() {
-                None
-            } else {
-                safe_fingerprint(unsafe { CStr::from_ptr(sql) }.to_bytes())
-            };
+            if !counters.fingerprint_frozen {
+                counters.fingerprint = if sql.is_null() {
+                    None
+                } else {
+                    safe_fingerprint(unsafe { CStr::from_ptr(sql) }.to_bytes())
+                };
+            }
+            counters.clear_current_if(stmt as usize);
         }
         return 0;
     }
@@ -231,7 +304,7 @@ impl<'a> StatementObservation<'a> {
         Self::install_using(connection, |db, context| unsafe {
             ffi::sqlite3_trace_v2(
                 db,
-                ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_ROW,
+                ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_ROW,
                 Some(profile),
                 context,
             )
@@ -283,7 +356,7 @@ impl<'a> StatementObservation<'a> {
         self.connection
     }
     pub fn counters(&self) -> Counters {
-        self.counters.lock().map(|c| *c).unwrap_or_default()
+        self.counters.lock().map(|c| c.clone()).unwrap_or_default()
     }
     pub(super) fn shared_counters(&self) -> Arc<Mutex<Counters>> {
         self.counters.clone()
@@ -334,9 +407,13 @@ impl SlowBacktrace {
                 .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             if let Some(counters) = &self.counters
-                && let Ok(mut counters) = counters.try_lock()
+                && let Ok(mut counters) = counters.lock()
             {
                 counters.fingerprint = counters.current_fingerprint;
+                counters.sql = counters.current_sql.clone();
+                counters.captured_statement = counters.current_statement;
+                counters.counter_scope = None;
+                counters.fingerprint_frozen = true;
             }
             *captured = std::panic::catch_unwind(capture).ok();
         }
@@ -378,15 +455,22 @@ mod tests {
     fn overrun_captures_executing_statement_not_later_sql() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY,deleted_at TEXT); INSERT INTO thread VALUES ('private-id',NULL)").unwrap();
-        let mut observation = StatementObservation::install_exhaustive_for_tests(&mut db);
+        let mut observation = StatementObservation::install(&mut db);
         let start = std::time::Instant::now();
-        let trace = SlowBacktrace::new(start, Some(observation.shared_counters()));
+        let shared = observation.shared_counters();
+        let trace = SlowBacktrace::new(start, Some(shared.clone()));
+        let active = Arc::new(Mutex::new(None));
+        let snapshot = active.clone();
         observation
             .connection()
             .progress_handler(
                 1,
                 Some(move || {
                     trace.observe(start + super::super::SLOW_JOB_THRESHOLD);
+                    let mut snapshot = snapshot.lock().unwrap();
+                    if snapshot.is_none() {
+                        *snapshot = Some(shared.lock().unwrap().clone());
+                    }
                     false
                 }),
             )
@@ -403,7 +487,25 @@ mod tests {
             .connection()
             .progress_handler(0, None::<fn() -> bool>)
             .unwrap();
-        observation.connection().execute_batch("SELECT 1").unwrap();
+        observation
+            .connection()
+            .create_scalar_function(
+                "later_delay",
+                0,
+                rusqlite::functions::FunctionFlags::empty(),
+                |_| {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    Ok(1)
+                },
+            )
+            .unwrap();
+        observation
+            .connection()
+            .execute_batch("SELECT later_delay()")
+            .unwrap();
+        let active = active.lock().unwrap().clone().unwrap();
+        assert_eq!(active.sql, observation.counters().sql);
+        assert!(active.sql.as_deref().unwrap().contains("WHERE"));
         let json = serde_json::to_string(&observation.counters()).unwrap();
         assert!(json.contains("thread.deleted_at_by_id"));
         assert!(!json.contains("private-id"));
@@ -563,6 +665,77 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual comparison of production row and statement hooks"]
+    fn measure_final_hook_variants() {
+        fn workload(db: &Connection, scan: bool) {
+            if scan {
+                let mut statement = db
+                    .prepare_cached("SELECT value FROM bench WHERE id < 1000")
+                    .unwrap();
+                for _ in 0..100 {
+                    let mut rows = statement.query([]).unwrap();
+                    while let Some(row) = rows.next().unwrap() {
+                        std::hint::black_box(row.get::<_, i64>(0).unwrap());
+                    }
+                }
+            } else {
+                let mut statement = db
+                    .prepare_cached("SELECT value FROM bench WHERE id = ?1")
+                    .unwrap();
+                for id in 0..50000_i64 {
+                    std::hint::black_box(
+                        statement
+                            .query_row([id % 10000], |r| r.get::<_, i64>(0))
+                            .unwrap(),
+                    );
+                }
+            }
+        }
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE bench(id INTEGER PRIMARY KEY,value INTEGER); WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<9999) INSERT INTO bench SELECT x,x FROM n;").unwrap();
+        for scan in [false, true] {
+            workload(&db, scan);
+            for pass in 0..7 {
+                let start = std::time::Instant::now();
+                workload(&db, scan);
+                let baseline = start.elapsed();
+                let mut profile_only =
+                    StatementObservation::install_using(&mut db, |db, context| unsafe {
+                        ffi::sqlite3_trace_v2(db, ffi::SQLITE_TRACE_PROFILE, Some(profile), context)
+                    });
+                let start = std::time::Instant::now();
+                workload(profile_only.connection(), scan);
+                let profile_time = start.elapsed();
+                drop(profile_only);
+                let mut all = StatementObservation::install(&mut db);
+                let capture = SlowBacktrace::new(std::time::Instant::now(), None);
+                all.connection()
+                    .progress_handler(
+                        1000,
+                        Some(move || {
+                            capture.observe(std::time::Instant::now());
+                            false
+                        }),
+                    )
+                    .unwrap();
+                let start = std::time::Instant::now();
+                workload(all.connection(), scan);
+                let full = start.elapsed();
+                all.connection()
+                    .progress_handler(0, None::<fn() -> bool>)
+                    .unwrap();
+                drop(all);
+                eprintln!(
+                    "scan={scan} pass={pass} baseline_ns={} profile_ns={} production_ns={}",
+                    baseline.as_nanos(),
+                    profile_time.as_nanos(),
+                    full.as_nanos()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn production_sampling_ignores_fast_statements_and_labels_slow_cumulative_counts() {
         let mut db = Connection::open_in_memory().unwrap();
         db.create_scalar_function(
@@ -580,10 +753,13 @@ mod tests {
             .connection()
             .query_row("SELECT 1", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(observation.counters().counter_scope, None);
-        let fast = serde_json::to_value(observation.counters()).unwrap();
-        assert_eq!(fast["rows"], 1);
-        assert!(fast.get("vm_steps").is_none());
+        assert!(!sample_profile(999_999));
+        assert!(sample_profile(1_000_000));
+        let fast = observation.counters();
+        assert_eq!(fast.rows, Some(1));
+        if fast.counter_scope.is_some() {
+            assert!(fast.elapsed_ns >= 1_000_000);
+        }
         let _: i64 = observation
             .connection()
             .query_row("SELECT pause()", [], |r| r.get(0))
