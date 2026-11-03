@@ -568,14 +568,32 @@ impl Diagnostics {
     }
     /// Log only a bounded parameter name, never its value.
     pub(crate) fn record_shell_unknown_parameter(
-        &self, event: DiagnosticEvent, ids: DiagnosticIds, name: &str,
+        &self,
+        event: DiagnosticEvent,
+        ids: DiagnosticIds,
+        name: &str,
     ) {
-        let name: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(64).collect();
+        let name: String = name
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .take(64)
+            .collect();
         self.enqueue_record(Record {
-            event, ids, failure: None, stream_difference: None, send: None, shutdown: None,
-            tool_repair: None, usage_slow: None, ui_history: None, lineage_slow: None,
-            db_job: None, index_discard: None, automatic_compaction_counts: None,
-            startup_stage: None, shell_unknown_parameter: Some(name),
+            event,
+            ids,
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: None,
+            index_discard: None,
+            automatic_compaction_counts: None,
+            startup_stage: None,
+            shell_unknown_parameter: Some(name),
         });
     }
     pub fn record(&self, event: DiagnosticEvent, ids: DiagnosticIds) {
@@ -1626,16 +1644,26 @@ mod shell_unknown_parameter_tests {
         let root = tempfile::tempdir().unwrap();
         let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
         diagnostics.record_shell_unknown_parameter(
-            DiagnosticEvent::ShellUnknownArgumentsIgnored, DiagnosticIds::default(), "timeout",
+            DiagnosticEvent::ShellUnknownArgumentsIgnored,
+            DiagnosticIds::default(),
+            "timeout",
         );
         diagnostics.record_shell_unknown_parameter(
-            DiagnosticEvent::ShellUnknownArgumentsRejected, DiagnosticIds::default(), &"x".repeat(100),
+            DiagnosticEvent::ShellUnknownArgumentsRejected,
+            DiagnosticIds::default(),
+            &"x".repeat(100),
         );
         diagnostics.shutdown().await;
         let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
-        let rows: Vec<serde_json::Value> = body.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let rows: Vec<serde_json::Value> = body
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
         assert_eq!(rows[0]["shell_unknown_parameter"], "timeout");
-        assert_eq!(rows[1]["shell_unknown_parameter"].as_str().unwrap().len(), 64);
+        assert_eq!(
+            rows[1]["shell_unknown_parameter"].as_str().unwrap().len(),
+            64
+        );
         assert!(rows.iter().all(|row| row.get("value").is_none()));
     }
 }
