@@ -351,13 +351,24 @@ mod tests {
                 }
                 for part in bytes.chunks(chunk) {
                     decoder.feed(part);
+                }
+                decoder.finish_escape();
+                assert_eq!(
+                    decoder.events.drain(..).collect::<Vec<_>>(),
+                    [Event::Paste("a\x1b\x1b\x1b[b".into())]
+                );
+                assert!(decoder.bytes.is_empty());
+                // Once the opener is recognized, idle inside paste cannot turn
+                // its Escape bytes into standalone keys either.
+                decoder.feed(b"\x1b[200~");
+                for part in b"a\x1b\x1b\x1b[b\x1b[201~".chunks(chunk) {
+                    decoder.feed(part);
                     decoder.finish_escape();
                 }
                 assert_eq!(
                     decoder.events.drain(..).collect::<Vec<_>>(),
                     [Event::Paste("a\x1b\x1b\x1b[b".into())]
                 );
-                assert!(decoder.bytes.is_empty());
             }
         }
     }
