@@ -175,10 +175,10 @@ impl SlowBacktrace {
         if now.saturating_duration_since(self.started) < super::SLOW_JOB_THRESHOLD {
             return;
         }
-        if let Ok(mut captured) = self.captured.try_lock() {
-            if captured.is_none() {
-                *captured = Some(std::backtrace::Backtrace::force_capture());
-            }
+        if let Ok(mut captured) = self.captured.try_lock()
+            && captured.is_none()
+        {
+            *captured = Some(std::backtrace::Backtrace::force_capture());
         }
     }
     pub fn symbols(&self) -> Option<Vec<String>> {

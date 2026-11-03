@@ -57,6 +57,24 @@ mod tests {
           INSERT INTO app_meta(key,value)VALUES('compact.inflight.t','[\"operation\"]');").unwrap();
         db
     }
+    #[test]
+    fn run_and_turn_details_seek_when_unrelated_history_grows() {
+        let mut db = fixture();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES ('other','/','','p','m','now'); WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) INSERT INTO run(id,thread_id,state,created_at) SELECT 'foreign-r-'||x,'other','completed','now' FROM n; WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) INSERT INTO turn(id,thread_id,run_id,state,created_at) SELECT 'foreign-u-'||x,'other','foreign-r-'||x,'completed','now' FROM n;").unwrap();
+        for name in ["run", "turn"] {
+            let mut observation =
+                crate::storage::statement_observation::StatementObservation::install(&mut db);
+            if name == "run" {
+                crate::control::db::run_details(observation.connection(), "r").unwrap();
+            } else {
+                crate::control::db::turn_details(observation.connection(), "u").unwrap();
+            }
+            let counters = observation.counters();
+            assert_eq!(counters.fullscan_steps, 0, "{name}: {counters:?}");
+            assert!(counters.vm_steps > 0);
+        }
+    }
+
     #[tokio::test(start_paused = true)]
     async fn saved_wait_has_no_clock_expiry_and_terminal_or_removed_owner_clears_it() {
         let db = fixture();
