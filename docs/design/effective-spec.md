@@ -385,7 +385,11 @@ before the event loop. Agreeing replies identify width one or two; timeout,
 unsupported input path, impossible response or disagreement is unknown. A small
 terminal that cannot host the probe is also unknown. F1 help reports the result;
 TUI status and diagnostics report a measured mismatch with Ratatui's default.
-No user width override or terminal-name/locale guess is used.
+`ui.ambiguous_width` selects `cached` (default), `probe`, `narrow`, or `wide`.
+A successful observation is cached per terminal program and version, or TERM;
+unknown identity and failed probes are never cached. `probe` remeasures and
+refreshes the cache, while fixed modes bypass the helper. No terminal-name or
+locale is used to infer width.
 
 Shellboy's own layout uses the observation; unknown reserves two cells for
 ambiguous characters, and emoji sequences reserve their component widths.
