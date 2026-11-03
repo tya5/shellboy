@@ -3451,7 +3451,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 3,
                     pending: false,
-                    last_fired_at: None,
                 }),
                 Some("↻3"),
             ),
@@ -3459,7 +3458,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 3,
                     pending: true,
-                    last_fired_at: None,
                 }),
                 Some("↻3+"),
             ),
@@ -3467,7 +3465,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 0,
                     pending: true,
-                    last_fired_at: None,
                 }),
                 Some("↻0+"),
             ),
@@ -3475,7 +3472,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 0,
                     pending: false,
-                    last_fired_at: None,
                 }),
                 None,
             ),
@@ -3510,7 +3506,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 3,
                     pending: false,
-                    last_fired_at: None,
                 }),
                 Some("↻3"),
             ),
@@ -3518,7 +3513,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 3,
                     pending: true,
-                    last_fired_at: None,
                 }),
                 Some("↻3+"),
             ),
@@ -3526,7 +3520,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 0,
                     pending: true,
-                    last_fired_at: None,
                 }),
                 Some("↻0+"),
             ),
@@ -3534,7 +3527,6 @@ mod tests {
                 Some(RevisitSummary {
                     consumed_count: 0,
                     pending: false,
-                    last_fired_at: None,
                 }),
                 None,
             ),
