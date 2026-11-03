@@ -12,7 +12,7 @@ use super::sql_error;
 pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenance, ApiError> {
     connection
         .query_row(
-            "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id),COALESCE((SELECT sender_json FROM receipt WHERE message_node_id=n.id ORDER BY rowid LIMIT 1),(SELECT json_extract(result_json,'$.reply.by') FROM receipt WHERE json_extract(result_json,'$.reply.node_id')=n.id ORDER BY rowid LIMIT 1)) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",
+            "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id),COALESCE((SELECT sender_json FROM receipt WHERE message_node_id=n.id ORDER BY rowid LIMIT 1),(SELECT json_extract(result_json,'$.reply.by') FROM receipt WHERE target_thread_id=COALESCE(t.thread_id,r.thread_id) AND json_extract(result_json,'$.reply.node_id')=n.id ORDER BY rowid LIMIT 1)) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",
             [node_id],
             |row| Ok(NodeProvenance { sender: {
                 let kind: String = row.get(0)?;
