@@ -339,65 +339,151 @@ def input_ready(text):
     return '\u5165\u529b\u3067\u304d\u307e\u3059' in text or 'Ready for input' in text
 
 
-def measure_startup(binary):
+def terminal_replies(pending, dsr_count):
+    """Answer the terminal queries used by crossterm and the width probe."""
+    replies = []
+    queries = {'\x1b[?u': b'\x1b[?0u', '\x1b[c': b'\x1b[?1;2c'}
+    while True:
+        found = [(pending.find(query), query) for query in (*queries, '\x1b[6n')
+                 if pending.find(query) >= 0]
+        if not found:
+            break
+        pos, query = min(found)
+        pending = pending[pos + len(query):]
+        if query in queries:
+            replies.append(queries[query])
+        else:
+            dsr_count += 1
+            # The probe writes two narrow middle dots at row 11, columns 1 and 2.
+            column = 2 if dsr_count == 1 else 3
+            replies.append(f'\x1b[11;{column}R'.encode())
+    return pending[-5:], replies, dsr_count
+
+
+def run_startup_sample(binary, root, config, env, expected_cache_hit):
     import fcntl
     import pty
     import struct
     import termios
+    log = root / 'data' / 'logs' / 'shellboy.log'
+    prior_log_size = log.stat().st_size if log.exists() else 0
+    master, slave = pty.openpty()
+    process = None
+    pending = ''
+    dsr_count = 0
+    da_replies = 0
+    keyboard_replies = 0
+    started = time.perf_counter_ns()
+    first_screen = None
+    input_echo = None
+    try:
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 100, 0, 0))
+        frames = Frames(100, 36)
+        process = subprocess.Popen([str(binary), '--config', str(config), '--data-dir', str(root / 'data')],
+                                   cwd=root, env=env, stdin=slave, stdout=slave, stderr=slave,
+                                   start_new_session=True)
+        os.close(slave)
+        slave = None
+        probe_sent = False
+        probe = 'BENCH_INPUT_READY'
+        deadline = time.monotonic() + TIMEOUT
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError('TUI exited before input probe')
+            if not select.select([master], [], [], .01)[0]:
+                continue
+            data = os.read(master, 65536)
+            pending += data.decode('latin1')
+            pending, replies, dsr_count = terminal_replies(pending, dsr_count)
+            for reply in replies:
+                os.write(master, reply)
+                if reply == b'\x1b[?1;2c':
+                    da_replies += 1
+                elif reply == b'\x1b[?0u':
+                    keyboard_replies += 1
+            for text in frames.feed(data):
+                elapsed = (time.perf_counter_ns() - started) / 1e6
+                if first_screen is None and text.strip():
+                    first_screen = elapsed
+                if not probe_sent and input_ready(text):
+                    os.write(master, ('\x1b[200~' + probe + '\x1b[201~').encode())
+                    probe_sent = True
+                if probe in text:
+                    input_echo = elapsed
+                    break
+            if input_echo is not None:
+                break
+        if input_echo is None:
+            raise TimeoutError('PTY startup/input watchdog: ' + frames.completed_text)
+    finally:
+        if slave is not None:
+            os.close(slave)
+        if process is not None and process.poll() is None:
+            os.write(master, b'\x11')
+            deadline = time.monotonic() + 10
+            while process.poll() is None and time.monotonic() < deadline:
+                if select.select([master], [], [], .05)[0]:
+                    try:
+                        os.read(master, 65536)
+                    except OSError:
+                        break
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
+        os.close(master)
+        if process is not None and process.returncode != 0:
+            raise RuntimeError('TUI did not shut down cleanly')
+    if da_replies == 0 or keyboard_replies == 0:
+        raise RuntimeError(f'Terminal queries not exercised: DA={da_replies}, keyboard={keyboard_replies}')
+    expected_dsr = 0 if expected_cache_hit else 2
+    if dsr_count != expected_dsr:
+        raise RuntimeError(f'Unexpected width-probe DSR count: expected {expected_dsr}, got {dsr_count}')
+    log_bytes = log.read_bytes()[prior_log_size:] if log.exists() else b''
+    lines = log_bytes.decode('utf-8', errors='replace').splitlines()
+    records = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get('event') == 'startup_stage' and entry.get('startup_stage'):
+            records.append(entry['startup_stage'])
+    return {
+        'first_screen_ms': first_screen,
+        'input_echo_ms': input_echo,
+        'method': 'spawn_to_first_nonempty_completed_frame_and_pasted_composer_echo',
+        'cols': 100,
+        'rows': 36,
+        'fresh_data_dir': not expected_cache_hit,
+        'width_cache_hit': expected_cache_hit,
+        'terminal_replies': {'primary_da': da_replies, 'keyboard_enhancement': keyboard_replies,
+                             'width_probe_dsr': dsr_count},
+        'startup_stage_records': records,
+    }
+
+
+def measure_startup(binary):
     with tempfile.TemporaryDirectory(prefix='shellboy-startup-') as scratch:
         root = Path(scratch)
         env = isolated_env(root)
+        env['TERM_PROGRAM'] = 'ShellboyFootprintFakeTerminal'
+        env['TERM_PROGRAM_VERSION'] = '1'
         config = configure(root, 'http://127.0.0.1:9/v1')
-        master, slave = pty.openpty()
-        process = None
-        try:
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 36, 100, 0, 0))
-            frames = Frames(100, 36)
-            start = time.perf_counter_ns()
-            process = subprocess.Popen([str(binary), '--config', str(config), '--data-dir', str(root / 'data')],
-                                       cwd=root, env=env, stdin=slave, stdout=slave, stderr=slave,
-                                       start_new_session=True)
-            os.close(slave)
-            slave = None
-            first_screen = None
-            probe_sent = False
-            probe = 'BENCH_INPUT_READY'
-            deadline = time.monotonic() + TIMEOUT
-            while time.monotonic() < deadline:
-                if process.poll() is not None:
-                    raise RuntimeError('TUI exited before input probe')
-                if not select.select([master], [], [], .01)[0]:
-                    continue
-                for text in frames.feed(os.read(master, 65536)):
-                    elapsed = (time.perf_counter_ns() - start) / 1e6
-                    if first_screen is None and text.strip():
-                        first_screen = elapsed
-                    if not probe_sent and input_ready(text):
-                        os.write(master, ('\x1b[200~' + probe + '\x1b[201~').encode())
-                        probe_sent = True
-                    if probe in text:
-                        return {'first_screen_ms': first_screen, 'input_echo_ms': elapsed,
-                                'method': 'spawn_to_first_nonempty_completed_frame_and_pasted_composer_echo',
-                                'cols': 100, 'rows': 36, 'cold_data_dir': True}
-            raise TimeoutError('PTY startup/input watchdog: ' + frames.completed_text)
-        finally:
-            if slave is not None:
-                os.close(slave)
-            if process is not None and process.poll() is None:
-                os.write(master, b'\x11')
-                deadline = time.monotonic() + 10
-                while process.poll() is None and time.monotonic() < deadline:
-                    if select.select([master], [], [], .05)[0]:
-                        try:
-                            os.read(master, 65536)
-                        except OSError:
-                            break
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=10)
-            os.close(master)
-            if process is not None and process.returncode != 0:
-                raise RuntimeError('TUI did not shut down cleanly')
+        cold = run_startup_sample(binary, root, config, env, expected_cache_hit=False)
+        caches = list((root / 'data').glob('.terminal-width-*'))
+        if len(caches) != 1 or caches[0].read_bytes() != b'1\n':
+            raise RuntimeError('Cold width-probe run did not persist the expected narrow-width cache')
+        cached = run_startup_sample(binary, root, config, env, expected_cache_hit=True)
+        if not cold['startup_stage_records'] or not cached['startup_stage_records']:
+            raise RuntimeError('Startup stage diagnostics missing from one or both fake-PTY launches')
+        return {
+            'method': 'two launches in one disposable HOME/data dir; first DSR-probed, second verified cache hit',
+            'terminal_replies': {'primary_da': 'ESC[?1;2c',
+                                 'keyboard_enhancement': 'ESC[?0u (not supported)',
+                                 'width_probe_dsr': ['ESC[11;2R', 'ESC[11;3R']},
+            'cold_fresh_data_dir': cold,
+            'width_cache_hit': cached,
+        }
 
 
 def main():
