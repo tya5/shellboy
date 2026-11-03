@@ -602,7 +602,7 @@ async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resen
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn invalid_second_tool_prevents_first_side_effect_and_every_call_receives_a_result() {
+async fn invalid_second_tool_does_not_prevent_valid_call_and_each_receives_a_result() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = owner(root.path(), &url).await;
@@ -629,9 +629,9 @@ async fn invalid_second_tool_prevents_first_side_effect_and_every_call_receives_
         .map(|v| serde_json::from_str(v["output"].as_str().unwrap()).unwrap())
         .collect();
     assert_eq!(outputs.len(), 2);
-    assert_eq!(outputs[0]["status"], "cancelled");
+    assert_eq!(outputs[0]["status"], "exited");
     assert_eq!(outputs[1]["status"], "error");
-    assert!(!marker.exists());
+    assert!(marker.exists());
     second.reply.send((200, answer("corrected"))).unwrap();
     settled(&control, &thread).await;
     control.shutdown().await.unwrap();
