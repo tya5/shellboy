@@ -47,6 +47,16 @@ behavior.
   and cached-input tokens. Bytes and tokens are different units and are never
   converted into each other; requests saved before this release show the bytes
   as not recorded. `shellboy usage get` shows the same facts (#186).
+- `ui.ambiguous_width` controls characters whose terminal width varies. The
+  default, `cached`, probes once per terminal program and version (or `TERM`
+  when program identity is unavailable) and remembers a successful result in
+  the data directory. If no terminal identity is available, Shellboy probes on
+  every launch. `probe` measures on every launch; `narrow` forces width 1 and
+  `wide` forces width 2. If measurement fails, Shellboy uses the conservative
+  glyph fallback and does not cache a guessed result. See
+  [Terminal Ambiguous Width](../guides/configuration.md#terminal-ambiguous-width).
+  Startup after a clean shutdown is also faster, because the integrity check
+  is skipped then (see Fixes, #192).
 - A new [Shell guide](../guides/shell.md) covers noninteractive Git use and
   diagnosing stuck shell processes.
 
@@ -63,9 +73,11 @@ behavior.
 - Conversation-history row clicks now expand only eligible tool/notice rows;
   ordinary message rows do not trigger disclosure, and command details appear
   only while their tool row is expanded (#177).
-- Narrow conversation panes preserve wide glyphs and wrap nested rows without
-  clipping or losing indentation. Fallback body hints remain on their own rows
-  (#179).
+- Narrow conversation panes preserve wide glyphs and wrap most nested rows
+  without clipping. Fallback body hints remain on their own rows. This work is
+  not complete: the wrapped continuation lines of the "> Original reference" row
+  and the "Display details limited · F6 Original" row still lack indentation
+  (#179, reopened).
 - Overflow recovery trims retain every user input from the active Turn (#185).
 - Watch results retain their order and separators in English; more recovery,
   receipt and operation diagnostics display in the selected UI language
