@@ -2295,7 +2295,7 @@ async fn deleted_thread_exclusive_nodes_disappear_before_gc_while_live_roots_and
         INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('deleted',0,'only-path'),('deleted',1,'shared'),('deleted',2,'source'),('deleted',3,'accepted'),('deleted',4,'pinned'),('live',0,'shared'),('live',1,'summary');
         INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES('replacement','summary','key','1','1','completed','now'),('nested-replacement','nested','nested-key','1','1','completed','now');
         INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision)VALUES('replacement',0,'nested',0),('nested-replacement',0,'source',0);
-        INSERT INTO receipt(id,client_operation_id,sender_json,message_node_id,state,target_thread_id,created_at)VALUES('receipt','op','null','accepted','accepted','deleted','now');
+        INSERT INTO receipt(id,client_operation_id,sender_json,message_node_id,state,target_thread_id,created_at)VALUES('receipt','op',json_object('kind','model','thread_id','live'),'accepted','accepted','deleted','now');
         INSERT INTO runtime_pin(id,resource_kind,resource_id,instance_id,generation,created_at)VALUES('pin','node','pinned','fixture',0,'now');")?;
         Ok(())
     }).await.unwrap();
