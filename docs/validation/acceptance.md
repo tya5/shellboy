@@ -9372,3 +9372,44 @@ failure retaining pending. The manual timing test uses fresh disposable copies
 of one closed snapshot and emits only numeric startup-stage measurements. Results,
 exact-tip CI and independent review remain pending; no provider or owner is
 started on copies and no installed binary is changed.
+
+### #210 Follow-Up Local Evidence (2026-11-04 JST)
+
+On arm64 macOS26.3.1, a fresh readonly VACUUM INTO snapshot (3.2GiB,
+schema27, quick_check=ok) supplies disposable schema24 fixtures that apply only
+migrations25-27. No source rows/logs are published. Both policies use the same
+implementation, with the baseline's legacy pending marker selecting the prior
+mandatory full check. The policy comparison is not two different builds.
+
+| Pair | Previous Full DB Open (s) | Scoped DB Open (s) | Previous FK Stage (s) | Scoped FK Stage |
+| --- | ---: | ---: | ---: | --- |
+| 1 | 11.169594 | 0.095948 | 11.080 | absent (index-only) |
+| 2 | 11.905182 | 0.084540 | 11.809 | absent (index-only) |
+| 3 | 10.256656 | 0.160764 | 10.170 | absent (index-only) |
+
+Before/after stage observations (milliseconds), pairs1/2/3 respectively:
+- Pragmas: before2/2/2; after4/3/3.
+- Migration25: before47/49/50; after48/49/49.
+- Migration26: before9/15/9; after11/8/9.
+- Migration27: before29/27/23; after31/22/97.
+- Database and validation stages: rounded0 in every observation.
+
+An earlier independent three-pair pass on this snapshot measured full DB open
+12.824/11.069/12.069s versus0.086/0.098/0.088s; FK12.700/10.985/11.971s.
+No timing thresholds, paid APIs or embedding/index jobs ran. Copy/fixture setup,
+compile/slot wait and diagnostic flushing are excluded; connection, pragmas,
+validation and index creation are included. Clean shutdown skips independent
+quick_check. Cache/other process activity is uncontrolled, baseline always first;
+these are database-open observations, not cold-cache or UI-ready guarantees.
+
+Forced own-crate rebuild inside rust-slot confirmed6 scope tests,4 real-file
+startup tests and3 existing integrity-policy tests pass (timing test explicitly
+ignored in ordinary runs, then1 manual test pass with6 observation rows).
+An initial attempt reused a stale shared test executable and selected0 new tests;
+it is not counted as evidence. The forced run exposed fixture FK enforcement
+(default on); the orphan-only fixture now explicitly disables enforcement before
+insertion. Initial strict Clippy caught ignored progress-handler Result values;
+those are checked. Strict locked all-target Clippy passed after that fix. Python
+checks196 pass; integration-layout/watchdog gates pass with103 suites. Rebased
+cargo check/tests, final-tip CI and external review are recorded in the issue
+handoff rather than claiming them before they finish.

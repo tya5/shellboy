@@ -155,7 +155,7 @@ mod tests {
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(
-            "CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            "PRAGMA foreign_keys=OFF; CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
             CREATE TABLE parent(id INTEGER PRIMARY KEY);
             CREATE TABLE child(parent_id INTEGER REFERENCES parent(id));
             CREATE TABLE unrelated(parent_id INTEGER REFERENCES parent(id));
