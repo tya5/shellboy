@@ -5101,3 +5101,321 @@ mod inspection_isolation_tests {
         writer.shutdown().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod writer_lane_audit_measurement {
+    use super::*;
+    use rusqlite::{
+        StatementStatus,
+        trace::{TraceEvent, TraceEventCodes},
+    };
+    use std::{
+        sync::{
+            Mutex, OnceLock,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::{Duration, Instant},
+    };
+
+    static SQL_TRACE: OnceLock<Mutex<Vec<(String, Duration, i32)>>> = OnceLock::new();
+    static TIMER_EPOCH: OnceLock<Instant> = OnceLock::new();
+    static SQL_DEADLINE_US: AtomicU64 = AtomicU64::new(0);
+
+    fn arm_sql_timeout() {
+        let now = TIMER_EPOCH.get_or_init(Instant::now).elapsed().as_micros() as u64;
+        SQL_DEADLINE_US.store(now.saturating_add(20_000_000), Ordering::Relaxed);
+    }
+
+    fn sql_timed_out() -> bool {
+        let now = TIMER_EPOCH.get_or_init(Instant::now).elapsed().as_micros() as u64;
+        now > SQL_DEADLINE_US.load(Ordering::Relaxed)
+    }
+
+    fn capture_sql(event: TraceEvent<'_>) {
+        match event {
+            TraceEvent::Stmt(_, _) => arm_sql_timeout(),
+            TraceEvent::Profile(stmt, elapsed) => {
+                let sql = stmt.sql();
+                if !sql
+                    .trim_start()
+                    .to_ascii_uppercase()
+                    .starts_with("EXPLAIN QUERY PLAN")
+                {
+                    SQL_TRACE
+                        .get_or_init(Default::default)
+                        .lock()
+                        .unwrap()
+                        .push((
+                            sql.into_owned(),
+                            elapsed,
+                            stmt.get_status(StatementStatus::FullscanStep),
+                        ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn has_growth_scan(sql: &str, details: &[String], table: &str) -> bool {
+        let normalized = sql.to_ascii_lowercase().replace(['\n', '\t'], " ");
+        let mut aliases = vec![table.to_owned()];
+        for keyword in [format!(" from {table} "), format!(" join {table} ")] {
+            let mut offset = 0;
+            while let Some(found) = normalized[offset..].find(&keyword) {
+                let after = normalized[offset + found + keyword.len()..].trim_start();
+                let token = after
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(',');
+                let token = if token == "as" {
+                    after
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("")
+                        .trim_matches(',')
+                } else {
+                    token
+                };
+                if !token.is_empty()
+                    && ![
+                        "where", "on", "join", "order", "group", "limit", "left", "right", "inner",
+                        "union",
+                    ]
+                    .contains(&token)
+                {
+                    aliases.push(token.to_owned());
+                }
+                offset += found + keyword.len();
+                if offset >= normalized.len() {
+                    break;
+                }
+            }
+        }
+        details.iter().any(|detail| {
+            let words = detail.split_whitespace().collect::<Vec<_>>();
+            words.len() >= 2
+                && words[0] == "SCAN"
+                && aliases
+                    .iter()
+                    .any(|alias| words[1].trim_matches('"') == alias)
+        })
+    }
+
+    fn report_sql(db: &Connection, label: &str) {
+        let mut statements =
+            std::mem::take(&mut *SQL_TRACE.get_or_init(Default::default).lock().unwrap());
+        statements.sort_by_key(|(_, elapsed, _)| std::cmp::Reverse(*elapsed));
+        for (sql, elapsed, fullscan) in statements {
+            eprintln!(
+                "AUDIT_SQL kind={label} elapsed_us={} fullscan_step={} sql={}",
+                elapsed.as_micros(),
+                fullscan,
+                sql
+            );
+            let explain = format!("EXPLAIN QUERY PLAN {sql}");
+            if let Ok(mut stmt) = db.prepare(&explain) {
+                let nulls =
+                    std::iter::repeat_n(rusqlite::types::Value::Null, stmt.parameter_count());
+                if let Ok(rows) =
+                    stmt.query_map(rusqlite::params_from_iter(nulls), |r| r.get::<_, String>(3))
+                {
+                    let details = rows.flatten().collect::<Vec<_>>();
+                    for detail in &details {
+                        eprintln!("AUDIT_PLAN kind={label} detail={detail}");
+                    }
+                    let growth = [
+                        "node",
+                        "edge",
+                        "tool_call",
+                        "tool_group",
+                        "receipt",
+                        "event",
+                        "output_chunk",
+                        "model_attempt",
+                        "embedding_job",
+                    ];
+                    for table in growth {
+                        let scan = has_growth_scan(&sql, &details, table);
+                        eprintln!("AUDIT_GROWTH_SCAN kind={label} table={table} scan={scan}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "opt-in read-only measurement; set SHELLBOY_AUDIT_DB and SHELLBOY_AUDIT_THREAD"]
+    fn measure_production_inspection_handlers() {
+        let path = std::path::PathBuf::from(
+            std::env::var_os("SHELLBOY_AUDIT_DB").expect("verified disposable DB copy required"),
+        );
+        let thread_id =
+            std::env::var("SHELLBOY_AUDIT_THREAD").expect("existing thread ID required");
+        let db = open_inspection(&path).expect("open copy using production read-only connection");
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT | TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(capture_sql),
+        );
+        arm_sql_timeout();
+        db.progress_handler(1_000, Some(sql_timed_out))
+            .expect("install statement timeout");
+
+        for repeat in 1..=3 {
+            eprintln!("AUDIT_START kind=ThreadList repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let start = Instant::now();
+            let _ = thread_list(
+                &tx,
+                &ThreadListArgs {
+                    limit: 40,
+                    ..Default::default()
+                },
+            )
+            .expect("production ThreadList handler");
+            eprintln!(
+                "AUDIT kind=ThreadList repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "ThreadList");
+
+            eprintln!("AUDIT_START kind=Status repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let mut args = StatusArgs::default();
+            args.thread_id = Some(thread_id.clone());
+            let start = Instant::now();
+            let _ = crate::status::snapshot(&tx, &args, "writer-lane-audit")
+                .expect("production Status handler");
+            eprintln!(
+                "AUDIT kind=Status repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "Status");
+
+            eprintln!("AUDIT_START kind=ShellList repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let args = ShellListArgs {
+                thread_id: Some(thread_id.clone()),
+                since: None,
+                until: None,
+                command_contains: None,
+                state: None,
+                exit_code: None,
+                limit: 40,
+                cursor: None,
+            };
+            let start = Instant::now();
+            let _ = crate::readback::shells(&tx, &args, "writer-lane-audit")
+                .expect("production ShellList handler");
+            eprintln!(
+                "AUDIT kind=ShellList repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "ShellList");
+
+            eprintln!("AUDIT_START kind=AttachmentList repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let start = Instant::now();
+            let _ = crate::attachments::list_tx(&tx, &thread_id)
+                .expect("production AttachmentList handler");
+            eprintln!(
+                "AUDIT kind=AttachmentList repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "AttachmentList");
+
+            eprintln!("AUDIT_START kind=HistoryRelations repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let node_id: String = tx.query_row(
+                "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal DESC LIMIT 1",
+                [&thread_id], |row| row.get(0),
+            ).expect("large thread has history");
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let args = HistoryRelationsArgs {
+                node_id,
+                relation: HistoryRelation::Previous,
+                limit: 40,
+                cursor: None,
+            };
+            let start = Instant::now();
+            let _ = history::relations(&tx, &args).expect("production HistoryRelations handler");
+            eprintln!(
+                "AUDIT kind=HistoryRelations repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "HistoryRelations");
+
+            eprintln!("AUDIT_START kind=UsageGet repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let scope = crate::usage_totals::Scope::Thread {
+                id: thread_id.clone(),
+                children: true,
+            };
+            let window = crate::readback::Window::new(None, None).expect("usage window");
+            let start = Instant::now();
+            let _ = crate::usage_totals::read_period_logged(
+                &tx,
+                &scope,
+                crate::usage_totals::read_context(),
+                None,
+                &window,
+            )
+            .expect("production UsageGet handler");
+            eprintln!(
+                "AUDIT kind=UsageGet repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "UsageGet");
+
+            eprintln!("AUDIT_START kind=MessageGet repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let message_id: String = tx.query_row(
+                "SELECT message_node_id FROM receipt WHERE target_thread_id=?1 ORDER BY created_at DESC LIMIT 1",
+                [&thread_id], |row| row.get(0),
+            ).expect("large thread has a saved message");
+            SQL_TRACE
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .clear();
+            let start = Instant::now();
+            let _ = message_details(&tx, &message_id).expect("production MessageGet handler");
+            eprintln!(
+                "AUDIT kind=MessageGet repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "MessageGet");
+
+            eprintln!("AUDIT_START kind=CompactPreview repeat={repeat}");
+            let tx = db.unchecked_transaction().expect("read transaction");
+            let args = CompactPreviewArgs {
+                thread_id: Some(thread_id.clone()),
+                ..Default::default()
+            };
+            let config = Config::parse("").expect("default config");
+            let start = Instant::now();
+            let raw = crate::compaction::preview::read_tx(&tx, &thread_id, &args, &config)
+                .expect("production CompactPreview projection");
+            let _ = crate::compaction::preview::prepare(raw);
+            eprintln!(
+                "AUDIT kind=CompactPreview repeat={repeat} elapsed_us={}",
+                start.elapsed().as_micros()
+            );
+            tx.commit().expect("close read transaction");
+            report_sql(&db, "CompactPreview");
+        }
+        db.progress_handler(0, None::<fn() -> bool>)
+            .expect("remove statement timeout");
+    }
+}
