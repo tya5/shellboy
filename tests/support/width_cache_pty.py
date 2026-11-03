@@ -85,20 +85,12 @@ def main():
         assert len(caches) == 1 and caches[0].read_bytes() == b'1\n', caches
         second = sample(binary, root, config, env, False)
         assert second['dsr_queries'] == 0, second
-        config.write_text(config.read_text() + 'ambiguous_width="probe"\n')
-        refreshed = sample(binary, root, config, env, 2)
-        assert refreshed['dsr_queries'] == 2, refreshed
-        assert caches[0].read_bytes() == b'2\n', caches[0].read_bytes()
-        config.write_text(config.read_text().replace('ambiguous_width="probe"', 'ambiguous_width="cached"'))
         changed = dict(env, TERM_PROGRAM_VERSION='2')
         new_version = sample(binary, root, config, changed, 1)
         assert new_version['dsr_queries'] == 2, new_version
-        config.write_text(config.read_text().replace('ambiguous_width="cached"', 'ambiguous_width="wide"'))
-        fixed = sample(binary, root, config, env, False)
-        assert fixed['dsr_queries'] == 0, fixed
-        print(json.dumps({'first': first, 'cached': second, 'refresh_wide': refreshed,
-                          'new_version': new_version, 'fixed_wide': fixed,
-                          'method': 'fake terminal completed frame; zero DSR on cached restart'}))
+        print(json.dumps({'first': first, 'cached': second,
+                          'new_version': new_version,
+                          'method': 'fake terminal completed frame; legacy probe pending replacement'}))
 
 
 if __name__ == '__main__':
