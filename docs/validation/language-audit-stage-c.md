@@ -15,7 +15,17 @@ Comments and character literals are excluded from this string inventory; the
 scan covers `src/**/*.rs`, not top-level test files. It does not infer that a
 source file is test-only from its filename. Unknown macros, nested arguments,
 other logging forms, arbitrary identifiers and ambiguous language predicates
-remain (c). The scanner is lexical, not a Rust type checker; its classification
+remain (c). A typed `render(self, language: UiLanguage)` using the explicit
+`use UiLanguage::{En, Ja}` and `match (language, self)` is also paired only
+when the same `Self` pattern has one Ja arm and one En arm with Japanese-free
+English literals. Operation catalogue fields are joined by their exact
+`FieldId`/`OperationId`, field role and matching Ja literal to a `local!` En
+counterpart. That special join only runs while the reviewed typed-key and UI
+projection functions match the token fingerprints in the script; a changed or
+missing projection makes those candidates pending again. A pair establishes
+resource structure, not that every caller is localized. Other separate tables,
+including `presentation/fields.rs`, are not presumed to have a safe projection.
+The scanner is lexical, not a Rust type checker; its classification
 is evidence of structure, not proof of end-to-end English rendering or license
 to change canonical data. Manually reviewed, fingerprint-pinned decisions still
 take precedence and stale decisions fail closed.
