@@ -299,7 +299,7 @@ issue; this change adds no storage column and does not claim that check passed.
 
 ### Context role: `context_role`
 
-Shellboy inserts context into a conversation: event notices (`Shellboy event v1: ...`, for example a finished background shell or a changed context) and the context line saved at each Turn start and after a setting change. By default these are sent as `developer` messages, the meaning OpenAI-style APIs expect, and the saved history is never changed.
+Shellboy inserts context into a conversation: event notices (`Shellboy event v1: ...`, for example a finished background shell or a changed context) and a context line saved at each Turn start and after a setting change. The context line is stored as a `context` history node and reused by following requests; a changed setting appends a new line rather than rewriting earlier history. These items are sent as `developer` messages by default, the meaning OpenAI-style APIs expect.
 
 Some gateways (for example LiteLLM in front of Claude) move every `developer` message into the system prompt. A conversation whose last message is then an assistant message is rejected as "assistant message prefill" (HTTP 400, `The conversation must end with a user message`), which happens when a notice is the only thing after the model's last answer. For such a connection set:
 

@@ -63,7 +63,7 @@ Without an explicit ID, the CLI generates an instance-specific operation ID. For
 
 For important changes, explicitly retain an ID in the already known same-instance form `INSTANCE:YOUR_UNIQUE_NONCE` so acceptance can be investigated after disconnection. The instance component matches an operation_id returned by that owner. Do not reuse Run/Turn/message/node IDs as operation IDs.
 
-`message send` `delivery_status=accepted|held|applied|cancelled` describes acceptance/application. `assignment=new_run|new_turn|existing_turn` includes both run_id and turn_id; saved assignment never changes. `assignment=pending` has neither; query `message get` later for initial assignment. Successful send does not mean an answer is complete. Use `answer_node_id` for source retrieval when available.
+`message send` `delivery_status=accepted|held|applied|cancelled` describes acceptance/application. `assignment=new_run|new_turn|existing_turn` includes both run_id and turn_id; saved assignment never changes. `assignment=pending` has neither; query `message get` later for initial assignment. Successful send does not mean the assigned Turn has completed. Use `end_message_node_id` for source retrieval when available.
 
 ### Saved execution context
 
@@ -158,7 +158,7 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `message send [--thread THREAD] [--deliver now\|complete] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
-| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and answer_node_id when available |
+| `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and end_message_node_id when available |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed queued message IDs. Each item reports cancelled/already_cancelled/already_admitted/not_found/forbidden/unavailable and an archive_draft_id when available; admitted history cannot be cancelled. Does not wake the model |
 | `operation get --operation ID` | operation_id/state/outcome, instance_id/created_at/current_instance, result_uncertain/result_expired/replay_policy/targets, target-dependent downstream. Global `--operation-id` identifies this query; `--operation` identifies its target |
 
@@ -194,7 +194,7 @@ every case:
 - `now`: also release a foreground shell wait for urgent delivery. That shell
   continues under its execution ID; an in-progress model response is not
   interrupted.
-- `complete` (Revisit): deliver when the Thread's live Run would complete
+- `complete`: deliver when the Thread's live Run would complete
   normally, after owned shells and children finish. The result is
   `delivery_status: held`, `assignment: pending`, `deliver: complete`. If no Run
   is live, it is delivered immediately exactly like an omitted timing, and the

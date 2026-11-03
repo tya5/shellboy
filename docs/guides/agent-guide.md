@@ -93,7 +93,7 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 |---|---|---|
 | Command meaning and examples | `shellboy <command> --help` / `shellboy docs search --query 'background'` | `docs get` using the returned guide ID |
 | Current work state | `shellboy status --thread THREAD_ID` | get the target returned by each item; this is saved state, not an inference of OS process liveness |
-| Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | get the returned Turn, then history get if it has an answer_node_id |
+| Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | get the returned Turn, then history get if it has an end_message_node_id |
 | Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
 | Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history get by node ID; history relations for relationships |
 | Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
@@ -109,7 +109,7 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 1. Read instructions, current state, and necessary original text.
 2. Perform bounded work through shell. Use background execution for long tasks and track the returned execution.
 3. If dividing work, create a child Thread and send its request. Check assignment after acceptance before waiting.
-4. Check wait status and target state, then read the original answer node.
+4. Check wait status and target state, then read the original end-message node when present.
 5. Report results, verification, failures, and remaining work to the user.
 
 Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. An answered parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check its answer notification and retrieve the original text.
@@ -336,12 +336,12 @@ an independent Run that you cannot stop; the human user can. The saved
 Use the saved evidence to decide how to continue rather than assuming the work
 completed or repeating side effects automatically.
 
-## Revisit: a message delivered when the Run completes
+## Send a message when the Run completes
 
-A Revisit is an ordinary message whose delivery waits until your live Run would
-otherwise complete normally, after owned shells/children and pending input and
-events have been handled. Use it to make yourself check the work once more
-before finishing. It is not a new human request or a judgement of success.
+Use `--deliver complete` for an ordinary message that waits until your live Run
+would otherwise complete normally, after owned shells/children and pending input
+and events have been handled. This is a delivery timing on `message send`, not a
+separate Revisit operation, a new human request, or a judgement of success.
 
 ```sh
 shellboy message send --deliver complete --text 'Before finishing, inspect the original request and later constraints using their saved node IDs. Continue missing work and report unverified results.'
@@ -354,29 +354,31 @@ Inside your shell, omitting `--thread` targets your own Thread. The result has
 completion they arrive together, in send order, as a new Turn of the same Run,
 and your Run continues. Messages you or others send later with the default
 timing or `--deliver now` are delivered at their own boundaries first; a waiting
-Revisit never delays them. To continue again, send another one during that Turn.
+complete-delivery message never delays them. To continue again, send another
+one during that Turn.
 
 If no Run is live when it is sent (for example your parent sends one to a child
 that already finished), it is delivered immediately like an ordinary message and
 starts a new Run. A parent may send one to its owned child under the ordinary
 message rules.
 
-A waiting Revisit never outlives its Run. If the Run ends some other way, it is
-released at that moment as ordinary input: after `/stop`, Ctrl+C or `run stop`
-it is held like any input sent to a stopping Run and is admitted at the next
-explicit resume; after shutdown it is admitted at the next resume after
-restart; when the Run enters `recovery_wait`, it joins the held input that an
-explicit retry sends. After a human Esc interruption the Run still completes, so
-the Revisit is delivered then; check the latest human direction first.
+A waiting complete-delivery message never outlives its Run. If the Run ends
+some other way, it is released at that moment as ordinary input: after `/stop`,
+Ctrl+C or `run stop` it is held like any input sent to a stopping Run and is
+admitted at the next explicit resume; after shutdown it is admitted at the next
+resume after restart; when the Run enters `recovery_wait`, it joins the held
+input that an explicit retry sends. After a human Esc interruption the Run still
+completes, so the message is delivered then; check the latest human direction
+first.
 
-Before asking the user a question and ending your Turn, cancel a waiting
-Revisit. Core cannot identify questions. If one arrives while waiting for the
-user, end briefly without starting extra work. A false trigger can cost an
-additional model request.
+Before asking the user a question and ending your Turn, cancel any waiting
+complete-delivery message. Core cannot identify questions. If one arrives while
+waiting for the user, end briefly without starting extra work. A false trigger
+can cost an additional model request.
 
 `child_turn_completed` is progress, not completion of a child Run. A child with
-Revisit work can send several such notifications; wait for `child_run_ended`
-before treating the child as finished.
+complete-delivery messages can send several such notifications; wait for
+`child_run_ended` before treating the child as finished.
 
 ## Inspect a delegation sender
 
@@ -408,7 +410,7 @@ Collection keeps history references/reasons, not the reclaimed content; conversa
 
 Retain the accepted `message_id`. `shellboy message get --message MESSAGE_ID` exposes its saved delivery/context; applied means path admission, not a successful answer. To cancel unread input explicitly, use `shellboy message cancel --message MESSAGE_ID` (repeat `--message` for up to 128 fixed IDs). Humans may cancel any sender's input; models may cancel only input sent by their own Thread. Check each returned outcome: another input may already have been admitted. Same-operation replay returns the saved outcomes. Cancellation does not wake the model. `archive_draft_id` identifies a durable source available to a human through TUI `/restore list` or `/restore draft ID`; restoration does not execute or send anything automatically.
 
-A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background work; a later genuine shell/child completion may wake a Turn after Esc. A waiting Revisit message is still delivered when the Run then completes. Automatic time-based backgrounding is not enabled.
+A human's Esc interruption ends only the active Turn. Its notification describes which output was cut short or which calls did not run; do not assume those actions executed. Received partial output is saved for inspection but omitted from the model conversation. A foreground shell may continue in the background: inspect its returned execution ID before repeating work. Check the latest human direction before continuing. Ctrl+C and Run stop remain full stops, including owned background work; a later genuine shell/child completion may wake a Turn after Esc. A waiting complete-delivery message is still delivered when the Run then completes. Automatic time-based backgrounding is not enabled.
 
 
 ### Human Watch views and saved facts
