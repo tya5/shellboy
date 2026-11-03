@@ -68,11 +68,48 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
         }
         Ok(())
     }).await.unwrap();
+    control
+        .store
+        .database
+        .call(|db| {
+            db.execute("UPDATE run SET state='stopping' WHERE id='r'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        next(&control, "t", "r").await.unwrap(),
+        Next::Done
+    ));
+    control
+        .store
+        .database
+        .call(|db| {
+            db.execute("UPDATE run SET state='live' WHERE id='r'", [])?;
+            db.execute("UPDATE turn SET state='recovery_wait' WHERE id='u'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        next(&control, "t", "r").await.unwrap(),
+        Next::Done
+    ));
+    control.store.database.call(|db| {
+        assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_reminder'",[],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0))?,128);
+        db.execute("UPDATE turn SET state='completed' WHERE id='u'",[])?;
+        Ok(())
+    }).await.unwrap();
     let snapshot = match next(&control, "t", "r").await.unwrap() {
         Next::Ready(s) => s,
         _ => panic!("reminder must continue Run"),
     };
-    assert_eq!(snapshot.events.len(), 1, "the reminder must be in this continuation request");
+    assert_eq!(
+        snapshot.events.len(),
+        1,
+        "the reminder must be in this continuation request"
+    );
     control
         .store
         .database

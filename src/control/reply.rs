@@ -288,9 +288,8 @@ pub(crate) fn complete_tx(
         let value: Value = serde_json::from_str(&saved)
             .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         if value["reply"].get("reminded_at").is_some() {
-            if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
-                if let Some(thread) = outcome_tx(db, &message, &sender, "ignored", at)? { wakes.push(thread); }
-            }
+            if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1
+                && let Some(thread) = outcome_tx(db, &message, &sender, "ignored", at)? { wakes.push(thread); }
         } else {
             db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.reminded_at',?2,'$.reply.reminded_run_id',?3),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at,run])?;
             pending.push(json!({"message_id":message,"sender":crate::protocol::MessageSender::from_saved(Some(&sender))}));
@@ -301,7 +300,7 @@ pub(crate) fn complete_tx(
     }
     let event = format!("reply-reminder-{}", uuid::Uuid::new_v4());
     let payload = json!({"kind":"reply_reminder","messages":pending});
-    db.execute("INSERT INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at) VALUES(?1,?2,?3,'reply_reminder',?4,?5)",params![event,thread,run,payload.to_string(),at])?;
+    db.execute("INSERT INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at,source_json) VALUES(?1,?2,?3,'reply_reminder',?4,?5,'{}')",params![event,thread,run,payload.to_string(),at])?;
     db.execute(
         "INSERT INTO delivery(event_id,recipient_id,state) VALUES(?1,?2,'pending')",
         params![event, run],
@@ -344,7 +343,7 @@ fn outcome_tx(
         [&thread],
     )?;
     let payload = json!({"kind":"reply_outcome","message_id":message,"state":state});
-    db.execute("INSERT OR IGNORE INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at) VALUES(?1,?2,?3,?4,?5,?6)",params![id,thread,run,if run.is_some(){"reply_outcome"}else{"context_changed"},payload.to_string(),at])?;
+    db.execute("INSERT OR IGNORE INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at,source_json) VALUES(?1,?2,?3,?4,?5,?6,'{}')",params![id,thread,run,if run.is_some(){"reply_outcome"}else{"context_changed"},payload.to_string(),at])?;
     if let Some(run) = run {
         db.execute(
             "INSERT OR IGNORE INTO delivery(event_id,recipient_id,state) VALUES(?1,?2,'pending')",
@@ -388,6 +387,61 @@ pub(crate) fn deleted_threads_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reminder_rollback_and_restart_keep_once_per_message_not_per_run() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("fixture.db");
+        let mut db = Connection::open(&path).unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','0'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','0'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('m','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES('m','m','{\"kind\":\"human\"}','t','m','applied','admitted','0','{\"reply\":{\"state\":\"pending\"}}');").unwrap();
+        let tx = db.transaction().unwrap();
+        assert!(
+            complete_tx(&tx, "t", "r", "one", &mut Vec::new())
+                .unwrap()
+                .is_some()
+        );
+        tx.rollback().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let tx = db.transaction().unwrap();
+        assert!(
+            complete_tx(&tx, "t", "r", "two", &mut Vec::new())
+                .unwrap()
+                .is_some()
+        );
+        tx.commit().unwrap();
+        db.execute_batch("UPDATE run SET state='stopped'; INSERT INTO run(id,thread_id,state,created_at)VALUES('new-run','t','live','later');").unwrap();
+        drop(db);
+        let mut db = Connection::open(path).unwrap();
+        let tx = db.transaction().unwrap();
+        assert!(
+            complete_tx(&tx, "t", "new-run", "three", &mut Vec::new())
+                .unwrap()
+                .is_none()
+        );
+        tx.commit().unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM event WHERE kind='reply_reminder'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='m'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "ignored"
+        );
+    }
     #[test]
     fn admission_notices_are_once_only_ordered_and_transactional() {
         let mut db = Connection::open_in_memory().unwrap();

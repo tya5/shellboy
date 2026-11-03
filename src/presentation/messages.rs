@@ -1142,6 +1142,29 @@ pub(super) fn event_messages(
             }
         }
     }
+    if kind == "reply_reminder" {
+        if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+            for message in messages.iter().take(128) {
+                if let Some(id) = message["message_id"].as_str() {
+                    body.push(Message::Raw {
+                        text: format!(
+                            "{} {}",
+                            clipped(id),
+                            clipped(&message["sender"].to_string())
+                        ),
+                    });
+                }
+            }
+        }
+    } else if kind == "reply_outcome" {
+        for key in ["message_id", "state"] {
+            if let Some(value) = payload[key].as_str() {
+                body.push(Message::Raw {
+                    text: format!("{key}: {}", clipped(value)),
+                });
+            }
+        }
+    }
     // Provider/model messages and saved instructions are verbatim data, not catalogue keys.
     for key in ["message", "detail", "instruction"] {
         if let Some(text) = payload.get(key).and_then(Value::as_str) {
@@ -1400,6 +1423,16 @@ impl PresentationMessages {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reply_events_show_each_message_and_sender() {
+        let event = serde_json::json!({"kind":"reply_reminder","payload":{"messages":[{"message_id":"request-one","sender":{"kind":"human","label":"fixture"}},{"message_id":"request-two","sender":{"kind":"external_cli"}}]}});
+        let (_, body) = super::event_messages(&event, "event", false, &[]);
+        let rendered = format!("{body:?}");
+        for text in ["request-one", "request-two", "fixture", "external_cli"] {
+            assert!(rendered.contains(text), "{rendered}");
+        }
+    }
+
     use super::*;
 
     #[test]
