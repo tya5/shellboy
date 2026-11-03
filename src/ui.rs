@@ -17,6 +17,8 @@ use crate::{
 
 pub mod activity;
 mod bell;
+#[allow(dead_code)] // Wiring into the terminal session is the next step.
+mod capability_probe;
 mod chrome;
 mod code_copy;
 pub(crate) use code_copy::caption as code_copy_caption;
