@@ -940,6 +940,30 @@ mod metadata_tests {
     }
 
     #[test]
+    fn authorization_save_failure_reports_prior_commit_and_retry_resumes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        for key in ["index.auto.a", "index.auto.b"] {
+            db.execute(
+                "INSERT INTO app_meta VALUES(?1,?2)",
+                params![key, r#"{"node_id":"node","state":"running","error":null}"#],
+            )
+            .unwrap();
+        }
+        db.execute_batch("CREATE TRIGGER fail_b BEFORE UPDATE ON app_meta WHEN OLD.key='index.auto.b' BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
+        let (result, changed) = recover_authorization_page(&mut db, None);
+        assert!(result.is_err());
+        assert!(changed);
+        let first: AutoAdmission = json_meta(&db, "index.auto.a").unwrap().unwrap();
+        assert_eq!(first.state, "failed");
+        db.execute_batch("DROP TRIGGER fail_b;").unwrap();
+        recover_authorization(&mut db).unwrap();
+        let second: AutoAdmission = json_meta(&db, "index.auto.b").unwrap().unwrap();
+        assert_eq!(second.state, "failed");
+    }
+
+    #[test]
     fn interrupted_auto_recovery_keeps_existing_per_row_commit_and_decode_order() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
