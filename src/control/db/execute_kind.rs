@@ -147,10 +147,32 @@ mod tests {
     #[test]
     fn writer_bound_exemptions_are_unique_and_not_declared() {
         for (i, kind) in UNDECLARED_WRITER_BOUNDS.iter().enumerate() {
-            assert!(!kind.declared_writer_bound(), "remove bound-declared kind from exemptions");
-            assert!(!UNDECLARED_WRITER_BOUNDS[..i].contains(kind), "duplicate exemption");
+            assert!(
+                !kind.declared_writer_bound(),
+                "remove bound-declared kind from exemptions"
+            );
+            assert!(
+                !UNDECLARED_WRITER_BOUNDS[..i].contains(kind),
+                "duplicate exemption"
+            );
         }
-        assert_eq!(Kind::ALL.len(), 45, "classify new kinds and update this ratchet");
+        assert_eq!(
+            Kind::ALL.len(),
+            45,
+            "classify new kinds and update this ratchet"
+        );
+    }
+
+    #[test]
+    fn pure_read_is_never_allowed_on_writer() {
+        let command = Command::Status(Default::default());
+        assert!(command.is_read_only());
+        for kind in Kind::ALL {
+            assert!(
+                !kind.writer_allowed(&command),
+                "read was admitted as {kind:?}"
+            );
+        }
     }
 
     #[tokio::test]
