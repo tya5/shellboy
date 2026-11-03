@@ -74,8 +74,18 @@ Compaction summary requests and embedding requests are not measured.
   `started_at`, `usage` and `input_bytes`, or null. It searches only the newest
   33 Turns, one attempt index seek per Turn.
 
-TUI presentation (F6) and its wording are pending the user's approval (issue
-#186 option 3) and are not implemented.
+## F6 (approved option 3)
+
+F6 details of a model answer read the adopted attempt (the existing exact
+`output_item` relation) and show, in the 実行/Execution group, before the
+existing cached-token and request-ID fields: `入力のバイト数（UTF-8）`
+(Input bytes (UTF-8)) as the total then every nonzero source, `入力トークン
+（提供元の報告）` (Input tokens (provider-reported)) and `キャッシュ済み入力
+トークン（提供元の報告）` (Cached input tokens (provider-reported)). Saved field
+values are language-neutral (counts, the saved JSON, fixed unknown markers)
+and F6 localizes labels and values. Null bytes show `未記録`/Not recorded and
+unreported tokens `未報告`/Not reported. No glyph is added; no ratio or
+conversion between bytes and tokens is shown.
 
 ## Validation
 

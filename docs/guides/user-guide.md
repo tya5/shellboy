@@ -132,7 +132,8 @@ contains an **unverified** Gemini example and the unavailable features. Response
 reasoning/encrypted replay is not sent to Chat, and vendor reasoning content is
 unused. All real providers remain unverified: only synthetic SSE and loopback
 mocks were used. Cache usage shown by `usage get` and F6 is reported fact, with
-missing details unknown; a catalog check cannot prove caching. Anthropic's
+missing details unknown; F6 and `usage get` also show the request's measured
+input bytes by source, which are never converted into tokens; a catalog check cannot prove caching. Anthropic's
 OpenAI facade is excluded because prompt caching is unavailable there; use a
 suitable native-API proxy rather than assume it supports long cached sessions.
 

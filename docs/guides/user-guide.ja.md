@@ -126,7 +126,7 @@ shellboy --config /path/to/config.toml --data-dir /path/to/shellboy-data
 に**未検証**のGemini例と使えない機能を記載しています。Responsesの推論項目・暗号化
 推論はChatへ持ち回さず、vendorの`reasoning_content`も使いません。確認したのは
 合成SSEとloopback mockだけで、実プロバイダはすべて未検証です。`usage get`とF6の
-キャッシュ使用量は返った値だけで、不明を0にはしません。一覧の確認だけでは
+キャッシュ使用量は返った値だけで、不明を0にはしません。F6と`usage get`は送った要求の入力のバイト数（UTF-8）を種類別に実測して並べますが、トークンへは換算しません。一覧の確認だけでは
 キャッシュの実効性は分かりません。Anthropicの互換の入口はキャッシュが使えないため
 対象外です。長い会話には本来のAPIに対応するproxyを使ってください。
 

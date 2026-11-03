@@ -7,8 +7,11 @@ use crate::{
 };
 use std::collections::HashMap;
 
-const FIELD: &str = "/ui_model_attempt/cached_tokens";
-const ATTEMPT: &str = "/ui_model_attempt/attempt_id";
+use crate::presentation::fields::{
+    ATTEMPT_CACHED_TOKENS as FIELD, ATTEMPT_ID as ATTEMPT, ATTEMPT_INPUT_BYTES as BYTES,
+    ATTEMPT_INPUT_TOKENS as TOKENS, NOT_RECORDED, NOT_REPORTED, NOT_REPORTED_AMBIGUOUS,
+    NOT_REPORTED_NO_REQUEST,
+};
 
 // The indexed output_item.node_id relation identifies the adopted attempt,
 // including repeated attempts in one Turn. Read at most two distinct owners
@@ -20,19 +23,28 @@ const SOURCE: &str = "WITH owners AS (
     JOIN output_item o INDEXED BY output_item_node ON o.node_id=requested.value
     GROUP BY requested.value,o.attempt_id
     ) SELECT owners.node_id,a.id,
-    USAGE_SCALARS
+    USAGE_SCALARS,INPUT_BYTES
     FROM owners JOIN model_attempt a ON a.id=owners.attempt_id
     WHERE owners.ordinal<=2";
 
 fn cached_tokens(count: Option<u64>) -> String {
     count
         .map(|n| n.to_string())
-        .unwrap_or_else(|| "未報告".into())
+        .unwrap_or_else(|| NOT_REPORTED.into())
+}
+
+/// One adopted attempt's reported tokens and measured request bytes (#186).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Source {
+    pub(super) attempt: String,
+    pub(super) input_tokens: Option<u64>,
+    pub(super) cached_tokens: Option<u64>,
+    pub(super) input_bytes: Option<crate::model::wire_bytes::InputBytes>,
 }
 
 pub(super) struct Observation {
     index: usize,
-    sources: Vec<(String, Option<u64>)>,
+    sources: Vec<Source>,
 }
 
 pub(super) fn requests(nodes: &[UiNode]) -> Vec<(usize, String)> {
@@ -56,22 +68,29 @@ pub(super) fn read_tx(
     }
     let ids = serde_json::to_string(&requests.iter().map(|(_, id)| id).collect::<Vec<_>>())
         .expect("string IDs serialize");
-    let sql = SOURCE.replace(
-        "USAGE_SCALARS",
-        &crate::usage::sql_projection("a.usage_json"),
-    );
+    let sql = SOURCE
+        .replace(
+            "USAGE_SCALARS",
+            &crate::usage::sql_projection("a.usage_json"),
+        )
+        .replace("INPUT_BYTES", crate::usage_totals::INPUT_BYTES_SQL);
     let mut statement = db.prepare(&sql)?;
-    let mut sources = HashMap::<String, Vec<(String, Option<u64>)>>::new();
+    let mut sources = HashMap::<String, Vec<Source>>::new();
     let rows = statement.query_map(rusqlite::params![ids], |row| {
+        let usage = crate::usage::StandardUsage::read(row, 2)?;
         Ok((
             row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            crate::usage::StandardUsage::read(row, 2)?.cached_tokens,
+            Source {
+                attempt: row.get(1)?,
+                input_tokens: usage.input_tokens,
+                cached_tokens: usage.cached_tokens,
+                input_bytes: crate::usage_totals::parse_input_bytes(row.get(7)?),
+            },
         ))
     })?;
     for row in rows {
-        let (node, id, count) = row?;
-        sources.entry(node).or_default().push((id, count));
+        let (node, source) = row?;
+        sources.entry(node).or_default().push(source);
     }
     Ok(requests
         .iter()
@@ -97,40 +116,59 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
     Ok(())
 }
 
+fn field(key: &str, value: String) -> PresentationField {
+    PresentationField {
+        value_omitted: false,
+        display: None,
+        key: key.into(),
+        label: crate::presentation::fields::attempt_label(key, crate::config::UiLanguage::Ja)
+            .expect("request size field")
+            .into(),
+        value,
+    }
+}
+
+/// Values stay language-neutral (counts, saved JSON, fixed unknown markers);
+/// F6 renders and localizes them. Bytes and tokens are separate facts.
 pub(super) fn apply(nodes: &mut [UiNode], observations: Vec<Observation>) {
     for observation in observations {
         let index = observation.index;
-        let (attempt, display) = match observation.sources.as_slice() {
-            [(id, count)] => (Some(id.clone()), cached_tokens(*count)),
-            [] => (None, "未報告（要求の記録なし）".into()),
-            _ => (None, "未報告（要求との対応が一意でない）".into()),
+        let (attempt, tokens, cached, bytes) = match observation.sources.as_slice() {
+            [source] => (
+                Some(source.attempt.clone()),
+                cached_tokens(source.input_tokens),
+                cached_tokens(source.cached_tokens),
+                source
+                    .input_bytes
+                    .as_ref()
+                    .map_or_else(|| NOT_RECORDED.into(), |bytes| bytes.to_value().to_string()),
+            ),
+            [] => (
+                None,
+                NOT_REPORTED_NO_REQUEST.into(),
+                NOT_REPORTED_NO_REQUEST.into(),
+                NOT_RECORDED.into(),
+            ),
+            _ => (
+                None,
+                NOT_REPORTED_AMBIGUOUS.into(),
+                NOT_REPORTED_AMBIGUOUS.into(),
+                NOT_RECORDED.into(),
+            ),
         };
         let presentation = &mut nodes[index].presentation;
         presentation
             .fields
-            .retain(|field| !matches!(field.key.as_str(), FIELD | ATTEMPT));
+            .retain(|field| !matches!(field.key.as_str(), FIELD | ATTEMPT | TOKENS | BYTES));
+        let mut added = vec![
+            field(BYTES, bytes),
+            field(TOKENS, tokens),
+            field(FIELD, cached),
+        ];
         if let Some(attempt) = attempt {
-            presentation.fields.insert(
-                0,
-                PresentationField {
-                    value_omitted: false,
-                    display: None,
-                    key: ATTEMPT.into(),
-                    label: "モデル要求ID（使用量の記録元）".into(),
-                    value: attempt,
-                },
-            );
+            added.push(field(ATTEMPT, attempt));
         }
-        presentation.fields.insert(
-            0,
-            PresentationField {
-                value_omitted: false,
-                display: None,
-                key: FIELD.into(),
-                label: "入力キャッシュ（cached_tokens）".into(),
-                value: display,
-            },
-        );
+        presentation.fields.splice(0..0, added);
         if presentation.fields.len() > crate::presentation::MAX_FIELDS {
             presentation.metadata_limited = true;
             presentation.details_omitted = true;

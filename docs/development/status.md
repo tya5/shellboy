@@ -18,10 +18,10 @@ them with `reply_node_id`. Resume point: step 2 (schema 25 and the reply core).
 Each conversation attempt saves measured UTF-8 bytes of its sent body by source
 (13 categories, exact sum) as `input_bytes` in the attempt manifest; no table,
 migration or setting. `usage get --attempt` and ungrouped `usage get`
-(`latest_request`) expose it beside provider-reported tokens. See
-[input byte accounting](../design/input-byte-accounting.md). TUI (F6) display
-awaits the user's approval of option 3; not implemented. Next: 3-OS CI result,
-then review.
+(`latest_request`) expose it beside provider-reported tokens, and F6 shows it
+for each model answer (approved option 3). See
+[input byte accounting](../design/input-byte-accounting.md). Next: rebase onto
+main after #180 lands (replay spill-flag conflict), 3-OS CI, review.
 
 ## Final benchmark after #183 (2026-11-03, branch `bench/final-2026-11-03`)
 

@@ -16,6 +16,16 @@ Judgements made while landing step 1 of the
 - The exec contract prompt sent to the model ("Final answer contract") and the
   schema-validation messages keep their wording, since changing model-facing
   text is a behaviour change outside a rename.
+## F6 request size display (#186, 2026-11-03)
+
+The user approved option 3: F6 plus `usage get`. F6 shows, for a model answer,
+`入力のバイト数（UTF-8）` with the total and nonzero sources, `入力トークン（提供元の
+報告）` and the renamed `キャッシュ済み入力トークン（提供元の報告）` (previously
+`入力キャッシュ（cached_tokens）`), in Japanese and English, with no new glyph.
+Unrecorded bytes show `未記録`; unreported tokens keep `未報告`, since a missing
+provider count is not a missing record. Numbers use ASCII thousands separators.
+Bytes and tokens are never converted or compared as a ratio.
+
 ## Request input byte accounting attribution (#186, 2026-11-03)
 
 Attribution rules for bytes that do not obviously belong to one item, chosen
