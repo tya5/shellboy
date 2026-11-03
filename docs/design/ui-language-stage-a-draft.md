@@ -51,8 +51,19 @@ queries before the first frame without waiting. One capability-probe mechanism
 tracks each as `Unmeasured` or `Measured(value)`. A single input reader removes
 DSR (`ESC [ row ; column R`), DA (`ESC [ ? ... c`), and keyboard flags
 (`ESC [ ? ... u`) replies at any time, including while the user is typing.
-Replies never become input. No response leaves the capability unmeasured
-indefinitely. A successful width measurement becomes known and causes one
+Inside bracketed paste (`ESC [ 200 ~` through `ESC [ 201 ~`), all bytes
+are user data and are delivered unchanged; no sequence is stripped. Outside
+paste, a response is accepted only while its corresponding query is outstanding,
+and each query consumes at most one response. A matching sequence after the
+query is answered or when none was sent remains ordinary input. Plain DSR's
+`ESC [ 1 ; 2 R` collides with Shift+F3 on some terminals. Prefer DEC-private
+DSR (`ESC [ ? 6 n`, response `ESC [ ? row ; column R`) on terminals that
+support it without collision. Where it cannot be distinguished, the outstanding
+query rule bounds a collision to one key while that query is pending. This does
+not use a timeout to turn an unmeasured capability into a guess. A terminal reply
+interleaved within a paste block is treated as pasted data; terminals are
+assumed not to interleave their replies within a paste in practice.
+No response leaves the capability unmeasured indefinitely. A successful width measurement becomes known and causes one
 redraw when layout changes. The last successful width per terminal program and
 version (or TERM) is only an initial baseline; a new successful measurement
 refreshes it. Unknown identity and guesses are never cached. If no cache exists,
