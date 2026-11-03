@@ -6313,6 +6313,7 @@ fn draw_header(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
             state.selection_mode,
             state.palette,
             state.selection_frozen_at.as_deref(),
+            state.config.ui.language,
         )),
         content,
     );
