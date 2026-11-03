@@ -3646,14 +3646,16 @@ fn completion_prefers_exact_commands_and_keeps_prefix_expansion_nonexecuting() {
 
 #[test]
 fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() {
-    for (reason, expected) in [
+    for (reason, expected_ja, expected_en) in [
         (
             r#"{"code":"io_failed","message":"保存済みの要求は再試行できます","details":{"private_fixture":"raw-only"}}"#,
             "保存済みの要求は再試行できます",
+            "Saved request can be retried",
         ),
         (
             r#"{"unknown":"legacy-fixture-raw-only"}"#,
             "保存された復旧理由を詳細で確認してください",
+            "Check the saved recovery reason in details",
         ),
     ] {
         let mut ui = state();
@@ -3670,6 +3672,10 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
             details,
             draft: None,
         });
+        let expected = match ui.view().language {
+            shellboy::config::UiLanguage::Ja => expected_ja,
+            shellboy::config::UiLanguage::En => expected_en,
+        };
         assert_eq!(ui.view().status, format!("Recovery pending: {expected}"));
         assert_eq!(ui.view().run_id.as_deref(), Some("saved-run"));
         for width in [60, 110] {
