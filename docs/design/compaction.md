@@ -605,3 +605,31 @@ selected Thread list). Turn/Run scopes keep records whose snapshot saw that
 Turn/Run as current; a period selects by first-request time. `model_attempts`
 remains conversation requests only. Coverage `summary` is `recorded`. Grouped
 `usage get --group-by` stays attempt-only (`coverage.summary: ungrouped_only`).
+
+## Calibrated proactive target (#209)
+
+The target is 80% of `auto_at_tokens`. In the #208 observations at the
+200,000-token threshold, W7 had five post-compaction inputs in the 120,000 to
+159,999 range, followed by a median 39 requests to the next marker; W3 had
+four followed by a median 39.5. W7's five inputs at or above 180,000 were
+followed by a median 9 requests, versus W4's 17 with median 6. These are
+nearest-request observations, not proof of causal intervals or of what each
+summary retained. The 160,000 target is the upper bound of the observed
+120,000-159,999 band and retains more context than the 8,000-14,000 outcomes.
+
+Calibrate the character-reduction plan from input tokens and serialized input
+characters recorded for the same completed request on the same connection and
+model. Use integer arithmetic and round the required reduction upward. This is a
+prediction, not a tokenizer or a guaranteed bound: fixed instructions,
+attachments, model changes and differing text can change the ratio. When the
+pair is unavailable, preserve the existing behavior; never invent a ratio.
+
+An adopted proactive attempt waits for fresh provider-reported usage. Record
+whether it reached the target on the triggering attempt's existing observation.
+Above target, an eligible next attempt must escalate its source scope, older
+Turns first, then the active-Turn middle, rather than repeat the shallow plan.
+Do not treat unknown or stale usage as success or failure. Respect existing
+atomic adoption, cancellation, protected groups, bounded work and no-progress
+fences. If no wider safe source exists, defer rather than repeatedly summarize
+identical sources. A provider that never reports usage retains the existing
+behavior; unmeasurable target achievement is not represented as success.
