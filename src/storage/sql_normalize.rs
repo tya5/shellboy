@@ -14,8 +14,18 @@ pub(super) fn normalize(sql: &[u8]) -> String {
                 continue;
             }
             let start = i;
-            let token: String;
-            if c == 39 {
+            let token: String = if matches!(c, b'x' | b'X') && i + 1 < sql.len() && sql[i + 1] == 39
+            {
+                i += 2;
+                while i < sql.len() && sql[i].is_ascii_hexdigit() {
+                    i += 1;
+                }
+                if i >= sql.len() || sql[i] != 39 {
+                    return None;
+                }
+                i += 1;
+                "?".into()
+            } else if c == 39 {
                 i += 1;
                 loop {
                     if i >= sql.len() {
@@ -31,7 +41,7 @@ pub(super) fn normalize(sql: &[u8]) -> String {
                     }
                     i += 1;
                 }
-                token = "?".into();
+                "?".into()
             } else if c.is_ascii_alphabetic() || c == b'_' {
                 i += 1;
                 while i < sql.len() && (sql[i].is_ascii_alphanumeric() || sql[i] == b'_') {
@@ -40,7 +50,7 @@ pub(super) fn normalize(sql: &[u8]) -> String {
                 let word = std::str::from_utf8(&sql[start..i])
                     .ok()?
                     .to_ascii_uppercase();
-                token = match word.as_str() {
+                match word.as_str() {
                     "SELECT" | "FROM" | "WHERE" | "AND" | "OR" | "NOT" | "NULL" | "IS" | "AS"
                     | "JOIN" | "ON" | "LEFT" | "INNER" | "OUTER" | "ORDER" | "BY" | "GROUP"
                     | "HAVING" | "LIMIT" | "OFFSET" | "INSERT" | "INTO" | "VALUES" | "UPDATE"
@@ -48,7 +58,7 @@ pub(super) fn normalize(sql: &[u8]) -> String {
                     | "CASE" | "WHEN" | "THEN" | "ELSE" | "END" | "EXISTS" | "IN" | "LIKE"
                     | "ASC" | "DESC" | "RETURNING" => word,
                     _ => "?".into(),
-                };
+                }
             } else if c.is_ascii_digit()
                 || (c == b'.' && i + 1 < sql.len() && sql[i + 1].is_ascii_digit())
             {
@@ -74,13 +84,13 @@ pub(super) fn normalize(sql: &[u8]) -> String {
                         }
                     }
                 }
-                token = "?".into();
+                "?".into()
             } else if c == b'?' {
                 i += 1;
                 while i < sql.len() && sql[i].is_ascii_digit() {
                     i += 1;
                 }
-                token = "?".into();
+                "?".into()
             } else if matches!(
                 c,
                 b'(' | b')'
@@ -107,10 +117,10 @@ pub(super) fn normalize(sql: &[u8]) -> String {
                     return None;
                 }
                 i += 1;
-                token = (c as char).to_string();
+                (c as char).to_string()
             } else {
                 return None;
-            }
+            };
             if !out.is_empty() {
                 out.push(' ');
             }
@@ -138,7 +148,7 @@ mod tests {
     fn strips_values_and_hashes_unsupported_syntax() {
         let raw = b"SELECT 'private body', x'4142', 1.23e-45 FROM messages WHERE id=?123";
         let value = normalize(raw);
-        assert!(value.starts_with("SELECT"));
+        assert_eq!(value, "SELECT ? , ? , ? FROM ? WHERE ? = ?");
         assert!(!value.contains("private"));
         assert!(!value.contains("4142"));
         assert!(!value.contains("123"));
