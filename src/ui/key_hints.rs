@@ -634,6 +634,25 @@ mod owner_tests {
         assert!(!last.contains("コピー"), "{last}");
     }
     #[test]
+    fn english_detail_footers_are_localized_in_every_detail_context() {
+        for context in [
+            Context::Details,
+            Context::Fields,
+            Context::Original { next: true },
+            Context::Original { next: false },
+            Context::OriginalPending,
+        ] {
+            let footer = detail_footer_for(context, crate::config::UiLanguage::En);
+            assert!(footer.contains("Back"), "{footer}");
+            assert!(
+                !footer
+                    .chars()
+                    .any(|ch| ('\u{3040}'..='\u{30ff}').contains(&ch)),
+                "{footer}"
+            );
+        }
+    }
+    #[test]
     fn detail_pages_only_advertise_real_continuations() {
         assert!(!detail_footer(Context::Original { next: false }).contains("n 次page"));
         assert!(detail_footer(Context::Original { next: true }).contains("n 次page"));
