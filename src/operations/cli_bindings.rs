@@ -436,6 +436,7 @@ const MEANINGS: &[Meaning] = &[
             ("text", FieldId::Text),
             ("text_stdin", FieldId::Text),
             ("max_repairs", FieldId::MaxRepairs),
+            ("result", FieldId::ExecResult),
             ("timeout_ms", FieldId::Timeout),
             ("sender_label", FieldId::SenderLabel),
         ],

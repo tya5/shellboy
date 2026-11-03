@@ -103,6 +103,7 @@ impl Form {
             "category" => FieldId::Category,
             "schema" => FieldId::Schema,
             "max_repairs" => FieldId::MaxRepairs,
+            "exec_result" => FieldId::ExecResult,
             "doc_parent" => FieldId::DocParent,
             "document" => FieldId::Document,
             "section" => FieldId::Section,
@@ -1061,6 +1062,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "最終JSONのschemaファイル",
             "Final JSON schema file"
         ),
+        FieldId::ExecResult => local!(language, "結果モード", "Result mode"),
         FieldId::MaxRepairs => local!(language, "追加修復の上限", "Maximum additional repairs"),
         FieldId::DocParent => local!(language, "ガイドの親ID", "Guide parent ID"),
         FieldId::Document => local!(language, "文書ID", "Document ID"),
@@ -1404,6 +1406,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "最大64KiBの対応JSON Schemaファイルです。未対応keywordは入力エラーです。",
             "A supported JSON Schema file up to 64 KiB. Unsupported keywords are input errors."
+        ),
+        FieldId::ExecResult => local!(
+            language,
+            "reply、turn-end、run-endから選択します。replyは現在未対応です。",
+            "Choose reply, turn-end, or run-end. Reply is not yet available."
         ),
         FieldId::MaxRepairs => local!(
             language,
