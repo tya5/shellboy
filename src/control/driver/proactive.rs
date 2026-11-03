@@ -29,6 +29,7 @@ struct Evidence {
     attempt: String,
     input_tokens: u64,
     input_characters: Option<u64>,
+    insufficient_prefix: bool,
 }
 
 /// Called at the request boundary while the Thread boundary guard is held and
@@ -88,14 +89,32 @@ pub(super) async fn maybe_compact(
             let Some((attempt, Some(input_tokens), false)) = raw.latest_reported_input() else {
                 return Ok(None);
             };
-            if input_tokens < threshold {
+            let target_key = crate::compaction::CompactionKeys::new(&thread).automatic_target();
+            let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=4096", [&target_key], |row| row.get(0)).optional()?;
+            let mut insufficient_prefix = false;
+            if let Some(pending) = pending.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                && let (Some(previous), Some(target)) = (pending["attempt"].as_str(), pending["target_tokens"].as_u64())
+                && previous != attempt
+            {
+                let same_model: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt old JOIN model_attempt new ON old.profile_id=new.profile_id AND old.model_id=new.model_id WHERE old.id=?1 AND new.id=?2)", params![previous,attempt], |row| row.get(0))?;
+                if same_model {
+                    let insufficient = input_tokens > target;
+                    let verification = json!({"attempt_id":attempt,"input_tokens":input_tokens,"target_tokens":target,"outcome":if insufficient {"insufficient"} else {"met"}}).to_string();
+                    db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.target_verification',json(?1)) WHERE id=?2 AND json_valid(error_json)", params![verification,previous])?;
+                    if insufficient {
+                        insufficient_prefix = pending["scope"] == "prefix";
+                    }
+                }
+                db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
+            }
+            if input_tokens < threshold && !insufficient_prefix {
                 return Ok(Some(Measurement::BelowThreshold));
             }
             let input_characters = db.query_row(
                 "SELECT CASE WHEN json_valid(input_manifest_json) AND json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END FROM model_attempt WHERE id=?1",
                 [attempt], |row| row.get::<_, Option<i64>>(0),
             )?.and_then(|n| u64::try_from(n).ok());
-            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters })))
+            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix })))
         })
         .await
         .map_err(storage_error);
@@ -292,7 +311,7 @@ pub(super) async fn maybe_compact(
         Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
     let mut midturn = Value::Null;
-    let prefer_active = std::mem::take(&mut budget.prefix_adopted);
+    let prefer_active = evidence.insufficient_prefix || std::mem::take(&mut budget.prefix_adopted);
     let mut summary_scope = "";
     let result: Result<Value, ApiError> = async {
     // #182: spill rewrites an earlier tool result while later output is
@@ -490,16 +509,23 @@ pub(super) async fn maybe_compact(
     });
     // Record on the attempt whose reported usage triggered this decision, in the
     // existing automatic-compaction field and partial index (no new table).
+    let pending_target = if adopted { target_plan.map(|plan| json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":summary_scope}).to_string()) } else { None };
+    let target_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_target();
     let body = observation.to_string();
     let attempt = evidence.attempt;
     control
         .store
         .database
         .call(move |db| {
-            db.execute(
+            let tx = db.transaction()?;
+            tx.execute(
                 "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json(?1)) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json))",
                 params![body, attempt],
             )?;
+            if let Some(pending) = pending_target {
+                tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![target_key,pending])?;
+            }
+            tx.commit()?;
             Ok(())
         })
         .await
