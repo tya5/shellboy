@@ -487,7 +487,7 @@ pub(super) fn footer_lines_with_db(
         if phase.is_active()
             && let Some(reduction) = snapshot.context_reduction.as_ref()
         {
-            facts.push(reduction.clone());
+            facts.push(reduction.localized(view.language));
         }
     }
     if let Some(gap) = view
@@ -1237,7 +1237,12 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("chosen.toml");
         let mut config = Config::default();
-        // This fixture asserts the legacy Japanese first-run copy explicitly.
+        config.ui.language = crate::config::UiLanguage::En;
+        let mut english_ui = UiState::new(&config, root.path().into());
+        let english = frame_text(&mut english_ui, 150, 32);
+        assert!(english.contains("Configuration required:"));
+        assert!(!english.contains("設定が必要です:"));
+        // This fixture also asserts the legacy Japanese first-run copy explicitly.
         config.ui.language = crate::config::UiLanguage::Ja;
         config.source = Some(crate::config::ConfigSource {
             path: path.clone(),
