@@ -28,6 +28,7 @@ impl UiUpdate {
             | Self::WatchDetails { .. }
             | Self::Descendants { .. }
             | Self::ProgramStatus(_)
+            | Self::DbWorkerActivity(_)
             | Self::ConfirmationSourcesChanged
             | Self::BrowserPatch { .. }
             | Self::BrowserPatchFailed { .. }

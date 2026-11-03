@@ -49,6 +49,21 @@ These are per-statement VM counts including triggers, not end-to-end latency,
 disk cost, total transaction cost, a bound, or measurements on bundled SQLite.
 The helper's synthetic fixture and CLI may behave differently from application
 workloads and other SQLite builds.
+## DB worker activity statusbar (#190)
+
+Acceptance: snapshots are readable without the DB writer queue and clear on job
+completion; a job is hidden through exactly one second and then shows a localized
+operation and elapsed time at the right edge; no-progress state takes priority
+and clears with its existing worker state; normal status is unchanged; the footer
+row count remains fixed; active/no-progress logs contain fixed fields only; and
+help renders the behavior in English and Japanese.
+
+Local validation on the macOS development host via `rust-slot`: formatting,
+`cargo check --tests`, and focused tests for threshold/localization, right-edge
+fixed-row layout, active snapshots/log privacy, no-progress clearing, slow-job
+limits, and bilingual help passed. The handoff gate is green three-OS CI on the
+exact pushed tip, with its commit and run URL recorded on #190. Physical-terminal
+behavior remains unverified.
 
 ## DB writer occupancy (#171, 2026-11-03)
 

@@ -39,6 +39,14 @@ Run: stop, shutdown and recovery wait hand it to the ordinary held-input rules. 
 `limits.revisit_max_per_run`, `revisit_limit_reached` and the Revisit capture
 diagnostic are removed. Migration 24 drops the old metadata and adds
 `receipt_run_completion`. Validation status is in acceptance.
+## DB worker activity statusbar (#190)
+
+The user approved the right-edge indicator with a strict greater-than-one-second
+visibility condition, localized English/Japanese strings and help, and no new
+footer row. The implementation uses a separate in-memory snapshot/watch path.
+Local formatting, `cargo check --tests` and focused tests pass. Handoff is gated
+on a rebase to current `origin/main` and green three-OS CI; record the exact
+commit and CI run on #190.
 
 ## Paused index consumption (#173)
 
@@ -70,8 +78,9 @@ maintenance (no 60 s GC timer, no 30 s paused-index poll), schema22 logical
 usage counters (O(1) capacity gate) and the pending-delivery operation index,
 `storage status` on a reader connection, foreground/background lanes with
 strict alternation, and the conditional step budget with `db_job_budget` /
-`db_job_no_progress` diagnostics and no-progress state. Occupancy visibility
-(#171 part 2) and heavy foreground jobs (#172) are not done. See acceptance.
+`db_job_no_progress` diagnostics and no-progress state. Occupancy visibility is
+implemented on the #190 branch; heavy foreground jobs (#172) remain separate.
+See acceptance.
 
 ## Bounded index wake-delay read (#164, branch CI pending)
 

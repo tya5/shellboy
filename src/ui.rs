@@ -2,6 +2,7 @@
 //! through finite action queues; only terminal event/drawing I/O runs here.
 pub mod actions;
 mod autosave;
+mod db_activity;
 mod update_batch;
 
 use crate::presentation::{NodePresentation, PresentationField};
@@ -860,6 +861,7 @@ pub enum UiUpdate {
 
     MemoryProbe(crate::memory::UiMemoryReply),
     ProgramStatus(crate::program_status::Snapshot),
+    DbWorkerActivity(crate::storage::DbWorkerActivity),
 
     BrowserPatch {
         patch: Box<thread_patch::BrowserPatch>,
@@ -1777,6 +1779,8 @@ pub struct UiState {
     #[cfg(test)]
     retention_passes: usize,
     animation: activity::Animation,
+    db_activity: crate::storage::DbWorkerActivity,
+    db_status: Option<String>,
     key_hints: key_hints::Cache,
     pub views: BTreeMap<String, ThreadView>,
     pub active: String,
@@ -1895,6 +1899,8 @@ impl UiState {
             diagnostics: None,
             bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
+            db_activity: Default::default(),
+            db_status: None,
             key_hints: key_hints::Cache::default(),
             views: BTreeMap::from([(active.clone(), view)]),
             active,
@@ -2489,6 +2495,16 @@ impl UiState {
         self.dirty = true;
     }
     fn apply_inner(&mut self, update: UiUpdate) {
+        let update = match update {
+            UiUpdate::DbWorkerActivity(activity) => {
+                if self.db_activity != activity {
+                    self.db_activity = activity;
+                    self.refresh_db_status(Instant::now());
+                }
+                return;
+            }
+            update => update,
+        };
         let language = self.config.ui.language;
         if let UiUpdate::ProgramStatus(snapshot) = update {
             if self.config.ui.program_status == crate::config::ProgramStatus::Off {
@@ -2695,6 +2711,7 @@ impl UiState {
         };
         let mut retry_window = false;
         match update {
+            UiUpdate::DbWorkerActivity(_) => unreachable!("handled before per-view updates"),
             UiUpdate::ConfirmationSourcesChanged => {
                 self.confirmation_cache.clear();
                 self.management.invalidate_index_preview();
@@ -4410,9 +4427,18 @@ impl UiState {
         self.dirty = true;
         actions
     }
+    fn refresh_db_status(&mut self, now: Instant) {
+        let status = db_activity::status_label(&self.db_activity, now, self.config.ui.language);
+        if self.db_status != status {
+            self.db_status = status;
+            self.dirty = true;
+        }
+    }
+
     /// Animation deadlines only invalidate the visible footer; no worker action
     /// or history revision is produced by the display clock.
     pub fn animation_tick(&mut self, now: Instant) {
+        self.refresh_db_status(now);
         // Commit the existing UI clock before drawing: a delayed observation
         // cannot move an already displayed second back into the past.
         // Display clocks never change a persisted draft or source anchor.
@@ -6409,7 +6435,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
                 .and_then(|name| state.config.connections.get(name)),
         ),
     });
-    let lines = chrome::footer_lines(
+    let lines = chrome::footer_lines_with_db(
         view,
         area.width,
         &hints,
@@ -6417,6 +6443,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
         spans,
         notice,
         context,
+        state.db_status.as_deref(),
     );
     frame.render_widget(Paragraph::new(lines), area);
 }

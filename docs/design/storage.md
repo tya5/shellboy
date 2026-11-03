@@ -24,6 +24,31 @@ arguments, origin, IDs and SQL. Existing run and queue timings are whole-job
 measurements, not acceptance, dispatch or commit phase timings. The labels do
 not change DB queue admission, diagnostic sampling or privacy bounds.
 
+## DB worker activity visibility (#190)
+
+Adopted 2026-11-03. Each dequeued job publishes an in-memory snapshot containing
+the fixed `kind`, foreground/background lane, wall-clock start and monotonic
+start used for elapsed time. The snapshot also exposes the existing bounded
+no-progress kinds and deferral counts. A Tokio watch channel gives the frontend
+the latest snapshot without querying or waiting on the DB writer queue; no state
+is persisted and no worker is added.
+
+The existing frontend tick observes an active job while it runs. Once its run
+time reaches the existing one-second slow-job threshold, it emits at most one
+`db_job_active` event per job, sharing the existing slow-job limiter. The
+completion `db_job_slow` event retains final queue/run times. Both events contain
+only fixed call-site labels, lane and elapsed durations, never SQL, arguments,
+results or conversation content. The existing `db_job_no_progress` event and
+state remain authoritative for no-progress; the UI shows its first sorted kind
+in preference to a timed active job.
+
+The first existing status/footer row places `DB <operation> <elapsed>` at its
+right edge only after run time exceeds one second; a no-progress entry instead
+shows `DB! <operation> no progress` (localized in Japanese). With no qualifying
+activity it shows nothing. The display updates through the existing UI clock,
+adds no row or setting, and may truncate lower-priority footer facts while
+visible. This is observability, not a wall-clock completion guarantee.
+
 ## DB writer occupancy: requester contract and backend safety net (#171)
 
 Status: adopted (revision 2, approved 2026-11-02) and implemented on
@@ -38,9 +63,9 @@ the *requester*:
 
 This revision makes a requester contract the primary mechanism. The backend
 does two things: it keeps the UX cost of that contract small, and it catches
-contract violations. The occupancy-visibility part of #171 (current-job start
-time and kind readable from another thread, status-bar display) is a later step
-and is not covered here.
+contract violations. Current-job visibility (start time and kind readable from
+another thread) is specified separately in [#190](#db-worker-activity-visibility-190);
+it does not change the requester contract or step budget.
 
 ### Problem (measured)
 

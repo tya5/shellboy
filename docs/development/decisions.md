@@ -1,5 +1,13 @@
 # 開発判断
 
+## DB worker activity display (#190, 2026-11-03)
+
+The user approved option 1: place `DB <operation> <elapsed>` at the statusbar
+right edge only while execution exceeds one second. Show `DB! <operation> no progress`
+when the existing no-progress state is present, and show nothing otherwise.
+Provide Japanese and English text/help, keep the existing footer row count, and
+do not add a setting or persisted state. The indicator is observational only.
+
 ## Measured proactive retry gate (#153, 2026-11-02)
 
 Replace #125's permanent per-Run failure flag with a provider-usage growth gate.
