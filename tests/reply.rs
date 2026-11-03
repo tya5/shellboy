@@ -347,11 +347,9 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
         store.database.call(move|db| {
             let raw:String=db.query_row("SELECT result_json FROM receipt WHERE message_node_id=?1",[&m],|r|r.get(0))?;
             let value:serde_json::Value=serde_json::from_str(&raw).unwrap();
-            assert_eq!(value["reply"]["state"],if deleted=="sender"{"cancelled"}else{"recipient_deleted"});
+            assert_eq!(value["reply"]["state"],if deleted=="sender"{"pending"}else{"recipient_deleted"});
             if deleted=="sender" {
-                assert_eq!(value["reply"]["cancel_reason"],"sender_deleted");
-                assert_eq!(value["reply"]["cancelled_by"]["thread_id"],"sender");
-                assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'",[],|r|r.get::<_,i64>(0))?,1);
+                assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'",[],|r|r.get::<_,i64>(0))?,0,"sender cleanup is deferred");
             }
             if deleted=="recipient" {
                 let event:(String,Option<String>)=db.query_row("SELECT kind,target_run_id FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_outcome'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
@@ -388,6 +386,14 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
         store
             .database
             .call(move |db| {
+                if deleted == "sender" {
+                    let raw: String = db.query_row("SELECT result_json FROM receipt WHERE message_node_id=?1", [&message], |r|r.get(0))?;
+                    let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+                    assert_eq!(value["reply"]["state"], "cancelled");
+                    assert_eq!(value["reply"]["cancel_reason"], "sender_deleted");
+                    assert_eq!(value["reply"]["cancelled_by"]["thread_id"], "sender");
+                    assert_eq!(db.query_row("SELECT count(*) FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_cancelled'",[],|r|r.get::<_,i64>(0))?,1);
+                }
                 assert_eq!(
                     db.query_row(
                         "SELECT count(*) FROM receipt WHERE message_node_id=?1",

@@ -4273,7 +4273,7 @@ pending. No real-provider measurements are involved.
 
 Implemented durable once-per-message Run-end reminders with per-message sender
 facts, then ignored outcomes; stopped/recovery work retains pending duties.
-Deleted endpoint transitions and sender notices are in the deletion transaction.
+Recipient transitions and outcomes are in the deletion transaction; sender-deleted cancellation is deferred to the bounded history-GC receipt phase.
 History GC now scans a finite receipt horizon in batches of at most 128 before
 marking, retaining pending duties and live endpoint ownership. The branch stays
 based on approved step 2, separate from the 0.7.0 release. Synthetic validation

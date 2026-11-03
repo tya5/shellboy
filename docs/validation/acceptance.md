@@ -9083,3 +9083,8 @@ sender non-start, and 260 deleted-target receipt rows reclaimed in bounded GC
 steps. Pending duties, live recipients, and live model senders retain receipt
 roots and associated bodies. These are synthetic fixtures, not real-provider or
 power-loss tests. Final task CI and review remain required.
+
+Step-3 review follow-up: deletion uses receipt_reply_pending with target equality
+and LIMIT 128 per recipient (EXPLAIN asserted); 4096 unrelated pending replies
+remain untouched. Sender deletion is deferred to 128-row GC batches before
+eligibility, with actor/reason and cancellation notice asserted after GC.
