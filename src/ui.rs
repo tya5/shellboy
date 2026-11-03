@@ -17,9 +17,12 @@ use crate::{
 
 pub mod activity;
 mod bell;
+// Windows uses native console events; retain the Unix decoder for portable tests.
+#[cfg_attr(windows, allow(dead_code))]
 mod capability_probe;
 mod chrome;
 mod code_copy;
+#[cfg_attr(windows, allow(dead_code))]
 mod terminal_input;
 pub(crate) use code_copy::caption as code_copy_caption;
 pub use code_copy::{CopyBlock, CopyOffer};
