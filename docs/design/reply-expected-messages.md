@@ -35,7 +35,8 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 | D7 | Delegation is unified onto this mechanism | [Delegation mapping](#delegation-mapping) |
 | D8 | Replace every `answer_node_id` use without compatibility paths | [Implementation plan](#implementation-plan) |
 | D9 | `exec --result reply\|turn-end\|run-end`, default `reply`; `turn-end`/`run-end` send an ordinary message with no reply duty | [exec](#exec) |
-| D10 | An empty end message is an ordinary end message: the result is empty text, no special case | [exec](#empty-end-message) |
+| D10 | An empty end message is an ordinary end message: the result is empty text and exec exits 0, no special case | [exec](#empty-end-message-and-no-end-message) |
+| D11 | A Turn ended by Esc produced no end message: treated like a stopped Turn, exit 4, in every `--result` mode that reads an end message | [exec](#empty-end-message-and-no-end-message) |
 | Q1–Q17 | Answers to the memo's questions | [Decisions](#decisions) |
 | Earlier comments | Sender may cancel; cancelled recipient is notified through the existing event mechanism; fail-safe count cap reusing an existing queue bound; reply carries the original ID; both messages are stored in the DB and read on demand | [Data model](#data-model) |
 
@@ -444,7 +445,8 @@ for `turn-end`, `turn_id` present), otherwise exit 4 `held`; the message must be
 `applied` before its result is read.
 
 **Which end message.** Both modes read the saved end message of a Turn: the
-last assistant node of a Turn that completed normally (or nothing, see below).
+last assistant node of a Turn that completed normally. A Turn ended by Esc
+has none (see below).
 
 - `turn-end` reads the Turn the message was assigned to (`MessageAccepted.turn_id`,
   the same value `message get` shows). That is the Turn that processed the
@@ -465,37 +467,44 @@ last assistant node of a Turn that completed normally (or nothing, see below).
   finished this message. Neither mode creates a reply duty, so neither mode
   causes a reminder for its own message.
 
-#### Empty end message
+#### Empty end message and no end message
 
-User decision (D10): an empty end message is treated like any other end
-message. There is no special case, error or exit code: the result text is the
-empty string and the normal rules apply. With the Schema contract, empty text
-is not a JSON value, so it fails local validation, is repaired like any other
-mismatch and, at the repair cap, exits 3 with `raw_answer: ""`.
+Two user decisions (D10, D11) separate these cases:
 
-Two saved shapes produce empty text, both by the same rule:
+- **Empty end message (D10).** The Turn produced an end message whose text is
+  empty, for example a node holding only reasoning. That is a normal result:
+  the result text is the empty string and exec exits 0 with an empty stdout
+  line. There is no special case, error or distinct exit code. Schema
+  validation and repairs apply to non-empty text; empty text is the successful
+  empty result the user ruled it to be, not a mismatch.
+  `history get --end-message-only` returns empty text for such a node instead
+  of today's `target_unavailable`.
+- **No end message (D11).** The Turn completed without producing an end
+  message at all: a Turn ended by Esc completes with `end_message_node_id`
+  null (fact 7). There is no result to return, so it is treated like a stopped
+  Turn: exit 4 `execution_unavailable` under the existing
+  stopped/held/failed/unavailable rule, with `end_message_node_id: null` in the
+  diagnostics. It is never turned into empty text.
 
-- the end-message node has no assistant message text (for example only
-  reasoning): `history get --end-message-only` returns empty text instead of
-  today's `target_unavailable`;
-- **Judgement:** the Turn completed with no end-message node at all (a Turn
-  ended by Esc completes with `end_message_node_id` null). exec treats an
-  absent node as empty text instead of today's exit 4 "Completed Turn has no
-  saved answer". This keeps one rule ("the end message, possibly empty") for
-  both modes and needs no extra read; the diagnostics keep
-  `end_message_node_id: null` so the two shapes stay distinguishable.
+Per mode:
 
-A deleted (tombstoned) node is not empty: it stays exit 4 as today, because
-the saved fact is unavailable rather than empty.
+| Mode | Empty end message | No end message (Esc) |
+|---|---|---|
+| `reply` | not applicable: the result is the reply, and reply text follows the non-empty `message send` text rule | not applicable: an Esc-ended Turn does not end the wait; the Run-end rule reminds once, then `ignored` → exit 4 |
+| `turn-end` | the processing Turn's end message is empty → exit 0, empty result | the processing Turn was ended by Esc → exit 4 |
+| `run-end` | the Run's last Turn's end message is empty → exit 0, empty result | the Run's last Turn was ended by Esc → exit 4, even if an earlier Turn of the Run had an end message |
+
+A deleted (tombstoned) node is also exit 4, as today: the saved fact is
+unavailable.
 
 #### Exit codes
 
 | Exit | `reply` | `turn-end` | `run-end` |
 |---|---|---|---|
-| 0 | valid JSON in the reply | valid JSON in the Turn's end message | valid JSON in the Run's end message |
+| 0 | valid JSON in the reply | valid JSON in the Turn's end message, or an empty end message (D10) | valid JSON in the Run's end message, or an empty end message (D10) |
 | 2 | input error (unchanged) | same | same |
-| 3 | mismatch after repairs (unchanged) | same, including empty text | same, including empty text |
-| 4 | held at send; `recovery_wait`; Run `stopped` / `failed` with the reply still pending; reply `ignored`, `cancelled`, `recipient_deleted` | held at send; Turn `recovery_wait`, `stopped`, `failed`; Thread deleted; node tombstoned | held at send; Run in recovery wait (the `run_ended` wait reports `recovery_wait`), `stopped`, `failed`; Thread deleted; node tombstoned |
+| 3 | mismatch after repairs (unchanged) | same | same |
+| 4 | held at send; `recovery_wait`; Run `stopped` / `failed` with the reply still pending; reply `ignored`, `cancelled`, `recipient_deleted` | held at send; Turn `recovery_wait`, `stopped`, `failed`; Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned | held at send; Run in recovery wait (the `run_ended` wait reports `recovery_wait`), `stopped`, `failed`; last Turn ended by Esc with no end message (D11); Thread deleted; node tombstoned |
 | 5 | client deadline; the message stays pending and the Run-end rule later marks it `ignored` unless answered | client deadline (unchanged) | client deadline (unchanged) |
 | 6 | owner/transport/protocol/output failure (unchanged) | same | same |
 
@@ -588,7 +597,7 @@ manual "did you report?" Revisit.
 
 Each existing behaviour touching messages, answers, delegation, wait, exec or
 "thread request", checked against this design. **Decided** = covered by a user
-decision (D1–D10 or an answered question); **Design** = settled by this
+decision (D1–D11 or an answered question); **Design** = settled by this
 adopted design (explanation given); **Judgement** =
 decided here without an explicit user answer (see [Decisions](#decisions)).
 
@@ -620,7 +629,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G24 | App shutdown | Design | reminder skipped once the start gate closes; nothing becomes `ignored` at shutdown |
 | G25 | TUI pending queue | Design | "reply expected" tag on queued reply-expected rows; admitted pending replies appear under `/replies` |
 | G26 | Search and history indexing | Design | reply node indexed like any message node; scoped to the sender Thread (model senders) or the recipient Thread (others). `history list` provenance of a reply without a delivery receipt shows sender `unknown`; `message get` of the original gives `reply.by` |
-| G27 | `exec` exit codes and timeouts | Decided | `--result` modes and exit table in [exec](#exec) (Q14, D9, D10) |
+| G27 | `exec` exit codes and timeouts | Decided | `--result` modes and exit table in [exec](#exec) (Q14, D9, D10, D11) |
 | G28 | Multiple waiters on one message | Design | all released by one transition |
 | G29 | Messages sent without `--expect-reply` | Design | unchanged except `message get` drops `answer_node_id` |
 | G30 | Wait `interrupted` from an arriving receipt | Design | `satisfied` wins when the arriving receipt is the awaited reply |
@@ -745,14 +754,16 @@ and sender-deletion `cancelled` in the Thread deletion transaction (Q4);
 `--result reply|turn-end|run-end` (default `reply`) as in [exec](#exec): the
 per-mode send/wait/read, the empty-end-message rule in the
 `--end-message-only` projection (`src/history.rs` returns empty text instead
-of `target_unavailable`) and in exec (absent node = empty text), the exit
+of `target_unavailable`) and in exec (empty text exits 0; no end-message node
+exits 4, D11), the exit
 table, per-mode diagnostics and the `reply_received` owner probe.
 
 - Code: `src/exec_client.rs`, `src/history.rs`.
 - Tests: `tests/exec_client.rs` (each mode's success; reply `ignored`,
   `cancelled`, recovery and timeout exits; turn-end vs run-end with a
-  `--deliver complete` message and with a reminder Turn; empty and absent end
-  message → schema mismatch exit 3; probe against a refusing owner).
+  `--deliver complete` message and with a reminder Turn; empty end message →
+  exit 0 with empty stdout; Esc-ended Turn (turn-end) and Esc-ended last Turn
+  (run-end) → exit 4; probe against a refusing owner).
 - Guides: `cli-reference.md` (exec section and owner guard).
 - Designs: `cli.md` (#65 exec section, owner guard), `effective-spec.md`
   (#65 paragraph).
@@ -818,7 +829,7 @@ cap 128/129); Run-end reminder then `ignored` with sender notice and wait
 release; ordering with waiting `complete` messages; cancel before and after
 admission; recipient deletion; restart with a pending wait; multiple waiters;
 cycle rejection; exec in each `--result` mode (success, `ignored`, timeout,
-recovery, empty and absent end message, turn-end vs run-end with a
+recovery, empty end message (exit 0) and Esc-ended Turn (exit 4), turn-end vs run-end with a
 `--deliver complete` message and a reminder Turn); EXPLAIN QUERY PLAN for the
 pending-reply index. No timing assertions; no paid API.
 
@@ -849,7 +860,8 @@ the memo gave no single recommendation, the choice made here is marked
 | Q15 | Cap | 128 pending reply-expected messages per receiving Thread; the 129th send is refused with `input_limit` |
 | Q16 | Asking yourself | A model cannot send a reply-expected message to its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
-| D10 | Empty end message (user, after Q14) | Treated like any other end message: empty text, no special case, normal exit rules |
+| D10 | Empty end message (user, after Q14) | A normal result: empty text, exit 0, no special case |
+| D11 | Turn ended by Esc, no end message (user, correcting an earlier judgement) | Not the same as empty: no result, treated like a stopped Turn, exit 4 |
 
 Other judgements made while finalizing (not covered by a user answer):
 
@@ -857,8 +869,6 @@ Other judgements made while finalizing (not covered by a user answer):
   execution failures it already covers (held, recovery wait, stopped, failed,
   unavailable); only the reply outcomes cannot occur. Recheck if the user's
   "never exit 4" was meant literally.
-- **Absent end-message node = empty text** in exec, the same as an empty node
-  (D10 applied to a Turn ended by Esc). A tombstoned node stays exit 4.
 - **exec `reply` mode waits on `run_ended` of the assigned Run**, not
   `thread_settled`, so an earlier failed Run of an existing Thread does not end
   the wait.
