@@ -37,6 +37,33 @@ fn comp_args() -> CompactListArgs {
     }
 }
 #[test]
+fn scoped_shell_list_seeks_with_large_unrelated_history() {
+    let mut c = db();
+    let tx = c.transaction().unwrap();
+    for i in 0..10000 {
+        shell_row(
+            &tx,
+            &format!("foreign-{i}"),
+            "other",
+            "2026-10-31T00:00:00Z",
+            "private marker",
+            0,
+        );
+    }
+    shell_row(&tx, "target", "t", "2026-10-31T00:00:00Z", "target", 0);
+    tx.commit().unwrap();
+    let mut request = args();
+    request.thread_id = Some("t".into());
+    let mut observation =
+        crate::storage::statement_observation::StatementObservation::install(&mut c);
+    let result = shells(observation.connection(), &request).unwrap();
+    assert_eq!(result["items"].as_array().unwrap().len(), 1);
+    let counters = observation.counters();
+    assert_eq!(counters.fullscan_steps, 0, "{counters:?}");
+    assert!(counters.vm_steps > 0);
+}
+
+#[test]
 fn normalized_shell_keys_preserve_offsets_nanos_leaps_and_unknowns() {
     watchdog(|| {
         let c = db();
