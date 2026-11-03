@@ -198,6 +198,27 @@ impl Lanes {
 /// kind in between. Bounded by the finite set of background call sites.
 type NoProgress = Arc<Mutex<HashMap<&'static str, u32>>>;
 
+#[cfg(test)]
+async fn wait_for_activity(
+    activity: &mut watch::Receiver<DbWorkerActivity>,
+    mut matches: impl FnMut(&DbWorkerActivity) -> bool,
+) -> DbWorkerActivity {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let snapshot = activity.borrow_and_update().clone();
+            if matches(&snapshot) {
+                return snapshot;
+            }
+            activity
+                .changed()
+                .await
+                .expect("DB activity watch remains open");
+        }
+    })
+    .await
+    .expect("DB worker publishes the requested activity snapshot")
+}
+
 fn activity_snapshot(active_job: &ActiveJob, no_progress: &NoProgress) -> DbWorkerActivity {
     let active = active_job
         .lock()
@@ -1419,7 +1440,8 @@ mod slow_job_tests {
             });
             started_rx.await.unwrap();
             let mut activity_rx = db.subscribe_activity();
-            let snapshot = activity_rx.borrow_and_update().clone();
+            let snapshot =
+                wait_for_activity(&mut activity_rx, |snapshot| snapshot.active.is_some()).await;
             let active = snapshot.active.as_ref().expect("active job snapshot");
             assert!(active.kind.contains("active_job_snapshot_can_be_read"));
             assert_eq!(active.lane, DbJobLane::Foreground);
@@ -1429,7 +1451,10 @@ mod slow_job_tests {
             db.report_active_job_slow(active.id, active.started + SLOW_JOB_THRESHOLD);
             release_tx.send(()).unwrap();
             job.await.unwrap().unwrap();
-            let completed = activity_rx.borrow_and_update().clone();
+            let completed = wait_for_activity(&mut activity_rx, |activity| {
+                activity.active.is_none() && activity.no_progress.is_empty()
+            })
+            .await;
             assert!(completed.active.is_none());
             assert!(completed.no_progress.is_empty());
             db.shutdown().await.unwrap();
@@ -1759,21 +1784,31 @@ mod lane_budget_tests {
                 db.background_no_progress().is_empty(),
                 "one deferral is not evidence"
             );
-            assert!(activity_rx.borrow_and_update().no_progress.is_empty());
+            let after_first = wait_for_activity(&mut activity_rx, |activity| {
+                activity.active.is_none() && activity.no_progress.is_empty()
+            })
+            .await;
+            assert!(after_first.no_progress.is_empty());
             assert!(matches!(stuck_unit(&db, true).await, Background::Deferred));
             let stuck = db.background_no_progress();
             assert_eq!(stuck.len(), 1);
             assert!(stuck[0].0.contains("stuck_unit"), "{stuck:?}");
             assert_eq!(stuck[0].1, NO_PROGRESS_DEFERRALS);
-            let activity = activity_rx.borrow_and_update().clone();
-            assert_eq!(activity.no_progress.len(), 1);
-            assert_eq!(activity.no_progress[0].kind, stuck[0].0);
+            let activity = wait_for_activity(&mut activity_rx, |activity| {
+                activity.no_progress.len() == 1
+                    && activity.no_progress[0].kind == stuck[0].0
+                    && activity.active.is_none()
+            })
+            .await;
             assert_eq!(activity.no_progress[0].deferrals, NO_PROGRESS_DEFERRALS);
-            assert!(activity.active.is_none());
             // A completed job of the same kind is progress and clears the state.
             assert!(matches!(stuck_unit(&db, false).await, Background::Done(())));
             assert!(db.background_no_progress().is_empty());
-            assert!(activity_rx.borrow_and_update().no_progress.is_empty());
+            let cleared = wait_for_activity(&mut activity_rx, |activity| {
+                activity.active.is_none() && activity.no_progress.is_empty()
+            })
+            .await;
+            assert!(cleared.no_progress.is_empty());
             db.shutdown().await.unwrap();
             diagnostics.shutdown().await;
             let log = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
