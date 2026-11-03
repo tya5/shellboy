@@ -49,7 +49,10 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     let data = root.path().join("data");
     std::fs::write(&config, "[io]\nshutdown_grace_ms=50\n").unwrap();
     let (terminal, slave) = pty();
-    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+    // A copied binary keeps other shared-target builds from changing the child.
+    let binary = std::env::var_os("SHELLBOY_TEST_BINARY")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_shellboy").into());
+    let mut command = tokio::process::Command::new(binary);
     // Size/input APIs may prefer /dev/tty over stdio. Give this child only the
     // disposable PTY, never the parent's interactive controlling terminal.
     unsafe {

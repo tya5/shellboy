@@ -5,6 +5,63 @@ use std::{collections::VecDeque, io, time::Duration};
 
 mod parse;
 
+#[cfg(unix)]
+fn wait_readable(fd: std::os::fd::RawFd, timeout: Duration) -> io::Result<bool> {
+    #[cfg(target_os = "macos")]
+    let result = {
+        // Darwin poll() reports POLLNVAL for /dev/tty even while read() works.
+        // select() supports that controlling-terminal descriptor.
+        if fd < 0 || fd as usize >= libc::FD_SETSIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "terminal descriptor exceeds select capacity",
+            ));
+        }
+        // SAFETY: all-zero fd_set represents the empty descriptor set.
+        let mut read_fds: libc::fd_set = unsafe { std::mem::zeroed() };
+        let mut timeout = libc::timeval {
+            tv_sec: timeout.as_secs().min(libc::time_t::MAX as u64) as libc::time_t,
+            tv_usec: timeout.subsec_micros() as libc::suseconds_t,
+        };
+        // SAFETY: fd is within fd_set capacity; all pointers refer to live values.
+        unsafe {
+            libc::FD_SET(fd, &mut read_fds);
+            libc::select(
+                fd + 1,
+                &mut read_fds,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut timeout,
+            )
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let result = {
+        let mut descriptor = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one live pollfd owned by the session's only terminal reader.
+        let result = unsafe {
+            libc::poll(
+                &mut descriptor,
+                1,
+                timeout.as_millis().min(i32::MAX as u128) as i32,
+            )
+        };
+        if result > 0 && descriptor.revents & libc::POLLNVAL != 0 {
+            return Err(io::Error::from_raw_os_error(libc::EBADF));
+        }
+        result
+    };
+    if result < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(result > 0)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum InternalEvent {
     Event(Event),
@@ -165,22 +222,12 @@ impl Input {
         #[cfg(unix)]
         {
             use std::{io::Read, os::fd::AsRawFd};
-            let mut fd = libc::pollfd {
-                fd: self.tty.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
+            let ready = match wait_readable(self.tty.as_raw_fd(), timeout) {
+                Ok(ready) => ready,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(None),
+                Err(error) => return Err(error),
             };
-            // SAFETY: one live pollfd; the UI owns the only reader of this terminal.
-            let result =
-                unsafe { libc::poll(&mut fd, 1, timeout.as_millis().min(i32::MAX as u128) as i32) };
-            if result < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::Interrupted {
-                    return Ok(None);
-                }
-                return Err(error);
-            }
-            if result > 0 {
+            if ready {
                 let mut bytes = [0; 4096];
                 match self.tty.read(&mut bytes) {
                     Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
@@ -278,6 +325,38 @@ impl SessionInput {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[cfg(unix)]
+    #[test]
+    fn readiness_distinguishes_input_idle_and_eof() {
+        use std::{
+            io::{Read, Write},
+            os::{fd::AsRawFd, unix::net::UnixStream},
+        };
+        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+        reader.set_nonblocking(true).unwrap();
+        assert!(!wait_readable(reader.as_raw_fd(), Duration::ZERO).unwrap());
+        writer.write_all(b"\x1b").unwrap();
+        assert!(wait_readable(reader.as_raw_fd(), Duration::ZERO).unwrap());
+        let mut bytes = [0];
+        reader.read_exact(&mut bytes).unwrap();
+        assert_eq!(bytes, [0x1b]);
+        assert!(!wait_readable(reader.as_raw_fd(), Duration::ZERO).unwrap());
+        drop(writer);
+        assert!(wait_readable(reader.as_raw_fd(), Duration::ZERO).unwrap());
+        assert_eq!(reader.read(&mut bytes).unwrap(), 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn select_rejects_out_of_range_descriptors_before_fd_set() {
+        for fd in [-1, libc::FD_SETSIZE as i32] {
+            assert_eq!(
+                wait_readable(fd, Duration::ZERO).unwrap_err().kind(),
+                io::ErrorKind::InvalidInput
+            );
+        }
+    }
 
     fn typed(decoder: &mut Decoder) -> String {
         decoder
