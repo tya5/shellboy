@@ -330,3 +330,13 @@ The response includes attempt/state, standard usage scalars and the bounded
 `prompt_cache_diagnostics` object or null. `thread request --attempt` additionally
 exposes that saved observation and rebuilds the saved comparison ID; see
 [cache diagnostics](cache-diagnostics.md). Both paths are read-only.
+
+## Explicit Reply Commands (#194)
+
+Use `message send --thread T --expect-reply --text TEXT` to request a deliberate
+reply and retain its message ID. The recipient uses `message reply --message M
+--text TEXT` (or `--text-stdin`). `message get --message M` exposes reply state;
+`wait --conditions-json '[{"type":"reply_received","message_id":"M"}]'` waits
+for a terminal reply state, not a Turn's end message. `thread get` lists pending
+`awaiting_reply` duties. See the adopted reply design for Run-end and exec
+behavior implemented by subsequent steps.

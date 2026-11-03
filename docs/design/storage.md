@@ -659,3 +659,11 @@ Cache diagnostics reuses the context display's bounded completed-attempt
 selection over at most 33 recent Turns and the existing schema19 indexes.
 There is no new migration, derived pointer, index or adoption write. Bounded
 reported facts remain in the existing attempt manifest and GC accounting.
+
+## Pending Reply Lookup (#194)
+
+Provisional schema25 adds `receipt_reply_pending(target_thread_id)` for
+`json_extract(result_json,'$.reply.state')='pending'`. Reply state remains in
+acceptance receipts; the index supports the 128-duty cap and bounded Thread
+lookup. Renumber this migration mechanically if another schema change lands
+first. Run-end transitions are a subsequent implementation step.

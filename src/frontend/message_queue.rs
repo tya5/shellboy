@@ -346,6 +346,7 @@ pub(super) async fn cancel(
         let label = match item.outcome {
             MessageCancelOutcome::Cancelled => "取消",
             MessageCancelOutcome::AlreadyCancelled => "取消済み",
+            MessageCancelOutcome::ReplyCancelled => "返信依頼の取消",
             MessageCancelOutcome::AlreadyAdmitted => "すでに会話へ反映済み",
             MessageCancelOutcome::NotFound => "見つかりません",
             MessageCancelOutcome::Forbidden => "権限なし",
@@ -389,6 +390,7 @@ pub(super) async fn cancel(
 fn cancelled_summary(outcome: MessageCancelOutcome, count: usize) -> String {
     let noun = if count == 1 { "input" } else { "inputs" };
     match outcome {
+        MessageCancelOutcome::ReplyCancelled => format!("{count} reply duties cancelled"),
         MessageCancelOutcome::Cancelled => format!("{count} {noun} cancelled"),
         MessageCancelOutcome::AlreadyCancelled => format!("{count} {noun} already cancelled"),
         MessageCancelOutcome::AlreadyAdmitted => {

@@ -51,3 +51,15 @@ bounded thread_settled condition, instance-independent cursor and separate
 latest-answer/latest-input projections. Existing wait lifecycle, ownership and
 cancellation rules remain. Recovery facts for root Runs use the already-existing
 recovery event without a delivery; terminal Run facts require no extra event.
+
+## Reply Observation (#194)
+
+`reply_received` targets the accepted message ID, including before assignment.
+It reads the receipt's durable reply state. `replied`, `ignored`, `cancelled`,
+and `recipient_deleted` satisfy the condition; success must be checked in the
+snapshot. Unknown IDs fail as unavailable and ordinary messages are invalid
+reply targets. Timeout releases only the observation. A pending reply does not
+become failed merely because the recipient Run stops or enters recovery.
+The model wait graph links its shell to the recipient Thread and refreshes
+ownership edges as assignment changes. A committed reply takes precedence over
+an interruption caused by that reply arriving at the caller.
