@@ -4410,3 +4410,10 @@ hotfix 25 / #194 26 / #172 27. No renumbering is performed in this follow-up.
 Publication targets the requested baseline 461685ff and its existing remote
 branch, preserving review ancestry rather than rebasing these migration changes
 onto main before the separately coordinated integration.
+
+#172 final-source local validation (2026-11-03): strict locked all-target Clippy,
+67 index unit tests (two manual measurements ignored), two bilingual
+manual-rebuild tests, 190 Python tests and 12 CI-reuse Node tests passed on macOS.
+Language classification and integration layout/watchdog checks also passed.
+Findings 1-3 are committed with tests; finding 4 remains open as #203. Default
+CI on this requested baseline selects Linux; dispatch and outcome are pending.
