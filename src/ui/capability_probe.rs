@@ -37,12 +37,12 @@ pub(crate) struct Reply {
 pub(crate) struct ReplyFilter {
     pending: Vec<u8>,
     paste: bool,
-    outstanding: [bool; 3],
+    outstanding: [u8; 3],
 }
 
 impl ReplyFilter {
     pub fn expect(&mut self, kind: Kind) {
-        self.outstanding[kind.index()] = true;
+        self.outstanding[kind.index()] = self.outstanding[kind.index()].saturating_add(1).min(2);
     }
 
     pub fn feed(&mut self, bytes: &[u8], input: &mut Vec<u8>, replies: &mut Vec<Reply>) {
@@ -50,6 +50,9 @@ impl ReplyFilter {
             if self.pending.is_empty() && byte != 0x1b {
                 input.push(byte);
                 continue;
+            }
+            if byte == 0x1b && !self.pending.is_empty() {
+                input.append(&mut self.pending);
             }
             self.pending.push(byte);
             let p = self.pending.as_slice();
@@ -66,15 +69,19 @@ impl ReplyFilter {
                 continue;
             } else if !self.paste
                 && let Some(reply) = parse_reply(p)
-                && self.outstanding[reply.kind.index()]
+                && self.outstanding[reply.kind.index()] > 0
             {
-                self.outstanding[reply.kind.index()] = false;
+                self.outstanding[reply.kind.index()] -= 1;
                 replies.push(reply);
                 self.pending.clear();
                 continue;
             }
             input.append(&mut self.pending);
         }
+    }
+
+    pub fn lone_escape(&self) -> bool {
+        self.pending == b"\x1b"
     }
 
     pub fn flush_input(&mut self, input: &mut Vec<u8>) {
@@ -90,7 +97,7 @@ fn parse_reply(bytes: &[u8]) -> Option<Reply> {
         None => (false, body),
     };
     let kind = match (last, private) {
-        (b'R', _) => Kind::Cursor,
+        (b'R', true) => Kind::Cursor,
         (b'c', true) => Kind::DeviceAttributes,
         (b'u', true) => Kind::Keyboard,
         _ => return None,
