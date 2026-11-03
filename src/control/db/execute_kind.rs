@@ -84,9 +84,34 @@ const UNDECLARED_WRITER_BOUNDS: &[Kind] = &[
     Kind::ContextEdit,
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Classification {
+    PureRead,
+    MutationDeclaredBound,
+    MutationExempt,
+    Runtime,
+}
+
 impl Kind {
-    fn declared_writer_bound(self) -> bool {
+    fn classification(self) -> Classification {
+        use Classification::*;
         match self {
+            Kind::Status
+            | Kind::ThreadList
+            | Kind::ThreadGet
+            | Kind::UsageGet
+            | Kind::CompactList
+            | Kind::CompactPreview
+            | Kind::ShellList
+            | Kind::ThreadDeletePreview
+            | Kind::MessageGet
+            | Kind::OperationGet
+            | Kind::RunGet
+            | Kind::TurnGet
+            | Kind::HistoryList
+            | Kind::HistoryGet
+            | Kind::HistoryRelations
+            | Kind::AttachmentList => PureRead,
             Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
@@ -99,31 +124,15 @@ impl Kind {
             | Kind::AttachmentAdd
             | Kind::AttachmentRemove
             | Kind::Compact
-            | Kind::ContextEdit => false,
-            Kind::Status
-            | Kind::ModelList
-            | Kind::ThreadList
-            | Kind::ThreadGet
-            | Kind::UsageGet
-            | Kind::CompactList
-            | Kind::CompactPreview
-            | Kind::ShellList
-            | Kind::ThreadDeletePreview
-            | Kind::MessageGet
-            | Kind::OperationGet
-            | Kind::RunGet
-            | Kind::TurnGet
+            | Kind::ContextEdit => MutationExempt,
+            Kind::ModelList
             | Kind::Wait
-            | Kind::HistoryList
-            | Kind::HistoryGet
             | Kind::HistorySearch
-            | Kind::HistoryRelations
             | Kind::ShellGet
             | Kind::ShellRead
             | Kind::ShellWrite
             | Kind::ShellEof
             | Kind::ShellStop
-            | Kind::AttachmentList
             | Kind::IndexStatus
             | Kind::IndexPreview
             | Kind::IndexBackfill
@@ -131,12 +140,21 @@ impl Kind {
             | Kind::IndexRebuild
             | Kind::IndexProbe
             | Kind::StorageStatus
-            | Kind::StorageCollect => false,
+            | Kind::StorageCollect => Runtime,
         }
+    }
+    pub(super) fn read_lane(self) -> bool {
+        self.classification() == Classification::PureRead
+    }
+    fn declared_writer_bound(self) -> bool {
+        self.classification() == Classification::MutationDeclaredBound
     }
     pub(super) fn writer_allowed(self, command: &Command) -> bool {
         !command.is_read_only()
-            && (self.declared_writer_bound() || UNDECLARED_WRITER_BOUNDS.contains(&self))
+            && matches!(
+                self.classification(),
+                Classification::MutationDeclaredBound | Classification::MutationExempt
+            )
     }
 }
 
@@ -161,6 +179,88 @@ mod tests {
             45,
             "classify new kinds and update this ratchet"
         );
+    }
+
+    #[test]
+    fn every_writer_kind_has_a_bound_or_a_ratchet_exemption() {
+        let writers = [
+            Kind::OwnerShutdown,
+            Kind::ThreadCreate,
+            Kind::ThreadFork,
+            Kind::ThreadDelete,
+            Kind::ThreadSet,
+            Kind::MessageSend,
+            Kind::MessageCancel,
+            Kind::RunRetry,
+            Kind::RunStop,
+            Kind::AttachmentAdd,
+            Kind::AttachmentRemove,
+            Kind::Compact,
+            Kind::ContextEdit,
+        ];
+        for kind in writers {
+            assert!(
+                kind.declared_writer_bound() || UNDECLARED_WRITER_BOUNDS.contains(&kind),
+                "writer kind {kind:?} has neither a bound nor a ratchet exemption"
+            );
+        }
+        for kind in UNDECLARED_WRITER_BOUNDS {
+            assert!(
+                writers.contains(kind),
+                "exemption is not a writer kind: {kind:?}"
+            );
+            assert!(
+                !kind.declared_writer_bound(),
+                "remove bounded kind from exemptions: {kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn exhaustive_read_routes_and_exemptions_match_checked_in_list() {
+        let read_command = Command::Status(Default::default());
+        let mutation: Command = serde_json::from_value(
+            serde_json::json!({"command":"message.send","args":{"text":"test"}}),
+        )
+        .unwrap();
+        let expected = [
+            Kind::OwnerShutdown,
+            Kind::ThreadCreate,
+            Kind::ThreadFork,
+            Kind::ThreadDelete,
+            Kind::ThreadSet,
+            Kind::MessageSend,
+            Kind::MessageCancel,
+            Kind::RunRetry,
+            Kind::RunStop,
+            Kind::AttachmentAdd,
+            Kind::AttachmentRemove,
+            Kind::Compact,
+            Kind::ContextEdit,
+        ];
+        let actual: Vec<_> = Kind::ALL
+            .iter()
+            .copied()
+            .filter(|k| k.classification() == Classification::MutationExempt)
+            .collect();
+        assert_eq!(actual, expected);
+        assert_eq!(UNDECLARED_WRITER_BOUNDS, expected);
+        for kind in Kind::ALL {
+            match kind.classification() {
+                Classification::PureRead => {
+                    assert!(kind.read_lane());
+                    assert!(!kind.writer_allowed(&read_command));
+                    assert!(!kind.writer_allowed(&mutation));
+                }
+                Classification::MutationDeclaredBound | Classification::MutationExempt => {
+                    assert!(!kind.read_lane())
+                }
+                Classification::Runtime => {
+                    assert!(!kind.read_lane());
+                    assert!(!kind.writer_allowed(&mutation));
+                }
+            }
+        }
     }
 
     #[test]

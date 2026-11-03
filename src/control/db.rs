@@ -410,7 +410,7 @@ impl Store {
                     .await?,
             );
         }
-        if request.command.is_read_only() {
+        if execute_kind::Kind::of(&request.command).read_lane() {
             let mut store = self.clone();
             store.usage_context = crate::usage_totals::read_context();
             let path = self.database.path().to_path_buf();
