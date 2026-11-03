@@ -1589,6 +1589,39 @@ mod db_job_slow_tests {
     use std::time::Duration;
 
     #[tokio::test]
+    async fn slow_plan_is_written_without_path_or_values() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("private-db-name");
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY, deleted_at TEXT)")
+            .unwrap();
+        let diagnostics = Diagnostics::start(root.path().join("logs"), Logging::default());
+        let mut counters = crate::storage::statement_observation::Counters::default();
+        counters.fingerprint = Some("thread.deleted_at_by_id");
+        diagnostics.record_db_job_with_counters(
+            "thread.wait",
+            Duration::ZERO,
+            Duration::from_secs(2),
+            Some(counters),
+            (Some("foreground"), Some("shell"), Some(&path)),
+            None,
+        );
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(root.path().join("logs/shellboy.log")).unwrap();
+        let event: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+        assert_eq!(
+            event["db_job_slow"]["statement_counters"]["plan"][0],
+            "search"
+        );
+        assert_eq!(
+            event["db_job_slow"]["statement_counters"]["fingerprint"],
+            "thread.deleted_at_by_id"
+        );
+        assert!(!body.contains("private-db-name"));
+        assert!(!body.contains("SELECT"));
+    }
+
+    #[tokio::test]
     async fn only_slow_jobs_emit_fixed_bounded_fields() {
         let root = tempfile::tempdir().unwrap();
         let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
