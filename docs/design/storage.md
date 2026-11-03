@@ -667,3 +667,22 @@ Provisional schema25 adds `receipt_reply_pending(target_thread_id)` for
 acceptance receipts; the index supports the 128-duty cap and bounded Thread
 lookup. Renumber this migration mechanically if another schema change lands
 first. Run-end transitions are a subsequent implementation step.
+
+## Reply lifecycle and deleted receipt ownership (#194 step 3, #197)
+
+Pending replies are bounded to 128 per recipient and use receipt_reply_pending.
+Only normal Run completion checks applied pending duties: already-reminded
+messages become ignored, and previously unreminded messages receive one durable
+reminded_at/reminded_run_id fact and one reply_reminder event containing each
+message ID and credential-free sender. Stop, recovery wait and shutdown do not
+consume or ignore duties. The reminder is once per message across restart.
+
+Thread deletion terminalizes pending replies in the same transaction before
+making their receipt rows eligible for history GC. A deleted recipient produces
+recipient_deleted; a deleted sender produces cancelled with cancelled_by and
+cancel_reason=sender_deleted. Recipient deletion takes precedence when both
+endpoints are selected. Terminal receipts with a live model sender remain owned
+by that sender, while receipts targeting a live recipient remain recipient
+owned. Other deleted-target receipts are reclaimed by history GC in at-most-128
+row background transactions, before payload marking. See gc.md for visibility
+and root retention; operation_receipt retention is unchanged.
