@@ -210,6 +210,16 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'receipt_run_completion'):
             checks.check_migration(db, before, 23, 24)
 
+    def test_schema26_to27_adds_recovery_index(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 26)
+        before, records = self.upgrade(db, 26, 27)
+        self.assertEqual(checks.ledger(db), before + [(27, '0027_index_recovery')])
+        self.assertEqual(checks.snapshot(db), records)
+        db.executescript('DROP INDEX jobs_running_recovery; CREATE INDEX jobs_running_recovery ON embedding_job(id);')
+        with self.assertRaisesRegex(AssertionError, 'jobs_running_recovery'):
+            checks.check_migration(db, before, 26, 27)
+
     def test_schema25_to26_adds_partial_reply_index_without_rewriting_rows(self):
         db = self.fixture(17)
         self.upgrade(db, 17, 25)

@@ -344,5 +344,11 @@ Migration 25 remains unchanged on this review branch. Renumbering must wait for
 explicit confirmation that the 0.7.1 hotfix has landed. The latest planned order
 is hotfix 25, #194 reply 26, then #172 index recovery 27; this supersedes the
 older 25-to-26 checklist on #172. Reconcile that checklist only when authorized.
-The pre-existing unbounded startup authorization scan is tracked separately as
-#203; it is not fixed here.
+The pre-existing unbounded startup authorization scan is addressed by #203 below.
+
+### Authorization startup recovery (#203)
+
+Authorization records are scanned in indexed key order in bounded pages of 128
+records and 1 MiB of JSON values. Each page releases the DB worker; previously
+committed updates are published even if a later record fails. Invalid or oversized
+records stop recovery without automatic rebuild and require explicit repair.

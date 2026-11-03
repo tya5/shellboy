@@ -384,13 +384,17 @@ impl IndexService {
             }
             cursor = next;
         }
-        let (recovered, changed) = self
-            .database
-            .call(|db| Ok(queue::recover_authorization_progress(db)))
-            .await
-            .map_err(db_error)?;
-        self.publish_saved(changed);
-        recovered.map_err(db_error)?;
+        let mut cursor = None;
+        loop {
+            let (result, changed) = self.database
+                .call(move |db| Ok(queue::recover_authorization_page(db, cursor)))
+                .await
+                .map_err(db_error)?;
+            self.publish_saved(changed);
+            let (next, done) = result.map_err(db_error)?;
+            if done { break; }
+            cursor = next;
+        }
         let cancel = self.stop.child_token();
         let mut joins = Vec::new();
         for _ in 0..self.config.indexing.concurrency {
