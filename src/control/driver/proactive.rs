@@ -30,6 +30,7 @@ struct Evidence {
     input_tokens: u64,
     input_characters: Option<u64>,
     insufficient_prefix: bool,
+    prior_turn_prefix: bool,
     insufficient_spill: bool,
     exhausted_active: bool,
     baseline_marks: Option<Vec<String>>,
@@ -96,6 +97,7 @@ pub(super) async fn maybe_compact(
             let target_key = crate::compaction::CompactionKeys::new(&thread).automatic_target();
             let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=1048576", [&target_key], |row| row.get(0)).optional()?;
             let mut insufficient_prefix = false;
+            let mut prior_turn_prefix = false;
             let mut insufficient_spill = false;
             let mut exhausted_current_turn = false;
             let mut baseline_marks = None;
@@ -120,7 +122,11 @@ pub(super) async fn maybe_compact(
                     if pending["verified"] == "met" {
                         db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
                     } else if pending["scope"] == "prefix" {
-                        insufficient_prefix = true;
+                        if pending["turn"] == current_turn {
+                            insufficient_prefix = true;
+                        } else {
+                            prior_turn_prefix = true;
+                        }
                     } else if pending["scope"] == "spill" {
                         insufficient_spill = true;
                     } else if pending["scope"] == "active_turn" && pending["turn"] == current_turn {
@@ -129,14 +135,14 @@ pub(super) async fn maybe_compact(
                     }
                 }
             }
-            if input_tokens < threshold && !insufficient_prefix && !insufficient_spill && !exhausted_current_turn {
+            if input_tokens < threshold && !insufficient_prefix && !prior_turn_prefix && !insufficient_spill && !exhausted_current_turn {
                 return Ok(Some(Measurement::BelowThreshold));
             }
             let input_characters = db.query_row(
                 "SELECT CASE WHEN json_valid(input_manifest_json) THEN CASE WHEN json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END END FROM model_attempt WHERE id=?1",
                 [attempt], |row| row.get::<_, Option<i64>>(0),
             )?.and_then(|n| u64::try_from(n).ok());
-            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix, insufficient_spill, exhausted_active: exhausted_current_turn, baseline_marks })))
+            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix, prior_turn_prefix, insufficient_spill, exhausted_active: exhausted_current_turn, baseline_marks })))
         })
         .await
         .map_err(storage_error);
@@ -345,7 +351,11 @@ pub(super) async fn maybe_compact(
         .input_characters
         .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
     let mut midturn = Value::Null;
-    let prefer_active = evidence.insufficient_prefix || std::mem::take(&mut budget.prefix_adopted);
+    let prefer_active = evidence.insufficient_prefix
+        || (!evidence.prior_turn_prefix && std::mem::take(&mut budget.prefix_adopted));
+    if evidence.prior_turn_prefix {
+        budget.prefix_adopted = false;
+    }
     let mut summary_scope = "";
     let result: Result<Value, ApiError> = async {
     let before_characters = if target_plan.is_some() {

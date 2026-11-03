@@ -651,6 +651,9 @@ attempt. Fresh verification is also attached to the triggering attempt's
 existing `automatic_trim_attempt` record. For an insufficient active-Turn
 summary, only growth of eligible middle candidates permits another attempt in
 the same Turn; incomplete candidate evidence does not establish growth. A new
-Turn restores ordinary prefix selection. Local replay-character changes guide
+Turn restores ordinary prefix selection, including after an insufficient prefix;
+the outstanding shortfall remains eligible below the threshold, but must not
+force active-Turn-first ordering across that boundary. Spill-only shortfalls
+retain their separate escalation policy. Local replay-character changes guide
 whether to widen in the same attempt; only the next provider report verifies
 the outcome. No independent token or output-size guarantee is implied.
