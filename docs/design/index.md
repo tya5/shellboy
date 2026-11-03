@@ -349,6 +349,6 @@ The pre-existing unbounded startup authorization scan is addressed by #203 below
 ### Authorization startup recovery (#203)
 
 Authorization records are scanned in indexed key order in bounded pages of 128
-records and 1 MiB of JSON values. Each page releases the DB worker; previously
+records and 1 MiB of key and JSON value bytes. Each page releases the DB worker; previously
 committed updates are published even if a later record fails. Invalid or oversized
 records stop recovery without automatic rebuild and require explicit repair.

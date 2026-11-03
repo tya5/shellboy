@@ -441,7 +441,7 @@ pub(super) fn recover_authorization_page(
         let mut bytes = 0;
         loop {
             let row: Option<(String, i64)> = db.query_row(
-                "SELECT key,length(CAST(value AS BLOB)) FROM app_meta WHERE key>?1 AND key<?2 ORDER BY key LIMIT 1",
+                "SELECT key,length(CAST(key AS BLOB))+length(CAST(value AS BLOB)) FROM app_meta WHERE key>?1 AND key<?2 ORDER BY key LIMIT 1",
                 params![last, "index.auto/"], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional()?;
             let Some((key, size)) = row else { return Ok((None, true)); };
@@ -839,7 +839,7 @@ mod metadata_tests {
         for n in 0..300 {
             db.execute("INSERT INTO app_meta VALUES(?1,?2)", params![format!("index.auto.{n:04}"), r#"{"node_id":"n","state":"running","error":null}"#]).unwrap();
         }
-        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT key,length(CAST(value AS BLOB)) FROM app_meta WHERE key>?1 AND key<?2 ORDER BY key LIMIT 1", params!["index.auto.", "index.auto/"], |r| r.get(3)).unwrap();
+        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT key,length(CAST(key AS BLOB))+length(CAST(value AS BLOB)) FROM app_meta WHERE key>?1 AND key<?2 ORDER BY key LIMIT 1", params!["index.auto.", "index.auto/"], |r| r.get(3)).unwrap();
         assert!(plan.contains("INDEX"), "{plan}");
         let (result, changed) = recover_authorization_page(&mut db, None);
         assert!(changed);
