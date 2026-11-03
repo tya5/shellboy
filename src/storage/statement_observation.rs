@@ -16,6 +16,12 @@ pub(crate) struct Counters {
     pub vm_steps: u64,
     pub elapsed_ns: u64,
     pub rows: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<[Option<&'static str>; 8]>,
+    #[serde(skip)]
+    current_fingerprint: Option<&'static str>,
 }
 
 pub(crate) struct StatementObservation<'a> {
@@ -28,6 +34,55 @@ pub(crate) struct StatementObservation<'a> {
 struct TraceContext {
     counters: Arc<Mutex<Counters>>,
     baselines: HashMap<usize, [u64; 4]>,
+}
+
+// Only exact, reviewed static statements are eligible for diagnostic output.
+fn safe_fingerprint(sql: &[u8]) -> Option<&'static str> {
+    match sql {
+        b"SELECT deleted_at FROM thread WHERE id=?1" => Some("thread.deleted_at_by_id"),
+        b"SELECT parent_thread_id FROM thread WHERE id=?1" => Some("thread.parent_by_id"),
+        b"SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)" => {
+            Some("thread.live_by_id")
+        }
+        _ => None,
+    }
+}
+
+/// Explain only reviewed statements on a separate read-only connection. Plan
+/// text is reduced to fixed categories so schema names and values never escape.
+pub(crate) fn add_readonly_plan(path: &std::path::Path, counters: &mut Counters) {
+    let sql = match counters.fingerprint {
+        Some("thread.deleted_at_by_id") => "SELECT deleted_at FROM thread WHERE id=?1",
+        Some("thread.parent_by_id") => "SELECT parent_thread_id FROM thread WHERE id=?1",
+        Some("thread.live_by_id") => {
+            "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)"
+        }
+        _ => return,
+    };
+    let result = std::panic::catch_unwind(|| -> rusqlite::Result<[Option<&'static str>; 8]> {
+        let db = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let mut statement = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+        let mut rows = statement.query([rusqlite::types::Null])?;
+        let mut plan = [None; 8];
+        for item in &mut plan {
+            let Some(row) = rows.next()? else { break };
+            let detail: String = row.get(3)?;
+            *item = Some(if detail.starts_with("SEARCH ") {
+                "search"
+            } else if detail.starts_with("SCAN ") {
+                "scan"
+            } else if detail.starts_with("USE TEMP B-TREE") {
+                "temp_btree"
+            } else {
+                "other"
+            });
+        }
+        Ok(plan)
+    });
+    counters.plan = result.ok().and_then(Result::ok);
 }
 
 unsafe fn statement_counts(stmt: *mut ffi::sqlite3_stmt) -> [u64; 4] {
@@ -58,6 +113,14 @@ unsafe extern "C" fn profile(
                 .starts_with(b"--")
         {
             return 0;
+        }
+        let sql = unsafe { ffi::sqlite3_sql(stmt) };
+        if let Ok(mut counters) = context.counters.lock() {
+            counters.current_fingerprint = if sql.is_null() {
+                None
+            } else {
+                safe_fingerprint(unsafe { CStr::from_ptr(sql) }.to_bytes())
+            };
         }
         context
             .baselines
@@ -164,13 +227,15 @@ pub(super) struct SlowBacktrace {
     started: std::time::Instant,
     captured: Arc<Mutex<Option<std::backtrace::Backtrace>>>,
     attempted: Arc<std::sync::atomic::AtomicBool>,
+    counters: Option<Arc<Mutex<Counters>>>,
 }
 impl SlowBacktrace {
-    pub fn new(started: std::time::Instant) -> Self {
+    pub fn new(started: std::time::Instant, counters: Option<Arc<Mutex<Counters>>>) -> Self {
         Self {
             started,
             captured: Arc::new(Mutex::new(None)),
             attempted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            counters,
         }
     }
     pub fn observe(&self, now: std::time::Instant) {
@@ -189,6 +254,11 @@ impl SlowBacktrace {
                 .attempted
                 .swap(true, std::sync::atomic::Ordering::Relaxed)
         {
+            if let Some(counters) = &self.counters
+                && let Ok(mut counters) = counters.try_lock()
+            {
+                counters.fingerprint = counters.current_fingerprint;
+            }
             *captured = std::panic::catch_unwind(capture).ok();
         }
     }
@@ -226,6 +296,74 @@ fn safe_symbols(rendered: &str) -> Vec<String> {
 mod tests {
     use super::*;
     #[test]
+    fn overrun_captures_executing_statement_not_later_sql() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY,deleted_at TEXT); INSERT INTO thread VALUES ('private-id',NULL)").unwrap();
+        let mut observation = StatementObservation::install(&mut db);
+        let start = std::time::Instant::now();
+        let trace = SlowBacktrace::new(start, Some(observation.shared_counters()));
+        observation
+            .connection()
+            .progress_handler(
+                1,
+                Some(move || {
+                    trace.observe(start + super::super::SLOW_JOB_THRESHOLD);
+                    false
+                }),
+            )
+            .unwrap();
+        let _: Option<String> = observation
+            .connection()
+            .query_row(
+                "SELECT deleted_at FROM thread WHERE id=?1",
+                ["private-id"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        observation
+            .connection()
+            .progress_handler(0, None::<fn() -> bool>)
+            .unwrap();
+        observation.connection().execute_batch("SELECT 1").unwrap();
+        let json = serde_json::to_string(&observation.counters()).unwrap();
+        assert!(json.contains("thread.deleted_at_by_id"));
+        assert!(!json.contains("private-id"));
+    }
+
+    #[test]
+    fn fingerprint_is_exact_and_plan_is_read_only_and_bounded() {
+        assert_eq!(
+            safe_fingerprint(b"SELECT deleted_at FROM thread WHERE id=?1"),
+            Some("thread.deleted_at_by_id")
+        );
+        assert_eq!(
+            safe_fingerprint(b"SELECT deleted_at FROM thread WHERE id='secret'"),
+            None
+        );
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("db");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("CREATE TABLE thread(id TEXT PRIMARY KEY, deleted_at TEXT)")
+            .unwrap();
+        let mut counters = Counters {
+            fingerprint: Some("thread.deleted_at_by_id"),
+            ..Default::default()
+        };
+        add_readonly_plan(&path, &mut counters);
+        assert_eq!(counters.plan.unwrap()[0], Some("search"));
+        assert!(
+            serde_json::to_string(&counters)
+                .unwrap()
+                .contains("thread.deleted_at_by_id")
+        );
+        let missing = root.path().join("missing");
+        counters.plan = None;
+        add_readonly_plan(&missing, &mut counters);
+        assert!(counters.plan.is_none());
+        assert!(!missing.exists());
+    }
+
+    #[test]
     #[ignore = "manual hook overhead measurement"]
     fn measure_hook_overhead() {
         fn workload(db: &Connection) {
@@ -246,7 +384,7 @@ mod tests {
             let baseline = started.elapsed();
             let mut observation = StatementObservation::install(&mut db);
             assert!(observation.available());
-            let backtrace = SlowBacktrace::new(std::time::Instant::now());
+            let backtrace = SlowBacktrace::new(std::time::Instant::now(), None);
             observation
                 .connection()
                 .progress_handler(
@@ -286,7 +424,7 @@ mod tests {
     #[test]
     fn failed_backtrace_capture_is_not_retried() {
         let started = std::time::Instant::now();
-        let trace = SlowBacktrace::new(started);
+        let trace = SlowBacktrace::new(started, None);
         let later = started + super::super::SLOW_JOB_THRESHOLD;
         trace.observe_using(later, || panic!("injected capture failure"));
         assert!(trace.captured.lock().unwrap().is_none());
@@ -297,7 +435,7 @@ mod tests {
     #[test]
     fn backtrace_is_captured_once_after_threshold() {
         let started = std::time::Instant::now();
-        let trace = SlowBacktrace::new(started);
+        let trace = SlowBacktrace::new(started, None);
         trace.observe(started);
         assert!(trace.captured.lock().unwrap().is_none());
         trace.observe(started + super::super::SLOW_JOB_THRESHOLD);

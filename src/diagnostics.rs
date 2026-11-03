@@ -127,6 +127,8 @@ struct DbJobSlowTrace {
     requester: Option<&'static str>,
     queue_ms: u64,
     run_ms: u64,
+    #[serde(skip)]
+    plan_path: Option<std::path::PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     statement_counters: Option<crate::storage::statement_observation::Counters>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -458,13 +460,19 @@ impl Diagnostics {
                     usage_slow,
                     ui_history,
                     lineage_slow,
-                    db_job,
+                    mut db_job,
                     index_discard,
                     automatic_compaction_counts,
                     startup_stage,
                     shell_unknown_parameter,
                 }) = receiver.recv()
                 {
+                    if let Some(DbJobTrace::Slow(trace)) = db_job.as_mut()
+                        && let Some(path) = trace.plan_path.as_deref()
+                        && let Some(counters) = trace.statement_counters.as_mut()
+                    {
+                        crate::storage::statement_observation::add_readonly_plan(path, counters);
+                    }
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
                     let entry = Entry {
                         at: chrono::Utc::now().to_rfc3339(),
@@ -778,7 +786,7 @@ impl Diagnostics {
         queue: std::time::Duration,
         run: std::time::Duration,
     ) {
-        self.record_db_job_with_counters(kind, queue, run, None, (None, None), None);
+        self.record_db_job_with_counters(kind, queue, run, None, (None, None, None), None);
     }
     pub(crate) fn record_db_job_with_counters(
         &self,
@@ -786,10 +794,10 @@ impl Diagnostics {
         queue: std::time::Duration,
         run: std::time::Duration,
         statement_counters: Option<crate::storage::statement_observation::Counters>,
-        attribution: (Option<&str>, Option<&'static str>),
+        attribution: (Option<&str>, Option<&'static str>, Option<&std::path::Path>),
         backtrace_symbols: Option<Vec<String>>,
     ) {
-        let (lane, requester) = attribution;
+        let (lane, requester, plan_path) = attribution;
         if queue < std::time::Duration::from_secs(1) && run < std::time::Duration::from_secs(1) {
             return;
         }
@@ -810,6 +818,7 @@ impl Diagnostics {
                 requester,
                 queue_ms: u64::try_from(queue.as_millis()).unwrap_or(u64::MAX),
                 run_ms: u64::try_from(run.as_millis()).unwrap_or(u64::MAX),
+                plan_path: plan_path.map(std::path::Path::to_owned),
                 statement_counters,
                 backtrace_symbols,
             })),

@@ -514,9 +514,10 @@ impl DbWorker {
     ) -> T {
         let started = Instant::now();
         let queue = started.saturating_duration_since(queued_at);
-        let backtrace = statement_observation::SlowBacktrace::new(started);
-        let capture = backtrace.clone();
         let mut observation = statement_observation::StatementObservation::install(connection);
+        let backtrace =
+            statement_observation::SlowBacktrace::new(started, Some(observation.shared_counters()));
+        let capture = backtrace.clone();
         let counters = observation
             .available()
             .then(|| observation.shared_counters());
@@ -577,7 +578,11 @@ impl DbWorker {
                 queue,
                 run,
                 counters,
-                (Some("inspection"), requester),
+                (
+                    Some("inspection"),
+                    requester,
+                    (run >= SLOW_JOB_THRESHOLD).then_some(self.shared.path.as_path()),
+                ),
                 backtrace.symbols(),
             );
         }
@@ -1292,7 +1297,10 @@ fn run_worker(
                 );
                 let mut observation =
                     statement_observation::StatementObservation::install(&mut connection);
-                let slow_backtrace = statement_observation::SlowBacktrace::new(started);
+                let slow_backtrace = statement_observation::SlowBacktrace::new(
+                    started,
+                    Some(observation.shared_counters()),
+                );
                 if let Ok(mut active) = state.active_job.lock()
                     && let Some(active) = active.as_mut().filter(|active| active.job.id == job_id)
                 {
@@ -1323,7 +1331,11 @@ fn run_worker(
                         queue,
                         run,
                         counters,
-                        (Some(lane.as_str()), requester),
+                        (
+                            Some(lane.as_str()),
+                            requester,
+                            (run >= SLOW_JOB_THRESHOLD).then_some(path.as_path()),
+                        ),
                         slow_backtrace.symbols(),
                     );
                 }
