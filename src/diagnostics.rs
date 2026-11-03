@@ -1,4 +1,5 @@
-//! Bounded nonblocking diagnostics: fixed classifications and numeric observations only.
+//! Bounded nonblocking diagnostics: fixed classifications, numeric observations,
+//! and sanitized shell parameter names.
 //! Request/response bodies and values never enter the writer queue; shell unknown
 //! parameter names are bounded and sanitized before admission.
 use crate::config::Logging;
