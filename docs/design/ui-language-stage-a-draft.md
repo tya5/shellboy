@@ -52,8 +52,9 @@ tracks each as `Unmeasured` or `Measured(value)`. A single input reader removes
 DSR (`ESC [ row ; column R`), DA (`ESC [ ? ... c`), and keyboard flags
 (`ESC [ ? ... u`) replies at any time, including while the user is typing.
 Inside bracketed paste (`ESC [ 200 ~` through `ESC [ 201 ~`), all bytes
-are user data and are delivered unchanged; no sequence is stripped. Outside
-paste, a response is accepted only while its corresponding query is outstanding,
+are user data and the filter leaves them unchanged; no sequence is stripped.
+The existing UTF-8 text decoding remains unchanged, including its replacement
+of invalid bytes. Outside paste, a response is accepted only while its corresponding query is outstanding,
 and each query consumes at most one response. A matching sequence after the
 query is answered or when none was sent remains ordinary input. Plain DSR's
 `ESC [ 1 ; 2 R` collides with Shift+F3 on some terminals. Prefer DEC-private
