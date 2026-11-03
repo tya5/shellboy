@@ -272,6 +272,36 @@ mod tests {
         );
     }
     #[test]
+    fn hot_history_reads_do_not_scan_unrelated_growing_nodes() {
+        let mut db = fixture();
+        db.execute_batch("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) INSERT INTO node(id,kind,created_at,payload_json) SELECT 'foreign-'||x,'user','now','{}' FROM n; WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) SELECT 'r-'||x,'foreign-'||x,'key','v','v','completed','now' FROM n; WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) SELECT 'r-'||x,0,'foreign-'||x,0 FROM n; WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<5000) INSERT INTO edge(src,dst) SELECT 'foreign-'||x,'foreign-'||(x+5000) FROM n;").unwrap();
+        let list: crate::protocol::HistoryListArgs =
+            serde_json::from_value(json!({"thread_id":"t"})).unwrap();
+        let get: crate::protocol::HistoryGetArgs =
+            serde_json::from_value(json!({"node_id":"n"})).unwrap();
+        for name in ["list", "get", "previous", "next", "sources", "replacements"] {
+            let mut observation =
+                crate::storage::statement_observation::StatementObservation::install(&mut db);
+            match name {
+                "list" => {
+                    super::super::list_nodes(observation.connection(), &list).unwrap();
+                }
+                "get" => {
+                    super::super::get_node(observation.connection(), &get).unwrap();
+                }
+                relation => {
+                    let args: crate::protocol::HistoryRelationsArgs =
+                        serde_json::from_value(json!({"node_id":"n","relation":relation})).unwrap();
+                    super::super::relations(observation.connection(), &args).unwrap();
+                }
+            }
+            let counters = observation.counters();
+            assert_eq!(counters.fullscan_steps, 0, "{name}: {counters:?}");
+            assert!(counters.vm_steps > 0, "{name}");
+        }
+    }
+
+    #[test]
     fn node_and_path_seeks_do_not_scale_with_unrelated_rows_or_materialize_payloads() {
         let mut db = fixture();
         let encoded = serde_json::to_string(&vec!["n", "missing"]).unwrap();
