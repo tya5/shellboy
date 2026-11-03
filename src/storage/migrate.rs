@@ -288,18 +288,34 @@ mod activity_migration_tests {
         for start in [24, 25, 26] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch("DROP INDEX jobs_running_recovery;").unwrap();
+            db.execute_batch("DROP INDEX jobs_running_recovery;")
+                .unwrap();
             if start < 26 {
-                db.execute_batch("DROP INDEX receipt_reply_pending;").unwrap();
+                db.execute_batch("DROP INDEX receipt_reply_pending;")
+                    .unwrap();
             }
             if start < 25 {
-                db.execute_batch("DROP INDEX history_tool_group_attempt;").unwrap();
+                db.execute_batch("DROP INDEX history_tool_group_attempt;")
+                    .unwrap();
             }
-            db.execute("DELETE FROM schema_migration WHERE version>?1", [start]).unwrap();
+            db.execute("DELETE FROM schema_migration WHERE version>?1", [start])
+                .unwrap();
             db.pragma_update(None, "user_version", start).unwrap();
             run(&mut db, start, &|_, _| {}, &|| {}).unwrap();
-            assert_eq!(db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 27);
-            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=27", [], |r| r.get::<_, String>(0)).unwrap(), "0027_index_recovery");
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                27
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT name FROM schema_migration WHERE version=27",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                "0027_index_recovery"
+            );
             let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT id FROM embedding_job WHERE state='running' AND id>?1 ORDER BY id LIMIT 128", [""], |r| r.get(3)).unwrap();
             assert!(plan.contains("jobs_running_recovery"), "{plan}");
         }
@@ -356,7 +372,10 @@ mod activity_migration_tests {
             &|| {},
         )
         .unwrap();
-        assert_eq!(*observed.borrow(), vec![(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]);
+        assert_eq!(
+            *observed.borrow(),
+            vec![(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
+        );
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(
