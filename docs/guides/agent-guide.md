@@ -93,7 +93,7 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 |---|---|---|
 | Command meaning and examples | `shellboy <command> --help` / `shellboy docs search --query 'background'` | `docs get` using the returned guide ID |
 | Current work state | `shellboy status --thread THREAD_ID` | get the target returned by each item; this is saved state, not an inference of OS process liveness |
-| Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | get the returned Turn, then history get if it has an answer_node_id |
+| Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | inspect `reply.state`, then read `reply.node_id` when replied |
 | Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
 | Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history get by node ID; history relations for relationships |
 | Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
@@ -102,17 +102,17 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 
 `docs` provides procedures, `status` provides current saved state, `history` provides conversation evidence, and `rag` retrieves documents from explicitly selected scopes. For full text or precise state, continue to the returned target instead of stopping at an excerpt or acceptance result.
 
-IDs have distinct roles even within the same task. `operation_id` identifies an operation receipt, `message_id` a request, `thread_id` a conversation, `run_id` execution ownership, `turn_id` an answer interval, `answer_node_id` the original answer, and `execution_id` one shell process. The shell ID that ran `message send` is not the recipient shell's ID. Store a launched command's returned ID as `WORK_EXECUTION_ID`, and recipient IDs separately as `CHILD_THREAD_ID` / `CHILD_MESSAGE_ID` / `CHILD_TURN_ID`. Do not assume local variables are automatically shared between shell tool calls.
+IDs have distinct roles even within the same task. `operation_id` identifies an operation receipt, `message_id` a request, `thread_id` a conversation, `run_id` execution ownership, `turn_id` an answer interval, `end_message_node_id` the Turn end message, `reply.node_id` the requested reply, and `execution_id` one shell process. The shell ID that ran `message send` is not the recipient shell's ID. Store a launched command's returned ID as `WORK_EXECUTION_ID`, and recipient IDs separately as `CHILD_THREAD_ID` / `CHILD_MESSAGE_ID` / `CHILD_TURN_ID`. Do not assume local variables are automatically shared between shell tool calls.
 
 ## Carry out one task
 
 1. Read instructions, current state, and necessary original text.
 2. Perform bounded work through shell. Use background execution for long tasks and track the returned execution.
 3. If dividing work, create a child Thread and send its request. Check assignment after acceptance before waiting.
-4. Check wait status and target state, then read the original answer node.
+4. Check wait status and reply state, then read the original reply node.
 5. Report results, verification, failures, and remaining work to the user.
 
-Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. An answered parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check its answer notification and retrieve the original text.
+Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. An answered parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check its reply notification and retrieve the original text.
 
 
 ### Wait for any child Thread
@@ -128,9 +128,19 @@ Keep `result.cursor` even on timeout and pass it with unchanged conditions.
 Read `result.snapshot.changes`; `snapshot.more` means continue with that cursor.
 This also catches a finish/restart or recovery/resume between calls and survives
 owner restart. `satisfied` does not imply success or authorize recovery/retry.
-ThreadList/Get expose `last_answer` separately from `last_input`, including the
+ThreadList/Get expose `last_end_message` separately from `last_input`, including the
 latter's saved sender and self-asserted label. See [Delegation](delegation.md#waiting-for-several-threads)
 for bounds, current-state baselines and result/original-content inspection.
+
+## Reply to a request
+
+When the admission notice marks a message `reply_expected`, finish the task and
+use `shellboy message reply --message MESSAGE_ID --text 'Result and evidence'`.
+Reply once to that specific applied message; an ordinary progress message or a
+Turn end message is not its reply. The recipient Thread's model can reply; a
+parent cannot reply on the child's behalf. A model cannot send a reply-expected
+message to its own Thread. If the duty is cancelled, do not send a late reply.
+See [Delegation](delegation.md#waiting-for-replies) for reminders and wait states.
 
 ## Distinguish acceptance from completion
 
@@ -163,7 +173,7 @@ shellboy history list --thread THREAD_ID --limit 20
 shellboy history get --node NODE_ID --limit-bytes 65536
 ```
 
-Replace uppercase example IDs with actual returned values. List and search excerpts are not full text. If get returns `next_cursor`, continue with `--cursor` for the same node. Retrieve an answer through its Turn's `answer_node_id`; summaries and spills expose `source_node_ids`. Inspect `previous_node_ids` / `next_node_ids` for adjacency, and the tombstone reason for reclaimed source text. Do not invent unavailable content.
+Replace uppercase example IDs with actual returned values. List and search excerpts are not full text. If get returns `next_cursor`, continue with `--cursor` for the same node. Retrieve a Turn end message through its `end_message_node_id`, or a reply through `message get` and `reply.node_id`; summaries and spills expose `source_node_ids`. Inspect `previous_node_ids` / `next_node_ids` for adjacency, and the tombstone reason for reclaimed source text. Do not invent unavailable content.
 
 Explicitly restrict a search when needed. Unlike other self-targeting operations, search's omitted `--thread` means a global search.
 

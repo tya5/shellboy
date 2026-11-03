@@ -280,7 +280,7 @@ F1で説明を確認できます。Enterは操作に応じて表示・実行・�
 まず shellboy docs get --id shellboy/agent-guide と
 shellboy docs get --id shellboy/delegation をshellで読んでください。
 その手順で所有する子Threadを作り、調査だけを委譲してください。
-子の依頼を送った後は割当と完了状態を確認し、原文を取得して結果をまとめてください。
+子への依頼は `message send --expect-reply` を使い、`reply_received` で待ち、返信状態と原文を確認して結果をまとめてください。
 ```
 
 親子の停止範囲、途中報告、recovery待ちの判断は[委譲ガイド](delegation.md)にあります。
