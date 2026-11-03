@@ -79,6 +79,7 @@ pub(super) async fn maybe_compact(
         }
     }
     let thread = snapshot.thread.clone();
+    let current_turn = snapshot.turn.clone();
     let evidence = control
         .store
         .database
@@ -92,22 +93,33 @@ pub(super) async fn maybe_compact(
             let target_key = crate::compaction::CompactionKeys::new(&thread).automatic_target();
             let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=4096", [&target_key], |row| row.get(0)).optional()?;
             let mut insufficient_prefix = false;
-            if let Some(pending) = pending.and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                && let (Some(previous), Some(target)) = (pending["attempt"].as_str(), pending["target_tokens"].as_u64())
+            let mut exhausted_current_turn = false;
+            if let Some(mut pending) = pending.and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                && let (Some(previous), Some(target)) = (pending["attempt"].as_str().map(str::to_owned), pending["target_tokens"].as_u64())
                 && previous != attempt
             {
                 let same_model: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt old JOIN model_attempt new ON old.profile_id=new.profile_id AND old.model_id=new.model_id WHERE old.id=?1 AND new.id=?2)", params![previous,attempt], |row| row.get(0))?;
-                if same_model {
-                    let insufficient = target::verify(target, input_tokens) == target::Verification::Insufficient;
-                    let verification = json!({"attempt_id":attempt,"input_tokens":input_tokens,"target_tokens":target,"outcome":if insufficient {"insufficient"} else {"met"}}).to_string();
-                    db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.target_verification',json(?1)) WHERE id=?2 AND json_valid(error_json)", params![verification,previous])?;
-                    if insufficient {
-                        insufficient_prefix = pending["scope"] == "prefix";
+                if !same_model {
+                    db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
+                } else {
+                    if pending["verified"].is_null() {
+                        let insufficient = target::verify(target, input_tokens) == target::Verification::Insufficient;
+                        let outcome = if insufficient {"insufficient"} else {"met"};
+                        let verification = json!({"attempt_id":attempt,"input_tokens":input_tokens,"target_tokens":target,"outcome":outcome}).to_string();
+                        db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.target_verification',json(?1)) WHERE id=?2 AND json_valid(error_json)", params![verification,previous])?;
+                        pending["verified"] = json!(outcome);
+                        db.execute("UPDATE app_meta SET value=?2 WHERE key=?1", params![target_key,pending.to_string()])?;
+                    }
+                    if pending["verified"] == "met" {
+                        db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
+                    } else if pending["scope"] == "prefix" {
+                        insufficient_prefix = true;
+                    } else if pending["scope"] == "active_turn" && pending["turn"] == current_turn {
+                        exhausted_current_turn = true;
                     }
                 }
-                db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
             }
-            if input_tokens < threshold && !insufficient_prefix {
+            if exhausted_current_turn || (input_tokens < threshold && !insufficient_prefix) {
                 return Ok(Some(Measurement::BelowThreshold));
             }
             let input_characters = db.query_row(
@@ -518,7 +530,7 @@ pub(super) async fn maybe_compact(
     });
     // Record on the attempt whose reported usage triggered this decision, in the
     // existing automatic-compaction field and partial index (no new table).
-    let pending_target = if adopted { target_plan.map(|plan| json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":summary_scope}).to_string()) } else { None };
+    let pending_target = if adopted { target_plan.map(|plan| json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":summary_scope,"turn":snapshot.turn}).to_string()) } else { None };
     let target_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_target();
     let body = observation.to_string();
     let attempt = evidence.attempt;
