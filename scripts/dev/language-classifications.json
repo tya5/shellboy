@@ -1,62 +1,62 @@
 {
   "src/presentation/messages.rs:0bff270c09be9c78:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Summary replacement/source counts; English singular and plural arms. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:0c8bd08fbeb8fe7a:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: CommandNotice background None; English Background request not recorded. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:2d85efb0da176a01:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: IndexPause; English Pause recorded at. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:2ee12a032677caa4:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SourceWindow live ASCII-width fallback; English live window singular/plural. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:389f767af5a90d85:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: RetryError refresh; English Refresh failed. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:3e7a697a9be63ac3:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Hint; English Action. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:62a142b415a31d33:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: IndexPause reason fallback; English Reason unavailable. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:64e9d98e1b8291cf:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Reasoning; English singular/plural Reasoning. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:66389b2695f5dccb:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Exit; English Exit. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:6a7b140150cb0e91:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Summary source count; English singular/plural source count. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:6fde8b967c304887:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: DetailCount; English singular/plural item. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:84d027ce84868593:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: WaitCount; English singular/plural wait condition. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/fields.rs:cf3c793ba104a057:1": {
@@ -91,67 +91,67 @@
   },
   "src/presentation/messages.rs:850486352b42fc11:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SourceWindow original ASCII-width fallback; English original window singular/plural. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:a0cb0c2efd5aa53f:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SectionTitle; English Previous saved record. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:a11d38283bd0d638:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: IndexPause time fallback; English Time unavailable. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:a22a6d4826ea9101:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: RetryError output; English Output retrieval failed. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:a7cf2cdf54017602:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Source count; English singular/plural original count. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:ab5c381a330c4429:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: BodyOmitted; English singular/plural body/output characters. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:ac169d556eefae57:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: CommandNotice background false; English Background not requested. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:b057652dd4bf22f3:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: CommandNotice background true; English Background requested. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:d1df57e28c5bfa57:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: UnknownTitle; English Unsupported item. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:d52f11044f4b193b:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Reclaimed; English Original reclaimed. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:d6165bfb6d8626d0:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SectionCount; English count. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:e90446cae41655cf:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: ThreadNotice; English Current name. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/messages.rs:ea4d36dfd460f0c0:1": {
     "category": "a",
-    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
+    "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Excerpt; English singular/plural output excerpt. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
     "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
   },
   "src/presentation/events.rs:ada8b376f754ec68:1": {
