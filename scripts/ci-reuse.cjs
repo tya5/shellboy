@@ -9,7 +9,7 @@ async function decide({github, context}) {
   }
   const repo = {...context.repo};
   const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-    ...repo, workflow_id: 'ci.yml', head_sha: context.sha, status: 'success', per_page: 100,
+    ...repo, workflow_id: 'ci.yml', head_sha: context.sha, status: 'completed', per_page: 100,
   });
   for (const run of runs) {
     if (run.id === context.runId || run.head_sha !== context.sha ||

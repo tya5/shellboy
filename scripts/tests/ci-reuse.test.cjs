@@ -8,7 +8,14 @@ const run = {id: 1, head_sha: 'abc', status: 'completed', conclusion: 'success',
 const jobs = gate.requiredJobs.map(name => ({name, conclusion: 'success'}));
 function api(runs = [run], selected = jobs) {
   return {rest: {actions: {listWorkflowRuns: 'runs', listJobsForWorkflowRun: 'jobs'}},
-    paginate: async method => method === 'runs' ? runs : selected};
+      paginate: async (method, params) => {
+      if (method === 'runs') {
+        assert.equal(params.head_sha, context.sha);
+        assert.equal(params.status, 'completed');
+        return runs;
+      }
+      return selected;
+    }};
 }
 test('exact-SHA complete first-attempt evidence qualifies', async () => {
   assert.equal((await gate.decide({github: api(), context})).reuse, true);

@@ -11,10 +11,11 @@
 ## CI recovery and integration (#57)
 
 Run the complete local standard check on the proposed tree before any push:
-`sh scripts/check.sh` or `./scripts/check.ps1`. Automatic Rust checks are limited
-to main pushes. Branch pushes and pull requests require an explicit manual
-workflow dispatch when native-OS evidence is needed; existing inputs and matrix
-coverage are unchanged.
+`sh scripts/check.sh` or `./scripts/check.ps1`. Automatic Rust checks run on main pushes, with exact-SHA successful-check
+reuse when qualifying land/integration evidence exists. Branch pushes and pull requests
+do not run checks automatically. Workflow dispatch on task branches runs Linux
+only by default; set `all_oses=true` for Windows/PTY/path-sensitive changes.
+`main`, `land/*` and `integration/*` always select all three OSes.
 
 Treat red main CI as the first integration task: investigate and restore it
 before landing unrelated main work. Identify each failure by exact SHA, run/job
