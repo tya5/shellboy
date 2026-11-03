@@ -368,8 +368,20 @@ pub(super) async fn maybe_compact(
                     if before.saturating_sub(after) < plan.remove_characters {
                         match control.compactor.summarize_active_turn(&snapshot.thread, slot.stop.clone()).await {
                             Ok(active) if !active.no_target => {
-                                summary.spilled_groups += active.spilled_groups;
-                                summary.source_nodes += active.source_nodes;
+                                summary.spilled_groups = summary.spilled_groups.saturating_add(active.spilled_groups);
+                                summary.source_nodes = summary.source_nodes.saturating_add(active.source_nodes);
+                                summary.created_parts = summary.created_parts.saturating_add(active.created_parts);
+                                summary.reused_parts = summary.reused_parts.saturating_add(active.reused_parts);
+                                summary.source_characters = summary.source_characters.zip(active.source_characters).map(|(a,b)| a.saturating_add(b));
+                                summary.summary_characters = summary.summary_characters.zip(active.summary_characters).map(|(a,b)| a.saturating_add(b));
+                                summary.summary_limit = summary.summary_limit.zip(active.summary_limit).map(|(a,b)| a.saturating_add(b));
+                                summary.model_requests = summary.model_requests.zip(active.model_requests).map(|(a,b)| a.saturating_add(b));
+                                if let (Some(total), Some(usage)) = (&mut summary.summary_usage, &active.summary_usage) {
+                                    total.merge(usage);
+                                } else {
+                                    summary.summary_usage = None;
+                                }
+                                summary.summary_node_id = active.summary_node_id;
                                 summary.original_node_ids.extend(active.original_node_ids);
                                 summary.no_target = false;
                                 midturn = json!({"scope":"active_turn", "reason":"target_shortfall"});
