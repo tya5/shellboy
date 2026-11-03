@@ -21,8 +21,8 @@ pub(super) async fn run_tool_group(
                     crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsRejected
                 }
             };
-            for _ in &call.unknown_arguments {
-                control.diagnostics().record(
+            for name in &call.unknown_arguments {
+                control.diagnostics().record_shell_unknown_parameter(
                     event,
                     crate::diagnostics::DiagnosticIds {
                         thread_id: Some(snapshot.thread.clone()),
@@ -30,6 +30,7 @@ pub(super) async fn run_tool_group(
                         turn_id: Some(snapshot.turn.clone()),
                         ..Default::default()
                     },
+                    name,
                 );
             }
         }

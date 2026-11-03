@@ -1,5 +1,6 @@
 //! Bounded nonblocking diagnostics: fixed classifications and numeric observations only.
-//! Model/provider text and request/response bodies never enter the writer queue.
+//! Request/response bodies and values never enter the writer queue; shell unknown
+//! parameter names are bounded and sanitized before admission.
 use crate::config::Logging;
 use serde::Serialize;
 use std::{
@@ -317,6 +318,8 @@ struct Entry {
     automatic_compaction_counts: Option<AutomaticCompactionCounts>,
     #[serde(skip_serializing_if = "Option::is_none")]
     startup_stage: Option<StartupStageTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shell_unknown_parameter: Option<String>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -399,6 +402,7 @@ struct Record {
     index_discard: Option<IndexDiscardTrace>,
     automatic_compaction_counts: Option<AutomaticCompactionCounts>,
     startup_stage: Option<StartupStageTrace>,
+    shell_unknown_parameter: Option<String>,
 }
 struct Health {
     failed: AtomicBool,
@@ -442,6 +446,7 @@ impl Diagnostics {
                     index_discard,
                     automatic_compaction_counts,
                     startup_stage,
+                    shell_unknown_parameter,
                 }) = receiver.recv()
                 {
                     let dropped = worker_health.dropped.swap(0, Ordering::AcqRel);
@@ -462,6 +467,7 @@ impl Diagnostics {
                         index_discard,
                         automatic_compaction_counts,
                         startup_stage,
+                        shell_unknown_parameter,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -556,6 +562,19 @@ impl Diagnostics {
                 other_rejections,
             }),
             startup_stage: None,
+            shell_unknown_parameter: None,
+        });
+    }
+    /// Log only a bounded parameter name, never its value.
+    pub(crate) fn record_shell_unknown_parameter(
+        &self, event: DiagnosticEvent, ids: DiagnosticIds, name: &str,
+    ) {
+        let name: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(64).collect();
+        self.enqueue_record(Record {
+            event, ids, failure: None, stream_difference: None, send: None, shutdown: None,
+            tool_repair: None, usage_slow: None, ui_history: None, lineage_slow: None,
+            db_job: None, index_discard: None, automatic_compaction_counts: None,
+            startup_stage: None, shell_unknown_parameter: Some(name),
         });
     }
     pub fn record(&self, event: DiagnosticEvent, ids: DiagnosticIds) {
@@ -663,6 +682,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
@@ -686,6 +706,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -713,6 +734,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
     pub(crate) fn record_db_job(
@@ -743,6 +765,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
     /// An active DB job crossed the display threshold. Fixed fields only;
@@ -772,6 +795,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
 
@@ -820,6 +844,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
     pub(crate) fn record_startup_stage(
@@ -842,6 +867,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            shell_unknown_parameter: None,
             startup_stage: Some(StartupStageTrace {
                 stage,
                 elapsed_ms: millis(elapsed),
@@ -881,6 +907,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -963,6 +990,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             startup_stage: None,
+            shell_unknown_parameter: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -981,6 +1009,7 @@ impl Diagnostics {
             index_discard,
             automatic_compaction_counts,
             startup_stage,
+            shell_unknown_parameter,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -1015,6 +1044,7 @@ impl Diagnostics {
                     index_discard,
                     automatic_compaction_counts,
                     startup_stage,
+                    shell_unknown_parameter,
                 })
                 .is_err()
         }) {
@@ -1583,5 +1613,28 @@ mod automatic_compaction_tests {
         })
         .await
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod shell_unknown_parameter_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn records_only_the_bounded_parameter_name() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        diagnostics.record_shell_unknown_parameter(
+            DiagnosticEvent::ShellUnknownArgumentsIgnored, DiagnosticIds::default(), "timeout",
+        );
+        diagnostics.record_shell_unknown_parameter(
+            DiagnosticEvent::ShellUnknownArgumentsRejected, DiagnosticIds::default(), &"x".repeat(100),
+        );
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let rows: Vec<serde_json::Value> = body.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(rows[0]["shell_unknown_parameter"], "timeout");
+        assert_eq!(rows[1]["shell_unknown_parameter"].as_str().unwrap().len(), 64);
+        assert!(rows.iter().all(|row| row.get("value").is_none()));
     }
 }
