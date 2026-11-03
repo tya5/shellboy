@@ -9468,3 +9468,16 @@ log: `/tmp/192-select-clean-checks.log`. Readiness unit tests distinguish input,
 idle and EOF without sleeps, and reject out-of-range macOS descriptors before
 `FD_SET`. Corrected-tip three-OS CI, independent re-review and landing remain
 pending. No real-terminal, installed-binary or provider evidence is claimed.
+
+#192 exact-tip CI `41706512517` (`40796c53`) subsequently passed Ubuntu and
+Windows but failed the macOS shutdown PTY test again. This failure has ongoing
+shutdown-screen numeric updates, unlike the original static force-confirmation
+trace; its truncated transcript does not establish the same cause. Twenty
+protected-binary local runs all passed. A separate diagnostic run with a longer
+configured grace also passed and did not prove the proposed raw-marker/diff
+hypothesis. No further production correction or harmless-flake classification
+is justified by these observations. The fixture now logs its transition phase
+and, on failure only, its complete bounded synthetic VT transcript as JSON in
+the harness artifact. Grace, keys, assertions, watchdog and production input
+behavior remain unchanged. A new exact-tip diagnostic CI and independent review
+are required; the earlier failed CI remains part of the evidence.

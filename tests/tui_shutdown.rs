@@ -89,6 +89,7 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     // No request/side effect is started. Force exit interrupts this deliberately
     // expensive DB instruction after the UI grace/confirmation, not a sleep.
     db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('force-thread','/tmp','/tmp/AGENTS.md','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('force-run','force-thread','live','now'); CREATE TRIGGER fixture_block_shutdown BEFORE UPDATE OF state ON run WHEN OLD.id='force-run' BEGIN SELECT (WITH RECURSIVE counter(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM counter WHERE x<1000000000) SELECT sum(x) FROM counter); END;").unwrap();
+    eprintln!("shutdown phase: Ctrl+Q to initial graceful wait");
     terminal.send(&[0x11]);
     terminal.until_screen(&["W/Enter:"]).await;
     assert!(
@@ -96,6 +97,7 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
         "Grace must not silently force exit"
     );
     for return_key in [Some(b'n'), Some(0x1b), None] {
+        eprintln!("shutdown phase: force confirmation, return={return_key:?}");
         terminal.send(b"f");
         terminal
             .until_screen(&["N / Esc Back", "Y Force quit"])
