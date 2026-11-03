@@ -277,9 +277,25 @@ async fn recovery_retry_new_instruction_and_stop_keep_current_targets_and_saved_
                     let actions = enter(&mut ui);
                     deliver(&sender, actions);
                     next = request_with_ui(&mut requests, &incoming, &mut ui, &sender).await;
-                    ("記録したモデル失敗2件", "second recovery failure")
+                    match ui_config.ui.language {
+                        shellboy::config::UiLanguage::Ja => {
+                            ("記録したモデル失敗2件", "second recovery failure")
+                        }
+                        shellboy::config::UiLanguage::En => (
+                            "2 model failures recorded before resume",
+                            "second recovery failure",
+                        ),
+                    }
                 } else {
-                    ("記録したモデル失敗1件", "fixture recovery failure")
+                    match ui_config.ui.language {
+                        shellboy::config::UiLanguage::Ja => {
+                            ("記録したモデル失敗1件", "fixture recovery failure")
+                        }
+                        shellboy::config::UiLanguage::En => (
+                            "1 model failures recorded before resume",
+                            "fixture recovery failure",
+                        ),
+                    }
                 };
                 assert!(
                     next.body

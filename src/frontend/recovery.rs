@@ -164,6 +164,14 @@ fn read_tx_reference(
 }
 
 pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<(), ApiError> {
+    enrich_language(control, nodes, control.store.config.ui.language).await
+}
+
+async fn enrich_language(
+    control: &Control,
+    nodes: &mut [UiNode],
+    language: crate::config::UiLanguage,
+) -> Result<(), ApiError> {
     let requests = requests(nodes);
     if requests.is_empty() {
         return Ok(());
@@ -174,7 +182,7 @@ pub(super) async fn enrich(control: &Control, nodes: &mut [UiNode]) -> Result<()
         .call(move |db| read_tx(db, &requests))
         .await
         .map_err(|error| error.into_api_error())?;
-    apply(nodes, evidence, control.store.config.ui.language);
+    apply(nodes, evidence, language);
     Ok(())
 }
 
@@ -439,6 +447,14 @@ mod tests {
                 .iter()
                 .any(|field| field.key.ends_with("error/message")
                     && field.value == "provider: provider: literal saved reason")
+        );
+        let mut english_nodes = nodes.clone();
+        enrich_language(&control, &mut english_nodes, crate::config::UiLanguage::En)
+            .await
+            .unwrap();
+        assert_eq!(
+            english_nodes[0].presentation.blocks[0].text,
+            "Most recent saved reason: provider: literal saved reason"
         );
         // Missing saved facts do not fabricate a reason or a recovery count.
         control
