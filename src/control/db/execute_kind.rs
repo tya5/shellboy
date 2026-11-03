@@ -87,6 +87,7 @@ const UNDECLARED_WRITER_BOUNDS: &[Kind] = &[
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Classification {
     PureRead,
+    #[allow(dead_code)] // Reserved for audited bounds; #200 tracks the remaining mutations.
     MutationDeclaredBound,
     MutationExempt,
     Runtime,
@@ -151,10 +152,9 @@ impl Kind {
     }
     pub(super) fn writer_allowed(self, command: &Command) -> bool {
         !command.is_read_only()
-            && matches!(
-                self.classification(),
-                Classification::MutationDeclaredBound | Classification::MutationExempt
-            )
+            && (self.declared_writer_bound()
+                || (self.classification() == Classification::MutationExempt
+                    && UNDECLARED_WRITER_BOUNDS.contains(&self)))
     }
 }
 
