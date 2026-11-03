@@ -19,7 +19,7 @@ use std::{
 const DETAILS: &str = r"
 WITH requested AS MATERIALIZED (SELECT DISTINCT value AS id FROM json_each(?1)),
 facts AS MATERIALIZED (
- SELECT t.id,t.parent_thread_id,CASE WHEN octet_length(parent.title)<=4096 THEN parent.title ELSE '親の名称は取得範囲外' END AS parent_title,parent.deleted_at AS parent_deleted,
+ SELECT t.id,t.parent_thread_id,CASE WHEN octet_length(parent.title)<=4096 THEN parent.title END AS parent_title,parent.deleted_at AS parent_deleted,
    latest.id AS run_id,u.id AS turn_id,u.answer_node_id,
    shell.id AS execution,shell.turn_id AS shell_turn,shell.started_at AS shell_started,
    octet_length(shell.shell_json) AS command_bytes,
@@ -203,10 +203,19 @@ pub(super) fn prepare(raw: RawWatch) -> Vec<PreparedWatchDetail> {
     prepare_with_titles(raw, &BTreeMap::new())
 }
 
+#[cfg(test)]
 pub(super) fn prepare_with_titles(
     raw: RawWatch,
     known: &BTreeMap<String, String>,
 ) -> Vec<PreparedWatchDetail> {
+    prepare_with_language(raw, known, crate::config::UiLanguage::Ja)
+}
+pub(super) fn prepare_with_language(
+    raw: RawWatch,
+    known: &BTreeMap<String, String>,
+    language: crate::config::UiLanguage,
+) -> Vec<PreparedWatchDetail> {
+    use crate::ui::i18n::local;
     let RawWatch {
         summaries,
         mut extras,
@@ -272,9 +281,17 @@ pub(super) fn prepare_with_titles(
                     label: super::live_work::label(
                         extra.command.as_deref(),
                         if extra.command_limited {
-                            "shell（コマンドは取得範囲外・詳細で確認）"
+                            local!(
+                                language,
+                                "shell（コマンドは取得範囲外・詳細で確認）",
+                                "shell (command outside retrieval limit; see details)"
+                            )
                         } else {
-                            "shell（コマンドは詳細で確認）"
+                            local!(
+                                language,
+                                "shell（コマンドは詳細で確認）",
+                                "shell (see details for command)"
+                            )
                         },
                     ),
                     state: extra.shell_state.unwrap_or_default(),
@@ -289,7 +306,7 @@ pub(super) fn prepare_with_titles(
                 rows.push(LiveWorkRow {
                     description: None,
                     target: LiveWorkTarget::ChildRun { run_id, thread_id },
-                    label: "子の会話".into(),
+                    label: local!(language, "子の会話", "Child conversation").into(),
                     state: extra.child_state.unwrap_or_default(),
                     elapsed_base: super::live_work::age(extra.child_started.as_deref(), wall_at),
                     started_at: extra.child_started,
@@ -313,38 +330,80 @@ pub(super) fn prepare_with_titles(
                 });
             let parent_title = extra.parent.as_ref().map(|id| {
                 if extra.parent_deleted {
-                    "削除済みの親".into()
+                    local!(language, "削除済みの親", "Deleted parent").into()
                 } else {
                     known
                         .get(id)
                         .or_else(|| parents.get(id))
                         .cloned()
-                        .unwrap_or_else(|| "親の名称は取得範囲外".into())
+                        .unwrap_or_else(|| {
+                            local!(
+                                language,
+                                "親の名称は取得範囲外",
+                                "Parent title outside retrieval limit"
+                            )
+                            .into()
+                        })
                 }
             });
             let recovery_reason = if extra.recovery_limited {
-                Some("復旧理由は取得範囲外（詳細で確認）".into())
+                Some(
+                    local!(
+                        language,
+                        "復旧理由は取得範囲外（詳細で確認）",
+                        "Recovery reason outside retrieval limit (see details)"
+                    )
+                    .into(),
+                )
             } else {
                 extra.recovery.as_deref().map(|body| {
                     serde_json::from_str::<ApiError>(body)
-                        .map(|error| crate::config_setup::tui_error(&error))
-                        .unwrap_or_else(|_| "保存された復旧理由を詳細で確認してください".into())
+                        .map(|error| match language {
+                            crate::config::UiLanguage::Ja => crate::config_setup::tui_error(&error),
+                            crate::config::UiLanguage::En => error.message,
+                        })
+                        .unwrap_or_else(|_| {
+                            local!(
+                                language,
+                                "保存された復旧理由を詳細で確認してください",
+                                "See details for the saved recovery reason"
+                            )
+                            .into()
+                        })
                 })
             };
             let answer_preview = if extra.answer_limited {
-                Some("回答本文は取得範囲外（会話を開いて確認）".into())
+                Some(
+                    local!(
+                        language,
+                        "回答本文は取得範囲外（会話を開いて確認）",
+                        "Answer outside retrieval limit (open conversation)"
+                    )
+                    .into(),
+                )
             } else {
                 extra.answer.as_deref().map(|body| {
                     serde_json::from_str(body)
                         .map(|value| crate::history::conversation_excerpt(&value, 512))
-                        .unwrap_or_else(|_| "回答本文は読み取れません（原文で確認）".into())
+                        .unwrap_or_else(|_| {
+                            local!(
+                                language,
+                                "回答本文は読み取れません（原文で確認）",
+                                "Answer cannot be read (see original)"
+                            )
+                            .into()
+                        })
                 })
             };
             let answer_preview = answer_preview.or_else(|| {
-                identity
-                    .answer_id
-                    .as_ref()
-                    .map(|_| "回答本文は未取得（会話を開いて確認）".into())
+                identity.answer_id.as_ref().map(|_| {
+                    local!(
+                        language,
+                        "回答本文は未取得（会話を開いて確認）",
+                        "Answer not retrieved (open conversation)"
+                    )
+                    .into()
+                })
             });
             let detail = WatchDetail {
                 thread_id: summary.thread_id.clone(),
@@ -676,6 +735,31 @@ mod shared_consumer_tests {
             read_shared_tx(&db, &[], &[], &(0..129).map(|n| format!("p{n}")).collect()).is_err()
         );
         assert_eq!(trace.count(), 0);
+    }
+    #[test]
+    fn parent_fallback_is_localized_but_user_title_is_not_translated() {
+        let db = fixture();
+        let known = thread_summary::read_ids_tx(&db, &["child".into()]).unwrap();
+        let ids = BTreeSet::from(["parent".into()]);
+        for (language, expected) in [
+            (
+                crate::config::UiLanguage::En,
+                "Parent title outside retrieval limit",
+            ),
+            (crate::config::UiLanguage::Ja, "親の名称は取得範囲外"),
+        ] {
+            let raw = read_shared_tx(&db, &["child".into()], &known, &ids).unwrap();
+            let rows = prepare_with_language(raw, &BTreeMap::new(), language);
+            assert_eq!(rows[0].facts().parent_title.as_deref(), Some(expected));
+            let raw = read_shared_tx(&db, &["child".into()], &known, &ids).unwrap();
+            let title = "親の名称は取得範囲外";
+            let rows = prepare_with_language(
+                raw,
+                &BTreeMap::from([("parent".into(), title.into())]),
+                language,
+            );
+            assert_eq!(rows[0].facts().parent_title.as_deref(), Some(title));
+        }
     }
     #[test]
     fn missing_known_title_promise_remains_unavailable_and_deleted_parent_overrides_cached_name() {

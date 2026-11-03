@@ -615,7 +615,21 @@ pub(super) fn read_tx(
         title_only,
     })
 }
-pub(super) fn prepare(raw: RawObservation, read_sequence: u64, generation: u64) -> Observation {
+#[cfg(test)]
+fn prepare(raw: RawObservation, read_sequence: u64, generation: u64) -> Observation {
+    prepare_localized(
+        raw,
+        read_sequence,
+        generation,
+        crate::config::UiLanguage::Ja,
+    )
+}
+pub(super) fn prepare_localized(
+    raw: RawObservation,
+    read_sequence: u64,
+    generation: u64,
+    language: crate::config::UiLanguage,
+) -> Observation {
     let prepared = raw.patch.map(|patch| {
         super::browser_read::prepare_with_watch(patch, raw.mode == BrowserMode::Watch)
     });
@@ -629,7 +643,7 @@ pub(super) fn prepare(raw: RawObservation, read_sequence: u64, generation: u64) 
         })
         .unwrap_or_default();
     let details = raw.details.map(|details| {
-        let details = super::watch_read::prepare_with_titles(details, &titles);
+        let details = super::watch_read::prepare_with_language(details, &titles, language);
         let found = details
             .iter()
             .map(|d| d.facts().thread_id.as_str())

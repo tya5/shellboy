@@ -824,26 +824,72 @@ mod tests {
 
 /// Compare finite displayed source windows on the existing preparation worker.
 /// A unique substring is sufficient only when the whole canonical body is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RebaseFailure {
+    Unavailable,
+    CanonicalOutsideWindow,
+    SourceOutsideWindow,
+    DifferentBody,
+    Ambiguous,
+    DifferentReasoning,
+}
+impl RebaseFailure {
+    fn message(self, language: crate::config::UiLanguage) -> &'static str {
+        use crate::ui::i18n::local;
+        match self {
+            Self::Unavailable => local!(
+                language,
+                "確定本文の可用性を確認できない",
+                "Cannot verify that the saved body is available"
+            ),
+            Self::CanonicalOutsideWindow => local!(
+                language,
+                "確定本文が取得窓の範囲外",
+                "The saved body is outside the retrieved window"
+            ),
+            Self::SourceOutsideWindow => local!(
+                language,
+                "生成中の位置が保持窓の範囲外",
+                "The streaming position is outside the retained window"
+            ),
+            Self::DifferentBody => local!(
+                language,
+                "生成途中と確定本文が異なる",
+                "The streamed and saved bodies differ"
+            ),
+            Self::Ambiguous => local!(
+                language,
+                "同じ本文範囲が複数あり対応が不明",
+                "The same body occurs multiple times; correspondence is ambiguous"
+            ),
+            Self::DifferentReasoning => local!(
+                language,
+                "reasoningと本文の区切りが異なる",
+                "The reasoning and body boundaries differ"
+            ),
+        }
+    }
+}
 fn corresponding_offset(
     source: &UiNode,
     canonical: &UiNode,
     offset: usize,
-) -> Result<usize, &'static str> {
+) -> Result<usize, RebaseFailure> {
     if canonical.presentation.kind != crate::presentation::PresentationKind::Assistant {
-        return Err("確定本文の可用性を確認できない");
+        return Err(RebaseFailure::Unavailable);
     }
     if canonical.base_char_offset != 0
         || canonical.text.chars().count() != canonical.total_chars
         || canonical.presentation.body_extent_unknown
     {
-        return Err("確定本文が取得窓の範囲外");
+        return Err(RebaseFailure::CanonicalOutsideWindow);
     }
     let source_chars = source.text.chars().count();
     if source.text.is_empty()
         || offset < source.base_char_offset
         || offset > source.base_char_offset.saturating_add(source_chars)
     {
-        return Err("生成中の位置が保持窓の範囲外");
+        return Err(RebaseFailure::SourceOutsideWindow);
     }
     if source.base_char_offset == 0
         && source.total_chars == canonical.total_chars
@@ -853,7 +899,7 @@ fn corresponding_offset(
         return Ok(offset);
     }
     let Some(byte) = canonical.text.find(&source.text) else {
-        return Err("生成途中と確定本文が異なる");
+        return Err(RebaseFailure::DifferentBody);
     };
     let after_first = byte
         + canonical.text[byte..]
@@ -861,7 +907,7 @@ fn corresponding_offset(
             .next()
             .map_or(0, char::len_utf8);
     if canonical.text[after_first..].contains(&source.text) {
-        return Err("同じ本文範囲が複数あり対応が不明");
+        return Err(RebaseFailure::Ambiguous);
     }
     let start = canonical.text[..byte].chars().count();
     let ranges = |ranges: &[(usize, usize)], base: usize| {
@@ -877,7 +923,7 @@ fn corresponding_offset(
     if ranges(&source.reasoning_ranges, source.base_char_offset)
         != ranges(&canonical.reasoning_ranges, start)
     {
-        return Err("reasoningと本文の区切りが異なる");
+        return Err(RebaseFailure::DifferentReasoning);
     }
     Ok(start + offset - source.base_char_offset)
 }
@@ -901,9 +947,29 @@ pub(super) async fn rebase(
     let mapped =
         presentation_work(move || corresponding_offset(&source, &canonical, anchor.char_offset))
             .await?;
+    let language = control.store.config.ui.language;
     let (offset, note) = match mapped {
-        Ok(offset) => (offset, "生成中の位置を確定本文と照合しました".to_owned()),
-        Err(reason) => (0, format!("{reason}。確定本文の先頭を表示しました")),
+        Ok(offset) => (
+            offset,
+            crate::ui::i18n::local!(
+                language,
+                "生成中の位置を確定本文と照合しました",
+                "Matched the streaming position to the saved body"
+            )
+            .to_owned(),
+        ),
+        Err(reason) => (
+            0,
+            match language {
+                crate::config::UiLanguage::Ja => {
+                    format!("{}。確定本文の先頭を表示しました", reason.message(language))
+                }
+                crate::config::UiLanguage::En => format!(
+                    "{}. Showing the beginning of the saved body",
+                    reason.message(language)
+                ),
+            },
+        ),
     };
     let anchor = crate::ui::ViewAnchor {
         node_id: Some(node_id),
@@ -960,7 +1026,7 @@ mod anchor_tests {
         partial.total_chars = 100;
         assert_eq!(
             corresponding_offset(&partial, &repeated, 1),
-            Err("同じ本文範囲が複数あり対応が不明")
+            Err(RebaseFailure::Ambiguous)
         );
     }
     #[test]
@@ -971,12 +1037,12 @@ mod anchor_tests {
         saved.reasoning_ranges = vec![(0, 3)];
         assert_eq!(
             corresponding_offset(&streamed, &saved, 2),
-            Err("reasoningと本文の区切りが異なる")
+            Err(RebaseFailure::DifferentReasoning)
         );
         saved = source("考え\n回答");
         assert_eq!(
             corresponding_offset(&streamed, &saved, 2),
-            Err("生成途中と確定本文が異なる")
+            Err(RebaseFailure::DifferentBody)
         );
         saved = source("別の最終本文");
         assert!(corresponding_offset(&streamed, &saved, 2).is_err());
@@ -984,7 +1050,7 @@ mod anchor_tests {
         saved.total_chars += 1;
         assert_eq!(
             corresponding_offset(&streamed, &saved, 2),
-            Err("確定本文が取得窓の範囲外")
+            Err(RebaseFailure::CanonicalOutsideWindow)
         );
     }
 }

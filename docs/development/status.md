@@ -4213,3 +4213,9 @@ projection-generated titles, keeping canonical Japanese values and source
 payloads intact. Scoped classification leaves only the unused
 `NOTICE_SOURCE_OUTSIDE_WINDOW` candidate pending; see acceptance for exact
 counts. Three-OS CI is pending.
+
+### #152 Frontend Reader Localization (In Progress)
+
+History detail facts, Watch bounded fallbacks, and streaming rebase notices use
+the configured UI language. Persisted titles, bodies, and raw errors remain
+unchanged. Validation and three-OS CI for this batch are pending.

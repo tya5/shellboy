@@ -384,7 +384,12 @@ pub(super) async fn complete(
         }
     }
 }
-pub(super) fn prepare(raw: RawBatch, sequence: u64, tickets: &Tickets) -> Prepared {
+pub(super) fn prepare(
+    raw: RawBatch,
+    sequence: u64,
+    tickets: &Tickets,
+    language: crate::config::UiLanguage,
+) -> Prepared {
     Prepared {
         inspection: raw
             .inspection
@@ -395,7 +400,7 @@ pub(super) fn prepare(raw: RawBatch, sequence: u64, tickets: &Tickets) -> Prepar
         cold_lineage: raw.cold_lineage,
         browser: raw.browser.map(|result| {
             result.map(|raw| {
-                browser::prepare(
+                browser::prepare_localized(
                     raw,
                     sequence,
                     tickets
@@ -403,6 +408,7 @@ pub(super) fn prepare(raw: RawBatch, sequence: u64, tickets: &Tickets) -> Prepar
                         .as_ref()
                         .expect("browser raw owns ticket")
                         .generation,
+                    language,
                 )
             })
         }),
@@ -450,7 +456,8 @@ pub(super) async fn read(
     drop(_permit);
     let (raw, sequence) = checked_storage(control, result).await?;
     let project = tickets.clone();
-    let prepared = presentation_work(move || prepare(raw, sequence, &project)).await?;
+    let language = control.store.config.ui.language;
+    let prepared = presentation_work(move || prepare(raw, sequence, &project, language)).await?;
     Ok((prepared, sequence))
 }
 
@@ -532,7 +539,7 @@ mod cancellation_tests {
             1,
             "only the still-visible root count may query SQLite"
         );
-        let prepared = prepare(raw, 7, &tickets);
+        let prepared = prepare(raw, 7, &tickets, crate::config::UiLanguage::Ja);
         assert!(prepared.browser.is_none());
         let counts = prepared.descendants.unwrap().unwrap();
         assert_eq!(counts.queried_roots, 1);

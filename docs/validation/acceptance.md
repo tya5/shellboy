@@ -9030,3 +9030,11 @@ assume its display role. Projection tests cover generated titles and preserve
 canonical summary payload bytes. Received-list tests cover Ja/En headings,
 states, pagination and sanitization while retaining source request/excerpt
 text. Local Rust verification is formatting only; exact-tip three-OS CI pending.
+
+### #152 Frontend Reader Localization
+
+The reader batch covers localized bounded-detail labels, Watch fallbacks, and
+streaming-to-saved-body correspondence notices. Tests include typed rebase
+failure cases and a bilingual Watch fallback with a user title identical to the
+Japanese fallback. Local test execution and three-OS CI remain pending; the
+three assigned files also retain Japanese fixture data and localized literals.
