@@ -346,7 +346,7 @@ impl ThreadView {
                 .as_ref()
                 .and_then(|name| config.connections.get(name))
                 .and_then(|c| c.default_effort.clone()),
-            title: "新しい会話".into(),
+            title: super::i18n::local!(config.ui.language, "新しい会話", "New conversation").into(),
             state: "idle".into(),
             draft: DraftSnapshot::default(),
             generation: 0,
@@ -568,10 +568,21 @@ impl ThreadView {
             "待機中".into()
         };
         if let Some(reason) = details.recovery_reason {
-            let message = serde_json::from_str::<crate::protocol::ApiError>(&reason)
-                .map(|error| crate::config_setup::tui_error(&error))
-                .unwrap_or_else(|_| "保存された復旧理由を詳細で確認してください".into());
-            self.status = format!("復旧待ち: {message}");
+            self.status = match serde_json::from_str::<crate::protocol::ApiError>(&reason) {
+                Ok(error) => {
+                    let message = crate::config_setup::tui_error(&error);
+                    match self.language {
+                        crate::config::UiLanguage::Ja => format!("復旧待ち: {message}"),
+                        crate::config::UiLanguage::En => format!("Recovery pending: {message}"),
+                    }
+                }
+                Err(_) => super::i18n::local!(
+                    self.language,
+                    "復旧待ち: 保存された復旧理由を詳細で確認してください",
+                    "Recovery pending: Check the saved recovery reason in details"
+                )
+                .into(),
+            };
         }
         // Only install the saved draft into an untouched placeholder.
         if let Some(draft) = draft.filter(valid_draft)
@@ -1346,7 +1357,12 @@ impl ThreadView {
         draft.literal_paste = true;
         draft.typed_prefix = 0;
         self.draft = draft;
-        self.status = "保存済みの依頼を入力欄へ戻しました".into();
+        self.status = super::i18n::local!(
+            self.language,
+            "保存済みの依頼を入力欄へ戻しました",
+            "Restored the saved request to the input field"
+        )
+        .into();
     }
     pub(super) fn on_clipboard_attachment(
         &mut self,
@@ -1357,7 +1373,12 @@ impl ThreadView {
         if !self.draft.text.is_char_boundary(position)
             || self.draft.text.len().saturating_add(draft::MARKER.len()) > limit
         {
-            self.status = "画像位置または下書きのbyte上限が変わったため採用していません".into();
+            self.status = super::i18n::local!(
+                self.language,
+                "画像位置または下書きのbyte上限が変わったため採用していません",
+                "The image was not attached because its position or the draft byte limit changed"
+            )
+            .into();
             false
         } else {
             self.draft.insert_attachment(attachment, position);
@@ -1586,6 +1607,55 @@ impl ThreadView {
 #[cfg(test)]
 mod owner_tests {
     use super::*;
+
+    #[test]
+    fn recovery_feedback_localizes_fallback_and_preserves_source_error() {
+        use crate::config::UiLanguage::{En, Ja};
+        use crate::protocol::{ApiError, ErrorCode};
+        let raw = "provider raw 日本語: /stay";
+        let serialized = serde_json::to_string(&ApiError::new(ErrorCode::IoFailed, raw)).unwrap();
+        for language in [Ja, En] {
+            for reason in [serialized.as_str(), "not-json"] {
+                let mut config = Config::default();
+                config.ui.language = language;
+                let mut ui = UiState::new(&config, std::env::temp_dir());
+                let details = ThreadDetails {
+                    last_end_message: None,
+                    last_input: None,
+                    last_compaction: None,
+                    thread_id: "thread-raw".into(),
+                    title: "title 日本語".into(),
+                    cwd: "/synthetic/日本語".into(),
+                    agents_path: "/AGENTS.md".into(),
+                    connection: "connection-raw".into(),
+                    model: "model-raw".into(),
+                    effort: None,
+                    parent_id: None,
+                    run_id: None,
+                    turn_id: None,
+                    children_count: 0,
+                    shells_count: 0,
+                    recovery_reason: Some(reason.into()),
+                    context: None,
+                    context_usage: None,
+                    usage_totals: None,
+                };
+                ui.view_mut().on_thread(details, None);
+                assert_eq!(ui.view().state, "復旧待ち");
+                assert_eq!(ui.view().title, "title 日本語");
+                assert_eq!(ui.view().cwd, PathBuf::from("/synthetic/日本語"));
+                let expected = match (language, reason == serialized) {
+                    (Ja, true) => format!("復旧待ち: {raw}"),
+                    (En, true) => format!("Recovery pending: {raw}"),
+                    (Ja, false) => "復旧待ち: 保存された復旧理由を詳細で確認してください".into(),
+                    (En, false) => {
+                        "Recovery pending: Check the saved recovery reason in details".into()
+                    }
+                };
+                assert_eq!(ui.view().status, expected);
+            }
+        }
+    }
 
     #[test]
     fn language_follows_config_for_new_views_and_separates_render_caches() {
@@ -2381,14 +2451,20 @@ impl ThreadView {
             node.presentation.kind = crate::presentation::PresentationKind::Event;
             node.presentation.event_class = crate::presentation::EventClass::Change;
             node.presentation.title = if kind == "model_stream_observation" {
-                crate::ui::text_width::glyphs::select(
+                crate::ui::text_width::glyphs::localized!(
+                    self.language,
                     "ストリーム差分 · 最終応答は確定済み",
                     "ストリーム差分 | 最終応答は確定済み",
+                    "Stream delta · Final response is already confirmed",
+                    "Stream delta | Final response is already confirmed"
                 )
             } else {
-                crate::ui::text_width::glyphs::select(
+                crate::ui::text_width::glyphs::localized!(
+                    self.language,
                     "途中で切れた応答（保存済み・会話には含めない） · /received 一覧",
                     "途中で切れた応答（保存済み・会話には含めない） | /received 一覧",
+                    "Interrupted response (saved; not part of the conversation) · /received List",
+                    "Interrupted response (saved; not part of the conversation) | /received List"
                 )
             }
             .into();
