@@ -4417,3 +4417,8 @@ manual-rebuild tests, 190 Python tests and 12 CI-reuse Node tests passed on macO
 Language classification and integration layout/watchdog checks also passed.
 Findings 1-3 are committed with tests; finding 4 remains open as #203. Default
 CI on this requested baseline selects Linux; dispatch and outcome are pending.
+
+#172 migration integration: recovery index is migration 27 after history index 25
+and pending-reply index 26. Synthetic upgrade checks cover starts 24, 25, and
+26; W3 recovery authorization, independent barrier release, bounded bootstrap
+records, and bilingual status remain in the rebased branch.

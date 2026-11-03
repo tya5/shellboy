@@ -9317,3 +9317,8 @@ An extra standalone watchdog-script invocation failed because that file does
 not exist; the real watchdog check is included in the successful layout script.
 Final published-SHA CI is pending. Synthetic fixtures and loopback mocks only;
 no installed binary, real provider traffic, or user data was used.
+
+#172 migration 27 verification (macOS): Python release-upgrade fixtures pass
+from schemas 24, 25, and 26, preserving rows and ledger and checking the recovery
+index plan. Python scripts suite: 193 passed. Rust and 3-OS CI are pending; no
+installed binary, real provider, or user data was exercised.
