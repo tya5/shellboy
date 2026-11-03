@@ -107,6 +107,7 @@ pub(super) async fn start(control: &Arc<Control>) -> String {
     rpc(
         control,
         Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: crate::protocol::Deliver::Next,
             thread_id: Some(thread.clone()),

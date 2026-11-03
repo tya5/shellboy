@@ -477,6 +477,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
         return Err("Composed request and Schema exceed128KiB".into());
     }
     Command::MessageSend(MessageSendArgs {
+        expect_reply: false,
         thread_id: Some("preflight".into()),
         text: prompt.clone(),
         deliver: Deliver::Next,
@@ -551,7 +552,7 @@ pub async fn execute(
         }
         for repair in 0..=options.max_repairs {
             session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
-            let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
+            let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{expect_reply:false,thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
             session.progress.message_id=Some(accepted.message_id);session.progress.run_id=accepted.run_id;session.progress.turn_id=accepted.turn_id;
             let raw=session.answer().await?;
             session.progress.stage="validate";

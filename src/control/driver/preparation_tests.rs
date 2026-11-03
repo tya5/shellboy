@@ -48,6 +48,7 @@ pub(super) async fn fixture(
             Request::new(
                 format!("{}:send", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
                     thread_id: Some(thread),

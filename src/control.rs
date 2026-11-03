@@ -1701,6 +1701,7 @@ mod failure_tests {
             .await
             .insert(origin.token.clone(), origin.clone());
         let command = Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             thread_id: Some("target".into()),
             text: "synthetic sender".into(),
             deliver: Deliver::Next,
