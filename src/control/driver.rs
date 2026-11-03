@@ -436,8 +436,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         let pending:Vec<(String,String)>=tx.prepare("SELECT id,message_node_id FROM receipt WHERE turn_id=?1 AND state='accepted' ORDER BY created_at,rowid")?.query_map([&turn],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         let nodes:Vec<String>=pending.iter().map(|(_,node)|node.clone()).collect();
         snapshot.receipts=pending.into_iter().map(|(receipt,_)|receipt).collect();
-        history::append_existing_nodes(&tx,&thread,snapshot.selection as u64,&nodes,&now())?;
-        super::message_delivery::mark_admitted_tx(&tx,&thread,&nodes)?;
+        super::message_delivery::append_admitted_tx(&tx,&thread,snapshot.selection as u64,&nodes,&now())?;
         for (event,payload)in &events{
             let node=format!("event-{event}");
             let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node WHERE id=?1)",[&node],|r|r.get(0))?;

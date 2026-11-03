@@ -19,11 +19,48 @@ pub(crate) fn mark_admitted_tx(
     nodes: &[String],
 ) -> rusqlite::Result<()> {
     for node in nodes {
-        db.execute("UPDATE receipt SET path_admission='admitted' WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node])?;
+        let changed = db.execute("UPDATE receipt SET path_admission='admitted' WHERE target_thread_id=?1 AND message_node_id=?2 AND path_admission<>'admitted' AND EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?1 AND p.node_id=?2)", params![thread,node])?;
+        if changed > 0 {
+            super::reply::admission_notice_tx(db, thread, node)?;
+        }
         let operation: Option<String> = db.query_row("SELECT client_operation_id FROM receipt WHERE target_thread_id=?1 AND message_node_id=?2",params![thread,node],|r|r.get(0)).optional()?;
         if let Some(operation) = operation {
             super::submission_retention::collect_operation(db, &operation)?;
         }
+    }
+    Ok(())
+}
+
+/// Preserve immediate message/notice order while retaining ordinary batch semantics.
+pub(crate) fn append_admitted_tx(
+    tx: &Transaction<'_>,
+    thread: &str,
+    revision: u64,
+    nodes: &[String],
+    at: &str,
+) -> Result<(), StorageError> {
+    if history::selection_revision(tx, thread, history::ThreadScope::Live)? as u64 != revision {
+        return Err(ApiError::new(ErrorCode::InvalidState, "selected path revision changed; discard late adoption").into());
+    }
+    let mut has_notice = false;
+    for node in nodes {
+        has_notice |= tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt WHERE message_node_id=?1 AND (json_extract(result_json,'$.expect_reply')=1 OR json_extract(result_json,'$.reply_to') IS NOT NULL))", [node], |r| r.get::<_, bool>(0))?;
+    }
+    if has_notice {
+        for node in nodes {
+            let revision = history::selection_revision(tx, thread, history::ThreadScope::Live)?;
+            history::append_existing_nodes(
+                tx,
+                thread,
+                revision as u64,
+                std::slice::from_ref(node),
+                at,
+            )?;
+            mark_admitted_tx(tx, thread, std::slice::from_ref(node))?;
+        }
+    } else {
+        history::append_existing_nodes(tx, thread, revision, nodes, at)?;
+        mark_admitted_tx(tx, thread, nodes)?;
     }
     Ok(())
 }
@@ -79,8 +116,7 @@ pub(crate) fn recover_on_resume_tx(
     }
     let nodes = rows.iter().map(|row| row.1.clone()).collect::<Vec<_>>();
     let revision = history::selection_revision(tx, thread, history::ThreadScope::Live)?;
-    history::append_existing_nodes(tx, thread, revision as u64, &nodes, at)?;
-    mark_admitted_tx(tx, thread, &nodes)?;
+    append_admitted_tx(tx, thread, revision as u64, &nodes, at)?;
     for (receipt, _, _, _) in &rows {
         tx.execute("UPDATE receipt SET state='applied',hold_reason='recovered_at_explicit_resume',updated_at=?2 WHERE id=?1 AND state='held' AND path_admission='admitted'", params![receipt,at])?;
     }

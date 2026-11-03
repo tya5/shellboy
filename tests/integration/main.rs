@@ -205,5 +205,7 @@ pub(crate) mod test_watchdog;
 
 #[path = "../support/count_after.rs"]
 pub(crate) mod count_after;
+#[path = "../reply.rs"]
+mod reply;
 #[path = "../thread_observation.rs"]
 mod thread_observation;
