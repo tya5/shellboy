@@ -86,19 +86,6 @@ impl Page {
         );
         page.section(local!(
             config.ui.language,
-            "DB worker の状態",
-            "DB worker status"
-        ));
-        page.entry(
-            "DB <operation> <elapsed>",
-            local!(
-                config.ui.language,
-                "処理が1秒を超える間だけ右端に表示。進捗なしは DB! <操作> 進捗なし。",
-                "Shown at the right edge only while work exceeds one second; no progress is marked DB! <operation> no progress."
-            ),
-        );
-        page.section(local!(
-            config.ui.language,
             "回答をコピーする",
             "Copy an answer"
         ));
@@ -1018,6 +1005,19 @@ impl Page {
             }
             .render(config.ui.language),
         );
+        page.section(local!(
+            config.ui.language,
+            "DB worker の状態",
+            "DB worker status"
+        ));
+        page.entry(
+            "DB <operation> <elapsed>",
+            local!(
+                config.ui.language,
+                "処理が1秒を超える間だけ右端に表示。進捗なしは DB! <操作> 進捗なし。",
+                "Shown at the right edge only while work exceeds one second; no progress is marked DB! <operation> no progress."
+            ),
+        );
         Self {
             title: local!(config.ui.language, "ヘルプ", "Help"),
             context: crate::ui::text_width::glyphs::localized!(
@@ -1263,10 +1263,25 @@ mod tests {
     #[test]
     fn owned_work_help_describes_heading_and_short_screen_fallback() {
         for (language, phrases) in [
-            (UiLanguage::Ja, ["最古の作業", "折りたたみ中", "状態欄"]),
+            (
+                UiLanguage::Ja,
+                [
+                    "最古の作業",
+                    "折りたたみ中",
+                    "状態欄",
+                    "1秒を超える間だけ右端に表示",
+                    "DB! <操作> 進捗なし",
+                ],
+            ),
             (
                 UiLanguage::En,
-                ["oldest work", "even when folded", "status bar"],
+                [
+                    "oldest work",
+                    "even when folded",
+                    "status bar",
+                    "right edge only while work exceeds one second",
+                    "no progress is marked",
+                ],
             ),
         ] {
             let mut config = Config::default();
@@ -1321,8 +1336,8 @@ mod tests {
         }
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &["Common actions", "DB worker status", "Copy an answer"],
-                UiLanguage::Ja => &["よく使う操作", "DB worker の状態", "回答をコピーする"],
+                UiLanguage::En => &["Common actions", "Copy an answer"],
+                UiLanguage::Ja => &["よく使う操作", "回答をコピーする"],
             }
         }
         super::super::i18n::verify_screen(show, expected);
@@ -1344,8 +1359,6 @@ mod tests {
             "次の区切りでメッセージを渡す",
             "改行",
             "Ctrl+C",
-            "DB worker の状態",
-            "1秒を超える間だけ右端に表示",
             "回答をコピーする",
             "Esc",
         ] {
