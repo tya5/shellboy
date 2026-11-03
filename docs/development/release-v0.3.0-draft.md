@@ -42,8 +42,9 @@ and clearer guides for model-directed shell work.
   be restored for review and sending** (#53). They are not silently discarded
   or automatically sent again. Pending input can also be inspected, cancelled
   by fixed message IDs and restored to a draft without sending it.
-- `message send --now` releases the foreground shell wait so input can be
-  delivered sooner; the shell continues and model generation is not cancelled.
+- At v0.3.0, `message send --now` released the foreground shell wait so input
+  could be delivered sooner. Since #187, use `message send --deliver now`;
+  `--now` was removed. The shell continues and model generation is not cancelled.
   Esc interrupts the current Turn after closing open UI surfaces; Ctrl+C stops
   the Run and its background work.
 - **The conversation list and conversation view now agree on work status**,
