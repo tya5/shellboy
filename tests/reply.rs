@@ -361,6 +361,44 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
             assert_eq!(db.query_row("SELECT count(*) FROM gc_job WHERE state='pending'",[],|r|r.get::<_,i64>(0))?,1);
             Ok(())
         }).await.unwrap();
+        let attachments = Arc::new(shellboy::attachments::AttachmentService::new(
+            store.database.clone(),
+            &store.config,
+            _root.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = shellboy::gc::GcService::new(
+            store.database.clone(),
+            store.config.clone(),
+            _root.path().to_owned(),
+            attachments,
+        );
+        let mut complete = false;
+        for _ in 0..64 {
+            if gc.collect_history_step().await.unwrap().complete {
+                complete = true;
+                break;
+            }
+        }
+        assert!(
+            complete,
+            "delete-scheduled GC must finish its original horizon"
+        );
+        store
+            .database
+            .call(move |db| {
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM receipt WHERE message_node_id=?1",
+                        [&message],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    if deleted == "both" { 0 } else { 1 }
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         store.database.shutdown().await.unwrap();
     }
 }
