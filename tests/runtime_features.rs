@@ -4109,6 +4109,20 @@ async fn proactive_no_safe_reduction_is_not_started_or_retried() {
     assert_eq!(saved["other_rejections"], 0);
     assert!(!saved.to_string().contains("only completed task"));
     assert!(receive.try_recv().is_err());
+    // #182: a synthetic kept-reasoning set must end with its Thread too.
+    let keep = format!("reasoning.keep.{thread}");
+    control
+        .store
+        .database
+        .call(move |db| {
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,'{\"epoch\":1,\"nodes\":[]}')",
+                [keep],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     request(
         &control,
         Command::ThreadDelete(ThreadDeleteArgs {
@@ -4121,14 +4135,15 @@ async fn proactive_no_safe_reduction_is_not_started_or_retried() {
     let keys = [
         format!("compact.automatic_guard.{thread}"),
         format!("compact.automatic_status.{thread}"),
+        format!("reasoning.keep.{thread}"),
     ];
     let remaining = control
         .store
         .database
         .call(move |db| {
             Ok(db.query_row(
-                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
-                [&keys[0], &keys[1]],
+                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2,?3)",
+                [&keys[0], &keys[1], &keys[2]],
                 |row| row.get::<_, i64>(0),
             )?)
         })
@@ -4136,7 +4151,7 @@ async fn proactive_no_safe_reduction_is_not_started_or_retried() {
         .unwrap();
     assert_eq!(
         remaining, 0,
-        "Thread deletion removes both bounded witnesses"
+        "Thread deletion removes the bounded witnesses and the kept-reasoning set"
     );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();

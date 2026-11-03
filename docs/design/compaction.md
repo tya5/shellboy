@@ -513,6 +513,8 @@ The same rule applies to every adapter (no per-provider branch).
    change or a binding retry advances the epoch and so voids the set. A fork
    copies the set with the epoch. Bound: the set holds at most the output
    nodes on the selected path; it is rewritten only at an epoch advance.
+   Owner: the Thread; Thread deletion removes it in the same transaction as
+   the other per-Thread `app_meta` keys.
 3. Selective automatic edits run only at a boundary where the latest assistant
    output on the selected path has no tool call (`history::open_tool_loop`):
    proactive spill, the overflow maximal trim and spill stages, and the

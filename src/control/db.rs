@@ -2460,10 +2460,12 @@ fn delete_thread(
         )
         .map_err(sql_error)?;
         tx.execute(
-            "DELETE FROM app_meta WHERE key IN (?1,?2)",
+            "DELETE FROM app_meta WHERE key IN (?1,?2,?3)",
             params![
                 crate::compaction::CompactionKeys::new(id).automatic_guard(),
-                crate::compaction::CompactionKeys::new(id).automatic_status()
+                crate::compaction::CompactionKeys::new(id).automatic_status(),
+                // #182: the kept-reasoning set ends with its Thread.
+                history::reasoning_keep_key(id)
             ],
         )
         .map_err(sql_error)?;
