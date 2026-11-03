@@ -11,6 +11,7 @@ pub(super) struct Query {
     pub visible: bool,
     pub epoch: u64,
     pub render_width: u16,
+    pub language: crate::config::UiLanguage,
     pub tool_scope: Option<ToolObservation>,
     pub views: view_read::Tickets,
 }
@@ -121,7 +122,11 @@ fn read_visible_tx_limited(
     })
 }
 
-fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
+fn project(
+    raw: RawVisible,
+    width: u16,
+    language: crate::config::UiLanguage,
+) -> Result<ProjectedVisible, ApiError> {
     let RawVisible {
         details,
         history,
@@ -137,7 +142,7 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
         index_pause,
         observed_at,
     } = raw;
-    let (mut nodes, info, _) = history.project_page(width, None);
+    let (mut nodes, info, _) = history.project_page(width, None, language);
     message_metadata::apply(&mut nodes, &sources);
     tools::apply(&mut nodes, &tools);
     recovery::apply(&mut nodes, recovery);
@@ -149,7 +154,7 @@ fn project(raw: RawVisible, width: u16) -> Result<ProjectedVisible, ApiError> {
             node.presentation.read_revision = info.read_revision;
         }
     }
-    let mut received = received.map(|snapshot| received::prepare(snapshot, width));
+    let mut received = received.map(|snapshot| received::prepare(snapshot, width, language));
     if let Some(prepared) = &mut received {
         for (_, node) in &mut prepared.nodes {
             node.presentation.read_revision = info.read_revision;
@@ -231,6 +236,7 @@ pub(super) async fn run(
         visible,
         epoch,
         render_width,
+        language,
         tool_scope,
         views,
     } = query;
@@ -290,7 +296,7 @@ pub(super) async fn run(
             let raw=checked_storage(&control,visible).await?;
             // Rendering, sender/model-error JSON, decoding and timestamp work
             // begin only after the readonly snapshot released its transaction.
-            let mut frame=presentation_work(move || project(raw,render_width)).await??;
+            let mut frame=presentation_work(move || project(raw,render_width,language)).await??;
             let page_len=frame.nodes.len();
             let notice_threads=frame.nodes.iter().flat_map(|node|node.presentation.fields.iter())
                 .filter(|field|field.key=="/ui_notice/thread_id").map(|field|field.value.clone()).take(128).collect();
@@ -419,7 +425,7 @@ mod tests {
         owner.db.call(|db| {
             db.execute_batch("UPDATE thread SET title='later',model_id='later-model' WHERE id='t'; UPDATE receipt SET state='cancelled' WHERE message_node_id='queued';")?;Ok(())
         }).await.unwrap();
-        let frame = presentation_work(move || project(raw, 80))
+        let frame = presentation_work(move || project(raw, 80, crate::config::UiLanguage::Ja))
             .await
             .unwrap()
             .unwrap();
@@ -522,7 +528,7 @@ mod tests {
             assert_eq!(raw.recovery.len(),1,"a non-event carrying event_id is not a recovery observation");
             tx.commit()?;Ok(raw)
         }).await.unwrap();
-        let frame = presentation_work(move || project(raw, 80))
+        let frame = presentation_work(move || project(raw, 80, crate::config::UiLanguage::Ja))
             .await
             .unwrap()
             .unwrap();
@@ -622,6 +628,7 @@ mod tests {
                         visible: true,
                         epoch: 0,
                         render_width: 80,
+                        language: crate::config::UiLanguage::Ja,
                         tool_scope: None,
                         views: view_read::Tickets::default(),
                     },
@@ -711,6 +718,7 @@ mod tests {
                     visible: true,
                     epoch: 0,
                     render_width: 80,
+                    language: crate::config::UiLanguage::Ja,
                     tool_scope: None,
                     views: view_read::Tickets {
                         browser: Some(ticket),
@@ -820,14 +828,14 @@ mod tests {
             })
             .await
             .unwrap();
-        let before = project(before, 80).unwrap();
+        let before = project(before, 80, crate::config::UiLanguage::Ja).unwrap();
         assert_eq!(before.details.title, "saved pending title");
         assert!(before.nodes.is_empty());
         assert_eq!(
             before.info.pending.items[0].message_id,
             "saved pending title"
         );
-        let after = project(after, 80).unwrap();
+        let after = project(after, 80, crate::config::UiLanguage::Ja).unwrap();
         assert_eq!(after.details.title, "saved pending title");
         assert!(
             after
@@ -943,7 +951,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let frame = project(visible, 80).unwrap();
+        let frame = project(visible, 80, crate::config::UiLanguage::Ja).unwrap();
         assert_eq!(frame.details.title, "coupled title");
         assert_eq!(frame.info.read_revision, sequence);
         let prepared = view_read::prepare(facts, sequence, &tickets, crate::config::UiLanguage::Ja);

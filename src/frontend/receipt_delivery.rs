@@ -73,6 +73,19 @@ pub(super) fn continue_scan(pending: &mut HashMap<String, PendingReceipt>, threa
 pub(super) struct Batch {
     receipts: std::vec::IntoIter<(String, ReceiptStatus)>,
 }
+fn restore_hint(language: UiLanguage, revision: u64) -> String {
+    match language {
+        UiLanguage::Ja => crate::ui::text_width::glyphs::formatted!(
+            "依頼を保持しました · /restore {} で入力欄へ戻す",
+            "依頼を保持しました | /restore {} で入力欄へ戻す",
+            revision
+        ),
+        UiLanguage::En => {
+            format!("Input retained; use /restore {revision} to return it to the composer.")
+        }
+    }
+}
+
 impl Batch {
     pub(super) fn new(receipts: Vec<(String, ReceiptStatus)>) -> Self {
         // The query receives at most BATCH_LIMIT IDs. Never truncate results.
@@ -91,6 +104,7 @@ impl Batch {
         &mut self,
         pending: &mut HashMap<String, PendingReceipt>,
         updates: &BufferedUpdates,
+        language: UiLanguage,
     ) {
         if updates.closed() {
             self.receipts = Vec::new().into_iter();
@@ -114,14 +128,8 @@ impl Batch {
             if status != ReceiptStatus::Held {
                 pending.remove(&message);
             }
-            let hint =
-                matches!(status, ReceiptStatus::Cancelled | ReceiptStatus::Failed).then(|| {
-                    crate::ui::text_width::glyphs::formatted!(
-                        "依頼を保持しました · /restore {} で入力欄へ戻す",
-                        "依頼を保持しました | /restore {} で入力欄へ戻す",
-                        revision
-                    )
-                });
+            let hint = matches!(status, ReceiptStatus::Cancelled | ReceiptStatus::Failed)
+                .then(|| restore_hint(language, revision));
             // Main is the sole producer allowed into the last 32 slots. Its
             // synchronous capacity check + insertion cannot race another main
             // handler, and workers stop at 480. No await and no raw bypass.
@@ -142,9 +150,10 @@ impl Batch {
         &mut self,
         pending: &mut HashMap<String, PendingReceipt>,
         updates: &BufferedUpdates,
+        language: UiLanguage,
     ) {
         while self.active() && !updates.closed() {
-            self.drain(pending, updates);
+            self.drain(pending, updates, language);
             if self.active() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
@@ -198,7 +207,11 @@ mod tests {
                 repeat: false,
             },
         )]);
-        Batch::new(vec![("message".into(), ReceiptStatus::Held)]).drain(&mut pending, &updates);
+        Batch::new(vec![("message".into(), ReceiptStatus::Held)]).drain(
+            &mut pending,
+            &updates,
+            UiLanguage::Ja,
+        );
         assert!(pending.contains_key("message"));
         assert!(matches!(
             receive.try_recv().unwrap(),
@@ -208,7 +221,11 @@ mod tests {
                 ..
             }
         ));
-        Batch::new(vec![("message".into(), ReceiptStatus::Applied)]).drain(&mut pending, &updates);
+        Batch::new(vec![("message".into(), ReceiptStatus::Applied)]).drain(
+            &mut pending,
+            &updates,
+            UiLanguage::Ja,
+        );
         assert!(!pending.contains_key("message"));
         assert!(matches!(
             receive.try_recv().unwrap(),
@@ -219,6 +236,57 @@ mod tests {
             }
         ));
     }
+    #[test]
+    fn restore_hints_follow_ui_language_without_changing_receipt_facts() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            for status in [ReceiptStatus::Cancelled, ReceiptStatus::Failed] {
+                let (send, receive) = std::sync::mpsc::sync_channel(8);
+                let updates = BufferedUpdates::new(send);
+                let mut pending = HashMap::from([(
+                    "message".into(),
+                    PendingReceipt {
+                        thread: "thread".into(),
+                        draft: "draft".into(),
+                        revision: 73,
+                        checked: true,
+                        repeat: false,
+                    },
+                )]);
+                Batch::new(vec![("message".into(), status.clone())]).drain(
+                    &mut pending,
+                    &updates,
+                    language,
+                );
+
+                assert!(pending.is_empty());
+                let UiUpdate::Receipt {
+                    draft_id,
+                    revision,
+                    thread_id,
+                    status: delivered_status,
+                    message: Some(message),
+                } = receive.try_recv().unwrap()
+                else {
+                    panic!("cancelled/failed receipt should carry its restore hint");
+                };
+                assert_eq!(draft_id, "draft");
+                assert_eq!(revision, 73);
+                assert_eq!(thread_id.as_deref(), Some("thread"));
+                assert_eq!(delivered_status, status);
+                match language {
+                    UiLanguage::Ja => assert!(
+                        message == "依頼を保持しました · /restore 73 で入力欄へ戻す"
+                            || message == "依頼を保持しました | /restore 73 で入力欄へ戻す"
+                    ),
+                    UiLanguage::En => assert_eq!(
+                        message,
+                        "Input retained; use /restore 73 to return it to the composer."
+                    ),
+                }
+            }
+        }
+    }
+
     #[test]
     fn change_before_a_fresh_scan_is_observed_without_an_extra_pass() {
         for count in [1, 128, 200] {

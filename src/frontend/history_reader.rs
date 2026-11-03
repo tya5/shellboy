@@ -154,8 +154,9 @@ impl RawHistory {
         self,
         width: u16,
         anchor: Option<ViewAnchor>,
+        language: crate::config::UiLanguage,
     ) -> (Vec<UiNode>, HistoryInfo, Option<ViewAnchor>) {
-        self.project(width, |_, row| {
+        self.project(width, language, |_, row| {
             anchor
                 .as_ref()
                 .filter(|anchor| anchor.node_id.as_deref() == Some(&row.node.id))
@@ -168,6 +169,7 @@ impl RawHistory {
     fn project(
         self,
         width: u16,
+        language: crate::config::UiLanguage,
         mut position: impl FnMut(usize, &PathNode) -> Option<NodePosition>,
     ) -> (Vec<UiNode>, HistoryInfo, Option<ViewAnchor>) {
         let mut anchor = None;
@@ -178,7 +180,7 @@ impl RawHistory {
             .enumerate()
             .map(|(index, row)| {
                 let wanted = position(index, &row);
-                let mut node = row.node.into_ui_node(wanted, width);
+                let mut node = row.node.into_ui_node(wanted, width, language);
                 stamp_source(&mut node, read_revision);
                 if let Some(wanted) = wanted {
                     anchor = Some(ViewAnchor {
@@ -236,7 +238,9 @@ impl<'a> HistoryReader<'a> {
             })
             .await
             .map_err(storage_error)?;
-        let (mut nodes, info, _) = presentation_work(move || raw.project_page(width, None)).await?;
+        let language = control.store.config.ui.language;
+        let (mut nodes, info, _) =
+            presentation_work(move || raw.project_page(width, None, language)).await?;
         message_metadata::enrich(control, Some(&thread), &mut nodes).await?;
         streams::enrich(control, &mut nodes, width).await?;
         stamp_sources(&mut nodes, info.read_revision);
@@ -288,8 +292,9 @@ impl<'a> HistoryReader<'a> {
             .map_err(storage_error);
         let (raw, ordinal) = checked_storage(self.control, result).await?;
         let width = self.width;
+        let language = self.control.store.config.ui.language;
         let (mut nodes, info, anchor) = presentation_work(move || {
-            raw.project(width, |index, row| {
+            raw.project(width, language, |index, row| {
                 if Some(row.ordinal) == ordinal {
                     Some(NodePosition::At(wanted_offset))
                 } else if ordinal.is_none() && index == 0 {
@@ -346,8 +351,9 @@ impl<'a> HistoryReader<'a> {
                 .await
                 .map_err(storage_error)?;
             let width = self.width;
+            let language = self.control.store.config.ui.language;
             let (mut nodes, info, anchor) = presentation_work(move || {
-                raw.project(width, |_, row| {
+                raw.project(width, language, |_, row| {
                     (row.ordinal as u64 == ordinal).then_some(position)
                 })
             })
@@ -403,8 +409,9 @@ impl<'a> HistoryReader<'a> {
                 .await
                 .map_err(storage_error)?;
             let width = self.width;
+            let language = self.control.store.config.ui.language;
             let (mut nodes, info, _) =
-                presentation_work(move || raw.project_page(width, anchor)).await?;
+                presentation_work(move || raw.project_page(width, anchor, language)).await?;
             message_metadata::enrich(self.control, Some(&reply.thread), &mut nodes).await?;
             streams::enrich(self.control, &mut nodes, self.width).await?;
             stamp_sources(&mut nodes, info.read_revision);
@@ -523,7 +530,7 @@ impl<'a> HistoryReader<'a> {
                         sources.push(unavailable(local!(language, "出典の形式を確認できません。O 原文で確認", "Source format is unavailable. Press O for the original")));
                         continue;
                     }
-                    let mut node=row.into_ui_node(Some(NodePosition::At(0)),width);
+                    let mut node=row.into_ui_node(Some(NodePosition::At(0)),width,language);
                     let mut fields=Vec::new();
                     let field=|key:String,label:&str,value:String| crate::presentation::PresentationField {
                         key,label:label.into(),value,display:None,value_omitted:false,
@@ -595,9 +602,11 @@ impl<'a> HistoryReader<'a> {
                     ApiError::new(ErrorCode::TargetUnavailable, "History node is unavailable")
                 })?;
             let width = self.width;
-            let mut node =
-                presentation_work(move || row.into_ui_node(Some(NodePosition::At(offset)), width))
-                    .await?;
+            let language = self.control.store.config.ui.language;
+            let mut node = presentation_work(move || {
+                row.into_ui_node(Some(NodePosition::At(offset)), width, language)
+            })
+            .await?;
             message_metadata::enrich(self.control, Some(viewed_thread), std::slice::from_mut(&mut node)).await?;
             streams::enrich(self.control, std::slice::from_mut(&mut node), self.width).await?;
             stamp_source(&mut node, read_revision);
@@ -1063,6 +1072,7 @@ mod read_stamping_tests {
                     node_id: Some("source-25".into()),
                     char_offset: 2,
                 }),
+                crate::config::UiLanguage::Ja,
             )
         })
         .await
@@ -1094,7 +1104,7 @@ mod read_stamping_tests {
                 read_revision: 73,
             },
         };
-        let (nodes, info, _) = raw.project(80, |_, _| None);
+        let (nodes, info, _) = raw.project(80, crate::config::UiLanguage::Ja, |_, _| None);
         assert_eq!(nodes.len(), 4);
         assert_eq!(info.read_revision, 73);
         for node in &nodes {

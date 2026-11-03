@@ -1065,7 +1065,7 @@ async fn run_with_delivery(
             initialize = updates.defer(value);
         }
         if initialize.is_none() {
-            receipt_batch.drain(&mut pending, &updates);
+            receipt_batch.drain(&mut pending, &updates, language);
         }
         draft_saver.pump_delivery(&mut draft_failure, &updates);
 
@@ -1122,6 +1122,7 @@ async fn run_with_delivery(
                     visible,
                     epoch: selection.progress_epoch,
                     render_width,
+                    language: control.store.config.ui.language,
                     tool_scope,
                     views: view_tickets,
                 },
@@ -3839,7 +3840,9 @@ async fn run_with_delivery(
         if let Some(value) = initialize {
             update(shutdown_updates, value).await;
         }
-        receipt_batch.finish(&mut pending, shutdown_updates).await;
+        receipt_batch
+            .finish(&mut pending, shutdown_updates, language)
+            .await;
         save_result
             .and(server_result)
             .and(control_result)
@@ -4273,7 +4276,12 @@ impl NodePosition {
     }
 }
 impl RawNode {
-    fn into_ui_node(self, position: Option<NodePosition>, render_width: u16) -> UiNode {
+    fn into_ui_node(
+        self,
+        position: Option<NodePosition>,
+        render_width: u16,
+        language: crate::config::UiLanguage,
+    ) -> UiNode {
         let (payload, text, mut reasoning_ranges) = self.decode();
         let offset = position.map(|position| match position {
             NodePosition::At(offset) => offset,
@@ -4304,6 +4312,7 @@ impl RawNode {
                 render_width,
                 false,
                 self.received_recovery_wait,
+                language,
             );
         }
         let mut presentation =

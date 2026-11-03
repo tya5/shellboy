@@ -1191,6 +1191,125 @@ impl ThreadView {
     }
 }
 
+// Keep each combination as a complete message rather than joining translated fragments.
+fn receipt_english(
+    status: &ReceiptStatus,
+    revision: u64,
+    message: Option<&str>,
+    retained: bool,
+) -> String {
+    match (status, message, retained) {
+        (ReceiptStatus::Accepting, None, false) => "Accepting".into(),
+        (ReceiptStatus::Accepting, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Accepting · Current input retained (next send uses the full text)",
+            "Accepting | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Accepting, Some(message), false) => format!("Accepting: {message}"),
+        (ReceiptStatus::Accepting, Some(message), true) => {
+            crate::ui::text_width::glyphs::formatted!(
+                "Accepting: {message} · Current input retained (next send uses the full text)",
+                "Accepting: {message} | Current input retained (next send uses the full text)"
+            )
+        }
+        (ReceiptStatus::Accepted, None, false) => "Accepted".into(),
+        (ReceiptStatus::Accepted, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Accepted · Current input retained (next send uses the full text)",
+            "Accepted | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Accepted, Some(message), false) => format!("Accepted: {message}"),
+        (ReceiptStatus::Accepted, Some(message), true) => {
+            crate::ui::text_width::glyphs::formatted!(
+                "Accepted: {message} · Current input retained (next send uses the full text)",
+                "Accepted: {message} | Current input retained (next send uses the full text)"
+            )
+        }
+        (ReceiptStatus::Preparing, None, false) => "Accepted / Preparing".into(),
+        (ReceiptStatus::Preparing, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Accepted / Preparing · Current input retained (next send uses the full text)",
+            "Accepted / Preparing | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Preparing, Some(message), false) => {
+            format!("Accepted / Preparing: {message}")
+        }
+        (ReceiptStatus::Preparing, Some(message), true) => {
+            crate::ui::text_width::glyphs::formatted!(
+                "Accepted / Preparing: {message} · Current input retained (next send uses the full text)",
+                "Accepted / Preparing: {message} | Current input retained (next send uses the full text)"
+            )
+        }
+        (ReceiptStatus::Held, None, false) => "Held".into(),
+        (ReceiptStatus::Held, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Held · Current input retained (next send uses the full text)",
+            "Held | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Held, Some(message), false) => format!("Held: {message}"),
+        (ReceiptStatus::Held, Some(message), true) => crate::ui::text_width::glyphs::formatted!(
+            "Held: {message} · Current input retained (next send uses the full text)",
+            "Held: {message} | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Applied, None, false) => "Applied to conversation".into(),
+        (ReceiptStatus::Applied, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Applied to conversation · Current input retained (next send uses the full text)",
+            "Applied to conversation | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Applied, Some(message), false) => {
+            format!("Applied to conversation: {message}")
+        }
+        (ReceiptStatus::Applied, Some(message), true) => crate::ui::text_width::glyphs::formatted!(
+            "Applied to conversation: {message} · Current input retained (next send uses the full text)",
+            "Applied to conversation: {message} | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Failed, None, false) => crate::ui::text_width::glyphs::formatted!(
+            "Failed · /restore {revision} to restore the original input",
+            "Failed | /restore {revision} to restore the original input"
+        ),
+        (ReceiptStatus::Failed, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Failed · /restore {revision} to restore the original input · Current input retained (next send uses the full text)",
+            "Failed | /restore {revision} to restore the original input | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Failed, Some(message), false) => crate::ui::text_width::glyphs::formatted!(
+            "Failed · /restore {revision} to restore the original input: {message}",
+            "Failed | /restore {revision} to restore the original input: {message}"
+        ),
+        (ReceiptStatus::Failed, Some(message), true) => crate::ui::text_width::glyphs::formatted!(
+            "Failed · /restore {revision} to restore the original input: {message} · Current input retained (next send uses the full text)",
+            "Failed | /restore {revision} to restore the original input: {message} | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Cancelled, None, false) => crate::ui::text_width::glyphs::formatted!(
+            "Cancelled · /restore {revision} to restore the original input",
+            "Cancelled | /restore {revision} to restore the original input"
+        ),
+        (ReceiptStatus::Cancelled, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Cancelled · /restore {revision} to restore the original input · Current input retained (next send uses the full text)",
+            "Cancelled | /restore {revision} to restore the original input | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Cancelled, Some(message), false) => {
+            crate::ui::text_width::glyphs::formatted!(
+                "Cancelled · /restore {revision} to restore the original input: {message}",
+                "Cancelled | /restore {revision} to restore the original input: {message}"
+            )
+        }
+        (ReceiptStatus::Cancelled, Some(message), true) => {
+            crate::ui::text_width::glyphs::formatted!(
+                "Cancelled · /restore {revision} to restore the original input: {message} · Current input retained (next send uses the full text)",
+                "Cancelled | /restore {revision} to restore the original input: {message} | Current input retained (next send uses the full text)"
+            )
+        }
+        (ReceiptStatus::Completed, None, false) => "Completed".into(),
+        (ReceiptStatus::Completed, None, true) => crate::ui::text_width::glyphs::formatted!(
+            "Completed · Current input retained (next send uses the full text)",
+            "Completed | Current input retained (next send uses the full text)"
+        ),
+        (ReceiptStatus::Completed, Some(message), false) => format!("Completed: {message}"),
+        (ReceiptStatus::Completed, Some(message), true) => {
+            crate::ui::text_width::glyphs::formatted!(
+                "Completed: {message} · Current input retained (next send uses the full text)",
+                "Completed: {message} | Current input retained (next send uses the full text)"
+            )
+        }
+    }
+}
+
 impl ThreadView {
     pub(super) fn on_receipt(
         &mut self,
@@ -1255,28 +1374,36 @@ impl ThreadView {
             self.draft.edit = None;
             self.draft.revision += 1;
         }
-        self.status = format!(
-            "{}{}",
-            if matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled) {
-                crate::ui::text_width::glyphs::formatted!(
-                    "{} · /restore {revision} で元の入力を復元",
-                    "{} | /restore {revision} で元の入力を復元",
-                    receipt_label(&status)
-                )
-            } else {
-                receipt_label(&status).into()
-            },
-            message.map(|m| format!(": {m}")).unwrap_or_default()
-        );
-        if accepted
+        let retained = accepted
             && self.draft.draft_id == draft_id
             && self.draft.revision != revision
-            && (!self.draft.text.is_empty() || !self.draft.attachments.is_empty())
-        {
-            self.status.push_str(crate::ui::text_width::glyphs::select(
-                " · 編集中の入力を保持（次は全文送信）",
-                " | 編集中の入力を保持（次は全文送信）",
-            ));
+            && (!self.draft.text.is_empty() || !self.draft.attachments.is_empty());
+        if self.language == crate::config::UiLanguage::En {
+            self.status = receipt_english(&status, revision, message.as_deref(), retained);
+        } else {
+            self.status = format!(
+                "{}{}",
+                if matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled) {
+                    crate::ui::text_width::glyphs::formatted!(
+                        "{} · /restore {revision} で元の入力を復元",
+                        "{} | /restore {revision} で元の入力を復元",
+                        receipt_label(&status)
+                    )
+                } else {
+                    receipt_label(&status).into()
+                },
+                message.map(|m| format!(": {m}")).unwrap_or_default()
+            );
+            if accepted
+                && self.draft.draft_id == draft_id
+                && self.draft.revision != revision
+                && (!self.draft.text.is_empty() || !self.draft.attachments.is_empty())
+            {
+                self.status.push_str(crate::ui::text_width::glyphs::select(
+                    " · 編集中の入力を保持（次は全文送信）",
+                    " | 編集中の入力を保持（次は全文送信）",
+                ));
+            }
         }
         if matches!(status, ReceiptStatus::Completed | ReceiptStatus::Applied)
             && (pending.send.is_none() || pending.source_node_id.is_some())
@@ -1842,6 +1969,47 @@ mod completion_notice_tests {
             message: message.into(),
         }
     }
+    #[test]
+    fn receipt_english_preserves_raw_messages_revision_and_terminal_symbols() {
+        use crate::ui::text_width;
+        let statuses = [
+            ReceiptStatus::Accepting,
+            ReceiptStatus::Accepted,
+            ReceiptStatus::Preparing,
+            ReceiptStatus::Held,
+            ReceiptStatus::Applied,
+            ReceiptStatus::Failed,
+            ReceiptStatus::Cancelled,
+            ReceiptStatus::Completed,
+        ];
+        for policy in [Some(1), Some(2), None] {
+            text_width::set_terminal_width(policy);
+            for status in &statuses {
+                for retained in [false, true] {
+                    for message in [None, Some("RAW 日本語：")] {
+                        let displayed = receipt_english(status, 42, message, retained);
+                        assert!(!displayed.is_empty());
+                        if let Some(raw) = message {
+                            assert!(displayed.contains(raw), "{displayed}");
+                        }
+                        if matches!(status, ReceiptStatus::Failed | ReceiptStatus::Cancelled) {
+                            assert!(displayed.contains("/restore 42"), "{displayed}");
+                        }
+                        assert_eq!(
+                            displayed.contains("Current input retained"),
+                            retained,
+                            "{displayed}"
+                        );
+                        if policy != Some(1) {
+                            assert!(!displayed.contains('·'), "{displayed}");
+                        }
+                    }
+                }
+            }
+        }
+        text_width::clear_terminal_width();
+    }
+
     #[test]
     fn completion_notice_requires_the_accepted_owner_revision_anchor_and_paused_view() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());

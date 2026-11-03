@@ -1,11 +1,13 @@
 //! Read-only display of saved failed responses; never a model replay source.
 use super::*;
 mod list;
-use crate::presentation::{EventClass, PresentationKind};
+use crate::{
+    config::UiLanguage,
+    presentation::{EventClass, PresentationKind},
+};
 use rusqlite::OptionalExtension;
 
 pub(super) const ROLE: &str = "received_response";
-pub(super) const TITLE: &str = "途中で切れた応答（保存済み・会話には含めない）";
 const SAVED_BYTES: usize = 1024 * 1024;
 
 pub(super) fn source(
@@ -95,12 +97,54 @@ pub(super) fn body(payload: &Value) -> (String, Vec<(usize, usize)>) {
     (text, ranges)
 }
 
+fn received_title(language: UiLanguage, observation: bool) -> String {
+    match language {
+        UiLanguage::Ja => {
+            if observation {
+                crate::ui::text_width::glyphs::formatted!(
+                    "{} · {} · {}",
+                    "{} | {} | {}",
+                    "ストリーム差分",
+                    "最終応答は確定済み",
+                    "/received 一覧"
+                )
+            } else {
+                crate::ui::text_width::glyphs::formatted!(
+                    "{} · {}",
+                    "{} | {}",
+                    "途中で切れた応答（保存済み・会話には含めない）",
+                    "/received 一覧"
+                )
+            }
+        }
+        UiLanguage::En => {
+            if observation {
+                crate::ui::text_width::glyphs::formatted!(
+                    "{} · {} · {}",
+                    "{} | {} | {}",
+                    "Stream difference",
+                    "final response confirmed",
+                    "/received list"
+                )
+            } else {
+                crate::ui::text_width::glyphs::formatted!(
+                    "{} · {}",
+                    "{} | {}",
+                    "Interrupted response (saved; not part of the conversation)",
+                    "/received list"
+                )
+            }
+        }
+    }
+}
+
 pub(super) fn project(
     kind: &str,
     mut node: UiNode,
     width: u16,
     omitted: bool,
     recovery_wait: bool,
+    language: UiLanguage,
 ) -> UiNode {
     let mut p = crate::presentation::project_stream_window(
         &node.text,
@@ -119,15 +163,7 @@ pub(super) fn project(
     } else {
         EventClass::Attention
     };
-    p.title = crate::ui::text_width::glyphs::formatted!(
-        "{} · /received 一覧",
-        "{} | /received 一覧",
-        if observation {
-            "ストリーム差分 | 最終応答は確定済み"
-        } else {
-            TITLE
-        }
-    );
+    p.title = received_title(language, observation);
     p.provisional_stream = false;
     for block in &mut p.blocks {
         block.source_exact = false;
@@ -135,7 +171,11 @@ pub(super) fn project(
     p.body_extent_unknown = omitted;
     p.fields.push(crate::presentation::PresentationField {
         key: "/source_node_id".into(),
-        label: "保存原文".into(),
+        label: match language {
+            UiLanguage::Ja => "保存原文",
+            UiLanguage::En => "Saved source",
+        }
+        .into(),
         value: node.node_id.clone(),
         ..Default::default()
     });
@@ -254,7 +294,7 @@ pub(super) fn query_tx(
     }))
 }
 
-pub(super) fn prepare(snapshot: RawSnapshot, width: u16) -> Prepared {
+pub(super) fn prepare(snapshot: RawSnapshot, width: u16, language: UiLanguage) -> Prepared {
     let RawSnapshot {
         rows,
         selection_revision,
@@ -270,7 +310,7 @@ pub(super) fn prepare(snapshot: RawSnapshot, width: u16) -> Prepared {
         let omitted=!full_saved && row.total>known as i64;
         let(text,base,total)=window(&text,None);
         reasoning.retain(|range|range.1>base && range.0<base+text.chars().count());
-        let mut node=project(&row.kind,UiNode{node_id:row.id,text,base_char_offset:base,total_chars:total,reasoning_ranges:reasoning,..Default::default()},width,!full_saved,row.recovery_wait);
+        let mut node=project(&row.kind,UiNode{node_id:row.id,text,base_char_offset:base,total_chars:total,reasoning_ranges:reasoning,..Default::default()},width,!full_saved,row.recovery_wait,language);
         if omitted{node.presentation.body_omitted_chars=(row.total as usize).saturating_sub(known);}
         streams::seal_node(&mut node);
         Some((after,node))
@@ -311,6 +351,7 @@ pub(super) async fn refresh(
     width: u16,
     scope: Scope,
 ) -> Result<(), ApiError> {
+    let language = control.store.config.ui.language;
     let target = thread.to_owned();
     let snapshot = control
         .store
@@ -321,7 +362,7 @@ pub(super) async fn refresh(
     let Some(snapshot) = snapshot else {
         return Ok(());
     };
-    let prepared = presentation_work(move || prepare(snapshot, width)).await?;
+    let prepared = presentation_work(move || prepare(snapshot, width, language)).await?;
     apply(updates, thread, generation, scope, prepared).await;
     Ok(())
 }
@@ -338,6 +379,82 @@ pub(super) async fn list(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn received_labels_follow_ui_language_without_changing_source_facts() {
+        let cases = [
+            (
+                UiLanguage::Ja,
+                "incomplete_response",
+                "途中で切れた応答（保存済み・会話には含めない） · /received 一覧",
+                "途中で切れた応答（保存済み・会話には含めない） | /received 一覧",
+                "保存原文",
+                PresentationKind::Interrupted,
+                EventClass::Attention,
+            ),
+            (
+                UiLanguage::En,
+                "incomplete_response",
+                "Interrupted response (saved; not part of the conversation) · /received list",
+                "Interrupted response (saved; not part of the conversation) | /received list",
+                "Saved source",
+                PresentationKind::Interrupted,
+                EventClass::Attention,
+            ),
+            (
+                UiLanguage::Ja,
+                "model_stream_observation",
+                "ストリーム差分 · 最終応答は確定済み · /received 一覧",
+                "ストリーム差分 | 最終応答は確定済み | /received 一覧",
+                "保存原文",
+                PresentationKind::Event,
+                EventClass::Change,
+            ),
+            (
+                UiLanguage::En,
+                "model_stream_observation",
+                "Stream difference · final response confirmed · /received list",
+                "Stream difference | final response confirmed | /received list",
+                "Saved source",
+                PresentationKind::Event,
+                EventClass::Change,
+            ),
+        ];
+
+        for (language, kind, dot_title, bar_title, label, expected_kind, expected_class) in cases {
+            let node = project(
+                kind,
+                UiNode {
+                    node_id: "source-node".into(),
+                    text: "saved raw response".into(),
+                    ..Default::default()
+                },
+                80,
+                false,
+                true,
+                language,
+            );
+
+            assert!(
+                node.presentation.title == dot_title || node.presentation.title == bar_title,
+                "unexpected title for {language:?}: {}",
+                node.presentation.title
+            );
+            assert_eq!(node.presentation.kind, expected_kind);
+            assert_eq!(node.presentation.event_class, expected_class);
+            assert_eq!(node.role, ROLE);
+            assert_eq!(node.node_id, "source-node");
+            assert_eq!(node.text, "saved raw response");
+            let source_field = node
+                .presentation
+                .fields
+                .iter()
+                .find(|field| field.key == "/source_node_id")
+                .expect("received source reference is retained");
+            assert_eq!(source_field.label, label);
+            assert_eq!(source_field.value, "source-node");
+        }
+    }
     #[test]
     fn prepared_saved_response_retains_snapshot_fences_and_paid_body() {
         let prepared = prepare(
@@ -361,6 +478,7 @@ mod tests {
                 }],
             },
             80,
+            UiLanguage::Ja,
         );
         assert_eq!(
             (prepared.selection_revision, prepared.root_revision),
