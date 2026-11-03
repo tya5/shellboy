@@ -87,6 +87,48 @@ separate tool calls; releasing the foreground wait still leaves that shell alive
 
 Unlike backgrounding, interrupting a Run with Ctrl+C requests stopping it and its owned descendants. Acceptance of a stop request does not mean every PID has been reclaimed; query the terminal Run/shell state. An interrupted model is not automatically resumed merely to deliver a notification.
 
+### Finding and stopping a stalled shell
+
+Shells do not provide an interactive terminal. Git operations that launch an
+editor or request terminal input can therefore wait indefinitely. Avoid the
+editor for a continued rebase or commit where appropriate:
+
+```bash
+git -c core.editor=true rebase --continue
+git commit --no-edit
+```
+
+For a single command, `GIT_EDITOR=true git rebase --continue` sets the editor to
+`true` only for that invocation. `GIT_TERMINAL_PROMPT=0 git fetch` disables
+Git's terminal credential prompts, so use it only when credentials are already
+available noninteractively. These command-scoped forms avoid changing global
+Git configuration or overriding a user's persistent preferences. They address
+Git's editor/terminal prompts, not arbitrary programs that wait for stdin.
+
+A person or leader can look for an apparently hung process without interrupting
+the model's foreground wait:
+
+```bash
+shellboy shell list --state running
+shellboy shell get --execution EXECUTION_ID
+```
+
+Find a candidate whose `state` remains `running` and whose `last_output_at` is
+old relative to `started_at` and the expected work. `shell list` identifies
+running executions; use `shell get` to inspect that execution's `last_output_at`,
+command, and timestamps. A stale timestamp is a clue, not proof of a hang: a
+quiet command can be healthy. If it is stuck, stop that exact execution and
+verify the resulting state:
+
+```bash
+shellboy shell stop --execution EXECUTION_ID
+shellboy shell get --execution EXECUTION_ID
+```
+
+Stop's acceptance is not completion. Confirm the target becomes terminal before
+reporting it stopped. Do not stop unrelated shells or assume a stop request
+means the command completed successfully.
+
 ### Minimal check of background output only (Bash)
 
 For this check, fix the target shell's command to the following string. Add no other output, CLI calls, pipes, or redirects. With ordinary Bash configuration, it writes only the ASCII token `SHELLBOY_BG_READ_V1` to stdout without a newline after two seconds, leaves stderr empty, and exits with code 0.

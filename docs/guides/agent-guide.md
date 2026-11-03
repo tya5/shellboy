@@ -115,6 +115,23 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. An answered parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check its answer notification and retrieve the original text.
 
 
+### Noninteractive Git and stalled shells
+
+A model shell is not an interactive terminal. When Git would open an editor or
+prompt, use a command-scoped noninteractive form, for example
+`git -c core.editor=true rebase --continue` or `git commit --no-edit`. For a
+single command, `GIT_EDITOR=true git rebase --continue` is another editor
+override; `GIT_TERMINAL_PROMPT=0` disables Git's terminal credential prompts.
+Prefer command-scoped overrides and do not change the user's global Git settings.
+
+If a shell appears stuck, a person or leader can run
+`shellboy shell list --state running`, then inspect a candidate with
+`shellboy shell get --execution ID`.
+An old `last_output_at` together with `state: running` is a clue that it may be
+waiting on an interactive prompt; it is not by itself proof. Stop it with
+`shellboy shell stop --execution ID`, then confirm the resulting state. See the
+[Shell guide](shell.md#finding-and-stopping-a-stalled-shell) for the procedure.
+
 ### Wait for any child Thread
 
 Use one wait for several child Threads, not a repeated ThreadList comparison:
