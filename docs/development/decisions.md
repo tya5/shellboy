@@ -3101,8 +3101,12 @@ Implementation choices with lower confidence, with recheck conditions:
 - The positional rule is a new epoch plus a per-Thread kept-node set in
   `app_meta` (`reasoning.keep.<thread>`, bounded by the output nodes on the
   path, rewritten only at an epoch advance), not a schema column. Recheck if
-  the set's size shows in write cost or if deletion should reclaim it (like
-  `compact.pending.*`, it is left behind by Thread deletion).
+  the set's size shows in write cost. Owner and end (coordinator review): the
+  Thread; Thread deletion removes the key in its transaction.
+  `compact.pending.*`/`inflight.*` is not the same leak: queued intents carry
+  operation receipts, are drained to terminal outcomes by the compaction queue
+  and are cancelled with recorded results at startup, so deletion does not
+  remove them.
 - Retained user messages and protected nodes inside the active-Turn span are
   moved right after the summary, not kept in place. Recheck if models redo
   work already done for such a message.
