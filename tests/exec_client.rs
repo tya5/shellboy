@@ -786,3 +786,89 @@ async fn run_end_returns_assigned_runs_last_end_message() {
     assert!(diagnostic(&output)["run_id"].is_string());
     fixture.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn run_end_selects_last_turn_after_processing_turn() {
+    let mut fixture = Fixture::new().await;
+    let (accepted, first) = fixture.active().await;
+    let schema = fixture.schema();
+    let mut command = fixture.command_mode(&schema, "run-end");
+    command.arg("--thread").arg(&accepted.thread_id).arg("work");
+    let mut child = spawn(command);
+    fixture.queued_exec(&accepted.thread_id).await;
+    first.reply.send(http(200,json!({"id":"boundary","status":"completed","output":[{"type":"function_call","call_id":"fixture-call","name":"shell","arguments":json!({"command":"echo fixture"}).to_string()}]}))).unwrap();
+    let processing = fixture.next(&mut child).await;
+    let response = fixture
+        .control
+        .request(Request::new(
+            format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
+            Command::MessageSend(MessageSendArgs {
+                thread_id: Some(accepted.thread_id.clone()),
+                text: "later turn".into(),
+                deliver: Deliver::Complete,
+                sender_label: None,
+            }),
+        ))
+        .await;
+    assert!(response.ok, "{:?}", response.error);
+    processing
+        .reply
+        .send(answer("{\"value\":\"processing\"}"))
+        .unwrap();
+    let last = fixture.next(&mut child).await;
+    last.reply.send(answer("{\"value\":\"last\"}")).unwrap();
+    let output = crate::test_watchdog::watchdog("multi-turn run end", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"value":"last"})
+    );
+    assert_eq!(diagnostic(&output)["turn_id"], accepted.turn_id.unwrap());
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn esc_ended_processing_turn_exits_four() {
+    let mut fixture = Fixture::new().await;
+    let (accepted, first) = fixture.active().await;
+    let schema = fixture.schema();
+    let mut command = fixture.command(&schema);
+    command.arg("--thread").arg(&accepted.thread_id).arg("work");
+    let mut child = spawn(command);
+    fixture.queued_exec(&accepted.thread_id).await;
+    first.reply.send(http(200,json!({"id":"boundary","status":"completed","output":[{"type":"function_call","call_id":"fixture-call","name":"shell","arguments":json!({"command":"echo fixture"}).to_string()}]}))).unwrap();
+    let pending = fixture.next(&mut child).await;
+    fixture
+        .control
+        .interrupt_turn(accepted.thread_id.clone(), accepted.turn_id.unwrap())
+        .await
+        .unwrap();
+    drop(pending);
+    let output = crate::test_watchdog::watchdog("esc turn result", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(diagnostic(&output)["status"], "execution_unavailable");
+    assert!(output.stdout.is_empty());
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn default_reply_mode_returns_explicit_unavailable_without_sending() {
+    let root = tempfile::tempdir().unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .arg("--data-dir")
+        .arg(root.path().join("data"))
+        .args(["exec", "--schema", "unused.json", "work"])
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(output.status.code(), Some(6));
+    assert!(output.stdout.is_empty());
+    assert_eq!(diagnostic(&output)["status"], "not_yet_available");
+    assert!(!root.path().join("data").exists());
+}
