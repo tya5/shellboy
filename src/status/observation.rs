@@ -499,7 +499,7 @@ fn canonical_item(
         message_id: (fact.key.kind == Kind::Message).then(|| id.clone()),
         attempt_id: (fact.key.kind == Kind::Attempt).then(|| id.clone()),
         operation_id: get(10),
-        answer_node_id: get(11),
+        end_message_node_id: get(11),
         activity_at: activity.1.into(),
         elapsed_ms,
         last_output_at: get(20),

@@ -420,7 +420,7 @@ pub(super) fn complete_answer_turn(
             run,
             &format!("child-turn-completed-{}", turn),
             "child_turn_completed",
-            json!({"thread_id":thread,"run_id":run,"turn_id":turn,"state":"completed","answer_node_id":node}),
+            json!({"thread_id":thread,"run_id":run,"turn_id":turn,"state":"completed","end_message_node_id":node}),
         )?;
     }
     Ok(())
@@ -455,7 +455,7 @@ pub(super) fn stop_drained_runs(
                 run,
                 &format!("child-run-ended-{run}"),
                 "child_run_ended",
-                json!({"run_id":run,"state":"stopped","answer_node_id":null,"incomplete":true}),
+                json!({"run_id":run,"state":"stopped","end_message_node_id":null,"incomplete":true}),
             )?;
         }
         tx.execute("UPDATE receipt SET state='held',hold_reason='stopped',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now()])?;

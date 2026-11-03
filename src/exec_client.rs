@@ -46,7 +46,7 @@ struct Progress {
     message_id: Option<String>,
     run_id: Option<String>,
     turn_id: Option<String>,
-    answer_node_id: Option<String>,
+    end_message_node_id: Option<String>,
     operation_id: Option<String>,
     send_operation_id: Option<String>,
     create_operation_id: Option<String>,
@@ -82,15 +82,15 @@ impl Failure {
             api: None,
         }
     }
-    fn final_answer_read(error: ApiError) -> Self {
+    fn end_message_read(error: ApiError) -> Self {
         if matches!(
             error.code,
             ErrorCode::InvalidArgument | ErrorCode::ProtocolMismatch
         ) {
-            return Self {code:6,status:"owner_version_mismatch",message:"Owner/CLI version mismatch: the required final_answer_only read was refused. Use matching owner and CLI versions. If work already ran, read the saved answer with history get --node <answer_node_id> without --final-answer-only; do not resend the work.".into(),api:Some(Box::new(error))};
+            return Self {code:6,status:"owner_version_mismatch",message:"Owner/CLI version mismatch: the required end_message_only read was refused. Use matching owner and CLI versions. If work already ran, read the saved end message with history get --node <end_message_node_id> without --end-message-only; do not resend the work.".into(),api:Some(Box::new(error))};
         }
         if error.code == ErrorCode::IoFailed {
-            return Self {code:6,status:"owner_capability_unavailable",message:"Cannot confirm the owner's final-answer read support; check matching owner/CLI versions. If work already ran, inspect the reported IDs with ordinary history get rather than resending it.".into(),api:Some(Box::new(error))};
+            return Self {code:6,status:"owner_capability_unavailable",message:"Cannot confirm the owner's end-message read support; check matching owner/CLI versions. If work already ran, inspect the reported IDs with ordinary history get rather than resending it.".into(),api:Some(Box::new(error))};
         }
         Self::api(error)
     }
@@ -183,13 +183,13 @@ impl Session {
             })?;
         Ok(())
     }
-    async fn verify_final_answer_support(&mut self) -> Result<(), Failure> {
+    async fn verify_end_message_support(&mut self) -> Result<(), Failure> {
         // Missing-node rejection proves argument decoding without creating work.
         let probe: Result<HistoryBody, Failure> = self
             .request(
                 "capability",
                 Command::HistoryGet(HistoryGetArgs {
-                    final_answer_only: true,
+                    end_message_only: true,
                     node_id: uuid::Uuid::new_v4().to_string(),
                     limit_bytes: 1,
                     cursor: None,
@@ -215,8 +215,7 @@ impl Session {
         stage: &'static str,
         command: Command,
     ) -> Result<T, Failure> {
-        let final_answer_read =
-            matches!(&command,Command::HistoryGet(args)if args.final_answer_only);
+        let end_message_read = matches!(&command,Command::HistoryGet(args)if args.end_message_only);
         self.progress.stage = stage;
         if Instant::now() >= self.deadline {
             return Err(Failure::new(
@@ -234,13 +233,13 @@ impl Session {
             self.progress.create_operation_id = Some(operation.clone());
         }
         let response=timeout_at(self.deadline,ipc::call(&self.data,command,Some(operation),self.origin.clone())).await
-            .map_err(|_|Failure::new(5,"timeout","Client deadline expired; inspect the reported IDs before resending; no target was stopped"))?.map_err(|error|if final_answer_read {Failure::final_answer_read(error)}else{Failure::api(error)})?;
+            .map_err(|_|Failure::new(5,"timeout","Client deadline expired; inspect the reported IDs before resending; no target was stopped"))?.map_err(|error|if end_message_read {Failure::end_message_read(error)}else{Failure::api(error)})?;
         if !response.ok {
             let error = response.error.unwrap_or_else(|| {
                 ApiError::new(ErrorCode::InvalidState, "Owner returned no error detail")
             });
-            return Err(if final_answer_read {
-                Failure::final_answer_read(error)
+            return Err(if end_message_read {
+                Failure::end_message_read(error)
             } else {
                 Failure::api(error)
             });
@@ -290,7 +289,7 @@ impl Session {
                             "Message was not applied; the completed Turn is not proof of its answer",
                         ));
                     }
-                    self.progress.answer_node_id = facts.answer_node_id;
+                    self.progress.end_message_node_id = facts.end_message_node_id;
                     break;
                 }
                 TurnState::RecoveryWait => {
@@ -349,11 +348,11 @@ impl Session {
             }
             // Satisfied, interrupted and timeout are observations, not success evidence.
         }
-        let node = self.progress.answer_node_id.clone().ok_or_else(|| {
+        let node = self.progress.end_message_node_id.clone().ok_or_else(|| {
             Failure::new(
                 4,
                 "execution_unavailable",
-                "Completed Turn has no saved answer",
+                "Completed Turn has no saved end message",
             )
         })?;
         let mut cursor = None;
@@ -363,7 +362,7 @@ impl Session {
                 .request(
                     "answer",
                     Command::HistoryGet(HistoryGetArgs {
-                        final_answer_only: true,
+                        end_message_only: true,
                         node_id: node.clone(),
                         limit_bytes: 65_536,
                         cursor: cursor.clone(),
@@ -382,7 +381,7 @@ impl Session {
                 return Err(Failure::new(
                     4,
                     "execution_unavailable",
-                    "Saved answer is no longer available",
+                    "Saved end message is no longer available",
                 ));
             }
             text.push_str(&page.text);
@@ -390,7 +389,7 @@ impl Session {
                 return Err(Failure::new(
                     6,
                     "output_limit",
-                    "Saved answer exceeds the bounded client output size; inspect answer_node_id",
+                    "Saved end message exceeds the bounded client output size; inspect end_message_node_id",
                 ));
             }
             match page.next_cursor {
@@ -399,7 +398,7 @@ impl Session {
                         return Err(Failure::new(
                             6,
                             "output_limit",
-                            "Final answer exceeds 1MiB; inspect answer_node_id",
+                            "End message exceeds 1MiB; inspect end_message_node_id",
                         ));
                     }
                     return Ok(text);
@@ -417,7 +416,7 @@ impl Session {
         Err(Failure::new(
             6,
             "output_limit",
-            "Answer exceeded the bounded page count; inspect answer_node_id",
+            "Answer exceeded the bounded page count; inspect end_message_node_id",
         ))
     }
 }
@@ -545,13 +544,13 @@ pub async fn execute(
     };
     let result: Result<Outcome,Failure>=async {
         session.connect().await?;
-        session.verify_final_answer_support().await?;
+        session.verify_end_message_support().await?;
         if session.progress.thread_id.is_none() {
             let created:Value=session.request("create",Command::ThreadCreate(create)).await?;
             session.progress.thread_id=Some(created["thread_id"].as_str().ok_or_else(||Failure::new(6,"owner_error","Thread creation returned no ID"))?.to_owned());
         }
         for repair in 0..=options.max_repairs {
-            session.progress.repairs=repair;session.progress.answer_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
+            session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
             let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
             session.progress.message_id=Some(accepted.message_id);session.progress.run_id=accepted.run_id;session.progress.turn_id=accepted.turn_id;
             let raw=session.answer().await?;
@@ -586,7 +585,7 @@ mod owner_version_tests {
             ErrorCode::IoFailed,
         ] {
             let failure =
-                Failure::final_answer_read(ApiError::new(code, "synthetic final-read refusal"));
+                Failure::end_message_read(ApiError::new(code, "synthetic final-read refusal"));
             assert_eq!(failure.code, 6);
             assert!(failure.message.contains("history get"));
             assert_eq!(failure.api.unwrap().code, code);
@@ -596,7 +595,7 @@ mod owner_version_tests {
             2
         );
         assert_eq!(
-            Failure::final_answer_read(ApiError::new(ErrorCode::TargetUnavailable, "node is gone"))
+            Failure::end_message_read(ApiError::new(ErrorCode::TargetUnavailable, "node is gone"))
                 .code,
             4
         );

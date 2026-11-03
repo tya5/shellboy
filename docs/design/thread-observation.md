@@ -60,8 +60,8 @@ is part of these observations.
 
 ## Latest answer and input
 
-ThreadList and ThreadGet retain existing excerpt and add nullable last_answer
-and last_input. last_answer means the latest own saved Turn with answer_node_id,
+ThreadList and ThreadGet retain existing excerpt and add nullable last_end_message
+and last_input. last_end_message means the latest own saved Turn with an end message (internal column turn.answer_node_id),
 not a tool call, provisional response or another Thread's fork-only ancestor.
 Include node_id, turn_id, node creation time and at most512 characters of natural
 assistant content. last_input is the latest durably accepted receipt for that

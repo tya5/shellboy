@@ -75,7 +75,7 @@ pub(crate) struct RawLatest {
     input: Option<RawMessage>,
 }
 pub(crate) struct PreparedLatest {
-    pub last_answer: Option<Value>,
+    pub last_end_message: Option<Value>,
     pub last_input: Option<Value>,
     pub limited_fields: Vec<String>,
 }
@@ -238,21 +238,21 @@ pub(crate) fn read_latest_display_tx(db: &Connection, thread: &str) -> Result<Ra
 }
 pub(crate) fn prepare_latest_display(raw: RawLatest) -> PreparedLatest {
     let mut limited_fields = Vec::new();
-    let last_answer = raw
+    let last_end_message = raw
         .answer
-        .map(|row| prepare_message(row, "last_answer", &mut limited_fields));
+        .map(|row| prepare_message(row, "last_end_message", &mut limited_fields));
     let last_input = raw
         .input
         .map(|row| prepare_message(row, "last_input", &mut limited_fields));
     PreparedLatest {
-        last_answer,
+        last_end_message,
         last_input,
         limited_fields,
     }
 }
-pub(crate) fn last_answer(db: &Connection, thread: &str) -> Result<Option<Value>> {
+pub(crate) fn last_end_message(db: &Connection, thread: &str) -> Result<Option<Value>> {
     Ok(read_answer(db, thread, &mut Budget::canonical())?
-        .map(|raw| prepare_message(raw, "last_answer", &mut Vec::new())))
+        .map(|raw| prepare_message(raw, "last_end_message", &mut Vec::new())))
 }
 pub(crate) fn last_input(db: &Connection, thread: &str) -> Result<Option<Value>> {
     Ok(read_input(db, thread, &mut Budget::canonical())?
@@ -288,7 +288,7 @@ mod tests {
             &json!({"content":[{"type":"input_text","text":"request e\u{301}🙂"}]}).to_string(),
             json!({"kind":"external_cli","label":"untrusted-label","token":"DO_NOT_COPY"}),
         );
-        let expected_answer = last_answer(&db, "t").unwrap();
+        let expected_answer = last_end_message(&db, "t").unwrap();
         let expected_input = last_input(&db, "t").unwrap();
         let trace = Statements::new(&db);
         let raw = read_latest_display_tx(&db, "t").unwrap();
@@ -296,14 +296,14 @@ mod tests {
         drop(trace);
         drop(db);
         let prepared = prepare_latest_display(raw);
-        assert_eq!(prepared.last_answer, expected_answer);
+        assert_eq!(prepared.last_end_message, expected_answer);
         assert_eq!(prepared.last_input, expected_input);
         assert!(prepared.limited_fields.is_empty());
         let input = prepared.last_input.unwrap();
         assert_eq!(input["excerpt"], "request e\u{301}🙂");
         assert_eq!(input["sender"]["label"], "untrusted-label");
         assert!(!input.to_string().contains("DO_NOT_COPY"));
-        let answer = prepared.last_answer.unwrap();
+        let answer = prepared.last_end_message.unwrap();
         assert_eq!(answer["excerpt"], "answer 日本語\n");
         assert!(!answer.to_string().contains("HIDDEN"));
     }
@@ -326,14 +326,14 @@ mod tests {
         drop(trace);
         let prepared = prepare_latest_display(raw);
         assert_eq!(
-            prepared.last_answer.as_ref().unwrap()["body_available"],
+            prepared.last_end_message.as_ref().unwrap()["body_available"],
             true
         );
-        assert!(prepared.last_answer.as_ref().unwrap()["excerpt"].is_null());
+        assert!(prepared.last_end_message.as_ref().unwrap()["excerpt"].is_null());
         assert_eq!(prepared.last_input.unwrap()["excerpt"], "request");
-        assert_eq!(prepared.limited_fields, ["last_answer.excerpt"]);
+        assert_eq!(prepared.limited_fields, ["last_end_message.excerpt"]);
         assert_eq!(
-            last_answer(&db, "t").unwrap().unwrap()["excerpt"],
+            last_end_message(&db, "t").unwrap().unwrap()["excerpt"],
             "retained answer"
         );
     }
@@ -355,7 +355,10 @@ mod tests {
         );
         drop(trace);
         let prepared = prepare_latest_display(raw);
-        assert_eq!(prepared.last_answer.unwrap()["excerpt"], "a".repeat(512));
+        assert_eq!(
+            prepared.last_end_message.unwrap()["excerpt"],
+            "a".repeat(512)
+        );
         let input = prepared.last_input.unwrap();
         assert_eq!(input["body_available"], true);
         assert!(input["excerpt"].is_null());
@@ -404,7 +407,7 @@ mod tests {
             "scalar rejection precedes sender/excerpt work"
         );
         drop(trace);
-        assert_eq!(last_answer(&db, "t").unwrap().unwrap()["at"], at);
+        assert_eq!(last_end_message(&db, "t").unwrap().unwrap()["at"], at);
     }
     #[test]
     fn latest_query_plans_seek_one_thread_without_sorting_history() {
@@ -486,7 +489,7 @@ mod tests {
         db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('receipt','op',?1,'t','m','held','input-at')",[json!({"kind":"external_cli","label":"untrusted-name","token":"DO_NOT_COPY"}).to_string()]).unwrap();
         db.execute("UPDATE turn SET answer_node_id='a' WHERE id='u'", [])
             .unwrap();
-        let answer = last_answer(&db, "t").unwrap().unwrap();
+        let answer = last_end_message(&db, "t").unwrap().unwrap();
         let input = last_input(&db, "t").unwrap().unwrap();
         assert_eq!(answer["excerpt"], "old answer");
         assert_eq!(answer["turn_id"], "u");
@@ -497,7 +500,7 @@ mod tests {
         assert!(!input.to_string().contains("DO_NOT_COPY"));
         db.execute("UPDATE node SET payload_json=NULL WHERE id='a'", [])
             .unwrap();
-        let answer = last_answer(&db, "t").unwrap().unwrap();
+        let answer = last_end_message(&db, "t").unwrap().unwrap();
         assert_eq!(answer["body_available"], false);
         assert_eq!(answer["excerpt"], "");
         assert_eq!(answer["node_id"], "a");

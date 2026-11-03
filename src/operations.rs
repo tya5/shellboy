@@ -213,7 +213,7 @@ pub(crate) enum FieldId {
     Timeout,
     ExcerptChars,
     LimitBytes,
-    FinalAnswerOnly,
+    EndMessageOnly,
     Encoding,
     Relation,
     Kinds,
@@ -679,9 +679,9 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         discovery: Discovery::None,
     },
     FieldSpec {
-        id: FieldId::FinalAnswerOnly,
+        id: FieldId::EndMessageOnly,
         default_origin: DefaultOrigin::Literal,
-        label: "最終回答のみ",
+        label: "終了メッセージのみ",
         help: "保存された最終assistant messageだけを取得し、推論と途中説明を除きます。",
         kind: FieldType::Boolean,
         discovery: Discovery::HistoryList,
@@ -1259,7 +1259,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     OperationSpec {
         id: OperationId::HistoryGet,
         label: "履歴 · 原文",
-        meaning: "指定ノードの保存原文と出典を取得します。最終回答のみを選ぶと推論や途中説明を除きます。",
+        meaning: "指定ノードの保存原文と出典を取得します。終了メッセージのみを選ぶと推論や途中説明を除きます。",
         effect: Effect::Inspect,
         confirmation: Confirmation::None,
         route: Route::Owner,
@@ -1268,7 +1268,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::LimitBytes,
             FieldId::Cursor,
             FieldId::Encoding,
-            FieldId::FinalAnswerOnly,
+            FieldId::EndMessageOnly,
         ],
     },
     OperationSpec {

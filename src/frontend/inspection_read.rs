@@ -228,7 +228,7 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             limited_fields = limited;
             let latest = crate::thread_observation::prepare_latest_display(*latest);
             limited_fields.extend(latest.limited_fields);
-            details.last_answer = latest.last_answer;
+            details.last_end_message = latest.last_end_message;
             details.last_input = latest.last_input;
             if let Some(compactions) = compactions {
                 let compactions = crate::readback::prepare_compactions(*compactions)?;

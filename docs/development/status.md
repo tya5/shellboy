@@ -1,5 +1,19 @@
 # Development status
 
+## #194 step 1: "answer" renamed to "end message" (branch `issue-194/step1-end-message`)
+
+Public names only, no behaviour change, no aliases, no migration (internal
+column `turn.answer_node_id` keeps its name): Run/Turn details, wait Turn
+snapshot, `status` items, `child_turn_completed`/`child_run_ended` payloads,
+interruption context and exec diagnostics now say `end_message_node_id`;
+ThreadList/Get say `last_end_message`; `history get --end-message-only`
+(`HistoryGetArgs.end_message_only`, cursor scope `history.get.end_message`).
+The F6 field label is `終了メッセージnode ID`; the `回答` row label is unchanged.
+`message get` keeps `answer_node_id` (and its `回答node ID` label) until step 2.
+The `status` item field is shared by all kinds, so message items also say
+`end_message_node_id` (the assigned Turn's end message) until step 2 replaces
+them with `reply_node_id`. Resume point: step 2 (schema 25 and the reply core).
+
 ## Final benchmark after #183 (2026-11-03, branch `bench/final-2026-11-03`)
 
 Paid real-model before/after (same day, back to back, release builds, N=1):

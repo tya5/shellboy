@@ -414,7 +414,7 @@ pub(super) fn follow_target(
             return Ok(FollowTarget::Command(Box::new(Command::HistoryGet(
                 HistoryGetArgs {
                     node_id: source.into(),
-                    final_answer_only: false,
+                    end_message_only: false,
                     cursor: None,
                     encoding: DEFAULT_ENCODING.into(),
                     limit_bytes: MAX_BODY_BYTES,
@@ -516,15 +516,18 @@ pub(super) fn follow(
             }))
         }
         "execution_id" => Ok(Command::ShellGet(ExecutionTarget { execution_id: id })),
-        "node_id" | "source_node_id" | "answer_node_id" | "request_node_id" | "result_node_id" => {
-            Ok(Command::HistoryGet(HistoryGetArgs {
-                final_answer_only: false,
-                node_id: id,
-                cursor: None,
-                encoding: DEFAULT_ENCODING.into(),
-                limit_bytes: MAX_BODY_BYTES,
-            }))
-        }
+        "node_id"
+        | "source_node_id"
+        | "answer_node_id"
+        | "end_message_node_id"
+        | "request_node_id"
+        | "result_node_id" => Ok(Command::HistoryGet(HistoryGetArgs {
+            end_message_only: false,
+            node_id: id,
+            cursor: None,
+            encoding: DEFAULT_ENCODING.into(),
+            limit_bytes: MAX_BODY_BYTES,
+        })),
         "operation_id" | "request_operation_id" => {
             Ok(Command::OperationGet(OperationTarget { operation_id: id }))
         }

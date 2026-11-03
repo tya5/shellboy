@@ -171,7 +171,10 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         })
         .await
         .unwrap();
-    assert_eq!(applied.items[0].answer_node_id.as_deref(), Some("answer"));
+    assert_eq!(
+        applied.items[0].end_message_node_id.as_deref(),
+        Some("answer")
+    );
     assert!(
         applied.items[0]
             .targets

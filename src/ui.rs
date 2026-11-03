@@ -4292,7 +4292,7 @@ impl UiState {
                         || !view.pending.is_empty())
             })
             .map(|(key, view)| ThreadSummary {
-                last_answer: None,
+                last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
                 latest_run_stop_reason: None,
@@ -8255,7 +8255,7 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
-            last_answer: None,
+            last_end_message: None,
             last_input: None,
             last_compaction: None,
             thread_id: "t".into(),

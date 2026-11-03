@@ -187,7 +187,7 @@ pub enum ThreadCommand {
 pub enum MessageCommand {
     /// Save an instruction; acceptance is separate from execution and answer completion.
     #[command(
-        after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node ANSWER_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
     Get(MessageOptions),
@@ -216,9 +216,9 @@ pub enum RunCommand {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum TurnCommand {
-    /// Inspect state and answer_node_id; fetch the answer with history get.
+    /// Inspect state and end_message_node_id; fetch the end message with history get.
     #[command(
-        after_help = "  shellboy turn get --turn TURN_ID\n  shellboy history get --node ANSWER_NODE_ID\n\nFetch only a returned answer_node_id; stopped/failed terminal states need not have an answer. Guide: shellboy docs get --id shellboy/delegation"
+        after_help = "  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nFetch only a returned end_message_node_id; stopped/failed terminal states need not have an end message. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Get(TurnOptions),
 }
@@ -539,9 +539,9 @@ pub struct HistoryListOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct HistoryGetOptions {
-    /// Read only the saved final assistant message; exclude reasoning and commentary.
+    /// Read only the saved end message (final assistant message); exclude reasoning and commentary.
     #[arg(long)]
-    pub final_answer_only: bool,
+    pub end_message_only: bool,
     #[arg(long = "node")]
     pub node_id: String,
     #[arg(long,default_value_t=wire::MAX_BODY_BYTES)]
@@ -876,7 +876,7 @@ impl Cli {
                     state: a.state,
                 }),
                 HistoryCommand::Get(a) => C::HistoryGet(wire::HistoryGetArgs {
-                    final_answer_only: a.final_answer_only,
+                    end_message_only: a.end_message_only,
                     node_id: a.node_id,
                     limit_bytes: a.limit_bytes,
                     cursor: a.cursor,

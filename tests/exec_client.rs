@@ -118,13 +118,13 @@ impl Fixture {
                     sent = true;
                 }
                 let reject = after_send.is_some_and(|late| !late || sent)
-                    && matches!(&invocation.request.command,Command::HistoryGet(args)if args.final_answer_only);
+                    && matches!(&invocation.request.command,Command::HistoryGet(args)if args.end_message_only);
                 if reject {
                     let _ = invocation.reply.send(Response::failure(
                         invocation.request.operation_id.clone(),
                         ApiError::new(
                             ErrorCode::InvalidArgument,
-                            "unknown field `final_answer_only` (synthetic old owner)",
+                            "unknown field `end_message_only` (synthetic old owner)",
                         ),
                     ));
                 } else if forward.send(invocation).await.is_err() {
@@ -291,8 +291,8 @@ async fn native_stdout_is_only_validated_utf8_final_json_and_sender_is_recorded(
             .arg("--data-dir")
             .arg(fixture.root.path().join("data"))
             .args(["history", "get", "--node"])
-            .arg(diag["answer_node_id"].as_str().unwrap())
-            .arg("--final-answer-only")
+            .arg(diag["end_message_node_id"].as_str().unwrap())
+            .arg("--end-message-only")
             .output(),
     )
     .await
@@ -693,7 +693,7 @@ async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_res
         "message_id",
         "run_id",
         "turn_id",
-        "answer_node_id",
+        "end_message_node_id",
     ] {
         assert!(diagnostic[key].is_string(), "{diagnostic}");
     }
@@ -708,7 +708,7 @@ async fn final_read_refusal_after_work_is_owner_error_with_answer_ids_and_no_res
             .arg("--data-dir")
             .arg(fixture.root.path().join("data"))
             .args(["history", "get", "--node"])
-            .arg(diagnostic["answer_node_id"].as_str().unwrap())
+            .arg(diagnostic["end_message_node_id"].as_str().unwrap())
             .output(),
     )
     .await

@@ -316,8 +316,8 @@ remain protected; autosave/restore fences survive admitted/cancelled copy dispos
 Adopt [exec](cli.md#noninteractive-saved-work-exec-65) as a composition of existing
 owner operations and local bounded subset validation. No Core execution engine,
 owner auto-start, provider structured-output dependency, table/worker/queue or new
-crate. Ordinary history.get stays unchanged; its optional final-only read projection
-has an independent cursor scope and supports exact saved answer validation.
+crate. Ordinary history.get stays unchanged; its optional end-message-only read projection (`--end-message-only`)
+has an independent cursor scope and supports exact saved end-message validation.
 
 Issue #73 adopts bounded explicit-summary map/reduce and optional `[compaction]`
 limits per D-015: smaller of 20,000 characters and 5%, floored at 2,000, with
@@ -360,7 +360,7 @@ F8 presentation and untracked allocator/request-copy investigations are separate
 ## Bounded Thread observations (#74)
 
 Adopt [Thread observations](thread-observation.md) for cursor-bearing Thread
-settlement waits and separate own-final-answer/received-input projections.
+settlement waits and separate own end-message (`last_end_message`)/received-input projections.
 The existing Run, recovery event, receipt and Turn facts remain authoritative;
 root recovery retains the existing event without parent delivery so resume does
 not erase an unobserved transition. Schema16 adds lookup indexes, not tables.

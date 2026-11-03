@@ -154,11 +154,11 @@ mod tests {
         let value = exec_response(crate::exec_client::Outcome {
             code: 5,
             result: Some("paid answer retained".into()),
-            diagnostics: json!({"status":"validation_failed","answer_node_id":"saved"}),
+            diagnostics: json!({"status":"validation_failed","end_message_node_id":"saved"}),
         });
         assert_eq!(value["exit_code"], 5);
         assert_eq!(value["result"], "paid answer retained");
-        assert_eq!(value["diagnostics"]["answer_node_id"], "saved");
+        assert_eq!(value["diagnostics"]["end_message_node_id"], "saved");
         assert_eq!(value["ok"], false);
     }
     #[tokio::test]

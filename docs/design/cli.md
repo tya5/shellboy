@@ -183,12 +183,12 @@ final answer1MiB,100000 validation steps and8 bounded diagnostics. Exceeding a b
 is explicit failure, never silently accepting or truncating a validated result.
 
 
-Final-answer retrieval needs one additive read projection: existing history.get
-normally flattens reasoning and natural text together. Optional final_answer_only
+End-message retrieval needs one additive read projection: existing history.get
+normally flattens reasoning and natural text together. Optional end_message_only
 (default false and omitted on ordinary serialized requests) selects the last
 final_answer assistant message, or the last unphased assistant message if no
 final phase exists. Commentary/reasoning are excluded. CLI history get exposes
---final-answer-only for exact diagnosis. Normal text projection and cursor scope
+--end-message-only for exact diagnosis. Normal text projection and cursor scope
 remain unchanged; the final projection has its own cursor scope and node/revision
 binding. This does not add a Core execution path or change model output storage.
 
@@ -218,11 +218,11 @@ the existing serde_json supported range; out-of-range numeric inputs fail explic
 
 ### exec owner-version guard
 
-Before Thread creation/message send, exec makes a read-only final_answer_only
+Before Thread creation/message send, exec makes a read-only end_message_only
 probe with a random missing node. A current owner decodes the argument and reports
 target_unavailable; old-style argument rejection exits6 before work. A refusal
 at answer read also exits6 (owner_version_mismatch), retaining known answer IDs
-and recommending ordinary history get --node ANSWER_NODE_ID without the new flag.
+and recommending ordinary history get --node END_MESSAGE_NODE_ID without the new flag.
 Do not resend completed work as if this were an input/schema error. Closed-wire
 support failures are owner/capability errors6, not input2. This is detection only,
 not an old-Core format shim or automatic answer/protocol downgrade.

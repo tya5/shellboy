@@ -182,9 +182,10 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
     key(&mut ui, &sender, KeyCode::Enter, KeyModifiers::NONE);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, proofs| {
         proofs.last().is_some_and(|proof| {
-            field(&proof.snapshot, "/last_answer/body_available") == Some("true")
+            field(&proof.snapshot, "/last_end_message/body_available") == Some("true")
                 && proof.snapshot.fields.iter().any(|field| {
-                    field.key.starts_with("/view_limits/") && field.value == "last_answer.excerpt"
+                    field.key.starts_with("/view_limits/")
+                        && field.value == "last_end_message.excerpt"
                 })
         })
     })
@@ -195,7 +196,7 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
         InspectionTarget::Thread("independent".into())
     );
     assert_eq!(
-        field(result, "/last_answer/node_id"),
+        field(result, "/last_end_message/node_id"),
         Some("bounded-answer")
     );
     assert_eq!(field(result, "/last_compaction/kind"), Some("restore"));
@@ -209,7 +210,12 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
     let canonical = control
         .store
         .database
-        .call(|db| Ok(crate::thread_observation::last_answer(db, "independent")?))
+        .call(|db| {
+            Ok(crate::thread_observation::last_end_message(
+                db,
+                "independent",
+            )?)
+        })
         .await
         .unwrap()
         .unwrap();
@@ -242,7 +248,10 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
     })
     .await;
     let latest = &proofs.last().unwrap().snapshot;
-    assert_eq!(field(latest, "/last_answer/body_available"), Some("true"));
+    assert_eq!(
+        field(latest, "/last_end_message/body_available"),
+        Some("true")
+    );
     assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
     let full = control
         .store

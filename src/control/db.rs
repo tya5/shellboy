@@ -1948,9 +1948,9 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { last_answer: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
-    details.last_answer = crate::thread_observation::last_answer(connection, id)?;
+    details.last_end_message = crate::thread_observation::last_end_message(connection, id)?;
     details.last_input = crate::thread_observation::last_input(connection, id)?;
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection
@@ -2139,8 +2139,8 @@ pub(crate) fn thread_list(
         }
         let excerpt = thread_excerpt(connection, id)?;
         let mut summary = thread_summary::prepare(raw, title, excerpt);
-        summary.last_answer =
-            crate::thread_observation::last_answer(connection, &summary.thread_id)?;
+        summary.last_end_message =
+            crate::thread_observation::last_end_message(connection, &summary.thread_id)?;
         summary.last_input = crate::thread_observation::last_input(connection, &summary.thread_id)?;
         items.push(summary);
         if items.len() > args.limit as usize {
@@ -2253,7 +2253,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
     let state = serde_json::from_value(json!(row.1))
         .map_err(|_| error(ErrorCode::InvalidState, "unknown saved Run state"))?;
     let turn:Option<(String,Option<String>,Option<String>)>=connection.query_row("SELECT id,answer_node_id,recovery_reason_json FROM turn WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(sql_error)?;
-    let (turn_id, answer_node_id, recovery_hint) = turn
+    let (turn_id, end_message_node_id, recovery_hint) = turn
         .map_or((None, None, None), |(id, answer, reason)| {
             (Some(id), answer, reason)
         });
@@ -2267,7 +2267,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
         state,
         owner_run_id: row.2,
         turn_id,
-        answer_node_id,
+        end_message_node_id,
         recovery_hint,
         owned_run_ids: ids(
             connection,
@@ -2283,7 +2283,7 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
 }
 
 pub fn turn_details(connection: &Connection, id: &str) -> Result<TurnDetails> {
-    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{usage_totals:None,context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,answer_node_id:row.3,recovery_hint:row.4}))
+    connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{usage_totals:None,context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,end_message_node_id:row.3,recovery_hint:row.4}))
 }
 
 pub(super) fn authorize_owned_run(
@@ -3776,7 +3776,7 @@ mod agents_reference_tests {
                     let body = history::get_node(
                         db,
                         &HistoryGetArgs {
-                            final_answer_only: false,
+                            end_message_only: false,
                             node_id: node.clone(),
                             limit_bytes: MAX_BODY_BYTES,
                             cursor: None,

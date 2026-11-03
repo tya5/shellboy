@@ -26,7 +26,7 @@ pub struct WorkItem {
     pub message_id: Option<String>,
     pub attempt_id: Option<String>,
     pub operation_id: Option<String>,
-    pub answer_node_id: Option<String>,
+    pub end_message_node_id: Option<String>,
     pub created_at: Option<String>,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
@@ -204,9 +204,9 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
             limit_bytes: 16384,
         }));
     }
-    if let Some(id) = &item.answer_node_id {
+    if let Some(id) = &item.end_message_node_id {
         links.push(Command::HistoryGet(HistoryGetArgs {
-            final_answer_only: false,
+            end_message_only: false,
             node_id: id.clone(),
             cursor: None,
             limit_bytes: 16384,
@@ -364,7 +364,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         updated_at: updated_at.clone(),
         activity_at: activity.1.into(),
         operation_id: row.get(11).map_err(sql)?,
-        answer_node_id: row.get(12).map_err(sql)?,
+        end_message_node_id: row.get(12).map_err(sql)?,
         attempt_connection: row
             .get::<_, Option<String>>(13)
             .map_err(sql)?

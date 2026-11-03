@@ -1292,7 +1292,7 @@ must be distinguished from native synthetic PTY/test results.
 
 ### E admission with latest Thread observations
 
-Keep #74's canonical ThreadList/Get last_answer/last_input projections. The
+Keep #74's canonical ThreadList/Get last_end_message/last_input projections. The
 shared summary preparer used by exact-ID presentation patches leaves those
 optional CLI message projections unobserved/None, matching the bounded header
 contract; canonical thread_list explicitly populates them through #74's indexed

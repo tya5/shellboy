@@ -143,7 +143,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         return Err(header_scalar_limit(&field));
     }
     let details = ThreadDetails {
-        last_answer: None,
+        last_end_message: None,
         last_input: None,
         last_compaction: None,
         thread_id: thread.into(),
@@ -387,9 +387,9 @@ mod tests {
         let actual = raw.prepare();
         // The bounded header intentionally does not fetch optional CLI message bodies.
         // Keep its three-query budget and compare every shared header fact unchanged.
-        assert!(actual.last_input.is_none() && actual.last_answer.is_none());
+        assert!(actual.last_input.is_none() && actual.last_end_message.is_none());
         assert_eq!(expected.last_input.take().unwrap()["message_id"], "pending");
-        assert!(expected.last_answer.is_none());
+        assert!(expected.last_end_message.is_none());
         assert_eq!(
             serde_json::to_value(&actual).unwrap(),
             serde_json::to_value(expected).unwrap()

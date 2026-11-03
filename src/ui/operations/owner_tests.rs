@@ -110,9 +110,9 @@ fn previously_missing_flags_have_typed_effects() {
         matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
     );
     let mut history = Form::new(OpKind::HistoryGet, &c);
-    set(&mut history, "final_answer_only", "true");
+    set(&mut history, "end_message_only", "true");
     assert!(
-        matches!(history.command(&c.cwd).unwrap(),Command::HistoryGet(args)if args.final_answer_only)
+        matches!(history.command(&c.cwd).unwrap(),Command::HistoryGet(args)if args.end_message_only)
     );
     let mut rebuild = Form::new(OpKind::IndexRebuild, &c);
     set(&mut rebuild, "dimensions", "512");
