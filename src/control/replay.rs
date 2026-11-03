@@ -896,7 +896,7 @@ mod tests {
                 let output = json!({"group_id":"g1","item":{"type":"function_call_output","call_id":"a","output":json!({"status":status,"stdout":"x".repeat(size)}).to_string()}});
                 let later_call = json!({"group_id":"g2","output":[{"type":"function_call","call_id":"b","name":"shell","arguments":"{}"}]});
                 let later_output = json!({"group_id":"g2","item":{"type":"function_call_output","call_id":"b","output":"{}"}});
-                let sources = vec![
+                let sources = [
                     ("call".to_owned(), call),
                     ("result".to_owned(), output),
                     ("later-call".to_owned(), later_call),
@@ -930,7 +930,7 @@ mod tests {
                 );
             }
         }
-        let sources = vec![
+        let sources = [
             (
                 "combined-call".to_owned(),
                 json!({"group_id":"g1","output":[{"type":"function_call","call_id":"a","name":"shell","arguments":"{}"}]}),
