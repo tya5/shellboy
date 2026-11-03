@@ -118,8 +118,13 @@ policy. Existing SQLite pages are reusable but not automatically returned to OS.
 ## Deleted-Thread message receipts (#197, #194 step 3)
 
 The history-GC requester owns receipt reclamation. Thread deletion first commits
-all pending-reply terminal transitions and outcome notices in its deletion
-transaction; GC must never delete a pending reply. History/all collection then
+recipient pending-reply terminal transitions and outcome notices in its deletion
+transaction, with indexed lookups bounded by the per-recipient 128 cap. Sender
+cancellation is deferred to this receipt phase: each of at most 128 scanned rows
+is checked by receipt primary key for a deleted model sender, then conditionally
+terminalized with cancel_reason=sender_deleted and a recipient cancellation
+notice in the same GC transaction before eligibility is checked. No database-wide
+pending scan or migration is needed; GC never deletes a still-pending reply. History/all collection then
 removes at most 128 eligible receipt rows per background-lane transaction before
 node marking, yielding between batches. Deletion, explicit collection, and
 startup resumption of pending history jobs are the existing triggers; no timer
