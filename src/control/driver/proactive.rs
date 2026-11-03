@@ -631,8 +631,8 @@ struct Order {
 /// Select one summary operation. #182 order: the ordinary summary of
 /// earlier Turns first (oldest context matters least); the active-Turn
 /// summary only when that prefix has nothing but earlier summaries, or when
-/// the previous attempt adopted the prefix summary and a fresh measurement is
-/// still at or above the threshold (`prefer_active`).
+/// the previous attempt adopted the prefix summary in this Turn and a fresh
+/// measurement remains above the calibrated target (`prefer_active`).
 async fn summarize_once(
     control: &Arc<Control>,
     thread: &str,
