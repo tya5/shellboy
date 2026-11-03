@@ -276,7 +276,7 @@ mod activity_migration_tests {
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             if upgrade {
                 db.execute_batch("DROP INDEX receipt_reply_pending; DELETE FROM schema_migration WHERE version=25; PRAGMA user_version=24;").unwrap();
-                run(&mut db, 24).unwrap();
+                run(&mut db, 24, &|_, _| {}, &|| {}).unwrap();
             }
             assert_eq!(
                 db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
@@ -301,7 +301,7 @@ mod activity_migration_tests {
             &|| {},
         )
         .unwrap();
-        assert_eq!(*observed.borrow(), vec![(1, 2), (2, 2)]);
+        assert_eq!(*observed.borrow(), vec![(1, 3), (2, 3), (3, 3)]);
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
             db.query_row(
