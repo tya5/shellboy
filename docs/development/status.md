@@ -4455,3 +4455,10 @@ comparison measured 11.170/11.905/10.257s with the previous full policy versus
 0.096/0.085/0.161s with explicit index-only skip. These isolate FK policy on
 identical startup code, not UI-ready latency or cold-cache performance. See the
 #210 acceptance record for stage times, controls and CI handoff evidence.
+## #192 session-owned input continuation
+
+Continue W4's adopted design and filter on a task-isolated branch rebased onto
+226c4f6d. Replace blocking Unix capability helpers with one session-owned reader;
+Windows native console input sends no VT probes. Implementation and validation
+are pending. #194 is accepted and frozen until explicit hotfix-landed notice;
+no migration changes are included here.
