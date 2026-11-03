@@ -624,12 +624,14 @@ pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiE
          CASE WHEN json_valid(a.input_manifest_json) THEN
              CASE WHEN json_type(a.input_manifest_json,'$.prompt_cache_diagnostics')='object'
                   AND octet_length(json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics'))<=2048
-             THEN json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics') END END
+             THEN json_extract(a.input_manifest_json,'$.prompt_cache_diagnostics') END END,
+         {INPUT_BYTES_SQL}
          FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1",
         usage::sql_projection("a.usage_json")
     );
     db.query_row(&sql, [attempt], |row| {
         let saved: Option<String> = row.get(10)?;
+        let input_bytes = saved_input_bytes(row.get(11)?);
         let diagnostic = saved
             .and_then(|text| serde_json::from_str::<Value>(&text).ok())
             .and_then(|value| crate::model::cache_diagnostics::bounded(&value));
@@ -640,10 +642,72 @@ pub(crate) fn read_attempt(db: &Connection, attempt: &str) -> Result<Value, ApiE
             "turn_id":row.get::<_,String>(3)?,
             "state":row.get::<_,String>(4)?,
             "usage":usage::StandardUsage::read(row,5)?.to_value(),
-            "prompt_cache_diagnostics":diagnostic
+            "prompt_cache_diagnostics":diagnostic,
+            "input_bytes":input_bytes
         }))
     })
     .optional()
     .map_err(error)?
     .ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable, "Model attempt not found"))
+}
+
+/// The saved request byte accounting (#186): measured UTF-8 bytes of the sent
+/// body by source. A bounded projection; never the manifest's other members.
+const INPUT_BYTES_SQL: &str = "CASE WHEN json_valid(a.input_manifest_json) THEN
+             CASE WHEN json_type(a.input_manifest_json,'$.input_bytes')='object'
+                  AND octet_length(json_extract(a.input_manifest_json,'$.input_bytes'))<=1024
+             THEN json_extract(a.input_manifest_json,'$.input_bytes') END END";
+/// A valid saved accounting, or null (unrecorded, legacy or invalid): unknown,
+/// never zero.
+fn saved_input_bytes(saved: Option<String>) -> Value {
+    saved
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| crate::model::wire_bytes::InputBytes::from_value(&value))
+        .map_or(Value::Null, |bytes| bytes.to_value())
+}
+/// Turns searched for the latest request, newest first, as in the cache
+/// comparison selection: one attempt index seek per Turn.
+const LATEST_REQUEST_TURNS: i64 = 33;
+
+/// The newest admitted model attempt of the scope's own Turns (children are
+/// not searched), with its measured request bytes beside the provider-reported
+/// token usage. Only the newest 33 Turns are searched; none found is null.
+pub(crate) fn read_latest_request(db: &Connection, scope: &Scope) -> Result<Value, ApiError> {
+    let (recent, id) = match scope {
+        Scope::Turn(id) => ("SELECT ?1 AS id", id),
+        Scope::Run(id) => (
+            "SELECT id FROM turn WHERE run_id=?1 ORDER BY created_at DESC LIMIT ?2",
+            id,
+        ),
+        Scope::Thread { id, .. } => (
+            "SELECT id FROM turn WHERE thread_id=?1 ORDER BY created_at DESC LIMIT ?2",
+            id,
+        ),
+    };
+    let sql = format!(
+        "WITH recent(id) AS ({recent})
+         SELECT a.id,a.turn_id,a.state,a.started_at,{},{INPUT_BYTES_SQL}
+         FROM recent r JOIN model_attempt a ON a.id=(SELECT x.id FROM model_attempt x WHERE x.turn_id=r.id ORDER BY x.started_at DESC,x.rowid DESC LIMIT 1)
+         ORDER BY a.started_at DESC,a.rowid DESC LIMIT 1",
+        usage::sql_projection("a.usage_json")
+    );
+    let mut statement = db.prepare(&sql).map_err(error)?;
+    let row = |row: &rusqlite::Row<'_>| {
+        Ok(json!({
+            "attempt_id":row.get::<_,String>(0)?,
+            "turn_id":row.get::<_,String>(1)?,
+            "state":row.get::<_,String>(2)?,
+            "started_at":row.get::<_,Option<String>>(3)?,
+            "usage":usage::StandardUsage::read(row,4)?.to_value(),
+            "input_bytes":saved_input_bytes(row.get(9)?)
+        }))
+    };
+    let found = if matches!(scope, Scope::Turn(_)) {
+        statement.query_row([id], row).optional()
+    } else {
+        statement
+            .query_row(rusqlite::params![id, LATEST_REQUEST_TURNS], row)
+            .optional()
+    };
+    Ok(found.map_err(error)?.unwrap_or(Value::Null))
 }

@@ -1,5 +1,6 @@
 //! Model configuration, borrowed input preparation and bounded stream forwarding.
 use super::*;
+use crate::model::wire_bytes::{Category, ItemTag};
 
 #[derive(Default)]
 pub(super) struct Instructions {
@@ -70,10 +71,12 @@ pub(super) async fn prepare_attempt(
         }
     };
     snapshot.cache_diagnostics_enabled = client.cache_diagnostics_enabled();
-    let request = match prepare_request(snapshot, instruction_body, &mut prepared) {
-        Ok(request) => request,
+    let (mut request, tags) = match prepare_request(snapshot, instruction_body, &mut prepared) {
+        Ok(prepared) => prepared,
         Err(error) => return fail_turn(control, snapshot, error).await,
     };
+    // Final before admission, so the measured body is the one sent.
+    model::configure_shell_description(&mut request, control.store.config.shell.describe_calls);
     // Count the actual serialized input, including system/developer instructions
     // and attachment projections. This is a Unicode scalar count, not UTF-8
     // bytes or a tokenizer claim.
@@ -88,6 +91,13 @@ pub(super) async fn prepare_attempt(
             .await;
         }
     };
+    // Measured UTF-8 bytes of the exact body `send` serializes, by source
+    // (#186). An encoding error already failed the Turn above; accounting
+    // itself never blocks a request.
+    snapshot.input_bytes = client
+        .input_bytes(request.clone(), &tags, Some(&snapshot.thread))
+        .ok()
+        .flatten();
     // Record selected replay size separately from fixed instructions and files.
     let history_characters = snapshot.input.as_ref().map_or(2, |replay| {
         json!(replay.materialize()).to_string().chars().count() as u64
@@ -256,15 +266,20 @@ impl Snapshot {
     }
 }
 
+/// The canonical request and one source tag per input item (#186).
 pub(super) fn prepare_request(
     snapshot: &Snapshot,
     instruction_body: Option<&Arc<str>>,
     prepared: &mut crate::attachments::PreparedAttachments,
-) -> Result<Value, ApiError> {
+) -> Result<(Value, Vec<ItemTag>), ApiError> {
     let mut input = leading_items(&snapshot.agents, instruction_body.map(|body| &**body))?;
+    let mut tags = vec![ItemTag::new(Category::System)];
+    if input.len() > 1 {
+        tags.push(ItemTag::new(Category::Instructions));
+    }
     // The context line is saved history (#183), so the replay already holds it.
     if let Some(replay) = &snapshot.input {
-        crate::control::attachment_input::bind(replay, prepared, &mut input)?;
+        crate::control::attachment_input::bind(replay, prepared, &mut input, &mut tags)?;
     }
     let mut request =
         model::response_request(&snapshot.model, input, snapshot.effort.as_deref(), true);
@@ -273,7 +288,7 @@ pub(super) fn prepare_request(
         snapshot.cache_diagnostics_enabled,
         snapshot.cache_comparison_response_id.as_deref(),
     );
-    Ok(request)
+    Ok((request, tags))
 }
 // Preserve the client's existing bounded partial-text/items/raw recovery type.
 #[allow(clippy::result_large_err)]
@@ -282,11 +297,10 @@ pub(super) async fn stream_response(
     thread: &str,
     attempt: &str,
     client: &HttpModelClient,
-    mut request: Value,
+    request: Value,
     bypass_usage_limit: Option<model::usage_limit::UsageLimit>,
     stop: &CancellationToken,
 ) -> Result<model::ModelResponse, model::http::AttemptFailure> {
-    model::configure_shell_description(&mut request, control.store.config.shell.describe_calls);
     let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
@@ -354,6 +368,11 @@ impl Snapshot {
             "comparison_response_id":self.cache_comparison_response_id.as_deref().filter(|_|self.cache_diagnostics_enabled)
         });
         manifest["prompt_cache_diagnostics"] = Value::Null;
+        // Measured request body bytes by source (#186); null when unmeasured.
+        manifest["input_bytes"] = self
+            .input_bytes
+            .as_ref()
+            .map_or(Value::Null, crate::model::wire_bytes::InputBytes::to_value);
         // Only a hash: the contents stay in the user's configuration file.
         if let Some(digest) = extra_digest {
             manifest["extra_digest"] = json!(digest);

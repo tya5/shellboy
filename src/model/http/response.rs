@@ -239,9 +239,35 @@ impl HttpModelClient {
     /// is byte-identical to the one `send` serializes.
     pub(crate) fn wire_request(
         &self,
-        mut request: Value,
+        request: Value,
         thread: Option<&str>,
     ) -> Result<(Value, Option<HeaderValue>), ModelError> {
+        self.wire_request_tagged(request, thread, None)
+            .map(|(wire, header, _)| (wire, header))
+    }
+    /// Measured UTF-8 bytes of the body [`Self::wire_request`] builds for this
+    /// request, partitioned by the source of each input item (#186). `tags`
+    /// has one entry per canonical `input` item. `None` when the tags do not
+    /// match the input; the body itself is never changed by accounting.
+    pub(crate) fn input_bytes(
+        &self,
+        request: Value,
+        tags: &[crate::model::wire_bytes::ItemTag],
+        thread: Option<&str>,
+    ) -> Result<Option<crate::model::wire_bytes::InputBytes>, ModelError> {
+        if request["input"].as_array().map(Vec::len) != Some(tags.len()) {
+            return Ok(None);
+        }
+        let (wire, _, labels) = self.wire_request_tagged(request, thread, Some(tags))?;
+        Ok(crate::model::wire_bytes::measure(&wire, &labels))
+    }
+    #[allow(clippy::type_complexity)]
+    fn wire_request_tagged(
+        &self,
+        mut request: Value,
+        thread: Option<&str>,
+        tags: Option<&[crate::model::wire_bytes::ItemTag]>,
+    ) -> Result<(Value, Option<HeaderValue>, crate::model::wire_bytes::Labels), ModelError> {
         let session_header = self.prepare_session(thread, &mut request)?;
         let Some(object) = request.as_object_mut() else {
             return Err(ModelError::new(
@@ -260,13 +286,14 @@ impl HttpModelClient {
             .prompt_caching
             .then(|| dialect::CacheHint::of(&request));
         crate::model::apply_context_role(&mut request, self.connection.context_role);
-        let mut request = dialect::encode_hinted(
+        let (mut request, labels) = dialect::encode_tagged(
             self.connection.api,
             request,
             self.connection
                 .max_tokens
                 .unwrap_or(crate::config::DEFAULT_MESSAGES_MAX_TOKENS),
             cache,
+            tags,
         )?;
         // Shellboy never interprets these. Config validation rejects any key
         // Shellboy owns, so a plain insert can neither override nor reorder.
@@ -275,7 +302,7 @@ impl HttpModelClient {
                 object.entry(key.clone()).or_insert_with(|| value.clone());
             }
         }
-        Ok((request, session_header))
+        Ok((request, session_header, labels))
     }
     // Keep the existing bounded recovery payload intact across body parsing.
     #[allow(clippy::result_large_err)]

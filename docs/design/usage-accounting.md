@@ -73,3 +73,9 @@ and existing #49 data remain unchanged; this version adds no observation hooks.
 not usage counters or inferred aggregates. `usage get --attempt` reads one
 attempt and reports the provider object or explicit null. Existing aggregate
 queries, counter whitelist and scalar readers are unchanged.
+
+## Request input bytes (#186)
+
+[Request input byte accounting](input-byte-accounting.md) records measured
+UTF-8 bytes of the sent body by source in the attempt manifest. They are not
+token usage, do not alter this normalizer, and are never converted to tokens.

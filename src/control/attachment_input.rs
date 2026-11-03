@@ -1,4 +1,5 @@
 //! Bind each current attachment version at its immutable source content slot.
+use crate::model::wire_bytes::{Category, ItemTag};
 use crate::{
     attachments::PreparedAttachments,
     protocol::{ApiError, ErrorCode},
@@ -30,14 +31,18 @@ pub(crate) fn has_attachment_ref(item: &Value) -> bool {
         })
 }
 
+/// Append the replayed items with attachment content bound, and one source
+/// tag per appended item (#186). Expanded attachment parts are `attachment`.
 pub(super) fn bind(
     replay: &super::replay::ReplayLease,
     prepared: &mut PreparedAttachments,
     input: &mut Vec<Value>,
+    tags: &mut Vec<ItemTag>,
 ) -> Result<(), ApiError> {
     let mut seen = HashSet::new();
-    for (source, original) in replay.sourced_items() {
+    for (source, category, original) in replay.sourced_items() {
         let mut item = original.clone();
+        let mut tag = ItemTag::new(category);
         if let Some(content) = item.get_mut("content").and_then(Value::as_array_mut) {
             let mut expanded = Vec::new();
             for (element, part) in std::mem::take(content).into_iter().enumerate() {
@@ -79,12 +84,17 @@ pub(super) fn bind(
                 manifest.api_item_index = Some(input.len());
                 manifest.api_content_index = Some(expanded.len());
                 manifest.api_content_count = placement.content.len();
+                tag.parts.extend(
+                    (expanded.len()..expanded.len() + placement.content.len())
+                        .map(|part| (part, Category::Attachment)),
+                );
                 expanded.extend(placement.content.iter().cloned());
             }
             *content = expanded;
         }
         strip_local(&mut item);
         input.push(item);
+        tags.push(tag);
     }
     // Replaced sources are absent from replay; report their excluded state at
     // this safe boundary instead of inventing a source message or binary.
@@ -111,6 +121,7 @@ pub(super) fn bind(
     }
     if !detached_content.is_empty() {
         input.push(json!({"role":"developer","content":detached_content}));
+        tags.push(ItemTag::new(Category::Attachment));
     }
     if prepared
         .placements
@@ -129,6 +140,7 @@ pub(super) fn bind(
     if !updates.is_empty() {
         input.push(json!({"role":"developer","content":[{"type":"input_text",
             "text":format!("Shellboy attachment updates v1: {}",json!(updates))}]}));
+        tags.push(ItemTag::new(Category::Notice));
     }
     Ok(())
 }

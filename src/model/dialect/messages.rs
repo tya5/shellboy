@@ -11,40 +11,62 @@ pub(super) const DIALECT: &str = "anthropic_messages";
 /// Sent as the `anthropic-version` header. Raising it is a deliberate change.
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
-fn text_of(content: &Value) -> Result<String, ModelError> {
-    if let Some(text) = content.as_str() {
-        return Ok(text.to_owned());
-    }
-    let parts = content
-        .as_array()
-        .ok_or_else(|| protocol("Message content must be text or an array"))?;
-    let mut text = String::new();
-    for part in parts {
-        match part["type"].as_str() {
-            Some("input_text" | "output_text") => {
-                text.push_str(part["text"].as_str().unwrap_or_default());
+/// The leading system text, joined from items, with each piece's source (#186).
+#[derive(Default)]
+struct System {
+    items: Vec<String>,
+    pieces: Vec<(wire_bytes::Category, u64)>,
+}
+impl System {
+    /// Append one item's text, its content parts concatenated in order.
+    fn push(&mut self, content: &Value, tag: Option<&ItemTag>) -> Result<(), ModelError> {
+        let mut text = String::new();
+        let mut piece = |part: &str, category: Option<wire_bytes::Category>| {
+            text.push_str(part);
+            if let Some(category) = category {
+                self.pieces.push((category, wire_bytes::escaped_len(part)));
             }
-            Some("refusal") => text.push_str(part["refusal"].as_str().unwrap_or_default()),
-            _ => {
-                return Err(ModelError::new(
-                    "unsupported_item",
-                    "Unsupported system content for Anthropic Messages; no request sent",
-                ));
+        };
+        if let Some(whole) = content.as_str() {
+            piece(whole, tag.map(|tag| tag.category));
+        } else {
+            let parts = content
+                .as_array()
+                .ok_or_else(|| protocol("Message content must be text or an array"))?;
+            for (index, part) in parts.iter().enumerate() {
+                let category = tag.map(|tag| tag.part(index));
+                match part["type"].as_str() {
+                    Some("input_text" | "output_text") => {
+                        piece(part["text"].as_str().unwrap_or_default(), category);
+                    }
+                    Some("refusal") => {
+                        piece(part["refusal"].as_str().unwrap_or_default(), category)
+                    }
+                    _ => {
+                        return Err(ModelError::new(
+                            "unsupported_item",
+                            "Unsupported system content for Anthropic Messages; no request sent",
+                        ));
+                    }
+                }
             }
         }
+        self.items.push(text);
+        Ok(())
     }
-    Ok(text)
 }
 
-fn blocks_of(content: &Value) -> Result<Vec<Value>, ModelError> {
+fn blocks_of(content: &Value, tag: Option<&ItemTag>) -> Result<Vec<Value>, ModelError> {
     if let Some(text) = content.as_str() {
-        return Ok(vec![json!({"type":"text","text":text})]);
+        let mut block = json!({"type":"text","text":text});
+        wire_bytes::mark(&mut block, tag.map(|tag| tag.category));
+        return Ok(vec![block]);
     }
     let parts = content
         .as_array()
         .ok_or_else(|| protocol("Message content must be text or an array"))?;
     let mut blocks = Vec::new();
-    for part in parts {
+    for (index, part) in parts.iter().enumerate() {
         match part["type"].as_str() {
             Some("input_text" | "output_text") => {
                 blocks.push(json!({"type":"text","text":part["text"]}));
@@ -62,6 +84,9 @@ fn blocks_of(content: &Value) -> Result<Vec<Value>, ModelError> {
                     "Unsupported Messages input content; no request sent",
                 ));
             }
+        }
+        if let Some(block) = blocks.last_mut() {
+            wire_bytes::mark(block, tag.map(|tag| tag.part(index)));
         }
     }
     Ok(blocks)
@@ -84,6 +109,8 @@ fn image_block(url: &str) -> Result<Value, ModelError> {
 
 /// Append blocks to the last message when it has the same role, else start one.
 /// Messages requires alternating roles, so adjacent items of one role merge.
+/// Each block keeps its own source; a new message's framing goes with its
+/// first block's source.
 fn push(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
     if blocks.is_empty() {
         return;
@@ -97,7 +124,10 @@ fn push(messages: &mut Vec<Value>, role: &str, blocks: Vec<Value>) {
             .extend(blocks);
         return;
     }
-    messages.push(json!({"role":role,"content":blocks}));
+    let owner = blocks.first().and_then(wire_bytes::marked);
+    let mut message = json!({"role":role,"content":blocks});
+    wire_bytes::mark(&mut message, owner);
+    messages.push(message);
 }
 
 /// The single effort mapping for this dialect (#126). Shellboy's effort is an
@@ -126,20 +156,24 @@ pub(super) fn encode(
     request: Value,
     max_tokens: u64,
     cache: Option<CacheHint>,
-) -> Result<Value, ModelError> {
+    tags: Option<&[ItemTag]>,
+) -> Result<(Value, Labels), ModelError> {
     let input = request["input"]
         .as_array()
         .ok_or_else(|| protocol("Conversation input must be an array"))?;
-    let mut system: Vec<String> = Vec::new();
+    let mut system = System::default();
     let mut messages: Vec<Value> = Vec::new();
     for (index, item) in input.iter().enumerate() {
+        let tag = tags.and_then(|tags| tags.get(index));
         if opaque::is_opaque(item) {
             // Only this dialect's own blocks go back, unchanged, in place.
             if let Some(block) = opaque::block_for(item, DIALECT) {
-                push(&mut messages, "assistant", vec![block.clone()]);
+                let mut block = block.clone();
+                wire_bytes::mark(&mut block, tag.map(|tag| tag.category));
+                push(&mut messages, "assistant", vec![block]);
             }
         } else {
-            encode_item(item, &mut system, &mut messages)?;
+            encode_item(item, tag, &mut system, &mut messages)?;
         }
         // Mark the tail once the conversation is complete, before the
         // per-request context is merged after it.
@@ -164,8 +198,9 @@ pub(super) fn encode(
     if let Some(effort) = request.pointer("/reasoning/effort").and_then(Value::as_str) {
         result["output_config"] = json!({"effort":effort_name(effort)});
     }
-    if !system.is_empty() {
-        let text = system.join("\n\n");
+    let mut labels = Labels::new();
+    if !system.items.is_empty() {
+        let text = system.items.join("\n\n");
         result["system"] = if cache.is_some() {
             let mut block = json!({"type":"text","text":text});
             mark(&mut block);
@@ -173,6 +208,16 @@ pub(super) fn encode(
         } else {
             json!(text)
         };
+        // Leading system/developer items are joined into one string; each
+        // item's text is charged to its own source, the separators to `other`.
+        if tags.is_some() {
+            let pointer = if cache.is_some() {
+                "/system/0/text"
+            } else {
+                "/system"
+            };
+            labels.push((pointer.into(), wire_bytes::Label::Split(system.pieces)));
+        }
     }
     if let Some(tools) = request["tools"]
         .as_array()
@@ -198,7 +243,10 @@ pub(super) fn encode(
         }
         result["tools"] = json!(converted);
     }
-    Ok(result)
+    if tags.is_some() {
+        labels.extend(wire_bytes::extract(&mut result));
+    }
+    Ok((result, labels))
 }
 
 /// The last block, in wire order, that may carry `cache_control`. Thinking and
@@ -225,17 +273,20 @@ fn last_cacheable(messages: &mut [Value]) -> Option<&mut Value> {
 /// Encode one non-opaque item.
 fn encode_item(
     item: &Value,
-    system: &mut Vec<String>,
+    tag: Option<&ItemTag>,
+    system: &mut System,
     messages: &mut Vec<Value>,
 ) -> Result<(), ModelError> {
+    let category = tag.map(|tag| tag.category);
     match item["type"].as_str() {
         Some("reasoning") => {}
         Some("function_call") => {
             let arguments = item["arguments"].as_str().unwrap_or("{}");
             let input: Value = serde_json::from_str(arguments)
                 .map_err(|_| protocol("Tool call arguments are not valid JSON"))?;
-            let block =
+            let mut block =
                 json!({"type":"tool_use","id":item["call_id"],"name":item["name"],"input":input});
+            wire_bytes::mark(&mut block, category);
             push(messages, "assistant", vec![block]);
         }
         Some("function_call_output") => {
@@ -243,8 +294,9 @@ fn encode_item(
                 .as_str()
                 .map(str::to_owned)
                 .unwrap_or_else(|| item["output"].to_string());
-            let block =
+            let mut block =
                 json!({"type":"tool_result","tool_use_id":item["call_id"],"content":output});
+            wire_bytes::mark(&mut block, category);
             // Results of one assistant turn stay together and come first.
             let results_first = messages.last().is_some_and(|last| last["role"] == "user");
             if results_first {
@@ -263,15 +315,15 @@ fn encode_item(
             let role = item["role"].as_str();
             match role {
                 Some("system" | "developer") if messages.is_empty() => {
-                    system.push(text_of(&item["content"])?);
+                    system.push(&item["content"], tag)?;
                 }
                 // Inserted context after the conversation began is a user
                 // message: Messages has no mid-conversation system role.
                 Some("system" | "developer" | "user") => {
-                    push(messages, "user", blocks_of(&item["content"])?);
+                    push(messages, "user", blocks_of(&item["content"], tag)?);
                 }
                 Some("assistant") => {
-                    push(messages, "assistant", blocks_of(&item["content"])?);
+                    push(messages, "assistant", blocks_of(&item["content"], tag)?);
                 }
                 _ => return Err(protocol("Unsupported conversation message role")),
             }

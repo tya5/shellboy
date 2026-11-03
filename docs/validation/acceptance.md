@@ -13,6 +13,18 @@ Shell-spawning runtime/shell integration tests failed nondeterministically on
 this Mac, and the same subset also failed on unmodified `origin/main`
 `9e822267`, so they are not evidence either way here. CI run 41586592079
 (`all_oses=true`) passed on ubuntu, macOS and Windows at `bc7175af`.
+## Request input byte accounting (#186, synthetic only)
+
+macOS, Rust via `rust-slot`: `cargo check --all-targets`, `cargo fmt`, `cargo
+clippy --all-targets -D warnings`, test layout and the Python suite (186) passed.
+Focused tests passed: 10 `wire_bytes` tests (all three dialects with/without
+cache hints and `context_role = "user"`, body byte-identity, exact sum, merges,
+moved system content, attachments, drops), the usage reader test, the replay
+category test and a loopback test where the saved total equals the received
+Content-Length. Related lib filters (model, usage_totals, replay, driver,
+request_inspect, attachment: 130 passed) and integration filters (116 passed)
+passed; one shell drain timing test failed once under parallel load and passed
+three times alone. No provider call; no user data. Three-OS CI pending.
 
 ## Asynchronous receipt pressure (#172, in progress)
 

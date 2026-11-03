@@ -330,3 +330,8 @@ The response includes attempt/state, standard usage scalars and the bounded
 `prompt_cache_diagnostics` object or null. `thread request --attempt` additionally
 exposes that saved observation and rebuilds the saved comparison ID; see
 [cache diagnostics](cache-diagnostics.md). Both paths are read-only.
+
+`usage get --attempt ID` also returns `input_bytes` (measured UTF-8 bytes of
+the sent body by source, or null), and ungrouped scoped `usage get` returns
+`latest_request` (the scope's newest admitted attempt with `usage` and
+`input_bytes`, or null); see [input byte accounting](input-byte-accounting.md).

@@ -722,3 +722,58 @@ fn attempt_diagnostics_read_is_bounded_exact_read_only_and_not_an_aggregate() {
     .unwrap();
     assert!(read_attempt(&db, "a0-0").unwrap()["prompt_cache_diagnostics"].is_null());
 }
+
+#[test]
+fn saved_request_bytes_are_read_beside_reported_tokens_and_invalid_is_unknown() {
+    use crate::model::wire_bytes::{Category, Label, measure};
+    let mut db = db();
+    seed(&mut db, 2, false);
+    let wire = json!({"input":[{"role":"user","content":"日本語"}],"model":"m"});
+    let bytes = measure(&wire, &[("/input/0".into(), Label::Whole(Category::User))]).unwrap();
+    let manifest = json!({"input_bytes":bytes.to_value(),"unrelated":"x".repeat(100_000)});
+    db.execute(
+        "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='a1-99'",
+        [manifest.to_string()],
+    )
+    .unwrap();
+    let before = db.total_changes();
+    let attempt = read_attempt(&db, "a1-99").unwrap();
+    assert_eq!(attempt["input_bytes"], bytes.to_value());
+    assert_eq!(
+        attempt["input_bytes"]["total"],
+        serde_json::to_vec(&wire).unwrap().len()
+    );
+    assert_eq!(attempt["usage"]["input_tokens"], 100);
+    // Recorded before #186 (or not measured): unknown, not zero.
+    assert!(read_attempt(&db, "a1-98").unwrap()["input_bytes"].is_null());
+    for scope in [
+        Scope::Thread {
+            id: "t0".into(),
+            children: true,
+        },
+        Scope::Run("r1".into()),
+        Scope::Turn("u1".into()),
+    ] {
+        let latest = read_latest_request(&db, &scope).unwrap();
+        assert_eq!(latest["attempt_id"], "a1-99", "{scope:?}");
+        assert_eq!(latest["input_bytes"], bytes.to_value());
+        assert_eq!(latest["usage"]["input_tokens_details"]["cached_tokens"], 75);
+    }
+    let older = read_latest_request(&db, &Scope::Turn("u0".into())).unwrap();
+    assert_eq!(older["attempt_id"], "a0-99");
+    assert!(older["input_bytes"].is_null());
+    assert!(
+        read_latest_request(&db, &Scope::Turn("missing".into()))
+            .unwrap()
+            .is_null()
+    );
+    assert_eq!(db.total_changes(), before);
+    let mut wrong = bytes.to_value();
+    wrong["categories"]["user"] = json!(1);
+    db.execute(
+        "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='a1-99'",
+        [json!({"input_bytes":wrong}).to_string()],
+    )
+    .unwrap();
+    assert!(read_attempt(&db, "a1-99").unwrap()["input_bytes"].is_null());
+}

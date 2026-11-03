@@ -71,6 +71,7 @@ async fn performance_ten_shells_ten_lifecycle_waits() {
             model: "synthetic".into(),
             cache_comparison_response_id: None,
             cache_diagnostics_enabled: false,
+            input_bytes: None,
             effort: None,
             epoch: 0,
             cwd: root.path().into(),

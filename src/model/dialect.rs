@@ -1,6 +1,7 @@
 //! Stateless wire adapters. Core consumes only the existing normalized response contract.
 use super::*;
 use crate::config::Api;
+use crate::model::wire_bytes::{self, ItemTag, Labels};
 use std::ops::Deref;
 
 mod chat;
@@ -30,13 +31,26 @@ pub fn encode_hinted(
     max_tokens: u64,
     cache: Option<CacheHint>,
 ) -> Result<Value, ModelError> {
+    encode_tagged(api, request, max_tokens, cache, None).map(|(wire, _)| wire)
+}
+/// Encode, carrying each canonical input item's source tag (#186) onto the
+/// wire fragments built from it. With `tags`, also return the labels that
+/// partition the body; the body itself is identical to the untagged encoding.
+/// `tags` must have one entry per `input` item.
+pub(crate) fn encode_tagged(
+    api: Api,
+    request: Value,
+    max_tokens: u64,
+    cache: Option<CacheHint>,
+    tags: Option<&[ItemTag]>,
+) -> Result<(Value, Labels), ModelError> {
     match api {
         // Responses providers cache prefixes on their own; the existing
         // `prompt_cache_key`/session handling is the only routing hint. Chat
         // has no cache field. Neither sends anything new for the hint.
-        Api::Responses => responses::encode(request),
-        Api::ChatCompletions => chat::encode(request),
-        Api::AnthropicMessages => messages::encode(request, max_tokens, cache),
+        Api::Responses => responses::encode(request, tags),
+        Api::ChatCompletions => chat::encode(request, tags),
+        Api::AnthropicMessages => messages::encode(request, max_tokens, cache, tags),
     }
 }
 

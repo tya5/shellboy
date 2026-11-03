@@ -13,6 +13,15 @@ The F6 field label is `終了メッセージnode ID`; the `回答` row label is 
 The `status` item field is shared by all kinds, so message items also say
 `end_message_node_id` (the assigned Turn's end message) until step 2 replaces
 them with `reply_node_id`. Resume point: step 2 (schema 25 and the reply core).
+## Request input byte accounting (#186, branch `issue-186/input-byte-accounting`)
+
+Each conversation attempt saves measured UTF-8 bytes of its sent body by source
+(13 categories, exact sum) as `input_bytes` in the attempt manifest; no table,
+migration or setting. `usage get --attempt` and ungrouped `usage get`
+(`latest_request`) expose it beside provider-reported tokens. See
+[input byte accounting](../design/input-byte-accounting.md). TUI (F6) display
+awaits the user's approval of option 3; not implemented. Next: 3-OS CI result,
+then review.
 
 ## Final benchmark after #183 (2026-11-03, branch `bench/final-2026-11-03`)
 

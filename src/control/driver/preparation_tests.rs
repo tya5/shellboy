@@ -155,6 +155,7 @@ async fn human_acceptance_between_next_and_prepare_refreshes_source_before_http(
         refreshed.input.as_ref().unwrap(),
         &mut prepared,
         &mut input,
+        &mut Vec::new(),
     )
     .unwrap();
     let manifest = prepared.manifest.clone();
@@ -525,6 +526,7 @@ async fn adoption_selection_conflict_rolls_back_without_entering_recovery() {
         snapshot.input.as_ref().unwrap(),
         &mut prepared,
         &mut input,
+        &mut Vec::new(),
     )
     .unwrap();
     let thread = accepted.thread_id.clone();
@@ -1547,4 +1549,106 @@ async fn concurrent_absent_driver_stop_and_retirement_do_not_advance_terminal_ge
         assert_eq!(observed,("stopped".into(),"stopped".into(),2,0));
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
     }).await.unwrap();
+}
+
+/// #186: the admitted attempt records the measured bytes of exactly the body
+/// sent, by source, and `usage get --attempt` reads them back.
+#[tokio::test]
+async fn admitted_attempt_records_the_exact_sent_body_bytes_by_source() {
+    use crate::model::wire_bytes::Category;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let (root, owner, control, accepted) =
+        fixture(&format!("http://{}/v1", listener.local_addr().unwrap())).await;
+    let path = root.path().join("evidence.txt");
+    std::fs::write(&path, b"file fixture").unwrap();
+    add_human_attachment(&control, &accepted, path).await;
+    let mut snapshot = ready(&control, &accepted).await;
+    let mut prepared = control
+        .attachments
+        .prepare_at_revision(
+            &accepted.thread_id,
+            CancellationToken::new(),
+            false,
+            snapshot.selection,
+        )
+        .await
+        .unwrap();
+    let instructions: Arc<str> = Arc::from("Working instructions 日本語");
+    let (mut request, tags) =
+        super::request::prepare_request(&snapshot, Some(&instructions), &mut prepared).unwrap();
+    model::configure_shell_description(&mut request, control.store.config.shell.describe_calls);
+    let client = HttpModelClient::new(control.store.config.connections["fixture"].clone()).unwrap();
+    snapshot.input_bytes = client
+        .input_bytes(request.clone(), &tags, Some(&accepted.thread_id))
+        .unwrap();
+    let measured = snapshot.input_bytes.clone().unwrap();
+    for category in [
+        Category::System,
+        Category::Instructions,
+        Category::User,
+        Category::Attachment,
+        Category::Notice,
+        Category::Other,
+    ] {
+        assert!(measured.get(category) > 0, "{category:?}");
+    }
+    let attempt = id();
+    assert!(
+        admit_attempt(&control, &snapshot, &attempt, Arc::new(prepared), 0, 0)
+            .await
+            .unwrap()
+    );
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = Vec::new();
+        let mut chunk = [0; 8192];
+        let length = loop {
+            let n = stream.read(&mut chunk).await.unwrap();
+            assert!(n > 0);
+            bytes.extend_from_slice(&chunk[..n]);
+            if let Some(at) = bytes.windows(4).position(|p| p == b"\r\n\r\n") {
+                let head = String::from_utf8_lossy(&bytes[..at]);
+                let length: usize = head
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse().unwrap())
+                    })
+                    .unwrap();
+                if bytes.len() >= at + 4 + length {
+                    assert_eq!(bytes.len(), at + 4 + length);
+                    break length;
+                }
+            }
+        };
+        let response = json!({"id":"fixture","status":"completed","output":[]}).to_string();
+        stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).as_bytes()).await.unwrap();
+        length
+    });
+    crate::test_watchdog::watchdog(
+        "src/control/driver/preparation_tests.rs: admitted_attempt_records_the_exact_sent_body_bytes_by_source",
+        client.response_observed(
+            &accepted.thread_id,
+            request,
+            CancellationToken::new(),
+            None,
+            None,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let sent = server.await.unwrap();
+    assert_eq!(measured.total, sent as u64);
+    let saved = control
+        .store
+        .database
+        .call(move |db| Ok(crate::usage_totals::read_attempt(db, &attempt).unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(saved["input_bytes"], measured.to_value());
+    assert_eq!(saved["input_bytes"]["total"], sent);
+    drop(snapshot);
+    close(control, owner).await;
 }

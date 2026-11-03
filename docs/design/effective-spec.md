@@ -260,6 +260,12 @@ Issue #49 adopts [standard usage measurements](usage-accounting.md): persist
 validated standard numbers only and read legacy large usage through guarded SQL
 scalar extraction. Task-boundary cleanup is Agent Guide guidance, not Core automation.
 
+Issue #186 adopts [request input byte accounting](input-byte-accounting.md):
+measured UTF-8 bytes of each attempt's sent body by source, tagged before
+dialect conversion, summing exactly to the body length, saved in the attempt
+manifest and read by `usage get`. No token estimate per category; TUI display
+awaits approval.
+
 
 Issue #53 adopts [interrupted message recovery](message-recovery.md): persist
 path-admission facts, share terminal repair, and recover known unadmitted input
