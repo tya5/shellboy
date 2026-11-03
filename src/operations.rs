@@ -869,7 +869,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::ExecResult,
         default_origin: DefaultOrigin::Literal,
         label: "結果モード",
-        help: "reply、turn-end、run-endから選択します。replyは現在未対応です。",
+        help: "reply、turn-end、run-endから選択します。",
         kind: FieldType::Choice,
         discovery: Discovery::None,
     },

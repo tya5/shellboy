@@ -265,7 +265,7 @@ impl Session {
         if self.progress.run_id.is_none() {
             return Err(Failure::new(4, "held", "Message has no assigned Run"));
         }
-        if mode == ResultMode::RunEnd {
+        if matches!(mode, ResultMode::RunEnd | ResultMode::Reply) {
             let run = self.progress.run_id.clone().expect("assigned run");
             loop {
                 let facts: RunDetails = self
@@ -290,7 +290,11 @@ impl Session {
                         if delivery.delivery_status != DeliveryStatus::Applied {
                             return Err(Failure::new(4, "held", "Message was not applied"));
                         }
-                        self.progress.end_message_node_id = facts.end_message_node_id;
+                        self.progress.end_message_node_id = if mode == ResultMode::Reply {
+                            reply_node(delivery.reply.as_ref())?
+                        } else {
+                            facts.end_message_node_id
+                        };
                         break;
                     }
                     RunState::Stopped | RunState::Failed => {
@@ -453,7 +457,7 @@ impl Session {
                 .request(
                     "answer",
                     Command::HistoryGet(HistoryGetArgs {
-                        end_message_only: true,
+                        end_message_only: mode != ResultMode::Reply,
                         node_id: node.clone(),
                         limit_bytes: 65_536,
                         cursor: cursor.clone(),
@@ -511,6 +515,41 @@ impl Session {
         ))
     }
 }
+fn reply_node(reply: Option<&Value>) -> Result<Option<String>, Failure> {
+    let reply =
+        reply.ok_or_else(|| Failure::new(4, "reply_unavailable", "No reply outcome was saved"))?;
+    match reply["state"].as_str() {
+        Some("replied") => Ok(reply["node_id"].as_str().map(str::to_owned)),
+        Some("ignored" | "cancelled" | "recipient_deleted") => Err(Failure::new(
+            4,
+            "reply_unavailable",
+            format!("Reply ended with state {}", reply["state"]),
+        )),
+        _ => Err(Failure::new(
+            4,
+            "reply_unavailable",
+            "Run ended without a reply",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod reply_mode_tests {
+    use super::*;
+    #[test]
+    fn terminal_nonreply_outcomes_are_exit_four() {
+        for state in ["ignored", "cancelled", "recipient_deleted", "pending"] {
+            let error = reply_node(Some(&json!({"state": state})))
+                .err()
+                .expect("must fail");
+            assert_eq!(error.code, 4, "{state}");
+        }
+        assert!(
+            matches!(reply_node(Some(&json!({"state":"replied", "node_id":"reply"}))), Ok(Some(node)) if node == "reply")
+        );
+    }
+}
+
 async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateArgs), String> {
     if options.max_repairs > 5 || !(1..=86_400_000).contains(&options.timeout_ms) {
         return Err("exec repair/timeout limits are invalid".into());
@@ -563,7 +602,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
     if text.trim().is_empty() {
         return Err("A nonempty work request is required".into());
     }
-    let prompt = contract(&text, &schema);
+    let prompt = contract(&text, &schema, options.result);
     if prompt.len() > INPUT_LIMIT {
         return Err("Composed request and Schema exceed128KiB".into());
     }
@@ -597,9 +636,14 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
         .map_err(|e| e.message)?;
     Ok((schema, prompt, create))
 }
-fn contract(text: &str, schema: &Schema) -> String {
+fn contract(text: &str, schema: &Schema, mode: ResultMode) -> String {
+    let instruction = if mode == ResultMode::Reply {
+        "send a reply to this message containing ONLY"
+    } else {
+        "return ONLY"
+    };
     format!(
-        "{text}\n\nFinal answer contract: perform the work normally with the available tools. When finished, return ONLY one JSON value matching this JSON Schema, with no Markdown fences or surrounding prose.\n{}",
+        "{text}\n\nFinal answer contract: perform the work normally with the available tools. When finished, {instruction} one JSON value matching this JSON Schema, with no Markdown fences or surrounding prose.\n{}",
         schema.value()
     )
 }
@@ -611,13 +655,6 @@ pub async fn execute(
     origin: Option<Origin>,
     operation: Option<String>,
 ) -> Outcome {
-    if options.result == ResultMode::Reply {
-        return Outcome {
-            code: 6,
-            result: None,
-            diagnostics: json!({"command":"exec", "status":"not_yet_available", "message":"exec --result reply is not yet available"}),
-        };
-    }
     if operation.is_some() {
         return Outcome::input("exec performs multiple RPCs; --operation-id is not accepted");
     }
@@ -650,7 +687,7 @@ pub async fn execute(
         }
         for repair in 0..=options.max_repairs {
             session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
-            let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{expect_reply:false,thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
+            let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{expect_reply:options.result == ResultMode::Reply,thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
             session.progress.message_id=Some(accepted.message_id);session.progress.run_id=accepted.run_id;session.progress.turn_id=accepted.turn_id;
             let raw=session.answer(options.result).await?;
             session.progress.stage="validate";
@@ -658,7 +695,7 @@ pub async fn execute(
             if Instant::now()>=session.deadline {return Err(Failure::new(5,"timeout","Client deadline expired during validation; no target was stopped"));}
             if errors.is_empty() {return Ok(session.finish(Some(raw),0,"completed",json!({})));}
             if repair==options.max_repairs {return Ok(session.finish(None,3,"schema_mismatch",json!({"raw_answer":raw,"validation_errors":errors})));}
-            prompt=contract(&format!("Correct ONLY the previous final answer; do not repeat completed side effects. Local validation failed: {}",serde_json::to_string(&errors).expect("errors JSON")),&schema);
+            prompt=contract(&format!("Correct ONLY the previous final answer; do not repeat completed side effects. Local validation failed: {}",serde_json::to_string(&errors).expect("errors JSON")),&schema,options.result);
         }
         unreachable!("bounded repair loop returns")
     }.await;

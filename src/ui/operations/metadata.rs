@@ -1422,8 +1422,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::ExecResult => local!(
             language,
-            "reply、turn-end、run-endから選択します。replyは現在未対応です。",
-            "Choose reply, turn-end, or run-end. Reply is not yet available."
+            "reply、turn-end、run-endから選択します。",
+            "Choose reply, turn-end, or run-end."
         ),
         FieldId::MaxRepairs => local!(
             language,
