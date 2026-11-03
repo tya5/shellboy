@@ -1,6 +1,6 @@
 //! Adapted from crossterm 0.29.0 src/event/sys/unix/parse.rs.
 //! Copyright crossterm contributors; MIT license in LICENSE-crossterm.
-//! Only imports, raw-mode access and always-enabled paste support differ.
+//! Imports, raw-mode access, paste support and private-CPR/F3 separation differ.
 use std::io;
 
 use crossterm::event::{
