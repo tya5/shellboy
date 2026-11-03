@@ -14,8 +14,9 @@ A shared presentation helper adds two-space hanging indentation to nested body
 rows while preserving span styles and viewport widths; at widths under three cells
 it omits indentation rather than overflowing. Conversation body/reasoning hints,
 opened owned-work notices and captured output, pending-input excerpts, and
-management preview bodies use it. Headers, event/tool rows, notices and
-source-preserving guide prose keep their existing structure. Bilingual narrow/wide
+management preview bodies use it. Compact queue excerpts remain single-row and
+clip to width. Headers, event/tool rows, notices and source-preserving guide
+prose keep their existing structure. Bilingual narrow/wide
 regressions cover evicted/Details hints, the shared indenter and management
 preview. Local cargo checks and exact-tip CI remain pending.
 

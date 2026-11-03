@@ -8988,7 +8988,7 @@ Static audit in `src/ui` and `src/presentation` after #177 final-tip CI succeede
 | Conversation body | `src/ui/presentation.rs::node_lines_inner` (`Uncached`, `Details`, block/reasoning lines) | `Uncached` and `Details` are `Body`; prose/code and reasoning blocks retain their typed roles. Body and reasoning roles use the shared hanging indenter; tool, header, metadata, and event rows remain distinct. |
 | Notice rows | `src/ui/presentation.rs::notice_row`, `append_notice_run` | Standalone and grouped notice rows use `row_columns` as flat, single-line item headers; grouped children carry tree prefixes. They do not emit wrapped body rows, so keep this left alignment intentional. |
 | Owned work / waits | `src/ui/live_work.rs::draw` | The #98 opened-output read-error, notice, loading, and captured-output rows use shared two-space hanging indentation. Existing tree glyphs remain nested; the muted notice style is preserved on the inserted indent. |
-| Pending input | `src/ui/message_queue.rs` panel and compact strip | The `/queue` panel renders excerpt bodies with hanging indentation; the compact strip keeps its existing fixed-height excerpt row and prefixes it without introducing wrapped rows. |
+| Pending input | `src/ui/message_queue.rs` panel and compact strip | The `/queue` panel renders excerpt bodies with hanging indentation; the compact strip keeps its fixed-height excerpt row, clips to available width, and omits the indent only when fewer than three cells are available. |
 | Recovery | `src/ui/live_work.rs` Recovery rows; `src/ui/threads.rs::watch_lines`; `src/ui/presentation.rs::recovery_lines` | Active Recovery rows use the owned-work path; Watch secondary details already indent; chrome recovery status is one line. `recovery_lines` has no production caller in the scanned tree, so keep its legacy output distinct from active recovery UI. |
 | Management preview | `src/ui/management.rs::preview_lines` | Preview title remains a heading; multiline result, error, and stale-result content use shared nested-body indentation and hanging wrapping. Structured field rows retain their own selection/list prefixes. |
 | Operation help | `src/ui/operations/metadata.rs::help_lines`, `src/ui/operations/client_forms.rs` | Field labels/values are peer rows. The F1 selected-field help remains sequential scrollable guide prose, not an item with a child body; `popup::Reader` wraps and preserves each source row. |
@@ -8996,7 +8996,8 @@ Static audit in `src/ui` and `src/presentation` after #177 final-tip CI succeede
 | Presentation model | `src/presentation/**` | No Ratatui `Line` constructors found; this layer provides typed content, not TUI row indentation. |
 
 Focused renderer coverage checks the shared indenter at narrow and wide widths
-in Japanese and English, and management preview content at both widths. At widths
+in Japanese and English, management preview content at both widths, and fixed-height
+compact excerpts from zero to wide widths. At widths
 below three cells the two-space indent is omitted because it cannot fit alongside
 content; all returned rows remain within the viewport. Existing tool-note
 assertions retain the two-space prefix, muted style, and non-body classification. The shared indenter also covers body-role paths, including
