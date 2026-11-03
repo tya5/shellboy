@@ -142,6 +142,16 @@ Recovery wait is time awaiting human action, not continued model processing. An 
 shellboy run retry --run RUN_ID
 ```
 
+Large held-input queues recover in ordered units of at most 128 receipts, not
+by rejecting the queue. While older input remains, the Turn stays in
+`recovery_wait`; `run get` / `run retry`'s `recovery_hint` and `thread get`'s
+`recovery_reason` include `remaining_held`. Repeat an explicit retry with a new
+operation ID to advance the next unit. Replaying the same operation ID returns
+its saved result and does not release another unit. New human input follows the
+older held input; no remaining instructions are silently dropped. The final
+unit lets the Turn resume normal preparation. Unknown-admission receipts still
+require inspection rather than guessed delivery.
+
 If a provider rejects an attachment, inspect `shellboy attachment list --thread
 THREAD_ID`, then exclude the specific attachment before retrying:
 

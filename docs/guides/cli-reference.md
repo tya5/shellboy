@@ -243,7 +243,7 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `run get --run RUN` | run_id/thread_id/state/owner_run_id/turn_id/end_message_node_id, owned_run_ids/owned_execution_ids, recovery_hint; optional waiting_reason identifies a saved in-flight context edit at the safe request boundary. Owned IDs reference current live resources, not a ledger of all historical children |
-| `run retry --run RUN` | Recovery Run/Turn references; explicitly reprepare a recovery_wait Turn in a live Run, reusing the Turn/original message without blindly rerunning executed shells. Human or direct parent decides |
+| `run retry --run RUN` | Recovery Run/Turn references; release the oldest at most 128 recoverable held receipts per operation, retaining recovery_wait while more remain. Existing recovery_hint includes remaining_held; repeat with a new operation ID for the next unit. Once drained, reprepare the same Turn without blindly rerunning executed shells. Human or direct parent decides |
 | `run stop --run RUN` | Confirmed stopping/Run state; stops own Run and owned descendants without affecting independent Runs. Models limited to ownership, humans may explicitly target. Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
 
