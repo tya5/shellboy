@@ -124,6 +124,7 @@ mod tests {
     }
     fn exec() -> crate::exec_client::ExecOptions {
         crate::exec_client::ExecOptions {
+            result: crate::exec_client::ResultMode::Reply,
             schema: "schema.json".into(),
             thread_id: None,
             create: crate::cli::ThreadCreateOptions {
