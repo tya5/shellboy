@@ -199,6 +199,60 @@ fn recovery_banner_preserves_actions_before_long_provider_reason_at_both_widths(
 }
 
 #[test]
+fn recovery_detail_localizes_only_generated_facts() {
+    use crate::ui::activity::{
+        ActivitySnapshot, ContextReductionSummary, RecoverySnapshot, RecoveryStage,
+        RecoveryStageDetails, saved_recovery_reason_unavailable,
+    };
+    let snapshot = ActivitySnapshot {
+        phase: crate::activity::ActivityPhase::Recovery,
+        recovery: Some(RecoverySnapshot {
+            stage: RecoveryStage::ModelContextLimit
+                .localized(UiLanguage::Ja)
+                .into(),
+            stage_kind: Some(RecoveryStage::ModelContextLimit),
+            stage_details: Some(RecoveryStageDetails {
+                retries: json!(2),
+                retry_limit: json!(3),
+                request_bytes: json!(400),
+                tool_bytes: json!(75),
+            }),
+            message: saved_recovery_reason_unavailable(UiLanguage::Ja).into(),
+            message_is_fallback: true,
+            ..Default::default()
+        }),
+        context_reduction: Some(ContextReductionSummary {
+            before_characters: 90_000,
+            after_characters: 40_000,
+            spilled_groups: 3,
+            omitted_items: 7,
+        }),
+        ..Default::default()
+    };
+    let english = plain(&recovery_lines(&snapshot, UiLanguage::En, 120, 20));
+    assert!(english.contains("Model request (input capacity exceeded)"));
+    assert!(english.contains("Review the saved recovery reason in Details."));
+    assert!(english.contains("Context was auto-compacted from 90000 to 40000 characters"));
+    let japanese = plain(&recovery_lines(&snapshot, UiLanguage::Ja, 120, 20));
+    assert!(japanese.contains("モデル要求（入力容量超過）"));
+    assert!(japanese.contains("保存された復旧理由を詳細で確認してください"));
+    assert!(japanese.contains("自動縮小済み"));
+
+    let source = ActivitySnapshot {
+        phase: crate::activity::ActivityPhase::Recovery,
+        recovery: Some(RecoverySnapshot {
+            stage: "raw saved stage".into(),
+            message: "Provider response: use the supplied reset time".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let shown = plain(&recovery_lines(&source, UiLanguage::En, 120, 16));
+    assert!(shown.contains("raw saved stage"));
+    assert!(shown.contains("Provider response: use the supplied reset time"));
+}
+
+#[test]
 fn quiet_event_title_retains_changed_values_and_failure_facts_in_both_languages() {
     let saved = json!({"kind":"model_changed","change":{"before":{"model":"old-model"},"after":{"model":"new-model"}},"payload":{"state":"failed","output_complete":false}});
     let value = node("event", "event", json!({"text":saved.to_string()}));

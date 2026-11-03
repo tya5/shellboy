@@ -42,13 +42,24 @@ pub(super) fn read_tx(
     .optional()
 }
 
-pub(super) fn prepare(facts: Option<String>) -> Option<String> {
+pub(super) fn prepare(
+    facts: Option<String>,
+) -> Option<crate::ui::activity::ContextReductionSummary> {
     facts
         .and_then(|body| serde_json::from_str::<[u64; 4]>(&body).ok())
-        .map(|[before, after, spilled, omitted]| {
-            crate::ui::text_width::glyphs::formatted!(
-                "自動縮小済み · spill {spilled}組 · 省略 {omitted}件 · {before}→{after} chars",
-                "自動縮小済み | spill {spilled}組 | 省略 {omitted}件 | {before}>{after} chars"
-            )
-        })
+        .map(
+            |[
+                before_characters,
+                after_characters,
+                spilled_groups,
+                omitted_items,
+            ]| {
+                crate::ui::activity::ContextReductionSummary {
+                    before_characters,
+                    after_characters,
+                    spilled_groups,
+                    omitted_items,
+                }
+            },
+        )
 }
