@@ -373,9 +373,10 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
             _root.path().to_owned(),
             attachments,
         );
+        let job = gc.start_history().await.unwrap().unwrap();
         let mut complete = false;
         for _ in 0..64 {
-            if gc.collect_history_step().await.unwrap().complete {
+            if gc.history_step(&job).await.unwrap().complete {
                 complete = true;
                 break;
             }
