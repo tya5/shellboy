@@ -87,7 +87,8 @@ reminded once at Run completion before it becomes `ignored`. The Turn's last
 assistant text is the "end message", not a reply; public `answer_node_id` /
 `last_answer` / `--final-answer-only` names are replaced without aliases.
 `exec --result reply|turn-end|run-end` (default `reply`) selects the result;
-an empty end message is ordinary empty text. No table, worker or queue is
+an empty end message is a normal empty result (exit 0), while a Turn ended by
+Esc has no end message and exits 4 like a stopped Turn. No table, worker or queue is
 added; schema 25 adds one partial index when step 2 lands. Until then the
 current schema and contracts below remain in force.
 

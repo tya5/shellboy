@@ -5,8 +5,11 @@
 The user answered Q2, Q11 and Q14 of the
 [reply-expected messages](../design/reply-expected-messages.md) memo, accepted
 the recommendations for the rest, chose glyph option B, and ruled that an empty
-end message is ordinary empty text. These points were decided while finalizing,
-without an explicit user answer:
+end message is a normal result (empty text, exit 0). The user also ruled
+(correcting an earlier judgement here) that a Turn ended by Esc produced no end
+message: it is not empty text but is treated like a stopped Turn, exit 4, in
+every `--result` mode. These points were decided while finalizing, without an
+explicit user answer:
 
 - `history get --final-answer-only` is kept and renamed `--end-message-only`
   instead of removed (Q12): `exec --result turn-end|run-end` needs the
@@ -16,8 +19,6 @@ without an explicit user answer:
   stopped, failed and unavailable, as today; only the reply outcomes cannot
   occur. The user's "never exit 4" is read as "never exit 4 for an ignored
   reply". Recheck if the literal reading was meant.
-- A completed Turn with no end-message node (ended by Esc) gives empty text in
-  exec, the same as an empty node; a tombstoned node stays exit 4.
 - exec `reply` mode waits on `run_ended` of the assigned Run, not
   `thread_settled`, which without a cursor matches an earlier Run's state.
 - Per-mode usage diagnostics: Turn usage (`turn-end`), Run usage (`run-end`),
