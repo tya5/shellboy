@@ -114,3 +114,30 @@ not a hard row-count bound: retained references, maintenance backlog and
 throughput greater than the scan rate can retain rows indefinitely.
 No conversation text, raw shell output or other event kind is removed by this
 policy. Existing SQLite pages are reusable but not automatically returned to OS.
+
+## Deleted-Thread message receipts (#197, #194 step 3)
+
+The history-GC requester owns receipt reclamation. Thread deletion first commits
+recipient pending-reply terminal transitions and outcome notices in its deletion
+transaction, with indexed lookups bounded by the per-recipient 128 cap. Sender
+cancellation is deferred to this receipt phase: each of at most 128 scanned rows
+is checked by receipt primary key for a deleted model sender, then conditionally
+terminalized with cancel_reason=sender_deleted and a recipient cancellation
+notice in the same GC transaction before eligibility is checked. No database-wide
+pending scan or migration is needed; GC never deletes a still-pending reply. History/all collection then
+removes at most 128 eligible receipt rows per background-lane transaction before
+node marking, yielding between batches. Deletion, explicit collection, and
+startup resumption of pending history jobs are the existing triggers; no timer
+or separate unbounded collector is introduced.
+
+A receipt targeting a deleted Thread is eligible only when its reply is not
+pending and no live model sender Thread owns the cross-Thread result. A live
+sender preserves the original receipt (including terminal reply facts) and its
+message/reply bodies as roots until that sender is deleted. External/human
+senders have no inbox: after recipient deletion and collection, message get and
+new waits may report target_unavailable; deletion is not indefinite archival.
+A deleted sender does not remove receipts targeting live recipients: those are
+still recipient-owned history. Once both model endpoints are deleted, terminal
+receipts are eligible. The GC transaction rechecks live endpoints and terminal
+state before deletion. A collection chunk does not remove operation_receipt
+idempotency records, whose existing independent retention policy still applies.

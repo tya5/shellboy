@@ -74,6 +74,14 @@ pub(crate) fn cancel_tx(
             continue;
         }
         if admission == "admitted" || selected || state == "applied" {
+            if super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, true)? {
+                item.outcome = ReplyCancelled;
+                if !changed.contains(&thread) {
+                    changed.push(thread);
+                }
+                items.push(item);
+                continue;
+            }
             item.outcome = AlreadyAdmitted;
             items.push(item);
             continue;
@@ -97,6 +105,7 @@ pub(crate) fn cancel_tx(
         }
         tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,0,?3,'archived',?4)",params![archive,thread,archived,at])?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_sender"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string()])?;
+        super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?;
         super::submission_retention::collect_operation(tx, &operation)?;
         item.outcome = Cancelled;
         item.archive_draft_id = Some(archive);

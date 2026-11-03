@@ -249,3 +249,18 @@ The remaining submitted-copy fence keeps its existing source/revision index.
 Cancellation archives keep their existing source references. Restoration still
 reads canonical message text/attachment positions without sending it; deleting
 the redundant submitted copy must not collect the archived message source.
+
+## Reply-Expected Messages (#194 Step 2)
+
+`message send --expect-reply` creates a pending reply duty in the acceptance
+receipt. Ordinary sends omit that flag, retaining their existing fingerprint.
+At most 128 duties may remain pending per recipient Thread, including held or
+unassigned input. Replay does not create a second duty. A model cannot require
+a reply from its own Thread. Admission appends an ordered, once-only
+`reply_expected` notice after the input in the same transaction. Explicit
+replies use `message reply`; Turn end messages do not satisfy duties.
+
+Cancellation retains the existing sender/human authority. A queued input is
+archived and its duty is cancelled together. An admitted input stays in history;
+its duty becomes cancelled, returns `reply_cancelled`, and adds a durable
+recipient notice without waking it. See [the adopted design](reply-expected-messages.md).

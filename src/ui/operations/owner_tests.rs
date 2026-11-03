@@ -56,7 +56,7 @@ fn owner_forms_cover_every_owner_catalogue_identity_without_client_stubs() {
         .iter()
         .map(|kind| kind.catalogue())
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(implemented.len(), 42);
+    assert_eq!(implemented.len(), 43);
     assert_eq!(implemented, owner);
     for kind in OpKind::OWNER {
         let form = Form::new(*kind, &context());
@@ -106,8 +106,9 @@ fn previously_missing_flags_have_typed_effects() {
     set(&mut send, "text", "hello");
     set(&mut send, "sender_label", "operator");
     set(&mut send, "deliver", "now");
+    set(&mut send, "expect_reply", "true");
     assert!(
-        matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
+        matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.expect_reply&&args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
     );
     let mut history = Form::new(OpKind::HistoryGet, &c);
     set(&mut history, "end_message_only", "true");
@@ -210,7 +211,7 @@ fn headers_never_become_actions_and_help_preserves_edits_and_references() {
     let actions = operations.rows().to_vec();
     let rendered = screen(&operations);
     assert!(rendered.contains("その他の操作"));
-    assert!(rendered.contains("58件"));
+    assert!(rendered.contains("59件"));
     operations.key(key(KeyCode::Home));
     for (index, expected) in actions.iter().enumerate() {
         assert_eq!(OpKind::ALL[operations.selected], *expected);

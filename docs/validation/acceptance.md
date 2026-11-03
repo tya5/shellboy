@@ -9124,3 +9124,34 @@ defaults to target schema 24; the Python test covers the argument defaults.
 This is a source comparison, not an executed upgrade test. Run the disposable
 synthetic upgrade test on the candidate; no candidate, tag, publication or
 installed-binary change is claimed by this preparation.
+### #194 Step 2: Reply Core
+
+Synthetic fixtures cover fresh/upgrade partial-index plans, once-only ordered
+admission with rollback, 128-duty capacity, replay and fingerprint conflicts,
+applied/pending and recipient authority checks, reply correlation, queued and
+admitted cancellation, terminal reply wait states, and observer cleanup.
+Terminal `ignored`/`recipient_deleted` facts are injected for wait tests; their
+production transitions are step 3. Final-tip three-OS CI remains pending.
+
+### #194 Step 3 / #197 Synthetic Acceptance
+
+Fixtures exercise the 128-entry reminder (each message ID and sender), ignored
+outcomes after normal completion/Esc, stopping and recovery gates, rollback and
+reopening with a different Run, recipient/sender/both deletion precedence, idle
+sender non-start, and 260 deleted-target receipt rows reclaimed in bounded GC
+steps. Pending duties, live recipients, and live model senders retain receipt
+roots and associated bodies. These are synthetic fixtures, not real-provider or
+power-loss tests. Final task CI and review remain required.
+
+Step-3 review follow-up: deletion uses receipt_reply_pending with target equality
+and LIMIT 128 per recipient (EXPLAIN asserted); 4096 unrelated pending replies
+remain untouched. Sender deletion is deferred to 128-row GC batches before
+eligibility, with actor/reason and cancellation notice asserted after GC.
+
+### #194 Step 6 Reply TUI Acceptance
+
+Synthetic fixtures cover Japanese/English option B states with unchanged source
+marks, narrow/wide reply popup drawing, applied-only selection, exact saved reply
+correlation, failed reply restoration, per-view reply mode, Escape draft retention,
+and acknowledgement races with newer drafts/targets. Final task CI is pending;
+these fixtures do not establish manual terminal or real-provider behavior.

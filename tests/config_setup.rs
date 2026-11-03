@@ -493,6 +493,7 @@ async fn missing_key_recovery_has_setup_details_and_never_opens_an_http_connecti
     let mut changes = control.subscribe();
     let sent = control
         .request(request(Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
             thread_id: Some(thread.clone()),

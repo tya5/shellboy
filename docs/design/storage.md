@@ -659,3 +659,34 @@ Cache diagnostics reuses the context display's bounded completed-attempt
 selection over at most 33 recent Turns and the existing schema19 indexes.
 There is no new migration, derived pointer, index or adoption write. Bounded
 reported facts remain in the existing attempt manifest and GC accounting.
+
+## Pending Reply Lookup (#194)
+
+Provisional schema25 adds `receipt_reply_pending(target_thread_id)` for
+`json_extract(result_json,'$.reply.state')='pending'`. Reply state remains in
+acceptance receipts; the index supports the 128-duty cap and bounded Thread
+lookup. Renumber this migration mechanically if another schema change lands
+first. Run-end transitions are a subsequent implementation step.
+
+## Reply lifecycle and deleted receipt ownership (#194 step 3, #197)
+
+Pending replies are bounded to 128 per recipient and use receipt_reply_pending.
+Only normal Run completion checks applied pending duties: already-reminded
+messages become ignored, and previously unreminded messages receive one durable
+reminded_at/reminded_run_id fact and one reply_reminder event containing each
+message ID and credential-free sender. Stop, recovery wait and shutdown do not
+consume or ignore duties. The reminder is once per message across restart.
+
+Thread deletion terminalizes recipient duties in the delete transaction using
+one target_thread_id-indexed lookup per deleted Thread, bounded by the 128-duty
+cap. It does not scan sender JSON or all pending replies. Deleted model senders
+are handled later in the existing history-GC receipt phase, at most 128 rows
+per transaction: pending becomes cancelled with cancelled_by and
+cancel_reason=sender_deleted before reclamation eligibility is checked. This
+reuses the existing deletion-triggered collector and needs no migration or
+sender index. Recipient deletion wins if both endpoints are deleted.
+Terminal receipts with a live model sender remain owned
+by that sender, while receipts targeting a live recipient remain recipient
+owned. Other deleted-target receipts are reclaimed by history GC in at-most-128
+row background transactions, before payload marking. See gc.md for visibility
+and root retention; operation_receipt retention is unchanged.

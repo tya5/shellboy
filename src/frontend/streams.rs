@@ -434,6 +434,8 @@ pub(super) fn seal_node(node: &mut UiNode) {
             node.presentation.created_at.as_deref(),
             node.presentation.input_source,
             node.presentation.input_sender_label.as_deref(),
+            node.presentation.reply_state,
+            node.presentation.reply_excerpt.as_deref(),
         ),
     )
     .is_err()

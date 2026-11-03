@@ -209,6 +209,7 @@ impl Fixture {
             .request(Request::new(
                 format!("{}:{}", self.owner.instance_id, uuid::Uuid::new_v4()),
                 Command::MessageSend(MessageSendArgs {
+                    expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
                     thread_id: Some(id),
