@@ -283,7 +283,9 @@ impl ReplayLease {
     pub(crate) fn proves_no_active_middle(&self) -> bool {
         let mut first = None;
         for frame in &self.0.frames {
-            if frame.spill_marker { return false; }
+            if frame.spill_marker {
+                return false;
+            }
             if let Some(group) = frame.group.as_deref() {
                 match first {
                     None => first = Some(group),

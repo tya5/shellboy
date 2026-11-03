@@ -3464,6 +3464,9 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
         before.reply.send((200, tool_response(2, 200))).unwrap();
         let summary = incoming(&control, &mut receive).await;
         assert_eq!(summary.body["tools"], json!([]));
+        let first_summary_input = summary.body["input"].to_string();
+        assert!(first_summary_input.contains("large-0") && first_summary_input.contains("large-1"));
+        assert!(!first_summary_input.contains("small-2"), "the newest completed group is protected");
         let mut rejected = answer(&"too-long-summary ".repeat(180));
         rejected["usage"] = json!({"input_tokens":321,"output_tokens":123,"total_tokens":444});
         summary.reply.send((200, rejected)).unwrap();
@@ -3485,17 +3488,23 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
         assert_eq!(first_events[0]["metrics"]["summary_usage"]["requests"], 1);
         assert_eq!(first_events[0]["metrics"]["summary_usage"]["reduce_requests"], 0);
         after.reply.send((200, tool_response(3, 205))).unwrap();
+        let middle = incoming(&control, &mut receive).await;
+        assert_eq!(middle.body["tools"], json!([]));
+        let middle_input = middle.body["input"].to_string();
+        assert!(middle_input.contains("small-2"), "the new middle target must contain the newly eligible completed group");
+        assert!(!middle_input.contains("small-3"), "the newest tool group stays protected");
+        middle.reply.send((200, answer("The earlier shell commands completed."))).unwrap();
         let gated = incoming(&control, &mut receive).await;
-        assert_ne!(gated.body["tools"], json!([]), "partial adoption must not bypass failed-summary retry gate");
+        assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
         gated.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
         assert!((1..=2).contains(&events.len()), "only a newly eligible tool group can add one attempt: {events:#?}");
         assert_eq!(events.iter().filter(|event| event["metrics"]["summary_rejected"] == true).count(), 1, "the rejected summary must not be reissued");
         let item = events.iter().find(|event| event["metrics"]["summary_rejected"] == true).expect("original summary rejection is retained");
-        if let Some(later) = events.iter().find(|event| event["metrics"]["summary_rejected"] != true) {
-            assert!(later["metrics"].get("summary_usage").is_none_or(Value::is_null), "a new spill must not retry the old summary");
-        }
+        assert_eq!(events.len(), 2, "newly eligible middle sources produce one additional attempt");
+        let later = events.iter().find(|event| event["metrics"]["summary_rejected"] != true).unwrap();
+        assert_eq!(later["state"], "adopted", "the new middle summary must be adopted");
         assert_eq!(item["state"], "adopted");
         assert_eq!(item["metrics"]["summary_rejected"], true);
         assert!(item["metrics"]["spilled_groups"].as_u64().unwrap() >= 2);
@@ -3936,12 +3945,24 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     if next.body["tools"] == json!([]) {
         let input = next.body["input"].to_string();
         assert!(input.contains("call-0"));
-        assert!(!input.contains("call-1"), "the latest group stays protected");
-        next.reply.send((200, answer("short middle summary"))).unwrap();
+        assert!(
+            !input.contains("call-1"),
+            "the latest group stays protected"
+        );
+        next.reply
+            .send((200, answer("short middle summary")))
+            .unwrap();
         next = incoming(&control, &mut receive).await;
     }
-    assert_ne!(next.body["tools"], json!([]), "ordinary work continues after compaction");
-    assert!(next.body["input"].to_string().contains("call-1"), "the newest group must remain replayable");
+    assert_ne!(
+        next.body["tools"],
+        json!([]),
+        "ordinary work continues after compaction"
+    );
+    assert!(
+        next.body["input"].to_string().contains("call-1"),
+        "the newest group must remain replayable"
+    );
     next.reply
         .send((200, answer_with_usage("done", 10)))
         .unwrap();
