@@ -487,10 +487,12 @@ fn node_lines_inner(
     }
     out.role = LineRole::Meta;
     for notice in omission_notices(language, node) {
-        out.push(Line::from(Span::styled(
-            notice,
-            Style::default().fg(theme::MUTED),
-        )));
+        let row = Line::from(Span::styled(notice, Style::default().fg(theme::MUTED)));
+        if conversational || node.presentation.kind == PresentationKind::Event {
+            out.push(row);
+        } else {
+            out.extend(indented_wrap(vec![row], width));
+        }
     }
     out
 }
@@ -796,6 +798,19 @@ fn node_lines_with_header(
         let first_body = lines.remove(1);
         lines[0].spans.push(Span::raw("  "));
         lines[0].spans.extend(first_body.spans);
+        if node.presentation.kind == PresentationKind::Spill {
+            let mut wrapped = indented_wrap(vec![lines.remove(0)], width);
+            // Keep the existing first-line placement; the helper's indent is for
+            // wrapped continuations of this inline original-reference row.
+            if wrapped
+                .first()
+                .and_then(|line| line.spans.first())
+                .is_some_and(|span| span.content.as_ref() == "  ")
+            {
+                wrapped[0].spans.remove(0);
+            }
+            lines = wrapped;
+        }
     }
     if node.presentation.kind == PresentationKind::Event && lines.len() > 1 {
         let body = lines.split_off(1);
@@ -4037,7 +4052,22 @@ mod tests {
             presentation: crate::presentation::project("assistant_response", &payload, &text, 0),
         };
         assert!(node.presentation.metadata_limited);
+        node.presentation.ui_messages.limited = true;
         assert_eq!(node.presentation.body_omitted_chars, 0);
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let notice = Text::MetadataLimited.render(language);
+            let mut non_conversational = node.clone();
+            non_conversational.presentation.kind = PresentationKind::Summary;
+            for rendered_node in [&node, &non_conversational] {
+                let rows = node_lines(language, rendered_node, false, 0, 80, &mut Vec::new());
+                let row = rows
+                    .iter()
+                    .find(|row| row.to_string().contains(&notice))
+                    .unwrap_or_else(|| panic!("{language:?}: {}", plain(&rows)));
+                assert!(row.to_string().starts_with("  "), "{language:?}: {row:?}");
+            }
+        }
+        node.presentation.ui_messages.limited = false;
         let shown = plain(&node_lines(
             UiLanguage::Ja,
             &node,
@@ -5124,6 +5154,62 @@ mod conversation_item_tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn spill_reference_wraps_continuations_with_shared_indent_bilingually() {
+        use crate::presentation::{NodePresentation, PresentationBlock};
+
+        for (language, body) in [
+            (
+                UiLanguage::En,
+                "This is a long saved excerpt that must wrap onto continuation rows while remaining aligned below the original reference heading.",
+            ),
+            (
+                UiLanguage::Ja,
+                "これは元の参照見出しの下に揃ったまま、複数行に折り返される長い保存済み抜粋です。",
+            ),
+        ] {
+            let node = UiNode {
+                node_id: "spill-reference".into(),
+                role: "spill".into(),
+                text: body.into(),
+                total_chars: body.chars().count(),
+                presentation: NodePresentation {
+                    kind: PresentationKind::Spill,
+                    title: "原文参照".into(),
+                    ui_messages: crate::presentation::messages::PresentationMessages {
+                        title: Some(Message::Text(Text::Spill)),
+                        ..Default::default()
+                    },
+                    blocks: vec![PresentationBlock {
+                        kind: BlockKind::Plain,
+                        text: body.into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let rows = node_lines(language, &node, false, 0, 36, &mut Vec::new());
+            let shown = rows.iter().map(ToString::to_string).collect::<Vec<_>>();
+            assert!(shown.len() > 1, "{language:?}: {shown:?}");
+            assert!(
+                shown[0].contains(if language == UiLanguage::En {
+                    "Original reference"
+                } else {
+                    "原文参照"
+                }),
+                "{language:?}: {shown:?}"
+            );
+            for row in shown.iter().skip(1) {
+                assert!(row.starts_with("  "), "{language:?}: {row:?}");
+                assert!(
+                    Line::from(row.as_str()).width() <= 36,
+                    "{language:?}: {row:?}"
+                );
             }
         }
     }
