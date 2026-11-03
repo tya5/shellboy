@@ -9206,3 +9206,16 @@ Rebase follow-up: main's newly introduced compaction-effect Python fixture now
 expects this branch's current schema 25 (no migration renumbering). All 190
 Python script tests passed on macOS; strict all-target Clippy also passed.
 Focused native tests and publication/CI remain pending at this record point.
+
+### #194 rebased native checks completed (2026-11-03)
+
+On macOS, the chained rust-slot validation exited 0: `cargo fmt --all`,
+`cargo clippy --locked --all-targets -- -D warnings`,
+`cargo test --locked --lib ui::send_tests::` (27 passed),
+`cargo test --locked --lib foreground_db_stall` (1 passed), and
+`cargo test --locked --test integration reply::` (7 passed). All three
+filters ran nonzero matching tests after a fresh library rebuild. This includes
+bilingual reply local-handoff and sender-deletion-before-GC regressions.
+The schema fixture correction separately passed all 190 Python script tests.
+No real provider, installed binary, or user data was used. Final published-tip
+CI, other OSes, and manual terminal/provider behavior remain unverified.
