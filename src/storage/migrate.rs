@@ -377,6 +377,7 @@ mod activity_migration_tests {
             "nodes_index_gc",
             "node_event_retention",
             "delivery_event_state",
+            "jobs_running_recovery",
         ] {
             assert_eq!(
                 db.query_row(
