@@ -1,6 +1,7 @@
 # Reply-expected messages (#194)
 
-Status: **Adopted (2026-11-03), not implemented.** This design turns the
+Status: **Implemented on the migration-26 integration branch (2026-11-03);
+final checks, independent review and main landing remain gates.** This design turns the
 user's decisions on #194 (comments marked "決定" and the answers to the memo's
 questions, 2026-11-03) into a concrete design, lists every existing behaviour
 it touches, records the answered questions under [Decisions](#decisions) and
@@ -67,10 +68,12 @@ These correct or sharpen assumptions in the issue thread.
    replayed as plain `user` text. A model cannot reply to a message it cannot
    name, so admission must add a short notice carrying the ID (see
    [Model-visible notices](#model-visible-notices)).
-5. **Existing bound 128.** The pending-message projection (`/queue`, 128 rows),
-   `message cancel` (1..128 IDs) and resume-time interrupted-message recovery
-   (`message_delivery::recover_on_resume_tx`, rejects >128) all use 128. There
-   is no total cap on queued messages today.
+5. **Existing windows of 128 are not a queue admission invariant.** The
+   pending-message projection (`/queue`, 128 rows), `message cancel` (1..128 IDs)
+   and the pre-integration interrupted-message recovery all used 128. There is
+   no total cap on ordinary queued messages. The integration replaces the old
+   recovery refusal with oldest-first progressing units; see the recovery
+   decision at the end of this document. The pending reply-duty cap remains128.
 6. **The #187 completion hook** is `driver::next`, in the branch where no Turn,
    pending input, event or owned work remains: `revisit::release_tx` runs and,
    if it found nothing, `state::complete_idle_run`. The shutdown gate already
