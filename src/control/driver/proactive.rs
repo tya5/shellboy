@@ -30,6 +30,7 @@ struct Evidence {
     input_tokens: u64,
     input_characters: Option<u64>,
     insufficient_prefix: bool,
+    insufficient_spill: bool,
     exhausted_active: bool,
     baseline_marks: Option<Vec<String>>,
 }
@@ -133,7 +134,7 @@ pub(super) async fn maybe_compact(
                 "SELECT CASE WHEN json_valid(input_manifest_json) AND json_type(input_manifest_json,'$.input_characters')='integer' THEN json_extract(input_manifest_json,'$.input_characters') END FROM model_attempt WHERE id=?1",
                 [attempt], |row| row.get::<_, Option<i64>>(0),
             )?.and_then(|n| u64::try_from(n).ok());
-            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix, exhausted_active: exhausted_current_turn, baseline_marks })))
+            Ok(Some(Measurement::Ready(Evidence { attempt: attempt.to_owned(), input_tokens, input_characters, insufficient_prefix, insufficient_spill, exhausted_active: exhausted_current_turn, baseline_marks })))
         })
         .await
         .map_err(storage_error);
@@ -225,7 +226,7 @@ pub(super) async fn maybe_compact(
         (Some(previous), Some(current)) => guard::has_new_marks(previous, current, "middle:"),
         _ => false,
     };
-    let spill_new = !evidence.insufficient_prefix && !evidence.exhausted_active && has_kind("spill:");
+    let spill_new = !evidence.insufficient_prefix && !evidence.insufficient_spill && !evidence.exhausted_active && has_kind("spill:");
     let summary_new = !evidence.insufficient_prefix
         && has_kind("summary:")
         && !(marks.is_none()
