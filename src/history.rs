@@ -341,6 +341,36 @@ fn restart_reasoning_after(
     Ok(())
 }
 
+/// Bound for [`summary_message_ids`]: the restore provenance budget.
+const SUMMARY_SOURCE_ROWS: i64 = 65_536;
+/// #182: the user-message IDs (a message ID is its message node ID) covered by
+/// any summary node (ordinary, active-Turn or nested), in original order,
+/// derived on demand from the ordered replacement sources. Nested summaries
+/// are expanded through their own sources, at most 8 levels and 65,536 source
+/// rows; nothing extra is stored on summary nodes.
+pub fn summary_message_ids(
+    db: &Connection,
+    summary_node_id: &str,
+) -> Result<Vec<String>, StorageError> {
+    let mut statement = db.prepare(
+        "WITH RECURSIVE src(node,depth,sort) AS(
+           SELECT s.source_node_id,1,printf('%08d',s.ordinal) FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id WHERE r.output_node_id=?1
+           UNION ALL
+           SELECT s.source_node_id,src.depth+1,src.sort||'.'||printf('%08d',s.ordinal) FROM src JOIN replacement r ON r.output_node_id=src.node JOIN replacement_source s ON s.replacement_id=r.id WHERE src.depth<8
+           LIMIT ?2)
+         SELECT n.id FROM src JOIN node n ON n.id=src.node
+         WHERE n.kind NOT IN ('tool_result','assistant_response')
+           AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user')
+         ORDER BY src.sort",
+    )?;
+    let rows = statement
+        .query_map(params![summary_node_id, SUMMARY_SOURCE_ROWS], |row| {
+            row.get(0)
+        })?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(rows)
+}
+
 /// #182: true while the latest assistant output on the selected path requested
 /// a tool, i.e. the provider tool loop is still open. Selective automatic edits
 /// wait until this is false; only the active-Turn summary may run meanwhile.

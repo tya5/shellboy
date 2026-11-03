@@ -3107,13 +3107,19 @@ Implementation choices with lower confidence, with recheck conditions:
   operation receipts, are drained to terminal outcomes by the compaction queue
   and are cancelled with recorded results at startup, so deletion does not
   remove them.
-- User decision (2026-11-03, final, replacing the earlier "after the summary"
-  choice and a briefly considered per-segment summary): the active Turn's
-  later user messages and protected nodes stay verbatim, in their original
-  order, before the one summary of ③④, which comes last as the current state
-  (Codex `build_compacted_history_with_limit`). Per-segment summaries were
-  rejected because short segments can produce summaries larger than their
-  source. One summary request per attempt.
+- User decision B, simplified (2026-11-03, final; replaces moving the
+  messages before or after the summary, per-segment summaries and code-quoted
+  messages): mid-Turn user messages are summarized with the tool rounds. The
+  summarizer sees them interleaved in original order, and every summary prompt
+  (ordinary, active-Turn, nested) asks for a "User instructions to keep"
+  section. Meaning, not byte-exactness, is required. Message IDs are derived on
+  demand from the ordered replacement sources (`history::summary_message_ids`,
+  bounded by depth 8 and 65,536 rows on indexed lookups), so no ID list,
+  original-order list or reply-expected list is stored on summary nodes. The
+  path keeps the ordinary summary shape and no original node gains an edge. A
+  span holding a protected node is not a target. Covered messages'
+  attachments leave send selection like any replaced source. Recheck if
+  models drop instructions in practice.
 - The ordinary prefix summary runs while the tool loop is open (required by the
   order decision); its edit stops the open loop's thinking too. Anthropic
   documents this as degrading, not failing; recheck on any provider rejection.

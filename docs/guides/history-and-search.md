@@ -110,9 +110,10 @@ summaries is left there, or when a fresh measurement after that summary is
 still at or above the threshold, does it summarize the active Turn: every tool
 round of the Turn is replaced by one summary, and the latest tool round is
 included in it as plain text. Earlier Turns and the Turn's request stay
-unchanged. User messages delivered during that work are kept word for word, in
-their original order, just before the summary, which comes last and describes
-the current state. One summary runs per attempt.
+unchanged. User messages delivered during that work are summarized with it:
+every summary keeps a "User instructions to keep" section for what must stay
+in effect, and the originals stay readable with `shellboy history get` and
+`shellboy history relations`. One summary runs per attempt.
 
 Reasoning follows one rule for every replacement: reasoning before the first
 changed position is still sent unchanged, and reasoning saved after it is not

@@ -41,7 +41,8 @@ impl SummaryBudget<'_> {
     }
     pub fn prompt(&self, stage: &str) -> String {
         format!(
-            "{BOUNDED_PROMPT}\nStage: {stage}. Maximum final summary: {} Unicode characters. Be substantially shorter if needed. Exact full source provenance is retained outside the summary.",
+            "{BOUNDED_PROMPT}{}\nStage: {stage}. Maximum final summary: {} Unicode characters. Be substantially shorter if needed. Exact full source provenance is retained outside the summary.",
+            super::KEEP_INSTRUCTIONS,
             self.limit
         )
     }
