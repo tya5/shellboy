@@ -182,6 +182,8 @@ mod audit_tests {
     };
     use std::{sync::Mutex, time::Instant};
 
+    type CoverageRow = (String, String, i64, i64, String, Option<String>, bool);
+
     static TRACE: std::sync::OnceLock<Mutex<Vec<(String, std::time::Duration, i32)>>> =
         std::sync::OnceLock::new();
 
@@ -268,7 +270,7 @@ mod audit_tests {
                     })
                     .expect("production IndexPreview attachment projection");
                 if let (Some(space), true) = (&space, valid) {
-                    let _: Vec<(String, String, i64, i64, String, Option<String>, bool)> = tx
+                    let _: Vec<CoverageRow> = tx
                         .prepare(coverage_sql)
                         .and_then(|mut statement| {
                             statement
@@ -287,11 +289,11 @@ mod audit_tests {
                         })
                         .expect("production IndexPreview coverage projection");
                 }
-                if let Some(body) = row.payload {
-                    if let Ok(payload) = serde_json::from_str::<Value>(&body) {
-                        for (_, text) in body_facts(&row.kind, &payload, &paths) {
-                            let _ = split_text(&text, 512, 0);
-                        }
+                if let Some(body) = row.payload
+                    && let Ok(payload) = serde_json::from_str::<Value>(&body)
+                {
+                    for (_, text) in body_facts(&row.kind, &payload, &paths) {
+                        let _ = split_text(&text, 512, 0);
                     }
                 }
             }
