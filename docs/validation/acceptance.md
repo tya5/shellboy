@@ -9738,3 +9738,19 @@ Final-tip Clippy, cleanup-stage measurements/regressions and default/all-OS CI
 remain to be completed.
 No installed binary, user data, provider request or database schema changes are
 part of this validation. Native Windows terminal/font pixels remain untested.
+
+### #218 Compact Removal: Separate Stage
+
+The behavior checkpoint is `553a426`. Compact-only painting/height/count/label
+helpers are removed separately; their shared-fit, grapheme, control-text and
+4 MiB draft protections now run through shared fitting or held painting.
+Saved queue/archive/reply/source/status/cancellation behavior is retained.
+Post-removal focused queue tests pass 22 cases and held tests pass 11 cases on
+macOS arm64 with locked dependencies. Strict all-target locked Clippy passes
+with warnings denied; formatting and the integration-layout/watchdog checker
+also pass. An additional attempted `check-watchdogs.py` command does not exist;
+watchdog policy is checked by the successful `check-test-layout.py` command.
+Independent metrics are `held-regions/after-compact-removal.json`;
+message_queue.rs changes from 1793/27/5 to 1690/22/5 (physical lines/production
+functions/max lexical parameters including self). Neither local tests nor this
+cleanup establishes final-tip CI or W8 landing.

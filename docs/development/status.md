@@ -4675,3 +4675,14 @@ still warn as unused until their separate cleanup. The behavior checkpoint has
 no pushed-commit CI result yet. Cleanup, final-tip default/all-OS CI, final
 measurements and W8 review/integration remain outstanding. No Windows font-pixel
 claim is made.
+
+### #218 Separate Compact-Removal Stage
+
+Behavior is checkpointed at `553a426`. Subsequent cleanup removes disconnected
+compact-only count/height/label/body/draw helpers and ports their width, grapheme,
+control-text and large-draft tests to shared fitting/held drawing. It retains
+saved-input status/source/cancel, replies, archives and bounded excerpts.
+Independent post-removal metrics are in `validation/held-regions/`.
+Cleanup validation passes 22 queue and 11 held tests, formatting, and strict
+all-target locked Clippy. Final-tip default/all-OS CI is still pending; neither
+stage-1 CI nor the behavior checkpoint implies feature acceptance or landing.

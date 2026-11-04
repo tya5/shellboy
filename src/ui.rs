@@ -6694,7 +6694,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     } else {
         0
     };
-    let queue_height = held_input::height(
+    let held_height = held_input::height(
         layout[1].height.saturating_sub(recovery_height),
         state.held_input_collapsed,
         state.config.ui.held_input_rows,
@@ -6707,21 +6707,21 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         layout[1]
             .height
             .saturating_sub(recovery_height)
-            .saturating_sub(queue_height),
+            .saturating_sub(held_height),
     );
     let body_area = Rect {
         height: layout[1]
             .height
             .saturating_sub(recovery_height)
-            .saturating_sub(queue_height)
+            .saturating_sub(held_height)
             .saturating_sub(live_height),
         ..layout[1]
     };
-    let queue_area = Rect::new(
+    let held_area = Rect::new(
         layout[1].x,
         body_area.bottom() + recovery_height + live_height,
         layout[1].width,
-        queue_height,
+        held_height,
     );
     let live_area = Rect::new(
         layout[1].x,
@@ -6731,7 +6731,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     );
     state.live_work_mut().set_area(live_area);
     let (fold, cap) = (state.held_input_collapsed, state.config.ui.held_input_rows);
-    held_input::configure(state.active_view_mut(), fold, cap, queue_area);
+    held_input::configure(state.active_view_mut(), fold, cap, held_area);
     let recovery_area = Rect {
         y: body_area.bottom(),
         height: recovery_height,
@@ -6815,7 +6815,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     if let Some(snapshot) = &view.activity.snapshot {
         draw_recovery(frame, recovery_area, snapshot, state.config.ui.language);
     }
-    held_input::draw(frame, queue_area, view, state.config.ui.language);
+    held_input::draw(frame, held_area, view, state.config.ui.language);
     live_work::draw(
         frame,
         live_area,
