@@ -14,7 +14,7 @@ These notes cover changes on `main` after v0.7.2 baseline `22db1a226351123fc5b27
 - Current source declares conversation schema 27 (`src/storage.rs`, `MIGRATION_NAMES` has entries 1–27; `src/storage/migrate.rs` applies through migration 27). Standalone RAG schema is 4 (`src/rag/store.rs`, `PRAGMA user_version=4`). From v0.7.2 schema 27, no schema migration is expected; confirm on the release candidate.
 - Run the release upgrade check against the exact old and candidate binaries, with a fresh disposable output directory:
   `python3 scripts/check-release-upgrade.py --old OLD_BINARY --new NEW_BINARY --root EMPTY_TEMP_DIR --old-version 0.7.2 --start-schema 27`
-  This check has not yet been run for a v0.7.3 candidate. The current script choices do not include `0.7.2` for `--old-version`, so this requested invocation is presently rejected by argument parsing; update the checker before release validation. The current script choices do not include `0.7.2` for `--old-version`, so this requested invocation is presently rejected by argument parsing; update the checker before release validation.
+  This check has not yet been run for a v0.7.3 candidate. The current script choices do not include `0.7.2` for `--old-version`, so this requested invocation is presently rejected by argument parsing; update the checker before release validation.
 
 ## Changes since v0.7.2
 
