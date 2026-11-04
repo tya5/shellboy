@@ -9802,3 +9802,21 @@ marker enumeration measured 40 microseconds cold and 8-11 microseconds warm
 with zero candidates. This is candidate enumeration, not full startup-stage
 latency. The snapshot was deleted. Rust formatting and `cargo check --tests` are
 being rerun after rebase; default and all-OS CI remain pending.
+
+## #219 proposal 2/3 capture follow-up measurement
+
+On one 3.5 GiB read-only-source `VACUUM INTO` copy of the local schema-27 DB,
+with migration 28 applied, there were 60,840 groups, nine interrupted-work
+Threads, one pending wait, zero candidate groups, and one active attempt. Step
+measurements (first / warm median) were: thread detection with correlated wait
+matching, 603 / 114 ms; wait capture across nine Threads, 30 / 18 ms; tool-call
+snapshot across nine Threads, 309 / 258 ms (zero output rows); active-attempt
+cleanup, 295 / 30 ms (one row). A rollback-safe full context-capture plus
+`interrupt_previous_work` run measured 1,796 ms before and 881 ms after the
+candidate-backed query changes, with no capture failures and no repaired,
+unresolved, or retired groups in either run. The candidate-backed call snapshot
+returned byte-identical result rows (zero on this workload) and reduced the
+query from a 249 ms warm median to 0.064 ms. The thread selector returned the
+same nine IDs and fell from 70 ms to 8.8 ms warm. All timings are local arm64
+macOS / SQLite 3.51 observations, not startup timing guarantees; sample
+boundaries differ. The one snapshot was deleted after measurement.
