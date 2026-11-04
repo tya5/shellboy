@@ -404,9 +404,9 @@ async fn last_handle_drop_requests_cleanup_and_natural_exit_kills_term_ignoring_
 #[tokio::test]
 async fn leading_dash_command_is_a_script_not_a_bash_option() {
     let root = tempfile::tempdir().unwrap();
-    // Use an already installed native executable: this regression concerns
-    // Bash argv, not first-launch behavior of a newly written interpreter file.
-    std::os::unix::fs::symlink("/bin/echo", root.path().join("-x")).unwrap();
+    // A shell accepts the fixture argv0; multicall echo implementations can
+    // reject a symlink whose name is not one of their registered utilities.
+    std::os::unix::fs::symlink("/bin/sh", root.path().join("-x")).unwrap();
     let mut config = config();
     config.shell.env.insert(
         "PATH".into(),
@@ -416,7 +416,14 @@ async fn leading_dash_command_is_a_script_not_a_bash_option() {
             std::env::var("PATH").unwrap()
         ),
     );
-    let (chunks, completion) = collect(spawn(&config, args("-x 'arg space'")).await).await;
+    let (chunks, completion) = collect(
+        spawn(
+            &config,
+            args("-x -c 'printf \"%s\\n\" \"$1\"' fixture 'arg space'"),
+        )
+        .await,
+    )
+    .await;
     assert_eq!(
         joined(&chunks, OutputStream::Stdout),
         b"arg space\n",
