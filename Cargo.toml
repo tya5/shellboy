@@ -67,7 +67,7 @@ unsafe_op_in_unsafe_fn = "deny"
 dbg_macro = "deny"
 
 [profile.dev]
-debug = "line-tables-only"
+debug = false
 
 [profile.release]
 lto = "thin"
