@@ -215,3 +215,32 @@ expected tests can establish local feature evidence. That rebuilt run passes
 held 12, live-work 33, region 3, queue 22, worker 10, key-hint 12 and overlay 26,
 plus locked full test compilation and strict all-target Clippy with warnings
 denied. No installed binary changes or dependency changes are involved.
+
+## First Final-Tip CI Failure: Viewport Fixtures
+
+Default CI `41884515961` on `1ba45e4` fails in actual Ubuntu test assertions.
+It is not a runner-capacity cancellation and does not authorize all-OS acceptance.
+The old scroll screen helpers still sliced terminal height minus 11, accidentally
+including fixed-region rows. Their fixtures now add the five held-region rows
+and slice height minus 16, preserving the original history viewport and every
+source-anchor, row equality, page overlap, preview and resize assertion. The
+folded-input test keeps its 24-row frame and explicitly accounts for the new
+five-row region (history area 13/10 becomes 8/5); no composer sizing changes.
+Small cached-history fixtures gain the same five rows. No production history,
+scrolling or shell behavior is changed to satisfy these tests.
+
+That CI also fails two shell-output tests: leading-dash stdout is empty, and
+the slow-database binary-tail fixture saves 835584 rather than 1048576 stdout
+bytes. Their relationship to this UI change is unestablished; they are tracked
+separately and no shell source is changed here. Local reproduction and the next
+corrected-tip CI are still required. A passing focused palette/held suite does
+not establish the untested full UI/scroll suite.
+
+Corrected-fixture local run (macOS arm64, locked dependencies, rust-slot) passes
+19 library scroll-characterization, 4 input, 6 integration scrolling and
+88 integration UI tests (1 UI test remains ignored). Both separately failing
+shell cases also pass individually locally. This does not reproduce or explain
+their Linux failure and is not a claim of flakiness. No shell source changes.
+The next default CI must validate the corrected exact tip before all-OS dispatch.
+The measured region files are unchanged by this test-only correction; existing
+stage metrics remain historical evidence, not regenerated baselines.

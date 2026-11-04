@@ -422,8 +422,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             ui.view().navigation.scroll.area.unwrap().height,
-            13,
-            "one folded line uses a three-row input box"
+            8,
+            "three-row folded input leaves room for both fixed regions"
         );
         let chip = terminal
             .backend()
@@ -441,8 +441,8 @@ mod tests {
             .unwrap();
         assert_eq!(
             ui.view().navigation.scroll.area.unwrap().height,
-            10,
-            "expanded input is capped at one quarter of 24 rows"
+            5,
+            "expanded input keeps its quarter-screen cap beside both regions"
         );
         let actions = ui.event(key(KeyCode::Enter, KeyModifiers::NONE));
         assert!(
