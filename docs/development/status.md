@@ -4608,6 +4608,7 @@ shrink, but sparse log scrolling adds 975--1921 bytes (+53.7%--127.0%); thus opt
 is proposed, with the owner retaining the final default decision. Windows
 hardware/font pixels remain unverified. Local fmt, 11 redraw tests, seven backend
 tests, ten config-setup tests, the strict boolean test, locked check --tests and
-strict all-target Clippy pass. Python 198, layout 105/watchdog, language audit
-and inventory regeneration pass. Current-main revalidation and exact-tip CI
+strict all-target Clippy pass. Python 198, layout 105/watchdog and inventory
+regeneration pass. The unclassified language inventory has existing pending
+literals, so its zero-pending --check is not a pass. Current-main revalidation and exact-tip CI
 remain pending; W8 owns review and landing.

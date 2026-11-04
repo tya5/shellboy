@@ -9652,8 +9652,11 @@ frame-plan consumption now uses a Cell rather than requiring an exclusive
 snapshot borrow. Those failed attempts are not passing evidence. Corrected
 local checks pass: 11 redraw, seven backend, ten config-setup and one strict
 boolean test, locked check --tests and strict all-target Clippy, formatting,
-Python 198, layout 105/watchdog, language audit and inventory regeneration.
-Current-main revalidation and pushed-tip CI remain pending.
+Python 198, layout 105/watchdog and inventory regeneration. The language
+inventory reports 1215 existing unclassified pending literals; its zero-pending
+--check exits 1 and is not a passing gate. A current-main inventory comparison
+checks for new pending literals instead. Current-main revalidation and pushed-tip
+CI remain pending.
 
 Source-symbol inventory uses Unicode 15.0.0 and separates source occurrences from
 production/test literals; arbitrary content and runtime count are not inferred.
