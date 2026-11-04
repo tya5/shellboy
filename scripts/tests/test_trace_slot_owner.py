@@ -16,7 +16,7 @@ class TraceSlotOwnerTest(unittest.TestCase):
             for path in (ROOT / tree).rglob("*.rs"):
                 if path == OWNER:
                     continue
-                text = path.read_text()
+                text = path.read_text(encoding="utf-8")
                 if "trace_slot::register" in text:
                     registrations[path.relative_to(ROOT).as_posix()] = text.count("trace_slot::register")
                 for number, line in enumerate(text.splitlines(), 1):
