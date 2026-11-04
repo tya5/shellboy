@@ -422,7 +422,7 @@ impl UiState {
                 }
                 _ => Context::History,
             },
-            None if self.view().live_work.active => Context::LiveWork,
+            None if self.view().live_work.region.active => Context::LiveWork,
             None if self.has_completions() => Context::Completion,
             None if self
                 .view()

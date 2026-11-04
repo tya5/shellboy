@@ -1,6 +1,8 @@
 //! Bounded fixed-region projection of work owned by the selected Run.
 //! Saved elapsed bases are independent of the UI-observed Turn clock.
-use super::region::{RegionLayout, fit, row_columns};
+#[cfg(test)]
+use super::region::fit;
+use super::region::{RegionHit, RegionState, row_columns};
 use super::*;
 use crate::config::UiLanguage;
 use crate::ui::text_width::glyphs;
@@ -297,9 +299,8 @@ pub struct LiveOutputPreview {
 #[derive(Debug, Default)]
 pub(super) struct LiveWorkView {
     language: UiLanguage,
+    pub(super) region: RegionState<LiveWorkTarget>,
     snapshot: Option<LiveWorkSnapshot>,
-    pub active: bool,
-    selected: Option<LiveWorkTarget>,
     open: Option<String>,
     preview: Option<LiveOutputPreview>,
     error: Option<String>,
@@ -307,11 +308,6 @@ pub(super) struct LiveWorkView {
     seconds: Vec<(Option<u64>, Option<u64>)>,
     clock_origin: Option<Instant>,
     clock_step: Option<u64>,
-    pub area: Option<Rect>,
-    visible_rows: usize,
-    /// Section fold and fixed body size, synced from the UI each layout (#131).
-    collapsed: bool,
-    capacity: usize,
     revision: u64,
     published: Option<(Vec<String>, Option<String>)>,
 }
@@ -350,7 +346,7 @@ impl LiveWorkView {
             self.snapshot.as_ref().map(|s| &s.run_id) != snapshot.as_ref().map(|s| &s.run_id);
         if owner_changed {
             self.close();
-            self.selected = None;
+            self.region.selected = None;
             self.markers.clear();
             self.clock_origin = snapshot.as_ref().map(|snapshot| snapshot.observed_at);
         }
@@ -378,9 +374,9 @@ impl LiveWorkView {
         }
         self.snapshot = snapshot;
         if self.snapshot.is_none() {
-            self.active = false;
+            self.region.active = false;
         }
-        if let Some(key) = &self.selected {
+        if let Some(key) = &self.region.selected {
             if !self.rows().iter().any(|row| &row.target == key) {
                 let replacement = match key {
                     LiveWorkTarget::Shell { execution_id, .. } => {
@@ -396,11 +392,11 @@ impl LiveWorkView {
                     _ => None,
                 };
                 if let Some(replacement) = replacement {
-                    self.selected = Some(replacement);
+                    self.region.selected = Some(replacement);
                 }
             }
         } else {
-            self.selected = self.rows().first().map(|row| row.target.clone());
+            self.region.selected = self.rows().first().map(|row| row.target.clone());
         }
         if self.open.as_ref().is_some_and(|id| {
             !self.rows().iter().any(|row| {
@@ -418,19 +414,10 @@ impl LiveWorkView {
     fn rows(&self) -> &[LiveWorkRow] {
         self.snapshot.as_ref().map_or(&[], |s| s.rows.as_slice())
     }
-    /// Fixed body rows; an unconfigured view (no layout yet) is uncapped.
-    fn cap(&self) -> usize {
-        if self.capacity == 0 {
-            10
-        } else {
-            self.capacity
-        }
-    }
+    /// Apply region layout preferences; preview lifecycle stays domain-owned.
     pub fn configure(&mut self, collapsed: bool, capacity: usize) {
-        self.collapsed = collapsed;
-        self.capacity = capacity.clamp(1, 10);
+        self.region.configure(collapsed, capacity);
         if collapsed {
-            self.active = false;
             self.close();
         }
     }
@@ -451,20 +438,14 @@ impl LiveWorkView {
         } else {
             0
         };
-        RegionLayout::new(self.cap(), self.collapsed).height(available, preview)
+        self.region.layout().height(available, preview)
     }
     pub fn set_area(&mut self, area: Rect) {
-        self.area = (area.height > 0).then_some(area);
-        self.visible_rows = RegionLayout::new(self.cap(), self.collapsed).visible_rows(
-            area,
-            self.rows().len(),
-            self.snapshot.as_ref().is_some_and(|s| s.overflow > 0),
-        );
-        if area.height == 0 {
-            self.active = false;
-        }
-        if self.selected.is_none() && self.visible_rows > 0 {
-            self.selected = self.rows().first().map(|row| row.target.clone());
+        let total = self.rows().len();
+        let overflow = self.snapshot.as_ref().is_some_and(|s| s.overflow > 0);
+        self.region.set_area(area, total, overflow);
+        if self.region.selected.is_none() && self.region.visible_rows > 0 {
+            self.region.selected = self.rows().first().map(|row| row.target.clone());
         }
         if self
             .open
@@ -476,7 +457,7 @@ impl LiveWorkView {
         }
     }
     fn visible_execution(&self, execution: &str) -> bool {
-        self.area.is_some() && self.rows().iter().take(self.visible_rows).any(|row|
+        self.region.area.is_some() && self.rows().iter().take(self.region.visible_rows).any(|row|
             matches!(&row.target,LiveWorkTarget::Shell {execution_id,..} if execution_id==execution))
     }
     fn output_age_label(&self, index: usize) -> Option<String> {
@@ -490,7 +471,8 @@ impl LiveWorkView {
     /// The heading's blink origin (#90): the section's existing seconds
     /// clock, only while the section is drawn.
     pub fn blink_origin(&self) -> Option<Instant> {
-        self.area
+        self.region
+            .area
             .filter(|_| self.has_work())
             .and(self.snapshot.as_ref())
             .and(self.clock_origin)
@@ -533,10 +515,10 @@ impl LiveWorkView {
         changed
     }
     pub fn observe(&mut self, thread: String, generation: u64, visible: bool) -> Option<UiAction> {
-        let executions = if visible && self.area.is_some() {
+        let executions = if visible && self.region.area.is_some() {
             self.rows()
                 .iter()
-                .take(self.visible_rows)
+                .take(self.region.visible_rows)
                 .filter_map(|row| match &row.target {
                     LiveWorkTarget::Shell { execution_id, .. } => Some(execution_id.clone()),
                     _ => None,
@@ -569,9 +551,9 @@ impl LiveWorkView {
         })
     }
     pub fn deactivate(&mut self, thread: String, generation: u64) -> Option<UiAction> {
-        self.active = false;
-        self.area = None;
-        self.visible_rows = 0;
+        self.region.active = false;
+        self.region.area = None;
+        self.region.visible_rows = 0;
         self.close();
         self.observe(thread, generation, false)
     }
@@ -646,24 +628,17 @@ impl LiveWorkView {
         true
     }
     fn selected(&self) -> Option<&LiveWorkRow> {
-        let selected = self.selected.as_ref()?;
+        let selected = self.region.selected.as_ref()?;
         self.rows()
             .iter()
-            .take(self.visible_rows)
+            .take(self.region.visible_rows)
             .find(|row| &row.target == selected)
     }
     fn move_focus(&mut self, down: bool) {
         let index = self
-            .selected
-            .as_ref()
-            .and_then(|key| self.rows().iter().position(|row| &row.target == key))
-            .unwrap_or(0);
-        let index = if down {
-            (index + 1).min(self.visible_rows.saturating_sub(1))
-        } else {
-            index.saturating_sub(1)
-        };
-        self.selected = self.rows().get(index).map(|row| row.target.clone());
+            .region
+            .next_index(self.rows().iter().map(|row| &row.target), down);
+        self.region.selected = self.rows().get(index).map(|row| row.target.clone());
     }
     fn toggle(&mut self) {
         let Some(LiveWorkRow {
@@ -710,7 +685,7 @@ impl LiveWorkView {
             "{}{sep}{}{timing}",
             WorkMessage::Heading {
                 empty: false,
-                folded: self.collapsed
+                folded: self.region.collapsed
             }
             .render(self.language),
             counts_text(snapshot, self.language),
@@ -729,11 +704,11 @@ pub(super) fn draw(
     if area.height == 0 {
         return;
     }
-    let hidden = view.snapshot.as_ref().map_or(0, |s| {
-        s.overflow
-            .saturating_add((s.rows.len() - view.visible_rows) as u64)
-    });
-    let hidden_label = if view.visible_rows == 0 && hidden > 0 {
+    let hidden = view
+        .snapshot
+        .as_ref()
+        .map_or(0, |s| view.region.hidden(s.rows.len(), s.overflow));
+    let hidden_label = if view.region.visible_rows == 0 && hidden > 0 {
         format!(
             "{}{}",
             glyphs::separator(),
@@ -752,43 +727,35 @@ pub(super) fn draw(
         .filter(|_| view.has_work())
         .map(|s| format!("{}{}", glyphs::separator(), counts_text(s, view.language)))
         .unwrap_or_default();
-    let mark = glyphs::HEADING;
     let name = WorkMessage::Heading {
         empty: !view.has_work(),
-        folded: view.collapsed,
+        folded: view.region.collapsed,
     }
     .render(view.language);
-    let heading = fit(
-        &format!("{mark} {name}{hidden_label}{counts}{}", view.clock_suffix()),
-        usize::from(area.width),
+    let heading = super::region::heading(
+        area.width,
+        &format!("{name}{hidden_label}{counts}{}", view.clock_suffix()),
+        palette,
+        heading_dim,
     );
     let separate_overflow = hidden > 0
-        && view.visible_rows > 0
-        && usize::from(area.height.saturating_sub(2)) > view.visible_rows;
-    // Blink changes only the `◉` brightness, never its glyph or the width.
-    let dim = heading_dim
-        .then(|| palette.live_work_dim())
-        .flatten()
-        .filter(|_| heading.starts_with(mark));
-    let mut lines = super::region::heading_lines(
-        area,
-        match dim {
-            Some(dim) => Line::from(vec![
-                Span::styled(mark.to_owned(), dim),
-                Span::styled(heading[mark.len()..].to_owned(), palette.live_work()),
-            ]),
-            None => Line::styled(heading, palette.live_work()),
-        },
-    );
-    for (index, row) in view.rows().iter().take(view.visible_rows).enumerate() {
-        let selected = view.active && view.selected.as_ref() == Some(&row.target);
+        && view.region.visible_rows > 0
+        && usize::from(area.height.saturating_sub(2)) > view.region.visible_rows;
+    let mut lines = super::region::heading_lines(area, heading);
+    for (index, row) in view
+        .rows()
+        .iter()
+        .take(view.region.visible_rows)
+        .enumerate()
+    {
+        let selected = view.region.active && view.region.selected.as_ref() == Some(&row.target);
         // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
         let kind = match row.target {
             LiveWorkTarget::Shell { .. } => glyphs::SHELL,
             LiveWorkTarget::ChildRun { .. } => glyphs::CHILD,
             LiveWorkTarget::Wait { .. } => glyphs::WAIT,
         };
-        let last_item = index + 1 == view.visible_rows;
+        let last_item = index + 1 == view.region.visible_rows;
 
         let elapsed = view
             .seconds
@@ -836,7 +803,7 @@ pub(super) fn draw(
             .and_then(|target| {
                 view.rows()
                     .iter()
-                    .take(view.visible_rows)
+                    .take(view.region.visible_rows)
                     .position(|other| match (target, &other.target) {
                         (WaitTarget::Shell(a), LiveWorkTarget::Shell { execution_id, .. }) => {
                             a == execution_id
@@ -851,10 +818,10 @@ pub(super) fn draw(
                     })
             });
 
-        let extra = if index + 1 == view.visible_rows && !separate_overflow {
+        let extra = if index + 1 == view.region.visible_rows && !separate_overflow {
             view.snapshot.as_ref().map_or(0, |s| {
                 s.overflow
-                    .saturating_add((s.rows.len() - view.visible_rows) as u64)
+                    .saturating_add((s.rows.len() - view.region.visible_rows) as u64)
             })
         } else {
             0
@@ -874,7 +841,12 @@ pub(super) fn draw(
         };
         let prefix = format!(
             "{}{}",
-            glyphs::numbered_branch(last_item && !separate_overflow, index + 1, selected, kind),
+            super::region::numbered_branch(
+                last_item && !separate_overflow,
+                index + 1,
+                selected,
+                kind
+            ),
             linked
                 .map(|i| format!("{} [{}] ", glyphs::arrow(), i + 1))
                 .unwrap_or_default()
@@ -886,7 +858,9 @@ pub(super) fn draw(
         let (label, gap, right) = row_columns(
             usize::from(area.width),
             &prefix,
-            if describe_calls && !(view.active && view.selected.as_ref() == Some(&row.target)) {
+            if describe_calls
+                && !(view.region.active && view.region.selected.as_ref() == Some(&row.target))
+            {
                 row.description.as_deref().unwrap_or(&row.label)
             } else {
                 &row.label
@@ -922,7 +896,7 @@ pub(super) fn draw(
             palette.live_work(),
         ));
     }
-    RegionLayout::new(view.cap(), view.collapsed).pad_body(area, &mut lines);
+    view.region.layout().pad_body(area, &mut lines);
     if view
         .open
         .as_ref()
@@ -1015,20 +989,20 @@ impl UiState {
             return None;
         }
         if key.code == KeyCode::BackTab
-            && !self.view().live_work.active
-            && self.view().live_work.visible_rows > 0
+            && !self.view().live_work.region.active
+            && self.view().live_work.region.visible_rows > 0
             && !self.has_completions()
         {
             self.active_view_mut().items.active = false;
-            self.active_view_mut().live_work.active = true;
+            self.active_view_mut().live_work.region.active = true;
             return Some(vec![]);
         }
-        if !self.view().live_work.active || key.modifiers.contains(KeyModifiers::CONTROL) {
+        if !self.view().live_work.region.active || key.modifiers.contains(KeyModifiers::CONTROL) {
             return None;
         }
         match key.code {
             KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => {
-                self.active_view_mut().live_work.active = false
+                self.active_view_mut().live_work.region.active = false
             }
             KeyCode::Up => self.active_view_mut().live_work.move_focus(false),
             KeyCode::Down => self.active_view_mut().live_work.move_focus(true),
@@ -1081,24 +1055,15 @@ impl UiState {
         Some(vec![])
     }
     pub(super) fn live_work_click(&mut self, column: u16, row: u16) -> bool {
-        let Some(area) = self.view().live_work.area else {
-            return false;
+        let index = match self.view().live_work.region.hit(column, row) {
+            RegionHit::Outside => return false,
+            RegionHit::Heading => {
+                self.toggle_live_work_section();
+                return true;
+            }
+            RegionHit::Blank => return true,
+            RegionHit::Row(index) => index,
         };
-        if !area.contains(ratatui::layout::Position::new(column, row)) {
-            return false;
-        }
-        let heading_row = area.y + u16::from(area.height > 1);
-        if row == heading_row {
-            self.toggle_live_work_section();
-            return true;
-        }
-        let Some(offset) = row.saturating_sub(area.y).checked_sub(2) else {
-            return true;
-        };
-        let index = usize::from(offset);
-        if index >= self.view().live_work.visible_rows {
-            return true;
-        }
         let target = self
             .view()
             .live_work
@@ -1108,8 +1073,8 @@ impl UiState {
         if let Some(target) = target {
             self.active_view_mut().items.active = false;
             let live = &mut self.active_view_mut().live_work;
-            live.active = true;
-            live.selected = Some(target);
+            live.region.active = true;
+            live.region.selected = Some(target);
             self.dirty = true;
         }
         true
@@ -1240,8 +1205,8 @@ mod tests {
             let mut ui = ui(at);
             ui.config.ui.language = language;
             ui.view_mut().live_work.set_area(Rect::new(0, 0, 100, 10));
-            ui.view_mut().live_work.active = true;
-            ui.view_mut().live_work.selected = Some(LiveWorkTarget::Shell {
+            ui.view_mut().live_work.region.active = true;
+            ui.view_mut().live_work.region.selected = Some(LiveWorkTarget::Shell {
                 execution_id: "execution".into(),
                 turn_id: Some("answered-turn".into()),
             });
@@ -1320,7 +1285,7 @@ mod tests {
         }
         assert!(text.contains("◉") && text.contains("他4件"), "{text}");
         assert!(ui.live_work_click(0, 0));
-        assert!(!ui.view().live_work.active);
+        assert!(!ui.view().live_work.region.active);
     }
     #[test]
     fn saved_work_clock_survives_answer_and_dirties_at_most_once_per_second_without_actions() {
@@ -1498,7 +1463,7 @@ mod tests {
         let mut original = all.clone();
         original.rows.remove(2);
         let shell = original.rows[0].target.clone();
-        ui.view_mut().live_work.selected = Some(shell.clone());
+        ui.view_mut().live_work.region.selected = Some(shell.clone());
         ui.view_mut().live_work.toggle();
         let mut folded = all;
         folded.rows.remove(0);
@@ -1518,9 +1483,9 @@ mod tests {
         folded.rows.push(second);
         ui.view_mut().live_work.accept(Some(folded), at);
         ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
-        assert_eq!(ui.view().live_work.selected, Some(shell.clone()));
+        assert_eq!(ui.view().live_work.region.selected, Some(shell.clone()));
         assert!(ui.view().live_work.selected().is_none());
-        ui.view_mut().live_work.active = true;
+        ui.view_mut().live_work.region.active = true;
         assert!(
             matches!(ui.live_work_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE)), Some(actions) if actions.is_empty())
         );
@@ -1616,7 +1581,7 @@ mod tests {
         terminal
             .draw(|frame| super::super::draw(frame, &mut ui))
             .unwrap();
-        let area = ui.view().live_work.area.unwrap();
+        let area = ui.view().live_work.region.area.unwrap();
         assert!(ui.view().navigation.scroll.area.unwrap().height >= 3);
         // Wide graphemes own multiple terminal columns. The continuation
         // cell contains a blank, which is geometry rather than an extra space
@@ -1642,14 +1607,14 @@ mod tests {
         ui.insert("draft stays", false);
         let anchor = ui.view().navigation.anchor.clone();
         assert!(ui.live_work_click(area.x, area.y + 3));
-        assert!(ui.view().live_work.active);
+        assert!(ui.view().live_work.region.active);
         assert_eq!(ui.view().draft.text, "draft stays");
         assert_eq!(ui.view().navigation.anchor, anchor);
         let actions = ui
             .live_work_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE))
             .unwrap();
         assert!(actions.iter().any(|action|matches!(action,UiAction::SelectThread {thread_id,..} if thread_id=="child-thread")));
-        assert!(!ui.view().live_work.active);
+        assert!(!ui.view().live_work.region.active);
     }
     #[test]
     fn wait_target_number_and_approximate_deadline_are_visible() {
@@ -1805,7 +1770,7 @@ mod tests {
         source.overflow = 0;
         ui.view_mut().live_work.accept(Some(source), at);
         ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
-        ui.view_mut().live_work.selected = Some(LiveWorkTarget::Shell {
+        ui.view_mut().live_work.region.selected = Some(LiveWorkTarget::Shell {
             execution_id: "execution".into(),
             turn_id: Some("answered-turn".into()),
         });
@@ -1829,7 +1794,7 @@ mod tests {
             "execution",
             Ok(output("late hidden row"))
         ));
-        ui.view_mut().live_work.active = true;
+        ui.view_mut().live_work.region.active = true;
         ui.live_work_key(KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
         assert!(ui.operations.is_none());
         ui.view_mut().live_work.set_area(Rect::new(0, 10, 80, 5));
@@ -1918,7 +1883,7 @@ mod tests {
                                 let area = Rect::new(1, 1, width, height);
                                 view.set_area(area);
                                 if state == 3 || state == 7 {
-                                    view.active = true;
+                                    view.region.active = true;
                                 }
                                 if (4..=6).contains(&state) {
                                     view.open = Some("execution".into());
@@ -1981,7 +1946,10 @@ mod tests {
             }
             text.push('\n');
         }
-        (text, ui.view().live_work.area.map_or(0, |a| a.height))
+        (
+            text,
+            ui.view().live_work.region.area.map_or(0, |a| a.height),
+        )
     }
     fn set_work(ui: &mut UiState, work: Option<LiveWorkSnapshot>, epoch: u64, at: Instant) {
         ui.apply(UiUpdate::Activity {
@@ -2077,10 +2045,10 @@ mod tests {
             assert!(!text.contains("printf synthetic-output"), "{text}");
             ui.key(alt_w);
             assert_eq!(screen(&mut ui).1, open);
-            let area = ui.view().live_work.area.unwrap();
+            let area = ui.view().live_work.region.area.unwrap();
             assert!(ui.live_work_click(area.x + 2, area.y + 1));
             assert_eq!(screen(&mut ui).1, 2);
-            let area = ui.view().live_work.area.unwrap();
+            let area = ui.view().live_work.region.area.unwrap();
             assert!(ui.live_work_click(area.x + 2, area.y + 1));
             assert_eq!(screen(&mut ui).1, open);
         }
@@ -2122,7 +2090,7 @@ mod tests {
                     });
                     view.accept(Some(data), now);
                     view.set_area(Rect::new(0, 0, width, 5));
-                    view.active = true;
+                    view.region.active = true;
                     let mut terminal =
                         Terminal::new(ratatui::backend::TestBackend::new(width, 5)).unwrap();
                     terminal

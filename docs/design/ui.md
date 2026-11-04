@@ -312,3 +312,13 @@ reverse-video selection remains visible without colors. Both language guides,
 configuration example, responsibility/line/parameter metrics and regression
 fixtures accompany the behavior change. Windows font pixels are not established
 by synthetic render tests or by OS CI.
+
+The shared state is parameterized by stable row identity (`RegionState<K>`): it
+owns focus, selected identity, fold/capacity, current frame bounds and visible
+slots. `RegionHit` describes only frame hits (outside, heading, row or padding).
+Domain views keep row payloads, Run/Thread generations, timers, observers,
+preview/source bodies and action construction. Heading marker/clipping/styles
+and the existing measured-width branch vocabulary are shared presentation,
+not a reason to move live-work clocks or message admission into the framework.
+The structural follow-up retains the original pinned cell/style golden; reverse
+selection and the held region remain later intentional behavior changes.
