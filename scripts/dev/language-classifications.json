@@ -5921,18 +5921,18 @@
   },
   "src/presentation/fields.rs:943b7d62659dd74d:1": {
     "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "799a743d5bc455c08ff16f49fb019cb3ab3c7d00af1f76d2c06894b8f85c71fd"
+    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values. Re-reviewed after localized raw-refresh warning mapping; values and pointers remain unchanged.",
+    "source_tokens_sha256": "6b9e3cb04de9dc99c36adfa81d01519cb9dd65e3935eef7a3e7f4fabcd03d6e8"
   },
   "src/presentation/fields.rs:b6843538a6083ac6:1": {
     "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "799a743d5bc455c08ff16f49fb019cb3ab3c7d00af1f76d2c06894b8f85c71fd"
+    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values. Re-reviewed after localized raw-refresh warning mapping; values and pointers remain unchanged.",
+    "source_tokens_sha256": "6b9e3cb04de9dc99c36adfa81d01519cb9dd65e3935eef7a3e7f4fabcd03d6e8"
   },
   "src/presentation/fields.rs:0bd8094b4f7e3147:1": {
     "category": "a",
-    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values.",
-    "source_tokens_sha256": "799a743d5bc455c08ff16f49fb019cb3ab3c7d00af1f76d2c06894b8f85c71fd"
+    "reason": "This field UI source remains Japanese for Ja. English projections are explicit: attempt_label/attempt_value and input_bytes_text use UiLanguage match tables; state_label_for covers known states; display_value translates unknown/deep-structure explanations; display_label renders array-count labels. Consumers: src/ui/details.rs and src/ui/management.rs. Tests cover field labels, all known states, explanatory values, pointers and unchanged raw values. Re-reviewed after localized raw-refresh warning mapping; values and pointers remain unchanged.",
+    "source_tokens_sha256": "6b9e3cb04de9dc99c36adfa81d01519cb9dd65e3935eef7a3e7f4fabcd03d6e8"
   },
   "src/presentation/fields.rs:a5cbbb053e40d541:1": {
     "category": "a",
@@ -6393,5 +6393,278 @@
     "category": "a",
     "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
     "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/frontend/notices.rs:7f713b9b0bf08ff6:1": {
+    "category": "a",
+    "reason": "Japanese fallback in NoticeText::text, consumed by Message::Text variants that provide the English Source result is unavailable projection.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:f65ca4881c729da1:1": {
+    "category": "a",
+    "reason": "Japanese fallback in NoticeText::text, consumed by Message::Text variants that provide the English Call information is unavailable projection.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:c884e192dcebf635:1": {
+    "category": "a",
+    "reason": "Japanese fallback in NoticeText::text, consumed by Message::CommandNotice; Text::NoticeCommandUnrecorded supplies English Command not recorded.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:c97c0f0010d7a143:1": {
+    "category": "a",
+    "reason": "Japanese branch of CommandNotice background rendering; Message::CommandNotice has the English Background requested arm.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:75fe79c38dd167f9:1": {
+    "category": "a",
+    "reason": "Japanese branch of CommandNotice background rendering; Message::CommandNotice has the English Background not requested arm.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:f7545ffa42521f23:1": {
+    "category": "a",
+    "reason": "Japanese branch of CommandNotice background rendering; Message::CommandNotice has the English Background request not recorded arm.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:e285f7c02c03aa54:1": {
+    "category": "a",
+    "reason": "Japanese fallback in NoticeText::text, consumed by Message::Text variants that provide the English Referenced conversation was deleted projection.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:6a641957091defc7:1": {
+    "category": "a",
+    "reason": "Japanese fallback in NoticeText::text, consumed by Message::Text variants that provide the English Referenced conversation is unavailable projection.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:bb26c4dbc7825158:1": {
+    "category": "a",
+    "reason": "Japanese fallback in NoticeText::text, consumed by ThreadNotice; Text::NoticeUntitled supplies the English Untitled fallback.",
+    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
+  },
+  "src/frontend/notices.rs:a0773a30228a28bd:1": {
+    "category": "a",
+    "reason": "Japanese ThreadNotice display title; Message::ThreadNotice renders the paired English Current name label while leaving the saved thread title unchanged.",
+    "source_tokens_sha256": "fcb0b0122e86945ae834af656f5ff2c4144fbd5fd718525ecd74663bd76b3e5f"
+  },
+  "src/frontend/received.rs:0399375bcdb16ccb:1": {
+    "category": "a",
+    "reason": "Japanese title for received responses. received::project attaches typed Text::ReceivedResponse; ui::presentation::label renders its English title for En without changing saved text.",
+    "source_tokens_sha256": "0760e2ddf5bf668e155f334c605ca861ff0cdf3d5e74451bb92c893b246a7791"
+  },
+  "src/frontend/received.rs:41b864dfa58171f9:1": {
+    "category": "a",
+    "reason": "Japanese projection title separator/suffix; English UI title is supplied by typed Text::ReceivedResponse/StreamDifference in ui_messages.",
+    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
+  },
+  "src/frontend/received.rs:afde8c7877ae72d6:1": {
+    "category": "a",
+    "reason": "Japanese projection title separator/suffix; English UI title is supplied by typed Text::ReceivedResponse/StreamDifference in ui_messages.",
+    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
+  },
+  "src/frontend/received.rs:8e576edeef0007f7:1": {
+    "category": "a",
+    "reason": "Japanese stream-difference title for stored observation; English UI title is supplied by typed Text::StreamDifference.",
+    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
+  },
+  "src/frontend/received.rs:4e7f9ba5488f7a1d:1": {
+    "category": "a",
+    "reason": "Japanese label for the source-node identifier; presentation::fields::display_label maps the same pointer to Source Node ID in English UI.",
+    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
+  },
+  "src/frontend/message_queue.rs:428bbfd88c37c740:1": {
+    "category": "a",
+    "reason": "Japanese outcome label for ReplyCancelled; the English UiLanguage arm delegates to cancelled_summary, which maps the same enum outcome.",
+    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
+  },
+  "src/frontend/tools.rs:cdf1b7d7bdf25eba:1": {
+    "category": "a",
+    "reason": "Japanese helper text retained in ToolPresentation for Japanese details; ui::presentation::tool_reason maps PriorWaitHumanBackground to a complete English message.",
+    "source_tokens_sha256": "12fc3f289a7aee23ea17f9e34559e96b869198fd6f5aed3a6ed3e8bba1445aa8"
+  },
+  "src/frontend/tools.rs:4121bc6ea5c1289c:1": {
+    "category": "a",
+    "reason": "Japanese helper text retained in ToolPresentation for Japanese details; ui::presentation::tool_reason maps PriorWaitNewInput to a complete English message.",
+    "source_tokens_sha256": "12fc3f289a7aee23ea17f9e34559e96b869198fd6f5aed3a6ed3e8bba1445aa8"
+  },
+  "src/presentation/fields.rs:2c25108503b2c0da:1": {
+    "category": "a",
+    "reason": "Fixed UI raw-refresh warning maps through display_value to an English sentence; neither raw copy nor pointer is rewritten.",
+    "source_tokens_sha256": "6b9e3cb04de9dc99c36adfa81d01519cb9dd65e3935eef7a3e7f4fabcd03d6e8"
+  },
+  "src/presentation/messages.rs:38065c90cf3e6e78:1": {
+    "category": "a",
+    "reason": "Fixed Japanese error-detail sentinel maps to Error details: F6 in English tool_reason; arbitrary provider/error prefixes remain unchanged.",
+    "source_tokens_sha256": "1be06d669c2418d1427eb9f3bc8adc476a69a7630caa6243b3ac9940f9407fd6"
+  },
+  "src/presentation/projection/envelopes.rs:be056047f0b0912f:1": {
+    "category": "a",
+    "reason": "Generated missing-command sentinel is translated by ui::presentation::display_tool_command; actual saved shell commands remain unchanged.",
+    "source_tokens_sha256": "b471f53a531976666b981bd35bed63df85184ead78a18c1b777ca91e40a68492"
+  },
+  "src/presentation/projection/envelopes.rs:e95725538ebdcc2d:1": {
+    "category": "a",
+    "reason": "Generated missing-command sentinel is translated by ui::presentation::display_tool_command; actual saved shell commands remain unchanged.",
+    "source_tokens_sha256": "b471f53a531976666b981bd35bed63df85184ead78a18c1b777ca91e40a68492"
+  },
+  "src/presentation/projection/envelopes.rs:38065c90cf3e6e78:1": {
+    "category": "a",
+    "reason": "Fixed error-detail sentinel maps to English Error details: F6 in tool_reason; saved source error text is not rewritten.",
+    "source_tokens_sha256": "0fbef9aca2a0a7d602b63d19201303b34e532bfc2119859acff9a512d4aca924"
+  },
+  "src/presentation/projection/envelopes.rs:dbb29b00ccda5fef:1": {
+    "category": "a",
+    "reason": "Generated no-output fallback is translated by ui::presentation::display_tool_result only for non-source-exact blocks; saved output remains verbatim.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/presentation/projection/envelopes.rs:1fc404f127605e56:1": {
+    "category": "a",
+    "reason": "Generated no-output fallback is translated by ui::presentation::display_tool_result only for non-source-exact blocks; saved output remains verbatim.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/presentation/projection/envelopes.rs:b689c404f2e501a8:1": {
+    "category": "a",
+    "reason": "Generated no-output fallback is translated by ui::presentation::display_tool_result only for non-source-exact blocks; saved output remains verbatim.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/presentation/projection/envelopes.rs:1c1831366cbc529f:1": {
+    "category": "a",
+    "reason": "Japanese-only prerequisite facts render only in the Japanese tool detail; the English tool_reason projection uses the typed English reason-kind sentence and does not reuse these Japanese labels.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/presentation/projection/envelopes.rs:5a25c211a0a945a3:1": {
+    "category": "a",
+    "reason": "Japanese-only prerequisite facts render only in the Japanese tool detail; the English tool_reason projection uses the typed English reason-kind sentence and does not reuse these Japanese labels.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/presentation/projection/envelopes.rs:3d07bda32416519c:1": {
+    "category": "a",
+    "reason": "Japanese-only prerequisite facts render only in the Japanese tool detail; the English tool_reason projection uses the typed English reason-kind sentence and does not reuse these Japanese labels.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/presentation/projection/envelopes.rs:97c0ca692f4200ab:1": {
+    "category": "a",
+    "reason": "Japanese-only prerequisite facts render only in the Japanese tool detail; the English tool_reason projection uses the typed English reason-kind sentence and does not reuse these Japanese labels.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/presentation/projection/envelopes.rs:e0296a284b2bc952:1": {
+    "category": "a",
+    "reason": "Japanese-only prerequisite facts render only in the Japanese tool detail; the English tool_reason projection uses the typed English reason-kind sentence and does not reuse these Japanese labels.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a"
+  },
+  "src/ui/presentation.rs:c90e7217ddfcf0d7:1": {
+    "category": "a",
+    "reason": "Japanese context-change title marker is parsed from the Japanese projection; English UI title is supplied by typed Message::EventTitle and render tests. The saved projection title is retained unchanged.",
+    "source_tokens_sha256": "5953f128cdd6610c700ddfd9278b0a122869b2df132844f6b07f89c193ae63da"
+  },
+  "src/ui/presentation.rs:f52b7df2a49c808b:1": {
+    "category": "a",
+    "reason": "Japanese context-change title marker is parsed from the Japanese projection; English UI title is supplied by typed Message::EventTitle and render tests. The saved projection title is retained unchanged.",
+    "source_tokens_sha256": "5953f128cdd6610c700ddfd9278b0a122869b2df132844f6b07f89c193ae63da"
+  },
+  "src/ui/presentation.rs:c3e7115095a225cc:1": {
+    "category": "a",
+    "reason": "Japanese context-change title marker is parsed from the Japanese projection; English UI title is supplied by typed Message::EventTitle and render tests. The saved projection title is retained unchanged.",
+    "source_tokens_sha256": "5953f128cdd6610c700ddfd9278b0a122869b2df132844f6b07f89c193ae63da"
+  },
+  "src/ui/presentation.rs:be056047f0b0912f:1": {
+    "category": "a",
+    "reason": "Generated Japanese missing-command sentinel is translated at the compact/detail command display boundary; real saved commands are preserved.",
+    "source_tokens_sha256": "707577fad0b53d263d874d17c6f008dd87a389a05474bbb0e6b7d361fbbffeca"
+  },
+  "src/ui/presentation.rs:e95725538ebdcc2d:1": {
+    "category": "a",
+    "reason": "Generated Japanese missing-command sentinel is translated at the compact/detail command display boundary; real saved commands are preserved.",
+    "source_tokens_sha256": "707577fad0b53d263d874d17c6f008dd87a389a05474bbb0e6b7d361fbbffeca"
+  },
+  "src/ui/presentation.rs:dbb29b00ccda5fef:1": {
+    "category": "a",
+    "reason": "Generated no-output tool-result sentence has an explicit English UI mapping; source-exact saved output is never translated.",
+    "source_tokens_sha256": "6a58af91fba19161ff8fed59259ada906fd6c803ac138fe66f2211942ca19c6e"
+  },
+  "src/ui/presentation.rs:1fc404f127605e56:1": {
+    "category": "a",
+    "reason": "Generated no-output tool-result sentence has an explicit English UI mapping; source-exact saved output is never translated.",
+    "source_tokens_sha256": "6a58af91fba19161ff8fed59259ada906fd6c803ac138fe66f2211942ca19c6e"
+  },
+  "src/ui/presentation.rs:b689c404f2e501a8:1": {
+    "category": "a",
+    "reason": "Generated no-output tool-result sentence has an explicit English UI mapping; source-exact saved output is never translated.",
+    "source_tokens_sha256": "6a58af91fba19161ff8fed59259ada906fd6c803ac138fe66f2211942ca19c6e"
+  },
+  "src/presentation/projection/envelopes.rs:25b59e2e47cb2413:1": {
+    "category": "protected",
+    "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a",
+    "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
+    "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
+  },
+  "src/presentation/projection/envelopes.rs:7f044afa4082814f:1": {
+    "category": "protected",
+    "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
+    "source_tokens_sha256": "273e3cee71748a9d53a46841970eb5bae5fddd7317ee9fb8512cce21d1b3e56a",
+    "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
+    "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
+  },
+  "src/ui/presentation.rs:7f044afa4082814f:1": {
+    "category": "protected",
+    "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
+    "source_tokens_sha256": "2eb91feac356b6db5c51194944b167949504b50308ad8d33d9d3b71e85956d22",
+    "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
+    "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
+  },
+  "src/ui/presentation.rs:25b59e2e47cb2413:1": {
+    "category": "protected",
+    "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
+    "source_tokens_sha256": "2eb91feac356b6db5c51194944b167949504b50308ad8d33d9d3b71e85956d22",
+    "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
+    "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
+  },
+  "src/presentation/messages.rs:68938f9d1e4cc943:1": {
+    "category": "a",
+    "reason": "Japanese terminal-width variant for the generated F6 details suffix; English tool_reason maps this exact suffix to F6 details and preserves the preceding error text.",
+    "source_tokens_sha256": "1be06d669c2418d1427eb9f3bc8adc476a69a7630caa6243b3ac9940f9407fd6"
+  },
+  "src/presentation/messages.rs:8cfbf51c65edaa9f:1": {
+    "category": "a",
+    "reason": "Japanese terminal-width variant for the generated F6 details suffix; English tool_reason maps this exact suffix to F6 details and preserves the preceding error text.",
+    "source_tokens_sha256": "1be06d669c2418d1427eb9f3bc8adc476a69a7630caa6243b3ac9940f9407fd6"
+  },
+  "src/presentation/projection/envelopes.rs:c668cd43e018cc79:1": {
+    "category": "a",
+    "reason": "Japanese generated F6 details suffix on a sanitized code; ui::presentation::tool_reason renders the English suffix while preserving the preceding code.",
+    "source_tokens_sha256": "0fbef9aca2a0a7d602b63d19201303b34e532bfc2119859acff9a512d4aca924"
+  },
+  "src/presentation/projection/envelopes.rs:15740217b43ff624:1": {
+    "category": "a",
+    "reason": "Japanese generated F6 details suffix on a sanitized code; ui::presentation::tool_reason renders the English suffix while preserving the preceding code.",
+    "source_tokens_sha256": "0fbef9aca2a0a7d602b63d19201303b34e532bfc2119859acff9a512d4aca924"
+  },
+  "src/presentation/rows.rs:e473acb290667527:1": {
+    "category": "a",
+    "reason": "Japanese-compatible exported UI notice has an explicit English alternative through notice_source_outside_window; callers retain the old constant for compatibility.",
+    "source_tokens_sha256": "fce96815807bcd0b9b542f713064f8d2d6db2f383b1bb3d08798cb0cf5a4121d"
+  },
+  "src/ui.rs:c187b29692a65d7c:1": {
+    "category": "a",
+    "reason": "Japanese global help constant is preserved for compatibility and paired with HELP_EN/help_for; the bilingual regression checks both selected-language outputs.",
+    "source_tokens_sha256": "8408bb6668158ce3857b6fa8cf88b098ddfdb6fdfcb2e1a1c2554d9e57624bfc"
+  },
+  "src/frontend/header.rs:5cc5ec42dea8bd9a:1": {
+    "category": "a",
+    "reason": "Japanese bounded-title fallback returned by CLI/header APIs; RawHeader::prepare_for_ui maps only the TitleFallback::Limited case to English for TUI updates. Raw user titles and ThreadDetails::prepare() remain unchanged.",
+    "source_tokens_sha256": "e38cb9648e11ba98c7b8b772c8d04a7ac9a51642e29e3d828e957939c4d79113"
+  },
+  "src/frontend/header.rs:2a3d305091ce105f:1": {
+    "category": "a",
+    "reason": "Japanese synthetic Untitled fallback from TitleWitness::prepare_outcome; UI-only preparation translates based on TitleFallback::Untitled provenance, never by comparing user title text.",
+    "source_tokens_sha256": "7ccb4cdc99b7b5919508b0fba712a045cf9163f4f08dc1758ab41b83d30d5045"
+  },
+  "src/frontend/header.rs:6b7b3973c84b36eb:1": {
+    "category": "a",
+    "reason": "Japanese synthetic Not sent fallback from TitleWitness::prepare_outcome; UI-only preparation translates based on TitleFallback::NotSent provenance, never by comparing user title text.",
+    "source_tokens_sha256": "7ccb4cdc99b7b5919508b0fba712a045cf9163f4f08dc1758ab41b83d30d5045"
+  },
+  "src/ui.rs:2c25108503b2c0da:1": {
+    "category": "a",
+    "reason": "Fixed raw-refresh warning is translated by presentation::fields::display_value at the English UI boundary; raw error codes, values and pointers are unchanged.",
+    "source_tokens_sha256": "41c586cc1a737d182043bc6fa30ae67417d77e5f60673050e46267701a7f2b7a"
   }
 }
