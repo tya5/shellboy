@@ -1,5 +1,15 @@
 # 開発判断
 
+## Automatic compaction target window and spill evidence (#215)
+
+The owner approved proposals 1 and 2: bound automatic prefix selection by the
+existing calibrated removal target, preserving whole groups and safety fences,
+and record anonymous spill candidate and skip counts. Preserve manual and
+overflow semantics, cancellation and atomic adoption; do not parallelize map
+requests. Source reduction and observed token target are separate from semantic
+retention. Historical slow-case spill skip reasons were not recorded and are
+not inferred. Revisit if calibrated projection or fresh usage shows shortfall.
+
 ## End-message rename, step 1 details (#194, 2026-11-03)
 
 Judgements made while landing step 1 of the
