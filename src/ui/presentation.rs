@@ -352,14 +352,15 @@ fn node_lines_inner(
             if node.role != "received_response"
                 && matches!(block.kind, BlockKind::Prose | BlockKind::Reasoning)
                 && block.source_exact
+                && contains_markdown_syntax(&block.text)
                 && (block
                     .rendered
                     .as_ref()
                     .is_some_and(|rendered| rendered.omitted || rendered.width != width)
-                    || (block.rendered.is_none() && contains_markdown_syntax(&block.text)
-                        || (start > block.source_start
-                            && start < block.source_end
-                            && block.rendered.is_some())))
+                    || block.rendered.is_none()
+                    || (start > block.source_start
+                        && start < block.source_end
+                        && block.rendered.is_some()))
             {
                 out.push(Line::from(Span::styled(
                     crate::ui::i18n::local!(
