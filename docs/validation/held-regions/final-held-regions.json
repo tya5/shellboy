@@ -1,0 +1,3836 @@
+[
+  {
+    "path": "src/ui/live_work.rs",
+    "physical_lines": 2491,
+    "production_function_count": 35,
+    "production_max_parameters": 6,
+    "functions": [
+      {
+        "name": "phase_label",
+        "line": 10,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "state",
+        "line": 59,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "render",
+        "line": 66,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "eq",
+        "line": 223,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "eq",
+        "line": 246,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "counts_text",
+        "line": 258,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "more_text",
+        "line": 282,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "bounded",
+        "line": 314,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "byte_boundary",
+        "line": 322,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_language",
+        "line": 331,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "accept",
+        "line": 334,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "rows",
+        "line": 414,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "configure",
+        "line": 418,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "has_work",
+        "line": 424,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "height",
+        "line": 431,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_area",
+        "line": 443,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "visible_execution",
+        "line": 465,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "output_age_label",
+        "line": 469,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "blink_origin",
+        "line": 479,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "advance",
+        "line": 486,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "observe",
+        "line": 523,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "deactivate",
+        "line": 559,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "close",
+        "line": 566,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "accept_markers",
+        "line": 571,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "accept_preview",
+        "line": 598,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "selected",
+        "line": 636,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "move_focus",
+        "line": 643,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "toggle",
+        "line": 649,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "clock_suffix",
+        "line": 666,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "footer",
+        "line": 687,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "draw",
+        "line": 702,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "section_key_available",
+        "line": 964,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "toggle_live_work_section",
+        "line": 975,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "live_work_key",
+        "line": 981,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "live_work_click",
+        "line": 1043,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "japanese_view",
+        "line": 1076,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "japanese_config",
+        "line": 1081,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "capped_counts_and_overflow_are_explicit_lower_bounds",
+        "line": 1089,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "capped_footer_does_not_claim_an_exact_oldest_work_time",
+        "line": 1099,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "snapshot",
+        "line": 1116,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "ui",
+        "line": 1171,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "f6_operations_form_uses_configured_language",
+        "line": 1191,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configured_cap_applies_to_ui_and_counts_hidden_rows",
+        "line": 1225,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tiny_section_shows_header_and_header_click_does_not_select",
+        "line": 1247,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_work_clock_survives_answer_and_dirties_at_most_once_per_second_without_actions",
+        "line": 1281,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "quiet_heading_blink_is_one_frame_per_second_and_static_when_motion_or_color_is_off",
+        "line": 1320,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "heading_blink_changes_only_the_mark_brightness",
+        "line": 1373,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "maximum_rows_share_one_quiet_clock_without_reads",
+        "line": 1400,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "folding_preserves_identity_and_ambiguous_or_evicted_targets_do_not_redirect",
+        "line": 1447,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "scope_revision_and_exact_execution_guard_live_output_and_postcommit_markers",
+        "line": 1488,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "snapshot_time_reobservation_avoids_redraw_feedback_and_small_layout_preserves_history",
+        "line": 1546,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "actual_draw_and_focus_keep_live_work_separate_from_history_and_composer",
+        "line": 1566,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "wait_target_number_and_approximate_deadline_are_visible",
+        "line": 1610,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "wrong_generation_reply_never_hydrates_and_labels_cannot_inject_terminal_controls",
+        "line": 1660,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "output",
+        "line": 1692,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "overlay_f2_and_thread_switch_clear_scope_and_reject_reply_before_deferred_clear",
+        "line": 1702,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "shrinking_preserves_target_and_rejects_late_preview_without_waiting_for_publication",
+        "line": 1755,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "newer_saved_output_replaces_only_older_commit_observations_and_labels_the_source",
+        "line": 1797,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "region_extraction_full_cell_style_baseline",
+        "line": 1840,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "screen",
+        "line": 1956,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "screen_at",
+        "line": 1959,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "set_work",
+        "line": 1981,
+        "parameters_including_self": 4,
+        "test_only": true
+      },
+      {
+        "name": "work_heading_shows_clocks_and_footer_falls_back_when_hidden",
+        "line": 1996,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "height_is_constant_across_zero_two_zero_works_and_empty_heading_does_not_blink",
+        "line": 2033,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "key_and_heading_click_toggle_between_heading_only_and_fixed_rows",
+        "line": 2058,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "kind_glyphs_are_one_column_even_under_cjk_variable_width",
+        "line": 2085,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "body_lines",
+        "line": 2092,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "measured_tree_fits_both_languages_and_terminal_widths",
+        "line": 2103,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tree_connectors_cover_single_multiple_and_overflow_rows_and_all_kinds",
+        "line": 2183,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "populate",
+        "line": 2230,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "owned_work_is_registered_in_both_languages_and_widths",
+        "line": 2276,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 2277,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "folded_and_empty_work_are_registered",
+        "line": 2292,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "folded",
+        "line": 2293,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "folded_expected",
+        "line": 2297,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "empty",
+        "line": 2303,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "empty_expected",
+        "line": 2304,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "child_phase_projection_is_english_without_rewriting_source_states",
+        "line": 2314,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "state_projection_preserves_unknown_and_non_child_source_bytes",
+        "line": 2358,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "canonical_child_states_render_at_both_widths_for_one_two_and_many",
+        "line": 2391,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "children",
+        "line": 2392,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 2415,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "clipped_live_work_uses_measured_ellipsis_without_exceeding_width",
+        "line": 2426,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "preview_decoration_does_not_rewrite_unknown_state",
+        "line": 2442,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "count_grammar_and_unknown_values_are_explicit",
+        "line": 2469,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/region.rs",
+    "physical_lines": 377,
+    "production_function_count": 18,
+    "production_max_parameters": 5,
+    "functions": [
+      {
+        "name": "new",
+        "line": 16,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "height",
+        "line": 23,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "visible_rows",
+        "line": 35,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "pad_body",
+        "line": 48,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "heading",
+        "line": 59,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "heading_lines",
+        "line": 75,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "fit",
+        "line": 83,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "row_columns",
+        "line": 106,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "fixed_geometry_matches_original_bounds_and_overflow_slots",
+        "line": 133,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "heading_and_padding_preserve_existing_lines_and_short_areas",
+        "line": 168,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "default",
+        "line": 208,
+        "parameters_including_self": 0,
+        "test_only": false
+      },
+      {
+        "name": "cap",
+        "line": 222,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "configure",
+        "line": 230,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "layout",
+        "line": 238,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "set_area",
+        "line": 242,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "hidden",
+        "line": 250,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "hit",
+        "line": 254,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "next_index",
+        "line": 276,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "region_identity_navigation_and_hits_preserve_existing_bounds",
+        "line": 306,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "selection_style",
+        "line": 343,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "paint",
+        "line": 361,
+        "parameters_including_self": 3,
+        "test_only": false
+      }
+    ]
+  },
+  {
+    "path": "src/ui/held_input.rs",
+    "physical_lines": 664,
+    "production_function_count": 13,
+    "production_max_parameters": 4,
+    "functions": [
+      {
+        "name": "key",
+        "line": 27,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "kind",
+        "line": 33,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "excerpt",
+        "line": 44,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "metadata",
+        "line": 63,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "rows",
+        "line": 78,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "total",
+        "line": 92,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "height",
+        "line": 101,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "configure",
+        "line": 104,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "draw",
+        "line": 124,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "toggle_focused_region",
+        "line": 202,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "held_select",
+        "line": 212,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "held_input_click",
+        "line": 227,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "region_key",
+        "line": 241,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "item",
+        "line": 364,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "ui",
+        "line": 382,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "key",
+        "line": 393,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "screen",
+        "line": 396,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "empty_regions_do_not_gain_focus_and_configured_backtab_keeps_priority",
+        "line": 404,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_origin_marks_do_not_infer_human_from_null_thread",
+        "line": 417,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "metadata_is_muted_without_losing_selected_or_no_color_styles",
+        "line": 432,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "fixed_empty_heading_both_languages_and_fold_geometry",
+        "line": 459,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "focus_visits_displayed_rows_then_composer_and_fold_keeps_owner",
+        "line": 479,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "source_and_details_use_existing_async_saved_id_actions",
+        "line": 502,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "cancellation_freezes_exact_painted_ids_across_unpainted_refresh",
+        "line": 515,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "selected_line_is_reverse_bold_even_without_color_and_no_caret",
+        "line": 528,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "time_is_omitted_before_reason_is_shortened_and_excerpts_stay_bounded",
+        "line": 545,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "cycle_crosses_live_then_held_and_popup_has_input_ownership",
+        "line": 562,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "full_layout_orders_regions_and_keeps_headings_when_empty",
+        "line": 623,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "accepting_rows_never_clone_or_render_full_drafts_or_invent_saved_ids",
+        "line": 641,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/message_queue.rs",
+    "physical_lines": 1690,
+    "production_function_count": 22,
+    "production_max_parameters": 5,
+    "functions": [
+      {
+        "name": "caption",
+        "line": 20,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "sender",
+        "line": 56,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "state",
+        "line": 77,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "reason",
+        "line": 86,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "delivery_flags",
+        "line": 114,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "label",
+        "line": 125,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "region_metadata",
+        "line": 135,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "archive_count",
+        "line": 145,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "queue_context",
+        "line": 153,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "archive_error",
+        "line": 160,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "sender_count",
+        "line": 168,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "cancel_detail",
+        "line": 175,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "paint_bounds",
+        "line": 200,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "wheel",
+        "line": 203,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "draw",
+        "line": 210,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "accepting_excerpt",
+        "line": 352,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "bind_saved_history",
+        "line": 366,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "recovery_target",
+        "line": 401,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "open_pending_status",
+        "line": 410,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "open_pending_source",
+        "line": 421,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "confirm_pending_cancel",
+        "line": 427,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "queue_key",
+        "line": 465,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "key",
+        "line": 605,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "ui",
+        "line": 608,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "queued",
+        "line": 611,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "page",
+        "line": 629,
+        "parameters_including_self": 4,
+        "test_only": true
+      },
+      {
+        "name": "selected",
+        "line": 648,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "region_excerpt_rows_fit_narrow_widths_without_wrapping",
+        "line": 657,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "late_paired_history_cannot_resurrect_cancelled_queue_or_replace_newer_history",
+        "line": 672,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "committed_input_transfers_from_local_accepting_to_db_projection_atomically",
+        "line": 717,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paired_db_commit_before_ack_reconciles_exact_operation_and_preserves_newer_edits",
+        "line": 762,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "db_pair_before_operation_update_uses_frozen_source_identity_without_duplicates",
+        "line": 821,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_ack_after_db_reconciliation_still_applies_newer_queue_without_clearing_edits",
+        "line": 871,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_ack_rejects_mismatched_embedded_thread_or_generation_before_draft_mutation",
+        "line": 941,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "old_generation_saved_ack_cannot_clear_a_newer_view_or_draft",
+        "line": 1007,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "closed_archive_popup_is_not_reopened_by_a_late_reply",
+        "line": 1049,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "now_keys_respect_configured_normal_send_and_chord_focus",
+        "line": 1071,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "queue_confirmation_uses_only_the_displayed_ids_and_sanitizes_labels",
+        "line": 1103,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "late_restore_preserves_new_edits_and_original_attachment_fold_layout",
+        "line": 1146,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "escape_dismisses_queue_before_interrupting_exact_turn_and_ctrl_c_stops_run",
+        "line": 1188,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "held_region_bounds_terminal_control_text",
+        "line": 1206,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "accepting_large_draft_renders_only_a_sanitized_bounded_prefix",
+        "line": 1241,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "region_labels_preserve_source_and_use_measured_ellipsis",
+        "line": 1288,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "item",
+        "line": 1309,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "pending",
+        "line": 1327,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "archives",
+        "line": 1335,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "queue_and_archive_screens_are_registered_in_both_languages",
+        "line": 1340,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "counts_and_cancel_messages_are_complete_for_zero_one_and_many",
+        "line": 1474,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "state_projection_preserves_unknown_reasons_and_source_facts",
+        "line": 1503,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "long_pending",
+        "line": 1550,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "real_sender_and_recovery_facts_remain_visible_at_screen_boundaries",
+        "line": 1558,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "region_ellipsis_preserves_graphemes_cells_and_held_height",
+        "line": 1629,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "locale_does_not_expand_the_captured_cancellation_scope",
+        "line": 1659,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui.rs",
+    "physical_lines": 9724,
+    "production_function_count": 131,
+    "production_max_parameters": 7,
+    "functions": [
+      {
+        "name": "operation_catalogue_label",
+        "line": 68,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "default",
+        "line": 164,
+        "parameters_including_self": 0,
+        "test_only": false
+      },
+      {
+        "name": "tool_stub",
+        "line": 206,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "refresh_tools",
+        "line": 249,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "same_projection",
+        "line": 409,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "preserve_preview_on_transient_failure",
+        "line": 416,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "metadata_bytes",
+        "line": 454,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "evict_body",
+        "line": 459,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "cached_bytes",
+        "line": 471,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "from",
+        "line": 847,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "details_refresh_failure",
+        "line": 1339,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "original_page",
+        "line": 1356,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "original_page_localized",
+        "line": 1366,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1424,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "item",
+        "line": 1466,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "bytes",
+        "line": 1491,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1523,
+        "parameters_including_self": 4,
+        "test_only": true
+      },
+      {
+        "name": "bytes",
+        "line": 1547,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "evict",
+        "line": 1560,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "unit",
+        "line": 1583,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "insert_unit",
+        "line": 1596,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "discard_old_revision",
+        "line": 1630,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "get",
+        "line": 1644,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "insert",
+        "line": 1651,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "sized_area",
+        "line": 1693,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "footer",
+        "line": 1708,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "context",
+        "line": 1720,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "title",
+        "line": 1725,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "lines",
+        "line": 1730,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "text",
+        "line": 1736,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "layout",
+        "line": 1749,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "page",
+        "line": 1767,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1861,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "threads",
+        "line": 1872,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "thread_selection",
+        "line": 1875,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "threads_visible",
+        "line": 1878,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "thread_filter",
+        "line": 1881,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "threads_next_cursor",
+        "line": 1884,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "list_generation",
+        "line": 1887,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1890,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_diagnostics",
+        "line": 1978,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "trace_history",
+        "line": 1981,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "view",
+        "line": 1992,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "view_mut",
+        "line": 1997,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "view_for",
+        "line": 2000,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "active_view_mut",
+        "line": 2008,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "live_work_mut",
+        "line": 2015,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "prepare_render_width",
+        "line": 2023,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "prepare_visible_render_width",
+        "line": 2045,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "history_layout",
+        "line": 2145,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "deferred_action_wait",
+        "line": 2154,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "take_deferred_actions",
+        "line": 2164,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "take_deferred_actions_at",
+        "line": 2167,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "take_terminal_requests",
+        "line": 2255,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "apply",
+        "line": 2258,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "history_trace_before",
+        "line": 2363,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "record_history_trace",
+        "line": 2403,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "apply_current_view",
+        "line": 2422,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "apply_inner",
+        "line": 2517,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "command_outcome",
+        "line": 3817,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "reject_agents_selection",
+        "line": 3885,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "action_rejected",
+        "line": 3914,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "begin_edit",
+        "line": 4248,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "insert",
+        "line": 4270,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "clear_current_draft",
+        "line": 4299,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "delete",
+        "line": 4313,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "persist_active",
+        "line": 4325,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "local_drafts",
+        "line": 4342,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "select_thread",
+        "line": 4376,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "new_chat",
+        "line": 4456,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "refresh_db_status",
+        "line": 4487,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "animation_tick",
+        "line": 4497,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "submit",
+        "line": 4535,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "submit_reply",
+        "line": 4638,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "send_current",
+        "line": 4691,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "slash_path",
+        "line": 4803,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "slash",
+        "line": 4817,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "paste_command",
+        "line": 5309,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "toggle_reasoning",
+        "line": 5357,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "index_command",
+        "line": 5415,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "operation_context",
+        "line": 5486,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "invalidate_management",
+        "line": 5548,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "open_operations",
+        "line": 5561,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "detail_key",
+        "line": 5571,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "select_agents",
+        "line": 5588,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "execute_client_operation",
+        "line": 5603,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "execute_operation",
+        "line": 5627,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "management_key",
+        "line": 5718,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_confirmation",
+        "line": 5753,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "confirmation_key",
+        "line": 5760,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "shutdown_key",
+        "line": 5850,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "draw_help",
+        "line": 5870,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "draw_overlays",
+        "line": 5886,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "command_error",
+        "line": 5979,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "open_descendant_watch",
+        "line": 5989,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "thread_key",
+        "line": 6002,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "project_viewport",
+        "line": 6028,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "scroll",
+        "line": 6032,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "remember_painted_bodies",
+        "line": 6039,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "retained_working_node_ids",
+        "line": 6048,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "trim_bodies",
+        "line": 6074,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "merge_navigation_window",
+        "line": 6188,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "viewport_node_index",
+        "line": 6191,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "projection_node_index",
+        "line": 6194,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "working_node_ids",
+        "line": 6197,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "expanded_id_bytes",
+        "line": 6200,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "retained_body_bytes",
+        "line": 6203,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "valid_draft",
+        "line": 6206,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "receipt_label",
+        "line": 6217,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "unquote",
+        "line": 6229,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "key_matches",
+        "line": 6236,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "draft_display",
+        "line": 6284,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "cursor_position",
+        "line": 6287,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "rendered_node_text",
+        "line": 6291,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "draw_recovery",
+        "line": 6361,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "draw_header",
+        "line": 6391,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "draw_conversation",
+        "line": 6415,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "paint_conversation_edges",
+        "line": 6461,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "draw_input",
+        "line": 6509,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "draw_status",
+        "line": 6543,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "visible_render_nodes",
+        "line": 6628,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "draw",
+        "line": 6643,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "help_for",
+        "line": 6902,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "global_help_copy_follows_language",
+        "line": 6911,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "run",
+        "line": 6920,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "set_diagnostics",
+        "line": 6938,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "enter",
+        "line": 6943,
+        "parameters_including_self": 0,
+        "test_only": false
+      },
+      {
+        "name": "enter_with_width",
+        "line": 6947,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "width_observation",
+        "line": 6951,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "on_width_observation",
+        "line": 6956,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "enter_with_keyboard_enhancement",
+        "line": 6961,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "enter_inner",
+        "line": 6967,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "record_terminal_width",
+        "line": 7005,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "run_in_session",
+        "line": 7021,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "run_in_session_with_termination",
+        "line": 7029,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "run_session",
+        "line": 7038,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "details_refresh_failure_preserves_raw_reason_in_both_languages",
+        "line": 7178,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "confirmation_glyphs_do_not_rewrite_details",
+        "line": 7193,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "source_window_retains_raw_user_and_model_text_under_each_width",
+        "line": 7217,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 7251,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "history",
+        "line": 7262,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "memory_probe_uses_body_and_layout_accounting_without_f8_changes",
+        "line": 7278,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "probe",
+        "line": 7280,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "management_selection_is_typed_and_controls_stay_fixed",
+        "line": 7308,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "confirmation_helpers_are_used_by_the_real_bilingual_screen",
+        "line": 7360,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 7361,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 7366,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "long_confirmation_can_be_read_without_accepting_it",
+        "line": 7383,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "completed_markdown_single_rows_remain_monotonic_across_body_reloads",
+        "line": 7436,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "downward_single_rows_never_return_to_an_older_projection",
+        "line": 7527,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "attachment_unavailable_notice_is_localized_and_not_repeated_for_same_attempt",
+        "line": 7587,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "revisit_footer_shows_saved_continuation_and_clears_with_new_snapshot",
+        "line": 7691,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "retry_footer_renders_saved_counts_and_clears_them_after_success",
+        "line": 7724,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "receive_gap_updates_are_scoped_and_preserve_history_layout",
+        "line": 7787,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "activity_clock_preserves_history_and_rejects_stale_updates",
+        "line": 7849,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "observation_loss_freezes_only_the_matching_view_without_reversing_a_displayed_second",
+        "line": 7931,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unchanged_visible_progress_does_not_invalidate_the_screen",
+        "line": 7977,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "draft_and_status_reuse_layout_but_same_length_source_and_reload_invalidate",
+        "line": 8008,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "anchor_fold_dimensions_and_cross_thread_switch_have_distinct_layouts",
+        "line": 8057,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "layout_global_lru_zero_oversize_and_eviction_release_owned_buffers",
+        "line": 8095,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "painted_viewport_protects_all_visible_kinds_beyond_three_nodes",
+        "line": 8132,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "evicted_empty_tool_and_event_windows_reload_without_prose_blocks",
+        "line": 8207,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "body_budget_excludes_working_nodes_and_evicts_oldest_inactive_first",
+        "line": 8285,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "projection_work_and_row_metadata_are_bounded_independently_of_retained_history",
+        "line": 8315,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "row_scrolling_across_short_nodes_reuses_a_stable_projection_focus",
+        "line": 8349,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "pending_wheel_reply_at_coalesced_event_tail_finishes_without_nested_scroll",
+        "line": 8364,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "past_management_reference_does_not_change_current_recovery_or_normal_operation_context",
+        "line": 8413,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tool",
+        "line": 8465,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "history",
+        "line": 8495,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "details",
+        "line": 8509,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "frame",
+        "line": 8533,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "paused",
+        "line": 8555,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "observation",
+        "line": 8566,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "paired_paused_facts_converge_without_secondary_read_and_keep_source_window",
+        "line": 8586,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "context_usage_changes_only_with_an_adopted_snapshot_and_never_on_the_clock",
+        "line": 8618,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "stale_initial_context_waits_for_a_new_adoptable_observation",
+        "line": 8653,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paired_history_preserves_shrink_and_stale_diagnostics_with_one_retention_pass",
+        "line": 8681,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paired_history_keeps_saved_sender_projection_with_header_update",
+        "line": 8724,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "stale_frame_retires_read_slot_and_cannot_regress_header_or_facts",
+        "line": 8758,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "malformed_paired_child_does_not_partially_apply_header_or_history",
+        "line": 8772,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "follow_and_thread_switch_clear_saved_observation_once",
+        "line": 8787,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "pinned_tool_changes_only_metadata_and_refresh_requests_coalesce_without_source_loss",
+        "line": 8805,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 8911,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "history",
+        "line": 8922,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "draft_status_and_source_anchor_edits_reuse_layout_but_source_and_width_do_not",
+        "line": 8937,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "background_stream_commit_keeps_temporary_source_until_its_owner_is_rebased",
+        "line": 8973,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "background_invalidation_checks_its_generation_and_view_revision",
+        "line": 9043,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 9087,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "setup",
+        "line": 9100,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "newer_paired_tail_then_older_required_rebase_retries_without_losing_frame_or_wheel",
+        "line": 9136,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "obsolete_generation_or_view_does_not_reissue_or_consume_current_navigation",
+        "line": 9206,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "conversation_128_nodes_50_tools_latency",
+        "line": 9235,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "notice_refresh_updates_typed_title_and_keeps_canonical_text",
+        "line": 9350,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paused_tool_refresh_adopts_tail_without_replacing_prose_or_source_offsets",
+        "line": 9383,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "header_background_is_full_width_but_both_text_edges_are_blank",
+        "line": 9463,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "a_short_continuation_and_a_later_plain_row_own_their_last_cells",
+        "line": 9496,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "initial_pages_preserve_raw_attachment_fields_and_localize_copy",
+        "line": 9608,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unknown_command_uses_configured_language",
+        "line": 9695,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 9696,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 9699,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "model_settings_preserves_raw_names",
+        "line": 9709,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 9710,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 9716,
+        "parameters_including_self": 1,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/frontend/message_queue.rs",
+    "physical_lines": 1149,
+    "production_function_count": 12,
+    "production_max_parameters": 7,
+    "functions": [
+      {
+        "name": "read_revision",
+        "line": 6,
+        "parameters_including_self": 0,
+        "test_only": false
+      },
+      {
+        "name": "query",
+        "line": 9,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "submission_snapshot",
+        "line": 95,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "archives",
+        "line": 137,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "restore_archive",
+        "line": 155,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "restore_archive_inner",
+        "line": 162,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "validate_snapshot_positions",
+        "line": 198,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "validate_restore",
+        "line": 221,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "restore",
+        "line": 231,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "append_restored",
+        "line": 257,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "cancel",
+        "line": 290,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "cancelled_summary",
+        "line": 422,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "replies_are_thread_scoped_bounded_and_keep_saved_application_state",
+        "line": 442,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "cancellation_summary_uses_english_for_all_outcomes_and_counts",
+        "line": 486,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "fixture",
+        "line": 504,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "input",
+        "line": 509,
+        "parameters_including_self": 7,
+        "test_only": true
+      },
+      {
+        "name": "held_region_projects_saved_sender_and_completion_facts_without_null_guessing",
+        "line": 538,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "queue_uses_saved_sender_admission_membership_and_original_receipt_order",
+        "line": 606,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "queue_bounds_rows_and_unicode_excerpts_without_hiding_the_total",
+        "line": 686,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "frozen_submission_identity_and_content_cannot_diverge_from_sent_input",
+        "line": 711,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tiny_text_budget_does_not_count_snapshot_json_metadata_as_user_text",
+        "line": 752,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "merged_restore_preserves_attachment_positions_folds_and_budget",
+        "line": 773,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unknown_held_input_is_listed_cancelled_and_restored_in_receipt_order_across_restart",
+        "line": 813,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "cancelled_copy_is_retired_but_text_and_attachment_restore_without_sending",
+        "line": 1013,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/key_hints.rs",
+    "physical_lines": 699,
+    "production_function_count": 14,
+    "production_max_parameters": 4,
+    "functions": [
+      {
+        "name": "readonly_key",
+        "line": 7,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "static_binding",
+        "line": 53,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "spec",
+        "line": 80,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "description",
+        "line": 86,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "short_label",
+        "line": 143,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "binding",
+        "line": 173,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "matches",
+        "line": 180,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "label",
+        "line": 184,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "actions",
+        "line": 225,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "detail_footer",
+        "line": 257,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "build",
+        "line": 259,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "detail_footer_for",
+        "line": 302,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "text",
+        "line": 346,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "hint_context",
+        "line": 394,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "hint_glyphs_follow_width_without_changing_bindings",
+        "line": 450,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paired_text_keeps_every_original_binding_and_japanese_short_label",
+        "line": 488,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "every_width_keeps_whole_actions_and_help_last",
+        "line": 528,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "language_changes_invalidate_the_hint_cache",
+        "line": 553,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "binding_changes_invalidate_but_clock_repaints_reuse_the_string",
+        "line": 564,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "form_cache_tracks_catalogue_verb_and_never_uses_the_composer_send_binding",
+        "line": 577,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "ui",
+        "line": 606,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "key",
+        "line": 609,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "help_is_an_escape_route_without_discarding_the_underlying_detail",
+        "line": 613,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "footer_never_overwrites_a_notice_even_in_history_focus",
+        "line": 625,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "english_detail_footers_are_localized_in_every_detail_context",
+        "line": 640,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "detail_pages_only_advertise_real_continuations",
+        "line": 659,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "readonly_case_normalization_never_rewrites_control_or_alt_chords",
+        "line": 672,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "selection_tip_does_not_toggle_an_existing_history_focus_back_to_composer",
+        "line": 690,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/overlay.rs",
+    "physical_lines": 1740,
+    "production_function_count": 24,
+    "production_max_parameters": 4,
+    "functions": [
+      {
+        "name": "top_popup",
+        "line": 18,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "top_overlay",
+        "line": 43,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "composer_active",
+        "line": 52,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "history_mouse_active",
+        "line": 55,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "history_links_active",
+        "line": 58,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "event",
+        "line": 61,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "scope_management_actions",
+        "line": 124,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "needs_scope",
+        "line": 125,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "scope",
+        "line": 141,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "starts_scope",
+        "line": 155,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "event_inner",
+        "line": 187,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "submit_immediately",
+        "line": 292,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "key",
+        "line": 298,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "global_key",
+        "line": 508,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "overlay_key",
+        "line": 568,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "shutdown_title",
+        "line": 618,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "shutdown_context",
+        "line": 621,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "shutdown_footer",
+        "line": 624,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "shutdown_starting",
+        "line": 631,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "shutdown_progress",
+        "line": 638,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "confirmation_title",
+        "line": 662,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "confirmation_context",
+        "line": 672,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "confirmation_footer",
+        "line": 682,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "confirmation_text",
+        "line": 704,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "state",
+        "line": 770,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "invalid_watch_confirmation_shows_localized_notice_without_action",
+        "line": 785,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "changed_edit_confirmation_is_cancelled_in_both_languages",
+        "line": 835,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "ctrl_t_remembers_browser_mode_but_explicit_threads_and_new_ui_start_in_list",
+        "line": 863,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "mode",
+        "line": 864,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "close",
+        "line": 870,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "f2_captures_entry_time_once_and_all_exits_release_it",
+        "line": 920,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "f1_dispatch_keeps_operation_field_help_and_layered_general_help_distinct",
+        "line": 981,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "f1_above_client_confirmation_neither_executes_nor_drops_the_choice",
+        "line": 1032,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "derived_owner_keeps_valid_stacking_without_extra_mode_state",
+        "line": 1057,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "key",
+        "line": 1095,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "install",
+        "line": 1098,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "command",
+        "line": 1151,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "policy_global_keys_have_explicit_priority_over_each_overlay",
+        "line": 1160,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "policy_fold_shortcuts_never_change_a_popup_background_draft",
+        "line": 1194,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "policy_paste_cannot_reach_a_form_below_confirmation_shutdown_or_selection",
+        "line": 1214,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "policy_composer_completion_and_selection_use_matching_mouse_and_link_guards",
+        "line": 1246,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "policy_reader_navigation_keeps_existing_function_key_owners",
+        "line": 1257,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "selection_suppresses_actual_detail_link_targets_without_discarding_the_popup",
+        "line": 1281,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "rendered",
+        "line": 1327,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "rejected_paste_notice_is_bilingual_and_does_not_insert_text",
+        "line": 1343,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 1344,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 1350,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "english_rejection_keeps_its_outcome_at_eight_columns",
+        "line": 1359,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "rejected_paste_is_visible_for_every_blocked_owner_without_changing_input",
+        "line": 1378,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paste_feedback_keeps_status_and_fixed_escape_footer_at_small_and_wide_sizes",
+        "line": 1419,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "editable_owners_still_accept_paste_and_next_key_clears_only_the_notice",
+        "line": 1466,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tiny_frame_settles_and_clears_obsolete_links_without_an_idle_repaint",
+        "line": 1509,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "ignored_events_never_request_a_frame_or_erase_an_existing_request",
+        "line": 1531,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "index_confirmation_screen_preserves_external_preview_in_both_languages",
+        "line": 1579,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 1580,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 1616,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "storage_confirmation_screen_keeps_category_and_requires_explicit_y",
+        "line": 1636,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 1637,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 1653,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "shutdown_progress_preserves_raw_detail_and_force_state_in_both_languages",
+        "line": 1673,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "shutdown_screen_is_bilingual_and_preserves_raw_progress",
+        "line": 1688,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 1689,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 1700,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "stale_index_confirmation_preserves_detail_and_never_offers_execution",
+        "line": 1715,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "force_quit_stays_on_the_existing_stage_a_translation",
+        "line": 1733,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/view.rs",
+    "physical_lines": 3946,
+    "production_function_count": 62,
+    "production_max_parameters": 7,
+    "functions": [
+      {
+        "name": "draft_attachment_retention",
+        "line": 68,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "finish_saved_input",
+        "line": 91,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "reconcile_saved_inputs",
+        "line": 110,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "observe_sent_nodes",
+        "line": 143,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "sending",
+        "line": 162,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "footer_phase",
+        "line": 191,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "cancel_navigation",
+        "line": 209,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "clear_tool_observation",
+        "line": 217,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "request_tool_refresh",
+        "line": 227,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "apply_tool_observation",
+        "line": 284,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "start_rebase_navigation",
+        "line": 313,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "prepare_navigation",
+        "line": 318,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "follow_tail",
+        "line": 322,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 327,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "history_layout",
+        "line": 392,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "closed_tool_source",
+        "line": 444,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "selected_node_count",
+        "line": 463,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "merge_navigation_window",
+        "line": 471,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "viewport_node_index",
+        "line": 521,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "projection_node_index",
+        "line": 532,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "working_node_ids",
+        "line": 540,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "matches",
+        "line": 550,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "on_thread",
+        "line": 556,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "on_history",
+        "line": 599,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "on_stream",
+        "line": 747,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "commit_stream_node",
+        "line": 831,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "retire_committed_preview",
+        "line": 880,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "remove_committed_previews",
+        "line": 895,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "rebase_preview",
+        "line": 911,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "rebase_committed_stream",
+        "line": 939,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "on_view_state",
+        "line": 966,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "on_load_failed",
+        "line": 970,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "on_node_window",
+        "line": 975,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "received_anchor_bindings",
+        "line": 1021,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "take_received_previews",
+        "line": 1035,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "on_history_window",
+        "line": 1055,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "on_history_invalidated",
+        "line": 1176,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "on_tool_facts",
+        "line": 1207,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "receipt_english",
+        "line": 1243,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "on_receipt",
+        "line": 1362,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "on_restored_snapshot",
+        "line": 1481,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "on_clipboard_attachment",
+        "line": 1508,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "on_progress",
+        "line": 1535,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "retain_source_ids",
+        "line": 1550,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "compact_node_slots",
+        "line": 1571,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "current_uncommitted_preview",
+        "line": 1580,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "discard_committed_previews_except",
+        "line": 1594,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "discard_cached_history",
+        "line": 1607,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "trim_page_edges",
+        "line": 1615,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "retained_body_bytes",
+        "line": 1660,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "evict_node_body",
+        "line": 1690,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "nodes",
+        "line": 1709,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "nodes_mut_for_test",
+        "line": 1713,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "matches_navigation_reply",
+        "line": 1720,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "finish_navigation_reply",
+        "line": 1734,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "history_revision",
+        "line": 1739,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "mark_source_changed",
+        "line": 1742,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "language_follows_config_for_new_views_and_separates_render_caches",
+        "line": 1753,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "scroll_uses_its_own_sources_and_preserves_source_anchor_across_widths",
+        "line": 1780,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "settle_stream",
+        "line": 1835,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "provisional_sources",
+        "line": 1873,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "settle_other_streams",
+        "line": 1896,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "stream",
+        "line": 1919,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "metadata_history_does_not_erase_preview_or_reinterpret_it_as_canonical",
+        "line": 1931,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "prepared",
+        "line": 1967,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "identical_final_history_retains_layout_and_different_source_envelope_or_width_invalidates",
+        "line": 1979,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "notice",
+        "line": 2033,
+        "parameters_including_self": 4,
+        "test_only": true
+      },
+      {
+        "name": "receipt_english_preserves_raw_messages_revision_and_terminal_symbols",
+        "line": 2046,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "completion_notice_requires_the_accepted_owner_revision_anchor_and_paused_view",
+        "line": 2087,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "read_failure_discards_queued_motion_without_automatic_retry",
+        "line": 2111,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unrelated_refresh_failure_does_not_cancel_navigation_read",
+        "line": 2126,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "navigation_read_has_an_explicit_footer_indicator",
+        "line": 2146,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "cached_rows_remain_navigable_during_a_pending_read",
+        "line": 2171,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "pending_read_allows_cached_movement_across_nodes",
+        "line": 2211,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "stopped_growth_near_tail_keeps_up_navigation_available",
+        "line": 2245,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "rebase_reply_keeps_newer_cached_movement_on_the_same_source",
+        "line": 2291,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "rebase_reply_uses_authoritative_offset_without_newer_movement",
+        "line": 2321,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "stream_commit_rebase_does_not_discard_queued_navigation",
+        "line": 2346,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "rejected_navigation_releases_matching_read_and_discards_its_movement",
+        "line": 2369,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "initiating_scroll_is_replayed_after_stream_rebase",
+        "line": 2415,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "rejected_stream_rebase_can_retry_and_follow_completion_releases_its_correspondence",
+        "line": 2488,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "retain_incomplete_stream",
+        "line": 2562,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "on_incomplete_responses",
+        "line": 2612,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "anchored_received_preview_refreshes_state_color_without_replacing_its_body_window",
+        "line": 2679,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_previews_stay_in_their_turn_and_do_not_leak_into_other_pages",
+        "line": 2801,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 2802,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "received_previews_do_not_advance_selected_ordinals_or_break_page_merges",
+        "line": 2872,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "delayed_received_refresh_cannot_replace_a_newer_snapshot_or_navigation",
+        "line": 2907,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "received_window_scope_rejects_stale_replies_but_retains_paid_body_until_fresh_snapshot",
+        "line": 2953,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unsaved_conversation_title_follows_language_without_creating_a_thread",
+        "line": 3034,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "settled_stream_titles_are_localized_without_changing_raw_text_or_identity",
+        "line": 3048,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "terminal_failure_keeps_visible_paid_text_and_fresh_generations_own_saved_previews",
+        "line": 3098,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "two_commits_resolve_reverse_body_delivery_without_losing_the_other_source",
+        "line": 3170,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "source",
+        "line": 3171,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "an_evicted_canonical_slot_cannot_retire_the_paid_preview_from_a_late_window",
+        "line": 3251,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node_storage_bytes",
+        "line": 3314,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "streaming_replacement_eviction_and_capacity_compaction_keep_exact_body_totals",
+        "line": 3322,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "local_tool_observation_failure_invalidates_projection_stamp",
+        "line": 3353,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paused_stream_window_extent_changes_render_unit_identity_without_losing_old_text",
+        "line": 3371,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 3406,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "view",
+        "line": 3418,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "backward_window_intent_is_independent_of_initial_tail_hydration_order",
+        "line": 3424,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "follow_window_keeps_paid_stream_until_canonical_body_is_installed",
+        "line": 3487,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "disjoint_visible_and_current_working_regions_keep_both_page_edges",
+        "line": 3529,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "only_offscreen_committed_previews_are_discarded_as_complete_units",
+        "line": 3547,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "overlapping_follow_windows_preserve_uncommitted_streams",
+        "line": 3570,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "following_non_tail_anchor_reply_retains_current_frame_and_requests_tail",
+        "line": 3600,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node_hydration_order_is_separate_from_queue_age_and_navigation_intent",
+        "line": 3625,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "discarded_failed_raw_previews_cannot_move_the_retained_tool_body",
+        "line": 3648,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "navigation_keeps_newer_queue_snapshot_and_releases_its_slot",
+        "line": 3682,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 3720,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "view",
+        "line": 3730,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "ids",
+        "line": 3764,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "same_window",
+        "line": 3770,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "following_same_window_retains_all_anchored_audits_until_audit_snapshot",
+        "line": 3805,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paused_same_window_retains_all_anchored_audits_at_the_original_predecessors",
+        "line": 3809,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "ordinary_tail_refresh_keeps_audits_at_their_anchors_and_drops_missing_anchors",
+        "line": 3813,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "non_tail_fallback_does_not_extract_audits_and_new_window_drops_only_missing_anchors",
+        "line": 3846,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "send_stage_age_does_not_use_older_reflection_and_duplicate_ack_does_not_reset",
+        "line": 3892,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  }
+]
