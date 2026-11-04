@@ -279,6 +279,7 @@ fn render(
     *snapshot.borrow_mut() = crate::terminal_links::LinkSnapshot {
         buffer: frame.buffer_mut().clone(),
         regions: vec![],
+        repaint_rows: None.into(),
     };
 }
 

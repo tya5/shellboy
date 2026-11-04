@@ -459,7 +459,8 @@ Use `/replies` to select an applied reply request in the current conversation. T
 If residue appears after closing help or while scrolling, turn on
 `clean_redraw = true` in `[ui]` and restart Shellboy. It clears and redraws the
 screen when an overlay closes, and erases and rewrites moved history rows,
-including both edges. Turn it off (`false`, the proposed default) if the extra
+including both edges. It is off by default: sparse log scrolling can emit substantially more bytes.
+Turn it off (`false`) if the extra
 terminal output makes interaction slower. Ctrl+L still requests a manual full
 redraw with either value. `shellboy config check` validates the boolean setting.
 
