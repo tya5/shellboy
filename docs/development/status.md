@@ -4522,3 +4522,20 @@ known operation. This batch pins the 54 Japanese arms as localized UI resources
 and adds exhaustive language-pair coverage; unknown operation identifiers keep
 the neutral fallback. No operation kind or persisted data changes.
 - #152 reconciliation: deletion/key-hint/count audit evidence recorded against current main in `docs/validation/language-audit-stage-c.md`; this is not Stage C completion.
+
+## #214 bounded bootstrap recovery seek
+
+Bootstrap recovery now selects each candidate with one effective lower key
+bound: inclusive prefix for the first lookup and exclusive processed cursor
+thereafter. Count and input-byte limits also apply before oversized legacy
+handling, which starts in a separate page. The existing page transaction,
+notification/yield boundary and explicit-retry/paid-work policy are unchanged.
+Authorization recovery (#203) remains a separate branch/scope.
+
+Synthetic regressions cover early/late/exhausted cursors on 10,000 pending
+records, exact-prefix and adjacent-range boundaries, read-only VM-step probes,
+an instruction guard on the actual page function, byte/count limits, restart
+and per-page rollback. Native macOS arm64 local checks passed locked test
+compilation, the five new bootstrap regressions and seven existing metadata
+regressions; Python 197 tests, layout/watchdog and language checks also passed.
+Strict Clippy and exact-tip CI results are tracked in the issue handoff.
