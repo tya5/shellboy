@@ -459,9 +459,8 @@ impl ShellSupervisor {
                 );
             }
             forced |= group_forced;
-            let (state, reason, output_complete) = io
-                .finish(drain_timeout, group_confirmed, stopped_before_exit)
-                .await;
+            let (state, reason, output_complete) =
+                io.finish(drain_timeout, stopped_before_exit).await;
             let completion = ShellCompletion {
                 execution_id,
                 state,
@@ -546,7 +545,6 @@ struct OutputSink {
     chunk_size: usize,
     stop: CancellationToken,
     failure: Arc<StdMutex<ShellFailures>>,
-    progress: Arc<std::sync::atomic::AtomicU64>,
 }
 
 async fn pump<R: AsyncRead + Unpin>(
@@ -554,9 +552,11 @@ async fn pump<R: AsyncRead + Unpin>(
     stream: OutputStream,
     sink: Arc<OutputSink>,
     waiting_for_sink: Arc<std::sync::atomic::AtomicBool>,
+    progress: Arc<std::sync::atomic::AtomicU64>,
 ) -> bool {
     loop {
         let mut bytes = vec![0; sink.chunk_size];
+        waiting_for_sink.store(true, std::sync::atomic::Ordering::Relaxed);
         let n = match reader.read(&mut bytes).await {
             Ok(0) => return true,
             Ok(n) => n,
@@ -571,9 +571,9 @@ async fn pump<R: AsyncRead + Unpin>(
             }
         };
         bytes.truncate(n);
+        progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // Each pipe owns one fixed read buffer outside the queued-byte budget.
         // Reserving the whole budget before read could starve the other stream.
-        waiting_for_sink.store(true, std::sync::atomic::Ordering::Relaxed);
         let permit = match sink.budget.clone().acquire_many_owned(n as u32).await {
             Ok(p) => p,
             Err(_) => return false,
@@ -601,7 +601,7 @@ async fn pump<R: AsyncRead + Unpin>(
             stream,
             bytes,
             _budget: permit,
-            _progress: sink.progress.clone(),
+            _progress: progress.clone(),
         });
         if publisher.tx.send(event).await.is_err() {
             record_failure(
@@ -831,6 +831,7 @@ mod output_failure_tests {
         drop(writer);
         let (tx, mut events) = mpsc::channel(4);
         let stop = CancellationToken::new();
+        let progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let sink = Arc::new(OutputSink {
             publisher: Mutex::new(Publisher {
                 tx,
@@ -842,13 +843,13 @@ mod output_failure_tests {
             chunk_size: 16,
             stop: stop.clone(),
             failure: failure.clone(),
-            progress: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         });
         let pump = tokio::spawn(pump(
             reader,
             OutputStream::Stdout,
             sink,
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            progress,
         ));
         let ShellEvent::Output(chunk) = events.recv().await.unwrap();
         assert_eq!(chunk.bytes, b"abcd");
