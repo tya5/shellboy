@@ -40,6 +40,8 @@ pub struct PendingMessage {
     pub message_id: String,
     pub operation_id: String,
     pub sender_thread: Option<String>,
+    pub sender_kind: crate::protocol::SenderKind,
+    pub completion_scheduled: bool,
     pub created_at: String,
     pub held: bool,
     pub hold_reason: Option<String>,
@@ -59,61 +61,84 @@ impl PendingMessage {
             (Some(id), UiLanguage::En) => {
                 format!("Conversation {}", id.chars().take(8).collect::<String>())
             }
-            (None, _) => i18n::local!(language, "人", "Person").into(),
+            (None, _) => match self.sender_kind {
+                crate::protocol::SenderKind::Human => i18n::local!(language, "人", "Person"),
+                crate::protocol::SenderKind::ExternalCli => {
+                    i18n::local!(language, "外部CLI", "External CLI")
+                }
+                crate::protocol::SenderKind::Model => i18n::local!(language, "モデル", "Model"),
+                crate::protocol::SenderKind::Unknown => {
+                    i18n::local!(language, "送信元不明", "Unknown sender")
+                }
+            }
+            .into(),
         }
     }
-    fn label(&self, language: UiLanguage) -> String {
+    fn state(&self, language: UiLanguage) -> &'static str {
+        if self.uncertain {
+            i18n::local!(language, "反映状況不明", "Delivery unknown")
+        } else if self.held {
+            i18n::local!(language, "保留", "Held")
+        } else {
+            i18n::local!(language, "反映待ち", "Pending")
+        }
+    }
+    fn reason(&self, language: UiLanguage) -> Option<&str> {
+        let reason = self.hold_reason.as_deref()?;
+        Some(match reason {
+            "terminal_before_path_admission" => i18n::local!(
+                language,
+                "中断前の未反映",
+                "Not delivered before interruption"
+            ),
+            "uncertain_path_admission" => i18n::local!(
+                language,
+                "反映状況を確認できません",
+                "Delivery could not be verified"
+            ),
+            "previous_instance_interrupted" => i18n::local!(
+                language,
+                "前回の終了で中断",
+                "Interrupted by previous shutdown"
+            ),
+            "stopped" | "stopping" => i18n::local!(language, "停止", "Stopped"),
+            "recovery_wait" => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
+            "run_completion" => i18n::local!(
+                language,
+                "作業の完了時に届ける",
+                "Delivered when the Run completes"
+            ),
+            _ => reason,
+        })
+    }
+    fn delivery_flags(&self, language: UiLanguage, label: &mut String) {
         let sep = crate::ui::text_width::glyphs::separator();
-        let sender = self.sender(language);
-        let mut label = match (language, self.uncertain, self.held, self.now) {
-            (UiLanguage::Ja, true, _, false) => format!("{sender}{sep}反映状況不明"),
-            (UiLanguage::Ja, true, _, true) => format!("{sender}{sep}反映状況不明{sep}すぐ渡す"),
-            (UiLanguage::Ja, false, true, false) => format!("{sender}{sep}保留"),
-            (UiLanguage::Ja, false, true, true) => format!("{sender}{sep}保留{sep}すぐ渡す"),
-            (UiLanguage::Ja, false, false, false) => format!("{sender}{sep}反映待ち"),
-            (UiLanguage::Ja, false, false, true) => format!("{sender}{sep}反映待ち{sep}すぐ渡す"),
-            (UiLanguage::En, true, _, false) => format!("{sender}{sep}Delivery unknown"),
-            (UiLanguage::En, true, _, true) => {
-                format!("{sender}{sep}Delivery unknown{sep}Deliver now")
-            }
-            (UiLanguage::En, false, true, false) => format!("{sender}{sep}Held"),
-            (UiLanguage::En, false, true, true) => format!("{sender}{sep}Held{sep}Deliver now"),
-            (UiLanguage::En, false, false, false) => format!("{sender}{sep}Pending"),
-            (UiLanguage::En, false, false, true) => format!("{sender}{sep}Pending{sep}Deliver now"),
-        };
+        if self.now {
+            label.push_str(sep);
+            label.push_str(i18n::local!(language, "すぐ渡す", "Deliver now"));
+        }
         if self.expect_reply {
             label.push_str(sep);
             label.push_str(crate::presentation::ReplyState::Pending.label(language));
         }
-        if let Some(reason) = &self.hold_reason {
-            // A reason is an independent fact, not a grammatical message fragment.
+    }
+    pub(super) fn label(&self, language: UiLanguage) -> String {
+        let sep = crate::ui::text_width::glyphs::separator();
+        let mut label = format!("{}{sep}{}", self.sender(language), self.state(language));
+        self.delivery_flags(language, &mut label);
+        if let Some(reason) = self.reason(language) {
             label.push_str(sep);
-            label.push_str(match reason.as_str() {
-                "terminal_before_path_admission" => i18n::local!(
-                    language,
-                    "中断前の未反映",
-                    "Not delivered before interruption"
-                ),
-                "uncertain_path_admission" => i18n::local!(
-                    language,
-                    "反映状況を確認できません",
-                    "Delivery could not be verified"
-                ),
-                "previous_instance_interrupted" => i18n::local!(
-                    language,
-                    "前回の終了で中断",
-                    "Interrupted by previous shutdown"
-                ),
-                "stopped" | "stopping" => i18n::local!(language, "停止", "Stopped"),
-                "recovery_wait" => i18n::local!(language, "復旧待ち", "Waiting for recovery"),
-                "run_completion" => i18n::local!(
-                    language,
-                    "作業の完了時に届ける",
-                    "Delivered when the Run completes"
-                ),
-                _ => reason,
-            });
+            label.push_str(reason);
         }
+        label
+    }
+    pub(super) fn region_metadata(&self, language: UiLanguage) -> String {
+        let mut label = self.state(language).to_owned();
+        if let Some(reason) = self.reason(language) {
+            label.push_str(crate::ui::text_width::glyphs::separator());
+            label.push_str(reason);
+        }
+        self.delivery_flags(language, &mut label);
         label
     }
 }
@@ -148,14 +173,11 @@ fn archive_error(language: UiLanguage, error: &str) -> String {
         UiLanguage::En => format!("Could not load: {error}{sep}R Retry"),
     }
 }
-fn sender_count(language: UiLanguage, sender: Option<&str>, count: usize) -> String {
-    match (language, sender, count == 1) {
-        (UiLanguage::Ja, Some(id), _) => format!("会話 {id}: {count}件"),
-        (UiLanguage::Ja, None, _) => format!("人: {count}件"),
-        (UiLanguage::En, Some(id), true) => format!("Conversation {id}: 1 input"),
-        (UiLanguage::En, Some(id), false) => format!("Conversation {id}: {count} inputs"),
-        (UiLanguage::En, None, true) => "Person: 1 input".into(),
-        (UiLanguage::En, None, false) => format!("Person: {count} inputs"),
+fn sender_count(language: UiLanguage, sender: &str, count: usize) -> String {
+    match (language, count == 1) {
+        (UiLanguage::Ja, _) => format!("{sender}: {count}件"),
+        (UiLanguage::En, true) => format!("{sender}: 1 input"),
+        (UiLanguage::En, false) => format!("{sender}: {count} inputs"),
     }
 }
 fn cancel_detail(language: UiLanguage, count: usize, senders: &str) -> String {
@@ -347,14 +369,14 @@ pub(super) fn height(view: &ThreadView, available: u16) -> u16 {
 // Drawing must never scan or allocate the complete accepting draft: it may be
 // several MiB while only one preview line is visible. Find a bounded UTF-8
 // prefix before sanitization or newline replacement.
-fn accepting_excerpt(text: &str) -> String {
+pub(super) fn accepting_excerpt(text: &str) -> String {
     let end = text
         .char_indices()
         .nth(512)
         .map_or(text.len(), |(index, _)| index);
     let mut preview = crate::presentation::sanitize_plain(&text[..end], 0)
         .0
-        .replace('\n', " ");
+        .replace(['\n', '\r', '\t'], " ");
     if end < text.len() {
         preview.push_str(crate::ui::text_width::glyphs::ellipsis());
     }
@@ -485,6 +507,61 @@ impl UiState {
             thread_id: view.thread_id.clone(),
         }
     }
+    pub(super) fn open_pending_status(&mut self, id: String) -> Vec<UiAction> {
+        self.management.mode = management::ManagementMode::General;
+        self.management.open_text(ManagementView {
+            title: i18n::local!(self.config.ui.language, "依頼の状態", "Request status").into(),
+            text: i18n::local!(self.config.ui.language, "取得中", "Loading").into(),
+            scroll: 0,
+        });
+        vec![UiAction::Manage(Command::MessageGet(
+            crate::protocol::MessageTarget { message_id: id },
+        ))]
+    }
+    pub(super) fn open_pending_source(&mut self, id: String) -> Vec<UiAction> {
+        let mut details = details::Details::new(self.view(), false);
+        let action = details.open_source(id, &mut self.next_detail_request);
+        self.details = Some(details);
+        vec![action]
+    }
+    pub(super) fn confirm_pending_cancel(&mut self, message_ids: Vec<String>) {
+        if message_ids.is_empty() {
+            return;
+        }
+        let language = self.config.ui.language;
+        let mut counts = BTreeMap::<String, usize>::new();
+        for item in self
+            .view()
+            .pending_messages
+            .items
+            .iter()
+            .filter(|item| message_ids.contains(&item.message_id))
+        {
+            let sender = match (&item.sender_thread, language) {
+                (Some(id), UiLanguage::Ja) => format!("会話 {id}"),
+                (Some(id), UiLanguage::En) => format!("Conversation {id}"),
+                (None, _) => item.sender(language),
+            };
+            *counts.entry(sender).or_default() += 1;
+        }
+        let senders = counts
+            .into_iter()
+            .map(|(who, count)| {
+                let who = crate::presentation::sanitize_plain(&who, 0).0;
+                sender_count(language, &who, count)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let detail = cancel_detail(language, message_ids.len(), &senders);
+        let action = UiAction::CancelMessages {
+            message_ids,
+            target: self.recovery_target(),
+        };
+        self.confirmation = Some(Confirmation::MessageQueue {
+            action: Box::new(action),
+            detail,
+        });
+    }
     pub(super) fn queue_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         if self.queue_popup.replies {
             let count = self.view().pending_messages.awaiting_reply.len();
@@ -586,20 +663,7 @@ impl UiState {
                 {
                     let id = item.message_id.clone();
                     self.queue_popup.visible = false;
-                    self.management.mode = management::ManagementMode::General;
-                    self.management.open_text(ManagementView {
-                        title: i18n::local!(
-                            self.config.ui.language,
-                            "依頼の状態",
-                            "Request status"
-                        )
-                        .into(),
-                        text: i18n::local!(self.config.ui.language, "取得中", "Loading").into(),
-                        scroll: 0,
-                    });
-                    return vec![UiAction::Manage(Command::MessageGet(
-                        crate::protocol::MessageTarget { message_id: id },
-                    ))];
+                    return self.open_pending_status(id);
                 }
                 vec![]
             }
@@ -612,50 +676,21 @@ impl UiState {
                 {
                     let id = item.message_id.clone();
                     self.queue_popup.visible = false;
-                    let mut details = details::Details::new(self.view(), false);
-                    let action = details.open_source(id, &mut self.next_detail_request);
-                    self.details = Some(details);
-                    return vec![action];
+                    return self.open_pending_source(id);
                 }
                 vec![]
             }
             KeyCode::Char(mode @ ('d' | 'a')) if self.queue_popup.archives.is_none() => {
-                let items = self
+                let ids = self
                     .view()
                     .pending_messages
                     .items
                     .iter()
                     .enumerate()
                     .filter(|(i, _)| mode == 'a' || *i == self.queue_popup.selected)
-                    .map(|(_, item)| item.clone())
-                    .collect::<Vec<_>>();
-                if items.is_empty() {
-                    return vec![];
-                }
-                let mut counts = BTreeMap::<Option<String>, usize>::new();
-                for item in &items {
-                    *counts.entry(item.sender_thread.clone()).or_default() += 1;
-                }
-                let language = self.config.ui.language;
-                let senders = counts
-                    .into_iter()
-                    .map(|(who, count)| {
-                        let who = who
-                            .as_deref()
-                            .map(|id| crate::presentation::sanitize_plain(id, 0).0);
-                        sender_count(language, who.as_deref(), count)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let detail = cancel_detail(language, items.len(), &senders);
-                let action = UiAction::CancelMessages {
-                    message_ids: items.into_iter().map(|i| i.message_id).collect(),
-                    target: self.recovery_target(),
-                };
-                self.confirmation = Some(Confirmation::MessageQueue {
-                    action: Box::new(action),
-                    detail,
-                });
+                    .map(|(_, item)| item.message_id.clone())
+                    .collect();
+                self.confirm_pending_cancel(ids);
                 vec![]
             }
             _ => vec![],
@@ -675,6 +710,8 @@ mod tests {
     }
     fn queued(id: &str) -> PendingMessage {
         PendingMessage {
+            sender_kind: crate::protocol::SenderKind::Human,
+            completion_scheduled: false,
             expect_reply: false,
             message_id: id.into(),
             operation_id: format!("op:{id}"),
@@ -1373,6 +1410,8 @@ mod language_tests {
     }
     fn item(id: &str) -> PendingMessage {
         PendingMessage {
+            sender_kind: crate::protocol::SenderKind::Human,
+            completion_scheduled: false,
             expect_reply: false,
             message_id: id.into(),
             operation_id: format!("operation-{id}"),
@@ -1459,25 +1498,17 @@ mod language_tests {
                 crate::ui::text_width::terminal_width_observation(),
             ) {
                 (UiLanguage::En, Some(1)) => &[
-                    "Person · Held · Deliver now · Waiting for recovery",
+                    "Held input",
+                    "Held · Waiting for recovery",
                     "source-preview",
-                    "/queue · 1 saved input",
                 ],
-                (UiLanguage::Ja, Some(1)) => &[
-                    "人 · 保留 · すぐ渡す · 復旧待ち",
-                    "source-preview",
-                    "/queue · 保存済み1件",
-                ],
+                (UiLanguage::Ja, Some(1)) => &["保留中の入力", "保留 · 復旧待ち", "source-preview"],
                 (UiLanguage::En, _) => &[
-                    "Person | Held | Deliver now | Waiting for recovery",
+                    "Held input",
+                    "Held | Waiting for recovery",
                     "source-preview",
-                    "/queue | 1 saved input",
                 ],
-                (UiLanguage::Ja, _) => &[
-                    "人 | 保留 | すぐ渡す | 復旧待ち",
-                    "source-preview",
-                    "/queue | 保存済み1件",
-                ],
+                (UiLanguage::Ja, _) => &["保留中の入力", "保留 | 復旧待ち", "source-preview"],
             },
         );
         i18n::verify_screen(archives, |language| match language {
@@ -1547,7 +1578,8 @@ mod language_tests {
             for language in [UiLanguage::En, UiLanguage::Ja] {
                 let archive = archive_count(language, count);
                 let compact = compact_count(language, count as u64);
-                let sender = sender_count(language, Some("raw-id"), count);
+                let who = i18n::local!(language, "会話 raw-id", "Conversation raw-id");
+                let sender = sender_count(language, who, count);
                 let cancel = cancel_detail(language, count, &sender);
                 if language == UiLanguage::Ja {
                     assert_eq!(archive, format!("{count}件 | /restore draft ID"));

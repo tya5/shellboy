@@ -1089,3 +1089,19 @@ fn clean_redraw_is_a_strict_startup_boolean() {
     }
     assert!(Config::parse("[ui]\nclean_redarw=true\n").is_err());
 }
+
+#[test]
+fn held_input_rows_have_independent_strict_bounds() {
+    assert_eq!(Config::parse("").unwrap().ui.held_input_rows, 3);
+    for limit in [1, 3, 10] {
+        let config = Config::parse(&format!(
+            "[ui]\nheld_input_rows = {limit}\nlive_work_rows = 2\n"
+        ))
+        .unwrap();
+        assert_eq!(config.ui.held_input_rows, limit);
+        assert_eq!(config.ui.live_work_rows, 2);
+    }
+    for invalid in ["0", "11", "-1", "true", "\"3\""] {
+        assert!(Config::parse(&format!("[ui]\nheld_input_rows = {invalid}\n")).is_err());
+    }
+}
