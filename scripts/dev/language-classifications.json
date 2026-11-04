@@ -62,32 +62,32 @@
   "src/presentation/fields.rs:cf3c793ba104a057:1": {
     "category": "a",
     "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/fields.rs:3b13281cd9c74396:1": {
     "category": "a",
     "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/fields.rs:cf3c793ba104a057:2": {
     "category": "a",
     "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/fields.rs:967e34304c32c1b8:1": {
     "category": "a",
     "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/fields.rs:b7717629563883d0:1": {
     "category": "a",
     "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/fields.rs:84e2338840f9909e:1": {
     "category": "a",
     "reason": "Re-reviewed after #186 adds input_tokens and input_bytes to the execution group: group() keeps stable semantic IDs and Japanese compatibility labels; details Fields mode calls group_label(), which selects ASCII English labels by UiLanguage. These are UI resources, not canonical field values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/messages.rs:850486352b42fc11:1": {
     "category": "a",
@@ -6690,16 +6690,16 @@
   "src/presentation/fields.rs:316861a2463ec17b:2": {
     "category": "a",
     "reason": "Added grouped-usage Japanese group label; group_label() selects the matching English section label by UI language without modifying canonical field keys or values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/fields.rs:91e9447dd745de19:2": {
     "category": "a",
     "reason": "Added grouped-usage Japanese group label; group_label() selects the matching English section label by UI language without modifying canonical field keys or values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   },
   "src/presentation/fields.rs:35d4e4f84a270612:2": {
     "category": "a",
     "reason": "Added grouped-usage Japanese group label; group_label() selects the matching English section label by UI language without modifying canonical field keys or values.",
-    "source_tokens_sha256": "fc3789b39188737a585824cf3f3f86bb681135b1e7f4b1554c4e885300ddbe27"
+    "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
   }
 }
