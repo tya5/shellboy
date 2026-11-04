@@ -384,13 +384,37 @@ mod tests {
         fs::create_dir_all(&logs).unwrap();
         let rows = [
             // Input: 0.7.2-rc.1 -> 0.7.2; final release is a version increase.
-            line_with_app_version("2026-01-01T00:00:00Z", "configuration", 1, None, "0.7.2-rc.1"),
+            line_with_app_version(
+                "2026-01-01T00:00:00Z",
+                "configuration",
+                1,
+                None,
+                "0.7.2-rc.1",
+            ),
             line_with_app_version("2026-01-01T00:00:01Z", "configuration", 1, None, "0.7.2"),
             // Reverse direction is not an increase.
-            line_with_app_version("2026-01-01T00:00:02Z", "configuration", 1, None, "0.7.2-rc.1"),
+            line_with_app_version(
+                "2026-01-01T00:00:02Z",
+                "configuration",
+                1,
+                None,
+                "0.7.2-rc.1",
+            ),
             // Build metadata does not affect SemVer precedence.
-            line_with_app_version("2026-01-01T00:00:03Z", "configuration", 1, None, "0.7.2+ci.1"),
-            line_with_app_version("2026-01-01T00:00:04Z", "configuration", 1, None, "0.7.2+ci.2"),
+            line_with_app_version(
+                "2026-01-01T00:00:03Z",
+                "configuration",
+                1,
+                None,
+                "0.7.2+ci.1",
+            ),
+            line_with_app_version(
+                "2026-01-01T00:00:04Z",
+                "configuration",
+                1,
+                None,
+                "0.7.2+ci.2",
+            ),
         ];
         fs::write(logs.join("shellboy.log"), rows.join("\n") + "\n").unwrap();
 
