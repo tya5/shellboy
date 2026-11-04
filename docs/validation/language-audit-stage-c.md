@@ -514,5 +514,5 @@ loading/failure screen test in `src/ui/thread_deletion.rs`, the measured-width
 guide-key test in `src/ui/help.rs`, and localized generated-title/count
 projections in `src/presentation/projection.rs` and
 `src/presentation/messages.rs`. These are UI-owned labels; provider errors,
-source titles, IDs, and stored values remain unchanged. The current-source audit on reconcile-34 reports `a=2808, b=1555, c=104`; strict `--check` still fails for 104 candidates. Fingerprint consistency is not a zero gate. This note records reviewed surfaces only and does not claim the Stage C
+source titles, IDs, and stored values remain unchanged. The current-source audit on reconcile-34 reports `a=2834, b=1555, c=76`; strict `--check` still fails for 76 candidates. Fingerprint consistency is not a zero gate. This note records reviewed surfaces only and does not claim the Stage C
 zero gate, physical PTY, Windows, or integration acceptance.

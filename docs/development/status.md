@@ -4459,7 +4459,7 @@ selected-language label helper.
 
 All 320 Japanese catalogue literals are individually source-hash classified as
 reviewed UI-side text. The current exact-source audit on main `22db1a22` plus
-the current reconcile-34 source tree reports `a=2808, b=1555, c=104`; strict `--check` still fails on 104 pending literals outside the reviewed catalogue. English
+the current reconcile-34 source tree reports `a=2834, b=1555, c=76`; strict `--check` still fails on 76 pending literals outside the reviewed catalogue. English
 catalogue fallback, global argument and frontend title regression tests pass.
 The localized field/usage regressions also pass. Full library suite at the
 pre-DB-fallback-test revision: 1,999 passed, 19 ignored; current DB activity

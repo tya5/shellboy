@@ -9425,8 +9425,8 @@ global-argument test checks English output likewise. A new frontend regression
 checks the selected-language title under terminal separator variants.
 
 The current-source audit (main `22db1a22` plus reconcile-34 commits) classifies the 320 Japanese catalogue literals as reviewed UI-side
-strings using per-token source hashes. Counts: `a=2808, b=1555, c=104`;
-strict audit still fails for 104 other pending literals. This is not final
+strings using per-token source hashes. Counts: `a=2834, b=1555, c=76`;
+strict audit still fails for 76 other pending literals. This is not final
 Stage C acceptance. Native checks, branch verdict completion, formal acceptance
 and exact integration-tip all-OS CI remain pending.
 ### #152 DB activity language slice
