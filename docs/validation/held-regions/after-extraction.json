@@ -1,0 +1,2916 @@
+[
+  {
+    "path": "src/ui/live_work.rs",
+    "physical_lines": 2498,
+    "production_function_count": 36,
+    "production_max_parameters": 6,
+    "functions": [
+      {
+        "name": "phase_label",
+        "line": 8,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "state",
+        "line": 57,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "render",
+        "line": 64,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "eq",
+        "line": 221,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "eq",
+        "line": 244,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "counts_text",
+        "line": 256,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "more_text",
+        "line": 280,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "bounded",
+        "line": 318,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "byte_boundary",
+        "line": 326,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_language",
+        "line": 335,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "accept",
+        "line": 338,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "rows",
+        "line": 418,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "cap",
+        "line": 422,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "configure",
+        "line": 429,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "has_work",
+        "line": 437,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "height",
+        "line": 444,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_area",
+        "line": 456,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "visible_execution",
+        "line": 478,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "output_age_label",
+        "line": 482,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "blink_origin",
+        "line": 492,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "advance",
+        "line": 498,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "observe",
+        "line": 535,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "deactivate",
+        "line": 571,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "close",
+        "line": 578,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "accept_markers",
+        "line": 583,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "accept_preview",
+        "line": 610,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "selected",
+        "line": 648,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "move_focus",
+        "line": 655,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "toggle",
+        "line": 668,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "clock_suffix",
+        "line": 685,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "footer",
+        "line": 706,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "draw",
+        "line": 721,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "section_key_available",
+        "line": 996,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "toggle_live_work_section",
+        "line": 1007,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "live_work_key",
+        "line": 1013,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "live_work_click",
+        "line": 1083,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "japanese_view",
+        "line": 1121,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "japanese_config",
+        "line": 1126,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "capped_counts_and_overflow_are_explicit_lower_bounds",
+        "line": 1134,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "capped_footer_does_not_claim_an_exact_oldest_work_time",
+        "line": 1144,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "snapshot",
+        "line": 1161,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "ui",
+        "line": 1216,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "f6_operations_form_uses_configured_language",
+        "line": 1236,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configured_cap_applies_to_ui_and_counts_hidden_rows",
+        "line": 1270,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tiny_section_shows_header_and_header_click_does_not_select",
+        "line": 1292,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_work_clock_survives_answer_and_dirties_at_most_once_per_second_without_actions",
+        "line": 1326,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "quiet_heading_blink_is_one_frame_per_second_and_static_when_motion_or_color_is_off",
+        "line": 1365,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "heading_blink_changes_only_the_mark_brightness",
+        "line": 1418,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "maximum_rows_share_one_quiet_clock_without_reads",
+        "line": 1445,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "folding_preserves_identity_and_ambiguous_or_evicted_targets_do_not_redirect",
+        "line": 1492,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "scope_revision_and_exact_execution_guard_live_output_and_postcommit_markers",
+        "line": 1533,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "snapshot_time_reobservation_avoids_redraw_feedback_and_small_layout_preserves_history",
+        "line": 1591,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "actual_draw_and_focus_keep_live_work_separate_from_history_and_composer",
+        "line": 1611,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "wait_target_number_and_approximate_deadline_are_visible",
+        "line": 1655,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "wrong_generation_reply_never_hydrates_and_labels_cannot_inject_terminal_controls",
+        "line": 1705,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "output",
+        "line": 1737,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "overlay_f2_and_thread_switch_clear_scope_and_reject_reply_before_deferred_clear",
+        "line": 1747,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "shrinking_preserves_target_and_rejects_late_preview_without_waiting_for_publication",
+        "line": 1800,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "newer_saved_output_replaces_only_older_commit_observations_and_labels_the_source",
+        "line": 1842,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "region_extraction_full_cell_style_baseline",
+        "line": 1885,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "screen",
+        "line": 1964,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "screen_at",
+        "line": 1967,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "set_work",
+        "line": 1986,
+        "parameters_including_self": 4,
+        "test_only": true
+      },
+      {
+        "name": "work_heading_shows_clocks_and_footer_falls_back_when_hidden",
+        "line": 2001,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "height_is_constant_across_zero_two_zero_works_and_empty_heading_does_not_blink",
+        "line": 2038,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "key_and_heading_click_toggle_between_heading_only_and_fixed_rows",
+        "line": 2063,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "kind_glyphs_are_one_column_even_under_cjk_variable_width",
+        "line": 2090,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "body_lines",
+        "line": 2097,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "measured_tree_fits_both_languages_and_terminal_widths",
+        "line": 2108,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tree_connectors_cover_single_multiple_and_overflow_rows_and_all_kinds",
+        "line": 2190,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "populate",
+        "line": 2237,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "owned_work_is_registered_in_both_languages_and_widths",
+        "line": 2283,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 2284,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "folded_and_empty_work_are_registered",
+        "line": 2299,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "folded",
+        "line": 2300,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "folded_expected",
+        "line": 2304,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "empty",
+        "line": 2310,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "empty_expected",
+        "line": 2311,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "child_phase_projection_is_english_without_rewriting_source_states",
+        "line": 2321,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "state_projection_preserves_unknown_and_non_child_source_bytes",
+        "line": 2365,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "canonical_child_states_render_at_both_widths_for_one_two_and_many",
+        "line": 2398,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "children",
+        "line": 2399,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 2422,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "clipped_live_work_uses_measured_ellipsis_without_exceeding_width",
+        "line": 2433,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "preview_decoration_does_not_rewrite_unknown_state",
+        "line": 2449,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "count_grammar_and_unknown_values_are_explicit",
+        "line": 2476,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/message_queue.rs",
+    "physical_lines": 1761,
+    "production_function_count": 20,
+    "production_max_parameters": 5,
+    "functions": [
+      {
+        "name": "caption",
+        "line": 20,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "sender",
+        "line": 54,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "label",
+        "line": 65,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "archive_count",
+        "line": 120,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "queue_context",
+        "line": 128,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "compact_count",
+        "line": 135,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "archive_error",
+        "line": 143,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "sender_count",
+        "line": 151,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "cancel_detail",
+        "line": 161,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "paint_bounds",
+        "line": 186,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "wheel",
+        "line": 189,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "draw",
+        "line": 196,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "height",
+        "line": 335,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "accepting_excerpt",
+        "line": 350,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "compact_label",
+        "line": 364,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "compact_body",
+        "line": 386,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "draw_compact",
+        "line": 392,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "bind_saved_history",
+        "line": 444,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "recovery_target",
+        "line": 479,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "queue_key",
+        "line": 488,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "key",
+        "line": 670,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "ui",
+        "line": 673,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "queued",
+        "line": 676,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "page",
+        "line": 692,
+        "parameters_including_self": 4,
+        "test_only": true
+      },
+      {
+        "name": "selected",
+        "line": 711,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "compact_excerpt_rows_keep_their_fixed_height_and_fit_narrow_widths",
+        "line": 720,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "late_paired_history_cannot_resurrect_cancelled_queue_or_replace_newer_history",
+        "line": 741,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "committed_input_transfers_from_local_accepting_to_db_projection_atomically",
+        "line": 786,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paired_db_commit_before_ack_reconciles_exact_operation_and_preserves_newer_edits",
+        "line": 831,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "db_pair_before_operation_update_uses_frozen_source_identity_without_duplicates",
+        "line": 890,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_ack_after_db_reconciliation_still_applies_newer_queue_without_clearing_edits",
+        "line": 940,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_ack_rejects_mismatched_embedded_thread_or_generation_before_draft_mutation",
+        "line": 1010,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "old_generation_saved_ack_cannot_clear_a_newer_view_or_draft",
+        "line": 1076,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "closed_archive_popup_is_not_reopened_by_a_late_reply",
+        "line": 1118,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "now_keys_respect_configured_normal_send_and_chord_focus",
+        "line": 1140,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "queue_confirmation_uses_only_the_displayed_ids_and_sanitizes_labels",
+        "line": 1172,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "late_restore_preserves_new_edits_and_original_attachment_fold_layout",
+        "line": 1215,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "escape_dismisses_queue_before_interrupting_exact_turn_and_ctrl_c_stops_run",
+        "line": 1257,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "compact_queue_and_popup_bound_terminal_control_text",
+        "line": 1275,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "accepting_large_draft_renders_only_a_sanitized_bounded_prefix",
+        "line": 1308,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "compact_queue_labels_preserve_source_and_use_measured_ellipsis",
+        "line": 1353,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "item",
+        "line": 1374,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "pending",
+        "line": 1390,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "archives",
+        "line": 1398,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "queue_and_archive_screens_are_registered_in_both_languages",
+        "line": 1403,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "counts_and_cancel_messages_are_complete_for_zero_one_and_many",
+        "line": 1545,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "state_projection_preserves_unknown_reasons_and_source_facts",
+        "line": 1577,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "long_pending",
+        "line": 1624,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "real_sender_and_recovery_facts_remain_visible_at_screen_boundaries",
+        "line": 1632,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "compact_ellipsis_preserves_graphemes_cells_and_fixed_height",
+        "line": 1700,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "locale_does_not_expand_the_captured_cancellation_scope",
+        "line": 1730,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/presentation.rs",
+    "physical_lines": 6260,
+    "production_function_count": 58,
+    "production_max_parameters": 11,
+    "functions": [
+      {
+        "name": "conversational",
+        "line": 18,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "source_candidate",
+        "line": 26,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "saved_failure_text",
+        "line": 30,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "label",
+        "line": 62,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "color",
+        "line": 116,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "body_spans",
+        "line": 143,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 164,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "push",
+        "line": 173,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "extend",
+        "line": 177,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "node_lines_inner",
+        "line": 183,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "omission_notices",
+        "line": 504,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "tool_header_lines",
+        "line": 549,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "link_target",
+        "line": 568,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "annotate_links",
+        "line": 577,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "hanging_wrap",
+        "line": 625,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "indented_wrap",
+        "line": 674,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "node_lines",
+        "line": 693,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "node_lines_with_header",
+        "line": 703,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "notice_message",
+        "line": 828,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "notice_kind",
+        "line": 836,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "notice_symbol",
+        "line": 854,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "background_label",
+        "line": 885,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "exit_code_label",
+        "line": 904,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "notice_row",
+        "line": 908,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "is_notice",
+        "line": 1063,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "adjacent_tool_pair",
+        "line": 1067,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "interruption_group",
+        "line": 1094,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "history",
+        "line": 1174,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "projection_bounds",
+        "line": 1182,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "history_with_cache",
+        "line": 1216,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "input_kind",
+        "line": 1543,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "input_marker",
+        "line": 1554,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "into_line",
+        "line": 1564,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "input_metadata",
+        "line": 1593,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "user_band",
+        "line": 1640,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "node_region",
+        "line": 1675,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "tool_outcome",
+        "line": 1715,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "tool_metadata",
+        "line": 1739,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "tool_text_fit",
+        "line": 1805,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "tool_row",
+        "line": 1826,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "display_tool_command",
+        "line": 1869,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "display_tool_result",
+        "line": 1880,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "compact_tool_line",
+        "line": 1896,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "tool_note",
+        "line": 1933,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "append_item_rows",
+        "line": 1948,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "append_node_cached",
+        "line": 2011,
+        "parameters_including_self": 11,
+        "test_only": false
+      },
+      {
+        "name": "tool_observation_rank",
+        "line": 2084,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "result_owners",
+        "line": 2097,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "correlated_tool_key",
+        "line": 2120,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "append_notice_run",
+        "line": 2136,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "typed_history",
+        "line": 2229,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "row_boundaries",
+        "line": 2666,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "excerpt_tail_match",
+        "line": 2716,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "plain",
+        "line": 2732,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "bytes",
+        "line": 2744,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "borrowed",
+        "line": 2760,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "paint_live_times",
+        "line": 2784,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "link_regions",
+        "line": 2883,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "japanese_config",
+        "line": 2922,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "reply_option_b_keeps_existing_glyph_and_localized_tags",
+        "line": 2931,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "typed_event_title_uses_english_copy_without_rewriting_the_japanese_projection",
+        "line": 2977,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "generated_tool_fallbacks_follow_language_but_saved_commands_stay_literal",
+        "line": 2993,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unknown_and_missing_notice_kinds_use_the_approved_unknown_mark",
+        "line": 3017,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "shell_notice_uses_description_setting_signal_and_localized_elapsed",
+        "line": 3074,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "shell_exit_and_unknown_signal_are_localized",
+        "line": 3145,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "notification_group_preserves_individual_sources_and_measured_rows",
+        "line": 3192,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "event",
+        "line": 3194,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "formal_shutdown_group_identity_survives_generic_field_limits",
+        "line": 3261,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "scene",
+        "line": 3262,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "a_generated_gap_never_matches_the_same_text_inside_omitted_stdout",
+        "line": 3374,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "excerpt_gap_metadata_survives_wrapping_without_becoming_a_terminal_link",
+        "line": 3446,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "typed_output_guides_preserve_rgb_links_and_unavailable_target_markers",
+        "line": 3484,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "wrapped_group_headers_cannot_consume_matching_stdout_source",
+        "line": 3520,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tail_source_search_has_one_window_budget_and_utf8_boundaries",
+        "line": 3629,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "grouped_unicode_bodies_keep_their_real_node_offsets_and_window_requests",
+        "line": 3644,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "multiple_calls_show_requests_separately_from_terminal_result_facts",
+        "line": 3819,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "spilled_tool_groups_render_one_row_like_unspilled_calls",
+        "line": 3895,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "interruption_details_group_only_with_their_explicit_saved_summary",
+        "line": 3957,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 3958,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "adjacent_tool_groups_keep_both_source_anchors_and_original_url_targets",
+        "line": 4024,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "repeated_plain_urls_are_all_clickable_without_rebinding_semantic_links",
+        "line": 4150,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "body_and_metadata_notices_report_only_their_known_extent",
+        "line": 4182,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unknown_saved_kind_remains_visible_despite_legacy_assistant_role",
+        "line": 4248,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "wrapped_tool_urls_keep_the_complete_target_on_every_visible_fragment",
+        "line": 4278,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "markdown_fixture",
+        "line": 4351,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "marked_text",
+        "line": 4375,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "markdown_click_identity_survives_duplicate_decorated_and_url_labels",
+        "line": 4390,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "markdown_link_callbacks_cover_tables_references_images_and_unavailable_targets",
+        "line": 4434,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "markdown_long_label_regions_follow_wrap_and_source_metadata_remains_canonical",
+        "line": 4458,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "oss_markdown_keeps_link_cells_and_inline_hanging_markers",
+        "line": 4482,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "code_surface_keeps_readable_foreground_on_dark_and_light_terminal_styles",
+        "line": 4543,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "semantic_markers_belong_to_answer_reasoning_events_and_summary_without_text_detection",
+        "line": 4628,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tool_calls_use_inline_shell_marker_without_assistant_role_line",
+        "line": 4673,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "failed_tool_output_is_indented_head_tail_excerpt_with_full_original_retained",
+        "line": 4705,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "typed_output_blocks_use_guides_not_stream_titles_and_combined_is_not_stderr",
+        "line": 4751,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "call_and_result_exit_markers_match_their_attention_color",
+        "line": 4808,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "plain_tabs_expand_before_word_wrapping_and_preserve_styles",
+        "line": 4863,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "boundary_rows_are_unselectable_and_tools_stay_dense",
+        "line": 4895,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "equivalent_terminal_metadata_does_not_reset_a_closed_disclosure",
+        "line": 4939,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "duplicate_result_outcomes_cannot_reopen_a_closed_canonical_header",
+        "line": 4954,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "missing_group_result_uses_its_exact_owner_and_keeps_richer_observed_header",
+        "line": 5012,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "empty_exact_result_members_do_not_leave_separate_detail_placeholders",
+        "line": 5051,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "description_replaces_command_until_existing_focus_or_disclosure_reveals_it",
+        "line": 5081,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "blank_descriptions_fall_back_to_command_even_for_direct_presentations",
+        "line": 5125,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "compact_tool_rows_hide_ids_and_only_label_factual_background_work",
+        "line": 5140,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "clipped_tool_text_uses_only_measured_ellipsis",
+        "line": 5190,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "compact_tool_metadata_uses_only_measured_variable_width",
+        "line": 5206,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "compact_tool_metadata_never_enters_body_and_yields_to_body_before_attention",
+        "line": 5225,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "uncached_and_details_hints_remain_indented_body_rows",
+        "line": 5255,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "spill_reference_wraps_continuations_with_shared_indent_bilingually",
+        "line": 5303,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "narrow_nested_rows_preserve_wide_glyphs",
+        "line": 5360,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "indented_wrap_keeps_nested_rows_and_continuations_aligned_bilingually",
+        "line": 5377,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "wrapped_tool_notes_share_two_space_indent_and_are_not_output_body",
+        "line": 5424,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "compact_shell_metadata_uses_shared_palette_without_changing_text",
+        "line": 5453,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "live_time_paints_from_saved_base_without_changing_layout_or_sources",
+        "line": 5486,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "notification_region_keeps_sources_without_triggering_output_hydration",
+        "line": 5554,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tool",
+        "line": 5590,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "prose",
+        "line": 5603,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 5613,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "nonadjacent_tool_item_keeps_mixed_prose_and_canonical_frontier",
+        "line": 5628,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "canonical_result_arrival_preserves_effective_outcome_and_received_inline_preview",
+        "line": 5681,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "saved_context_lines_render_no_rows_in_plain_or_typed_history",
+        "line": 5750,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "repeated_quiet_facts_coalesce_with_counts_and_latest_references_without_losing_answers",
+        "line": 5774,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "canonical_projection_bounds_include_a_quiet_prefix_hidden_by_tail_grouping",
+        "line": 5845,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "repeated_call_ids_in_other_groups_are_not_collapsed_together",
+        "line": 5885,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "input_band_parts_override_only_background_and_omit_metadata_before_body",
+        "line": 5910,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "input_band_all_sources_keep_body_anchors_and_display_metadata_only_once",
+        "line": 5979,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "failed_tool_opens_reason_without_execution_and_user_bands_fill_wrapped_rows",
+        "line": 6042,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "copy_labels_are_visible_but_never_count_as_canonical_source_or_links",
+        "line": 6095,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "recovery_lines",
+        "line": 6128,
+        "parameters_including_self": 4,
+        "test_only": false
+      }
+    ]
+  },
+  {
+    "path": "src/ui.rs",
+    "physical_lines": 9712,
+    "production_function_count": 131,
+    "production_max_parameters": 7,
+    "functions": [
+      {
+        "name": "operation_catalogue_label",
+        "line": 67,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "default",
+        "line": 163,
+        "parameters_including_self": 0,
+        "test_only": false
+      },
+      {
+        "name": "tool_stub",
+        "line": 205,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "refresh_tools",
+        "line": 248,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "same_projection",
+        "line": 408,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "preserve_preview_on_transient_failure",
+        "line": 415,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "metadata_bytes",
+        "line": 453,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "evict_body",
+        "line": 458,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "cached_bytes",
+        "line": 470,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "from",
+        "line": 846,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "details_refresh_failure",
+        "line": 1338,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "original_page",
+        "line": 1355,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "original_page_localized",
+        "line": 1365,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1423,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "item",
+        "line": 1465,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "bytes",
+        "line": 1490,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1522,
+        "parameters_including_self": 4,
+        "test_only": true
+      },
+      {
+        "name": "bytes",
+        "line": 1546,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "evict",
+        "line": 1559,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "unit",
+        "line": 1582,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "insert_unit",
+        "line": 1595,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "discard_old_revision",
+        "line": 1629,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "get",
+        "line": 1643,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "insert",
+        "line": 1650,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "sized_area",
+        "line": 1692,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "footer",
+        "line": 1707,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "context",
+        "line": 1719,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "title",
+        "line": 1724,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "lines",
+        "line": 1729,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "text",
+        "line": 1735,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "layout",
+        "line": 1748,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "page",
+        "line": 1766,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1858,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "threads",
+        "line": 1869,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "thread_selection",
+        "line": 1872,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "threads_visible",
+        "line": 1875,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "thread_filter",
+        "line": 1878,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "threads_next_cursor",
+        "line": 1881,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "list_generation",
+        "line": 1884,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "new",
+        "line": 1887,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_diagnostics",
+        "line": 1973,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "trace_history",
+        "line": 1976,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "view",
+        "line": 1987,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "view_mut",
+        "line": 1992,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "view_for",
+        "line": 1995,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "active_view_mut",
+        "line": 2003,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "live_work_mut",
+        "line": 2010,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "prepare_render_width",
+        "line": 2018,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "prepare_visible_render_width",
+        "line": 2040,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "history_layout",
+        "line": 2140,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "deferred_action_wait",
+        "line": 2149,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "take_deferred_actions",
+        "line": 2159,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "take_deferred_actions_at",
+        "line": 2162,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "take_terminal_requests",
+        "line": 2250,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "apply",
+        "line": 2253,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "history_trace_before",
+        "line": 2358,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "record_history_trace",
+        "line": 2398,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "apply_current_view",
+        "line": 2417,
+        "parameters_including_self": 7,
+        "test_only": false
+      },
+      {
+        "name": "apply_inner",
+        "line": 2512,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "command_outcome",
+        "line": 3812,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "reject_agents_selection",
+        "line": 3880,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "action_rejected",
+        "line": 3909,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "begin_edit",
+        "line": 4243,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "insert",
+        "line": 4265,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "clear_current_draft",
+        "line": 4294,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "delete",
+        "line": 4308,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "persist_active",
+        "line": 4320,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "local_drafts",
+        "line": 4337,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "select_thread",
+        "line": 4371,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "new_chat",
+        "line": 4451,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "refresh_db_status",
+        "line": 4482,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "animation_tick",
+        "line": 4492,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "submit",
+        "line": 4530,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "submit_reply",
+        "line": 4633,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "send_current",
+        "line": 4686,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "slash_path",
+        "line": 4798,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "slash",
+        "line": 4812,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "paste_command",
+        "line": 5304,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "toggle_reasoning",
+        "line": 5352,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "index_command",
+        "line": 5410,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "operation_context",
+        "line": 5481,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "invalidate_management",
+        "line": 5543,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "open_operations",
+        "line": 5556,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "detail_key",
+        "line": 5566,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "select_agents",
+        "line": 5583,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "execute_client_operation",
+        "line": 5598,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "execute_operation",
+        "line": 5622,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "management_key",
+        "line": 5713,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "set_confirmation",
+        "line": 5748,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "confirmation_key",
+        "line": 5755,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "shutdown_key",
+        "line": 5845,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "draw_help",
+        "line": 5865,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "draw_overlays",
+        "line": 5881,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "command_error",
+        "line": 5974,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "open_descendant_watch",
+        "line": 5984,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "thread_key",
+        "line": 5997,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "project_viewport",
+        "line": 6023,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "scroll",
+        "line": 6027,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "remember_painted_bodies",
+        "line": 6034,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "retained_working_node_ids",
+        "line": 6043,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "trim_bodies",
+        "line": 6069,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "merge_navigation_window",
+        "line": 6183,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "viewport_node_index",
+        "line": 6186,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "projection_node_index",
+        "line": 6189,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "working_node_ids",
+        "line": 6192,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "expanded_id_bytes",
+        "line": 6195,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "retained_body_bytes",
+        "line": 6198,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "valid_draft",
+        "line": 6201,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "receipt_label",
+        "line": 6212,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "unquote",
+        "line": 6224,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "key_matches",
+        "line": 6231,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "draft_display",
+        "line": 6279,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "cursor_position",
+        "line": 6282,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "rendered_node_text",
+        "line": 6286,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "draw_recovery",
+        "line": 6356,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "draw_header",
+        "line": 6386,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "draw_conversation",
+        "line": 6410,
+        "parameters_including_self": 6,
+        "test_only": false
+      },
+      {
+        "name": "paint_conversation_edges",
+        "line": 6456,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "draw_input",
+        "line": 6504,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "draw_status",
+        "line": 6538,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "visible_render_nodes",
+        "line": 6623,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "draw",
+        "line": 6638,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "help_for",
+        "line": 6890,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "global_help_copy_follows_language",
+        "line": 6899,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "run",
+        "line": 6908,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "set_diagnostics",
+        "line": 6926,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "enter",
+        "line": 6931,
+        "parameters_including_self": 0,
+        "test_only": false
+      },
+      {
+        "name": "enter_with_width",
+        "line": 6935,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "width_observation",
+        "line": 6939,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "on_width_observation",
+        "line": 6944,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "enter_with_keyboard_enhancement",
+        "line": 6949,
+        "parameters_including_self": 1,
+        "test_only": false
+      },
+      {
+        "name": "enter_inner",
+        "line": 6955,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "record_terminal_width",
+        "line": 6993,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "run_in_session",
+        "line": 7009,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "run_in_session_with_termination",
+        "line": 7017,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "run_session",
+        "line": 7026,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "details_refresh_failure_preserves_raw_reason_in_both_languages",
+        "line": 7166,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "confirmation_glyphs_do_not_rewrite_details",
+        "line": 7181,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "source_window_retains_raw_user_and_model_text_under_each_width",
+        "line": 7205,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 7239,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "history",
+        "line": 7250,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "memory_probe_uses_body_and_layout_accounting_without_f8_changes",
+        "line": 7266,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "probe",
+        "line": 7268,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "management_selection_is_typed_and_controls_stay_fixed",
+        "line": 7296,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "confirmation_helpers_are_used_by_the_real_bilingual_screen",
+        "line": 7348,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 7349,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 7354,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "long_confirmation_can_be_read_without_accepting_it",
+        "line": 7371,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "completed_markdown_single_rows_remain_monotonic_across_body_reloads",
+        "line": 7424,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "downward_single_rows_never_return_to_an_older_projection",
+        "line": 7515,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "attachment_unavailable_notice_is_localized_and_not_repeated_for_same_attempt",
+        "line": 7575,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "revisit_footer_shows_saved_continuation_and_clears_with_new_snapshot",
+        "line": 7679,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "retry_footer_renders_saved_counts_and_clears_them_after_success",
+        "line": 7712,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "receive_gap_updates_are_scoped_and_preserve_history_layout",
+        "line": 7775,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "activity_clock_preserves_history_and_rejects_stale_updates",
+        "line": 7837,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "observation_loss_freezes_only_the_matching_view_without_reversing_a_displayed_second",
+        "line": 7919,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unchanged_visible_progress_does_not_invalidate_the_screen",
+        "line": 7965,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "draft_and_status_reuse_layout_but_same_length_source_and_reload_invalidate",
+        "line": 7996,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "anchor_fold_dimensions_and_cross_thread_switch_have_distinct_layouts",
+        "line": 8045,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "layout_global_lru_zero_oversize_and_eviction_release_owned_buffers",
+        "line": 8083,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "painted_viewport_protects_all_visible_kinds_beyond_three_nodes",
+        "line": 8120,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "evicted_empty_tool_and_event_windows_reload_without_prose_blocks",
+        "line": 8195,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "body_budget_excludes_working_nodes_and_evicts_oldest_inactive_first",
+        "line": 8273,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "projection_work_and_row_metadata_are_bounded_independently_of_retained_history",
+        "line": 8303,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "row_scrolling_across_short_nodes_reuses_a_stable_projection_focus",
+        "line": 8337,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "pending_wheel_reply_at_coalesced_event_tail_finishes_without_nested_scroll",
+        "line": 8352,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "past_management_reference_does_not_change_current_recovery_or_normal_operation_context",
+        "line": 8401,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "tool",
+        "line": 8453,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "history",
+        "line": 8483,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "details",
+        "line": 8497,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "frame",
+        "line": 8521,
+        "parameters_including_self": 3,
+        "test_only": true
+      },
+      {
+        "name": "paused",
+        "line": 8543,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "observation",
+        "line": 8554,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "paired_paused_facts_converge_without_secondary_read_and_keep_source_window",
+        "line": 8574,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "context_usage_changes_only_with_an_adopted_snapshot_and_never_on_the_clock",
+        "line": 8606,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "stale_initial_context_waits_for_a_new_adoptable_observation",
+        "line": 8641,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paired_history_preserves_shrink_and_stale_diagnostics_with_one_retention_pass",
+        "line": 8669,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paired_history_keeps_saved_sender_projection_with_header_update",
+        "line": 8712,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "stale_frame_retires_read_slot_and_cannot_regress_header_or_facts",
+        "line": 8746,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "malformed_paired_child_does_not_partially_apply_header_or_history",
+        "line": 8760,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "follow_and_thread_switch_clear_saved_observation_once",
+        "line": 8775,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "pinned_tool_changes_only_metadata_and_refresh_requests_coalesce_without_source_loss",
+        "line": 8793,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 8899,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "history",
+        "line": 8910,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "draft_status_and_source_anchor_edits_reuse_layout_but_source_and_width_do_not",
+        "line": 8925,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "background_stream_commit_keeps_temporary_source_until_its_owner_is_rebased",
+        "line": 8961,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "background_invalidation_checks_its_generation_and_view_revision",
+        "line": 9031,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "node",
+        "line": 9075,
+        "parameters_including_self": 2,
+        "test_only": true
+      },
+      {
+        "name": "setup",
+        "line": 9088,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "newer_paired_tail_then_older_required_rebase_retries_without_losing_frame_or_wheel",
+        "line": 9124,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "obsolete_generation_or_view_does_not_reissue_or_consume_current_navigation",
+        "line": 9194,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "conversation_128_nodes_50_tools_latency",
+        "line": 9223,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "notice_refresh_updates_typed_title_and_keeps_canonical_text",
+        "line": 9338,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "paused_tool_refresh_adopts_tail_without_replacing_prose_or_source_offsets",
+        "line": 9371,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "header_background_is_full_width_but_both_text_edges_are_blank",
+        "line": 9451,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "a_short_continuation_and_a_later_plain_row_own_their_last_cells",
+        "line": 9484,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "initial_pages_preserve_raw_attachment_fields_and_localize_copy",
+        "line": 9596,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "unknown_command_uses_configured_language",
+        "line": 9683,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 9684,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 9687,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "model_settings_preserves_raw_names",
+        "line": 9697,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "configure",
+        "line": 9698,
+        "parameters_including_self": 1,
+        "test_only": true
+      },
+      {
+        "name": "expected",
+        "line": 9704,
+        "parameters_including_self": 1,
+        "test_only": true
+      }
+    ]
+  },
+  {
+    "path": "src/ui/region.rs",
+    "physical_lines": 173,
+    "production_function_count": 7,
+    "production_max_parameters": 5,
+    "functions": [
+      {
+        "name": "new",
+        "line": 14,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "height",
+        "line": 21,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "visible_rows",
+        "line": 33,
+        "parameters_including_self": 4,
+        "test_only": false
+      },
+      {
+        "name": "pad_body",
+        "line": 46,
+        "parameters_including_self": 3,
+        "test_only": false
+      },
+      {
+        "name": "heading_lines",
+        "line": 56,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "fit",
+        "line": 64,
+        "parameters_including_self": 2,
+        "test_only": false
+      },
+      {
+        "name": "row_columns",
+        "line": 87,
+        "parameters_including_self": 5,
+        "test_only": false
+      },
+      {
+        "name": "fixed_geometry_matches_original_bounds_and_overflow_slots",
+        "line": 114,
+        "parameters_including_self": 0,
+        "test_only": true
+      },
+      {
+        "name": "heading_and_padding_preserve_existing_lines_and_short_areas",
+        "line": 149,
+        "parameters_including_self": 0,
+        "test_only": true
+      }
+    ]
+  }
+]

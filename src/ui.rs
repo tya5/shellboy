@@ -30,6 +30,7 @@ mod command_diagnostics;
 mod composer;
 mod details;
 pub mod live_work;
+mod region;
 pub mod thread_patch;
 pub mod watch;
 pub use details::{DetailSourceFacts, DetailSourceSnapshot};
