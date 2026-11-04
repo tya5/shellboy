@@ -4570,3 +4570,18 @@ how history provenance obtains the credential-free replier identity from
 `reply_received` with its `message_id` example, and the CLI reference includes
 the same invocation as the delegation guide. Focused local tests and default /
 all-OS hosted CI are pending; W8 owns review and landing.
+
+
+## Confirmed output-pipe drain under backpressure (2026-11-04)
+
+Investigated intermittent Ubuntu failures of the binary-tail persistence test and
+the leading-dash Bash invocation test. Both also failed on main `44acf955` in
+CI run `41890829643`, while the earlier main run `41886037207` passed; #217,
+#219 and #221 CI showed the same pair. Root cause: `IoSession::finish` applied
+`drain_timeout_ms` to the entire pump join even after OS cleanup confirmed the
+managed process group/Job empty. Under CI scheduler and DB queue pressure, the
+time budget could expire while healthy output pumps were forwarding already
+read bytes, aborting them and losing output. The fix only retains the configured
+drain timeout when process-set cleanup is unconfirmed; otherwise pumps complete
+on pipe EOF and persistence. The deadline is not increased. Focused local tests
+for both regressions passed; full-suite and exact-tip CI validation are pending.

@@ -452,8 +452,12 @@ impl ShellSupervisor {
                 );
             }
             forced |= group_forced;
-            let (state, reason, output_complete) =
-                io.finish(drain_timeout, stopped_before_exit).await;
+            let (state, reason, output_complete) = io
+                .finish(
+                    group_confirmed.then_some(drain_timeout),
+                    stopped_before_exit,
+                )
+                .await;
             let completion = ShellCompletion {
                 execution_id,
                 state,

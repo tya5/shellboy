@@ -108,7 +108,7 @@ impl IoSession {
 
     pub(super) async fn finish(
         self,
-        drain_timeout: Duration,
+        drain_timeout: Option<Duration>,
         stopped_before_exit: bool,
     ) -> (ShellState, Option<String>, bool) {
         let Self {
@@ -122,13 +122,17 @@ impl IoSession {
         let mut stdout_task = stdout_task;
         let mut stderr_task = stderr_task;
         let mut initial_task = initial_task;
-        let drained = timeout(drain_timeout, async {
+        let drain = async {
             let (out, err, initial) =
                 tokio::join!(&mut stdout_task, &mut stderr_task, &mut initial_task);
             out.is_ok_and(|v| v) && err.is_ok_and(|v| v) && initial.is_ok()
-        })
-        .await
-        .unwrap_or(false);
+        };
+        // With managed writers gone, let pipe EOF and downstream persistence
+        // finish; queue/scheduler delay alone must not discard already-read bytes.
+        let drained = match drain_timeout {
+            Some(limit) => timeout(limit, drain).await.unwrap_or(false),
+            None => drain.await,
+        };
         if !stdout_task.is_finished() {
             stdout_task.abort();
             let _ = stdout_task.await;

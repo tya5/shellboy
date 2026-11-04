@@ -9610,3 +9610,17 @@ No real data, provider traffic or installed-binary change is part of validation.
 - Verified from the adopted reply design: the receiving Thread's reply body is an ordinary `user` node; its node kind is intentional. Provenance sender is being extended to expose the credential-free `reply.by` fact for replies without a delivery receipt.
 - Added `reply_received` / `message_id` to `wait --help`, plus a matching help regression test; CLI reference example now matches delegation documentation.
 - Focused provenance/help tests, doc check, standard checks, pushed-tip default CI, and pushed-tip all-OS CI remain pending.
+
+
+## Confirmed process-group output EOF (2026-11-04)
+
+Investigation of intermittent Ubuntu integration failures on main `44acf955`
+(run `41890829643`) found that both output pumps were still subject to the
+configured `drain_timeout_ms` even after the OS confirmed the process group/Job
+empty. Under CI scheduling and DB backpressure, that elapsed-time guard aborted
+otherwise healthy pumps before they consumed bytes already in the pipes. For a
+confirmed-empty group, output drain now waits for the authoritative pipe EOF;
+the configured timeout and abort remain in force when group cleanup is
+unconfirmed. This preserves finite cleanup for escaped/incompletely cleaned
+processes without using a larger timeout to mask incomplete reads. Local
+integration and CI validation are pending.

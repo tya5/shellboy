@@ -581,7 +581,9 @@ impl ShellSupervisor {
                     false
                 }
             };
-            let (state, reason, output_complete) = io.finish(drain, stopped_before_exit).await;
+            let (state, reason, output_complete) = io
+                .finish(confirmed.then_some(drain), stopped_before_exit)
+                .await;
             let completion = ShellCompletion {
                 execution_id,
                 state,
