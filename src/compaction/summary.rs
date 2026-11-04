@@ -1,6 +1,7 @@
 //! Fixed successful-summary adoption, retaining the caller's one transaction.
 use super::*;
 pub(super) struct SummaryAdoption {
+    pub(super) drop_all_reasoning: bool,
     pub(super) snapshot: Snapshot,
     pub(super) sources: Vec<Source>,
     pub(super) payload: Value,
@@ -38,8 +39,17 @@ impl SummaryAdoption {
             &path,
             &timestamp(),
         )?;
-        // `select_path` starts a new reasoning epoch only when the edit keeps
-        // later assistant output (#182); the active-Turn summary keeps none.
+        if self.drop_all_reasoning {
+            tx.execute(
+                "UPDATE thread SET reasoning_epoch=?2 WHERE id=?1",
+                params![self.snapshot.thread, self.snapshot.epoch + 1],
+            )?;
+            tx.execute(
+                "DELETE FROM app_meta WHERE key=?1",
+                [history::reasoning_keep_key(&self.snapshot.thread)],
+            )?;
+        }
+        // A partial active summary drops all earlier reasoning regardless of suffix.
         self.result.summary_node_id = Some(node);
         Ok(self.result)
     }
