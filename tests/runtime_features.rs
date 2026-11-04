@@ -3473,14 +3473,34 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
         let before = incoming(&control, &mut receive).await;
         let before_size = before.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
         assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
-        // #182: spill is a selective edit and waits until the tool loop is
-        // closed; the threshold is reported by the Turn's final answer and
-        // acted on at the next Turn's first boundary.
+        // This fixture reports the threshold only on the final answer, so
+        // the next Turn observes the older closed-Turn spill candidates.
         before.reply.send((200, tool_response(2, 100))).unwrap();
         incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
         settled(&control, &target).await;
         send(&control, &target, "next turn").await;
         let summary = incoming(&control, &mut receive).await;
+        if !oversized {
+            assert_ne!(summary.body["tools"], json!([]), "spill alone meets the calibrated target; no summary request");
+            let after_size = summary.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
+            assert!(after_size < before_size, "spill must shrink replay: {before_size} -> {after_size}");
+            let events = proactive_events(&control, &target).await;
+            assert_eq!(events.len(), 1, "{events:#?}");
+            assert_eq!(events[0]["state"], "adopted");
+            assert!(events[0]["metrics"]["spilled_groups"].as_u64().unwrap() > 0);
+            let attempt = events[0]["attempt_id"].as_str().unwrap().to_owned();
+            let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
+            let record: Value = serde_json::from_str(&record).unwrap();
+            assert_eq!(record["stages"]["closed_spill"]["outcome"], "adopted");
+            assert_eq!(record["stages"]["closed_spill"]["remaining_after"], 0);
+            assert_eq!(record["stages"]["closed_summary"]["skipped"], "target_met");
+            assert_eq!(record["stages"]["active_spill"]["skipped"], "target_met");
+            assert_eq!(record["stages"]["active_summary"]["skipped"], "target_met");
+            summary.reply.send((200, answer("finished"))).unwrap();
+            settled(&control, &target).await;
+            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+            return;
+        }
         assert_eq!(summary.body["tools"], json!([]));
         let first_summary_input = summary.body["input"].to_string();
         assert!(!first_summary_input.contains("large-0"), "earlier Turns first; the latest completed Turn stays");
@@ -3581,7 +3601,18 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         // Still at or above the threshold on a fresh measurement: active Turn.
         after_prefix.reply.send((200, step(3, 260))).unwrap();
         let second = incoming(&control, &mut receive).await;
-        assert_eq!(second.body["tools"], json!([]));
+        if second.body["tools"] != json!([]) {
+            let input = second.body["input"].as_array().unwrap();
+            let request = input.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
+            let before = after_prefix.body["input"].as_array().unwrap();
+            let before_request = before.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
+            assert_eq!(input[..=request], before[..=before_request], "request prefix remains unchanged");
+            assert!(input.iter().any(|item| item["call_id"] == "step-3"), "latest complete tool group is retained");
+            second.reply.send((200, answer("finished"))).unwrap();
+            settled(&control, &target).await;
+            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+            return;
+        }
         let material = second.body["input"].to_string();
         assert!(material.contains("STEP0") && material.contains("STEP2"), "③ is summary input");
         assert!(!material.contains("STEP3"), "④ is carried as text, not summarized");
@@ -3617,7 +3648,7 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
 }
 
 #[tokio::test]
-async fn proactive_adopts_reducing_spills_when_tiny_summary_is_rejected() {
+async fn proactive_spill_alone_meets_calibrated_target() {
     proactive_partial_spill_fixture(false).await;
 }
 
@@ -3998,14 +4029,11 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         "one actual attempt follows the new eligible group: {events:?}"
     );
     assert_eq!(events[0]["state"], "adopted");
-    // #182: the tool loop is open, so spill waits; the active-Turn summary
-    // reduces the older group instead (the latest round becomes text).
-    assert_eq!(
-        events[0]["metrics"]["spilled_groups"].as_u64().unwrap_or(0),
-        0
-    );
+    // #215 allows the older complete group to spill during the open loop;
+    // the latest complete group stays replayable and no summary is needed.
+    assert_eq!(events[0]["metrics"]["spilled_groups"], 1, "{events:?}");
     assert!(
-        events[0]["metrics"]["summary_node_id"].is_string(),
+        events[0]["metrics"]["summary_node_id"].is_null(),
         "{events:?}"
     );
     assert!(receive.try_recv().is_err());
