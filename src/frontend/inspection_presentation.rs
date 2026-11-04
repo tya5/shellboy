@@ -92,7 +92,7 @@ pub(super) fn prepare_in(
                 field.key = "/current_source".into();
             }
             field.label =
-                crate::ui::text_width::glyphs::formatted!("現在 · {}", "現在 | {}", field.label);
+                crate::ui::text_width::glyphs::formatted!("現在 · {}", "Current | {}", field.label);
         }
     }
     // report.detail may be omitted by a tiny budget. Anchors still derive from

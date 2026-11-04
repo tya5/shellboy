@@ -154,6 +154,18 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
             field.display = Some(display);
         }
     }
+    for field in &mut fields {
+        if field.display.is_some() {
+            let key = field.key.rsplit('/').next().unwrap_or(&field.key);
+            if matches!(
+                key,
+                "state" | "status" | "previous_state" | "startup_state" | "planned_state"
+            ) {
+                field.display =
+                    Some(presentation::fields::state_label_for(&field.value, language).to_owned());
+            }
+        }
+    }
     fields.extend(filter_fields);
     fn order(pointer: &str) -> (String, u8, String) {
         let (parent, key) = pointer.rsplit_once('/').unwrap_or(("", pointer));
@@ -327,7 +339,7 @@ fn work_report(language: UiLanguage, safe: Value, budget: usize) -> Report {
                             i18n::local!(language, "モデル要求", "Model request"),
                         other => other,
                     },
-                    presentation::fields::state_label(&text(item, "state"))
+                    presentation::fields::state_label_for(&text(item, "state"), language)
                 ),
                 value: crate::ui::text_width::glyphs::formatted!(
                     "{title} · {short} · {}{revisit}",
@@ -401,10 +413,20 @@ pub(super) enum FollowTarget {
         attachment_id: String,
     },
 }
+#[cfg(test)]
 pub(super) fn follow_target(
     value: &Value,
     pointer: &str,
     mode: crate::ui::ManagementFollow,
+) -> Result<FollowTarget, ApiError> {
+    follow_target_in(value, pointer, mode, UiLanguage::Ja)
+}
+
+pub(super) fn follow_target_in(
+    value: &Value,
+    pointer: &str,
+    mode: crate::ui::ManagementFollow,
+    language: UiLanguage,
 ) -> Result<FollowTarget, ApiError> {
     use crate::ui::ManagementFollow;
     if matches!(mode, ManagementFollow::Inspect | ManagementFollow::Read)
@@ -444,20 +466,35 @@ pub(super) fn follow_target(
             attachment_id: id.into(),
         });
     }
-    follow(value, pointer, mode).map(|command| FollowTarget::Command(Box::new(command)))
+    follow_in(value, pointer, mode, language)
+        .map(|command| FollowTarget::Command(Box::new(command)))
 }
 
 /// Resolve only explicit saved identifiers and read commands; never execute mutations from a view.
+#[cfg(test)]
 pub(super) fn follow(
     value: &Value,
     pointer: &str,
     mode: crate::ui::ManagementFollow,
 ) -> Result<Command, ApiError> {
+    follow_in(value, pointer, mode, UiLanguage::Ja)
+}
+
+fn follow_in(
+    value: &Value,
+    pointer: &str,
+    mode: crate::ui::ManagementFollow,
+    language: UiLanguage,
+) -> Result<Command, ApiError> {
     use crate::ui::ManagementFollow;
     let unavailable = || {
         ApiError::new(
             ErrorCode::InvalidArgument,
-            "この項目に対応する参照先がありません。IDの項目を選択してください",
+            i18n::local!(
+                language,
+                "この項目に対応する参照先がありません。IDの項目を選択してください",
+                "No reference target corresponds to this field. Select an ID field."
+            ),
         )
     };
     if matches!(mode, ManagementFollow::Next | ManagementFollow::Refresh) {
@@ -470,7 +507,10 @@ pub(super) fn follow(
                     .get("next_cursor")
                     .and_then(Value::as_str)
                     .ok_or_else(|| {
-                        ApiError::new(ErrorCode::InvalidArgument, "次の一覧pageはありません")
+                        ApiError::new(
+                            ErrorCode::InvalidArgument,
+                            i18n::local!(language, "次の一覧pageはありません", "No next list page"),
+                        )
                     })?
                     .into(),
             )
@@ -542,28 +582,42 @@ pub(super) fn follow(
     }
 }
 /// Structural field tree used for explicit detail pages and small fee previews.
-fn tree(value: &Value, path: &str, labels: Option<&Value>, emit: &mut impl FnMut(&str)) {
+fn tree(
+    value: &Value,
+    path: &str,
+    labels: Option<&Value>,
+    language: UiLanguage,
+    emit: &mut impl FnMut(&str),
+) {
     let label = labels
         .map(|root| presentation::fields::human_label(path, root))
         .unwrap_or_else(|| path.to_owned());
     match value {
         Value::Object(items) => {
             if items.is_empty() {
-                emit(&format!("{label}: （空の項目）\n"));
+                emit(&format!(
+                    "{label}: {}\n",
+                    i18n::local!(language, "（空の項目）", "(empty)")
+                ));
             }
             for (key, value) in items {
                 tree(
                     value,
                     &format!("{path}/{}", crate::json_pointer::escape_segment(key)),
                     labels,
+                    language,
                     emit,
                 );
             }
         }
         Value::Array(items) => {
-            emit(&format!("{label}: {}件\n", items.len()));
+            emit(&format!(
+                "{label}: {} {}\n",
+                items.len(),
+                i18n::local!(language, "件", "items")
+            ));
             for (index, value) in items.iter().enumerate() {
-                tree(value, &format!("{path}/{index}"), labels, emit);
+                tree(value, &format!("{path}/{index}"), labels, language, emit);
             }
         }
         Value::String(text) => {
@@ -647,13 +701,16 @@ pub(super) fn index_preview_captured_text_in(
 #[cfg(test)]
 fn preview_text(value: &Value) -> String {
     let mut text = String::new();
-    tree(value, "", Some(value), &mut |part| text.push_str(part));
+    tree(value, "", Some(value), UiLanguage::Ja, &mut |part| {
+        text.push_str(part)
+    });
     text
 }
 pub(super) fn detail_page(
     value: &Value,
     pointer: &str,
     cursor: Option<&str>,
+    language: UiLanguage,
 ) -> Result<(String, Option<String>), ApiError> {
     let selected = value.pointer(pointer).ok_or_else(|| {
         ApiError::new(
@@ -697,7 +754,7 @@ pub(super) fn detail_page(
     if let Value::String(value) = selected {
         emit(value);
     } else {
-        tree(selected, "", None, &mut emit);
+        tree(selected, "", None, language, &mut emit);
     }
     if invalid || offset > position {
         return Err(ApiError::new(
@@ -838,11 +895,24 @@ mod tests {
             assert!(preview.contains(text), "{preview}");
         }
         assert!(!preview.contains("/coverage/") && !preview.contains("eligible_sources"));
-        let (raw, cursor) = detail_page(&value, "", None).unwrap();
+        let (raw, cursor) = detail_page(&value, "", None, UiLanguage::Ja).unwrap();
         assert!(cursor.is_none());
         assert!(raw.contains("/coverage/eligible_sources: 3"), "{raw}");
+        let raw_array = serde_json::json!({"items":[1,2]});
+        let japanese_count = detail_page(&raw_array, "", None, UiLanguage::Ja).unwrap().0;
+        let english_count = detail_page(&raw_array, "", None, UiLanguage::En).unwrap().0;
+        assert!(japanese_count.contains("/items: 2 件"), "{japanese_count}");
+        assert!(english_count.contains("/items: 2 items"), "{english_count}");
+        let source_value = serde_json::json!({"state":"running"});
+        let english_source = detail_page(&source_value, "", None, UiLanguage::En)
+            .unwrap()
+            .0;
+        assert!(
+            english_source.contains("/state: running"),
+            "{english_source}"
+        );
         assert_eq!(
-            detail_page(&value, "/coverage/eligible_sources", None)
+            detail_page(&value, "/coverage/eligible_sources", None, UiLanguage::Ja)
                 .unwrap()
                 .0,
             ": 3\n"
@@ -902,6 +972,14 @@ mod tests {
         let dangerous =
             serde_json::json!({"targets":[Command::RunStop(RunTarget{run_id:"owner".into()})]});
         assert!(follow(&dangerous, "", crate::ui::ManagementFollow::Inspect).is_err());
+        let english = follow_in(
+            &json!({"other":true}),
+            "/missing",
+            crate::ui::ManagementFollow::Inspect,
+            crate::config::UiLanguage::En,
+        )
+        .unwrap_err();
+        assert!(english.message.contains("No reference target"), "{english}");
     }
     use serde_json::json;
     #[test]
@@ -921,7 +999,8 @@ mod tests {
         let mut actual = String::new();
         let mut cursor = None;
         loop {
-            let (page, next) = detail_page(&detail, "/a~1b/~0key", cursor.as_deref()).unwrap();
+            let (page, next) =
+                detail_page(&detail, "/a~1b/~0key", cursor.as_deref(), UiLanguage::Ja).unwrap();
             assert!(page.len() <= MAX_BODY_BYTES as usize);
             actual.push_str(&page);
             if next.is_none() {
@@ -930,10 +1009,10 @@ mod tests {
             cursor = next;
         }
         assert_eq!(actual, text);
-        assert!(detail_page(&detail, "/a~1b/~0key", Some("1")).is_err());
-        let (_, next) = detail_page(&detail, "/a~1b/~0key", None).unwrap();
+        assert!(detail_page(&detail, "/a~1b/~0key", Some("1"), UiLanguage::Ja).is_err());
+        let (_, next) = detail_page(&detail, "/a~1b/~0key", None, UiLanguage::Ja).unwrap();
         assert_eq!(
-            detail_page(&detail, "/field-149", next.as_deref())
+            detail_page(&detail, "/field-149", next.as_deref(), UiLanguage::Ja)
                 .unwrap_err()
                 .code,
             ErrorCode::CursorExpired

@@ -286,7 +286,15 @@ pub(super) fn label(value: Option<&str>, fallback: &str) -> String {
     }
 }
 
+#[cfg(test)]
 pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
+    prepare_in(raw, crate::config::UiLanguage::Ja)
+}
+
+pub(super) fn prepare_in(
+    raw: RawLiveWork,
+    language: crate::config::UiLanguage,
+) -> LiveWorkSnapshot {
     let observed_at = raw.observed_at;
     let now = raw.wall_at;
     let overflow = raw
@@ -335,14 +343,24 @@ pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
                         execution_id: row.id,
                         turn_id: row.related,
                     },
-                    label(row.label.as_deref(), "コマンド（内容未記録）"),
+                    label(
+                        row.label.as_deref(),
+                        crate::ui::i18n::local!(
+                            language,
+                            "コマンド（内容未記録）",
+                            "Command (not recorded)"
+                        ),
+                    ),
                 ),
                 "child" => (
                     LiveWorkTarget::ChildRun {
                         run_id: row.id,
                         thread_id: row.related.expect("saved child Thread"),
                     },
-                    label(row.label.as_deref(), "名称未設定"),
+                    label(
+                        row.label.as_deref(),
+                        crate::ui::i18n::local!(language, "名称未設定", "Untitled"),
+                    ),
                 ),
                 _ => (
                     LiveWorkTarget::Wait {
@@ -351,21 +369,50 @@ pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
                     },
                     {
                         let kind = match row.wait_kind.as_deref() {
-                            Some("shell_ended") => "shell の終了",
-                            Some("shell_output") => "shell の出力",
-                            Some("turn_completed") => "子の回答",
-                            Some("run_ended") => "Run の終了",
-                            Some("thread_settled") => "会話の状態",
-                            _ => "待機対象不明",
+                            Some("shell_ended") => {
+                                crate::ui::i18n::local!(language, "shell の終了", "Shell ended")
+                            }
+                            Some("shell_output") => {
+                                crate::ui::i18n::local!(language, "shell の出力", "Shell output")
+                            }
+                            Some("turn_completed") => {
+                                crate::ui::i18n::local!(language, "子の回答", "Child response")
+                            }
+                            Some("run_ended") => {
+                                crate::ui::i18n::local!(language, "Run の終了", "Run ended")
+                            }
+                            Some("thread_settled") => crate::ui::i18n::local!(
+                                language,
+                                "会話の状態",
+                                "Conversation state"
+                            ),
+                            _ => crate::ui::i18n::local!(
+                                language,
+                                "待機対象不明",
+                                "Unknown wait target"
+                            ),
                         };
-                        let name = label(row.label.as_deref(), "対象不明");
+                        let name = label(
+                            row.label.as_deref(),
+                            crate::ui::i18n::local!(language, "対象不明", "Unknown target"),
+                        );
                         let others = row.wait_condition_count.unwrap_or(0).saturating_sub(1);
                         let other_threads = row.wait_thread_count.unwrap_or(0).saturating_sub(1);
                         let thread_summary = if other_threads > 0 {
-                            crate::ui::text_width::glyphs::formatted!(
-                                " · 他{other_threads}会話",
-                                " | 他{other_threads}会話"
-                            )
+                            match language {
+                                crate::config::UiLanguage::Ja => {
+                                    crate::ui::text_width::glyphs::formatted!(
+                                        " · 他{other_threads}会話",
+                                        " | 他{other_threads}会話"
+                                    )
+                                }
+                                crate::config::UiLanguage::En => {
+                                    crate::ui::text_width::glyphs::formatted!(
+                                        " · {other_threads} other threads",
+                                        " | {other_threads} other threads"
+                                    )
+                                }
+                            }
                         } else {
                             String::new()
                         };
@@ -373,10 +420,20 @@ pub(super) fn prepare(raw: RawLiveWork) -> LiveWorkSnapshot {
                             "{kind} · {name}{thread_summary}{}",
                             "{kind} | {name}{thread_summary}{}",
                             if others > 0 {
-                                crate::ui::text_width::glyphs::formatted!(
-                                    " · 他{others}件",
-                                    " | 他{others}件"
-                                )
+                                match language {
+                                    crate::config::UiLanguage::Ja => {
+                                        crate::ui::text_width::glyphs::formatted!(
+                                            " · 他{others}件",
+                                            " | 他{others}件"
+                                        )
+                                    }
+                                    crate::config::UiLanguage::En => {
+                                        crate::ui::text_width::glyphs::formatted!(
+                                            " · {others} more",
+                                            " | {others} more"
+                                        )
+                                    }
+                                }
                             } else {
                                 String::new()
                             }
@@ -538,6 +595,35 @@ mod tests {
                 target: Some(WaitTarget::Shell("s-new".into())),
                 timeout: Some(Duration::from_secs(300))
             })
+        );
+        let english = prepare_in(
+            read_tx_limited(&db, "r", Some(&[("w".into(), "s-old".into())]), 10).unwrap(),
+            crate::config::UiLanguage::En,
+        );
+        let english_wait = english
+            .rows
+            .iter()
+            .find(|row| matches!(row.target, LiveWorkTarget::Wait { .. }))
+            .unwrap();
+        assert!(
+            english_wait.label.contains("Shell ended"),
+            "{}",
+            english_wait.label
+        );
+        assert!(
+            english_wait.label.contains("1 more"),
+            "{}",
+            english_wait.label
+        );
+        assert!(
+            english_wait.label.contains("printf saved"),
+            "{}",
+            english_wait.label
+        );
+        assert!(
+            !english_wait.label.contains("shell の終了"),
+            "{}",
+            english_wait.label
         );
     }
     #[test]

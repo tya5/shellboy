@@ -271,7 +271,7 @@ async fn work_overview_follows_the_saved_execution_to_get_and_raw_output() {
     use shellboy::{protocol::*, ui::ManagementFollow};
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
-    std::fs::write(&config, "").unwrap();
+    std::fs::write(&config, "[ui]\nlanguage='ja'\n").unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),

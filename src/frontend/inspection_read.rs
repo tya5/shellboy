@@ -218,6 +218,12 @@ pub(super) fn read_scoped_tx(
     })
 }
 pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError> {
+    prepare_in(raw, crate::config::UiLanguage::Ja)
+}
+pub(super) fn prepare_in(
+    raw: RawInspection,
+    language: crate::config::UiLanguage,
+) -> Result<PreparedInspection, ApiError> {
     let mut limited_fields = Vec::new();
     let mut observed_at = raw.at;
     let target = raw.target;
@@ -227,7 +233,7 @@ pub(super) fn prepare(raw: RawInspection) -> Result<PreparedInspection, ApiError
             super::inspection_lists::prepare_list_facts(raw)?,
         ),
         Body::Thread(header, latest, compactions) => {
-            let (mut details, limited) = header.prepare_inspection();
+            let (mut details, limited) = header.prepare_inspection_in(language);
             limited_fields = limited;
             let latest = crate::thread_observation::prepare_latest_display(*latest);
             limited_fields.extend(latest.limited_fields);

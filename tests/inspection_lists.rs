@@ -158,7 +158,7 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
             let root = tempfile::tempdir().unwrap();
             let config = root.path().join("config.toml");
             let data = root.path().join("data");
-            std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+            std::fs::write(&config,"default_connection='fixture'\ndefault_model='fixture'\n[ui]\nlanguage='ja'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
             let owner = DataOwner::start(Some(config),Some(data.clone()),root.path().into()).await.unwrap();
             let control = Control::new(&owner,root.path().into());
             control.start().await.unwrap();

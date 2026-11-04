@@ -359,7 +359,8 @@ impl ThreadView {
             received_revision: 0,
             received_window_revision: None,
             total_nodes: 0,
-            status: "入力できます".into(),
+            status: crate::ui::i18n::local!(config.ui.language, "入力できます", "Ready for input")
+                .into(),
             pending: BTreeMap::new(),
             pending_messages: PendingMessages::default(),
             delivery_read_revision: 0,
@@ -561,11 +562,11 @@ impl ThreadView {
         self.run_id = details.run_id;
         self.turn_id = details.turn_id;
         self.state = if details.recovery_reason.is_some() {
-            "復旧待ち".into()
+            crate::ui::i18n::local!(self.language, "復旧待ち", "Waiting for recovery").into()
         } else if self.run_id.is_some() {
-            "処理中".into()
+            crate::ui::i18n::local!(self.language, "処理中", "Running").into()
         } else {
-            "待機中".into()
+            crate::ui::i18n::local!(self.language, "待機中", "Idle").into()
         };
         if let Some(reason) = details.recovery_reason {
             self.status = match serde_json::from_str::<crate::protocol::ApiError>(&reason) {
@@ -2162,7 +2163,7 @@ mod completion_notice_tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("履歴読込中"), "{text}");
+        assert!(text.contains("Loading history"), "{text}");
     }
     #[test]
     fn cached_rows_remain_navigable_during_a_pending_read() {

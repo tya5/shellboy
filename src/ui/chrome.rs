@@ -17,7 +17,7 @@ pub(super) fn header_line(
     };
     if selection {
         return Line::styled(
-            frozen_header_label(width, frozen_at),
+            frozen_header_label(width, frozen_at, view.language),
             palette.header().add_modifier(Modifier::BOLD),
         );
     }
@@ -90,44 +90,63 @@ pub(super) fn header_line(
     Line::from(spans).style(palette.header())
 }
 
-fn frozen_header_label(width: u16, frozen_at: Option<&str>) -> String {
+fn frozen_header_label(
+    width: u16,
+    frozen_at: Option<&str>,
+    language: crate::config::UiLanguage,
+) -> String {
+    use crate::config::UiLanguage::{En, Ja};
+    let separator = glyphs::separator();
     let time = frozen_at
         .and_then(|stamp| stamp.get(11..19))
         .filter(|time| time.is_ascii())
         .map(|time| format!("{time}Z"));
     let mut choices = Vec::new();
     if let Some(stamp) = frozen_at {
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定開始 {stamp} · F2/Esc解除 · Ctrl+L更新",
-            "表示固定開始 {stamp} | F2/Esc解除 | Ctrl+L更新"
-        ));
+        choices.push(match language {
+            Ja => format!("表示固定開始 {stamp}{separator} F2/Esc解除{separator} Ctrl+L更新"),
+            En => format!(
+                "Pinned since {stamp}{separator} F2/Esc to unpin{separator} Ctrl+L to refresh"
+            ),
+        });
     }
     if let Some(time) = time {
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定開始 {time} · F2/Esc解除 · Ctrl+L更新",
-            "表示固定開始 {time} | F2/Esc解除 | Ctrl+L更新"
-        ));
-        choices.push(crate::ui::text_width::glyphs::formatted!(
-            "表示固定 {time} · F2/Esc解除",
-            "表示固定 {time} | F2/Esc解除"
-        ));
-        choices.push(format!("表示固定 {time} F2"));
-        choices.push(format!("表示固定 {time}"));
+        choices.push(match language {
+            Ja => format!("表示固定開始 {time}{separator} F2/Esc解除{separator} Ctrl+L更新"),
+            En => format!(
+                "Pinned since {time}{separator} F2/Esc to unpin{separator} Ctrl+L to refresh"
+            ),
+        });
+        choices.push(match language {
+            Ja => format!("表示固定 {time}{separator} F2/Esc解除"),
+            En => format!("Pinned {time}{separator} F2/Esc to unpin"),
+        });
+        choices.push(match language {
+            Ja => format!("表示固定 {time} F2"),
+            En => format!("Pinned {time} F2"),
+        });
+        choices.push(match language {
+            Ja => format!("表示固定 {time}"),
+            En => format!("Pinned {time}"),
+        });
     } else {
-        choices.push(
-            crate::ui::text_width::glyphs::select(
-                "表示固定 · 時刻未記録 · F2/Esc解除 · Ctrl+L更新",
-                "表示固定 | 時刻未記録 | F2/Esc解除 | Ctrl+L更新",
-            )
-            .into(),
-        );
-        choices.push(
-            crate::ui::text_width::glyphs::select("表示固定 · F2/Esc解除", "表示固定 | F2/Esc解除")
-                .into(),
-        );
+        choices.push(match language {
+            Ja => format!("表示固定{separator} 時刻未記録{separator} F2/Esc解除{separator} Ctrl+L更新"),
+            En => format!("Pinned{separator} time unavailable{separator} F2/Esc to unpin{separator} Ctrl+L to refresh"),
+        });
+        choices.push(match language {
+            Ja => format!("表示固定{separator} F2/Esc解除"),
+            En => format!("Pinned{separator} F2/Esc to unpin"),
+        });
     }
-    choices.push("表示固定".into());
-    choices.push("固定".into());
+    choices.push(match language {
+        Ja => "表示固定".into(),
+        En => "Pinned".into(),
+    });
+    choices.push(match language {
+        Ja => "固定".into(),
+        En => "Pinned".into(),
+    });
     let label = choices
         .into_iter()
         .find(|label| label.width() <= usize::from(width))
@@ -551,9 +570,15 @@ pub(super) fn footer_lines_with_db(
         activity_spans.push(Span::styled(status, style));
     }
     let (hint, error) = notice.unwrap_or((hints, false));
-    let navigation_hint =
-        (view.navigation.is_loading() && view.navigation.request().is_some() && !error)
-            .then(|| format!("履歴読込中{}{hint}", glyphs::separator()));
+    let navigation_hint = (view.navigation.is_loading()
+        && view.navigation.request().is_some()
+        && !error)
+        .then(|| match view.language {
+            crate::config::UiLanguage::Ja => format!("履歴読込中{}{hint}", glyphs::separator()),
+            crate::config::UiLanguage::En => {
+                format!("Loading history{}{hint}", glyphs::separator())
+            }
+        });
     let hint = navigation_hint.as_deref().unwrap_or(hint);
     let notice_style = if error && !palette.plain() {
         Style::default().fg(super::theme::ATTENTION)
@@ -1174,16 +1199,24 @@ mod tests {
     #[test]
     fn frozen_banner_identifies_entry_and_resume_without_inventing_a_time() {
         let at = "2026-10-30T12:34:56Z";
-        let wide = frozen_header_label(100, Some(at));
+        let wide = frozen_header_label(100, Some(at), crate::config::UiLanguage::Ja);
         assert!(wide.contains(at) && wide.contains("F2/Esc解除") && wide.contains("Ctrl+L更新"));
-        let compact = frozen_header_label(40, Some(at));
+        let compact = frozen_header_label(40, Some(at), crate::config::UiLanguage::Ja);
         assert!(compact.contains("12:34:56Z") && compact.contains("F2/Esc解除"));
         for width in [8, 16, 24, 40, 80, 120] {
-            let label = frozen_header_label(width, Some(at));
+            let label = frozen_header_label(width, Some(at), crate::config::UiLanguage::Ja);
             assert!(label.width() <= usize::from(width));
             assert!(label.contains("表示固定"));
         }
-        assert!(frozen_header_label(100, None).contains("時刻未記録"));
+        assert!(
+            frozen_header_label(100, None, crate::config::UiLanguage::Ja).contains("時刻未記録")
+        );
+        let english = frozen_header_label(100, Some(at), crate::config::UiLanguage::En);
+        assert!(english.contains("Pinned since") && english.contains("to unpin"));
+        assert!(english.is_ascii(), "{english}");
+        let english_no_time = frozen_header_label(100, None, crate::config::UiLanguage::En);
+        assert!(english_no_time.contains("time unavailable"));
+        assert!(english_no_time.is_ascii(), "{english_no_time}");
     }
     #[test]
     fn empty_conversation_uses_measured_separators_without_changing_bindings() {
@@ -1294,8 +1327,8 @@ mod tests {
         let before = ui.view().navigation.anchor.clone();
         ui.event(Event::Key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE)));
         let shown = frame_text(&mut ui, 60, 20);
-        assert!(shown.lines().next().unwrap().contains("表示固定"));
-        assert!(shown.contains("F2/Esc解除"));
+        assert!(shown.lines().next().unwrap().contains("Pinned"));
+        assert!(shown.contains("to unpin"));
         ui.apply(UiUpdate::Status {
             thread_id: None,
             text: "background status changed".into(),
@@ -1309,7 +1342,7 @@ mod tests {
                 .lines()
                 .next()
                 .unwrap()
-                .contains("表示固定")
+                .contains("Pinned")
         );
     }
     #[test]
@@ -1323,11 +1356,7 @@ mod tests {
             assert!(ui.help_visible && ui.selection_mode);
             let shown = frame_text(&mut ui, width, height);
             assert!(
-                shown.lines().next().unwrap().contains(if width < 10 {
-                    "固定"
-                } else {
-                    "表示固定"
-                }),
+                shown.lines().next().unwrap().contains("Pinned"),
                 "{width}x{height}: {shown}"
             );
         }

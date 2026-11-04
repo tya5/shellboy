@@ -196,6 +196,18 @@ mod tests {
     }
 
     #[test]
+    fn unknown_operation_fallback_remains_a_neutral_identifier() {
+        assert_eq!(
+            operation_label("future_operation", UiLanguage::En),
+            "future operation"
+        );
+        assert_eq!(
+            operation_label("future_operation", UiLanguage::Ja),
+            "future operation"
+        );
+    }
+
+    #[test]
     fn active_jobs_are_hidden_until_the_display_threshold_in_both_languages() {
         let started = Instant::now();
         let activity = active(started);

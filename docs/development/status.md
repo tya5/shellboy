@@ -4496,3 +4496,29 @@ PTY runs; other Unix retains `poll` with explicit invalid-descriptor errors.
 Landing remains blocked pending corrected-tip local checks, W8 re-review and
 exact-tip three-OS CI. Shared-target test artifacts must be rebuilt from current
 crate roots and copied before invoking subprocess tests.
+### #152 reconcile-34: operation catalogue language boundary (2026-11-03)
+
+Owner decision: preserve `src/operations.rs` Japanese strings as UI catalogue
+source, not model input. Consumer inspection found the typed labels/meanings and
+field labels/help flow to the TUI projection in `src/ui/operations.rs` and
+`src/ui/operations/metadata.rs`; global argument metadata is rendered there as
+well. No model-request/tool-description/prompt/system-message/CLI-JSON consumer
+was found. A direct frontend operation-title consumer was changed to use the
+selected-language label helper.
+
+All 320 Japanese catalogue literals are individually source-hash classified as
+reviewed UI-side text. The current exact-source audit on main `ce4310d969` plus
+the current reconcile-34 source tree reports `a=2916, b=1576, c=0, protected=4`; strict `--check` passes; the four protected records retain canonical and projection evidence. English
+Catalogue fallback, global argument and frontend title tests pass. The current
+source also passes `cargo check --tests` and the full library suite (2,019 passed,
+20 ignored); current focused localization tests pass. Strict audit `--check`
+returns zero category-c records; four protected records retain provenance.
+Other branch verdicts are in the current #152 issue table. Default-scope CI,
+formal acceptance, physical PTY and integration-tip all-OS CI remain open.
+### #152 DB activity language audit
+
+The DB worker status labels already choose English/Japanese pairs for every
+known operation. This batch pins the 54 Japanese arms as localized UI resources
+and adds exhaustive language-pair coverage; unknown operation identifiers keep
+the neutral fallback. No operation kind or persisted data changes.
+- #152 reconciliation: deletion/key-hint/count audit evidence recorded against current main in `docs/validation/language-audit-stage-c.md`; this is not Stage C completion.

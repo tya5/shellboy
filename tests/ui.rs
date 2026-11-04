@@ -2987,7 +2987,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
     ui.event(key(KeyCode::F(1)));
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     let details = screen_text(&terminal);
-    assert!(details.contains("会話の情報"));
+    assert!(details.contains("Conversation info"));
     assert!(details.contains("Conversation ID: thread-29"));
 }
 

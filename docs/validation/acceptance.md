@@ -9513,3 +9513,30 @@ and, on failure only, its complete bounded synthetic VT transcript as JSON in
 the harness artifact. Grace, keys, assertions, watchdog and production input
 behavior remain unchanged. A new exact-tip diagnostic CI and independent review
 are required; the earlier failed CI remains part of the evidence.
+### #152 reconcile-34 operation-catalogue boundary (2026-11-03)
+
+The owner decision keeps Japanese `src/operations.rs` catalogue literals as
+TUI display data; they are not sent to model requests. Static consumer review
+found no model/tool-description/prompt/system-message/CLI-JSON path; the
+frontend operation-title path is routed through the selected-language label
+helper. The existing catalogue test enumerates each operation and used field,
+checks Japanese fallback equality, and requires English output to be ASCII; the
+global-argument test checks English output likewise. A new frontend regression
+checks the selected-language title under terminal separator variants.
+
+The current-source audit (main `ce4310d969` plus reconcile-34 commits) classifies the 320 Japanese catalogue literals as reviewed UI-side
+strings using per-token source hashes. Counts: `a=2916, b=1576, c=0, protected=4`;
+strict audit `--check` passes; four protected records remain evidence-pinned.
+`cargo check --tests` and `cargo test --lib` pass (2,019 passed, 20 ignored),
+and focused title/detail/live-work/received/receipt/tool localization regressions
+pass. This is not final Stage C acceptance. Default-scope CI, physical terminal
+checks, formal acceptance and exact integration-tip all-OS CI remain pending.
+### #152 DB activity language slice
+
+`src/ui/db_activity.rs`'s 54 previously unclassified Japanese labels are paired
+with explicit English labels in `operation_label`. Added coverage iterates all
+known operation keys and checks both localized values; unknown identifiers keep
+the underscore-normalized fallback. No source values or protocol labels are
+rewritten. Local validation is `cargo fmt --all -- --check` plus Python language
+audit tests; three-OS CI is pending.
+- #152 deletion/key-hint/count audit note is documentation evidence only. Strict language audit, physical terminal checks, and integration-tip three-OS acceptance remain separate and outstanding.

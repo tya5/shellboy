@@ -614,7 +614,7 @@ fn rejected_current_index_preview_finishes_loading_without_closing_owner() {
     ui.action_rejected(&actions[0]);
     assert!(ui.management.is_some());
     assert!(
-        matches!(&ui.management.preview, management::IndexPreviewState::Failed(_, text) if text.contains("未受付"))
+        matches!(&ui.management.preview, management::IndexPreviewState::Failed(_, text) if text.contains("not accepted"))
     );
     let owner = context(&actions[0]);
     let args = ui.management.scope.clone().unwrap();

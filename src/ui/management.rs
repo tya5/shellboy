@@ -1566,12 +1566,23 @@ impl ManagementPopup {
                         ));
                     }
                     let mut selected_row = 0;
-                    let mut previous_group = "";
+                    let mut previous_group = String::new();
                     for (index, field) in structured.fields.iter().enumerate() {
                         let (group, label) = field
                             .label
                             .split_once(" › ")
                             .unwrap_or(("", field.label.as_str()));
+                        let group_key = field
+                            .key
+                            .trim_start_matches('/')
+                            .split('/')
+                            .next()
+                            .unwrap_or("");
+                        let group = crate::presentation::fields::display_label(
+                            group_key,
+                            group,
+                            self.language,
+                        );
                         if group != previous_group && !group.is_empty() {
                             items.push(popup::Item::new(
                                 Line::from(crate::ui::text_width::glyphs::formatted!(
@@ -1581,14 +1592,27 @@ impl ManagementPopup {
                                 .style(Style::default().fg(theme::GROUP_HEADING)),
                             ));
                         }
-                        previous_group = group;
+                        previous_group = group.clone();
                         if index == structured.selected {
                             selected_row = items.len();
                         }
-                        let value = crate::presentation::sanitize_plain(field.displayed(), 0).0;
-                        let label = crate::presentation::sanitize_plain(label, 0)
-                            .0
-                            .replace('\n', " ");
+                        let displayed = crate::presentation::fields::display_value(
+                            &field.key,
+                            &field.value,
+                            field.displayed(),
+                            self.language,
+                        );
+                        let value = crate::presentation::sanitize_plain(&displayed, 0).0;
+                        let label = crate::presentation::sanitize_plain(
+                            &crate::presentation::fields::display_label(
+                                &field.key,
+                                label,
+                                self.language,
+                            ),
+                            0,
+                        )
+                        .0
+                        .replace('\n', " ");
                         let mut value_lines = value.lines();
                         let first_value = value_lines.next().unwrap_or("").to_owned();
                         let mut lines = vec![Line::from(vec![

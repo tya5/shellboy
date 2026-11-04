@@ -62,6 +62,13 @@ mod send_tests;
 pub use management::ManagementPopup;
 mod motion;
 mod operations;
+
+pub(crate) fn operation_catalogue_label(
+    id: crate::operations::OperationId,
+    language: crate::config::UiLanguage,
+) -> String {
+    operations::catalogue_label(id, language)
+}
 mod overlay;
 mod popup;
 mod popup_motion;
@@ -3696,7 +3703,14 @@ impl UiState {
                     revision,
                     None,
                     ReceiptStatus::Failed,
-                    Some("旧作業停止の確認が必要です".into()),
+                    Some(
+                        i18n::local!(
+                            self.config.ui.language,
+                            "旧作業停止の確認が必要です",
+                            "Confirm stopping the previous run"
+                        )
+                        .into(),
+                    ),
                 ) && view.pending[&revision].restored_revision == Some(view.draft.revision)
                 {
                     if let Some(edit) = &mut view.draft.edit {
@@ -3987,7 +4001,12 @@ impl UiState {
                 self.management.fail_preview(
                     *attempt,
                     args.clone(),
-                    "索引previewは未受付です。P/Tで再操作してください".into(),
+                    i18n::local!(
+                        self.config.ui.language,
+                        "索引previewは未受付です。P/Tで再操作してください",
+                        "Index preview was not accepted. Retry with P/T"
+                    )
+                    .into(),
                 );
                 self.dirty = true;
             }
@@ -3997,7 +4016,12 @@ impl UiState {
             self.management.fail_preview(
                 *attempt,
                 args.clone(),
-                "索引previewは未受付です。P/Tで再操作してください".into(),
+                i18n::local!(
+                    self.config.ui.language,
+                    "索引previewは未受付です。P/Tで再操作してください",
+                    "Index preview was not accepted. Retry with P/T"
+                )
+                .into(),
             );
             self.dirty = true;
             return;
@@ -4805,7 +4829,7 @@ impl UiState {
             }
             "/received" => {
                 let Some(thread_id) = thread_id else {
-                    return self.command_error("保存済みの会話を選択してください");
+                    return self.command_error(i18n::local!(self.config.ui.language, "保存済みの会話を選択してください", "Select a saved conversation"));
                 };
                 let page = if argument.is_empty() {
                     1
@@ -4814,7 +4838,7 @@ impl UiState {
                         Ok(page) if page > 0 => page,
                         _ => {
                             return self
-                                .command_error("/received または /received 1以上のページ番号");
+                                .command_error(i18n::local!(self.config.ui.language, "/received または /received 1以上のページ番号", "/received or /received <page number> (1 or higher)"));
                         }
                     }
                 };
@@ -5062,7 +5086,7 @@ impl UiState {
                         id: uuid::Uuid::new_v4().to_string(),
                         path,
                         kind: "file".into(),
-                        state: "未準備".into(),
+                        state: "pending".into(),
                         position: None,
                     },
                     position,
@@ -5338,7 +5362,11 @@ impl UiState {
             Some(argument.into())
         };
         let Some(node_id) = node_id else {
-            return self.command_error("推論テキストを含むnodeがありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "推論テキストを含むnodeがありません",
+                "No node contains reasoning text"
+            ));
         };
         let view = self.active_view_mut();
         let Some(node) = view
@@ -5346,7 +5374,11 @@ impl UiState {
             .iter()
             .find(|node| node.node_id == node_id && !node.reasoning_ranges.is_empty())
         else {
-            return self.command_error("指定nodeに表示可能な推論テキストがありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "指定nodeに表示可能な推論テキストがありません",
+                "The selected node has no displayable reasoning text"
+            ));
         };
         let offset = node.reasoning_ranges[0].0;
         let source_start = node.base_char_offset;
@@ -5378,9 +5410,11 @@ impl UiState {
         let words: Vec<_> = argument.split_whitespace().collect();
         let (space, parts) = if words.first() == Some(&"space") {
             let Some(id) = words.get(1) else {
-                return self.command_error(
+                return self.command_error(i18n::local!(
+                    self.config.ui.language,
                     "/index space SPACE-ID [all|thread|threads ID...] を指定してください",
-                );
+                    "Specify /index space SPACE-ID [all|thread|threads ID...]."
+                ));
             };
             (Some((*id).to_owned()), &words[2..])
         } else {
@@ -5403,13 +5437,19 @@ impl UiState {
                 ..Default::default()
             }),
             _ => {
-                return self.command_error(
+                return self.command_error(i18n::local!(
+                    self.config.ui.language,
                     "/index [status|all|thread|threads THREAD-ID ...] を指定してください",
-                );
+                    "Specify /index [status|all|thread|threads THREAD-ID ...]."
+                ));
             }
         };
         if parts == ["thread"] && selection.is_none() {
-            return self.command_error("未保存の下書きには索引対象会話がありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "未保存の下書きには索引対象会話がありません",
+                "An unsaved draft has no conversation to index"
+            ));
         }
         if let Some(space) = space {
             let args = selection.get_or_insert_default();
@@ -5594,7 +5634,11 @@ impl UiState {
                 if !matches!(&command, Command::IndexRetry(_))
                     && !management::explicit_index_targets(args)
                 {
-                    return self.command_error("索引の実行対象を明示してください");
+                    return self.command_error(i18n::local!(
+                        self.config.ui.language,
+                        "索引の実行対象を明示してください",
+                        "Specify an indexing target"
+                    ));
                 }
                 self.management.scope = Some(args.clone());
                 self.management.reset_preview();
@@ -5928,14 +5972,21 @@ impl UiState {
     }
     fn command_error(&mut self, message: &str) -> Vec<UiAction> {
         self.command_rejected = true;
-        self.active_view_mut().status = format!("コマンドエラー: {message}");
+        self.active_view_mut().status = format!(
+            "{}: {message}",
+            i18n::local!(self.config.ui.language, "コマンドエラー", "Command error")
+        );
         self.active_view_mut()
             .promote_status_notice(history_interaction::NoticeKind::Failure);
         vec![]
     }
     fn open_descendant_watch(&mut self) -> Vec<UiAction> {
         let Some(root) = self.view().thread_id.clone() else {
-            return self.command_error("子孫の監視には保存済みの会話を選んでください");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "子孫の監視には保存済みの会話を選んでください",
+                "Select a saved conversation to watch descendants"
+            ));
         };
         vec![
             self.thread_browser
@@ -5956,9 +6007,15 @@ impl UiState {
             threads::ThreadOutcome::None => vec![],
             threads::ThreadOutcome::Load(action) => vec![*action],
             threads::ThreadOutcome::Open(thread) => self.select_thread(thread),
-            threads::ThreadOutcome::Info(body) => {
-                self.show_help(help::Page::info("会話の情報", "会話一覧で選んだ対象", body))
-            }
+            threads::ThreadOutcome::Info(body) => self.show_help(help::Page::info(
+                i18n::local!(self.config.ui.language, "会話の情報", "Conversation info"),
+                i18n::local!(
+                    self.config.ui.language,
+                    "会話一覧で選んだ対象",
+                    "Selected from the conversation list"
+                ),
+                body,
+            )),
         }
     }
     /// Publish derived frame geometry without changing the durable source anchor.
@@ -6225,13 +6282,24 @@ pub fn cursor_position(text: &str, byte_cursor: usize, width: u16) -> (u16, u16)
     input::cursor_position(text, byte_cursor, width)
 }
 /// Render a cached source window without changing canonical text or offsets.
-fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize) -> String {
+fn rendered_node_text(
+    node: &UiNode,
+    expanded: bool,
+    start: usize,
+    limit: usize,
+    language: crate::config::UiLanguage,
+) -> String {
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
-        return text_width::glyphs::select(
-            "[本文未キャッシュ · スクロールで原文を再取得]",
-            "[本文未キャッシュ | スクロールで原文を再取得]",
-        )
-        .into();
+        return match language {
+            crate::config::UiLanguage::Ja => text_width::glyphs::select(
+                "[本文未キャッシュ · スクロールで原文を再取得]",
+                "[本文未キャッシュ | スクロールで原文を再取得]",
+            )
+            .into(),
+            crate::config::UiLanguage::En => {
+                "[Body not cached; scroll to reload the original]".into()
+            }
+        };
     }
     let start = start.max(node.base_char_offset);
     let mut range = 0;
@@ -6262,11 +6330,18 @@ fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize)
             && begin <= global
             && global < end
         {
-            let label = text_width::glyphs::formatted!(
-                "[推論 {}文字 · 折りたたみ /reasoning]\n",
-                "[推論 {}文字 | 折りたたみ /reasoning]\n",
-                end.saturating_sub(begin)
-            );
+            let label = match language {
+                crate::config::UiLanguage::Ja => text_width::glyphs::formatted!(
+                    "[推論 {}文字 · 折りたたみ /reasoning]\n",
+                    "[推論 {}文字 | 折りたたみ /reasoning]\n",
+                    end.saturating_sub(begin)
+                ),
+                crate::config::UiLanguage::En => crate::ui::text_width::glyphs::formatted!(
+                    "[Reasoning · {} chars · collapsed /reasoning]\n",
+                    "[Reasoning | {} chars | collapsed /reasoning]\n",
+                    end.saturating_sub(begin)
+                ),
+            };
             out.push_str(&label);
             displayed += label.chars().count();
             hidden_until = end;
@@ -6809,6 +6884,23 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     state.dirty = false;
 }
 pub const HELP: &str = "操作するときはEscで会話へ戻る | / でコマンド候補を表示";
+pub const HELP_EN: &str = "Press Esc to return to the conversation | / lists commands";
+
+pub fn help_for(language: crate::config::UiLanguage) -> &'static str {
+    match language {
+        crate::config::UiLanguage::Ja => HELP,
+        crate::config::UiLanguage::En => HELP_EN,
+    }
+}
+#[cfg(test)]
+mod help_copy_tests {
+    #[test]
+    fn global_help_copy_follows_language() {
+        assert!(super::help_for(crate::config::UiLanguage::Ja).contains("会話へ戻る"));
+        let english = super::help_for(crate::config::UiLanguage::En);
+        assert!(english.contains("conversation") && english.is_ascii());
+    }
+}
 
 /// Must run on the main OS thread. Updates should be sent through a bounded
 /// std::sync::mpsc::sync_channel; the UI only calls try_recv and try_send.
@@ -7117,15 +7209,30 @@ mod layout_cache_tests {
                 let mut value = node("n", raw);
                 value.role = role.into();
                 value.reasoning_ranges = vec![(0, raw.chars().count())];
-                assert_eq!(rendered_node_text(&value, true, 0, 256), raw);
-                let hidden = rendered_node_text(&value, false, 0, 256);
+                assert_eq!(
+                    rendered_node_text(&value, true, 0, 256, crate::config::UiLanguage::Ja),
+                    raw
+                );
+                let hidden =
+                    rendered_node_text(&value, false, 0, 256, crate::config::UiLanguage::Ja);
                 assert!(
                     hidden.contains(text_width::glyphs::separator()),
                     "{policy:?}: {hidden}"
                 );
+                let hidden_en =
+                    rendered_node_text(&value, false, 0, 256, crate::config::UiLanguage::En);
+                assert!(hidden_en.contains("Reasoning") && hidden_en.contains("chars"));
+                assert!(!hidden_en.contains("推論"), "{hidden_en}");
                 assert_eq!(value.text, raw);
             }
         }
+        let mut evicted = node("evicted", "");
+        evicted.presentation.body_evicted = true;
+        let ja = rendered_node_text(&evicted, true, 0, 256, crate::config::UiLanguage::Ja);
+        let en = rendered_node_text(&evicted, true, 0, 256, crate::config::UiLanguage::En);
+        assert!(ja.contains("本文未キャッシュ"));
+        assert_eq!(en, "[Body not cached; scroll to reload the original]");
+        assert!(en.is_ascii());
         text_width::clear_terminal_width();
     }
     fn node(id: &str, text: &str) -> UiNode {

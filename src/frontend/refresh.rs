@@ -163,7 +163,7 @@ fn project(
     activity.snapshot.index_pause = index_pause;
     activity.observed_at = observed_at;
     Ok(ProjectedVisible {
-        details: details.prepare(),
+        details: details.prepare_for_ui(language),
         nodes,
         info,
         before_cursor: before_cursor?,

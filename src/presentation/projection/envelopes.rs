@@ -70,6 +70,9 @@ fn event(
             .get("kind")
             .and_then(Value::as_str)
             .unwrap_or("context_changed");
+        p.ui_messages.title = Some(crate::presentation::messages::Message::EventTitle {
+            kind: event_kind.to_owned(),
+        });
         p.event_class = match event_kind {
             "run_started" | "turn_started" => EventClass::Routine,
             "index_state" if events::routine_index_ready(event) => EventClass::Routine,

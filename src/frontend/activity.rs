@@ -328,6 +328,10 @@ pub(super) fn read_tx_with_limit(
 }
 
 pub(super) fn prepare(raw: RawProjection) -> Projection {
+    prepare_in(raw, crate::config::UiLanguage::Ja)
+}
+
+pub(super) fn prepare_in(raw: RawProjection, language: crate::config::UiLanguage) -> Projection {
     let RawProjection {
         run,
         turn,
@@ -370,7 +374,7 @@ pub(super) fn prepare(raw: RawProjection) -> Projection {
             local_offset_seconds: chrono::Local::now().offset().local_minus_utc(),
             ..Default::default()
         },
-        live_work: live_work.map(super::live_work::prepare),
+        live_work: live_work.map(|raw| super::live_work::prepare_in(raw, language)),
         waiting_reason,
         automatic_compaction,
         automatic_compaction_skip,
@@ -579,7 +583,8 @@ pub async fn read(control: &Control, thread: &str) -> Result<Projection, ApiErro
         .await
         .map_err(super::storage_error);
     let raw = super::checked_storage(control, result).await?;
-    super::presentation_work(move || prepare(raw)).await
+    let language = control.store.config.ui.language;
+    super::presentation_work(move || prepare_in(raw, language)).await
 }
 
 pub(super) async fn read_cancellable(
@@ -599,8 +604,9 @@ pub(super) async fn read_cancellable(
     })
     .await;
     let (raw, pause) = super::checked_storage(control, result).await?;
+    let language = control.store.config.ui.language;
     super::presentation_work(move || {
-        let mut projection = prepare(raw);
+        let mut projection = prepare_in(raw, language);
         projection.snapshot.index_pause = pause;
         projection
     })

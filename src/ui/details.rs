@@ -1136,7 +1136,10 @@ impl Details {
             .max_by_key(|(_, _, block, _)| super::presentation::tool_observation_rank(block))
             .map(|(_, _, _, tool)| {
                 let call_id = safe(&tool.call_id.chars().take(48).collect::<String>());
-                let command = safe(&tool.command);
+                let command = safe(&super::presentation::display_tool_command(
+                    &tool.command,
+                    language,
+                ));
                 match language {
                     UiLanguage::Ja => {
                         format!("shell{sep}call {call_id}{sep}コマンドpreview {command}")
@@ -1671,13 +1674,22 @@ impl Details {
                         popup::item(
                             &format!(
                                 "{}{}{}",
-                                safe(&field.label),
+                                safe(&crate::presentation::fields::display_label(
+                                    &field.key,
+                                    &field.label,
+                                    language,
+                                )),
                                 if field.key == "sender.label" && language == UiLanguage::Ja {
                                     "："
                                 } else {
                                     ": "
                                 },
-                                safe(field.displayed())
+                                safe(&crate::presentation::fields::display_value(
+                                    &field.key,
+                                    &field.value,
+                                    field.displayed(),
+                                    language,
+                                ))
                             ),
                             body.width,
                         )
