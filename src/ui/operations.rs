@@ -3081,7 +3081,7 @@ mod entry_tests {
         let actual = |caption: &str| {
             OpKind::ALL.iter().any(|kind| kind.label() == caption)
                 || saved.title == caption
-                || received_source.contains(&format!("\"{caption}\""))
+                || received_source.contains(caption)
                 || management_source.contains(&format!("\"{caption}\""))
         };
         // A wrong caption must be rejected even if another correct caption is

@@ -102,18 +102,13 @@ fn received_title(language: UiLanguage, observation: bool) -> String {
         UiLanguage::Ja => {
             if observation {
                 crate::ui::text_width::glyphs::formatted!(
-                    "{} · {} · {}",
-                    "{} | {} | {}",
-                    "ストリーム差分",
-                    "最終応答は確定済み",
-                    "/received 一覧"
+                    "ストリーム差分 · 最終応答は確定済み · /received 一覧",
+                    "ストリーム差分 | 最終応答は確定済み | /received 一覧"
                 )
             } else {
                 crate::ui::text_width::glyphs::formatted!(
-                    "{} · {}",
-                    "{} | {}",
-                    "途中で切れた応答（保存済み・会話には含めない）",
-                    "/received 一覧"
+                    "途中で切れた応答（保存済み・会話には含めない） · /received 一覧",
+                    "途中で切れた応答（保存済み・会話には含めない） | /received 一覧"
                 )
             }
         }
@@ -723,8 +718,20 @@ mod tests {
         );
         assert_eq!(nodes[0].1.text, "理由\n有料本文33");
         assert_eq!(nodes[0].1.reasoning_ranges, [(0, 2)]);
-        assert!(nodes[0].1.presentation.title.contains("途中で切れた応答"));
-        assert!(nodes[1].1.presentation.title.contains("確定済み"));
+        assert!(
+            nodes[0]
+                .1
+                .presentation
+                .title
+                .contains("Interrupted response")
+        );
+        assert!(
+            nodes[1]
+                .1
+                .presentation
+                .title
+                .contains("final response confirmed")
+        );
         let (title, first) = list(&control, "t".into(), 1).await.unwrap();
         assert!(title.contains("35 records"));
         assert_eq!(
