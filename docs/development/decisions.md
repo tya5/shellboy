@@ -2663,12 +2663,13 @@ baseline spread. No schema/migration or product behavior changes.
 
 ## #105: Line Tables For Development And Tests (2026-11-01)
 
-Use `[profile.dev] debug = "line-tables-only"`; Cargo's test profile inherits it.
-Keep release settings, the encoding_rs optimization and the existing #46 test
-aggregation unchanged. This reduces retained development debug information while
-preserving source-line panic backtraces; inspecting local variable values with a
-native debugger is an explicit trade-off. Revisit if full debug information is
-needed for a particular investigation, using a local profile override.
+This was the initial development profile choice, adopted on 2026-11-01 and
+superseded on 2026-11-04 by [Disable Development Debug Information](#disable-development-debug-information-2026-11-04).
+The original rationale and measurements below remain historical evidence. To
+obtain source-line backtraces for a one-off test build, use
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only cargo test --locked --no-run`.
+Release settings, the encoding_rs optimization and the existing #46 test
+aggregation remain unchanged.
 
 One frozen macOS/aarch64 cold pair (main5ecbebc versus profile-only7a4bfc88)
 passed2125 Rust tests/35 ignored and71 Python tests on each side. Allocated target
