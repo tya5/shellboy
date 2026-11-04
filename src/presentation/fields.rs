@@ -206,6 +206,20 @@ fn item_name(value: &Value, collection: &str) -> &'static str {
     }
 }
 fn english_key(value: &str) -> String {
+    match value {
+        "input_bytes" => return "Input bytes (UTF-8)".into(),
+        "input_tokens" => return "Input tokens (provider-reported)".into(),
+        "cached_tokens" => return "Cached input tokens (provider-reported)".into(),
+        "current_source" => return "Current Source".into(),
+        "repeat_result" => return "Repeat Result".into(),
+        "limited_fields" => return "Limited Fields".into(),
+        "captured_result_at" => return "Captured Result At".into(),
+        "body_available" => return "Body Available".into(),
+        "body_hash" => return "Body Hash".into(),
+        "source_revision" => return "Source Revision".into(),
+        "tombstone_reason" => return "Tombstone Reason".into(),
+        _ => {}
+    }
     value
         .split(|ch: char| !ch.is_ascii_alphanumeric())
         .filter(|part| !part.is_empty())
@@ -228,20 +242,58 @@ fn english_key(value: &str) -> String {
 }
 
 pub(crate) fn display_label(key: &str, label: &str, language: crate::config::UiLanguage) -> String {
-    match language {
-        crate::config::UiLanguage::Ja => label.to_owned(),
-        crate::config::UiLanguage::En => {
-            let key = key.rsplit(['/', '.']).next().unwrap_or(key);
-            let mut english = english_key(key);
-            if english.is_empty() {
-                english = "Field".into();
-            }
-            if label.contains("件数") {
-                english.push_str(" (count)");
-            }
-            english
-        }
+    if language == crate::config::UiLanguage::Ja || label.is_ascii() {
+        return label.to_owned();
     }
+    let segments: Vec<_> = key.trim_start_matches('/').split(['/', '.']).collect();
+    let numeric = segments
+        .iter()
+        .enumerate()
+        .filter_map(|(index, segment)| {
+            segment
+                .parse::<usize>()
+                .ok()
+                .map(|position| (index, position))
+        })
+        .next();
+    let leaf = segments.last().copied().unwrap_or("");
+    let mut english = if let Some((index, position)) = numeric {
+        let collection = index
+            .checked_sub(1)
+            .and_then(|i| segments.get(i))
+            .copied()
+            .unwrap_or("");
+        let singular = match collection {
+            "answers" => "Answer",
+            "items" | "output" if segments.iter().any(|part| *part == "content") => "Answer",
+            "items" | "output" => "Item",
+            "messages" => "Message",
+            "nodes" => "Node",
+            "runs" => "Run",
+            "tools" => "Tool",
+            "attachments" => "Attachment",
+            "threads" => "Thread",
+            "turns" => "Turn",
+            other => other.strip_suffix('s').unwrap_or(other),
+        };
+        format!(
+            "{singular} {} › {}",
+            position.saturating_add(1),
+            english_key(leaf)
+        )
+    } else {
+        english_key(leaf)
+    };
+    if english.is_empty() {
+        english = "Field".into();
+    }
+    let suffix = match label {
+        "モデル要求ID（使用量の記録元）" => " (usage source)",
+        _ if label.contains("件数") => " (count)",
+        _ => "",
+    };
+    english.push_str(suffix);
+    english
 }
 
 pub(crate) fn display_value(
@@ -847,11 +899,31 @@ mod tests {
         assert_eq!(human_label_for("/thread_id", &raw, En), "Thread ID");
         assert_eq!(
             human_label_for("/items/0/run_id", &raw, En),
-            "Items 1 › Run ID"
+            "Item 1 › Run ID"
         );
         assert_eq!(state_label_for("running", En), "Running");
         assert_eq!(state_label_for("running", Ja), "実行中");
         assert_eq!(display_label("/items", "項目（件数）", En), "Items (count)");
+        assert_eq!(
+            display_label("/answers/0/text", "本文", En),
+            "Answer 1 › Text"
+        );
+        assert_eq!(
+            display_label(
+                "/ui_model_attempt/input_bytes",
+                "入力のバイト数（UTF-8）",
+                En
+            ),
+            "Input bytes (UTF-8)"
+        );
+        assert_eq!(
+            display_label(
+                "/ui_model_attempt/input_tokens",
+                "入力トークン（提供元の報告）",
+                En
+            ),
+            "Input tokens (provider-reported)"
+        );
         assert_eq!(display_value("/state", "running", "実行中", En), "Running");
         assert_eq!(
             display_value("/exit_code", "null", "未確定", En),
