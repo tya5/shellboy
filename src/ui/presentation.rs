@@ -639,9 +639,17 @@ pub(super) fn hanging_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'s
         for y in 0..height {
             let mut spans: Vec<Span<'static>> = Vec::new();
             let mut x = 0;
+            let mut row_width = 0;
             while x < width {
                 let cell = &buffer[(x, y)];
                 let symbol = cell.symbol();
+                let symbol_width = symbol.width().max(1);
+                // Ratatui can place a wide glyph in the last cell of a wrapped row.
+                if row_width > 0 && row_width + symbol_width > usize::from(width) {
+                    out.push(Line::from(std::mem::take(&mut spans)));
+                    row_width = 0;
+                }
+                row_width += symbol_width;
                 if let Some(last) = spans.last_mut().filter(|last| last.style == cell.style()) {
                     last.content.to_mut().push_str(symbol);
                 } else {
@@ -659,8 +667,8 @@ pub(super) fn hanging_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'s
 }
 
 pub(super) fn indented_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
-    // Preserve the viewport at widths too narrow to fit both the indent and text.
-    let indent = if width >= 3 { 2 } else { 0 };
+    // Reserve two cells for a wide grapheme when the viewport is very narrow.
+    let indent = width.saturating_sub(2).min(2);
     hanging_wrap(lines, width.saturating_sub(indent).max(1))
         .into_iter()
         .map(|mut line| {
@@ -669,7 +677,8 @@ pub(super) fn indented_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'
                     .spans
                     .first()
                     .map_or(line.style, |span| line.style.patch(span.style));
-                line.spans.insert(0, Span::styled("  ", style));
+                line.spans
+                    .insert(0, Span::styled(" ".repeat(indent as usize), style));
             }
             line
         })
@@ -5267,6 +5276,23 @@ mod conversation_item_tests {
                     "{language:?}: {row:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn narrow_nested_rows_preserve_wide_glyphs() {
+        for width in 3..=12 {
+            let rows = indented_wrap(vec![Line::from("日本🙂語")], width);
+            let actual = rows
+                .iter()
+                .map(ToString::to_string)
+                .map(|s| s.trim().to_owned())
+                .collect::<String>();
+            assert_eq!(actual, "日本🙂語", "width={width} rows={rows:?}");
+            assert!(
+                rows.iter().all(|row| row.width() <= usize::from(width)),
+                "width={width} rows={rows:?}"
+            );
         }
     }
 
