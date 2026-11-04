@@ -484,6 +484,7 @@ mod tests {
                 80,
                 false,
                 true,
+                UiLanguage::Ja,
             );
             let message = node.presentation.ui_messages.title.unwrap();
             assert_eq!(

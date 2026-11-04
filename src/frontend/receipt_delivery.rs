@@ -242,15 +242,30 @@ mod tests {
             for status in [ReceiptStatus::Cancelled, ReceiptStatus::Failed] {
                 let (send, receive) = std::sync::mpsc::sync_channel(8);
                 let updates = BufferedUpdates::new(send);
-                let mut pending = HashMap::from([("message".into(), PendingReceipt {
-                    thread: "thread".into(), draft: "draft".into(), revision: 73,
-                    checked: true, repeat: false,
-                })]);
+                let mut pending = HashMap::from([(
+                    "message".into(),
+                    PendingReceipt {
+                        thread: "thread".into(),
+                        draft: "draft".into(),
+                        revision: 73,
+                        checked: true,
+                        repeat: false,
+                    },
+                )]);
                 Batch::new(vec![("message".into(), status.clone())]).drain(
-                    &mut pending, &updates, language,
+                    &mut pending,
+                    &updates,
+                    language,
                 );
                 assert!(pending.is_empty());
-                let UiUpdate::Receipt { draft_id, revision, thread_id, status: delivered_status, message: Some(message) } = receive.try_recv().unwrap() else {
+                let UiUpdate::Receipt {
+                    draft_id,
+                    revision,
+                    thread_id,
+                    status: delivered_status,
+                    message: Some(message),
+                } = receive.try_recv().unwrap()
+                else {
                     panic!("cancelled/failed receipt should carry its restore hint");
                 };
                 assert_eq!(draft_id, "draft");
@@ -259,7 +274,10 @@ mod tests {
                 assert_eq!(delivered_status, status);
                 match language {
                     UiLanguage::Ja => assert!(message.contains("/restore 73")),
-                    UiLanguage::En => assert_eq!(message, "Input retained; use /restore 73 to return it to the composer."),
+                    UiLanguage::En => assert_eq!(
+                        message,
+                        "Input retained; use /restore 73 to return it to the composer."
+                    ),
                 }
             }
         }

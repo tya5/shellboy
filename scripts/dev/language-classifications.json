@@ -6446,28 +6446,13 @@
   },
   "src/frontend/received.rs:0399375bcdb16ccb:1": {
     "category": "a",
-    "reason": "Japanese title for received responses. received::project attaches typed Text::ReceivedResponse; ui::presentation::label renders its English title for En without changing saved text.",
-    "source_tokens_sha256": "0760e2ddf5bf668e155f334c605ca861ff0cdf3d5e74451bb92c893b246a7791"
-  },
-  "src/frontend/received.rs:41b864dfa58171f9:1": {
-    "category": "a",
-    "reason": "Japanese projection title separator/suffix; English UI title is supplied by typed Text::ReceivedResponse/StreamDifference in ui_messages.",
-    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
-  },
-  "src/frontend/received.rs:afde8c7877ae72d6:1": {
-    "category": "a",
-    "reason": "Japanese projection title separator/suffix; English UI title is supplied by typed Text::ReceivedResponse/StreamDifference in ui_messages.",
-    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
-  },
-  "src/frontend/received.rs:8e576edeef0007f7:1": {
-    "category": "a",
-    "reason": "Japanese stream-difference title for stored observation; English UI title is supplied by typed Text::StreamDifference.",
-    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
+    "reason": "Japanese received-response title; received_title selects complete Japanese/English presentation copy without changing the saved response or source ID.",
+    "source_tokens_sha256": "4965452d5a590542bd276534b10da5c48195a6e3b96953e2c91317e1131cbb64"
   },
   "src/frontend/received.rs:4e7f9ba5488f7a1d:1": {
     "category": "a",
-    "reason": "Japanese label for the source-node identifier; presentation::fields::display_label maps the same pointer to Source Node ID in English UI.",
-    "source_tokens_sha256": "eaa992c171d83cd13ce5d5d59ef66ad5203ea1fe9320f0df96f03a6a570484a9"
+    "reason": "Japanese saved-source field label; received::project selects the English label for En while preserving the JSON pointer and source-node value.",
+    "source_tokens_sha256": "3b28e2170a1d2334190fb9352b00e1dea56c12fa153dd1df8eb0c1db250fab75"
   },
   "src/frontend/message_queue.rs:428bbfd88c37c740:1": {
     "category": "a",

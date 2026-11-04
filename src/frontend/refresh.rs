@@ -296,7 +296,6 @@ pub(super) async fn run(
             let raw=checked_storage(&control,visible).await?;
             // Rendering, sender/model-error JSON, decoding and timestamp work
             // begin only after the readonly snapshot released its transaction.
-            let language = control.store.config.ui.language;
             let mut frame=presentation_work(move || project(raw,render_width,language)).await??;
             let page_len=frame.nodes.len();
             let notice_threads=frame.nodes.iter().flat_map(|node|node.presentation.fields.iter())
