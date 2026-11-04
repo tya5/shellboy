@@ -9685,9 +9685,16 @@ compares marker candidates with the legacy full predicate over 512 completed
 groups plus open/missing-result cases, including zero and one candidate. The
 open-boundary and transaction-rollback tests verify a marker survives process
 loss before completion commits. Migration coverage seeds legacy rows and verifies
-one-time backfill. On one 3.4 GiB
-VACUUM INTO snapshot (57,465 groups, 59,430 calls/results), legacy candidate
-enumeration measured 1.031 s cold, then 0.238/0.354 s warm; after migration,
-marker enumeration measured 40 microseconds cold and 8-11 microseconds warm
-with zero candidates. This is candidate enumeration, not full startup-stage
-latency. The snapshot was deleted. Rust formatting and `cargo check --tests` passed on the implementation tip. The focused migration/reopen integration test passes after correcting the production table-count expectation to 37. Default CI 41871799210 failed on that stale expectation and one cache-diagnostics unit test; the former is fixed, the cache-diagnostics test also had a stale hard-coded schema version (27 vs 28), corrected with the migration. The snapshot measurement is candidate enumeration only, not full interrupted_work stage latency. Default rerun and all-OS CI remain pending.
+one-time backfill. On one 3.4 GiB read-only `VACUUM INTO` snapshot (57,465 groups,
+59,430 calls/results), legacy candidate enumeration measured 1.031 s cold and
+0.238/0.354 s warm; after migration, marker enumeration measured 40 microseconds
+cold and 8-11 microseconds warm with zero candidates. This is candidate
+enumeration only, not full `interrupted_work` stage latency. The snapshot was
+deleted; the source DB was not found in the task tree. Default CI 41876622989
+passed on pre-rebase SHA `3fdaee53565d822a666ffa90f9e743e1f55052c2`. All-OS CI
+41878748584 attempt 3 failed on two Ubuntu integration tests unrelated to this
+change; Windows and macOS passed. Attempt 4 is running on the same SHA. Main CI
+41886037207 passed on `44acf9555bdc4d3b5c5c6f4bf82ed398c9aa34b3`; the recurring
+Ubuntu tests passed on that baseline. The branch has been rebased onto that tip;
+final-tip default and all-OS CI are pending. Full-stage before/after measurement
+remains unverified.

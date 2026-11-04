@@ -4630,6 +4630,14 @@ reference, English/Japanese User Guides and Agent Guide updated.
 
 Implementation replaces startup's completed-history scan with a transactionally
 maintained candidate marker. Schema migration 28 backfills existing databases;
-fresh schema installs the same triggers. Design and decision records document
-crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
-measurements. The 69-test `recovery_` lib filter and fresh-schema bootstrap check pass. Default CI run 41871799210 failed: its integration schema-table count was stale (36 vs 37) and one unrelated cache-diagnostics unit test failed; the table-count expectation is corrected and its focused migration/reopen test passes locally. A second exact-tip CI run exposed another stale schema-version assertion (27 vs 28) in the bounded cache-diagnostics test; that assertion is corrected for the schema bump and will be revalidated. Exact-tip CI rerun and all-OS CI remain pending. Snapshot timings currently cover candidate enumeration only, not full interrupted_work stage time.
+fresh schema installs the same triggers. Design and tests cover crash atomicity,
+legacy rows, candidate equivalence, and bounded keyset enumeration. Default CI
+41876622989 passed on pre-rebase SHA `3fdaee53565d822a666ffa90f9e743e1f55052c2`.
+All-OS run 41878748584 attempt 3 failed only on Ubuntu integration tests unrelated
+to tool-group recovery; Windows and macOS passed. Attempt 4 was started on the
+same SHA and is pending. Current main CI 41886037207 passed on
+`44acf9555bdc4d3b5c5c6f4bf82ed398c9aa34b3`, so the two recurring Ubuntu test
+failures did not reproduce on that baseline. The branch has been rebased onto
+that main commit; final-tip CI remains pending. Snapshot timings cover candidate
+enumeration only, not full `interrupted_work` stage latency. The original
+snapshot was deleted, and its source database was not found in the task tree.
