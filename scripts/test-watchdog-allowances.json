@@ -1042,7 +1042,7 @@
   {
     "file": "src/frontend/update_delivery.rs",
     "rule": "raw-timeout",
-    "fingerprint": "c402ea0195354c3b3295a7427f564d99fc48f52ab7ba1d4df30537fd9042346d",
+    "fingerprint": "7af32c54d40e7c5c2440bf96afa97253bb2cc4d7ed8638d3740a7bc613312289",
     "function": "reserved_batch_continuation_keeps_fifo_and_worker_permit_until_ui_resumes",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing reserved_batch_continuation_keeps_fifo_and_worker_permit_until_ui_resumes test occurrence only; migrate on #41 integration, no file-wide exemption."
