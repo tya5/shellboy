@@ -13,7 +13,7 @@ on:
         type: string
         default: '62a4c4def58dcf4a66327d37c343670f1bf3d68a'
       shell_output_repeats:
-        description: Repeat the two shell-output regressions 30 times on main, v0.8.0, and pre-#201
+        description: Repeat the two shell-output regressions 30 times on three baselines and the candidate
         type: boolean
         default: false
       shell_output_repeat_count:
@@ -358,31 +358,31 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            main -> ../shared-target
-            v0.8.0 -> ../shared-target
-            pre-instrumentation -> ../shared-target
-            current -> ../shared-target
+            main -> ../shared-target/main
+            v0.8.0 -> ../shared-target/v0.8.0
+            pre-instrumentation -> ../shared-target/pre-instrumentation
+            current -> ../shared-target/candidate
           shared-key: shell-output-repeat-v1
           cache-on-failure: true
       - name: Repeat both regressions on main
         continue-on-error: true
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target/main
         run: python3 current/scripts/dev/repeat-shell-output-tests.py --source main --output evidence/main --count ${{ inputs.shell_output_repeat_count }}
       - name: Repeat both regressions on v0.8.0
         continue-on-error: true
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target/v0.8.0
         run: python3 current/scripts/dev/repeat-shell-output-tests.py --source v0.8.0 --output evidence/v0.8.0 --count ${{ inputs.shell_output_repeat_count }}
       - name: Repeat both regressions before #201 instrumentation
         continue-on-error: true
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target/pre-instrumentation
         run: python3 current/scripts/dev/repeat-shell-output-tests.py --source pre-instrumentation --output evidence/pre-instrumentation --count ${{ inputs.shell_output_repeat_count }}
       - name: Repeat both regressions on candidate
         continue-on-error: true
         env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target/candidate
         run: python3 current/scripts/dev/repeat-shell-output-tests.py --source current --output evidence/candidate --count ${{ inputs.shell_output_repeat_count }}
       - name: Require complete exact-source evidence
         env:
@@ -400,6 +400,8 @@ jobs:
               assert result['count'] == int(os.environ['REPEAT_COUNT']), result
               assert not result.get('build_exit'), result
               assert all(len(items) == result['count'] for items in result['results'].values()), result
+              if name == 'candidate':
+                  assert not any(result['failures'].values()), result
               print(name, sha, result['failures'])
           PY
       - name: Retain exact-source logs and per-iteration results

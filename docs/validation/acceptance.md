@@ -9614,15 +9614,19 @@ No real data, provider traffic or installed-binary change is part of validation.
 
 ## Ubuntu shell-output cause correction (2026-11-04)
 
-Exact-source Ubuntu repeats showed the first drain candidate did not fix the
-runtime output test: it inverted the timeout condition. `then_some` returns the
-provided deadline when its boolean is true, so the original expression applied
-`drain_timeout_ms` when cleanup was confirmed instead of when it was unconfirmed.
-The corrected predicate must be validated on Ubuntu.
+The first confirmed-group drain candidate used the wrong `then_some` condition:
+it applied `drain_timeout_ms` when cleanup was confirmed. The predicate is
+corrected and both focused tests pass locally.
+
+A later Ubuntu comparison was invalid for candidate behavior: all four source
+checkouts shared one Cargo target, and the candidate build reported `fresh=true`
+while its test logs lacked the committed candidate test changes. The comparison
+workflow now assigns independent target directories per source and asserts zero
+candidate failures. Exact-source Ubuntu validation remains pending.
 
 The leading-dash regression fixture also used a symlink to `/bin/echo`. On the
 Ubuntu image, this resolves to coreutils' multicall binary, which rejects the
 symlink applet name `-x` before printing; its failure was not evidence of Bash
 option parsing. The test now uses a script executable named `-x` so it isolates
-Bash command-string parsing. Corrected focused local tests and exact-SHA Ubuntu
-and cross-platform CI remain pending.
+Bash command-string parsing; its focused local test passes. Exact-source Ubuntu
+comparison and corrected-SHA standard/all-OS CI remain pending.

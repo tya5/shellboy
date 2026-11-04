@@ -4575,19 +4575,19 @@ all-OS hosted CI are pending; W8 owns review and landing.
 ## Ubuntu shell-output failures: cause correction in progress (2026-11-04)
 
 The earlier drain hypothesis was incomplete and its first candidate was wrong.
-Exact-source Ubuntu repeats on `main` (`44acf955`), `v0.8.0`
-(`6a0827de`), pre-instrumentation (`6f486695`) and candidate
-`17ce1d42` / diagnostic `bd4c644e` failed both tests 30/30. The candidate
-completion exposed `group_cleanup_confirmed=true` together with
-`reason="output drain incomplete"`: the new call used
+The first confirmed-group drain candidate used
 `group_confirmed.then_some(drain_timeout)`, which enables the timeout precisely
-when cleanup is confirmed. Correct predicate is the inverse. This explains the
-lost output on the runtime test.
+when cleanup is confirmed; the correct predicate is the inverse. Local focused
+tests passed after correcting it. A subsequent Ubuntu comparison still ran a
+stale integration executable: all four source paths shared one Cargo target and
+the candidate build reported `fresh=true`, while logs lacked the committed
+candidate diagnostics and fixture. The comparison workflow now uses isolated
+Cargo target directories and fails if candidate repetitions fail. Correct exact-
+source Ubuntu evidence is pending.
 
 The leading-dash test had a separate invalid fixture: `/bin/echo` is a
 coreutils multicall executable on Ubuntu and rejects being invoked under the
 symlink name `-x` (`Security violation: Requested utility '-x' does not match
-executable name .../coreutils/echo`). This is not Bash option parsing. Replace
-the fixture with a small executable script named `-x` to test Bash's handling
-without coreutils applet-name behavior. Corrected fixes are being locally tested;
-Ubuntu evidence and CI for the corrected SHA are pending.
+executable name .../coreutils/echo`). This is not Bash option parsing. The
+fixture now uses a small executable script named `-x`; the local focused test
+passes. Correct isolated-target Ubuntu evidence and CI are pending.
