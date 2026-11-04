@@ -615,6 +615,28 @@ still pages the resulting groups. Malformed/oversized records are excluded and
 reported, never converted to zero. Combined token sums preserve known/unknown/
 overflow semantics; fields not reported for one request type remain unknown.
 
+## Proactive selection and spill evidence (#215)
+
+Automatic compaction attempts eligible reducing spills before requesting a
+summary. An open tool loop retains its existing safety fence; a driver gate
+must not suppress a newly eligible reducing spill merely because the summary
+scope is escalating. Record bounded anonymous candidate, adopted and skip
+counts by latest protection, unsafe or incomplete group, already spilled,
+non-reducing projection, open tool loop and driver gate in the existing
+`automatic_trim_attempt`; do not record content or introduce a new worker.
+If spill alone reaches the calibrated removal target, do not request a summary.
+
+With a calibrated target, automatic prefix summary selects oldest-first whole
+snapshot groups until projected replay-character removal reaches the remaining
+target. Never split a group or cross the existing protection, unreflected-user,
+incomplete-group and latest-complete-tool fences. If the safe prefix is too
+short, select all of it and record the projected shortfall. Without a calibrated
+plan keep existing selection. Manual compaction and explicit overflow retain
+their existing contracts. Previously automatic summary selected the whole safe
+prefix even when a smaller whole-group window could meet the target. This
+projection is a planning estimate, not a semantic-retention or token guarantee;
+actual provider usage still verifies the target on a subsequent request.
+
 ## Calibrated proactive target (#209)
 
 The target is 80% of `auto_at_tokens`. In the #208 observations at the
