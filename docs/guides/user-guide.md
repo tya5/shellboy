@@ -453,3 +453,16 @@ incomplete response does not trigger an automatic retry; an interrupted transpor
 retains the normal connection retry policy. No new filter/retry setting is added.
 
 Use `/replies` to select an applied reply request in the current conversation. The composer shows the reply target; submit text only with the usual send key. Esc leaves reply mode and preserves the draft. Saved reply state tags and a reply row's original excerpt use the existing sender glyphs. See [TUI reply controls](tui.md#replying-to-a-request).
+
+### Cleaning terminal residue
+
+If residue appears after closing help or while scrolling, turn on
+`clean_redraw = true` in `[ui]` and restart Shellboy. It clears and redraws the
+screen when an overlay closes, and erases and rewrites moved history rows,
+including both edges. Turn it off (`false`, the proposed default) if the extra
+terminal output makes interaction slower. Ctrl+L still requests a manual full
+redraw with either value. `shellboy config check` validates the boolean setting.
+
+Synthetic terminal tests verify emitted clear/erase sequences and modeled cells,
+not font pixels. Windows hardware is unverified; please check your own terminal
+and font and report whether this option helps.

@@ -1075,3 +1075,17 @@ fn cache_diagnostics_are_strict_opt_in_responses_only_and_reserve_dynamic_option
     }
     assert!(Config::parse("[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n[connections.fixture.extra_body]\nprompt_cache_options={comparison_response_id='not-adopted'}\n").is_err());
 }
+
+#[test]
+fn clean_redraw_is_a_strict_startup_boolean() {
+    assert!(!Config::default().ui.clean_redraw);
+    assert!(!Config::parse("").unwrap().ui.clean_redraw);
+    for value in [false, true] {
+        let config = Config::parse(&format!("[ui]\nclean_redraw={value}\n")).unwrap();
+        assert_eq!(config.ui.clean_redraw, value);
+    }
+    for value in ["'true'", "1", "[]", "{}"] {
+        assert!(Config::parse(&format!("[ui]\nclean_redraw={value}\n")).is_err());
+    }
+    assert!(Config::parse("[ui]\nclean_redarw=true\n").is_err());
+}

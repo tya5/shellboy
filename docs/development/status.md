@@ -4591,3 +4591,13 @@ symlink name `-x` (`Security violation: Requested utility '-x' does not match
 executable name .../coreutils/echo`). This is not Bash option parsing. The
 fixture now uses a small executable script named `-x`; the local focused test
 passes. Correct isolated-target Ubuntu evidence and CI are pending.
+## Optional clean redraw (#216, in progress)
+
+The source-symbol EAW inventory and synthetic width-mismatch baseline are in
+[the investigation](../validation/clean-redraw/README.md). The baseline produces
+help residue after close while Ctrl+L cleans it. `ui.clean_redraw` is proposed as
+one strict startup boolean; overlay dismissal reuses Ctrl+L's existing
+clear/resize path. Nested-close, both-value and config-check regressions are being
+validated. Scroll EL/full-row rewriting will be isolated in a separate commit.
+Exact byte measurements, default selection, and CI remain pending. Windows
+hardware/font pixels are unverified; no glyph substitutions are made.

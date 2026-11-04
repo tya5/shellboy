@@ -285,3 +285,21 @@ Synthetic unit/PTY fixtures cover missing DA after keyboard flags, silent
 terminals, fragmented/delayed replies, interleaved typing/paste, error retention
 and terminal restoration. Real terminals and Windows behavior require separate
 platform evidence; three-OS CI is required before handoff.
+
+### Optional clean redraw (#216)
+
+`ui.clean_redraw` is a startup boolean, initially proposed as `false` pending
+exact-byte measurements and owner review. When enabled, disappearance of a
+previously painted overlay requests the **same full clear and redraw** as Ctrl+L.
+Track painted overlay presence, not only the current input owner: dismissing help
+above a retained popup must also clear. This covers asynchronous dismissal and
+nested popups without changing input, selection, follow, or action ordering.
+Ctrl+L remains unconditional and independent of this option. No periodic repaint,
+platform branch, worker, queue, dependency, or glyph substitution is introduced.
+
+A separate scroll change under the same option will erase and rewrite the entire
+physical width of each history row when the projected history position moves,
+including unchanged left/right edge cells. It must be bounded by the visible
+history area, not loaded history length. No guessed list of unreliable glyphs is
+used. Synthetic sequence/cell tests cannot establish Windows pixel correctness;
+the owner must verify the font/terminal behavior on Windows hardware.

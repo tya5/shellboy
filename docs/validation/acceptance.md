@@ -9630,3 +9630,13 @@ symlink applet name `-x` before printing; its failure was not evidence of Bash
 option parsing. The test now uses a script executable named `-x` so it isolates
 Bash command-string parsing; its focused local test passes. Exact-source Ubuntu
 comparison and corrected-SHA standard/all-OS CI remain pending.
+## Terminal residue (#216, synthetic investigation in progress)
+
+macOS arm64, Rust through rust-slot: the first synthetic actual-help test passed
+with a two-cell terminal proxy for the app's one-cell arrow, exposing visible
+letters left after close in the baseline. Initial compile errors in the new
+harness (private writer accessor and borrowed contents) were corrected; they are
+not validation. A normalized cell comparison, both-value regression and nested
+help-over-threads close test are now running. See [investigation](clean-redraw/README.md)
+and source-symbol inventory there. No Windows hardware/font-pixel validation,
+byte-cost conclusion or CI success is claimed yet.

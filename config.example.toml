@@ -69,6 +69,9 @@ live_work_rows = 3
 palette = "dark"
 # Notify once when a new recovery wait needs attention (terminal bell).
 bell = true
+# Extra repaint on overlay close and history scroll. Restart after changing.
+# Enable if residue remains after closing help or scrolling; disable if slower.
+clean_redraw = false
 
 # Stop automatic conversation embeddings without disabling standalone RAG.
 # Explicit index backfill/rebuild/probe can still incur API cost.

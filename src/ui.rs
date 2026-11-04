@@ -1812,6 +1812,7 @@ pub struct UiState {
     confirmation_scroll: u16,
     pub dirty: bool,
     full_redraw_requested: bool,
+    painted_overlays: u16,
     lifecycle: lifecycle::Lifecycle,
     // One static UI rejection, no pasted content; cleared by the next input gesture.
     input_notice: Option<&'static str>,
@@ -1931,6 +1932,7 @@ impl UiState {
             confirmation_scroll: 0,
             dirty: true,
             full_redraw_requested: false,
+            painted_overlays: 0,
             lifecycle: Default::default(),
             input_notice: None,
             management,
