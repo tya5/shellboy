@@ -6586,14 +6586,14 @@
   "src/ui/presentation.rs:7f044afa4082814f:1": {
     "category": "protected",
     "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
-    "source_tokens_sha256": "2eb91feac356b6db5c51194944b167949504b50308ad8d33d9d3b71e85956d22",
+    "source_tokens_sha256": "030bfd468ee00cc90ccbbe0521e2566b46825c4c0fcf954a0705298d6e67e49e",
     "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
     "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
   },
   "src/ui/presentation.rs:25b59e2e47cb2413:1": {
     "category": "protected",
     "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
-    "source_tokens_sha256": "2eb91feac356b6db5c51194944b167949504b50308ad8d33d9d3b71e85956d22",
+    "source_tokens_sha256": "030bfd468ee00cc90ccbbe0521e2566b46825c4c0fcf954a0705298d6e67e49e",
     "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
     "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
   },
