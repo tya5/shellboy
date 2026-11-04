@@ -4787,3 +4787,6 @@ Stage 1 is owner-adopted; implementation and synthetic checks are in progress.
 No landing or CI success is claimed. Connection-wide waiting (stage 2) and
 budgeted summary retry with adaptive map concurrency (stage 3) remain separate
 future changes and landings.
+fresh schema installs the same triggers. Design and decision records document
+crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
+measurements. Focused test and CI results are pending on the task branch.
