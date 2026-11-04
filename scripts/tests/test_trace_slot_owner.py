@@ -18,7 +18,7 @@ class TraceSlotOwnerTest(unittest.TestCase):
                     continue
                 text = path.read_text()
                 if "trace_slot::register" in text:
-                    registrations[str(path.relative_to(ROOT))] = text.count("trace_slot::register")
+                    registrations[path.relative_to(ROOT).as_posix()] = text.count("trace_slot::register")
                 for number, line in enumerate(text.splitlines(), 1):
                     if PATTERN.search(line):
                         violations.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()}")
