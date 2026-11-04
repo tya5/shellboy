@@ -4459,7 +4459,7 @@ selected-language label helper.
 
 All 320 Japanese catalogue literals are individually source-hash classified as
 reviewed UI-side text. The current exact-source audit on main `22db1a22` plus
-this in-progress change reports `a=2808, b=1555, c=104`; strict `--check` still fails on 104 pending literals outside the reviewed catalogue. English
+the current reconcile-34 source tree reports `a=2808, b=1555, c=104`; strict `--check` still fails on 104 pending literals outside the reviewed catalogue. English
 counterpart checks and the frontend title regression test are pending local
 execution. Other assigned branch reconciliation and integration acceptance
 remain open.

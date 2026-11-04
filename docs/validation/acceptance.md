@@ -9424,8 +9424,7 @@ checks Japanese fallback equality, and requires English output to be ASCII; the
 global-argument test checks English output likewise. A new frontend regression
 checks the selected-language title under terminal separator variants.
 
-The current-source audit (main `22db1a22` plus the uncommitted reconcile-34
-changes) classifies the 320 Japanese catalogue literals as reviewed UI-side
+The current-source audit (main `22db1a22` plus reconcile-34 commits) classifies the 320 Japanese catalogue literals as reviewed UI-side
 strings using per-token source hashes. Counts: `a=2808, b=1555, c=104`;
 strict audit still fails for 104 other pending literals. This is not final
 Stage C acceptance. Native checks, branch verdict completion, formal acceptance
