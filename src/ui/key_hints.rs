@@ -337,7 +337,7 @@ struct Entry {
     send: String,
     newline: Vec<String>,
     language: crate::config::UiLanguage,
-    ambiguous_width: Option<u8>,
+    variable_width: Option<u8>,
     text: String,
 }
 impl Cache {
@@ -349,7 +349,7 @@ impl Cache {
                 && e.send == config.ui.send_key
                 && e.newline == config.ui.newline_keys
                 && e.language == config.ui.language
-                && e.ambiguous_width == crate::ui::text_width::terminal_width_observation()
+                && e.variable_width == crate::ui::text_width::terminal_width_observation()
         }) {
             let mut labels = context
                 .actions()
@@ -380,7 +380,7 @@ impl Cache {
                 send: config.ui.send_key.clone(),
                 newline: config.ui.newline_keys.clone(),
                 language: config.ui.language,
-                ambiguous_width: crate::ui::text_width::terminal_width_observation(),
+                variable_width: crate::ui::text_width::terminal_width_observation(),
                 text,
             });
         }

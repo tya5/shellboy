@@ -1,6 +1,6 @@
-# v0.7.3: terminal width configuration migration
+# v0.8.0: terminal width configuration migration
 
-This note describes the v0.7.3 candidate change, not a published release.
+This note describes the v0.8.0 candidate change, not a published release.
 
 The manual `ui.ambiguous_width` setting introduced in v0.7.0 is removed. It let
 users choose whether East Asian Ambiguous characters occupied one or two terminal

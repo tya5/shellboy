@@ -2071,7 +2071,7 @@ mod tests {
     }
 
     #[test]
-    fn kind_glyphs_are_one_column_even_under_cjk_ambiguous_width() {
+    fn kind_glyphs_are_one_column_even_under_cjk_variable_width() {
         use crate::ui::text_width::UnicodeWidthStr;
         for glyph in ["$", "◉", "↳", "⋯", "›"] {
             assert_eq!(glyph.width(), 1, "{glyph}");

@@ -5203,7 +5203,7 @@ mod conversation_item_tests {
     }
 
     #[test]
-    fn compact_tool_metadata_uses_only_measured_ambiguous_width() {
+    fn compact_tool_metadata_uses_only_measured_variable_width() {
         let mut value = tool("parts", "completed");
         value.background = true;
         value.elapsed_ms = Some(12_400);

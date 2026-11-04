@@ -17,7 +17,7 @@ Terminal capability measurement now starts without blocking input or the first
 frame. A cached successful observation is an initial baseline, not a user
 override; late observations can update rendering. Missing or inconsistent
 measurements remain unknown and use conservative fallback glyphs and widths.
-Guessed measurements are never saved. This change is included in v0.7.3.
+Guessed measurements are never saved. This change is included in v0.8.0.
 
 ## First setup without an owner
 

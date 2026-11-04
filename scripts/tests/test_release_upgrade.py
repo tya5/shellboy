@@ -271,8 +271,8 @@ class ReleaseUpgradeTests(unittest.TestCase):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.7.2', 27, '0.7.3', 27))
-        explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '27', '--expected-version', '0.7.3', '--expected-new-schema', '27'])
+                         ('0.7.2', 27, '0.8.0', 27))
+        explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '27', '--expected-version', '0.8.0', '--expected-new-schema', '27'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (27, 27))
         for target in (26, 27):
             args = checks.parse_args(required + ["--old-version", "0.7.1", "--expected-new-schema", str(target)])

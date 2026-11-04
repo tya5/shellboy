@@ -1,4 +1,6 @@
-# Shellboy v0.7.3 (draft; not verified for release)
+# Shellboy v0.8.0
+
+Draft; not verified for release.
 
 Read-only startup diagnostics, more focused migration validation, and reliability fixes.
 
@@ -6,15 +8,15 @@ These notes cover changes on `main` after v0.7.2 baseline `22db1a226351123fc5b27
 
 ## Breaking changes
 
-- Yes: `ui.ambiguous_width` is removed (#192). Remove it from `[ui]` before starting v0.7.3; otherwise the strict parser rejects the entire configuration. Other changes listed below are not identified as breaking. Conversation schema remains 27; standalone RAG schema remains 4.
+- Yes: `ui.ambiguous_width` is removed (#192). Before starting v0.8.0, delete the line `ambiguous_width = ...` under `[ui]` in `config.toml`; otherwise the strict parser rejects the entire configuration. Other changes listed below are not identified as breaking. Conversation schema remains 27; standalone RAG schema remains 4.
 
 ## Before upgrading
 
 - Stop the owner, back up the complete data directory, remove `ui.ambiguous_width` from `[ui]` if present, update the owner and CLI together, and restart the owner.
-- Current source declares conversation schema 27 (`src/storage.rs`, `MIGRATION_NAMES` has entries 1–27; `src/storage/migrate.rs` applies through migration 27). Standalone RAG schema is 4 (`src/rag/store.rs`, `PRAGMA user_version=4`). From v0.7.2 schema 27, no schema migration is expected; confirm on the release candidate.
+- Current source declares conversation schema 27 (`src/storage.rs`, `MIGRATION_NAMES` has entries 1–27; `src/storage/migrate.rs` applies through migration 27). Standalone RAG schema is unchanged at 4 (`src/rag/store.rs`, `PRAGMA user_version=4` in both v0.7.2 and this candidate). No configuration compatibility shim is provided under the pre-1.0 policy. From v0.7.2 schema 27, no schema migration is expected; confirm on the release candidate.
 - Run the release upgrade check against the exact old and candidate binaries, with a fresh disposable output directory:
-  `python3 scripts/check-release-upgrade.py --old OLD_BINARY --new NEW_BINARY --root EMPTY_TEMP_DIR --old-version 0.7.2 --start-schema 27 --expected-version 0.7.3 --expected-new-schema 27`
-  This exact-binary upgrade check has not yet been run for a v0.7.3 candidate.
+  `python3 scripts/check-release-upgrade.py --old OLD_BINARY --new NEW_BINARY --root EMPTY_TEMP_DIR --old-version 0.7.2 --start-schema 27 --expected-version 0.8.0 --expected-new-schema 27`
+  This exact-binary upgrade check has not yet been run for a v0.8.0 candidate.
 
 ## Changes since v0.7.2
 
@@ -40,4 +42,4 @@ The landed items below are derived from `git log v0.7.2..origin/main` at `36b70a
 
 ## Downloads and validation
 
-No candidate archive or checksum has been verified. The v0.7.2-to-v0.7.3 synthetic upgrade check, final default CI for a release candidate, platform matrix, and release artifact validation remain outstanding. Do not treat this draft as a release or replace an installed binary.
+No candidate archive or checksum has been verified. The v0.7.2-to-v0.8.0 synthetic upgrade check, final default CI for a release candidate, platform matrix, and release artifact validation remain outstanding. Do not treat this draft as a release or replace an installed binary.

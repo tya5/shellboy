@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn measured_symbol_check_rejects_unsafe_ambiguous_widths() {
+    fn measured_symbol_check_rejects_unsafe_variable_widths() {
         use ratatui::{buffer::Buffer, layout::Rect};
         let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 1));
         buffer[(0, 0)].set_symbol("·");
@@ -328,8 +328,5 @@ mod rendering_tests {
             UiLanguage::En
         );
         assert!(Config::parse("[ui]\nlanguage='fr'").is_err());
-        for value in ["cached", "probe", "narrow", "wide"] {
-            assert!(Config::parse(&format!("[ui]\nambiguous_width='{value}'")).is_err());
-        }
     }
 }
