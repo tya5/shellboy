@@ -9631,12 +9631,33 @@ option parsing. The test now uses a script executable named `-x` so it isolates
 Bash command-string parsing; its focused local test passes. Exact-source Ubuntu
 comparison and corrected-SHA standard/all-OS CI remain pending.
 ## Terminal residue (#216, synthetic investigation in progress)
+## Terminal residue (#216, synthetic terminal evidence)
 
-macOS arm64, Rust through rust-slot: the first synthetic actual-help test passed
-with a two-cell terminal proxy for the app's one-cell arrow, exposing visible
-letters left after close in the baseline. Initial compile errors in the new
-harness (private writer accessor and borrowed contents) were corrected; they are
-not validation. A normalized cell comparison, both-value regression and nested
-help-over-threads close test are now running. See [investigation](clean-redraw/README.md)
-and source-symbol inventory there. No Windows hardware/font-pixel validation,
-byte-cost conclusion or CI success is claimed yet.
+macOS arm64, Rust through rust-slot: 11 redraw tests pass, including the actual
+help two-cell-arrow proxy, nested F1-over-F8 dismissal, both switch values,
+Ctrl+L independence, both-edge one-line/PageUp surrogates at 80/100/120 columns,
+and dense/sparse production-byte measurements. Enabled close emits ED2 and the
+surrogate scroll emits EL for every visible moved row including unchanged edges.
+Fresh-draw comparison has zero differing cells after repair; baseline residue
+and all baseline scroll differing coordinates are in the
+[investigation](clean-redraw/README.md). This proves sequences/modeled cells, not
+Windows pixels or the actual reported font mechanism.
+
+The initial nested test used F1 above Threads, where that key belongs to the
+browser; it now uses the supported F8 operations popup. The first CLI fixture
+incorrectly expected a live catalog request to a closed loopback port to succeed;
+validation now uses the existing GET-only mock for both booleans. Backend
+regressions also found an existing shared snapshot borrow in direct draw tests;
+frame-plan consumption now uses a Cell rather than requiring an exclusive
+snapshot borrow. Those failed attempts are not passing evidence. Corrected
+local checks pass: 11 redraw, seven backend, ten config-setup and one strict
+boolean test, locked check --tests and strict all-target Clippy, formatting,
+Python 198, layout 105/watchdog, language audit and inventory regeneration.
+Current-main revalidation and pushed-tip CI remain pending.
+
+Source-symbol inventory uses Unicode 15.0.0 and separates source occurrences from
+production/test literals; arbitrary content and runtime count are not inferred.
+Raw synthetic byte tables and fixtures are committed. The proposed default is
+OFF because sparse-log scrolling adds +53.7% to +127.0%, even though the mixed
+conversation fixture emits fewer bytes. No Windows hardware, font pixels,
+latency, CPU-time or universal throughput improvement is established.

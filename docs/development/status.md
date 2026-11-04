@@ -4592,12 +4592,22 @@ executable name .../coreutils/echo`). This is not Bash option parsing. The
 fixture now uses a small executable script named `-x`; the local focused test
 passes. Correct isolated-target Ubuntu evidence and CI are pending.
 ## Optional clean redraw (#216, in progress)
+## Optional clean redraw (#216)
 
-The source-symbol EAW inventory and synthetic width-mismatch baseline are in
-[the investigation](../validation/clean-redraw/README.md). The baseline produces
-help residue after close while Ctrl+L cleans it. `ui.clean_redraw` is proposed as
-one strict startup boolean; overlay dismissal reuses Ctrl+L's existing
-clear/resize path. Nested-close, both-value and config-check regressions are being
-validated. Scroll EL/full-row rewriting will be isolated in a separate commit.
-Exact byte measurements, default selection, and CI remain pending. Windows
-hardware/font pixels are unverified; no glyph substitutions are made.
+Implemented one strict startup boolean `ui.clean_redraw` (proposed default OFF).
+Overlay dismissal shares Ctrl+L's full-clear/resize path; moved visible history
+rows are erased and rewritten through both physical edges inside the existing
+OSC 8 backend, without duplicate diff writes. Ctrl+L is independent of the switch.
+The scroll implementation is isolated in a separate commit. No glyph vocabulary,
+platform branch, periodic redraw, thread, queue or dependency is added.
+
+[Investigation and measurements](../validation/clean-redraw/README.md) include the
+per-file EAW/source/literal inventory, actual-help width-mismatch and scroll-edge
+surrogates, and production backend bytes at 80/100/120 columns. Dense output can
+shrink, but sparse log scrolling adds 975--1921 bytes (+53.7%--127.0%); thus opt-in
+is proposed, with the owner retaining the final default decision. Windows
+hardware/font pixels remain unverified. Local fmt, 11 redraw tests, seven backend
+tests, ten config-setup tests, the strict boolean test, locked check --tests and
+strict all-target Clippy pass. Python 198, layout 105/watchdog, language audit
+and inventory regeneration pass. Current-main revalidation and exact-tip CI
+remain pending; W8 owns review and landing.

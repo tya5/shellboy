@@ -3,6 +3,29 @@ use super::*;
 use crate::terminal_links::{LinkSnapshot, SharedLinkSnapshot};
 use ratatui::backend::Backend;
 
+#[derive(PartialEq, Eq)]
+pub(super) struct HistoryPaint {
+    active: String,
+    anchor: ViewAnchor,
+    within: usize,
+    row: usize,
+    area: Rect,
+}
+
+fn history_paint(state: &UiState) -> Option<HistoryPaint> {
+    if state.top_overlay().is_some() {
+        return None;
+    }
+    let scroll = &state.view().navigation.scroll;
+    Some(HistoryPaint {
+        active: state.active.clone(),
+        anchor: scroll.anchor.clone(),
+        within: scroll.within,
+        row: scroll.row(),
+        area: scroll.area?,
+    })
+}
+
 pub(super) fn binding_available(config: &Config) -> bool {
     let key = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
     !key_matches(&config.ui.send_key, key)
@@ -59,7 +82,9 @@ pub(super) fn draw_terminal<B: Backend>(
 ) -> Result<(), B::Error> {
     let overlays = state.overlay_presence();
     let overlay_closed = state.painted_overlays & !overlays != 0;
-    if state.full_redraw_requested || (state.config.ui.clean_redraw && overlay_closed) {
+    let full_redraw =
+        state.full_redraw_requested || (state.config.ui.clean_redraw && overlay_closed);
+    if full_redraw {
         // Ratatui's clear() queries the physical cursor and can wait for a DSR
         // reply. Its fullscreen resize path performs the same screen/buffer
         // invalidation without that query. Keep the exact existing viewport;
@@ -67,13 +92,33 @@ pub(super) fn draw_terminal<B: Backend>(
         let area = terminal.get_frame().area();
         terminal.resize(area)?;
     }
+    let mut history = None;
     terminal.draw(|frame| {
         draw(frame, state);
+        history = history_paint(state);
+        let repaint_rows = if state.config.ui.clean_redraw && !full_redraw {
+            match (&state.painted_history, &history) {
+                (Some(previous), Some(current)) if previous != current => {
+                    let area = current.area.intersection(frame.area());
+                    Some(Rect::new(
+                        frame.area().x,
+                        area.y.saturating_add(1),
+                        frame.area().width,
+                        area.height.saturating_sub(2),
+                    ))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         *links.borrow_mut() = LinkSnapshot {
             buffer: frame.buffer_mut().clone(),
             regions: state.visible_links.clone(),
+            repaint_rows: repaint_rows.into(),
         };
     })?;
+    state.painted_history = history;
     state.painted_overlays = overlays;
     state.full_redraw_requested = false;
     Ok(())

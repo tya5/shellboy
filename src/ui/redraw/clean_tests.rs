@@ -1,7 +1,7 @@
 //! Synthetic cell/sequence evidence, not a Windows pixel or font test.
 use super::*;
 use ratatui::{
-    backend::{ClearType, CrosstermBackend, WindowSize},
+    backend::{ClearType, WindowSize},
     buffer::Cell,
     layout::{Position, Size},
 };
@@ -20,7 +20,7 @@ impl io::Write for Bytes {
 }
 struct Output {
     bytes: Bytes,
-    inner: CrosstermBackend<Bytes>,
+    inner: crate::terminal_links::HyperlinkBackend<Bytes>,
     size: Size,
 }
 impl Output {
@@ -70,7 +70,7 @@ impl Backend for Output {
 fn terminal(width: u16) -> Terminal<Output> {
     let bytes = Bytes::default();
     Terminal::new(Output {
-        inner: CrosstermBackend::new(bytes.clone()),
+        inner: crate::terminal_links::HyperlinkBackend::new(bytes.clone(), links()),
         bytes,
         size: Size::new(width, 30),
     })
@@ -80,7 +80,8 @@ fn links() -> SharedLinkSnapshot {
     Rc::new(RefCell::new(LinkSnapshot::default()))
 }
 fn frame(terminal: &mut Terminal<Output>, ui: &mut UiState) -> Vec<u8> {
-    draw_terminal(terminal, ui, &links()).unwrap();
+    let snapshot = terminal.backend().inner.snapshot();
+    draw_terminal(terminal, ui, &snapshot).unwrap();
     terminal.backend_mut().take()
 }
 fn fixture() -> UiState {
@@ -215,4 +216,221 @@ fn overlay_close_clears_once_including_help_above_a_retained_popup() {
                 .any(|b| b == b"\x1b[2J")
         );
     }
+}
+
+#[test]
+fn moved_history_rows_erase_and_rewrite_both_edges_with_both_settings() {
+    text_width::set_terminal_width(Some(1));
+    for width in [80, 100, 120] {
+        for page in [false, true] {
+            for enabled in [false, true] {
+                let mut ui = fixture();
+                ui.config.ui.clean_redraw = enabled;
+                let mut terminal = terminal(width);
+                let mut screen = vt100::Parser::new(30, width, 0);
+                screen.process(&frame(&mut terminal, &mut ui));
+                let area = ui.view().navigation.scroll.area.unwrap();
+                let y = area.y + 1;
+                // Explicit pixel-overhang surrogate: cell contamination at both
+                // physical edges, not an assertion about Windows font rasterization.
+                screen.process(format!("\x1b[{};1H#\x1b[{};{}H@", y + 1, y + 1, width).as_bytes());
+                let row = ui.view().navigation.scroll.row();
+                if page {
+                    ui.event(Event::Key(KeyEvent::new(
+                        KeyCode::PageUp,
+                        KeyModifiers::NONE,
+                    )));
+                } else {
+                    ui.scroll(-1);
+                }
+                let bytes = frame(&mut terminal, &mut ui);
+                assert_ne!(
+                    ui.view().navigation.scroll.row(),
+                    row,
+                    "fixture must actually move"
+                );
+                let erases = bytes.windows(3).filter(|b| *b == b"\x1b[K").count();
+                assert_eq!(
+                    erases,
+                    if enabled {
+                        usize::from(area.height - 2)
+                    } else {
+                        0
+                    }
+                );
+                screen.process(&bytes);
+                let mut fresh = vt100::Parser::new(30, width, 0);
+                ui.full_redraw_requested = true;
+                fresh.process(&frame(&mut terminal, &mut ui));
+                let diff = differences(screen.screen(), fresh.screen(), width);
+                eprintln!(
+                    "edge surrogate width={width} page={page} enabled={enabled} cells={diff:?}"
+                );
+                if enabled {
+                    assert!(diff.is_empty(), "{diff:?}");
+                } else {
+                    assert!(diff.iter().any(|c| c.0 == 0 && c.1 == y));
+                    assert!(diff.iter().any(|c| c.0 == width - 1 && c.1 == y));
+                }
+                // No idle repair, no repair behind help, no changes to the draft.
+                assert!(
+                    !frame(&mut terminal, &mut ui)
+                        .windows(3)
+                        .any(|b| b == b"\x1b[K")
+                );
+                ui.slash("/help");
+                assert!(
+                    !frame(&mut terminal, &mut ui)
+                        .windows(3)
+                        .any(|b| b == b"\x1b[K")
+                );
+                assert!(ui.view().draft.text.is_empty());
+            }
+        }
+    }
+    text_width::clear_terminal_width();
+}
+
+#[test]
+fn synthetic_scroll_width_mismatch_reports_every_differing_cell() {
+    text_width::set_terminal_width(Some(1));
+    for page in [false, true] {
+        let mut ui = fixture();
+        ui.config.ui.clean_redraw = false;
+        let mut terminal = terminal(80);
+        let mut screen = vt100::Parser::new(30, 80, 0);
+        let widen = |bytes: Vec<u8>| {
+            String::from_utf8(bytes)
+                .unwrap()
+                .replace('→', "界")
+                .into_bytes()
+        };
+        screen.process(&widen(frame(&mut terminal, &mut ui)));
+        if page {
+            ui.event(Event::Key(KeyEvent::new(
+                KeyCode::PageUp,
+                KeyModifiers::NONE,
+            )));
+        } else {
+            ui.scroll(-1);
+        }
+        screen.process(&widen(frame(&mut terminal, &mut ui)));
+        let mut fresh = vt100::Parser::new(30, 80, 0);
+        ui.full_redraw_requested = true;
+        fresh.process(&widen(frame(&mut terminal, &mut ui)));
+        let diff = differences(screen.screen(), fresh.screen(), 80);
+        eprintln!("scroll two-cell-arrow page={page} differing cells={diff:?}");
+        assert!(
+            !diff.is_empty(),
+            "model should expose baseline width residue"
+        );
+    }
+    text_width::clear_terminal_width();
+}
+
+#[test]
+fn measure_clean_redraw_bytes_on_realistic_history() {
+    eprintln!("CLEAN_REDRAW_BYTES policy,width,event,off,on,added");
+    for (policy, observation) in [("unknown", None), ("narrow", Some(1)), ("wide", Some(2))] {
+        text_width::set_terminal_width(observation);
+        for width in [80, 100, 120] {
+            for event in ["line_up", "page_up", "overlay_close"] {
+                let mut counts = Vec::new();
+                for enabled in [false, true] {
+                    let mut ui = fixture();
+                    ui.config.ui.clean_redraw = enabled;
+                    let mut terminal = terminal(width);
+                    frame(&mut terminal, &mut ui);
+                    match event {
+                        "line_up" => {
+                            ui.scroll(-1);
+                        }
+                        "page_up" => {
+                            ui.event(Event::Key(KeyEvent::new(
+                                KeyCode::PageUp,
+                                KeyModifiers::NONE,
+                            )));
+                        }
+                        _ => {
+                            ui.slash("/help");
+                            frame(&mut terminal, &mut ui);
+                            ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+                        }
+                    }
+                    counts.push(frame(&mut terminal, &mut ui).len());
+                }
+                eprintln!(
+                    "CLEAN_REDRAW_BYTES {policy},{width},{event},{},{},{}",
+                    counts[0],
+                    counts[1],
+                    counts[1] as isize - counts[0] as isize
+                );
+            }
+        }
+    }
+    text_width::clear_terminal_width();
+}
+
+#[test]
+fn measure_clean_redraw_on_sparse_log_history() {
+    text_width::set_terminal_width(None);
+    eprintln!("CLEAN_REDRAW_LOG_BYTES width,event,off,on,added");
+    for width in [80, 100, 120] {
+        for page in [false, true] {
+            let mut counts = Vec::new();
+            for enabled in [false, true] {
+                let mut ui = fixture();
+                ui.config.ui.clean_redraw = enabled;
+                let text = format!(
+                    "```text\n{}```",
+                    (0..200)
+                        .map(|i| format!(
+                            "2026-11-04 12:{:02}:00 INFO task={i:03} status=complete 日本語 →\n",
+                            i % 60
+                        ))
+                        .collect::<String>()
+                );
+                ui.apply(UiUpdate::History {
+                    pending: Default::default(),
+                    read_revision: 0,
+                    thread_id: "synthetic-history".into(),
+                    generation: ui.view().generation,
+                    total_nodes: 1,
+                    nodes: vec![UiNode {
+                        node_id: "synthetic-log".into(),
+                        role: "assistant".into(),
+                        total_chars: text.chars().count(),
+                        text,
+                        ..Default::default()
+                    }],
+                    before_cursor: None,
+                    append: false,
+                    first_ordinal: 0,
+                    selection_revision: 0,
+                });
+                let mut terminal = terminal(width);
+                frame(&mut terminal, &mut ui);
+                let row = ui.view().navigation.scroll.row();
+                if page {
+                    ui.event(Event::Key(KeyEvent::new(
+                        KeyCode::PageUp,
+                        KeyModifiers::NONE,
+                    )));
+                } else {
+                    ui.scroll(-1);
+                }
+                let bytes = frame(&mut terminal, &mut ui);
+                assert_ne!(row, ui.view().navigation.scroll.row());
+                counts.push(bytes.len());
+            }
+            eprintln!(
+                "CLEAN_REDRAW_LOG_BYTES {width},{},{},{},{}",
+                if page { "page_up" } else { "line_up" },
+                counts[0],
+                counts[1],
+                counts[1] as isize - counts[0] as isize
+            );
+        }
+    }
+    text_width::clear_terminal_width();
 }

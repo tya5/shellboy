@@ -371,3 +371,24 @@ Each item has its own commit and test update/removal of the doubtful marker.
 The approved structural boundary is 91 combined sites / scroll237 / fields15;
 use the same helper after every item. Native branch CI validates the six-commit
 behaviour boundary before handoff; no real provider, user data or clipboard tests.
+
+## Optional moved-row repaint (#216)
+
+With `ui.clean_redraw = true`, compare the last successfully painted history
+projection (view identity, source anchor, within-row offset, projected row and
+area) with the next one. On a visible position change, erase each visible history
+content row from physical column zero to its right edge and rewrite the complete
+row, including unchanged edge cells. No terminal scroll region is used. Reuse the
+already captured link buffer and existing hyperlink backend's leading-cell map;
+expand moved rows before submitting cells, retaining OSC 8 URL boundaries.
+Ratatui restores the drawn composer cursor after backend output, without a
+physical cursor query. Output remains bounded by viewport area;
+no all-history buffer, glyph reliability classification, worker or queue exists.
+
+The backend merges expanded rows with the normal diff before writing, avoiding
+two writes of changed cells. Measure the complete emitted stream, not only the
+EL bytes. It runs neither on an unchanged idle frame nor
+behind an overlay/selection freeze. A full clear already requested for Ctrl+L or
+overlay dismissal subsumes row repair. The proposed startup default is chosen
+from the recorded measurements, not assumed to be cheap. Hardware pixel behavior
+remains for the owner to validate.

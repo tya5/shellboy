@@ -1813,6 +1813,7 @@ pub struct UiState {
     pub dirty: bool,
     full_redraw_requested: bool,
     painted_overlays: u16,
+    painted_history: Option<redraw::HistoryPaint>,
     lifecycle: lifecycle::Lifecycle,
     // One static UI rejection, no pasted content; cleared by the next input gesture.
     input_notice: Option<&'static str>,
@@ -1933,6 +1934,7 @@ impl UiState {
             dirty: true,
             full_redraw_requested: false,
             painted_overlays: 0,
+            painted_history: None,
             lifecycle: Default::default(),
             input_notice: None,
             management,

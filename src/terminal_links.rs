@@ -25,12 +25,15 @@ pub struct LinkRegion {
 pub struct LinkSnapshot {
     pub buffer: Buffer,
     pub regions: Vec<LinkRegion>,
+    /// Frame-local request to erase and fully write physical history rows.
+    pub repaint_rows: std::cell::Cell<Option<Rect>>,
 }
 impl Default for LinkSnapshot {
     fn default() -> Self {
         Self {
             buffer: Buffer::empty(Rect::default()),
             regions: vec![],
+            repaint_rows: None.into(),
         }
     }
 }
@@ -162,6 +165,22 @@ impl<W: Write> Backend for HyperlinkBackend<W> {
                 cells.insert(point, value.clone());
             }
         }
+        let repaint_rows = snapshot
+            .repaint_rows
+            .get()
+            .map(|area| area.intersection(snapshot.buffer.area));
+        if let Some(area) = repaint_rows {
+            // Expand moved rows before output, so the normal diff is not written
+            // a second time. Reuse the existing viewport snapshot and lead map.
+            for (&point, &lead) in &leads {
+                if point == lead && area.contains(Position::from(point)) {
+                    let cell = &snapshot.buffer[lead];
+                    if cell.diff_option != CellDiffOption::Skip {
+                        cells.insert(lead, cell.clone());
+                    }
+                }
+            }
+        }
         if self.invalidated {
             for &lead in leads.values() {
                 let cell = &snapshot.buffer[lead];
@@ -186,6 +205,12 @@ impl<W: Write> Backend for HyperlinkBackend<W> {
         let mut ordered: Vec<_> = cells.iter().collect();
         ordered.sort_by_key(|((x, y), _)| (*y, *x));
         self.inner.write_all(CLOSE)?;
+        if let Some(area) = repaint_rows {
+            for y in area.top()..area.bottom() {
+                self.inner.set_cursor_position((area.x, y))?;
+                self.inner.clear_region(ClearType::UntilNewLine)?;
+            }
+        }
         let mut start = 0;
         while start < ordered.len() {
             let target = links.get(ordered[start].0);
@@ -213,6 +238,7 @@ impl<W: Write> Backend for HyperlinkBackend<W> {
         }
         self.previous = links;
         self.invalidated = false;
+        snapshot.repaint_rows.set(None);
         Ok(())
     }
     fn append_lines(&mut self, n: u16) -> io::Result<()> {

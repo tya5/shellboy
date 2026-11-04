@@ -288,8 +288,8 @@ platform evidence; three-OS CI is required before handoff.
 
 ### Optional clean redraw (#216)
 
-`ui.clean_redraw` is a startup boolean, initially proposed as `false` pending
-exact-byte measurements and owner review. When enabled, disappearance of a
+`ui.clean_redraw` is a startup boolean, proposed default `false` from the recorded
+sparse-log byte overhead (the owner retains the final default decision). When enabled, disappearance of a
 previously painted overlay requests the **same full clear and redraw** as Ctrl+L.
 Track painted overlay presence, not only the current input owner: dismissing help
 above a retained popup must also clear. This covers asynchronous dismissal and

@@ -29,6 +29,7 @@ fn fixture(text: &str) -> (HyperlinkBackend<Bytes>, SharedLinkSnapshot, Bytes) {
     let snapshot = Rc::new(RefCell::new(LinkSnapshot {
         buffer,
         regions: vec![],
+        repaint_rows: None.into(),
     }));
     let bytes = Bytes::default();
     (
@@ -196,4 +197,38 @@ fn terminal_clear_invalidates_link_metadata_and_redraws_current_viewport() {
         assert!(text.contains("unchanged"));
         assert!(!text.contains("https://"));
     }
+}
+
+#[test]
+fn moved_row_repaint_is_full_width_bounded_one_shot_and_preserves_links() {
+    let (mut backend, snapshot, bytes) = fixture("界 linked content");
+    snapshot.borrow_mut().regions = vec![region(3, 6, "https://example.invalid/link")];
+    empty_draw(&mut backend);
+    bytes.0.borrow_mut().clear();
+    snapshot
+        .borrow()
+        .repaint_rows
+        .set(Some(Rect::new(0, 0, 20, 1)));
+    empty_draw(&mut backend);
+    let output = recorded(&bytes);
+    assert_eq!(output.matches("\x1b[K").count(), 1);
+    assert!(output.contains("\x1b[1;1H\x1b[K"));
+    assert!(
+        !output.contains("\x1b[2;1H"),
+        "row outside repair must not be emitted"
+    );
+    assert!(output.contains("\x1b]8;;https://example.invalid/link\x1b\\"));
+    let mut screen = vt100::Parser::new(2, 20, 0);
+    screen.process(output.as_bytes());
+    assert_eq!(screen.screen().cell(0, 0).unwrap().contents(), "界");
+    assert!(screen.screen().cell(0, 1).unwrap().is_wide_continuation());
+    assert_eq!(
+        screen.screen().cell(0, 19).unwrap().contents(),
+        " ",
+        "last physical column must be written"
+    );
+    assert!(snapshot.borrow().repaint_rows.get().is_none());
+    bytes.0.borrow_mut().clear();
+    empty_draw(&mut backend);
+    assert!(!recorded(&bytes).contains("\x1b[K"));
 }
