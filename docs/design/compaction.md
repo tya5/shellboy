@@ -627,7 +627,15 @@ scope is escalating. Record bounded anonymous candidate, adopted and skip
 counts by latest protection, unsafe or incomplete group, already spilled,
 non-reducing projection, open tool loop and driver gate in the existing
 `automatic_trim_attempt`; do not record content or introduce a new worker.
-If spill alone reaches the calibrated removal target, do not request a summary.
+Adopt oldest eligible reducing spills until the calibrated need is projected
+to be met or candidates are exhausted, before grouping or bundling. Then take a
+fresh snapshot, subtract the actual replay-character reduction from the
+calibrated removal need, and only if a need remains select the summary window.
+Groups already spilled enter it as placeholders, not original tool outputs.
+Bundle the selected window into existing 64,000-character segments only after
+this selection. Record whether spill, fresh measurement, selection and bundling
+ran. A summary may proceed with an unspilled candidate only when its anonymous
+skip reason is recorded. If spill alone reaches the target, do not summarize.
 
 With a calibrated target, automatic prefix summary selects oldest-first whole
 snapshot groups until projected replay-character removal reaches the remaining
@@ -690,3 +698,30 @@ force active-Turn-first ordering across that boundary. Spill-only shortfalls
 retain their separate escalation policy. Local replay-character changes guide
 whether to widen in the same attempt; only the next provider report verifies
 the outcome. No independent token or output-size guarantee is implied.
+
+## Owner amendment: four-stage automatic escalation (#215)
+
+In one automatic attempt, run closed-Turn spill, closed-Turn summary, active-
+Turn spill, then active-Turn summary. Recompute remaining calibrated need from
+a fresh replay-character measurement after each stage; skip later stages once
+the target is met. Record each stage as run or skipped, with bounded anonymous
+reason and actual removed characters. Group and bundle summaries only after the
+corresponding spill and select oldest-first whole safe groups for remaining
+need. Uncalibrated attempts retain the existing escalation fallback.
+
+D-189 no longer prohibits selective active-Turn spill while the tool loop is
+open. It remains forbidden to edit between a call and its result. A mid-Turn
+spill adoption atomically advances the reasoning epoch and clears kept reasoning,
+so no earlier reasoning is replayed. Keep the latest complete group, incomplete
+groups and unreflected user sources protected. Anthropic documents graceful
+degradation for missing tool-use thinking; live Anthropic validation remains
+outstanding. Closed-Turn replacements retain the positional rule. Summary
+material includes readable reasoning text from all epochs, without encrypted
+or opaque data; this does not change replay eligibility.
+
+Automatic mid-Turn summary is likewise bounded by remaining need: choose the
+oldest whole safe groups before the latest complete tool group, never crossing
+request, user-instruction, unreflected or incomplete fences. Its adoption
+atomically advances the reasoning epoch and clears the kept set. Record the
+remaining need before and after. The prior #182 all-round scope is superseded
+for this automatic path; manual and overflow contracts are unchanged.

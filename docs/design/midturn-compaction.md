@@ -5,7 +5,14 @@ GPT-route validation. **Superseded in part by #182 (2026-11-03):** the segment,
 retained suffix, epoch rule and trigger order in sections 1-4 and 7 are replaced
 by [compaction #181/#182](compaction.md#active-turn-middle-summary-181-reshaped-by-182)
 (all tool rounds replaced, the latest round as text, no epoch advance, ordinary
-summary first). The evidence and cache sections remain as history. Adopted contract summary: [compaction](compaction.md#active-turn-middle-summary-181).
+summary first). #215 supersedes that scope: automatic mid-Turn summary chooses
+oldest-first whole safe groups only until the remaining calibrated removal need
+is met, keeping the latest complete tool group and the later suffix. Adoption
+atomically advances the Thread reasoning epoch and clears the kept set, dropping
+all earlier reasoning. The original request, kept user instructions, unreflected
+input, incomplete groups and protected nodes remain fenced; the summary keeps
+its User instructions to keep section. Record remaining need before and after.
+The evidence and cache sections remain as history. Adopted contract summary: [compaction](compaction.md#active-turn-middle-summary-181).
 Implementation differences from this memo: the readback `compact list` metric
 for the scope is not added (the `midturn` object is in the saved attempt record),
 and the function is named `active_turn_range`/`summarize_active_turn`.
@@ -389,3 +396,17 @@ worker or dependency.
    that would need its own validation.
 5. #182: existing prefix summary, middle summary, omission and spill edits on
    Claude 5.1+ with thinking.
+
+## Owner amendment: automatic mid-Turn spill (#215)
+
+After closed-Turn spill and summary fail to meet the calibrated target, the
+automatic path may spill older complete active-Turn tool groups before trying
+the active-Turn summary. The latest complete group, incomplete groups and
+unreflected user inputs remain protected. Each stage measures the selected
+replay anew and records outcome, skip reason and removed characters. Adopted
+mid-Turn spills advance the Thread reasoning epoch and clear the kept set in
+the adoption transaction, dropping all previously saved reasoning from replay.
+This does not permit edits between a tool call and its result. Anthropic tool-use
+thinking degradation is documented but has not been live-validated. Summary
+material may include readable old-epoch reasoning, never encrypted or opaque
+content; replay remains epoch-filtered.
