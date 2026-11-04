@@ -108,8 +108,11 @@ References refer to inspected base `291f298f03`; later changes may move lines.
 - `src/control/driver/retry.rs:378` projects error/partial/raw output and selected
   delay into the durable attempt body, **not `failure.facts.retry_after`**.
   `src/model.rs:66` has status but no Retry-After field. This is where header
-  attribution disappears even though status may survive. Recovery projections
-  likewise do not create a durable header observation.
+  attribution disappears even though status may survive. There is a specific
+  exception: `src/control/driver/overflow.rs:126` saves parsed long-wait delay
+  as `automatic_retry_deferred.retry_after_ms`; structured usage-limit facts
+  may also preserve reset time. Neither field appeared in the measured 429
+  records. Short/ordinary header attribution still cannot be reconstructed.
 - `src/compaction.rs:677` consumes a map budget slot and starts a usage record,
   then calls the shared client once (`:679`). Failure updates only token usage
   (`:686`); context overflow can split a segment, otherwise `:703` returns an
