@@ -53,3 +53,9 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
   implemented): `--expect-reply`, `message reply`, `wait reply_received`,
   Run-end reminder, end-message rename, `exec --result reply|turn-end|run-end`
   and delegation unification, with a six-step implementation plan.
+
+## Proposed Drafts (Not Adopted)
+
+- [Connection-wide rate feedback](connection-rate-limit.md) (#224, Phase 1):
+  measured 429 recording gaps and a proposed shared wait/retry/fairness design.
+  No runtime behavior changes or parallel-map implementation are adopted.
