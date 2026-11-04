@@ -3081,7 +3081,7 @@ mod entry_tests {
         let actual = |caption: &str| {
             OpKind::ALL.iter().any(|kind| kind.label() == caption)
                 || saved.title == caption
-                || received_source.contains(caption)
+                || received_source.contains(&format!("\"{caption}\""))
                 || management_source.contains(&format!("\"{caption}\""))
         };
         // A wrong caption must be rejected even if another correct caption is
@@ -3089,6 +3089,10 @@ mod entry_tests {
         let wrong = captions("Use `会話 | 詳細`, never `Thread | 詳細`.");
         assert!(actual(wrong[0]));
         assert!(!actual(wrong[1]));
+        assert!(actual(
+            "ストリーム差分 | 最終応答は確定済み | /received 一覧"
+        ));
+        assert!(!actual("ストリーム差分 | 最終応答は確定済み"));
         let mut documents = crate::docs::documents();
         assert_eq!(documents.len(), 14);
         assert!(

@@ -6444,11 +6444,6 @@
     "reason": "Japanese ThreadNotice display title; Message::ThreadNotice renders the paired English Current name label while leaving the saved thread title unchanged.",
     "source_tokens_sha256": "fcb0b0122e86945ae834af656f5ff2c4144fbd5fd718525ecd74663bd76b3e5f"
   },
-  "src/frontend/received.rs:0399375bcdb16ccb:1": {
-    "category": "a",
-    "reason": "Japanese received-response title; received_title selects complete Japanese/English presentation copy without changing the saved response or source ID.",
-    "source_tokens_sha256": "4965452d5a590542bd276534b10da5c48195a6e3b96953e2c91317e1131cbb64"
-  },
   "src/frontend/received.rs:4e7f9ba5488f7a1d:1": {
     "category": "a",
     "reason": "Japanese saved-source field label; received::project selects the English label for En while preserving the JSON pointer and source-node value.",
