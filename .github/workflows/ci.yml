@@ -12,6 +12,14 @@ on:
         description: Exact baseline SHA for the focused shutdown comparison
         type: string
         default: '62a4c4def58dcf4a66327d37c343670f1bf3d68a'
+      shell_output_repeats:
+        description: Repeat the two shell-output regressions 30 times on main, v0.8.0, and pre-#201
+        type: boolean
+        default: false
+      shell_output_repeat_count:
+        description: Iterations per test and source (1..100)
+        type: number
+        default: 30
       conpty_repro:
         description: Observe synthetic Windows ConPTY send behavior
         type: boolean
@@ -63,7 +71,7 @@ jobs:
             await reuse({github, context, core});
   check:
     needs: reuse
-    if: always() && !inputs.shutdown_repeats && needs.reuse.outputs.reuse != 'true'
+    if: always() && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -318,4 +326,78 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: shutdown-repeats-macOS
+          path: evidence
+
+
+  shell-output-repeats:
+    if: inputs.shell_output_repeats == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: current
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 44acf9555bdc4d3b5c5c6f4bf82ed398c9aa34b3
+          path: main
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 6a0827def47946948c4475365caeeefa1c2058b1
+          path: v0.8.0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 6f486695a4000c17a6ca209388902513b530289a
+          path: pre-instrumentation
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            main -> ../shared-target
+            v0.8.0 -> ../shared-target
+            pre-instrumentation -> ../shared-target
+          shared-key: shell-output-repeat-v1
+          cache-on-failure: true
+      - name: Repeat both regressions on main
+        continue-on-error: true
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+        run: python3 current/scripts/dev/repeat-shell-output-tests.py --source main --output evidence/main --count ${{ inputs.shell_output_repeat_count }}
+      - name: Repeat both regressions on v0.8.0
+        continue-on-error: true
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+        run: python3 current/scripts/dev/repeat-shell-output-tests.py --source v0.8.0 --output evidence/v0.8.0 --count ${{ inputs.shell_output_repeat_count }}
+      - name: Repeat both regressions before #201 instrumentation
+        continue-on-error: true
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/shared-target
+        run: python3 current/scripts/dev/repeat-shell-output-tests.py --source pre-instrumentation --output evidence/pre-instrumentation --count ${{ inputs.shell_output_repeat_count }}
+      - name: Require complete exact-source evidence
+        env:
+          REPEAT_COUNT: ${{ inputs.shell_output_repeat_count }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          for name, sha in [('main', '44acf9555bdc4d3b5c5c6f4bf82ed398c9aa34b3'),
+                            ('v0.8.0', '6a0827def47946948c4475365caeeefa1c2058b1'),
+                            ('pre-instrumentation', '6f486695a4000c17a6ca209388902513b530289a')]:
+              result = json.loads(Path(f'evidence/{name}/results.json').read_text())
+              assert result['sha'] == sha, result
+              assert result['count'] == int(os.environ['REPEAT_COUNT']), result
+              assert not result.get('build_exit'), result
+              assert all(len(items) == result['count'] for items in result['results'].values()), result
+              print(name, sha, result['failures'])
+          PY
+      - name: Retain exact-source logs and per-iteration results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-shell-output-repeats
           path: evidence
