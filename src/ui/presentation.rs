@@ -247,7 +247,7 @@ fn node_lines_inner(
         } else {
             out.extend(
                 crate::presentation::sanitize_plain(
-                    &rendered_node_text(node, expanded, start, usize::MAX),
+                    &rendered_node_text(node, expanded, start, usize::MAX, language),
                     start,
                 )
                 .0

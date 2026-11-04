@@ -6270,13 +6270,24 @@ pub fn cursor_position(text: &str, byte_cursor: usize, width: u16) -> (u16, u16)
     input::cursor_position(text, byte_cursor, width)
 }
 /// Render a cached source window without changing canonical text or offsets.
-fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize) -> String {
+fn rendered_node_text(
+    node: &UiNode,
+    expanded: bool,
+    start: usize,
+    limit: usize,
+    language: crate::config::UiLanguage,
+) -> String {
     if node.presentation.body_evicted || (node.text.is_empty() && node.total_chars > 0) {
-        return text_width::glyphs::select(
-            "[本文未キャッシュ · スクロールで原文を再取得]",
-            "[本文未キャッシュ | スクロールで原文を再取得]",
-        )
-        .into();
+        return match language {
+            crate::config::UiLanguage::Ja => text_width::glyphs::select(
+                "[本文未キャッシュ · スクロールで原文を再取得]",
+                "[本文未キャッシュ | スクロールで原文を再取得]",
+            )
+            .into(),
+            crate::config::UiLanguage::En => {
+                "[Body not cached; scroll to reload the original]".into()
+            }
+        };
     }
     let start = start.max(node.base_char_offset);
     let mut range = 0;
@@ -6307,11 +6318,18 @@ fn rendered_node_text(node: &UiNode, expanded: bool, start: usize, limit: usize)
             && begin <= global
             && global < end
         {
-            let label = text_width::glyphs::formatted!(
-                "[推論 {}文字 · 折りたたみ /reasoning]\n",
-                "[推論 {}文字 | 折りたたみ /reasoning]\n",
-                end.saturating_sub(begin)
-            );
+            let label = match language {
+                crate::config::UiLanguage::Ja => text_width::glyphs::formatted!(
+                    "[推論 {}文字 · 折りたたみ /reasoning]\n",
+                    "[推論 {}文字 | 折りたたみ /reasoning]\n",
+                    end.saturating_sub(begin)
+                ),
+                crate::config::UiLanguage::En => crate::ui::text_width::glyphs::formatted!(
+                    "[Reasoning · {} chars · collapsed /reasoning]\n",
+                    "[Reasoning | {} chars | collapsed /reasoning]\n",
+                    end.saturating_sub(begin)
+                ),
+            };
             out.push_str(&label);
             displayed += label.chars().count();
             hidden_until = end;
@@ -7153,15 +7171,30 @@ mod layout_cache_tests {
                 let mut value = node("n", raw);
                 value.role = role.into();
                 value.reasoning_ranges = vec![(0, raw.chars().count())];
-                assert_eq!(rendered_node_text(&value, true, 0, 256), raw);
-                let hidden = rendered_node_text(&value, false, 0, 256);
+                assert_eq!(
+                    rendered_node_text(&value, true, 0, 256, crate::config::UiLanguage::Ja),
+                    raw
+                );
+                let hidden =
+                    rendered_node_text(&value, false, 0, 256, crate::config::UiLanguage::Ja);
                 assert!(
                     hidden.contains(text_width::glyphs::separator()),
                     "{policy:?}: {hidden}"
                 );
+                let hidden_en =
+                    rendered_node_text(&value, false, 0, 256, crate::config::UiLanguage::En);
+                assert!(hidden_en.contains("Reasoning") && hidden_en.contains("chars"));
+                assert!(!hidden_en.contains("推論"), "{hidden_en}");
                 assert_eq!(value.text, raw);
             }
         }
+        let mut evicted = node("evicted", "");
+        evicted.presentation.body_evicted = true;
+        let ja = rendered_node_text(&evicted, true, 0, 256, crate::config::UiLanguage::Ja);
+        let en = rendered_node_text(&evicted, true, 0, 256, crate::config::UiLanguage::En);
+        assert!(ja.contains("本文未キャッシュ"));
+        assert_eq!(en, "[Body not cached; scroll to reload the original]");
+        assert!(en.is_ascii());
         text_width::clear_terminal_width();
     }
     fn node(id: &str, text: &str) -> UiNode {
