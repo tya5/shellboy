@@ -180,6 +180,38 @@ impl NodeLines {
         }
     }
 }
+const MAX_MARKDOWN_FALLBACK_BYTES: usize = 8 * 1024;
+
+fn bounded_markdown_fallback(text: &str, anchor: usize, byte_limit: usize) -> String {
+    if text.len() <= byte_limit {
+        return text.to_owned();
+    }
+
+    let marker = "[... omitted ...]\n";
+    let suffix = "\n[... omitted ...]";
+    if byte_limit <= marker.len() + suffix.len() {
+        return String::new();
+    }
+    let content_budget = byte_limit - marker.len() - suffix.len();
+    let preferred_start = text
+        .char_indices()
+        .nth(anchor.saturating_sub(512))
+        .map_or(text.len(), |(byte, _)| byte);
+    let start = preferred_start.min(text.len().saturating_sub(content_budget));
+    let start = text.ceil_char_boundary(start);
+    let end = text.floor_char_boundary((start + content_budget).min(text.len()));
+    let mut output = String::with_capacity(byte_limit);
+    if start > 0 {
+        output.push_str(marker);
+    }
+    output.push_str(&text[start..end]);
+    if end < text.len() {
+        output.push_str(suffix);
+    }
+    debug_assert!(output.len() <= byte_limit);
+    output
+}
+
 fn node_lines_inner(
     language: UiLanguage,
     node: &UiNode,
@@ -262,6 +294,26 @@ fn node_lines_inner(
     }
     let mut tool_result_seen = false;
     let mut previous_tool = None;
+    let fallback_count = node
+        .presentation
+        .blocks
+        .iter()
+        .filter(|block| {
+            node.role != "received_response"
+                && matches!(block.kind, BlockKind::Prose | BlockKind::Reasoning)
+                && block.source_exact
+                && (block
+                    .rendered
+                    .as_ref()
+                    .is_some_and(|rendered| rendered.omitted || rendered.width != width)
+                    || block.rendered.is_none()
+                    || (start > block.source_start
+                        && start < block.source_end
+                        && block.rendered.is_some()))
+        })
+        .count();
+    let mut fallbacks_remaining = fallback_count;
+    let mut fallback_bytes_used = 0;
     for (block_index, block) in node.presentation.blocks.iter().enumerate() {
         out.role = match block.kind {
             BlockKind::Reasoning => LineRole::Reasoning,
@@ -362,14 +414,18 @@ fn node_lines_inner(
                         && start < block.source_end
                         && block.rendered.is_some()))
             {
-                out.push(Line::from(Span::styled(
-                    crate::ui::i18n::local!(
-                        language,
-                        "Markdown 表示を更新しています…",
-                        "Updating Markdown preview…"
-                    ),
-                    Style::default().fg(theme::MUTED),
-                )));
+                let anchor = start.saturating_sub(block.source_start);
+                let budget = MAX_MARKDOWN_FALLBACK_BYTES.saturating_sub(fallback_bytes_used)
+                    / fallbacks_remaining.max(1);
+                let fallback = bounded_markdown_fallback(&block.text, anchor, budget);
+                fallback_bytes_used += fallback.len();
+                fallbacks_remaining = fallbacks_remaining.saturating_sub(1);
+                out.extend(fallback.lines().map(|line| {
+                    Line::from(Span::styled(
+                        line.to_owned(),
+                        Style::default().fg(theme::TEXT),
+                    ))
+                }));
                 continue;
             }
             let text = if block.source_exact
@@ -4419,7 +4475,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_fallbacks_keep_raw_syntax_offscreen_for_anchor_width_and_omission() {
+    fn markdown_fallbacks_keep_content_for_anchor_width_and_omission() {
         let text = "A paragraph with **bold** and `code` plus [link](https://example.com).\n";
         let mut projection =
             crate::presentation::project("assistant", &serde_json::json!({"text":text}), text, 0);
@@ -4432,7 +4488,12 @@ mod tests {
             presentation: projection,
             ..Default::default()
         };
-        let large = format!("# Huge\n\n{}", "**bold** text\n\n".repeat(6000));
+        let large = format!(
+            "# Huge\n\n{}",
+            (0..6000)
+                .map(|index| format!("**bold** text row-{index}\n\n"))
+                .collect::<String>()
+        );
         let (omitted_node, _, _) = markdown_fixture(&large, 42);
         assert!(omitted_node.presentation.metadata_limited);
 
@@ -4459,15 +4520,12 @@ mod tests {
             );
 
             let resized = line_text(&node_lines(language, &node, false, 0, 52, &mut targets));
-            assert!(resized.contains(if language == UiLanguage::Ja {
-                "Markdown 表示を更新"
-            } else {
-                "Updating Markdown preview"
-            }));
             assert!(
-                !resized.contains("**bold**"),
-                "width-change fallback: {resized:?}"
+                resized.contains("**bold**"),
+                "width-change lost body: {resized:?}"
             );
+            assert!(!resized.contains("Updating Markdown preview"));
+            assert!(resized.len() <= super::MAX_MARKDOWN_FALLBACK_BYTES + 64);
 
             let omitted = line_text(&node_lines(
                 language,
@@ -4477,16 +4535,82 @@ mod tests {
                 42,
                 &mut targets,
             ));
-            assert!(omitted.contains(if language == UiLanguage::Ja {
-                "Markdown 表示を更新"
-            } else {
-                "Updating Markdown preview"
-            }));
             assert!(
-                !omitted.contains("**bold**"),
-                "metadata-limit fallback: {omitted:?}"
+                omitted.contains("**bold**"),
+                "metadata-limit fallback lost body: {omitted:?}"
+            );
+            assert!(!omitted.contains("Updating Markdown preview"));
+            assert!(omitted.len() <= super::MAX_MARKDOWN_FALLBACK_BYTES + 64);
+            assert!(omitted.contains("[... omitted ...]"));
+            let anchor = large.find("row-3000").unwrap();
+            let anchored = line_text(&node_lines(
+                language,
+                &omitted_node,
+                false,
+                anchor,
+                42,
+                &mut targets,
+            ));
+            assert!(
+                anchored.contains("row-3000"),
+                "anchor not retained: {anchored:?}"
+            );
+            assert!(
+                !anchored.contains("row-0"),
+                "fallback ignored anchor: {anchored:?}"
+            );
+            assert!(
+                anchored.len() <= super::MAX_MARKDOWN_FALLBACK_BYTES + 128,
+                "anchored bytes={} blocks={}",
+                anchored.len(),
+                omitted_node.presentation.blocks.len()
             );
         }
+    }
+
+    #[test]
+    fn metadata_limited_multiple_markdown_blocks_keep_a_bounded_readable_fallback() {
+        let first = format!(
+            "first block **bold**\n\n{}",
+            "first text repeated\n\n".repeat(3000)
+        );
+        let second = format!(
+            "second block `code`\n\n{}",
+            "second text repeated\n\n".repeat(3000)
+        );
+        let source = format!("{first}\n\n{second}");
+        let payload = serde_json::json!({
+            "role":"assistant",
+            "content":[
+                {"type":"output_text","text":first.clone()},
+                {"type":"output_text","text":second.clone()}
+            ]
+        });
+        let mut presentation = crate::presentation::project("assistant", &payload, &source, 0);
+        crate::presentation::render_markdown(&mut presentation, 42);
+        assert!(presentation.metadata_limited);
+        assert!(presentation.blocks.len() >= 2);
+        let node = UiNode {
+            node_id: "multiple-fallback".into(),
+            role: "assistant".into(),
+            text: source,
+            total_chars: first.chars().count() + second.chars().count() + 2,
+            presentation,
+            ..Default::default()
+        };
+        let mut targets = Vec::new();
+        let rendered = line_text(&node_lines(
+            UiLanguage::En,
+            &node,
+            false,
+            0,
+            44,
+            &mut targets,
+        ));
+        assert!(rendered.contains("first block **bold**"));
+        assert!(rendered.contains("second block `code`"));
+        assert!(!rendered.contains("Updating Markdown preview"));
+        assert!(rendered.len() <= super::MAX_MARKDOWN_FALLBACK_BYTES + 256);
     }
 
     fn marked_text(lines: &[Line<'static>], targets: &[std::sync::Arc<str>], url: &str) -> String {

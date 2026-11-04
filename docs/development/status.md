@@ -4736,10 +4736,16 @@ with a synthetic equivalence fixture; focused test and hosted checks pending.
 
 Raw Markdown fallback reproduced for an anchor inside a `source_exact` block, a
 render-width mismatch, and a rendered projection dropped by the 64 KiB metadata
-bound. The display now keeps the worker-rendered bounded source window for
-mid-block anchors, shows a localized updating placeholder instead of raw syntax
-while a width-specific render is pending, and retries an omitted projection
-once per view/width/anchor. Explicitly anchored history reads use an 8 KiB
-window (versus the 64 KiB unanchored body window); when the anchor is inside a
-fenced code block, the window retains its opening fence and may extend up to
-64 KiB. A synthetic worker measurement rendered a 64,329-byte full body in 18 ms and its 4,841-byte anchor window in 2 ms (single local run; not a benchmark). Dense anchored Markdown may still exceed the metadata budget after retry; in that case the bounded one-time retry leaves the localized placeholder rather than exposing raw syntax. The resize regression initially failed because its long synthetic reasoning block caused the renderer metadata budget to omit both blocks; the UI correctly showed its updating placeholder, leaving no body rows to anchor. Reducing the fixture from 1,200 to 700 Japanese repetitions keeps the hidden source gap while allowing the body renderer to produce rows. The isolated resize test now passes. Focused JA/EN tests and `cargo check --tests` pass; full standard validation and hosted CI remain pending.
+bound. The display keeps the worker-rendered bounded source window for mid-block
+anchors, retries an omitted projection once per view/width/anchor, and now shows
+a readable plain-source fallback instead of an updating-only placeholder when
+metadata remains unavailable. Fallback text is capped at 8 KiB total per node,
+anchored near the selected source position, and marks omitted extents. Explicitly
+anchored history reads use an 8 KiB window (versus the 64 KiB unanchored body
+window); when the anchor is inside a fenced code block, the window retains its
+opening fence and may extend up to 64 KiB. A synthetic worker measurement
+rendered a 64,329-byte full body in 18 ms and its 4,841-byte anchor window in
+2 ms (single local run; not a benchmark). Raw Markdown reported in real history
+remains undiagnosed. Regression coverage includes long and multiple blocks,
+anchor selection, metadata omission, width changes, and the retained resize
+worker request. Focused tests and full validation are in progress.
