@@ -146,7 +146,7 @@ fn japanese_receipts_keep_existing_text_for_every_status() {
                 expected.push_str(" | 編集中の入力を保持（次は全文送信）");
             }
             assert_eq!(ui.view().status.replace(" · ", " | "), expected);
-            assert_eq!(ui.view().draft.text, "firstnext");
+            assert_eq!(ui.view().draft.text, "next");
         }
     }
 }
@@ -164,7 +164,7 @@ fn english_receipt_retains_edited_draft_and_raw_message() {
         status: ReceiptStatus::Accepted,
         message: Some("raw-日本語".into()),
     });
-    assert_eq!(ui.view().draft.text, "firstnext");
+    assert_eq!(ui.view().draft.text, "next");
     assert!(ui.view().status.contains("Accepted: raw-日本語"));
     assert!(
         ui.view()
@@ -196,7 +196,7 @@ fn acceptance_clears_only_its_captured_draft() {
     assert!(
         ui.view()
             .status
-            .contains("Current input retained (next send uses the full text)")
+            .contains("編集中の入力を保持（次は全文送信）")
     );
     assert_eq!(ui.view().thread_id.as_deref(), Some("thread-1"));
     let actions = enter(&mut ui);

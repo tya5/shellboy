@@ -1064,7 +1064,7 @@ async fn run_with_delivery(
             initialize = updates.defer(value);
         }
         if initialize.is_none() {
-            receipt_batch.drain(&mut pending, &updates, language);
+            receipt_batch.drain(&mut pending, &updates);
         }
         draft_saver.pump_delivery(&mut draft_failure, &updates);
 
@@ -3857,9 +3857,7 @@ async fn run_with_delivery(
         if let Some(value) = initialize {
             update(shutdown_updates, value).await;
         }
-        receipt_batch
-            .finish(&mut pending, shutdown_updates, language)
-            .await;
+        receipt_batch.finish(&mut pending, shutdown_updates).await;
         save_result
             .and(server_result)
             .and(control_result)
