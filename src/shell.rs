@@ -62,6 +62,13 @@ pub struct OutputChunk {
     pub stream: OutputStream,
     pub bytes: Vec<u8>,
     _budget: OwnedSemaphorePermit,
+    _progress: Arc<std::sync::atomic::AtomicU64>,
+}
+impl Drop for OutputChunk {
+    fn drop(&mut self) {
+        self._progress
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 #[derive(Debug)]
 pub enum ShellEvent {
@@ -539,6 +546,7 @@ struct OutputSink {
     chunk_size: usize,
     stop: CancellationToken,
     failure: Arc<StdMutex<ShellFailures>>,
+    progress: Arc<std::sync::atomic::AtomicU64>,
 }
 
 async fn pump<R: AsyncRead + Unpin>(
@@ -593,6 +601,7 @@ async fn pump<R: AsyncRead + Unpin>(
             stream,
             bytes,
             _budget: permit,
+            _progress: sink.progress.clone(),
         });
         if publisher.tx.send(event).await.is_err() {
             record_failure(
@@ -833,6 +842,7 @@ mod output_failure_tests {
             chunk_size: 16,
             stop: stop.clone(),
             failure: failure.clone(),
+            progress: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         });
         let pump = tokio::spawn(pump(
             reader,

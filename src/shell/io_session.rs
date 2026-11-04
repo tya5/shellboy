@@ -10,19 +10,27 @@ pub(super) struct IoSession {
     initial_task: tokio::task::JoinHandle<()>,
     stdout_waiting: Arc<std::sync::atomic::AtomicBool>,
     stderr_waiting: Arc<std::sync::atomic::AtomicBool>,
+    progress: Arc<std::sync::atomic::AtomicU64>,
 }
 
 async fn pump_until_stalled(
     task: &mut tokio::task::JoinHandle<bool>,
-    waiting_for_sink: &std::sync::atomic::AtomicBool,
+    waiting: &std::sync::atomic::AtomicBool,
+    progress: &std::sync::atomic::AtomicU64,
     stall_timeout: Duration,
 ) -> bool {
     let mut blocked_since = None;
+    let mut last_progress = progress.load(std::sync::atomic::Ordering::Relaxed);
     loop {
         tokio::select! {
             result = &mut *task => return result.is_ok_and(|complete| complete),
             _ = tokio::time::sleep(Duration::from_millis(5)) => {
-                if waiting_for_sink.load(std::sync::atomic::Ordering::Relaxed) {
+                let current_progress = progress.load(std::sync::atomic::Ordering::Relaxed);
+                if current_progress != last_progress {
+                    last_progress = current_progress;
+                    blocked_since = None;
+                }
+                if waiting.load(std::sync::atomic::Ordering::Relaxed) {
                     let since = blocked_since.get_or_insert_with(tokio::time::Instant::now);
                     if since.elapsed() >= stall_timeout {
                         return false;
@@ -97,6 +105,7 @@ impl IoSession {
                 guard.take();
             }
         });
+        let progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let sink = Arc::new(OutputSink {
             publisher: Mutex::new(Publisher {
                 tx,
@@ -112,6 +121,7 @@ impl IoSession {
                 .min(READ_CHUNK as u64) as usize,
             stop: stop.clone(),
             failure: failure.clone(),
+            progress: progress.clone(),
         });
         let stdout_waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stderr_waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -139,6 +149,7 @@ impl IoSession {
                 initial_task,
                 stdout_waiting,
                 stderr_waiting,
+                progress,
             },
             handle,
             rx,
@@ -157,6 +168,7 @@ impl IoSession {
             initial_task,
             stdout_waiting,
             stderr_waiting,
+            progress,
             finished,
             failure,
             ..
@@ -166,14 +178,14 @@ impl IoSession {
         let mut initial_task = initial_task;
         let drain = async {
             let (out, err, initial) = tokio::join!(
-                pump_until_stalled(&mut stdout_task, &stdout_waiting, drain_timeout),
-                pump_until_stalled(&mut stderr_task, &stderr_waiting, drain_timeout),
+                pump_until_stalled(&mut stdout_task, &stdout_waiting, &progress, drain_timeout),
+                pump_until_stalled(&mut stderr_task, &stderr_waiting, &progress, drain_timeout),
                 timeout(drain_timeout, &mut initial_task),
             );
             out && err && initial.is_ok_and(|result| result.is_ok())
         };
-        // Confirmed process cleanup makes pipe EOF authoritative, but a pump
-        // stalled on the bounded consumer queue still needs a finite deadline.
+        // Consumer progress resets the stall deadline; a live batch commit must
+        // not be mistaken for a permanently blocked output queue.
         let drained = if process_set_confirmed {
             drain.await
         } else {
