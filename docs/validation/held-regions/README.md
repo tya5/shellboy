@@ -72,3 +72,49 @@ including the new 864-case baseline test and geometry tests. This is extraction
 for a shared owner-independent layout, not a line-count or maximum-arity reduction
 claim. Queue is deliberately untouched. Later behavioral/removal stages must
 record their own measurements rather than replacing this checkpoint's evidence.
+
+## Stage 1 Continued: Shared Identity State And Heading
+
+Before held behavior, the structural follow-up also extracts `RegionState<K>`
+and `RegionHit`. `RegionState<K>` owns only coherent UI-local focus/selected row
+identity, fixed capacity/fold, current frame bounds and visible slots. It computes
+bounded navigation and hidden counts without allocating a second row model. The
+stable key type belongs to the domain; payloads, snapshots, Run/Thread generation
+checks, timers, source bodies, output observers and action construction do not
+move into this type. `RegionHit` is only a current-frame hit classification:
+outside, heading, row index, padding. A hit is not an authorization or source ID.
+
+The heading mark/clipping/style moves to `region::heading`; a domain supplies
+localized facts and an explicit blink phase. Tree rows reuse the already generic
+measured-width `numbered_branch` helper through the region framework; no second
+glyph fallback implementation is introduced. Live work's selected-row lookup
+still resolves its domain target, rather than inferring identity from text/index.
+Shared state retains the existing collapse, fallback selection, keyboard and
+mouse behavior. Reverse-video selection remains a later behavioral commit.
+
+`before-shared-state.json` records the pushed `07f78f2` checkpoint;
+`after-shared-state.json` records the follow-up. They include the additionally
+touched chrome/key-hint/overlay clients. Historical first-checkpoint measurements
+above are not overwritten.
+
+| file | checkpoint lines | shared-state lines | production functions | max parameters |
+| --- | ---: | ---: | ---: | ---: |
+| live_work.rs | 2498 | 2466 | 36 / 35 | 6 / 6 |
+| region.rs | 173 | 337 | 7 / 16 | 5 / 5 |
+| message_queue.rs | 1761 | 1761 | 20 / 20 | 5 / 5 |
+| presentation.rs | 6260 | 6260 | 58 / 58 | 11 / 11 |
+| ui.rs | 9712 | 9712 | 131 / 131 | 7 / 7 |
+| chrome.rs | 1805 | 1805 | 11 / 11 | 7 / 7 |
+| key_hints.rs | 696 | 696 | 14 / 14 | 4 / 4 |
+| overlay.rs | 1736 | 1736 | 24 / 24 | 4 / 4 |
+
+Combined live-work+framework is now 2803 physical lines, +132 since the initial
+checkpoint and +321 versus the original 2482, including all new tests. Maximum
+arity is unchanged, not hidden in a broad context object. The same original
+864-case golden and existing focus/click tests must still pass before this
+follow-up is committed. Validation passes: 33 live-work tests (the same original
+864-case golden), three geometry/state tests, 12 key-hint and 26 overlay tests.
+A test-only import was cfg-gated after the initial strict Clippy failure; corrected
+golden/check --tests/strict all-target Clippy pass. The first pushed checkpoint's
+default CI `41868419181` passes at `07f78f2`; this follow-up has separate exact-tip
+validation and is not final held-feature or main landing evidence.

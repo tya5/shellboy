@@ -1,6 +1,7 @@
 //! Fixed-region geometry and row presentation, without domain state or I/O.
 use super::*;
 use crate::ui::text_width::glyphs;
+pub(super) use glyphs::numbered_branch;
 
 /// Immutable configuration shared by independently focused UI regions.
 /// Domain owners retain selected identities, snapshots, clocks and actions.
@@ -50,6 +51,23 @@ impl RegionLayout {
                 Line::from("")
             });
         }
+    }
+}
+
+/// Common marker and clipping; the domain supplies localized heading facts.
+pub(super) fn heading(width: u16, text: &str, palette: theme::Palette, dim: bool) -> Line<'static> {
+    let mark = glyphs::HEADING;
+    let heading = fit(&format!("{mark} {text}"), usize::from(width));
+    let dim = dim
+        .then(|| palette.live_work_dim())
+        .flatten()
+        .filter(|_| heading.starts_with(mark));
+    match dim {
+        Some(dim) => Line::from(vec![
+            Span::styled(mark.to_owned(), dim),
+            Span::styled(heading[mark.len()..].to_owned(), palette.live_work()),
+        ]),
+        None => Line::styled(heading, palette.live_work()),
     }
 }
 
@@ -169,5 +187,151 @@ mod tests {
                 );
             }
         }
+    }
+}
+
+/// UI-local region focus and geometry, parameterized only by stable row identity.
+/// Domain payloads, clocks, requests and preview/source bodies stay with owners.
+#[derive(Debug)]
+pub(super) struct RegionState<K> {
+    pub active: bool,
+    pub selected: Option<K>,
+    pub area: Option<Rect>,
+    pub visible_rows: usize,
+    pub collapsed: bool,
+    capacity: usize,
+}
+
+impl<K> Default for RegionState<K> {
+    fn default() -> Self {
+        Self {
+            active: false,
+            selected: None,
+            area: None,
+            visible_rows: 0,
+            collapsed: false,
+            capacity: 0,
+        }
+    }
+}
+
+impl<K> RegionState<K> {
+    pub fn cap(&self) -> usize {
+        if self.capacity == 0 {
+            10
+        } else {
+            self.capacity
+        }
+    }
+
+    pub fn configure(&mut self, collapsed: bool, capacity: usize) {
+        self.collapsed = collapsed;
+        self.capacity = capacity.clamp(1, 10);
+        if collapsed {
+            self.active = false;
+        }
+    }
+
+    pub fn layout(&self) -> RegionLayout {
+        RegionLayout::new(self.cap(), self.collapsed)
+    }
+
+    pub fn set_area(&mut self, area: Rect, total: usize, overflow: bool) {
+        self.area = (area.height > 0).then_some(area);
+        self.visible_rows = self.layout().visible_rows(area, total, overflow);
+        if area.height == 0 {
+            self.active = false;
+        }
+    }
+
+    pub fn hidden(&self, total: usize, overflow: u64) -> u64 {
+        overflow.saturating_add((total - self.visible_rows) as u64)
+    }
+
+    pub fn hit(&self, column: u16, row: u16) -> RegionHit {
+        let Some(area) = self.area else {
+            return RegionHit::Outside;
+        };
+        if !area.contains(ratatui::layout::Position::new(column, row)) {
+            return RegionHit::Outside;
+        }
+        if row == area.y + u16::from(area.height > 1) {
+            return RegionHit::Heading;
+        }
+        let Some(offset) = row.saturating_sub(area.y).checked_sub(2) else {
+            return RegionHit::Blank;
+        };
+        if usize::from(offset) < self.visible_rows {
+            RegionHit::Row(usize::from(offset))
+        } else {
+            RegionHit::Blank
+        }
+    }
+}
+
+impl<K: PartialEq> RegionState<K> {
+    pub fn next_index<'a>(&self, mut keys: impl Iterator<Item = &'a K>, down: bool) -> usize
+    where
+        K: 'a,
+    {
+        let index = self
+            .selected
+            .as_ref()
+            .and_then(|selected| keys.position(|key| key == selected))
+            .unwrap_or(0);
+        if down {
+            (index + 1).min(self.visible_rows.saturating_sub(1))
+        } else {
+            index.saturating_sub(1)
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum RegionHit {
+    Outside,
+    Heading,
+    Row(usize),
+    Blank,
+}
+
+#[cfg(test)]
+mod state_tests {
+    use super::*;
+    // Fold and focus remain structural: no caret/reverse-video behavior changes.
+    #[test]
+    fn region_identity_navigation_and_hits_preserve_existing_bounds() {
+        let mut state = RegionState::<String>::default();
+        state.configure(false, 3);
+        state.set_area(Rect::new(4, 5, 30, 5), 4, true);
+        let keys = [
+            "a".to_owned(),
+            "b".to_owned(),
+            "c".to_owned(),
+            "d".to_owned(),
+        ];
+        assert_eq!(state.visible_rows, 2);
+        assert_eq!(state.hidden(keys.len(), 3), 5);
+        state.selected = Some(keys[0].clone());
+        assert_eq!(state.next_index(keys.iter(), false), 0);
+        assert_eq!(state.next_index(keys.iter(), true), 1);
+        state.selected = Some(keys[1].clone());
+        assert_eq!(state.next_index(keys.iter(), true), 1);
+        assert_eq!(state.hit(4, 5), RegionHit::Blank);
+        assert_eq!(state.hit(4, 6), RegionHit::Heading);
+        assert_eq!(state.hit(4, 7), RegionHit::Row(0));
+        assert_eq!(state.hit(4, 8), RegionHit::Row(1));
+        assert_eq!(state.hit(4, 9), RegionHit::Blank);
+        assert_eq!(state.hit(3, 6), RegionHit::Outside);
+        state.active = true;
+        state.configure(true, 3);
+        state.set_area(Rect::new(4, 5, 30, 2), 4, true);
+        assert!(!state.active);
+        assert_eq!(state.visible_rows, 0);
+        assert_eq!(state.selected.as_ref(), Some(&keys[1]));
+        assert_eq!(state.hit(4, 6), RegionHit::Heading);
+        state.configure(false, 3);
+        state.set_area(Rect::new(4, 5, 30, 0), 4, true);
+        assert_eq!(state.hit(4, 5), RegionHit::Outside);
     }
 }
