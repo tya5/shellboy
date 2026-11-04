@@ -1149,21 +1149,34 @@ fn render(source: &Source, epoch: i64) -> String {
         source.payload.clone()
     };
     if let Some(items) = value.get_mut("output").and_then(Value::as_array_mut) {
-        let source_epoch = source
-            .payload
-            .get("reasoning_epoch")
-            .and_then(Value::as_i64);
-        // Reasoning and opaque provider blocks never become summary material.
-        items.retain(|item| {
-            (item.get("type").and_then(Value::as_str) != Some("reasoning")
-                && !crate::model::opaque::is_opaque(item))
-                || source_epoch == Some(epoch)
-        });
+        // Only the readable Anthropic thinking text is summary material; the
+        // envelope, signature and redacted blocks must never leave as such.
+        *items = items
+            .drain(..)
+            .filter_map(|item| {
+                if crate::model::opaque::is_opaque(&item) {
+                    if item["dialect"] == "anthropic_messages"
+                        && item["kind"] == "thinking"
+                        && item.pointer("/block/type").and_then(Value::as_str) == Some("thinking")
+                    {
+                        return item
+                            .pointer("/block/thinking")
+                            .and_then(Value::as_str)
+                            .map(|text| json!({"type":"reasoning_text","text":text}));
+                    }
+                    None
+                } else {
+                    Some(item)
+                }
+            })
+            .collect();
     }
     fn scrub(v: &mut Value) {
         match v {
             Value::Object(o) => {
-                o.remove("encrypted_content");
+                for key in ["encrypted_content", "signature", "redacted_content"] {
+                    o.remove(key);
+                }
                 for value in o.values_mut() {
                     scrub(value);
                 }
@@ -1455,16 +1468,22 @@ mod tests {
     }
 
     #[test]
-    fn summary_material_never_resurrects_old_reasoning_or_opaque_data() {
+    fn summary_material_includes_readable_old_reasoning_without_opaque_data() {
         let s = source(
             "source",
             None,
-            json!({"reasoning_epoch":1,"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"OLD-REASONING"}],"encrypted_content":"SECRET-OPAQUE"},{"type":"message","content":[{"type":"output_text","text":"answer"}]}]}),
+            json!({"reasoning_epoch":1,"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"OLD-REASONING"}],"encrypted_content":"SECRET-OPAQUE"},{"type":"provider_opaque","dialect":"anthropic_messages","kind":"thinking","block":{"type":"thinking","thinking":"OLD-THINKING","signature":"SECRET-SIGNATURE"}},{"type":"provider_opaque","dialect":"anthropic_messages","kind":"redacted_thinking","block":{"type":"redacted_thinking","data":"SECRET-REDACTED"}},{"type":"message","content":[{"type":"output_text","text":"answer"}]}]}),
         );
         let text = render(&s, 2);
-        assert!(!text.contains("OLD-REASONING"));
+        assert!(text.contains("OLD-REASONING"));
+        assert!(text.contains("OLD-THINKING"));
         assert!(!text.contains("SECRET-OPAQUE"));
+        assert!(!text.contains("SECRET-SIGNATURE"));
+        assert!(!text.contains("SECRET-REDACTED"));
         assert!(text.contains("answer"));
+        let replay = json!(crate::control::replay::convert(s.payload.clone(), 2)).to_string();
+        assert!(!replay.contains("OLD-REASONING"));
+        assert!(!replay.contains("OLD-THINKING"));
         let text = render(&s, 1);
         assert!(text.contains("OLD-REASONING"));
         assert!(!text.contains("SECRET-OPAQUE"));
