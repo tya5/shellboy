@@ -493,3 +493,10 @@ and the migration 26 reply and migration 27 recovery indexes. Use only owned
 synthetic fixtures and a new empty fixture path; the helper does not access the
 live owner database. Exact-candidate binary upgrade and release artifact checks
 remain separate gates.
+
+## v0.7.3 synthetic upgrade check
+
+The candidate checker defaults to public v0.7.2, conversation schema 27,
+expected v0.7.3 and target schema 27. Use an owned disposable fixture and
+previously nonexistent output directory; an exact-binary upgrade check is still
+a separate release gate. No migration was added since v0.7.2.

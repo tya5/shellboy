@@ -23,7 +23,7 @@ import time
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
            for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27)}
-PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25}
+PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27}
 
 
 def read_only_uri(path, stopped=False):
@@ -150,10 +150,10 @@ def parse_args(argv=None):
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.7.1')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26), default=None,
+    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.7.2')
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26, 27), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
-    parser.add_argument('--expected-version', default='0.7.2')
+    parser.add_argument('--expected-version', default='0.7.3')
     parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27), default=27,
                         help='27 for the recovery candidate; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
