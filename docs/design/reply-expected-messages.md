@@ -140,6 +140,14 @@ Thread of a model-sent message is later deleted, its copy of the reply can be
 collected; `message get` then reports the body as unavailable with the existing
 `body_available=false` convention rather than inventing content.
 
+History provenance for a reply `user` node identifies the replier using the
+credential-free `reply.by` saved on the original receipt when the reply has no
+ordinary delivery receipt (external CLI, human, or unknown sender). When a model
+sender receives the same reply node through ordinary delivery, its receipt
+sender is the same replier identity and is used as the provenance source. The
+node remains an ordinary `user` node in the recipient Thread; sender identity is
+provenance, not a distinct node kind.
+
 ### Outcomes
 
 | Outcome | Trigger | Saved where |
