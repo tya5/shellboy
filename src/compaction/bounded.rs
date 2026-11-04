@@ -80,7 +80,11 @@ impl Compactor {
                     "Summary still exceeds its limit after reduction; original path retained",
                 ));
             }
-            let batches = reduce_batches(&texts);
+            let (batches, oversized) = reduce_batches(&texts);
+            budget
+                .usage
+                .record_oversized_parts(&self.database, oversized)
+                .await?;
             let mut reduced = Vec::new();
             for text in batches {
                 if cancel.is_cancelled() {
@@ -156,23 +160,69 @@ impl Compactor {
     }
 }
 
-fn reduce_batches(texts: &[String]) -> Vec<String> {
+fn reduce_batches(texts: &[String]) -> (Vec<String>, usize) {
     let mut batches = Vec::new();
     let mut batch = String::new();
-    let mut count = 0;
-    // Derived summaries may be split at character boundaries, unlike source tool groups.
+    let mut count = 0usize;
+    let mut oversized = 0usize;
     for text in texts {
-        for ch in text.chars().chain("\n\n".chars()) {
-            if count == SEGMENT_CHARS {
-                batches.push(std::mem::take(&mut batch));
-                count = 0;
+        let size = text.chars().count();
+        let separator = if batch.is_empty() { 0 } else { 2 };
+        if !batch.is_empty() && count.saturating_add(separator).saturating_add(size) > SEGMENT_CHARS
+        {
+            batches.push(std::mem::take(&mut batch));
+            count = 0;
+        }
+        if size > SEGMENT_CHARS {
+            oversized = oversized.saturating_add(1);
+            batches.push(text.clone());
+        } else {
+            if !batch.is_empty() {
+                batch.push_str("\n\n");
+                count += 2;
             }
-            batch.push(ch);
-            count += 1;
+            batch.push_str(text);
+            count += size;
         }
     }
     if !batch.is_empty() {
         batches.push(batch);
     }
-    batches
+    (batches, oversized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_unicode_boundary_keeps_each_source_line_with_its_part() {
+        let first = format!("{}\nShellboy source node IDs: a", "\u{3042}".repeat(31_970));
+        let second = format!("{}\nShellboy source node IDs: b", "b".repeat(31_970));
+        let (batches, oversized) = reduce_batches(&[first.clone(), second.clone()]);
+        assert_eq!(oversized, 0);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0], format!("{first}\n\n{second}"));
+        assert!(batches[0].chars().count() <= SEGMENT_CHARS);
+        let (batches, _) = reduce_batches(&[first.clone(), second.clone(), "z".repeat(10)]);
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[1], "z".repeat(10));
+    }
+
+    #[test]
+    fn packs_whole_parts_and_records_oversized() {
+        let parts = vec![
+            "a".repeat(40_000),
+            "b".repeat(30_000),
+            "c".repeat(64_001),
+            "d".repeat(10),
+        ];
+        let (batches, oversized) = reduce_batches(&parts);
+        assert_eq!(oversized, 1);
+        assert_eq!(batches, parts);
+        let (batches, oversized) = reduce_batches(&["a".repeat(20_000), "b".repeat(30_000)]);
+        assert_eq!(oversized, 0);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].chars().count(), 50_002);
+    }
 }
