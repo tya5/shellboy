@@ -4,9 +4,11 @@ use crate::{
     protocol::PROTOCOL_VERSION,
 };
 use clap::Args;
+use semver::Version;
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
+    cmp::Ordering,
     fs::File,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -156,7 +158,7 @@ fn summarize(data_dir: &Path, last: usize) -> std::io::Result<Value> {
         let current = launches_newest_first[index].app_version.as_deref();
         launches_newest_first[index].version_increased = previous
             .zip(current)
-            .map(|(a, b)| version_key(b) > version_key(a));
+            .and_then(|(a, b)| version_increased(a, b));
     }
     if launches_newest_first.len() > last {
         launches_newest_first.remove(0);
@@ -260,33 +262,14 @@ fn validated_app_version(value: &str) -> Option<String> {
     if value.len() > 64 || !value.is_ascii() {
         return None;
     }
-    let core = value.split(['-', '+']).next()?;
-    let components: Vec<_> = core.split('.').collect();
-    if components.len() != 3
-        || components
-            .iter()
-            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return None;
-    }
-    let suffix = &value[core.len()..];
-    if !suffix
-        .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+'))
-    {
-        return None;
-    }
+    Version::parse(value).ok()?;
     Some(value.to_owned())
 }
 
-fn version_key(value: &str) -> Vec<u64> {
-    value
-        .split(['-', '+'])
-        .next()
-        .unwrap_or("")
-        .split('.')
-        .map(|part| part.split('-').next().unwrap_or("").parse().unwrap_or(0))
-        .collect()
+fn version_increased(previous: &str, current: &str) -> Option<bool> {
+    let previous = Version::parse(previous).ok()?;
+    let current = Version::parse(current).ok()?;
+    Some(current.cmp_precedence(&previous) == Ordering::Greater)
 }
 
 fn build_launch(records: Vec<Record>) -> Launch {
@@ -339,9 +322,19 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn line(at: &str, stage: &str, elapsed: u64, version: Option<u32>) -> String {
-        let mut row = json!({"at":at,"event":"startup_stage","startup_stage":{"stage":stage,"elapsed_ms":elapsed,"app_version":"0.7.2"}});
-        if let Some(version) = version {
+    fn line(at: &str, stage: &str, elapsed: u64, migration_version: Option<u32>) -> String {
+        line_with_app_version(at, stage, elapsed, migration_version, "0.7.2")
+    }
+
+    fn line_with_app_version(
+        at: &str,
+        stage: &str,
+        elapsed: u64,
+        migration_version: Option<u32>,
+        app_version: &str,
+    ) -> String {
+        let mut row = json!({"at":at,"event":"startup_stage","startup_stage":{"stage":stage,"elapsed_ms":elapsed,"app_version":app_version}});
+        if let Some(version) = migration_version {
             row["startup_stage"]["migration_version"] = json!(version);
         }
         row.to_string()
@@ -382,6 +375,30 @@ mod tests {
         assert_eq!(result["launches"][0]["total_elapsed_ms"], 12);
         assert_eq!(result["launches"][1]["incomplete"], false);
         assert!(result["launches"][0].get("ids").is_none());
+    }
+
+    #[test]
+    fn compares_prereleases_and_ignores_build_metadata_per_semver() {
+        let root = tempdir().unwrap();
+        let logs = root.path().join("logs");
+        fs::create_dir_all(&logs).unwrap();
+        let rows = [
+            // Input: 0.7.2-rc.1 -> 0.7.2; final release is a version increase.
+            line_with_app_version("2026-01-01T00:00:00Z", "configuration", 1, None, "0.7.2-rc.1"),
+            line_with_app_version("2026-01-01T00:00:01Z", "configuration", 1, None, "0.7.2"),
+            // Reverse direction is not an increase.
+            line_with_app_version("2026-01-01T00:00:02Z", "configuration", 1, None, "0.7.2-rc.1"),
+            // Build metadata does not affect SemVer precedence.
+            line_with_app_version("2026-01-01T00:00:03Z", "configuration", 1, None, "0.7.2+ci.1"),
+            line_with_app_version("2026-01-01T00:00:04Z", "configuration", 1, None, "0.7.2+ci.2"),
+        ];
+        fs::write(logs.join("shellboy.log"), rows.join("\n") + "\n").unwrap();
+
+        let launches = summarize(root.path(), 5).unwrap();
+        let launches = launches["launches"].as_array().unwrap();
+        assert_eq!(launches[1]["version_increased"], true);
+        assert_eq!(launches[2]["version_increased"], false);
+        assert_eq!(launches[4]["version_increased"], false);
     }
 
     #[test]

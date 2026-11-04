@@ -2,7 +2,7 @@
 
 ## Startup timing CLI (#212)
 
-Implemented read-only `shellboy startup [--last N]` over bounded owner diagnostics, with no owner startup or new storage/workers. On macOS, formatting, the CLI executable-path inventory test (including standalone `startup` option coverage), all 14 startup-related library tests, the standalone synthetic-log subprocess test, strict all-target Clippy, and integration-layout checks pass. The incomplete-launch fixture totals its recorded 7 ms configuration and 1 ms endpoint stages. Default-scope and all-OS CI are pending on the final documented tip; W8 review/landing remain.
+Implemented read-only `shellboy startup [--last N]` over bounded owner diagnostics, with no owner startup or new storage/workers. W8 review found the SemVer prerelease comparison defect (`0.7.2-rc.1` to `0.7.2`); a follow-up now uses SemVer ordering and adds RC/final, reverse-direction, and build-metadata regression cases. The SemVer-focused macOS unit suite passes (15 tests, including RC/final, reverse direction, and build metadata); formatting, CLI integration, strict Clippy, and final-tip CI are pending; the original implementation and CI evidence are recorded in the acceptance log.
 
 ## Shell unknown argument policy
 

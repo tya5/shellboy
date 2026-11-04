@@ -1,8 +1,8 @@
 # Validation record
 
-## Startup timing CLI (#212; validation pending)
+## Startup timing CLI (#212; SemVer review follow-up in progress)
 
-Synthetic logs cover multiple launches, migration versions, app-version increase, rotation, missing stages, and malformed lines; the CLI subprocess verifies no owner is started, no database is created, and unrelated log fields are not emitted. macOS via `rust-slot`: `cargo fmt --all -- --check`, the CLI executable-path inventory test (1 passed), `cargo test --lib startup::tests --no-fail-fast` (14 passed), the standalone integration test (1 passed), and `cargo clippy --locked --all-targets -- -D warnings` passed. The incomplete-launch fixture correctly totals 8 ms (7 ms configuration + 1 ms endpoint). Test layout (104 suites), watchdog policy, and `git diff --check` passed. Default-scope and all-OS CI are pending on the final documented tip.
+Synthetic logs cover multiple launches, migration versions, app-version increase, rotation, missing stages, and malformed lines; the CLI subprocess verifies no owner is started, no database is created, and unrelated log fields are not emitted. The initial implementation and CI evidence are superseded for final acceptance by the follow-up below. W8 review identified that comparing only numeric core components missed `0.7.2-rc.1` -> `0.7.2`. The correction parses SemVer and compares precedence, including prerelease ordering; invalid app-version strings are omitted, and build metadata does not affect precedence. A synthetic regression input covers RC -> final (`true`), final -> RC (`false`), and `0.7.2+ci.1` -> `0.7.2+ci.2` (`false`). macOS via `rust-slot`: `cargo test --lib startup::tests --no-fail-fast` passed (15 passed, 0 failed). The first attempt exposed `Version::Ord` including build metadata; the correction uses `Version::cmp_precedence`. Formatting, CLI integration, strict Clippy, and final-tip CI remain pending.
 
 ## End-message rename (#194 step 1)
 

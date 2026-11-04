@@ -38,6 +38,7 @@ toml = "=1.1.8"
 thiserror = "=2.0.21"
 fs2 = "=0.4.3"
 chrono = "=0.4.45"
+semver = "=1.0.28"
 base64 = "=0.23.1"
 uuid = { version = "=1.29.0", features = ["v4", "serde"] }
 url = { version = "=2.5.8", features = ["serde"] }
