@@ -12,6 +12,8 @@ pub struct SummaryUsage {
     pub requests: u64,
     pub map_requests: u64,
     pub reduce_requests: u64,
+    #[serde(default)]
+    pub oversized_reduce_parts: u64,
     pub input_tokens: Number,
     pub cached_tokens: Number,
     pub cache_creation_tokens: Number,
@@ -57,6 +59,9 @@ impl SummaryUsage {
         self.requests = self.requests.saturating_add(other.requests);
         self.map_requests = self.map_requests.saturating_add(other.map_requests);
         self.reduce_requests = self.reduce_requests.saturating_add(other.reduce_requests);
+        self.oversized_reduce_parts = self
+            .oversized_reduce_parts
+            .saturating_add(other.oversized_reduce_parts);
         let mut theirs = other.clone();
         for (mine, theirs) in self.fields().into_iter().zip(theirs.fields()) {
             mine.overflow |= theirs.overflow;
@@ -147,6 +152,21 @@ impl UsageLedger {
         self.record.usage.begin(reduce);
         self.save(database).await
     }
+    pub(super) async fn record_oversized_parts(
+        &mut self,
+        database: &DbWorker,
+        count: usize,
+    ) -> Result<(), ApiError> {
+        if count != 0 {
+            self.record.usage.oversized_reduce_parts = self
+                .record
+                .usage
+                .oversized_reduce_parts
+                .saturating_add(count as u64);
+            self.save(database).await?;
+        }
+        Ok(())
+    }
     pub(super) async fn observe(
         &mut self,
         database: &DbWorker,
@@ -198,6 +218,27 @@ mod tests {
             ..Default::default()
         }
     }
+    #[test]
+    fn oversized_reduce_count_survives_projection_and_merge() {
+        let mut first = SummaryUsage {
+            oversized_reduce_parts: 2,
+            ..Default::default()
+        };
+        let second = SummaryUsage {
+            oversized_reduce_parts: 3,
+            ..Default::default()
+        };
+        first.merge(&second);
+        let saved = json!(first);
+        assert_eq!(SummaryUsage::sanitize(&saved)["oversized_reduce_parts"], 5);
+        let mut old = saved.as_object().unwrap().clone();
+        old.remove("oversized_reduce_parts");
+        assert_eq!(
+            SummaryUsage::sanitize(&Value::Object(old))["oversized_reduce_parts"],
+            0
+        );
+    }
+
     #[test]
     fn unreported_values_stay_unknown_and_known_values_sum() {
         let mut usage = SummaryUsage::default();

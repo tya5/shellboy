@@ -218,8 +218,11 @@ usage observation is a manual read of existing records, not new telemetry.
 ## Bounded explicit summaries (#73 / D-015)
 
 Explicit range summaries use map/reduce, not concatenated part summaries. Keep
-map inputs chronological and group-atomic; reduce chronological batches of at
-most 64,000 characters, then consolidate again until one final summary remains.
+map inputs chronological and group-atomic; pack complete chronological map
+parts, including their source-ID lines, into reduce batches of at most 64,000
+characters, then consolidate again until one final summary remains. Never split
+a part: an oversized part is sent alone and counted in the existing summary
+usage record as `oversized_reduce_parts` without storing its contents.
 Prompts deduplicate goals/constraints, keep only the latest confirmed state,
 retain decisions/reasons, unresolved work, uncertainty and source node IDs.
 Original payloads, replacement sources, cancellation and transactional CAS
