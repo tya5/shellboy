@@ -308,14 +308,48 @@ embedding jobs failed in transactions of at most 128 jobs using a partial
 running-state index. Bootstrap records are visited in key order using the
 `index.bootstrap.` prefix range, at most 128 records and 1 MiB of values per
 transaction. New serialized Work records are capped at 1 MiB, including JSON
-metadata. A legacy record above that cap is measured with `octet_length`,
-deleted without selecting or decoding its payload, and replaced by a compact
-error record carrying its digest, observed size, limit, and reason. This keeps
-each recovery unit bounded without attempting to split an indivisible record.
+metadata. A legacy record above that cap is measured with `octet_length` and
+handled in its own page: read only its first and last 64 KiB to identify the
+existing source authorization, then atomically replace it with an admission or
+leave the profile-level manual-rebuild marker if identification fails. Do not
+select or decode its full payload. This is the existing #172 behavior, not a
+new recovery or automatic rebuild policy.
 The cursor is ephemeral: restart scans the prefix again and already failed
 records remain failed. Each committed page is published before the next one;
 workers start only after recovery completes. Interrupted requests require an
 explicit retry and may already have incurred billing.
+
+### Bootstrap recovery seek bounds (#214)
+
+Use one effective BINARY key lower bound per candidate lookup: the initial
+`key >= 'index.bootstrap.'` includes the prefix key itself; subsequent lookups
+use only `key > last_processed_key`. Both stop before `index.bootstrap/` and
+return at most one key and its byte length in ascending primary-key order.
+Never combine a fixed prefix lower bound with a cursor lower bound: SQLite can
+seek the fixed prefix and scan every previously visited key despite `LIMIT 1`.
+An absent or below-prefix cursor uses the initial bound; an exhausted or
+above-range cursor terminates without restarting from the prefix.
+
+Each ordinary page reads at most 128 Work records and 1 MiB of input values.
+An oversized record starts a separate page so its bounded prefix/tail reads
+cannot overrun an ordinary page's count or byte budget. Returning for either
+budget leaves the unprocessed candidate for the next page and returns the last
+processed key. Each successful nonterminal call commits a bounded job batch or
+advances the bootstrap cursor; an error rolls back that page without losing
+previously committed pages. No collection of the full prefix is allowed.
+
+Recovery remains a read-modify-write mutation in one writer transaction per
+page, with the existing publish/yield boundary between calls. Candidate reads
+and updates stay atomic; do not split a mutation across stale read and write
+snapshots. Pure observations and query-plan/VM-step probes use read-only
+connections, not a new writer-lane observation API. Workers and provider work
+still start only after recovery; no automatic rebuild or paid call is added.
+This fixes bootstrap seek work only; #203 authorization recovery is separate.
+
+Guard both the actual candidate SQL and the actual page function with synthetic
+10,000-key early, late and exhausted cursor tests. Check returned keys and VM
+steps, not only `EXPLAIN` containing `INDEX`: an indexed prefix rescan must fail
+the guard. Also retain byte/count, adjacent-prefix, restart and error tests.
 
 ### Oversized-work review follow-up (#172)
 
