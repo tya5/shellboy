@@ -24,6 +24,22 @@ pub(super) fn spill_ranges(snapshot: &Snapshot, include_latest: bool) -> Vec<Ran
         })
         .collect()
 }
+/// Automatic stages distinguish older Turns from the active Turn while
+/// retaining the shared latest-tool and whole-group safety checks.
+pub(super) fn staged_spill_ranges(snapshot: &Snapshot, active: bool) -> Vec<Range<usize>> {
+    let boundary = request_boundary(snapshot, snapshot.current_turn.as_deref())
+        .unwrap_or(snapshot.groups.len());
+    spill_ranges(snapshot, false)
+        .into_iter()
+        .filter(|range| {
+            if active {
+                range.start > boundary
+            } else {
+                range.end <= boundary
+            }
+        })
+        .collect()
+}
 pub(super) fn summary_range(snapshot: &Snapshot, allow_suffix: bool) -> Option<Range<usize>> {
     let count = prefix_count(snapshot, allow_suffix);
     (count > 0).then_some(0..count)

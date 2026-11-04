@@ -130,7 +130,7 @@ impl Compactor {
                 }
                 let invalidated = suffix_characters(&snapshot, selected.start);
                 let compact = if matches!(args.action, ContextEditAction::Spill) {
-                    self.spill_snapshot(snapshot, vec![selected], cancel)
+                    self.spill_snapshot(snapshot, vec![selected], cancel, false)
                         .await?
                 } else {
                     self.summarize_with_policy(snapshot, selected, cancel, limits)
