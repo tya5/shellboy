@@ -483,3 +483,24 @@ returned no items with an incompatible/degraded index; no index was rebuilt.
 No broad classification or fingerprint change is claimed. Exact3OS integration,
 physical terminal, clipboard, live provider and final Stage C acceptance remain
 separate. This work follows the subsequently selected0.6.1 cutoff.
+
+## Operation Catalogue Language Boundary (Owner Decision, 2026-11-03)
+
+Do not translate `src/operations.rs` Japanese catalogue strings: they are
+Japanese source display data, not model input. The owner rule is that system to
+model input remains English-only and TUI text follows `UiLanguage`. Labels and
+meanings route through `src/ui/operations.rs::catalogue_label` /
+`catalogue_meaning` to `src/ui/operations/metadata.rs::text_for`; field labels
+and help use `text_for` plus `field_label_for` / `field_help_for`; global
+arguments render through `global_argument_text`. Consumer inspection found no
+model request, tool-description, prompt, system-message, CLI JSON or generated
+tool-schema path consuming these values. The frontend direct-label path was
+changed to use the selected-language catalogue helper.
+
+The 320 Japanese literals in `src/operations.rs` are individually pinned as
+reviewed UI-side strings in `scripts/dev/language-classifications.json`, each
+with a source-token hash and this consumer rationale. English projections are
+covered by `japanese_catalogue_fallbacks_remain_exact_and_english_is_defined`
+and `global_argument_messages_preserve_cli_spelling_and_japanese_metadata`;
+the frontend title test checks both languages. This is a scoped exclusion from
+pending `c`, not a claim that the audit is complete.

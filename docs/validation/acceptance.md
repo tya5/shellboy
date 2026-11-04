@@ -9413,3 +9413,20 @@ those are checked. Strict locked all-target Clippy passed after that fix. Python
 checks196 pass; integration-layout/watchdog gates pass with103 suites. Rebased
 cargo check/tests, final-tip CI and external review are recorded in the issue
 handoff rather than claiming them before they finish.
+### #152 reconcile-34 operation-catalogue boundary (2026-11-03)
+
+The owner decision keeps Japanese `src/operations.rs` catalogue literals as
+TUI display data; they are not sent to model requests. Static consumer review
+found no model/tool-description/prompt/system-message/CLI-JSON path; the
+frontend operation-title path is routed through the selected-language label
+helper. The existing catalogue test enumerates each operation and used field,
+checks Japanese fallback equality, and requires English output to be ASCII; the
+global-argument test checks English output likewise. A new frontend regression
+checks the selected-language title under terminal separator variants.
+
+The current-source audit (main `22db1a22` plus the uncommitted reconcile-34
+changes) classifies the 320 Japanese catalogue literals as reviewed UI-side
+strings using per-token source hashes. Counts: `a=2808, b=1555, c=104`;
+strict audit still fails for 104 other pending literals. This is not final
+Stage C acceptance. Native checks, branch verdict completion, formal acceptance
+and exact integration-tip all-OS CI remain pending.

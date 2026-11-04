@@ -4447,3 +4447,19 @@ comparison measured 11.170/11.905/10.257s with the previous full policy versus
 0.096/0.085/0.161s with explicit index-only skip. These isolate FK policy on
 identical startup code, not UI-ready latency or cold-cache performance. See the
 #210 acceptance record for stage times, controls and CI handoff evidence.
+### #152 reconcile-34: operation catalogue language boundary (2026-11-03)
+
+Owner decision: preserve `src/operations.rs` Japanese strings as UI catalogue
+source, not model input. Consumer inspection found the typed labels/meanings and
+field labels/help flow to the TUI projection in `src/ui/operations.rs` and
+`src/ui/operations/metadata.rs`; global argument metadata is rendered there as
+well. No model-request/tool-description/prompt/system-message/CLI-JSON consumer
+was found. A direct frontend operation-title consumer was changed to use the
+selected-language label helper.
+
+All 320 Japanese catalogue literals are individually source-hash classified as
+reviewed UI-side text. The current exact-source audit on main `22db1a22` plus
+this in-progress change reports `a=2808, b=1555, c=104`; strict `--check` still fails on 104 pending literals outside the reviewed catalogue. English
+counterpart checks and the frontend title regression test are pending local
+execution. Other assigned branch reconciliation and integration acceptance
+remain open.

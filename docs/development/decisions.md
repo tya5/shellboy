@@ -3241,3 +3241,22 @@ or infer safety by parsing SQL. Historical migrations remain full unless their
 metadata has been explicitly reviewed. Table scopes still scan every selected
 child row and are not bounded-latency integrity checks. Index-only skip deliberately
 does not discover unrelated pre-existing FK corruption; manual checks cover that.
+## D-190: Keep Japanese operation-catalogue source as display data (#152)
+
+Owner decision, 2026-11-03: system-to-model input is English-only; UI display
+follows the selected language. Keep the Japanese source strings in
+`src/operations.rs` unchanged. They are TUI catalogue display data, not model
+input: operation labels/meanings flow through
+`src/ui/operations.rs::catalogue_label` / `catalogue_meaning` into
+`src/ui/operations/metadata.rs::text_for`, whose operation mappings select
+English or Japanese. Field labels/help use `text_for` with
+`field_label_for` / `field_help_for`; global argument text uses
+`global_argument_text`.
+
+Consumer inspection found no model-request, tool-description, prompt, system
+message, CLI JSON, or generated tool-schema consumer of these catalogue fields.
+The only non-TUI direct label consumer was the frontend operation title; route it
+through the selected-language catalogue label instead. Tests verify the
+English projection for every operation, field and global argument, and cover
+the frontend title in both languages. The Stage C audit records the Japanese
+source as reviewed UI copy with source-token hashes; changes invalidate review.
