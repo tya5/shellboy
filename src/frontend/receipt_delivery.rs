@@ -114,14 +114,6 @@ impl Batch {
             if status != ReceiptStatus::Held {
                 pending.remove(&message);
             }
-            let hint =
-                matches!(status, ReceiptStatus::Cancelled | ReceiptStatus::Failed).then(|| {
-                    crate::ui::text_width::glyphs::formatted!(
-                        "依頼を保持しました · /restore {} で入力欄へ戻す",
-                        "依頼を保持しました | /restore {} で入力欄へ戻す",
-                        revision
-                    )
-                });
             // Main is the sole producer allowed into the last 32 slots. Its
             // synchronous capacity check + insertion cannot race another main
             // handler, and workers stop at 480. No await and no raw bypass.
@@ -130,7 +122,8 @@ impl Batch {
                 revision,
                 thread_id: Some(thread),
                 status,
-                message: hint,
+                // The view owns localized restore guidance for failed/cancelled receipts.
+                message: None,
             });
             assert!(
                 rejected.is_none(),
@@ -214,6 +207,31 @@ mod tests {
             receive.try_recv().unwrap(),
             UiUpdate::Receipt {
                 status: ReceiptStatus::Applied,
+                message: None,
+                ..
+            }
+        ));
+    }
+    #[test]
+    fn cancelled_receipt_leaves_restore_guidance_to_the_localized_view() {
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let updates = BufferedUpdates::new(send);
+        let mut pending = HashMap::from([(
+            "message".into(),
+            PendingReceipt {
+                thread: "thread".into(),
+                draft: "draft".into(),
+                revision: 7,
+                checked: true,
+                repeat: false,
+            },
+        )]);
+        Batch::new(vec![("message".into(), ReceiptStatus::Cancelled)])
+            .drain(&mut pending, &updates);
+        assert!(matches!(
+            receive.try_recv().unwrap(),
+            UiUpdate::Receipt {
+                status: ReceiptStatus::Cancelled,
                 message: None,
                 ..
             }
