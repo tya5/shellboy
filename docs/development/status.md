@@ -4570,3 +4570,14 @@ how history provenance obtains the credential-free replier identity from
 `reply_received` with its `message_id` example, and the CLI reference includes
 the same invocation as the delegation guide. Focused local tests and default /
 all-OS hosted CI are pending; W8 owns review and landing.
+
+## Optional clean redraw (#216, in progress)
+
+The source-symbol EAW inventory and synthetic width-mismatch baseline are in
+[the investigation](../validation/clean-redraw/README.md). The baseline produces
+help residue after close while Ctrl+L cleans it. `ui.clean_redraw` is proposed as
+one strict startup boolean; overlay dismissal reuses Ctrl+L's existing
+clear/resize path. Nested-close, both-value and config-check regressions are being
+validated. Scroll EL/full-row rewriting will be isolated in a separate commit.
+Exact byte measurements, default selection, and CI remain pending. Windows
+hardware/font pixels are unverified; no glyph substitutions are made.

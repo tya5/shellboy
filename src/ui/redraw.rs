@@ -14,6 +14,24 @@ pub(super) fn binding_available(config: &Config) -> bool {
 }
 
 impl UiState {
+    fn overlay_presence(&self) -> u16 {
+        [
+            self.help_visible,
+            self.management.is_some(),
+            self.details.is_some(),
+            self.operations.is_some(),
+            self.models.is_some(),
+            self.queue_popup.visible,
+            self.thread_browser.visible(),
+            self.confirmation.is_some(),
+            self.lifecycle.blocks_input(),
+            self.has_completions(),
+        ]
+        .into_iter()
+        .enumerate()
+        .fold(0, |mask, (bit, visible)| mask | (u16::from(visible) << bit))
+    }
+
     pub(super) fn request_full_redraw(&mut self, key: KeyEvent) -> bool {
         if !key_matches("Ctrl+L", key) || !binding_available(&self.config) {
             return false;
@@ -39,7 +57,9 @@ pub(super) fn draw_terminal<B: Backend>(
     state: &mut UiState,
     links: &SharedLinkSnapshot,
 ) -> Result<(), B::Error> {
-    if state.full_redraw_requested {
+    let overlays = state.overlay_presence();
+    let overlay_closed = state.painted_overlays & !overlays != 0;
+    if state.full_redraw_requested || (state.config.ui.clean_redraw && overlay_closed) {
         // Ratatui's clear() queries the physical cursor and can wait for a DSR
         // reply. Its fullscreen resize path performs the same screen/buffer
         // invalidation without that query. Keep the exact existing viewport;
@@ -54,6 +74,7 @@ pub(super) fn draw_terminal<B: Backend>(
             regions: state.visible_links.clone(),
         };
     })?;
+    state.painted_overlays = overlays;
     state.full_redraw_requested = false;
     Ok(())
 }
@@ -290,3 +311,6 @@ mod tests {
         assert!(!ui.full_redraw_requested);
     }
 }
+
+#[cfg(test)]
+mod clean_tests;

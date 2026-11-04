@@ -31,6 +31,7 @@
 !/docs/validation/conversation-redesign-e.md
 !/docs/validation/conversation-redesign-f.md
 !/docs/validation/manual-terminal.md
+!/docs/validation/clean-redraw/
 !/docs/validation/bench-report-2026-11-03.md
 /scripts/check-review-plan.py
 /scripts/check-models.py

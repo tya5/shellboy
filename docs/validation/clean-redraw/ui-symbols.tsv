@@ -1,0 +1,415 @@
+# revision=36b70a58f9b64ca66b27b21eda5f2dd05e988589 Unicode=15.0.0; source counts include comments/tests
+file	codepoint	symbol	name	category	eaw	class	count
+src/presentation.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	16
+src/presentation.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	2
+src/presentation.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	3
+src/presentation.rs	U+21BB	↻	CLOCKWISE OPEN CIRCLE ARROW	So	N	neutral	1
+src/presentation.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	2
+src/presentation.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	4
+src/presentation.rs	U+250C	┌	BOX DRAWINGS LIGHT DOWN AND RIGHT	So	A	ambiguous	3
+src/presentation.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	2
+src/presentation.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	1
+src/presentation.rs	U+300D	」	RIGHT CORNER BRACKET	Pe	W	wide	1
+src/presentation.rs	U+300F	』	RIGHT WHITE CORNER BRACKET	Pe	W	wide	1
+src/presentation.rs	U+3011	】	RIGHT BLACK LENTICULAR BRACKET	Pe	W	wide	1
+src/presentation.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/presentation.rs	U+FF01	！	FULLWIDTH EXCLAMATION MARK	Po	F	wide	1
+src/presentation.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	3
+src/presentation.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	4
+src/presentation.rs	U+FF1F	？	FULLWIDTH QUESTION MARK	Po	F	wide	1
+src/presentation.rs	U+1F4A1	💡	ELECTRIC LIGHT BULB	So	W	wide	2
+src/presentation/content_filter.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	3
+src/presentation/content_filter.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	6
+src/presentation/content_filter.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	3
+src/presentation/content_filter.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	3
+src/presentation/events.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	14
+src/presentation/events.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	3
+src/presentation/events.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	6
+src/presentation/events.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	3
+src/presentation/fields.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	3
+src/presentation/fields.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	4
+src/presentation/fields.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	7
+src/presentation/fields.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	4
+src/presentation/fields.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	27
+src/presentation/fields.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	27
+src/presentation/messages.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	103
+src/presentation/messages.rs	U+2013	–	EN DASH	Pd	A	ambiguous	7
+src/presentation/messages.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	7
+src/presentation/messages.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	15
+src/presentation/messages.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	3
+src/presentation/messages.rs	U+25B8	▸	BLACK RIGHT-POINTING SMALL TRIANGLE	So	N	neutral	8
+src/presentation/messages.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	8
+src/presentation/messages.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	7
+src/presentation/messages.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	11
+src/presentation/messages.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	11
+src/presentation/projection.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	6
+src/presentation/projection.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	2
+src/presentation/projection/envelopes.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	8
+src/presentation/projection/envelopes.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	5
+src/presentation/projection/limits.rs	U+1F642	🙂	SLIGHTLY SMILING FACE	So	W	wide	1
+src/presentation/rows.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	1
+src/presentation/rows.rs	U+2042	⁂	ASTERISM	Po	N	neutral	1
+src/presentation/rows.rs	U+21B3	↳	DOWNWARDS ARROW WITH TIP RIGHTWARDS	So	N	neutral	2
+src/presentation/rows.rs	U+21BA	↺	ANTICLOCKWISE OPEN CIRCLE ARROW	So	N	neutral	1
+src/presentation/rows.rs	U+21BB	↻	CLOCKWISE OPEN CIRCLE ARROW	So	N	neutral	1
+src/presentation/rows.rs	U+21E5	⇥	RIGHTWARDS ARROW TO BAR	So	N	neutral	2
+src/presentation/rows.rs	U+2298	⊘	CIRCLED DIVISION SLASH	Sm	N	neutral	1
+src/presentation/rows.rs	U+23F5	⏵	BLACK MEDIUM RIGHT-POINTING TRIANGLE	So	N	neutral	2
+src/presentation/rows.rs	U+25B8	▸	BLACK RIGHT-POINTING SMALL TRIANGLE	So	N	neutral	2
+src/presentation/rows.rs	U+25B9	▹	WHITE RIGHT-POINTING SMALL TRIANGLE	So	N	neutral	1
+src/presentation/rows.rs	U+25C9	◉	FISHEYE	So	N	neutral	1
+src/presentation/rows.rs	U+25CC	◌	DOTTED CIRCLE	So	N	neutral	1
+src/presentation/rows.rs	U+25F4	◴	WHITE CIRCLE WITH UPPER LEFT QUADRANT	So	N	neutral	1
+src/presentation/rows.rs	U+25F5	◵	WHITE CIRCLE WITH LOWER LEFT QUADRANT	So	N	neutral	1
+src/presentation/rows.rs	U+25F6	◶	WHITE CIRCLE WITH LOWER RIGHT QUADRANT	So	N	neutral	1
+src/presentation/rows.rs	U+25F7	◷	WHITE CIRCLE WITH UPPER RIGHT QUADRANT	So	N	neutral	1
+src/presentation/rows.rs	U+2713	✓	CHECK MARK	So	N	neutral	1
+src/presentation/rows.rs	U+2717	✗	BALLOT X	So	N	neutral	1
+src/presentation/rows.rs	U+2807	⠇	BRAILLE PATTERN DOTS-123	So	N	neutral	1
+src/presentation/rows.rs	U+280B	⠋	BRAILLE PATTERN DOTS-124	So	N	neutral	1
+src/presentation/rows.rs	U+280F	⠏	BRAILLE PATTERN DOTS-1234	So	N	neutral	1
+src/presentation/rows.rs	U+2819	⠙	BRAILLE PATTERN DOTS-145	So	N	neutral	1
+src/presentation/rows.rs	U+2826	⠦	BRAILLE PATTERN DOTS-236	So	N	neutral	1
+src/presentation/rows.rs	U+2827	⠧	BRAILLE PATTERN DOTS-1236	So	N	neutral	1
+src/presentation/rows.rs	U+2834	⠴	BRAILLE PATTERN DOTS-356	So	N	neutral	1
+src/presentation/rows.rs	U+2838	⠸	BRAILLE PATTERN DOTS-456	So	N	neutral	1
+src/presentation/rows.rs	U+2839	⠹	BRAILLE PATTERN DOTS-1456	So	N	neutral	1
+src/presentation/rows.rs	U+283C	⠼	BRAILLE PATTERN DOTS-3456	So	N	neutral	1
+src/presentation/rows.rs	U+2933	⤳	WAVE ARROW POINTING DIRECTLY RIGHT	Sm	N	neutral	1
+src/presentation/rows.rs	U+2937	⤷	ARROW POINTING DOWNWARDS THEN CURVING RIGHTWARDS	Sm	N	neutral	1
+src/presentation/rows.rs	U+2B26	⬦	WHITE MEDIUM DIAMOND	So	N	neutral	1
+src/presentation/rows.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	1
+src/ui.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	20
+src/ui.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	3
+src/ui.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	1
+src/ui.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	2
+src/ui.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	1
+src/ui.rs	U+21BB	↻	CLOCKWISE OPEN CIRCLE ARROW	So	N	neutral	2
+src/ui.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	2
+src/ui.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	3
+src/ui.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	60
+src/ui.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	5
+src/ui.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	5
+src/ui.rs	U+FF0F	／	FULLWIDTH SOLIDUS	Po	F	wide	1
+src/ui/activity.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	22
+src/ui/activity.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/activity.rs	U+25A0	■	BLACK SQUARE	So	A	ambiguous	2
+src/ui/activity.rs	U+25CC	◌	DOTTED CIRCLE	So	N	neutral	1
+src/ui/activity.rs	U+25CF	●	BLACK CIRCLE	So	A	ambiguous	2
+src/ui/activity.rs	U+2713	✓	CHECK MARK	So	N	neutral	1
+src/ui/activity.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	1
+src/ui/activity.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	13
+src/ui/activity.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	13
+src/ui/activity/i18n_tests.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	1
+src/ui/activity/i18n_tests.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	1
+src/ui/activity/i18n_tests.rs	U+1F642	🙂	SLIGHTLY SMILING FACE	So	W	wide	1
+src/ui/chrome.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	11
+src/ui/chrome.rs	U+00D7	×	MULTIPLICATION SIGN	Sm	A	ambiguous	1
+src/ui/chrome.rs	U+2014	—	EM DASH	Pd	A	ambiguous	2
+src/ui/chrome.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	2
+src/ui/chrome.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	3
+src/ui/chrome.rs	U+2315	⌕	TELEPHONE RECORDER	So	N	neutral	2
+src/ui/chrome.rs	U+25A0	■	BLACK SQUARE	So	A	ambiguous	1
+src/ui/chrome.rs	U+25CC	◌	DOTTED CIRCLE	So	N	neutral	1
+src/ui/chrome.rs	U+2713	✓	CHECK MARK	So	N	neutral	2
+src/ui/chrome.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui/chrome.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	1
+src/ui/chrome.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	1
+src/ui/code_copy.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	10
+src/ui/code_copy.rs	U+200D	‍	ZERO WIDTH JOINER	Cf	N	neutral	5
+src/ui/code_copy.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	2
+src/ui/code_copy.rs	U+1F469	👩	WOMAN	So	W	wide	5
+src/ui/code_copy.rs	U+1F4BB	💻	PERSONAL COMPUTER	So	W	wide	5
+src/ui/composer.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	7
+src/ui/composer.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	1
+src/ui/composer.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	4
+src/ui/composer.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	4
+src/ui/composer.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	3
+src/ui/composer.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	11
+src/ui/composer.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	4
+src/ui/composer.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	4
+src/ui/composer.rs	U+FF0F	／	FULLWIDTH SOLIDUS	Po	F	wide	4
+src/ui/details.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	6
+src/ui/details.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	4
+src/ui/details.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	1
+src/ui/details.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	3
+src/ui/details.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	6
+src/ui/details.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	4
+src/ui/details.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	4
+src/ui/details.rs	U+FF1A	：	FULLWIDTH COLON	Po	F	wide	4
+src/ui/details.rs	U+1F980	🦀	CRAB	So	W	wide	2
+src/ui/draft.rs	U+200D	‍	ZERO WIDTH JOINER	Cf	N	neutral	6
+src/ui/draft.rs	U+1F466	👦	BOY	So	W	wide	2
+src/ui/draft.rs	U+1F467	👧	GIRL	So	W	wide	2
+src/ui/draft.rs	U+1F468	👨	MAN	So	W	wide	2
+src/ui/draft.rs	U+1F469	👩	WOMAN	So	W	wide	2
+src/ui/help.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	4
+src/ui/help.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	1
+src/ui/help.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	10
+src/ui/help.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	6
+src/ui/help.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	14
+src/ui/help.rs	U+2315	⌕	TELEPHONE RECORDER	So	N	neutral	3
+src/ui/help.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	1
+src/ui/help.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	1
+src/ui/help.rs	U+2588	█	FULL BLOCK	So	A	ambiguous	1
+src/ui/help.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	27
+src/ui/help.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	83
+src/ui/help.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	43
+src/ui/help.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	19
+src/ui/help.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	19
+src/ui/help.rs	U+FF0F	／	FULLWIDTH SOLIDUS	Po	F	wide	6
+src/ui/help.rs	U+FF1A	：	FULLWIDTH COLON	Po	F	wide	1
+src/ui/i18n.rs	U+00A7	§	SECTION SIGN	Po	A	ambiguous	1
+src/ui/i18n.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	2
+src/ui/i18n.rs	U+00D7	×	MULTIPLICATION SIGN	Sm	A	ambiguous	1
+src/ui/i18n.rs	U+2013	–	EN DASH	Pd	A	ambiguous	1
+src/ui/i18n.rs	U+2014	—	EM DASH	Pd	A	ambiguous	1
+src/ui/i18n.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	1
+src/ui/i18n.rs	U+2190	←	LEFTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/i18n.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	1
+src/ui/i18n.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/i18n.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	1
+src/ui/i18n.rs	U+2265	≥	GREATER-THAN OR EQUAL TO	Sm	A	ambiguous	1
+src/ui/i18n.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	1
+src/ui/i18n.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	1
+src/ui/i18n.rs	U+250A	┊	BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL	So	A	ambiguous	1
+src/ui/i18n.rs	U+250C	┌	BOX DRAWINGS LIGHT DOWN AND RIGHT	So	A	ambiguous	1
+src/ui/i18n.rs	U+2510	┐	BOX DRAWINGS LIGHT DOWN AND LEFT	So	A	ambiguous	1
+src/ui/i18n.rs	U+2514	└	BOX DRAWINGS LIGHT UP AND RIGHT	So	A	ambiguous	1
+src/ui/i18n.rs	U+2518	┘	BOX DRAWINGS LIGHT UP AND LEFT	So	A	ambiguous	1
+src/ui/i18n.rs	U+251C	├	BOX DRAWINGS LIGHT VERTICAL AND RIGHT	So	A	ambiguous	1
+src/ui/i18n.rs	U+2524	┤	BOX DRAWINGS LIGHT VERTICAL AND LEFT	So	A	ambiguous	1
+src/ui/i18n.rs	U+252C	┬	BOX DRAWINGS LIGHT DOWN AND HORIZONTAL	So	A	ambiguous	1
+src/ui/i18n.rs	U+2534	┴	BOX DRAWINGS LIGHT UP AND HORIZONTAL	So	A	ambiguous	1
+src/ui/i18n.rs	U+253C	┼	BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL	So	A	ambiguous	1
+src/ui/i18n.rs	U+2588	█	FULL BLOCK	So	A	ambiguous	1
+src/ui/i18n.rs	U+25A0	■	BLACK SQUARE	So	A	ambiguous	1
+src/ui/i18n.rs	U+25B8	▸	BLACK RIGHT-POINTING SMALL TRIANGLE	So	N	neutral	1
+src/ui/i18n.rs	U+25CF	●	BLACK CIRCLE	So	A	ambiguous	1
+src/ui/i18n.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	2
+src/ui/i18n.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	2
+src/ui/i18n.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	3
+src/ui/i18n.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	3
+src/ui/i18n.rs	U+FF1F	？	FULLWIDTH QUESTION MARK	Po	F	wide	1
+src/ui/i18n.rs	U+1F600	😀	GRINNING FACE	So	W	wide	1
+src/ui/input.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	9
+src/ui/input.rs	U+200D	‍	ZERO WIDTH JOINER	Cf	N	neutral	3
+src/ui/input.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/input.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	1
+src/ui/input.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	2
+src/ui/input.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	2
+src/ui/input.rs	U+1F469	👩	WOMAN	So	W	wide	4
+src/ui/input.rs	U+1F4BB	💻	PERSONAL COMPUTER	So	W	wide	4
+src/ui/input.rs	U+1F600	😀	GRINNING FACE	So	W	wide	2
+src/ui/inspection.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui/key_hints.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	22
+src/ui/key_hints.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	10
+src/ui/key_hints.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/key_hints.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	10
+src/ui/key_hints.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	2
+src/ui/key_hints.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	2
+src/ui/key_hints.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	1
+src/ui/key_hints.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	1
+src/ui/live_work.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	1
+src/ui/live_work.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	3
+src/ui/live_work.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	2
+src/ui/live_work.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/live_work.rs	U+21B3	↳	DOWNWARDS ARROW WITH TIP RIGHTWARDS	So	N	neutral	3
+src/ui/live_work.rs	U+22EF	⋯	MIDLINE HORIZONTAL ELLIPSIS	Sm	N	neutral	3
+src/ui/live_work.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	13
+src/ui/live_work.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	2
+src/ui/live_work.rs	U+2514	└	BOX DRAWINGS LIGHT UP AND RIGHT	So	A	ambiguous	7
+src/ui/live_work.rs	U+251C	├	BOX DRAWINGS LIGHT VERTICAL AND RIGHT	So	A	ambiguous	6
+src/ui/live_work.rs	U+25C9	◉	FISHEYE	So	N	neutral	7
+src/ui/live_work.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	1
+src/ui/live_work.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	1
+src/ui/management.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	3
+src/ui/management.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	2
+src/ui/management.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	1
+src/ui/management.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	4
+src/ui/management.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	1
+src/ui/management.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	12
+src/ui/management.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui/management.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	5
+src/ui/management.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	5
+src/ui/management.rs	U+FF0F	／	FULLWIDTH SOLIDUS	Po	F	wide	1
+src/ui/message_queue.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	26
+src/ui/message_queue.rs	U+200D	‍	ZERO WIDTH JOINER	Cf	N	neutral	6
+src/ui/message_queue.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	1
+src/ui/message_queue.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	2
+src/ui/message_queue.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	2
+src/ui/message_queue.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	4
+src/ui/message_queue.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	1
+src/ui/message_queue.rs	U+FF1F	？	FULLWIDTH QUESTION MARK	Po	F	wide	2
+src/ui/message_queue.rs	U+1F469	👩	WOMAN	So	W	wide	6
+src/ui/message_queue.rs	U+1F4BB	💻	PERSONAL COMPUTER	So	W	wide	6
+src/ui/models.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	1
+src/ui/models.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	2
+src/ui/models.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/models.rs	U+25CF	●	BLACK CIRCLE	So	A	ambiguous	3
+src/ui/motion.rs	U+23F5	⏵	BLACK MEDIUM RIGHT-POINTING TRIANGLE	So	N	neutral	1
+src/ui/motion.rs	U+280B	⠋	BRAILLE PATTERN DOTS-124	So	N	neutral	1
+src/ui/motion.rs	U+2819	⠙	BRAILLE PATTERN DOTS-145	So	N	neutral	3
+src/ui/observation_notice.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui/operations.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	4
+src/ui/operations.rs	U+201C	“	LEFT DOUBLE QUOTATION MARK	Pi	A	ambiguous	1
+src/ui/operations.rs	U+201D	”	RIGHT DOUBLE QUOTATION MARK	Pf	A	ambiguous	1
+src/ui/operations.rs	U+2190	←	LEFTWARDS ARROW	Sm	A	ambiguous	2
+src/ui/operations.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	4
+src/ui/operations.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	6
+src/ui/operations.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	4
+src/ui/operations.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	5
+src/ui/operations.rs	U+300C	「	LEFT CORNER BRACKET	Ps	W	wide	1
+src/ui/operations.rs	U+300D	」	RIGHT CORNER BRACKET	Pe	W	wide	1
+src/ui/operations.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	11
+src/ui/operations.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	109
+src/ui/operations.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	109
+src/ui/operations/client_forms.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	6
+src/ui/operations/client_forms.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	19
+src/ui/operations/client_forms.rs	U+301C	〜	WAVE DASH	Pd	W	wide	7
+src/ui/operations/client_forms.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	4
+src/ui/operations/client_forms.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	23
+src/ui/operations/client_forms.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	23
+src/ui/operations/client_forms.rs	U+FF0F	／	FULLWIDTH SOLIDUS	Po	F	wide	3
+src/ui/operations/metadata.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	121
+src/ui/operations/metadata.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	89
+src/ui/operations/metadata.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	301
+src/ui/operations/metadata.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	48
+src/ui/operations/metadata.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	28
+src/ui/operations/metadata.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	28
+src/ui/operations/metadata.rs	U+FF0F	／	FULLWIDTH SOLIDUS	Po	F	wide	8
+src/ui/overlay.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	4
+src/ui/overlay.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	4
+src/ui/overlay.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	4
+src/ui/overlay.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	3
+src/ui/overlay.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	10
+src/ui/overlay.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	3
+src/ui/overlay.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	1
+src/ui/overlay.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	1
+src/ui/overlay.rs	U+FF1F	？	FULLWIDTH QUESTION MARK	Po	F	wide	3
+src/ui/popup.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	2
+src/ui/popup.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	1
+src/ui/popup.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	1
+src/ui/popup.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	3
+src/ui/popup.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	3
+src/ui/popup.rs	U+250C	┌	BOX DRAWINGS LIGHT DOWN AND RIGHT	So	A	ambiguous	2
+src/ui/popup.rs	U+2588	█	FULL BLOCK	So	A	ambiguous	2
+src/ui/popup/reader.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	1
+src/ui/popup/reader.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui/presentation.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	8
+src/ui/presentation.rs	U+00D7	×	MULTIPLICATION SIGN	Sm	A	ambiguous	4
+src/ui/presentation.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	1
+src/ui/presentation.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	1
+src/ui/presentation.rs	U+2042	⁂	ASTERISM	Po	N	neutral	4
+src/ui/presentation.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	3
+src/ui/presentation.rs	U+2315	⌕	TELEPHONE RECORDER	So	N	neutral	3
+src/ui/presentation.rs	U+2318	⌘	PLACE OF INTEREST SIGN	So	N	neutral	1
+src/ui/presentation.rs	U+23F5	⏵	BLACK MEDIUM RIGHT-POINTING TRIANGLE	So	N	neutral	1
+src/ui/presentation.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	4
+src/ui/presentation.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	2
+src/ui/presentation.rs	U+2503	┃	BOX DRAWINGS HEAVY VERTICAL	So	A	ambiguous	1
+src/ui/presentation.rs	U+250A	┊	BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL	So	A	ambiguous	1
+src/ui/presentation.rs	U+2514	└	BOX DRAWINGS LIGHT UP AND RIGHT	So	A	ambiguous	2
+src/ui/presentation.rs	U+251C	├	BOX DRAWINGS LIGHT VERTICAL AND RIGHT	So	A	ambiguous	2
+src/ui/presentation.rs	U+25B8	▸	BLACK RIGHT-POINTING SMALL TRIANGLE	So	N	neutral	6
+src/ui/presentation.rs	U+25B9	▹	WHITE RIGHT-POINTING SMALL TRIANGLE	So	N	neutral	3
+src/ui/presentation.rs	U+25CC	◌	DOTTED CIRCLE	So	N	neutral	5
+src/ui/presentation.rs	U+2713	✓	CHECK MARK	So	N	neutral	2
+src/ui/presentation.rs	U+2717	✗	BALLOT X	So	N	neutral	1
+src/ui/presentation.rs	U+27E1	⟡	WHITE CONCAVE-SIDED DIAMOND	Sm	N	neutral	2
+src/ui/presentation.rs	U+2B26	⬦	WHITE MEDIUM DIAMOND	So	N	neutral	1
+src/ui/presentation.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	1
+src/ui/presentation.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	11
+src/ui/presentation.rs	U+300C	「	LEFT CORNER BRACKET	Ps	W	wide	1
+src/ui/presentation.rs	U+300D	」	RIGHT CORNER BRACKET	Pe	W	wide	1
+src/ui/presentation.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	1
+src/ui/presentation.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	7
+src/ui/presentation.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	7
+src/ui/presentation.rs	U+1F642	🙂	SLIGHTLY SMILING FACE	So	W	wide	6
+src/ui/presentation/i18n_tests.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	1
+src/ui/presentation/i18n_tests.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	1
+src/ui/presentation/i18n_tests.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	1
+src/ui/presentation/i18n_tests.rs	U+1F642	🙂	SLIGHTLY SMILING FACE	So	W	wide	8
+src/ui/send_tests.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui/startup.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	3
+src/ui/startup.rs	U+25CB	○	WHITE CIRCLE	So	A	ambiguous	3
+src/ui/startup.rs	U+25CF	●	BLACK CIRCLE	So	A	ambiguous	3
+src/ui/startup.rs	U+25D0	◐	CIRCLE WITH LEFT HALF BLACK	So	A	ambiguous	2
+src/ui/startup.rs	U+2839	⠹	BRAILLE PATTERN DOTS-1456	So	N	neutral	1
+src/ui/startup.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	1
+src/ui/startup.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	3
+src/ui/terminal_input/parse.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	1
+src/ui/text_width.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	12
+src/ui/text_width.rs	U+00D7	×	MULTIPLICATION SIGN	Sm	A	ambiguous	1
+src/ui/text_width.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	1
+src/ui/text_width.rs	U+203A	›	SINGLE RIGHT-POINTING ANGLE QUOTATION MARK	Pf	N	neutral	2
+src/ui/text_width.rs	U+2190	←	LEFTWARDS ARROW	Sm	A	ambiguous	2
+src/ui/text_width.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	2
+src/ui/text_width.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	4
+src/ui/text_width.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	2
+src/ui/text_width.rs	U+21B3	↳	DOWNWARDS ARROW WITH TIP RIGHTWARDS	So	N	neutral	2
+src/ui/text_width.rs	U+22EF	⋯	MIDLINE HORIZONTAL ELLIPSIS	Sm	N	neutral	1
+src/ui/text_width.rs	U+2315	⌕	TELEPHONE RECORDER	So	N	neutral	1
+src/ui/text_width.rs	U+2318	⌘	PLACE OF INTEREST SIGN	So	N	neutral	1
+src/ui/text_width.rs	U+23FB	⏻	POWER SYMBOL	So	N	neutral	1
+src/ui/text_width.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	3
+src/ui/text_width.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	2
+src/ui/text_width.rs	U+250C	┌	BOX DRAWINGS LIGHT DOWN AND RIGHT	So	A	ambiguous	1
+src/ui/text_width.rs	U+2510	┐	BOX DRAWINGS LIGHT DOWN AND LEFT	So	A	ambiguous	1
+src/ui/text_width.rs	U+2514	└	BOX DRAWINGS LIGHT UP AND RIGHT	So	A	ambiguous	2
+src/ui/text_width.rs	U+2518	┘	BOX DRAWINGS LIGHT UP AND LEFT	So	A	ambiguous	1
+src/ui/text_width.rs	U+251C	├	BOX DRAWINGS LIGHT VERTICAL AND RIGHT	So	A	ambiguous	2
+src/ui/text_width.rs	U+2524	┤	BOX DRAWINGS LIGHT VERTICAL AND LEFT	So	A	ambiguous	1
+src/ui/text_width.rs	U+252C	┬	BOX DRAWINGS LIGHT DOWN AND HORIZONTAL	So	A	ambiguous	1
+src/ui/text_width.rs	U+2534	┴	BOX DRAWINGS LIGHT UP AND HORIZONTAL	So	A	ambiguous	1
+src/ui/text_width.rs	U+253C	┼	BOX DRAWINGS LIGHT VERTICAL AND HORIZONTAL	So	A	ambiguous	1
+src/ui/text_width.rs	U+25C9	◉	FISHEYE	So	N	neutral	1
+src/ui/text_width.rs	U+2764	❤	HEAVY BLACK HEART	So	N	neutral	1
+src/ui/text_width.rs	U+27E1	⟡	WHITE CONCAVE-SIDED DIAMOND	Sm	N	neutral	1
+src/ui/text_width.rs	U+1F469	👩	WOMAN	So	W	wide	1
+src/ui/text_width.rs	U+1F4BB	💻	PERSONAL COMPUTER	So	W	wide	1
+src/ui/thread_deletion.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	8
+src/ui/thread_deletion.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	4
+src/ui/thread_deletion.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	4
+src/ui/thread_deletion.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	4
+src/ui/thread_deletion.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	25
+src/ui/threads.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	81
+src/ui/threads.rs	U+200D	‍	ZERO WIDTH JOINER	Cf	N	neutral	9
+src/ui/threads.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	2
+src/ui/threads.rs	U+2190	←	LEFTWARDS ARROW	Sm	A	ambiguous	4
+src/ui/threads.rs	U+2191	↑	UPWARDS ARROW	Sm	A	ambiguous	5
+src/ui/threads.rs	U+2192	→	RIGHTWARDS ARROW	Sm	A	ambiguous	6
+src/ui/threads.rs	U+2193	↓	DOWNWARDS ARROW	Sm	A	ambiguous	5
+src/ui/threads.rs	U+21BB	↻	CLOCKWISE OPEN CIRCLE ARROW	So	N	neutral	11
+src/ui/threads.rs	U+2500	─	BOX DRAWINGS LIGHT HORIZONTAL	So	A	ambiguous	2
+src/ui/threads.rs	U+2502	│	BOX DRAWINGS LIGHT VERTICAL	So	A	ambiguous	3
+src/ui/threads.rs	U+250C	┌	BOX DRAWINGS LIGHT DOWN AND RIGHT	So	A	ambiguous	1
+src/ui/threads.rs	U+2510	┐	BOX DRAWINGS LIGHT DOWN AND LEFT	So	A	ambiguous	1
+src/ui/threads.rs	U+2514	└	BOX DRAWINGS LIGHT UP AND RIGHT	So	A	ambiguous	2
+src/ui/threads.rs	U+2518	┘	BOX DRAWINGS LIGHT UP AND LEFT	So	A	ambiguous	1
+src/ui/threads.rs	U+251C	├	BOX DRAWINGS LIGHT VERTICAL AND RIGHT	So	A	ambiguous	1
+src/ui/threads.rs	U+25C9	◉	FISHEYE	So	N	neutral	1
+src/ui/threads.rs	U+25CF	●	BLACK CIRCLE	So	A	ambiguous	2
+src/ui/threads.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	2
+src/ui/threads.rs	U+3002	。	IDEOGRAPHIC FULL STOP	Po	W	wide	16
+src/ui/threads.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	9
+src/ui/threads.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	9
+src/ui/threads.rs	U+1F466	👦	BOY	So	W	wide	3
+src/ui/threads.rs	U+1F467	👧	GIRL	So	W	wide	3
+src/ui/threads.rs	U+1F468	👨	MAN	So	W	wide	3
+src/ui/threads.rs	U+1F469	👩	WOMAN	So	W	wide	3
+src/ui/threads.rs	U+1F642	🙂	SLIGHTLY SMILING FACE	So	W	wide	2
+src/ui/view.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	32
+src/ui/view.rs	U+2026	…	HORIZONTAL ELLIPSIS	Po	A	ambiguous	2
+src/ui/view.rs	U+3001	、	IDEOGRAPHIC COMMA	Po	W	wide	1
+src/ui/view.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	3
+src/ui/view.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	5
+src/ui/view.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	5
+src/ui/view.rs	U+FF1A	：	FULLWIDTH COLON	Po	F	wide	1
+src/ui/watch.rs	U+00B7	·	MIDDLE DOT	Po	A	ambiguous	18
+src/ui/watch.rs	U+2265	≥	GREATER-THAN OR EQUAL TO	Sm	A	ambiguous	3
+src/ui/watch.rs	U+25CF	●	BLACK CIRCLE	So	A	ambiguous	2
+src/ui/watch.rs	U+30FB	・	KATAKANA MIDDLE DOT	Po	W	wide	2
+src/ui/watch.rs	U+FF08	（	FULLWIDTH LEFT PARENTHESIS	Ps	F	wide	3
+src/ui/watch.rs	U+FF09	）	FULLWIDTH RIGHT PARENTHESIS	Pe	F	wide	3

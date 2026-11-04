@@ -9610,3 +9610,14 @@ No real data, provider traffic or installed-binary change is part of validation.
 - Verified from the adopted reply design: the receiving Thread's reply body is an ordinary `user` node; its node kind is intentional. Provenance sender is being extended to expose the credential-free `reply.by` fact for replies without a delivery receipt.
 - Added `reply_received` / `message_id` to `wait --help`, plus a matching help regression test; CLI reference example now matches delegation documentation.
 - Focused provenance/help tests, doc check, standard checks, pushed-tip default CI, and pushed-tip all-OS CI remain pending.
+
+## Terminal residue (#216, synthetic investigation in progress)
+
+macOS arm64, Rust through rust-slot: the first synthetic actual-help test passed
+with a two-cell terminal proxy for the app's one-cell arrow, exposing visible
+letters left after close in the baseline. Initial compile errors in the new
+harness (private writer accessor and borrowed contents) were corrected; they are
+not validation. A normalized cell comparison, both-value regression and nested
+help-over-threads close test are now running. See [investigation](clean-redraw/README.md)
+and source-symbol inventory there. No Windows hardware/font-pixel validation,
+byte-cost conclusion or CI success is claimed yet.

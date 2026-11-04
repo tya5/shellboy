@@ -596,3 +596,16 @@ fn config_check_rejects_invalid_summary_limits_before_any_catalog_request() {
             .contains("compaction")
     );
 }
+
+#[test]
+fn clean_redraw_config_check_accepts_both_booleans_and_rejects_strings() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("fixture.toml");
+    for value in ["true", "false", "'true'"] {
+        std::fs::write(&path, format!("{}\n[ui]\nclean_redraw={value}\n",
+            configuration("http://127.0.0.1:1/v1", false))).unwrap();
+        let (ok, _, text) = run(command(root.path()).arg("--config").arg(&path).args(["config", "check"]));
+        assert_eq!(ok, value != "'true'", "{text}");
+    }
+    assert!(!root.path().join("xdg-data").exists(), "config check must not start an owner");
+}
