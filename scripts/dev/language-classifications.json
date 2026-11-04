@@ -6353,5 +6353,45 @@
     "category": "a",
     "reason": "Japanese saved recovery counts row in recovery_lines; the same function formats the English Request saved row for UiLanguage::En.",
     "source_tokens_sha256": "5c43798a79fa662661fe6450d9633a4d814f5c8453aff2533e3bf4e443e416ff"
+  },
+  "src/ui.rs:49d819cd993ade59:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:bb218f39139f8fc9:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:59639bbf3ec67029:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:dc05d06eedde6a37:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:86b86ee263bb3e7c:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:608fe041d34bd512:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:6277ca836a850b9f:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
+  },
+  "src/ui.rs:9d0518dbe7e7b83c:1": {
+    "category": "a",
+    "reason": "Japanese ReceiptStatus label; the same exhaustive ReceiptStatus enum is rendered by receipt_english in English mode.",
+    "source_tokens_sha256": "c859011042a1420f4f97d2bdf9dfd24c09924b7041af472aeffeff33b5e3e955"
   }
 }
