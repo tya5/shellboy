@@ -30,14 +30,17 @@ fn fixture(nodes: Vec<UiNode>, width: u16, height: u16) -> (UiState, Terminal<Te
         first_ordinal: 0,
         selection_revision: 0,
     });
-    (ui, Terminal::new(TestBackend::new(width, height)).unwrap())
+    (
+        ui,
+        Terminal::new(TestBackend::new(width, height + 5)).unwrap(),
+    )
 }
 fn rows(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
     // Empty composer: one header, body with one-cell padding, three composer
-    // rows, two footer rows, plus the fixed five-row owned-work section (#131).
-    (2..buffer.area.height - 11)
+    // rows, two footer rows, plus both fixed five-row regions (#131/#218).
+    (2..buffer.area.height - 16)
         .map(|y| {
             let mut row = String::new();
             let mut x = 1;

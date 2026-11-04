@@ -9768,3 +9768,23 @@ used for this feature. Final locked test compilation and strict all-target
 Clippy pass with warnings denied; formatting, Python metrics tests (2) and
 language-audit helper tests (28) also pass. CI and W8 landing remain separate
 gates.
+
+### #218 First Final-Tip CI Failure And Fixture Correction
+
+Default CI `41884515961`, SHA `1ba45e4541224b9275ebcb104d9f8a34611da5b7`,
+fails actual Ubuntu assertions: seven library input/scroll cases and twelve
+integration cases. Most UI/scroll cases still use old history-only bounds or
+small frames; corrected fixtures preserve the old viewport while adding the new
+five-row held region. Folded-input history heights intentionally change by five
+inside the same 24-row screen. All row/page/anchor/preview assertions remain.
+Two shell-output failures (empty leading-dash stdout and slow-database stdout
+835584/1048576 bytes) are separately unclassified. The prior local focused tests
+did not cover these suites. No all-OS dispatch, rerun, final CI success or landing
+is claimed. Local corrected-fixture UI/scroll/shell checks are in progress.
+
+Corrected-fixture local macOS arm64 run succeeds: library scroll-characterization
+19, input 4, integration scrolling 6, integration UI 88 (1 ignored), and each of
+the two shell-output regressions 1. All retain their original exact row/page,
+preview/source identity or output-byte assertions. Shell cases passing on macOS
+does not explain Linux failures or establish flakiness. No shell source changes.
+Region source metrics and the original golden baseline are unchanged.
