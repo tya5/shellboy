@@ -3313,3 +3313,9 @@ correlated call/result probes to a covering primary-key seek over the candidate
 marker. This measures candidate enumeration only, not the entire
 `interrupted_work` stage or startup; the W9 5.940 s query and 6.606 s stage
 remain distinct historical measurements. The snapshot was deleted after use.
+A second one-copy measurement used a read-only `VACUUM INTO` snapshot of the
+local schema-27 database (59,471 groups). Legacy candidate enumeration returned
+zero candidates in 0.598 s on the first pass and 0.206 s warm. Applying migration
+28 took 0.141 s; marker enumeration returned zero candidates in 55 microseconds
+on the first pass and 12 microseconds warm. The temporary copy was deleted. This
+is still candidate enumeration, not full-stage timing.

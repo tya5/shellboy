@@ -4633,11 +4633,16 @@ maintained candidate marker. Schema migration 28 backfills existing databases;
 fresh schema installs the same triggers. Design and tests cover crash atomicity,
 legacy rows, candidate equivalence, and bounded keyset enumeration. Default CI
 41876622989 passed on pre-rebase SHA `3fdaee53565d822a666ffa90f9e743e1f55052c2`.
-All-OS run 41878748584 attempt 3 failed only on Ubuntu integration tests unrelated
-to tool-group recovery; Windows and macOS passed. Attempt 4 was started on the
-same SHA and is pending. Current main CI 41886037207 passed on
+All-OS run 41878748584 attempts 2-4 failed only on two Ubuntu integration
+tests (`slow_database_batches_binary_shell_output_without_losing_natural_exit_tail`
+and `leading_dash_command_is_a_script_not_a_bash_option`); Windows and macOS
+passed. Current main CI 41886037207 passed on
 `44acf9555bdc4d3b5c5c6f4bf82ed398c9aa34b3`, so the two recurring Ubuntu test
 failures did not reproduce on that baseline. The branch has been rebased onto
-that main commit; final-tip CI remains pending. Snapshot timings cover candidate
-enumeration only, not full `interrupted_work` stage latency. The original
-snapshot was deleted, and its source database was not found in the task tree.
+that main commit; final-tip CI remains pending. A later read-only snapshot of
+the local schema-27 database (59,471 groups)
+measured legacy candidate enumeration at 0.598 s on the first pass and 0.206 s
+warm; after migration 28, marker enumeration took 55 microseconds and 12
+microseconds, with zero candidates. Migration took 0.141 s and the temporary
+snapshot was deleted. These figures cover candidate enumeration, not full
+`interrupted_work` stage latency. Final-tip default and all-OS CI remain pending.

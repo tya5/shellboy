@@ -9690,10 +9690,16 @@ one-time backfill. On one 3.4 GiB read-only `VACUUM INTO` snapshot (57,465 group
 0.238/0.354 s warm; after migration, marker enumeration measured 40 microseconds
 cold and 8-11 microseconds warm with zero candidates. This is candidate
 enumeration only, not full `interrupted_work` stage latency. The snapshot was
-deleted; the source DB was not found in the task tree. Default CI 41876622989
-passed on pre-rebase SHA `3fdaee53565d822a666ffa90f9e743e1f55052c2`. All-OS CI
-41878748584 attempt 3 failed on two Ubuntu integration tests unrelated to this
-change; Windows and macOS passed. Attempt 4 is running on the same SHA. Main CI
+deleted. A second read-only `VACUUM INTO` snapshot from the local schema-27
+database contained 59,471 groups. On that same copy, legacy full-predicate
+keyset enumeration found zero candidates and took 0.598 s on the first pass and
+0.206 s warm. Applying migration 28 took 0.141 s; marker enumeration also found
+zero candidates and took 55 microseconds on the first pass and 12 microseconds
+warm. That temporary copy was deleted. These are candidate-enumeration timings,
+not full `interrupted_work` stage timings. Default CI 41876622989 passed on
+pre-rebase SHA `3fdaee53565d822a666ffa90f9e743e1f55052c2`. All-OS CI
+41878748584 attempts 2-4 failed on the same two unrelated Ubuntu integration
+tests; Windows and macOS passed. Main CI
 41886037207 passed on `44acf9555bdc4d3b5c5c6f4bf82ed398c9aa34b3`; the recurring
 Ubuntu tests passed on that baseline. The branch has been rebased onto that tip;
 final-tip default and all-OS CI are pending. Full-stage before/after measurement

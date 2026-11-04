@@ -75,6 +75,13 @@ INTO snapshot (57,465 groups), candidate enumeration measured 1.031 s cold and
 measured 40 microseconds cold and 8-11 microseconds warm with zero candidates.
 This is candidate-discovery work only, not a full-stage or startup timing claim;
 the snapshot was deleted after measurement.
+A second read-only `VACUUM INTO` copy of the local schema-27 database contained
+59,471 groups. On the same copy, the legacy full-predicate keyset enumeration
+found zero candidates and took 0.598 s on its first pass and 0.206 s warm. After
+migration 28 (0.141 s), marker enumeration found zero candidates and took 55
+microseconds on its first pass and 12 microseconds warm. That copy was deleted.
+These measurements still cover candidate enumeration only, not the full
+`interrupted_work` stage or startup.
 
 No separate worker, queue, Core event, dependency or paid indexing request is
 introduced. Actual SQLite/I/O failures, missing global root_revision, savepoint
