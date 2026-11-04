@@ -2,9 +2,10 @@
 use super::*;
 use crate::ui::text_width::glyphs;
 pub(super) use glyphs::numbered_branch;
+use ratatui::style::Modifier;
 
 /// Immutable configuration shared by independently focused UI regions.
-/// Domain owners retain selected identities, snapshots, clocks and actions.
+/// Domain owners retain payloads, snapshots, clocks and actions.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct RegionLayout {
     capacity: usize,
@@ -198,6 +199,7 @@ pub(super) struct RegionState<K> {
     pub selected: Option<K>,
     pub area: Option<Rect>,
     pub visible_rows: usize,
+    pub displayed_keys: Vec<K>,
     pub collapsed: bool,
     capacity: usize,
 }
@@ -209,6 +211,7 @@ impl<K> Default for RegionState<K> {
             selected: None,
             area: None,
             visible_rows: 0,
+            displayed_keys: Vec::new(),
             collapsed: false,
             capacity: 0,
         }
@@ -333,5 +336,42 @@ mod state_tests {
         state.configure(false, 3);
         state.set_area(Rect::new(4, 5, 30, 0), 4, true);
         assert_eq!(state.hit(4, 5), RegionHit::Outside);
+    }
+}
+
+/// Focus is visible even in a no-color terminal, without adding a caret glyph.
+pub(super) fn selection_style(selected: bool) -> Style {
+    if selected {
+        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::default()
+    }
+}
+
+/// Domain-provided facts; clipping, alignment, palette and focus are shared.
+pub(super) struct RegionRow<'a> {
+    pub prefix: String,
+    pub label: &'a str,
+    pub metadata: &'a str,
+    pub overflow: &'a str,
+    pub selected: bool,
+    pub metadata_style: Style,
+}
+impl RegionRow<'_> {
+    pub fn paint(self, width: u16, palette: theme::Palette) -> Line<'static> {
+        let (label, gap, right) = row_columns(
+            usize::from(width),
+            &self.prefix,
+            self.label,
+            self.metadata,
+            self.overflow,
+        );
+        Line::from(vec![
+            Span::styled(self.prefix, palette.live_work()),
+            Span::styled(label, palette.live_work_content()),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(right, self.metadata_style),
+        ])
+        .style(selection_style(self.selected))
     }
 }

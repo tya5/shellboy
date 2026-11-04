@@ -4626,3 +4626,28 @@ and cursor continuation. Focused macOS tests passed (2/2), and a clean
 `cargo check --tests` passed. Formatting, diff and 105-suite layout checks pass.
 Push and default/all-OS CI remain pending. CLI
 reference, English/Japanese User Guides and Agent Guide updated.
+## #218 Held Input Behavior In Progress
+
+The visually unchanged shared-region checkpoints `07f78f2` and `74cddc5` have
+passed default CI (`41868419181` / `41873034564`). The subsequent behavior stage
+adds bounded saved-origin/completion facts to current-input reads, a persistent
+held-input region, shared row painting/focus styles, independent strict
+`ui.held_input_rows`, stable displayed IDs and existing asynchronous source/status/
+cancellation paths. User/configuration/TUI guides describe the new controls.
+Old compact painting helpers remain until the separate cleanup stage.
+
+Local synthetic checks currently pass 11 held-region, 22 saved-input UI,
+12 key-hint and 26 overlay tests. Language audit still reports the existing
+1215 pending literals (not a zero-pending audit); its 28 helper tests pass.
+The original live-work fingerprint remains pinned: after explicitly asserting
+and reversing only the approved focus delta and canonicalizing equivalent
+empty cells, all 864 cases match the unchanged original digest. A temporary
+per-cell comparison with the checkpoint renderer confirmed that the earlier
+Debug mismatch was `None` versus `Some(" ")`, not a visible/style difference.
+That temporary renderer is removed; the standalone live-work 33, held 11,
+shared-region 3, queue 22, worker 10 and strict held-row config integration tests
+pass, as does locked test compilation. The five disconnected old compact helpers
+still warn as unused until their separate cleanup. The behavior checkpoint has
+no pushed-commit CI result yet. Cleanup, final-tip default/all-OS CI, final
+measurements and W8 review/integration remain outstanding. No Windows font-pixel
+claim is made.

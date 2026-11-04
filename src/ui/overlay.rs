@@ -248,7 +248,8 @@ impl UiState {
                 if self.history_mouse_active()
                     && self.top_overlay().is_none()
                     && mouse.kind == MouseEventKind::Down(event::MouseButton::Left)
-                    && self.live_work_click(mouse.column, mouse.row) =>
+                    && (self.live_work_click(mouse.column, mouse.row)
+                        || self.held_input_click(mouse.column, mouse.row)) =>
             {
                 vec![]
             }
@@ -331,8 +332,11 @@ impl UiState {
             && key.modifiers == KeyModifiers::ALT
             && super::live_work::section_key_available(&self.config)
         {
-            self.toggle_live_work_section();
+            self.toggle_focused_region();
             return vec![];
+        }
+        if let Some(actions) = self.region_key(key) {
+            return actions;
         }
         if let Some(actions) = self.live_work_key(key) {
             return actions;

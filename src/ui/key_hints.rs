@@ -204,6 +204,7 @@ pub(super) enum Context {
     HistoryNotice,
     HistoryNoticeGroup,
     LiveWork,
+    HeldInput,
     Selection,
     Completion,
     Details,
@@ -231,6 +232,7 @@ impl Context {
             Self::HistoryNotice => &[FollowNotice, Copy, Original],
             Self::HistoryNoticeGroup => &[Toggle, Copy, Original],
             Self::LiveWork => &[Toggle, Back],
+            Self::HeldInput => &[Original, Back],
             Self::Selection => &[SelectionBack, LongCopy],
             Self::Completion => &[Move, Complete, Back],
             Self::Details => &[Original, Copy, Back],
@@ -423,6 +425,7 @@ impl UiState {
                 _ => Context::History,
             },
             None if self.view().live_work.region.active => Context::LiveWork,
+            None if self.view().held_input.active => Context::HeldInput,
             None if self.has_completions() => Context::Completion,
             None if self
                 .view()

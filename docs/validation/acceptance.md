@@ -9678,3 +9678,32 @@ suites). A serialized clean `cargo check --tests` also passed.
 Grouped model-attempt fields retain their existing shape; summary and combined
 counters are additive. Bilingual TUI labels and CLI/User/Agent docs are updated.
 Rebase, push and default/all-OS CI remain pending.
+## #218 Held Input Behavior: Partial Local Evidence
+
+Environment: macOS arm64, isolated task worktree, locked dependencies, local
+Rust commands through the sandbox rust-slot wrapper; synthetic buffers and
+fixtures only. Saved-input worker tests passed 10 cases, including explicit
+sender-kind classification and completion-reservation/recovery/context changes.
+The behavior UI currently passes 11 held-region cases (empty EN/JA headings,
+fixed geometry, live-to-held focus cycle, popup ownership, saved-ID source/status,
+painted-ID cancellation across refresh, no-color focus, bounded accepting drafts,
+and width/time handling), 22 queue regressions, 12 key-hint and 26 overlay tests.
+These are not a full standard-check or final-feature CI result.
+
+The unchanged extraction had the original 864-case cell/style fingerprint
+`cce04517ab437b25`. That value is not regenerated for the behavior change.
+Explicit caret-removal/reverse-bold assertions pass. Normalizing those approved
+focus differences (and only fully default blank cells, whose `None`/`Some(" ")`
+representations compare equal in Ratatui but have different Debug bytes) restores
+the unchanged fingerprint across all 864 cases. A temporary checkpoint-renderer
+comparison also passed every normalized cell and Debug representation; that
+copy is removed and the standalone 33-test live-work suite passes. This does not claim
+that the intentionally changed focus or new held layout is visually unchanged.
+Language inventory has 1215 pending literals, unchanged; language-audit helper
+tests pass 28 cases.
+Strict held-row config validation and locked test compilation now pass. Five
+unused old compact helpers remain warnings until the separate removal stage.
+Final-tip Clippy, cleanup-stage measurements/regressions and default/all-OS CI
+remain to be completed.
+No installed binary, user data, provider request or database schema changes are
+part of this validation. Native Windows terminal/font pixels remain untested.
