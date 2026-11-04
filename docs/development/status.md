@@ -4714,4 +4714,4 @@ shell cases pass individually on macOS; the Linux failure remains unexplained,
 not dismissed as flaky. Next: strict local checks and new exact-tip default CI.
 fresh schema installs the same triggers. Design and decision records document
 crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
-measurements. Focused test and CI results are pending on the task branch.
+measurements. The 69-test `recovery_` lib filter and fresh-schema bootstrap check pass; default and all-OS CI are pending on the pushed tip.
