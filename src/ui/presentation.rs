@@ -349,13 +349,17 @@ fn node_lines_inner(
             }
             out.extend(lines);
         } else {
-            if matches!(block.kind, BlockKind::Prose | BlockKind::Reasoning)
+            if node.role != "received_response"
+                && matches!(block.kind, BlockKind::Prose | BlockKind::Reasoning)
                 && block.source_exact
                 && (block
                     .rendered
                     .as_ref()
-                    .is_none_or(|rendered| rendered.omitted || rendered.width != width)
-                    || (start > block.source_start && start < block.source_end))
+                    .is_some_and(|rendered| rendered.omitted || rendered.width != width)
+                    || (block.rendered.is_none() && contains_markdown_syntax(&block.text)
+                        || (start > block.source_start
+                            && start < block.source_end
+                            && block.rendered.is_some())))
             {
                 out.push(Line::from(Span::styled(
                     crate::ui::i18n::local!(
@@ -706,6 +710,17 @@ pub(super) fn indented_wrap(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'
             line
         })
         .collect()
+}
+
+fn contains_markdown_syntax(text: &str) -> bool {
+    text.contains("**")
+        || text.contains("__")
+        || text.contains('`')
+        || text.contains("](")
+        || text.lines().any(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with('#') || trimmed.starts_with("> ") || trimmed.starts_with("- ")
+        })
 }
 
 fn node_lines(
