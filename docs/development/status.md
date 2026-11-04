@@ -4461,8 +4461,8 @@ All 320 Japanese catalogue literals are individually source-hash classified as
 reviewed UI-side text. The current exact-source audit on main `ce4310d969` plus
 the current reconcile-34 source tree reports `a=2916, b=1576, c=0, protected=4`; strict `--check` passes; the four protected records retain canonical and projection evidence. English
 Catalogue fallback, global argument and frontend title tests pass. The current
-source also passes `cargo check --tests` and the full library suite (2,008 passed,
-19 ignored); current focused localization tests pass. Strict audit `--check`
+source also passes `cargo check --tests` and the full library suite (2,019 passed,
+20 ignored); current focused localization tests pass. Strict audit `--check`
 returns zero category-c records; four protected records retain provenance.
 Other branch verdicts are in the current #152 issue table. Default-scope CI,
 formal acceptance, physical PTY and integration-tip all-OS CI remain open.

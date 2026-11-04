@@ -9427,7 +9427,7 @@ checks the selected-language title under terminal separator variants.
 The current-source audit (main `ce4310d969` plus reconcile-34 commits) classifies the 320 Japanese catalogue literals as reviewed UI-side
 strings using per-token source hashes. Counts: `a=2916, b=1576, c=0, protected=4`;
 strict audit `--check` passes; four protected records remain evidence-pinned.
-`cargo check --tests` and `cargo test --lib` pass (2,008 passed, 19 ignored),
+`cargo check --tests` and `cargo test --lib` pass (2,019 passed, 20 ignored),
 and focused title/detail/live-work/received/receipt/tool localization regressions
 pass. This is not final Stage C acceptance. Default-scope CI, physical terminal
 checks, formal acceptance and exact integration-tip all-OS CI remain pending.
