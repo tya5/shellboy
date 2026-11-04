@@ -3260,3 +3260,24 @@ through the selected-language catalogue label instead. Tests verify the
 English projection for every operation, field and global argument, and cover
 the frontend title in both languages. The Stage C audit records the Japanese
 source as reviewed UI copy with source-token hashes; changes invalidate review.
+
+## 2026-11-04: Accept slow DB diagnostics overhead (#201)
+
+The leader accepts the production instrumentation without opt-in gating on the
+measured evidence for `46f9fbc7` (issue #201 comments 6627459223 and
+6627587728). On Apple M1, the synthetic 50,000 point-read worker request median
+was -2.08% versus the uninstrumented control, with overlapping ranges; its
+contribution is not distinguishable from zero. The 1,000-row workload was the
+worst measured case: approximately +0.18 ms, or +4.4% of a 4 ms synthetic
+worker request. These sequential, uncontrolled measurements compare revisions,
+not an isolated trace-only cost. The instrumentation is intended to find slow DB
+paths such as #164/#204; gating could hide the diagnosis when needed. The
+measured cost is bounded and sub-millisecond per statement in these workloads,
+not a general latency guarantee.
+
+The share in real application end-to-end requests is unmeasured and is not
+claimed. Re-measure if the real-workload share of DB worker time becomes
+available, or if instrumentation gains work per statement.
+
+Source: leader acceptance for #201, 2026-11-04; benchmark details and ranges in
+issue #201 comments 6627459223 and 6627587728.
