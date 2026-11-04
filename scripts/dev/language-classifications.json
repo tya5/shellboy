@@ -5917,7 +5917,7 @@
   "src/presentation/fields.rs:3fc7219c4fb6297c:1": {
     "category": "a",
     "reason": "Japanese display-label sentinel for a generated management field. The English renderer uses this exact fixed UI label to add the usage-source/count suffix; displayed values and JSON pointers are unchanged. Ja returns the original label. Covered by generated_field_labels_follow_language_without_changing_pointers_or_values.",
-    "source_tokens_sha256": "463c994795f1a84c570d5d8e8f4000920b31bb63b54c903abc67673591697c86"
+    "source_tokens_sha256": "cb305f634e0752e9924ba7e5d9935458a3b1a5df55c739a3630f495700298380"
   },
   "src/presentation/fields.rs:943b7d62659dd74d:1": {
     "category": "a",
@@ -5972,7 +5972,7 @@
   "src/presentation/fields.rs:98180f4181b919e3:1": {
     "category": "a",
     "reason": "Japanese display-label sentinel for a generated management field. The English renderer uses this exact fixed UI label to add the usage-source/count suffix; displayed values and JSON pointers are unchanged. Ja returns the original label. Covered by generated_field_labels_follow_language_without_changing_pointers_or_values.",
-    "source_tokens_sha256": "463c994795f1a84c570d5d8e8f4000920b31bb63b54c903abc67673591697c86"
+    "source_tokens_sha256": "cb305f634e0752e9924ba7e5d9935458a3b1a5df55c739a3630f495700298380"
   },
   "src/presentation/fields.rs:3cd406d72b881487:1": {
     "category": "a",
@@ -6567,12 +6567,12 @@
   "src/ui/presentation.rs:be056047f0b0912f:1": {
     "category": "a",
     "reason": "Generated Japanese missing-command sentinel is translated at the compact/detail command display boundary; real saved commands are preserved.",
-    "source_tokens_sha256": "707577fad0b53d263d874d17c6f008dd87a389a05474bbb0e6b7d361fbbffeca"
+    "source_tokens_sha256": "f17c5bd49410c18aac38b1c71b652ecceeaca8ed9417efdf93b6f75ad23980e6"
   },
   "src/ui/presentation.rs:e95725538ebdcc2d:1": {
     "category": "a",
     "reason": "Generated Japanese missing-command sentinel is translated at the compact/detail command display boundary; real saved commands are preserved.",
-    "source_tokens_sha256": "707577fad0b53d263d874d17c6f008dd87a389a05474bbb0e6b7d361fbbffeca"
+    "source_tokens_sha256": "f17c5bd49410c18aac38b1c71b652ecceeaca8ed9417efdf93b6f75ad23980e6"
   },
   "src/ui/presentation.rs:dbb29b00ccda5fef:1": {
     "category": "a",
