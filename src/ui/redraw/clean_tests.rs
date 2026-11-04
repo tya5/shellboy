@@ -188,15 +188,16 @@ fn overlay_close_clears_once_including_help_above_a_retained_popup() {
         ui.config.ui.clean_redraw = enabled;
         let mut terminal = terminal(100);
         frame(&mut terminal, &mut ui);
-        ui.slash("/threads");
+        ui.event(Event::Key(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE)));
+        assert!(ui.operations.is_some());
         frame(&mut terminal, &mut ui);
         ui.event(Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)));
         assert!(ui.help_visible);
-        assert!(ui.thread_browser.visible());
+        assert!(ui.operations.is_some());
         frame(&mut terminal, &mut ui);
         ui.event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         assert!(!ui.help_visible);
-        assert!(ui.thread_browser.visible());
+        assert!(ui.operations.is_some());
         let close = frame(&mut terminal, &mut ui);
         assert_eq!(close.windows(4).any(|b| b == b"\x1b[2J"), enabled);
         assert!(
