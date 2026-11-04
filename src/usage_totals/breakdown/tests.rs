@@ -519,3 +519,154 @@ fn grouped_text_wire_roundtrip_preserves_absent_null_empty_and_cursor_values() {
     assert!(serde_json::from_value::<UsageGetArgs>(json!({"cursor":[]})).is_err());
     assert!(serde_json::from_value::<UsageGetArgs>(json!({"unexpected":true})).is_err());
 }
+
+fn insert_summary(
+    db: &Connection,
+    thread: &str,
+    id: &str,
+    started_at: &str,
+    usage: serde_json::Value,
+) {
+    let record = serde_json::json!({
+        "id": id, "thread_id": thread, "turn_id": thread, "run_id": thread,
+        "profile_id": "p", "model_id": "m", "started_at": started_at,
+        "updated_at": started_at, "requests": usage["requests"],
+        "map_requests": usage["map_requests"], "reduce_requests": usage["reduce_requests"],
+        "input_tokens": usage["input_tokens"], "cached_tokens": usage["cached_tokens"],
+        "cache_creation_tokens": usage["cache_creation_tokens"], "output_tokens": usage["output_tokens"]
+    });
+    db.execute(
+        "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
+        params![
+            format!(
+                "{}{}.{}",
+                crate::compaction::SUMMARY_USAGE_PREFIX,
+                thread,
+                id
+            ),
+            record.to_string()
+        ],
+    )
+    .unwrap();
+}
+
+#[test]
+fn compaction_usage_uses_first_request_time_half_open_buckets_and_unknowns() {
+    let db = fixture();
+    insert_summary(
+        &db,
+        "t1",
+        "before",
+        "2026-10-30T23:59:59Z",
+        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":11,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":2,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":3,"unknown_count":0,"overflow":false}}),
+    );
+    insert_summary(
+        &db,
+        "t1",
+        "first",
+        "2026-10-31T00:00:00Z",
+        serde_json::json!({"requests":2,"map_requests":1,"reduce_requests":1,"input_tokens":{"known_sum":100,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":20,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":2,"overflow":false},"output_tokens":{"known_sum":30,"unknown_count":1,"overflow":false}}),
+    );
+    insert_summary(
+        &db,
+        "t1",
+        "until",
+        "2026-11-01T00:00:00Z",
+        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":999,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":0,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}}),
+    );
+    insert_summary(
+        &db,
+        "t1",
+        "missing-time",
+        "2026-10-31T12:00:00Z",
+        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
+    );
+    db.execute(
+        "UPDATE app_meta SET value=json_remove(value,'$.started_at') WHERE key=?1",
+        [format!(
+            "{}t1.missing-time",
+            crate::compaction::SUMMARY_USAGE_PREFIX
+        )],
+    )
+    .unwrap();
+    insert_summary(
+        &db,
+        "t1",
+        "unknown-time",
+        "not-a-timestamp",
+        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
+    );
+    db.execute(
+        "INSERT INTO app_meta(key,value) VALUES('summary.usage.t1.bad','{')",
+        [],
+    )
+    .unwrap();
+    db.pragma_update(None, "query_only", true).unwrap();
+    let value = read(&db, &args("day"), "fixture").unwrap();
+    let item = &value["items"][0];
+    assert_eq!(item["key"], "2026-10-31");
+    assert_eq!(item["compaction"]["compactions"], 1);
+    assert_eq!(item["compaction"]["requests"], 2);
+    assert_eq!(item["compaction"]["map_requests"], 1);
+    assert_eq!(item["compaction"]["reduce_requests"], 1);
+    assert_eq!(item["compaction"]["input_tokens"]["known_sum"], 100);
+    assert_eq!(item["compaction"]["input_tokens"]["unknown_count"], 1);
+    assert_eq!(item["compaction"]["cached_tokens"]["known_sum"], 20);
+    assert_eq!(item["total"]["input_tokens"]["known_sum"], 100);
+    assert_eq!(item["total"]["input_tokens"]["unknown_count"], 1);
+    assert_eq!(item["total"]["cached_tokens"]["known_sum"], 20);
+    assert_eq!(value["coverage"]["summary"], "recorded_first_request_at");
+    assert_eq!(value["unknown_time_compaction_records"], 2);
+    assert_eq!(value["malformed_compaction_records"], 1);
+}
+
+#[test]
+fn compaction_without_requests_stays_unknown_and_pagination_scans_bounded_windows() {
+    let db = fixture();
+    insert(
+        &db,
+        "model",
+        "t1",
+        "2026-10-31T00:30:00Z",
+        "completed",
+        Some("{\"input_tokens\":7}"),
+    );
+    for i in 0..10_001 {
+        insert_summary(
+            &db,
+            "t1",
+            &format!("c{i:05}"),
+            "2026-10-31T00:30:00Z",
+            serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":1,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}}),
+        );
+    }
+    let mut a = args("thread");
+    a.limit = Some(1);
+    let first = read(&db, &a, "fixture").unwrap();
+    assert_eq!(first["more"], true);
+    assert_eq!(first["scanned_compaction_candidates"], 10_000);
+    assert_eq!(first["items"][0]["compaction"]["requests"], 9_998);
+    a.cursor = first["next_cursor"].as_str().map(Into::into);
+    let second = read(&db, &a, "fixture").unwrap();
+    assert_eq!(second["more"], false);
+    assert_eq!(second["items"][0]["compaction"]["requests"], 3);
+    assert!(second["items"][0]["total"]["cached_tokens"]["known_sum"].is_null());
+    assert_eq!(
+        second["items"][0]["total"]["cached_tokens"]["unknown_count"],
+        3
+    );
+
+    let empty = fixture();
+    insert(
+        &empty,
+        "only-model",
+        "t1",
+        "2026-10-31T00:30:00Z",
+        "completed",
+        Some("{\"input_tokens\":7}"),
+    );
+    let result = read(&empty, &args("thread"), "fixture").unwrap();
+    assert_eq!(result["items"][0]["compaction"]["requests"], 0);
+    assert!(result["items"][0]["compaction"]["input_tokens"]["known_sum"].is_null());
+    assert_eq!(result["items"][0]["total"]["input_tokens"]["known_sum"], 7);
+}

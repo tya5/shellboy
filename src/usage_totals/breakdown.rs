@@ -84,6 +84,8 @@ struct Scan {
     since: String,
     until: String,
     after: i64,
+    compaction_after: i64,
+    compaction_watermark: i64,
     group_offset: usize,
     continued: bool,
 }
@@ -128,9 +130,23 @@ struct Row {
     in_range: bool,
     usage: usage::StandardUsage,
 }
+#[derive(Default, Serialize)]
+struct Combined {
+    model_attempt_records: u64,
+    summary_requests: u64,
+    input_tokens: Number,
+    cached_tokens: Number,
+    cache_creation_tokens: Number,
+    output_tokens: Number,
+    reasoning_tokens: Number,
+    total_tokens: Number,
+}
 #[derive(Default)]
 struct Group {
     attempts: BTreeMap<String, Attempts>,
+    compaction: crate::compaction::SummaryUsage,
+    compactions: u64,
+    combined: Combined,
     inputs: Vec<u64>,
     unknown_inputs: u64,
     max_input: Option<(u64, Value)>,
@@ -158,6 +174,26 @@ impl Group {
             saved_ms(row.started.as_deref(), row.ended.as_deref())
                 .and_then(|n| u64::try_from(n).ok()),
         ];
+        self.combined.model_attempt_records = self.combined.model_attempt_records.saturating_add(1);
+        for (number, value) in [
+            &mut self.combined.input_tokens,
+            &mut self.combined.cached_tokens,
+            &mut self.combined.output_tokens,
+            &mut self.combined.reasoning_tokens,
+            &mut self.combined.total_tokens,
+        ]
+        .into_iter()
+        .zip([
+            u.input_tokens,
+            u.cached_tokens,
+            u.output_tokens,
+            u.reasoning_tokens,
+            u.total_tokens,
+        ]) {
+            number.add(value.map(u128::from), u64::from(value.is_none()));
+        }
+        // Grouped SQL intentionally leaves this existing saved counter unread.
+        self.combined.cache_creation_tokens.add(None, 1);
         for (number, value) in group.fields().into_iter().zip(fields) {
             number.add(value.map(u128::from), u64::from(value.is_none()));
         }
@@ -198,6 +234,10 @@ impl Group {
             self.unpaired += 1;
         }
     }
+    fn add_compaction(&mut self, usage: &crate::compaction::SummaryUsage) {
+        self.compactions = self.compactions.saturating_add(1);
+        self.compaction.merge(usage);
+    }
     fn json(mut self, key: &str) -> Value {
         self.inputs.sort_unstable();
         let n = self.inputs.len();
@@ -207,7 +247,45 @@ impl Group {
         };
         let mean =
             (n > 0).then(|| self.inputs.iter().map(|n| *n as u128).sum::<u128>() as f64 / n as f64);
-        json!({"key":key,"model_attempts":self.attempts,
+        self.combined.summary_requests = self.compaction.requests;
+        for (combined, summary) in [
+            (
+                &mut self.combined.input_tokens,
+                &self.compaction.input_tokens,
+            ),
+            (
+                &mut self.combined.cached_tokens,
+                &self.compaction.cached_tokens,
+            ),
+            (
+                &mut self.combined.cache_creation_tokens,
+                &self.compaction.cache_creation_tokens,
+            ),
+            (
+                &mut self.combined.output_tokens,
+                &self.compaction.output_tokens,
+            ),
+        ] {
+            combined.add(summary.known_sum.map(u128::from), summary.unknown_count);
+            if summary.overflow {
+                combined.overflow = true;
+                combined.known_sum = None;
+            }
+        }
+        self.combined
+            .reasoning_tokens
+            .add(None, self.compaction.requests);
+        self.combined
+            .total_tokens
+            .add(None, self.compaction.requests);
+        let mut compaction = json!({"compactions":self.compactions});
+        if let (Value::Object(target), Value::Object(fields)) =
+            (&mut compaction, json!(self.compaction))
+        {
+            target.extend(fields);
+        }
+        json!({"key":key,"model_attempts":self.attempts,"compaction":compaction,
+            "total":self.combined,
             "input_per_request":{"states":["completed","failed","incomplete"],"known_count":n,"unknown_count":self.unknown_inputs,
             "mean":mean,"max":self.inputs.last(),"p50":percentile(50),"p95":percentile(95),
             "percentile_method":"nearest_rank","max_attempt":self.max_input.map(|(_, r)|r)},
@@ -215,23 +293,34 @@ impl Group {
                 "paired_count":self.paired,"unknown_pair_count":self.unpaired}})
     }
 }
+fn bucket_time(time: DateTime<FixedOffset>, group: &str, zone: Option<FixedOffset>) -> String {
+    let local = match zone {
+        Some(offset) => time.with_timezone(&offset),
+        None => time.with_timezone(&Local).fixed_offset(),
+    };
+    local
+        .format(if group == "hour" {
+            "%Y-%m-%dT%H:00:00%:z"
+        } else {
+            "%Y-%m-%d"
+        })
+        .to_string()
+}
 fn bucket(row: &Row, group: &str, zone: Option<FixedOffset>) -> Option<String> {
     if group == "thread" {
         return Some(row.thread.clone());
     }
     let time = DateTime::parse_from_rfc3339(row.started.as_deref()?).ok()?;
-    let local = match zone {
-        Some(offset) => time.with_timezone(&offset),
-        None => time.with_timezone(&Local).fixed_offset(),
-    };
-    Some(
-        local
-            .format(if group == "hour" {
-                "%Y-%m-%dT%H:00:00%:z"
-            } else {
-                "%Y-%m-%d"
-            })
-            .to_string(),
+    Some(bucket_time(time, group, zone))
+}
+fn compaction_query() -> String {
+    format!(
+        "WITH candidates AS MATERIALIZED (
+            SELECT rowid scan_id,key FROM app_meta WHERE rowid>?1 AND rowid<=?2
+            ORDER BY rowid LIMIT {}
+        ) SELECT c.scan_id,c.key,CASE WHEN octet_length(m.value)<=?3 THEN m.value END
+        FROM candidates c JOIN app_meta m ON m.rowid=c.scan_id ORDER BY c.scan_id",
+        ROW_LIMIT + 1
     )
 }
 
@@ -247,17 +336,24 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     let cursor = a
         .cursor
         .as_deref()
-        .map(|s| PageCursor::decode(s, "usage.groups", &filter, 0, None))
+        .map(|s| PageCursor::decode(s, "usage.groups.v2", &filter, 0, None))
         .transpose()?;
     let saved: Option<Scan> = cursor
         .as_ref()
         .map(|c| serde_json::from_str(&c.last_sort_key).map_err(|_| expired()))
         .transpose()?;
     let w = window(a, saved.as_ref())?;
+    let initial_compaction_watermark = db
+        .query_row("SELECT COALESCE(max(rowid),0) FROM app_meta", [], |r| {
+            r.get(0)
+        })
+        .map_err(error)?;
     let mut scan = saved.unwrap_or_else(|| Scan {
         since: w.since.unwrap().to_rfc3339(),
         until: w.until.unwrap().to_rfc3339(),
         after: 0,
+        compaction_after: 0,
+        compaction_watermark: initial_compaction_watermark,
         group_offset: 0,
         continued: false,
     });
@@ -322,6 +418,29 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     rows.truncate(ROW_LIMIT);
     let scanned = rows.len();
     let tail = rows.last().map(|r| r.key);
+    let mut compaction_statement = db.prepare(&compaction_query()).map_err(error)?;
+    let mut compaction_rows = compaction_statement
+        .query_map(
+            params![
+                scan.compaction_after,
+                scan.compaction_watermark,
+                crate::compaction::SUMMARY_USAGE_MAX_BYTES
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .map_err(error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(error)?;
+    let compaction_row_more = compaction_rows.len() > ROW_LIMIT;
+    compaction_rows.truncate(ROW_LIMIT);
+    let compaction_scanned = compaction_rows.len();
+    let compaction_tail = compaction_rows.last().map(|row| row.0);
     let zone = offset(a.timezone.as_deref().unwrap_or("local"))?;
     let group_by = a
         .group_by
@@ -329,6 +448,9 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         .ok_or_else(|| invalid("group_by required"))?;
     let mut groups = BTreeMap::<String, Group>::new();
     let mut matched = 0;
+    let mut matched_compactions = 0u64;
+    let mut malformed_compactions = 0u64;
+    let mut unknown_time_compactions = 0u64;
     let mut excluded_times = 0;
     let mut outside_period = 0;
     for row in rows {
@@ -358,6 +480,92 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
             groups.entry(key).or_default().add(row);
         }
     }
+    let mut live_thread = db
+        .prepare("SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL")
+        .map_err(error)?;
+    for (_rowid, key, body) in &compaction_rows {
+        let Some(suffix) = key.strip_prefix(crate::compaction::SUMMARY_USAGE_PREFIX) else {
+            continue;
+        };
+        if selection.as_ref().is_some_and(|selected| {
+            !selected
+                .threads
+                .iter()
+                .any(|id| suffix.starts_with(&format!("{id}.")))
+        }) {
+            continue;
+        }
+        let Some(body) = body.as_deref() else {
+            malformed_compactions = malformed_compactions.saturating_add(1);
+            continue;
+        };
+        let Ok(mut raw) = serde_json::from_str::<Value>(body) else {
+            malformed_compactions = malformed_compactions.saturating_add(1);
+            continue;
+        };
+        let started_at = raw
+            .get("started_at")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        if !raw.get("started_at").is_some_and(Value::is_string) {
+            let Some(fields) = raw.as_object_mut() else {
+                malformed_compactions = malformed_compactions.saturating_add(1);
+                continue;
+            };
+            // Keep an otherwise valid legacy record countable when its time is absent.
+            fields.insert("started_at".into(), Value::String(String::new()));
+        }
+        let Ok(record) = serde_json::from_value::<crate::compaction::SummaryUsageRecord>(raw)
+        else {
+            malformed_compactions = malformed_compactions.saturating_add(1);
+            continue;
+        };
+        if key
+            != &format!(
+                "{}{}.{}",
+                crate::compaction::SUMMARY_USAGE_PREFIX,
+                record.thread_id,
+                record.id
+            )
+            || !suffix.starts_with(&format!("{}.", record.thread_id))
+        {
+            malformed_compactions = malformed_compactions.saturating_add(1);
+            continue;
+        }
+        if live_thread
+            .query_row([&record.thread_id], |_| Ok(()))
+            .optional()
+            .map_err(error)?
+            .is_none()
+            || selection.as_ref().is_some_and(|selected| {
+                selected.kind == "turn" && record.turn_id.as_deref() != a.turn_id.as_deref()
+            })
+            || selection.as_ref().is_some_and(|selected| {
+                selected.kind == "run" && record.run_id.as_deref() != a.run_id.as_deref()
+            })
+        {
+            continue;
+        }
+        let Ok(at) = DateTime::parse_from_rfc3339(&started_at) else {
+            unknown_time_compactions = unknown_time_compactions.saturating_add(1);
+            continue;
+        };
+        let at_utc = at.with_timezone(&Utc);
+        if at_utc < w.since.unwrap() || at_utc >= w.until.unwrap() {
+            continue;
+        }
+        let group_key = if group_by == "thread" {
+            record.thread_id.clone()
+        } else {
+            bucket_time(at, group_by, zone)
+        };
+        matched_compactions = matched_compactions.saturating_add(1);
+        groups
+            .entry(group_key)
+            .or_default()
+            .add_compaction(&record.usage);
+    }
     let group_more = groups.len() > scan.group_offset + a.limit.unwrap_or(GROUP_LIMIT) as usize;
     let items = groups
         .into_iter()
@@ -366,19 +574,20 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         .map(|(k, g)| g.json(&k))
         .collect::<Vec<_>>();
     let continued = scan.continued;
-    let more = group_more || row_more;
+    let more = group_more || row_more || compaction_row_more;
     let next_cursor = if more {
         if group_more {
             scan.group_offset += items.len();
         } else {
-            scan.after = tail.ok_or_else(expired)?;
+            scan.after = tail.unwrap_or(scan.after);
+            scan.compaction_after = compaction_tail.unwrap_or(scan.compaction_after);
             scan.group_offset = 0;
             scan.continued = true;
         }
         Some(
             PageCursor {
                 version: 1,
-                scope: "usage.groups".into(),
+                scope: "usage.groups.v2".into(),
                 filter,
                 last_sort_key: serde_json::to_string(&scan).unwrap(),
                 watermark: watermark as u64,
@@ -393,9 +602,11 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     Ok(
         json!({"thread_id":selection.as_ref().and_then(|s|s.threads.first()).filter(|id|id.len()<=512),"group_by":group_by,"timezone":a.timezone.as_deref().unwrap_or("local"),"requested_period":w.json(),
         "items":items,"more":more,"next_cursor":next_cursor,"scanned_candidates":scanned,"matched_attempts":matched,
-        "excluded_time_count":excluded_times,"outside_period_count":outside_period,"row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || continued,
+        "scanned_compaction_candidates":compaction_scanned,"matched_compactions":matched_compactions,
+        "malformed_compaction_records":malformed_compactions,"unknown_time_compaction_records":unknown_time_compactions,
+        "excluded_time_count":excluded_times,"outside_period_count":outside_period,"row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || compaction_row_more || continued,
         "scope_complete":selection.as_ref().is_none_or(|s|s.complete),"statistics_scope":"current_candidate_window",
-        "coverage":{"unknown_starts":"excluded_time_count includes missing, malformed and non-current UTC formats","summary":"ungrouped_only","embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}),
+        "coverage":{"unknown_starts":"excluded_time_count includes missing, malformed and non-current UTC formats","summary":"recorded_first_request_at","summary_unknown_time":"unknown_time_compaction_records cannot be assigned to a period","summary_malformed":"malformed_compaction_records are excluded, never treated as zero","embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}),
     )
 }
 

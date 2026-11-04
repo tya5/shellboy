@@ -605,7 +605,15 @@ It reads the selected Threads' records by primary-key range (one join over the
 selected Thread list). Turn/Run scopes keep records whose snapshot saw that
 Turn/Run as current; a period selects by first-request time. `model_attempts`
 remains conversation requests only. Coverage `summary` is `recorded`. Grouped
-`usage get --group-by` stays attempt-only (`coverage.summary: ungrouped_only`).
+`usage get --group-by` adds a separate `compaction` object and `total` object
+beside the unchanged `model_attempts` and request-size/cache fields. Grouping uses
+the record's first-request `started_at`, including the exact half-open period
+boundary. Invalid/missing times remain unassigned and are counted as unknown.
+The metadata scan uses the existing 10,000-candidate bound, rowid watermark and
+cursor continuation independently of the model-attempt scan; group pagination
+still pages the resulting groups. Malformed/oversized records are excluded and
+reported, never converted to zero. Combined token sums preserve known/unknown/
+overflow semantics; fields not reported for one request type remain unknown.
 
 ## Calibrated proactive target (#209)
 

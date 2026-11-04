@@ -6,6 +6,15 @@ Shellboy is a terminal application for conversations and model-directed shell wo
 
 Before granting model-directed shell access, read the [safety model](#safety-model).
 
+Grouped `usage get --group-by day|hour|thread` also shows summary (compaction)
+usage separately from `model_attempts`, plus a combined token total. The summary
+section reports compaction and map/reduce request counts and provider-reported
+input, cached, cache-creation and output tokens. Period buckets use the time the
+first summary request was sent. Missing measurements stay unknown, not zero;
+summary metadata is read in bounded cursor pages. These are usage facts, not a
+cost estimate.
+
+
 ## UI language and diagnostics
 
 The TUI defaults to English. Set the display language in your configuration
