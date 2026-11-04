@@ -1870,7 +1870,7 @@ pub(super) fn display_tool_command(command: &str, language: UiLanguage) -> Strin
     if language == UiLanguage::En {
         match command {
             "shell呼出し · 詳細" | "shell呼出し | 詳細" => "Shell call; details".into(),
-            _ => return command.to_owned(),
+            _ => command.to_owned(),
         }
     } else {
         command.to_owned()

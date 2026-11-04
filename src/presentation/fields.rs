@@ -265,7 +265,7 @@ pub(crate) fn display_label(key: &str, label: &str, language: crate::config::UiL
             .unwrap_or("");
         let singular = match collection {
             "answers" => "Answer",
-            "items" | "output" if segments.iter().any(|part| *part == "content") => "Answer",
+            "items" | "output" if segments.contains(&"content") => "Answer",
             "items" | "output" => "Item",
             "messages" => "Message",
             "nodes" => "Node",
@@ -641,7 +641,7 @@ pub(crate) fn state_label_for(value: &str, language: crate::config::UiLanguage) 
         "exited" => "Exited",
         "idle" => "Idle",
         "paused" => "Paused",
-        other => return other,
+        other => other,
     }
 }
 
