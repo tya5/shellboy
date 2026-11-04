@@ -172,3 +172,26 @@ until their separate removal stage. No behavior/final-tip CI result or landing
 is claimed.
 The final branch must pass default then all-OS CI at one identical SHA and be
 reviewed/integrated by W8. Existing stage-1 CI success is not final-feature CI.
+
+## Stage 3: Remove Disconnected Compact Painting
+
+The behavior checkpoint is `553a426af334a8f4cdb1e3a05ca8be8e1541272a`.
+This later cleanup deletes only the old compact count, variable height, label,
+body and painter. Saved queue/popups, source/status workers, replies, archive,
+cancellation and bounded accepting excerpts stay with their existing owners.
+The layout variable names now say held region, without changing its position.
+
+Control-text and 4 MiB accepting-draft tests render the held region. The former
+compact label tests exercise shared region fitting, retaining source identity,
+measured ellipsis, width and grapheme checks. The obsolete two-line compact
+indentation/count contract is not an acceptance criterion for the new layout.
+Archive/sender/cancellation wording and exact-ID protections are retained.
+
+`after-compact-removal.json` records this stage independently: message_queue.rs
+is 1690 physical lines versus 1793 at behavior, and 22 production functions
+versus 27; its lexical maximum parameter count remains 5. The other measured
+files retain the behavior-stage counts. Live/shared/held still total 3505 lines;
+this is not evidence of an overall reduction or performance improvement.
+Cleanup validation passes 22 queue and 11 held cases, formatting, strict
+all-target locked Clippy, and integration-layout/watchdog policy checks on
+macOS arm64. Final-tip CI is still pending.
