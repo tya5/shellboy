@@ -4542,3 +4542,23 @@ Strict Clippy and exact-tip CI results are tracked in the issue handoff.
 #203: authorization recovery uses bounded keyset pages; synthetic tests cover restart, corrupt and oversized records. Validation pending.
 
 2026-11-03 #203 follow-up: authorization recovery uses a single seek lower bound per query; late-page work is checked with SQLite VM-step counters on synthetic data. Three-OS CI is tracked on the published tip.
+
+## #203 current-main recovery takeover
+
+The six authorization-recovery commits through `7ea40b2637` are replayed on
+main containing #211 and #214, on a new task branch rather than the author's
+branch. They change `index.auto.` recovery and its startup caller only; #214's
+bootstrap candidate selector, bounded page function and regression module are
+unchanged. The shared count/byte constants retain the same values. Cherry-picks
+apply without conflicts; focused and exact-tip native CI results are pending.
+
+Old CI `41705246248` attempt 1 is inspected directly, not inferred from its name:
+its sole integration failure is the blocked-worker force-exit test, waiting for
+a raw contiguous `W/Enter:` before force confirmation. The saved PTY diff writes
+`W/Enter` on row 14 and jumps to column 14 for `Keep waiting`, without writing
+the colon. This matches the #211 raw-marker/differential-screen failure signature,
+not an authorization-recovery assertion. It is not the separately unexplained
+post-notice child-exit timeout. The old diagnostic retains only start/tail bytes,
+so it does not reconstruct every earlier screen cell or prove all old failures
+share one cause. #211's persistent screen/frame helper and output draining are
+already ancestors of this task; no shutdown implementation is changed here.

@@ -9576,3 +9576,32 @@ recovery is not reimplemented by this change.
 #203 validation pending: synthetic paged authorization recovery; no real provider or user data used.
 
 2026-11-03 #203 cursor-seek follow-up: synthetic SQLite VM-step coverage checks early, late, and exhausted keyset cursors over 10,000 authorization keys; page-order and restart coverage uses synthetic records. Real user data and process-kill recovery remain untested.
+
+### #203 current-main replay and #214 coexistence
+
+Replay source: six commits from `17f87edbe0` through `7ea40b2637`, based on
+`a37b0c8d`, applied with provenance to main containing #211 `1b02aaa8` and
+#214 `197ed18f`. They apply without textual conflicts. The authorization page
+function and startup authorization loop are separate from the unchanged
+bootstrap page function, selector and test module; shared files do not mean
+shared recovery state or cursor. Validate both metadata and bootstrap regression
+modules together, plus the six shutdown tests, before exact-tip CI.
+
+Old macOS failure evidence is run `41705246248`, attempt 1, failed job
+`126158884310`, artifact `13266850496`, `harness-005.log`: 1087 integration
+passes and one failure in
+`tui_shutdown::explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes`,
+at `tui_shutdown.rs:65`, raw `W/Enter:` wait. Its action-relative diff writes
+row 14's `W/Enter`, then moves to column 14 before `Keep waiting`, omitting
+colon bytes. This matches the #211 differential-screen/raw-marker defect.
+It is not the later child-wait timeout after the final notice, whose exact cause
+remains unproven. The old start/tail diagnostic cannot reconstruct all prior
+cells, so the classification is limited to that observed failure signature.
+
+#211's native comparison `41733512201` has baseline failures 24/33/35/38/41
+(5/50) and fixed 0/50, with 27 fixed logs directly recording the completed-screen
+versus raw-marker mismatch. This finite comparison is supporting evidence,
+not proof every old shutdown failure was identical or every future run passes.
+New local checks and default/all-OS CI are pending for this replay; any new
+failure must be named and compared rather than automatically called a flake.
+No real data, provider traffic or installed-binary change is part of validation.
