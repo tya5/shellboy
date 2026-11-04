@@ -19,9 +19,13 @@ previous executions of a reused prepared statement; report them as cumulative
 statement-lifetime snapshots, not per-execution or job totals. No sample means
 unknown, not zero. A row callback counts returned rows across the current job,
 including its active statement; `row_scope` is `job_cumulative`. This count
-is distinct from sampled statement-lifetime counters. Tests may opt into
-exhaustive observation to check indexed
-hot reads independently of the production sampling threshold.
+is distinct from sampled statement-lifetime counters. Rust unit-test builds sample
+every completed statement. Integration tests normally link the production library,
+so the explicit `test-db-observation` feature is required to sample every statement
+in that library and its DB worker; normal integration runs retain production
+sampling. The feature is test-only and must not be enabled for release binaries.
+The standard checks exercise an integration worker with this feature. Separate
+exhaustive observation checks indexed hot reads independently of the threshold.
 
 The existing progress handler captures at most one backtrace on the executing
 thread after a job exceeds its limit. The statement active at that instant is
@@ -41,7 +45,11 @@ SHA-256 hash of the unexpanded statement, never the statement itself. Normalized
 output is limited to 256 bytes to bound event size while retaining a useful
 query shape; longer shapes use the hash rather than a potentially misleading
 truncation. Hashes can reveal equality of statements and are not encryption.
-Bindings, content, paths and source lines are never emitted. Safe fixed plan
+For statements up to 4,096 bytes the last unexpanded SQL is retained only in
+memory during the job, with debug output redacted; normalization is deferred
+until a sampled profile or an overrun. Longer statements are normalized
+immediately rather than retained in that cache. Bindings, content, paths and
+source lines are never emitted. Safe fixed plan
 categories may be generated on a separate read-only connection for reviewed
 static queries; this separate plan allowlist does not restrict SQL shapes.
 
