@@ -1270,27 +1270,49 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         .find(|item| item["type"] == "function_call_output")
         .map(|item| serde_json::from_str(item["output"].as_str().unwrap()).unwrap())
         .unwrap();
-    control.store.database.call(move |db| {
-        assert!(shellboy::trace_slot::slow_commit_fixture_hits() > 0, "fixture must observe later worker COMMITs");
-        shellboy::trace_slot::set_slow_commit_fixture(false);
-        let rows = db.prepare("SELECT sequence,stream,stream_offset,bytes FROM output_chunk ORDER BY sequence")?.query_map([], |row| Ok((row.get::<_,i64>(0)?, row.get::<_,String>(1)?, row.get::<_,i64>(2)?, row.get::<_,Vec<u8>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
-        let (mut out,mut err)=(Vec::new(),Vec::new());
-        for (i,(sequence,stream,offset,bytes)) in rows.iter().enumerate() {
-            assert_eq!(*sequence, i as i64);
-            let body=if stream=="stdout" {&mut out} else {assert_eq!(stream,"stderr"); &mut err};
-            assert_eq!(*offset, body.len() as i64);
-            body.extend_from_slice(bytes);
-        }
-        assert_eq!(out.len(), stdout.len(), "stdout byte count");
-        assert!(out==stdout, "stdout including its final binary bytes");
-        assert_eq!(err.len(), stderr.len(), "stderr byte count");
-        assert!(err==stderr, "stderr including its final binary bytes");
-        let (batches,max_bytes,max_chunks):(i64,i64,i64)=db.query_row("SELECT COUNT(*),MAX(bytes),MAX(chunks) FROM fixture_output_batch", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
-        assert!(max_bytes<=32768, "a saved batch exceeded configured bytes: {max_bytes}");
-        assert!(max_chunks>1 && batches<(rows.len()/2) as i64, "batching did not reduce durable commits: {batches} / {} chunks", rows.len());
-        assert_eq!(db.query_row("SELECT saved_sequence FROM shell_execution", [], |row| row.get::<_,i64>(0))?, rows.len() as i64);
-        Ok(())
-    }).await.unwrap();
+    let (out, err, batches, max_bytes, max_chunks, row_count, saved_sequence) =
+        control.store.database.call(move |db| {
+            assert!(shellboy::trace_slot::slow_commit_fixture_hits() > 0, "fixture must observe later worker COMMITs");
+            shellboy::trace_slot::set_slow_commit_fixture(false);
+            let rows = db.prepare("SELECT sequence,stream,stream_offset,bytes FROM output_chunk ORDER BY sequence")?.query_map([], |row| Ok((row.get::<_,i64>(0)?, row.get::<_,String>(1)?, row.get::<_,i64>(2)?, row.get::<_,Vec<u8>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
+            let (mut out,mut err)=(Vec::new(),Vec::new());
+            for (i,(sequence,stream,offset,bytes)) in rows.iter().enumerate() {
+                assert_eq!(*sequence, i as i64);
+                let body=if stream=="stdout" {&mut out} else {assert_eq!(stream,"stderr"); &mut err};
+                assert_eq!(*offset, body.len() as i64);
+                body.extend_from_slice(bytes);
+            }
+            let (batches,max_bytes,max_chunks):(i64,i64,i64)=db.query_row("SELECT COUNT(*),MAX(bytes),MAX(chunks) FROM fixture_output_batch", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
+            let saved_sequence=db.query_row("SELECT saved_sequence FROM shell_execution", [], |row| row.get::<_,i64>(0))?;
+            Ok((out,err,batches,max_bytes,max_chunks,rows.len(),saved_sequence))
+        }).await.unwrap();
+    assert_eq!(
+        out.len(),
+        stdout.len(),
+        "stdout byte count; completion={result}"
+    );
+    assert!(
+        out == stdout,
+        "stdout including its final binary bytes; completion={result}"
+    );
+    assert_eq!(
+        err.len(),
+        stderr.len(),
+        "stderr byte count; completion={result}"
+    );
+    assert!(
+        err == stderr,
+        "stderr including its final binary bytes; completion={result}"
+    );
+    assert!(
+        max_bytes <= 32768,
+        "a saved batch exceeded configured bytes: {max_bytes}"
+    );
+    assert!(
+        max_chunks > 1 && batches < (row_count / 2) as i64,
+        "batching did not reduce durable commits: {batches} / {row_count} chunks"
+    );
+    assert_eq!(saved_sequence, row_count as i64);
     assert_eq!(result["status"], "exited");
     assert_eq!(result["output_complete"], true);
     next.reply
