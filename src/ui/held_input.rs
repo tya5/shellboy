@@ -183,7 +183,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, view: &ThreadView, languag
                 metadata: &metadata,
                 overflow: "",
                 selected,
-                metadata_style: Style::default(),
+                metadata_style: Style::default().fg(view.palette.muted()),
             }
             .paint(area.width, view.palette),
         );
@@ -427,6 +427,33 @@ mod tests {
         }
         saved.completion_scheduled = true;
         assert_eq!(HeldRow::Saved(&saved).kind(), RowKind::Revisit);
+    }
+    #[test]
+    fn metadata_is_muted_without_losing_selected_or_no_color_styles() {
+        for choice in [
+            crate::config::PaletteMode::Dark,
+            crate::config::PaletteMode::Light,
+        ] {
+            for no_color in [false, true] {
+                for selected in [false, true] {
+                    let mut ui = ui();
+                    let palette = theme::Palette::from_capabilities(choice, no_color, true);
+                    ui.active_view_mut().palette = palette;
+                    ui.active_view_mut().held_input.active = selected;
+                    let buffer = screen(ui.view(), 80, UiLanguage::En);
+                    let expected = item("a").region_metadata(UiLanguage::En);
+                    let line = (0..80).map(|x| buffer[(x, 2)].symbol()).collect::<String>();
+                    assert!(line.contains(&expected), "{line}");
+                    // The metadata is right-aligned; its final cell is always painted.
+                    let cell = &buffer[(79, 2)];
+                    assert_eq!(cell.fg, palette.muted());
+                    assert_eq!(
+                        cell.modifier.contains(Modifier::REVERSED | Modifier::BOLD),
+                        selected
+                    );
+                }
+            }
+        }
     }
     #[test]
     fn fixed_empty_heading_both_languages_and_fold_geometry() {

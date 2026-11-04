@@ -4686,3 +4686,15 @@ Independent post-removal metrics are in `validation/held-regions/`.
 Cleanup validation passes 22 queue and 11 held tests, formatting, and strict
 all-target locked Clippy. Final-tip default/all-OS CI is still pending; neither
 stage-1 CI nor the behavior checkpoint implies feature acceptance or landing.
+
+### #218 Palette Self-Review And Final Local Rebuild
+
+A separate follow-up makes held metadata use the approved muted palette color,
+with Dark/Light, selected/unselected and NO_COLOR cell regressions. The rebuilt
+local suite passes 12 held, 33 live-work (including the original normalized
+864-case fingerprint), 3 shared-region, 22 queue, 10 saved-input worker,
+12 key-hint and 26 overlay tests. An earlier shared-target reuse ran zero held
+and region tests and is explicitly excluded as evidence. Locked compilation
+and strict all-target Clippy pass with warnings denied before branch CI.
+The final palette measurement retains prior snapshots; held is 664/13/4 and
+live/shared/held totals 3532 lines, not a simplicity/performance claim.

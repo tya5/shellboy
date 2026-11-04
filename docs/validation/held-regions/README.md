@@ -195,3 +195,23 @@ this is not evidence of an overall reduction or performance improvement.
 Cleanup validation passes 22 queue and 11 held cases, formatting, strict
 all-target locked Clippy, and integration-layout/watchdog policy checks on
 macOS arm64. Final-tip CI is still pending.
+
+## Final Palette Follow-Up
+
+Self-review found held metadata used the terminal default rather than the
+approved muted palette color. A separate follow-up uses `Palette::muted()`;
+Dark/Light, selected/unselected and `NO_COLOR` combinations have a dedicated
+cell-color/modifier regression. Live Work's non-selection painting is unchanged.
+`final-held-regions.json` preserves this later measurement separately: held is
+664 physical lines / 13 production functions / 4 maximum parameters, including
+its new test; live/shared/held total 3532, not a code-size reduction claim.
+
+One attempted local final validation reused a shared-target test executable from
+another worktree: held and region filters ran zero tests and Live Work ran 32,
+not the required 12/3/33. Exit status 0 is not acceptance for that attempt.
+Validation was restarted after touching this worktree's library root to force
+recompilation under the same rust-slot lock. Only the rebuilt run with the actual
+expected tests can establish local feature evidence. That rebuilt run passes
+held 12, live-work 33, region 3, queue 22, worker 10, key-hint 12 and overlay 26,
+plus locked full test compilation and strict all-target Clippy with warnings
+denied. No installed binary changes or dependency changes are involved.

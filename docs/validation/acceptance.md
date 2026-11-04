@@ -9754,3 +9754,17 @@ Independent metrics are `held-regions/after-compact-removal.json`;
 message_queue.rs changes from 1793/27/5 to 1690/22/5 (physical lines/production
 functions/max lexical parameters including self). Neither local tests nor this
 cleanup establishes final-tip CI or W8 landing.
+
+### #218 Final Palette Follow-Up And Rebuilt Tests
+
+Held metadata now uses the muted palette while keeping selected reverse/bold
+and NO_COLOR legibility. Its additional cell-style regression passes in all
+Dark/Light, selected/unselected and NO_COLOR combinations. After forcing this
+worktree's library rebuild, observed focused passes are held 12, live-work 33,
+shared-region 3, queue 22, saved-input worker 10, key-hint 12 and overlay 26.
+An earlier fresh/shared-target run executed zero held/region tests and therefore
+does not establish validation despite exit 0; its other apparent passes are not
+used for this feature. Final locked test compilation and strict all-target
+Clippy pass with warnings denied; formatting, Python metrics tests (2) and
+language-audit helper tests (28) also pass. CI and W8 landing remain separate
+gates.
