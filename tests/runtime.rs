@@ -1270,16 +1270,6 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         .find(|item| item["type"] == "function_call_output")
         .map(|item| serde_json::from_str(item["output"].as_str().unwrap()).unwrap())
         .unwrap();
-    let completion_diagnostic = format!(
-        "status={} output_complete={} reason={} end_reason={} exit_code={} forced={} group_cleanup_confirmed={}",
-        result["status"],
-        result["output_complete"],
-        result["reason"],
-        result["end_reason"],
-        result["exit_code"],
-        result["forced"],
-        result["group_cleanup_confirmed"]
-    );
     control.store.database.call(move |db| {
         assert!(shellboy::trace_slot::slow_commit_fixture_hits() > 0, "fixture must observe later worker COMMITs");
         shellboy::trace_slot::set_slow_commit_fixture(false);
@@ -1291,9 +1281,9 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
             assert_eq!(*offset, body.len() as i64);
             body.extend_from_slice(bytes);
         }
-        assert_eq!(out.len(), stdout.len(), "stdout byte count; {completion_diagnostic}");
+        assert_eq!(out.len(), stdout.len(), "stdout byte count");
         assert!(out==stdout, "stdout including its final binary bytes");
-        assert_eq!(err.len(), stderr.len(), "stderr byte count; {completion_diagnostic}");
+        assert_eq!(err.len(), stderr.len(), "stderr byte count");
         assert!(err==stderr, "stderr including its final binary bytes");
         let (batches,max_bytes,max_chunks):(i64,i64,i64)=db.query_row("SELECT COUNT(*),MAX(bytes),MAX(chunks) FROM fixture_output_batch", [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))?;
         assert!(max_bytes<=32768, "a saved batch exceeded configured bytes: {max_bytes}");
