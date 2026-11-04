@@ -208,15 +208,19 @@ pub(super) async fn maybe_compact(
     {
         return Ok(false);
     }
-    // #182: while the tool loop is open, spill opportunities are deferred,
-    // not seen: keep them out of the progress guard so the closed-loop
-    // boundary still finds them new.
     let open_loop = control.compactor.tool_loop_open(&snapshot.thread).await?;
+    let calibrated = evidence
+        .input_characters
+        .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars))
+        .is_some();
     let marks = candidates.as_ref().map(|candidate| {
         candidate
             .marks
             .iter()
-            .filter(|mark| !(open_loop && mark.starts_with("spill:")))
+            .filter(|mark| {
+                calibrated
+                    || (!mark.starts_with("partial:") && !(open_loop && mark.starts_with("spill:")))
+            })
             .cloned()
             .collect::<Vec<_>>()
     });
@@ -232,12 +236,16 @@ pub(super) async fn maybe_compact(
     };
     let widened_active = evidence.exhausted_active
         && match (&evidence.baseline_marks, &marks) {
-            (Some(previous), Some(current)) => guard::has_new_marks(previous, current, "middle:"),
+            (Some(previous), Some(current)) => {
+                guard::has_new_marks(previous, current, "middle:")
+                    || (calibrated && guard::has_new_marks(previous, current, "partial:"))
+            }
             _ => false,
         };
-    let spill_new = !evidence.insufficient_prefix
-        && !evidence.insufficient_spill
-        && !evidence.exhausted_active
+    let spill_new = (calibrated
+        || (!evidence.insufficient_prefix
+            && !evidence.insufficient_spill
+            && !evidence.exhausted_active))
         && has_kind("spill:");
     let summary_new = !evidence.insufficient_prefix
         && has_kind("summary:")
@@ -249,8 +257,9 @@ pub(super) async fn maybe_compact(
     let middle_new = if evidence.exhausted_active {
         widened_active
     } else {
-        has_kind("middle:")
+        has_kind("middle:") || (calibrated && has_kind("partial:"))
     };
+    let active_spill_new = calibrated && spill_new;
     let any_summary_new = middle_new || summary_new;
     let no_growth = !spill_new && !any_summary_new;
     let ids = crate::diagnostics::DiagnosticIds {
@@ -326,6 +335,18 @@ pub(super) async fn maybe_compact(
         Reason::CoverageLimited,
         budget.guard.as_ref(),
     );
+    let mut spill_counts = control
+        .compactor
+        .proactive_spill_counts(
+            &snapshot.thread,
+            open_loop
+                && evidence
+                    .input_characters
+                    .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars))
+                    .is_none(),
+            calibrated || spill_new,
+        )
+        .await?;
     let key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_active();
     let witness = json!({"run_id": snapshot.run, "turn_id": snapshot.turn,
         "input_tokens": evidence.input_tokens, "threshold": threshold,
@@ -351,43 +372,58 @@ pub(super) async fn maybe_compact(
         .input_characters
         .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
     let mut midturn = Value::Null;
-    let prefer_active = evidence.insufficient_prefix
-        || (!evidence.prior_turn_prefix && std::mem::take(&mut budget.prefix_adopted));
+    let prefer_active = target_plan.is_none()
+        && (evidence.insufficient_prefix
+            || (!evidence.prior_turn_prefix && std::mem::take(&mut budget.prefix_adopted)));
     if evidence.prior_turn_prefix {
         budget.prefix_adopted = false;
     }
     let mut summary_scope = "";
+    let mut selection_shortfall = None;
+    let mut stages = json!({"closed_spill":{"ran":false,"skipped":"not_reached"},"closed_summary":{"ran":false,"skipped":"not_reached"},"active_spill":{"ran":false,"skipped":"not_reached"},"active_summary":{"ran":false,"skipped":"not_reached"}});
     let result: Result<Value, ApiError> = async {
     let before_characters = if target_plan.is_some() {
         Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
-    // #182: spill rewrites an earlier tool result while later output is
-    // kept, so it waits for a boundary where the tool loop is closed.
-    let spill = if spill_new && !open_loop {
+    let spill = if let Some(plan) = target_plan {
+        control.compactor.spill_staged_cancellable(&snapshot.thread, false, plan.remove_characters, slot.stop.clone()).await
+    } else if spill_new && !open_loop {
         control.compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone()).await
     } else {
         Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
     };
+    stages["closed_spill"] = json!({"ran":target_plan.is_some() || (spill_new && !open_loop), "remaining_before":target_plan.map(|p|p.remove_characters), "adopted_groups":spill.as_ref().ok().map_or(0, |r| r.spilled_groups), "outcome":match &spill { Ok(r) if r.no_target => "no_target", Ok(_) => "adopted", Err(_) => "rejected" }});
+    let after_spill = if target_plan.is_some() {
+        Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
+    } else { None };
+    let remaining = target_plan.map(|plan| plan.remove_characters.saturating_sub(
+        before_characters.unwrap_or(0).saturating_sub(after_spill.unwrap_or(0))));
+    stages["closed_spill"] = json!({"ran":target_plan.is_some() || (spill_new && !open_loop), "removed_characters":before_characters.zip(after_spill).map(|(a,b)|a.saturating_sub(b)), "remaining_before":target_plan.map(|p|p.remove_characters), "remaining_after":remaining, "adopted_groups":spill.as_ref().ok().map_or(0, |r| r.spilled_groups), "outcome":match &spill { Ok(r) if r.no_target => "no_target", Ok(_) => "adopted", Err(_) => "rejected" }});
+    if target_plan.is_none() && (!spill_new || open_loop) {
+        stages["closed_spill"]["skipped"] = json!(if open_loop { "open_tool_loop" } else { "driver_gate" });
+        stages["closed_spill"]["outcome"] = json!("skipped");
+    }
     let observation = match spill {
         Err(error) if error.is_storage_failure() => return Err(error),
         Err(error) => json!({"outcome":"rejected","error":error}),
-        Ok(spill) if !any_summary_new => json!({
+        Ok(spill) if (!any_summary_new && !active_spill_new) || remaining == Some(0) => json!({
             "outcome": if spill.no_target { "no_safe_reduction" } else { "adopted" },
             "summary": spill,
             "summary_deferred": true,
         }),
-        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope).await
+        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages).await
         {
             Ok(mut summary) => {
-                if summary_scope == "prefix" && middle_new && !slot.stop.is_cancelled()
+                if summary_scope == "prefix" && (middle_new || active_spill_new) && !slot.stop.is_cancelled()
                     && let (Some(plan), Some(before)) = (target_plan, before_characters)
                 {
                     let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
                     if before.saturating_sub(after) < plan.remove_characters {
-                        match control.compactor.summarize_active_turn(&snapshot.thread, slot.stop.clone()).await {
+                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages).await {
                             Ok(active) if !active.no_target => {
                                 summary.spilled_groups = summary.spilled_groups.saturating_add(active.spilled_groups);
                                 summary.source_nodes = summary.source_nodes.saturating_add(active.source_nodes);
+                                if active.summary_node_id.is_some() {
                                 summary.created_parts = summary.created_parts.saturating_add(active.created_parts);
                                 summary.reused_parts = summary.reused_parts.saturating_add(active.reused_parts);
                                 summary.source_characters = summary.source_characters.zip(active.source_characters).map(|(a,b)| a.saturating_add(b));
@@ -400,6 +436,7 @@ pub(super) async fn maybe_compact(
                                     summary.summary_usage = None;
                                 }
                                 summary.summary_node_id = active.summary_node_id;
+                                }
                                 summary.original_node_ids.extend(active.original_node_ids);
                                 summary.no_target = false;
                                 midturn = json!({"scope":"active_turn", "reason":"target_shortfall"});
@@ -408,7 +445,7 @@ pub(super) async fn maybe_compact(
                             Ok(_) => {}
                             Err(error) if error.is_storage_failure() || slot.stop.is_cancelled() => return Err(error),
                             Err(error) => {
-                                summary.spilled_groups += spill.spilled_groups;
+                                summary.spilled_groups = summary.spilled_groups.saturating_add(spill.spilled_groups).saturating_add(stages["active_spill"]["adopted_groups"].as_u64().unwrap_or(0) as usize);
                                 summary.source_nodes += spill.source_nodes;
                                 summary.original_node_ids.extend(spill.original_node_ids);
                                 return Ok(json!({"outcome":"adopted","summary":summary,"summary_error":error}));
@@ -423,8 +460,9 @@ pub(super) async fn maybe_compact(
                 json!({"outcome":if summary.no_target {"no_safe_reduction"} else {"adopted"},"summary":summary})
             }
             Err(error) if error.is_storage_failure() => return Err(error),
-            Err(error) if !spill.no_target && !slot.stop.is_cancelled() => {
+            Err(error) if (!spill.no_target || stages["active_spill"]["outcome"] == "adopted") && !slot.stop.is_cancelled() => {
                 let mut summary = json!(spill);
+                summary["spilled_groups"] = json!(summary["spilled_groups"].as_u64().unwrap_or(0).saturating_add(stages["active_spill"]["adopted_groups"].as_u64().unwrap_or(0)));
                 summary["summary_rejected"] = json!(true);
                 if let Some(details) = error.details.as_ref().and_then(Value::as_object) {
                     for field in [
@@ -467,7 +505,57 @@ pub(super) async fn maybe_compact(
     );
     control.changed(&snapshot.thread);
     cleanup?;
-    let mut observation = result?;
+    let mut observation = match result {
+        Ok(observation) => observation,
+        Err(error) => {
+            spill_counts.spilled = stages["closed_spill"]["adopted_groups"]
+                .as_u64()
+                .unwrap_or(0)
+                .saturating_add(
+                    stages["active_spill"]["adopted_groups"]
+                        .as_u64()
+                        .unwrap_or(0),
+                )
+                .min(u32::MAX as u64) as u32;
+            let body = json!({"outcome":"exception", "cancelled":slot.stop.is_cancelled(), "stages":stages, "spill_counts":spill_counts}).to_string();
+            let attempt = evidence.attempt.clone();
+            control.store.database.call(move |db| {
+            db.execute("UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json(?1)) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json))", params![body,attempt])?;
+            Ok(())
+        }).await.map_err(storage_error)?;
+            return Err(error);
+        }
+    };
+    spill_counts.spilled = observation["summary"]["spilled_groups"]
+        .as_u64()
+        .unwrap_or(0)
+        .max(
+            stages["closed_spill"]["adopted_groups"]
+                .as_u64()
+                .unwrap_or(0)
+                .saturating_add(
+                    stages["active_spill"]["adopted_groups"]
+                        .as_u64()
+                        .unwrap_or(0),
+                ),
+        )
+        .min(u32::MAX as u64) as u32;
+    observation["spill_counts"] = json!(spill_counts);
+    if stages["closed_spill"]["remaining_after"] == 0 {
+        for stage in ["closed_summary", "active_spill", "active_summary"] {
+            if stages[stage]["ran"] == false {
+                stages[stage]["skipped"] = json!("target_met");
+            }
+        }
+    } else if stages["closed_summary"]["remaining_after"] == 0 {
+        for stage in ["active_spill", "active_summary"] {
+            if stages[stage]["ran"] == false {
+                stages[stage]["skipped"] = json!("target_met");
+            }
+        }
+    }
+    observation["stages"] = stages;
+    observation["steps"] = json!({"spill_attempted": target_plan.is_some() || (spill_new && !open_loop), "spill_adopted": spill_counts.spilled > 0, "fresh_measurement": target_plan.is_some(), "summary_selection": !summary_scope.is_empty(), "summary_bundling": observation["summary"]["model_requests"].as_u64().is_some_and(|n| n > 0)});
     let adopted = observation["outcome"] == "adopted";
     let summary_rejected = observation.get("summary_error").is_some();
     let summary_deferred = observation["summary_deferred"] == true;
@@ -516,14 +604,7 @@ pub(super) async fn maybe_compact(
                     }
                 };
                 current.replace_candidates(
-                    after.as_ref().map(|candidate| {
-                        candidate
-                            .marks
-                            .iter()
-                            .filter(|mark| !(open_loop && mark.starts_with("spill:")))
-                            .cloned()
-                            .collect()
-                    }),
+                    after.as_ref().map(|candidate| candidate.marks.to_vec()),
                     after
                         .as_ref()
                         .is_some_and(|candidate| candidate.mutable_protection),
@@ -566,6 +647,9 @@ pub(super) async fn maybe_compact(
     observation["reason"] = json!(REASON);
     if !midturn.is_null() {
         observation["midturn"] = midturn;
+    }
+    if let Some(shortfall) = selection_shortfall {
+        observation["selection_shortfall_characters"] = json!(shortfall);
     }
     if let Some(plan) = target_plan {
         observation["target_plan"] = json!({"target_tokens":plan.target_tokens,"remove_characters":plan.remove_characters,"input_characters":evidence.input_characters});
@@ -622,9 +706,100 @@ pub(super) async fn maybe_compact(
     Ok(true)
 }
 
+async fn active_after_spill(
+    control: &Arc<Control>,
+    thread: &str,
+    slot: &DriverSlot,
+    remaining: Option<u64>,
+    allow_summary: bool,
+    stages: &mut Value,
+) -> Result<crate::compaction::CompactResult, ApiError> {
+    let Some(need) = remaining else {
+        return control
+            .compactor
+            .summarize_active_turn(thread, slot.stop.clone())
+            .await;
+    };
+    let before = control
+        .compactor
+        .proactive_history_characters(thread)
+        .await?;
+    stages["active_spill"] = json!({"ran":true,"remaining_before":need,"outcome":"started"});
+    let spill = match control
+        .compactor
+        .spill_staged_cancellable(thread, true, need, slot.stop.clone())
+        .await
+    {
+        Ok(spill) => spill,
+        Err(error) => {
+            stages["active_spill"]["outcome"] = json!(if slot.stop.is_cancelled() {
+                "cancelled"
+            } else {
+                "rejected"
+            });
+            return Err(error);
+        }
+    };
+    stages["active_spill"]["adopted_groups"] = json!(spill.spilled_groups);
+    stages["active_spill"]["outcome"] = json!(if spill.no_target {
+        "no_target"
+    } else {
+        "adopted"
+    });
+    let after = control
+        .compactor
+        .proactive_history_characters(thread)
+        .await?;
+    let removed = before.saturating_sub(after);
+    let remaining = need.saturating_sub(removed);
+    stages["active_spill"] = json!({"ran":true,"removed_characters":removed,"adopted_groups":spill.spilled_groups,"remaining_before":need,"remaining_after":remaining,"outcome":if spill.no_target {"no_target"} else {"adopted"}});
+    if remaining == 0 {
+        stages["active_summary"] = json!({"ran":false,"skipped":"target_met","remaining_before":0});
+        return Ok(spill);
+    }
+    if !allow_summary {
+        stages["active_summary"] =
+            json!({"ran":false,"skipped":"no_new_target","remaining_before":remaining});
+        return Ok(spill);
+    }
+    stages["active_summary"] = json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
+    let (mut summary, projected_shortfall) = match control
+        .compactor
+        .summarize_target_active(thread, remaining, slot.stop.clone())
+        .await
+    {
+        Ok(summary) => summary,
+        Err(error) => {
+            stages["active_summary"]["outcome"] = json!(if slot.stop.is_cancelled() {
+                "cancelled"
+            } else {
+                "rejected"
+            });
+            return Err(error);
+        }
+    };
+    stages["active_summary"]["outcome"] = json!(if summary.no_target {
+        "no_target"
+    } else {
+        "adopted"
+    });
+    let after_summary = control
+        .compactor
+        .proactive_history_characters(thread)
+        .await?;
+    let summary_removed = after.saturating_sub(after_summary);
+    stages["active_summary"] = json!({"ran":true,"removed_characters":summary_removed,"remaining_before":remaining,"remaining_after":remaining.saturating_sub(summary_removed),"projected_shortfall":projected_shortfall,"outcome":if summary.no_target {"no_target"} else {"adopted"}});
+    summary.spilled_groups += spill.spilled_groups;
+    summary.source_nodes += spill.source_nodes;
+    summary.original_node_ids.extend(spill.original_node_ids);
+    summary.no_target &= spill.no_target;
+    Ok(summary)
+}
+
 struct Order {
     prefer_active: bool,
     middle_new: bool,
+    active_spill_new: bool,
     ordinary_new: bool,
 }
 
@@ -633,6 +808,7 @@ struct Order {
 /// summary only when that prefix has nothing but earlier summaries, or when
 /// the previous attempt adopted the prefix summary in this Turn and a fresh
 /// measurement remains above the calibrated target or threshold (`prefer_active`).
+#[allow(clippy::too_many_arguments)]
 async fn summarize_once(
     control: &Arc<Control>,
     thread: &str,
@@ -640,22 +816,56 @@ async fn summarize_once(
     order: Order,
     midturn: &mut Value,
     scope: &mut &'static str,
+    remaining: Option<u64>,
+    shortfall: &mut Option<u64>,
+    stages: &mut Value,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let compactor = &control.compactor;
     if !order.prefer_active && order.ordinary_new {
-        let prefix = compactor
-            .summarize_unsummarized_prefix(thread, slot.stop.clone())
-            .await;
+        let before = if remaining.is_some() {
+            Some(compactor.proactive_history_characters(thread).await?)
+        } else {
+            None
+        };
+        stages["closed_summary"] =
+            json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
+        let prefix = if let Some(target) = remaining {
+            compactor
+                .summarize_target_prefix(thread, target, slot.stop.clone())
+                .await
+                .map(|(result, missing)| {
+                    *shortfall = Some(missing);
+                    result
+                })
+        } else {
+            compactor
+                .summarize_unsummarized_prefix(thread, slot.stop.clone())
+                .await
+        };
+        stages["closed_summary"]["outcome"] = json!(match &prefix {
+            Ok(r) if r.no_target => "no_target",
+            Ok(_) => "adopted",
+            Err(_) => "rejected",
+        });
+        let after = if remaining.is_some() {
+            Some(compactor.proactive_history_characters(thread).await?)
+        } else {
+            None
+        };
+        let removed = before.zip(after).map(|(a, b)| a.saturating_sub(b));
+        stages["closed_summary"] = json!({"ran":true,"remaining_before":remaining,"remaining_after":remaining.zip(removed).map(|(n,r)|n.saturating_sub(r)),"removed_characters":removed,"projected_shortfall":*shortfall,"outcome":match &prefix { Ok(r) if r.no_target => "no_target", Ok(_) => "adopted", Err(_) => "rejected" }});
         if !matches!(&prefix, Ok(result) if result.no_target) {
             *midturn = json!({"skipped":"prefix_first"});
             *scope = "prefix";
             return prefix;
         }
     }
-    if order.middle_new {
-        let active = compactor
-            .summarize_active_turn(thread, slot.stop.clone())
-            .await;
+    if order.middle_new || order.active_spill_new {
+        let remaining = stages["closed_summary"]["remaining_after"]
+            .as_u64()
+            .or(remaining);
+        let active =
+            active_after_spill(control, thread, slot, remaining, order.middle_new, stages).await;
         if !matches!(&active, Ok(result) if result.no_target) {
             *midturn = json!({"scope":"active_turn"});
             *scope = "active_turn";
@@ -667,9 +877,19 @@ async fn summarize_once(
     }
     if order.prefer_active && order.ordinary_new {
         *scope = "prefix";
-        return compactor
-            .summarize_unsummarized_prefix(thread, slot.stop.clone())
-            .await;
+        return if let Some(target) = remaining {
+            compactor
+                .summarize_target_prefix(thread, target, slot.stop.clone())
+                .await
+                .map(|(result, missing)| {
+                    *shortfall = Some(missing);
+                    result
+                })
+        } else {
+            compactor
+                .summarize_unsummarized_prefix(thread, slot.stop.clone())
+                .await
+        };
     }
     Ok(crate::compaction::CompactResult {
         no_target: true,

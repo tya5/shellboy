@@ -898,6 +898,14 @@ pub(crate) fn automatic_candidates_tx(
         for group in &snapshot.groups[plan.start..plan.end()] {
             add("middle", group);
         }
+    } else if let Some((range, _)) =
+        policy::target_active_range(&snapshot, u64::MAX, &crate::config::Compaction::default())
+    {
+        // A later fence may block the legacy full-round plan but leave an
+        // older, calibrated partial window safe.
+        for group in &snapshot.groups[range] {
+            add("partial", group);
+        }
     }
     if let Some(range) = policy::summary_range(&snapshot, false) {
         for group in &snapshot.groups[range] {

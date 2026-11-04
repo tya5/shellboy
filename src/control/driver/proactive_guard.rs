@@ -229,7 +229,10 @@ fn hex_digest(value: &str) -> bool {
 fn parse_mark(mark: &str) -> Option<(&str, u64)> {
     let (key, chars) = mark.rsplit_once(':')?;
     let (kind, id) = key.split_once(':')?;
-    if !matches!(kind, "spill" | "summary" | "middle") || !hex_digest(id) || chars.len() != 16 {
+    if !matches!(kind, "spill" | "summary" | "middle" | "partial")
+        || !hex_digest(id)
+        || chars.len() != 16
+    {
         return None;
     }
     Some((key, u64::from_str_radix(chars, 16).ok()?))

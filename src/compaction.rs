@@ -699,6 +699,7 @@ impl Compactor {
             .await
             .map_err(|error| usage::annotate(error, ledger.usage()))
     }
+    #[allow(clippy::too_many_arguments)]
     async fn summarize_recorded(
         &self,
         snapshot: Snapshot,
@@ -2601,21 +2602,37 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
-        let (result, shortfall) = compactor.summarize_target_active("t", 4_000, CancellationToken::new()).await.unwrap();
+        let (result, shortfall) = compactor
+            .summarize_target_active("t", 4_000, CancellationToken::new())
+            .await
+            .unwrap();
         assert!(!result.no_target);
         assert_eq!(shortfall, 0);
         db.call(|db| {
             let path = selected_path(db, "t")?;
             assert!(path.contains(&"current-user".to_owned()));
             assert!(!path.contains(&"g1-call".to_owned()));
-            for node in ["g2-call", "g2-result", "g3-call", "g3-result"] { assert!(path.contains(&node.to_owned())); }
-            let epoch: i64 = db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| r.get(0))?;
+            for node in ["g2-call", "g2-result", "g3-call", "g3-result"] {
+                assert!(path.contains(&node.to_owned()));
+            }
+            let epoch: i64 =
+                db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| {
+                    r.get(0)
+                })?;
             assert_eq!(epoch, 1);
             assert!(history::reasoning_keep(db, "t", epoch)?.is_empty());
-            let replay = crate::control::replay::ReplayCache::new(0).load(db, "t")?.materialize();
-            assert!(!replay.iter().any(|item| item["type"] == "reasoning" || crate::model::opaque::is_opaque(item)));
+            let replay = crate::control::replay::ReplayCache::new(0)
+                .load(db, "t")?
+                .materialize();
+            assert!(
+                !replay.iter().any(
+                    |item| item["type"] == "reasoning" || crate::model::opaque::is_opaque(item)
+                )
+            );
             Ok(())
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(server.await.unwrap(), 1);
         db.shutdown().await.unwrap();
     }
