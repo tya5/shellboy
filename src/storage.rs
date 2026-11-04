@@ -674,6 +674,17 @@ impl DbWorker {
         }
     }
 
+    /// Test-only access to the active worker's sampled VM counter.
+    #[cfg(feature = "test-db-observation")]
+    #[doc(hidden)]
+    pub fn test_active_statement_counters(&self) -> Option<(u64, u64)> {
+        let active = self.shared.active_job.lock().ok()?;
+        let counters = active.as_ref()?.counters.as_ref()?.lock().ok()?;
+        counters
+            .counter_scope
+            .map(|_| (counters.vm_steps, counters.elapsed_ns))
+    }
+
     /// Background kinds currently deferred at least [`NO_PROGRESS_DEFERRALS`]
     /// consecutive times without a completed job of the same kind in between.
     /// Read-only state for a later status surface; bounded by call sites.
@@ -1897,6 +1908,12 @@ mod slow_job_tests {
             assert_eq!(
                 active_logs[0]["db_job_active"]["statement_counters"]["row_scope"],
                 "job_cumulative"
+            );
+            assert!(
+                active_logs[0]["db_job_active"]["statement_counters"]["vm_steps"]
+                    .as_u64()
+                    .is_some_and(|steps| steps > 0),
+                "unit-test worker must observe even fast statements: {log}"
             );
             assert!(
                 active_logs[0]["db_job_active"]["elapsed_ms"]

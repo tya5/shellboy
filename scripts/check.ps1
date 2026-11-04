@@ -11,6 +11,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'cargo clippy failed' }
     & cargo test --locked --all-targets
     if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
+    & cargo test --locked --features test-db-observation --test integration db_observation_feature::integration_worker_samples_fast_statements -- --exact
+    if ($LASTEXITCODE -ne 0) { throw 'DB observation integration test failed' }
 } finally {
     Pop-Location
 }

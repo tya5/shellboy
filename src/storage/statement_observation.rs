@@ -27,10 +27,31 @@ pub(crate) struct Counters {
     current_fingerprint: Option<&'static str>,
     fingerprint_frozen: bool,
     pub sql: Option<Arc<str>>,
-    current_sql: Option<Arc<str>>,
+    current_sql: Option<CurrentSql>,
     current_statement: usize,
     captured_statement: usize,
     captured_profile_recorded: bool,
+}
+
+#[derive(Clone)]
+enum CurrentSql {
+    Raw(Arc<[u8]>),
+    Normalized(Arc<str>),
+}
+
+impl std::fmt::Debug for CurrentSql {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted SQL>")
+    }
+}
+
+impl CurrentSql {
+    fn normalized(&self) -> Arc<str> {
+        match self {
+            Self::Raw(sql) => sql_normalize::normalize(sql).into(),
+            Self::Normalized(sql) => sql.clone(),
+        }
+    }
 }
 
 impl Counters {
@@ -102,27 +123,23 @@ struct TraceContext {
     exhaustive: bool,
     sample_every_profile: bool,
     row_count: Arc<std::sync::atomic::AtomicU64>,
-    last_sql: Vec<u8>,
-    last_shape: Option<Arc<str>>,
+    last_sql: Option<Arc<[u8]>>,
 }
 
 impl TraceContext {
-    fn shape(&mut self, sql: &[u8]) -> Arc<str> {
-        if let Some(shape) = &self.last_shape
-            && self.last_sql == sql
+    fn current_sql(&mut self, sql: &[u8]) -> CurrentSql {
+        if sql.len() > 4096 {
+            self.last_sql = None;
+            return CurrentSql::Normalized(sql_normalize::normalize(sql).into());
+        }
+        if let Some(last) = &self.last_sql
+            && last.as_ref() == sql
         {
-            return shape.clone();
+            return CurrentSql::Raw(last.clone());
         }
-        let shape: Arc<str> = sql_normalize::normalize(sql).into();
-        if sql.len() <= 4096 {
-            self.last_sql.clear();
-            self.last_sql.extend_from_slice(sql);
-            self.last_shape = Some(shape.clone());
-        } else {
-            self.last_sql.clear();
-            self.last_shape = None;
-        }
-        shape
+        let raw: Arc<[u8]> = sql.into();
+        self.last_sql = Some(raw.clone());
+        CurrentSql::Raw(raw)
     }
 }
 
@@ -207,7 +224,7 @@ unsafe extern "C" fn profile(
                 (None, None)
             } else {
                 let sql = unsafe { CStr::from_ptr(sql) }.to_bytes();
-                (Some(context.shape(sql)), safe_fingerprint(sql))
+                (Some(context.current_sql(sql)), safe_fingerprint(sql))
             };
             if let Ok(mut counters) = context.counters.lock() {
                 counters.current_statement = stmt as usize;
@@ -248,7 +265,7 @@ unsafe extern "C" fn profile(
                 }
                 counters.captured_profile_recorded = true;
             } else {
-                counters.sql = counters.current_sql.clone();
+                counters.sql = counters.current_sql.as_ref().map(CurrentSql::normalized);
             }
             counters.fullscan_steps = values[0];
             counters.sorts = values[1];
@@ -333,7 +350,8 @@ unsafe extern "C" fn profile(
 impl<'a> StatementObservation<'a> {
     pub fn install(connection: &'a mut Connection) -> Self {
         let mut observation = Self::install_production(connection);
-        observation._context.sample_every_profile = cfg!(test);
+        observation._context.sample_every_profile =
+            cfg!(any(test, feature = "test-db-observation"));
         observation
     }
     fn install_production(connection: &'a mut Connection) -> Self {
@@ -374,8 +392,7 @@ impl<'a> StatementObservation<'a> {
             exhaustive: false,
             sample_every_profile: false,
             row_count: counters.lock().unwrap().row_count.clone(),
-            last_sql: Vec::new(),
-            last_shape: None,
+            last_sql: None,
         });
         // The guard removes the callback before dropping its context.
         let result = register(
@@ -453,7 +470,7 @@ impl SlowBacktrace {
                 && let Ok(mut counters) = counters.lock()
             {
                 counters.fingerprint = counters.current_fingerprint;
-                counters.sql = counters.current_sql.clone();
+                counters.sql = counters.current_sql.as_ref().map(CurrentSql::normalized);
                 counters.captured_statement = counters.current_statement;
                 counters.counter_scope = None;
                 counters.fingerprint_frozen = true;
@@ -776,6 +793,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn pending_raw_sql_is_redacted_from_debug_and_serialization() {
+        let private = "private_message_marker";
+        let counters = Counters {
+            current_sql: Some(CurrentSql::Raw(Arc::from(private.as_bytes()))),
+            ..Counters::default()
+        };
+        assert!(!format!("{counters:?}").contains(private));
+        assert!(!serde_json::to_string(&counters).unwrap().contains(private));
     }
 
     #[test]

@@ -9,6 +9,9 @@ description = "Shellboy native personal agent"
 license = "MIT"
 repository = "https://github.com/tya5/shellboy"
 
+[features]
+test-db-observation = []
+
 [[bin]]
 name = "shellboy"
 path = "src/main.rs"
