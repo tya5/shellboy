@@ -346,14 +346,18 @@ pub(crate) fn human_label_for(
             value = items.get(position).unwrap_or(&Value::Null);
             let name = match language {
                 crate::config::UiLanguage::Ja => item_name(value, collection).to_owned(),
-                crate::config::UiLanguage::En => {
-                    let collection = english_key(collection);
-                    if collection.is_empty() {
-                        "Item".into()
-                    } else {
-                        collection
-                    }
-                }
+                crate::config::UiLanguage::En => match collection {
+                    "answers" => "Answer".into(),
+                    "items" | "output" => "Item".into(),
+                    "messages" => "Message".into(),
+                    "nodes" => "Node".into(),
+                    "runs" => "Run".into(),
+                    "tools" => "Tool".into(),
+                    "attachments" => "Attachment".into(),
+                    "threads" => "Thread".into(),
+                    "turns" => "Turn".into(),
+                    other => english_key(other),
+                },
             };
             labels.push(format!("{name} {}", position + 1));
             continue;
