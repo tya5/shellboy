@@ -30,6 +30,12 @@ pub(super) struct TitleWitness {
     path: Candidates,
     pending: Candidates,
 }
+#[derive(Clone, Copy)]
+enum TitleFallback {
+    Limited,
+    Untitled,
+    NotSent,
+}
 #[derive(Default)]
 struct Candidates {
     rows: Vec<Candidate>,
@@ -253,24 +259,35 @@ impl RawHeader {
         &self.details.thread_id
     }
     /// Borrow raw title witnesses: sharing this header never duplicates source JSON.
+    #[cfg(test)]
     pub(super) fn prepare(&self) -> ThreadDetails {
         self.prepare_inspection().0
     }
+    pub(super) fn prepare_for_ui(&self, language: crate::config::UiLanguage) -> ThreadDetails {
+        self.prepare_inspection_in(language).0
+    }
+    #[cfg(test)]
     pub(super) fn prepare_inspection(&self) -> (ThreadDetails, Vec<String>) {
+        self.prepare_inspection_in(crate::config::UiLanguage::Ja)
+    }
+    pub(super) fn prepare_inspection_in(
+        &self,
+        language: crate::config::UiLanguage,
+    ) -> (ThreadDetails, Vec<String>) {
         let mut details = self.details.clone();
         let mut limited = Vec::new();
         if let Some(title) = &self.title {
-            let (value, is_limited) = title.prepare_outcome();
-            details.title = value;
+            let (_, is_limited, _) = title.prepare_outcome();
+            details.title = title.prepare_for_ui(language);
             if is_limited {
                 limited.push("title".into());
             }
         }
         if self.recovery_limited {
-            details.recovery_reason = Some(
-                "取得範囲外: 保存された復旧理由は64KiBを超えています。Turn原文で確認してください。"
-                    .into(),
-            );
+            details.recovery_reason = Some(match language {
+                crate::config::UiLanguage::Ja => "取得範囲外: 保存された復旧理由は64KiBを超えています。Turn原文で確認してください。".into(),
+                crate::config::UiLanguage::En => "Saved recovery reason exceeds 64 KiB; inspect the original Turn.".into(),
+            });
             limited.push("recovery_reason".into());
         }
         details.context = Some(ExecutionContext {
@@ -287,11 +304,22 @@ impl TitleWitness {
     pub(super) fn prepare(&self) -> String {
         self.prepare_outcome().0
     }
-    fn prepare_outcome(&self) -> (String, bool) {
+    fn prepare_for_ui(&self, language: crate::config::UiLanguage) -> String {
+        let (value, _, fallback) = self.prepare_outcome();
+        match (language, fallback) {
+            (crate::config::UiLanguage::En, Some(TitleFallback::Limited)) => {
+                "Untitled (original text is outside the captured range)".into()
+            }
+            (crate::config::UiLanguage::En, Some(TitleFallback::Untitled)) => "Untitled".into(),
+            (crate::config::UiLanguage::En, Some(TitleFallback::NotSent)) => "Not sent".into(),
+            _ => value,
+        }
+    }
+    fn prepare_outcome(&self) -> (String, bool, Option<TitleFallback>) {
         let mut user = false;
         for (index, source) in [&self.path, &self.pending].into_iter().enumerate() {
             if index == 1 && source.truncated {
-                return (LIMITED.into(), true);
+                return (LIMITED.into(), true, Some(TitleFallback::Limited));
             }
             for candidate in &source.rows {
                 if !candidate.user {
@@ -299,7 +327,7 @@ impl TitleWitness {
                 }
                 user = true;
                 if candidate.omitted {
-                    return (LIMITED.into(), true);
+                    return (LIMITED.into(), true, Some(TitleFallback::Limited));
                 }
                 let title = candidate
                     .body
@@ -307,14 +335,18 @@ impl TitleWitness {
                     .and_then(|body| serde_json::from_str(body).ok())
                     .and_then(|body| crate::control::db::title_from_user_payload(&body));
                 if let Some(title) = title {
-                    return (title, false);
+                    return (title, false, None);
                 }
             }
             if source.truncated {
-                return (LIMITED.into(), true);
+                return (LIMITED.into(), true, Some(TitleFallback::Limited));
             }
         }
-        ((if user { "名称未設定" } else { "未送信" }).into(), false)
+        if user {
+            ("名称未設定".into(), false, Some(TitleFallback::Untitled))
+        } else {
+            ("未送信".into(), false, Some(TitleFallback::NotSent))
+        }
     }
 }
 
@@ -340,6 +372,43 @@ mod tests {
             Ok(())
         }).await.unwrap();
         (root, owner)
+    }
+    #[test]
+    fn synthetic_title_fallbacks_localize_only_in_the_ui_projection() {
+        use crate::config::UiLanguage::{En, Ja};
+        let unsent = TitleWitness::default();
+        assert_eq!(unsent.prepare(), "未送信");
+        assert_eq!(unsent.prepare_for_ui(Ja), "未送信");
+        assert_eq!(unsent.prepare_for_ui(En), "Not sent");
+
+        let untitled = TitleWitness {
+            path: Candidates {
+                rows: vec![Candidate {
+                    user: true,
+                    body: None,
+                    omitted: false,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(untitled.prepare_for_ui(En), "Untitled");
+
+        let limited = TitleWitness {
+            path: Candidates {
+                rows: vec![Candidate {
+                    user: true,
+                    body: None,
+                    omitted: true,
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            limited.prepare_for_ui(En),
+            "Untitled (original text is outside the captured range)"
+        );
     }
     fn input(
         db: &Connection,
@@ -575,10 +644,10 @@ impl RawTitles {
         let mut titles = std::collections::BTreeMap::new();
         let mut limited = Vec::new();
         for (id, (stored, witness)) in self.entries {
-            let (title, is_limited) = witness
+            let (title, is_limited, _) = witness
                 .as_ref()
                 .map(TitleWitness::prepare_outcome)
-                .unwrap_or((stored, false));
+                .unwrap_or((stored, false, None));
             if is_limited {
                 limited.push(id.clone());
             }

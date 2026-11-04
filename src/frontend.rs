@@ -2951,7 +2951,12 @@ async fn run_with_delivery(
                         let follow_updates = updates.worker();
                         spawn_work(&mut workers, permit, async move {
                             let result =
-                                presentation_work(move || management::follow_target(&value, &resolved_pointer, mode))
+                                presentation_work(move || management::follow_target_in(
+                                    &value,
+                                    &resolved_pointer,
+                                    mode,
+                                    language,
+                                ))
                                     .await;
                             let target = match result {
                                 Ok(Ok(target)) => target,
@@ -3038,7 +3043,7 @@ async fn run_with_delivery(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let selected = resolved_pointer;
                             match presentation_work(move || {
-                                management::detail_page(&value, &selected, cursor.as_deref())
+                                management::detail_page(&value, &selected, cursor.as_deref(), language)
                             })
                             .await
                             {
@@ -4020,7 +4025,8 @@ async fn select_thread(
     let target = thread.to_owned();
     let submission_fence = crate::control::submission_retention::fence("current.id", "current.revision", "?1");
     let (draft,view)=control.store.database.call(move|db|{use rusqlite::OptionalExtension;let body:Option<String>=db.query_row(&format!("SELECT body_json FROM draft current WHERE thread_id=?1 AND state='editing' AND NOT {submission_fence} ORDER BY updated_at DESC LIMIT 1"),[&target],|r|r.get(0)).optional()?;let view=db.query_row("SELECT anchor_node_id,anchor_offset,follow_tail FROM view_state WHERE thread_id=?1",[target],|r|Ok((ViewAnchor{node_id:r.get(0)?,char_offset:r.get::<_,i64>(1)? as usize},r.get::<_,bool>(2)?))).optional()?;Ok((body,view))}).await.map_err(storage_error)?;
-    let (details,draft)=presentation_work(move || (header.prepare(),draft.and_then(|body|serde_json::from_str::<DraftSnapshot>(&body).ok()))).await?;
+    let language = control.store.config.ui.language;
+    let (details,draft)=presentation_work(move || (header.prepare_for_ui(language),draft.and_then(|body|serde_json::from_str::<DraftSnapshot>(&body).ok()))).await?;
     update(
         updates,
         UiUpdate::Thread {
