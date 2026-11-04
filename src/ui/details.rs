@@ -1136,7 +1136,10 @@ impl Details {
             .max_by_key(|(_, _, block, _)| super::presentation::tool_observation_rank(block))
             .map(|(_, _, _, tool)| {
                 let call_id = safe(&tool.call_id.chars().take(48).collect::<String>());
-                let command = safe(&tool.command);
+                let command = safe(&super::presentation::display_tool_command(
+                    &tool.command,
+                    language,
+                ));
                 match language {
                     UiLanguage::Ja => {
                         format!("shell{sep}call {call_id}{sep}コマンドpreview {command}")

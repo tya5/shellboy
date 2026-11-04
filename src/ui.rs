@@ -3698,7 +3698,14 @@ impl UiState {
                     revision,
                     None,
                     ReceiptStatus::Failed,
-                    Some("旧作業停止の確認が必要です".into()),
+                    Some(
+                        i18n::local!(
+                            self.config.ui.language,
+                            "旧作業停止の確認が必要です",
+                            "Confirm stopping the previous run"
+                        )
+                        .into(),
+                    ),
                 ) && view.pending[&revision].restored_revision == Some(view.draft.revision)
                 {
                     if let Some(edit) = &mut view.draft.edit {
@@ -5074,7 +5081,7 @@ impl UiState {
                         id: uuid::Uuid::new_v4().to_string(),
                         path,
                         kind: "file".into(),
-                        state: "未準備".into(),
+                        state: "pending".into(),
                         position: None,
                     },
                     position,
@@ -6872,6 +6879,23 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     state.dirty = false;
 }
 pub const HELP: &str = "操作するときはEscで会話へ戻る | / でコマンド候補を表示";
+pub const HELP_EN: &str = "Press Esc to return to the conversation | / lists commands";
+
+pub fn help_for(language: crate::config::UiLanguage) -> &'static str {
+    match language {
+        crate::config::UiLanguage::Ja => HELP,
+        crate::config::UiLanguage::En => HELP_EN,
+    }
+}
+#[cfg(test)]
+mod help_copy_tests {
+    #[test]
+    fn global_help_copy_follows_language() {
+        assert!(super::help_for(crate::config::UiLanguage::Ja).contains("会話へ戻る"));
+        let english = super::help_for(crate::config::UiLanguage::En);
+        assert!(english.contains("conversation") && english.is_ascii());
+    }
+}
 
 /// Must run on the main OS thread. Updates should be sent through a bounded
 /// std::sync::mpsc::sync_channel; the UI only calls try_recv and try_send.

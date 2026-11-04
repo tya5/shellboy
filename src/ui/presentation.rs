@@ -385,6 +385,11 @@ fn node_lines_inner(
                         .unwrap_or_else(|| block.text.clone())
                 }
             };
+            let text = if block.source_exact {
+                text
+            } else {
+                display_tool_result(text, block.kind.clone(), language)
+            };
             if block.kind == BlockKind::ToolCall {
                 let mut command = text
                     .lines()
@@ -1861,6 +1866,33 @@ fn tool_row(
     }
     .into_line(width, Style::default())
 }
+pub(super) fn display_tool_command(command: &str, language: UiLanguage) -> String {
+    if language == UiLanguage::En {
+        match command {
+            "shell呼出し · 詳細" | "shell呼出し | 詳細" => "Shell call; details".into(),
+            _ => return command.to_owned(),
+        }
+    } else {
+        command.to_owned()
+    }
+}
+
+fn display_tool_result(text: String, kind: BlockKind, language: UiLanguage) -> String {
+    if language != UiLanguage::En || kind != BlockKind::ToolResult {
+        return text;
+    }
+    match text.as_str() {
+        "この呼出しは実行されていません。" => "This call was not executed.".into(),
+        "前回の終了時点では未開始でした。自動再実行はしていません。" => {
+            "This call had not started when the previous run ended; it was not automatically retried.".into()
+        }
+        "前回の終了により結果は不確かです。再実行前に保存済みの出力と副作用を確認してください。" => {
+            "The result is uncertain after the previous run ended. Check saved output and side effects before retrying.".into()
+        }
+        _ => text,
+    }
+}
+
 fn compact_tool_line(
     language: UiLanguage,
     tool: &crate::presentation::ToolPresentation,
@@ -1875,10 +1907,11 @@ fn compact_tool_line(
             .underline_color(INPUT_DECORATION_MARKER),
     );
     let description = crate::tool_description::label(tool.description.as_deref());
-    let command =
-        crate::presentation::sanitize_plain(description.as_deref().unwrap_or(&tool.command), 0)
-            .0
-            .replace(['\n', '\r'], " ");
+    let raw_command = description.as_deref().unwrap_or(&tool.command);
+    let localized_command = display_tool_command(raw_command, language);
+    let command = crate::presentation::sanitize_plain(&localized_command, 0)
+        .0
+        .replace(['\n', '\r'], " ");
     let command = if command.trim().is_empty() {
         "shell"
     } else {
@@ -2412,7 +2445,11 @@ fn typed_history(
                             width,
                             view.palette,
                         ));
-                        chunk.extend(tool_note(&tool.command, width, view.palette));
+                        chunk.extend(tool_note(
+                            &display_tool_command(&tool.command, language),
+                            width,
+                            view.palette,
+                        ));
                     }
                     // Canonical call URLs remain original link targets after
                     // compacting the visible command.
@@ -2936,6 +2973,46 @@ mod tests {
     }
 
     use super::*;
+    #[test]
+    fn typed_event_title_uses_english_copy_without_rewriting_the_japanese_projection() {
+        let mut node = UiNode {
+            role: "event".into(),
+            ..Default::default()
+        };
+        node.presentation.kind = PresentationKind::Event;
+        node.presentation.title = "状態変更 · 接続: old → new".into();
+        node.presentation.ui_messages.title =
+            Some(crate::presentation::messages::Message::EventTitle {
+                kind: "context_changed".into(),
+            });
+        assert_eq!(label(UiLanguage::En, &node), "State change");
+        assert!(label(UiLanguage::Ja, &node).contains("接続"));
+        assert_eq!(node.presentation.title, "状態変更 · 接続: old → new");
+    }
+    #[test]
+    fn generated_tool_fallbacks_follow_language_but_saved_commands_stay_literal() {
+        assert_eq!(
+            display_tool_command("shell呼出し · 詳細", UiLanguage::En),
+            "Shell call; details"
+        );
+        assert_eq!(
+            display_tool_command("printf 日本語", UiLanguage::En),
+            "printf 日本語"
+        );
+        assert_eq!(
+            display_tool_result(
+                "この呼出しは実行されていません。".into(),
+                BlockKind::ToolResult,
+                UiLanguage::En,
+            ),
+            "This call was not executed."
+        );
+        let raw = "この呼出しは実行されていません。";
+        assert_eq!(
+            display_tool_result(raw.into(), BlockKind::ToolResult, UiLanguage::Ja),
+            raw
+        );
+    }
     #[test]
     fn unknown_and_missing_notice_kinds_use_the_approved_unknown_mark() {
         crate::ui::text_width::set_terminal_width(Some(1));

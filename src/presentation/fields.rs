@@ -315,6 +315,9 @@ pub(crate) fn display_value(
     }
     match displayed {
         "未確定" => "Undetermined".into(),
+        "保持済みの表示用コピーを継続表示。今回のraw再取得はIoFailed。現在のraw可用性は未確認。" => {
+            "Showing the retained display copy. Raw refresh failed (IoFailed); current raw availability is unknown.".into()
+        }
         "[深い構造 · 詳細は原文参照]" | "[深い構造 | 詳細は原文参照]" => {
             "[Deep structure; see original for details]".into()
         }
@@ -929,6 +932,15 @@ mod tests {
             "Input tokens (provider-reported)"
         );
         assert_eq!(display_value("/state", "running", "実行中", En), "Running");
+        assert_eq!(
+            display_value(
+                "/ui_raw_stream_preview",
+                "",
+                "保持済みの表示用コピーを継続表示。今回のraw再取得はIoFailed。現在のraw可用性は未確認。",
+                En,
+            ),
+            "Showing the retained display copy. Raw refresh failed (IoFailed); current raw availability is unknown."
+        );
         assert_eq!(
             display_value("/exit_code", "null", "未確定", En),
             "Undetermined"

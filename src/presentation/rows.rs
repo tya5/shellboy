@@ -4,6 +4,14 @@ use ratatui::style::Color;
 
 pub const NOTICE_SOURCE_OUTSIDE_WINDOW: &str =
     "元のtool行は表示範囲外です | F6で保存済み参照を確認";
+pub const NOTICE_SOURCE_OUTSIDE_WINDOW_EN: &str =
+    "Original tool row is outside the window | F6 opens saved references";
+pub fn notice_source_outside_window(language: crate::config::UiLanguage) -> &'static str {
+    match language {
+        crate::config::UiLanguage::Ja => NOTICE_SOURCE_OUTSIDE_WINDOW,
+        crate::config::UiLanguage::En => NOTICE_SOURCE_OUTSIDE_WINDOW_EN,
+    }
+}
 
 pub const EXTERNAL_MARK_CANDIDATES: [&str; 3] = ["⤷", "⇥", "⤳"];
 
@@ -126,6 +134,12 @@ pub fn blank_between(before: RowGroup, after: RowGroup) -> bool {
 mod tests {
     use super::*;
     use crate::ui::text_width::UnicodeWidthStr;
+    #[test]
+    fn outside_window_notice_has_language_specific_copy() {
+        assert!(notice_source_outside_window(crate::config::UiLanguage::Ja).contains("元のtool行"));
+        let english = notice_source_outside_window(crate::config::UiLanguage::En);
+        assert!(english.contains("Original tool row") && english.is_ascii());
+    }
     #[test]
     fn row_kind_labels_follow_ui_language_without_changing_marks_or_order() {
         use crate::config::UiLanguage;
