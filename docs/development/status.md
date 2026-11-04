@@ -4712,3 +4712,6 @@ Corrected fixtures now pass locally: 19 scroll-characterization, 4 input,
 6 integration scrolling and 88 integration UI cases (1 ignored). Both CI-failing
 shell cases pass individually on macOS; the Linux failure remains unexplained,
 not dismissed as flaky. Next: strict local checks and new exact-tip default CI.
+fresh schema installs the same triggers. Design and decision records document
+crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
+measurements. Focused test and CI results are pending on the task branch.
