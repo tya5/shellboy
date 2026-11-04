@@ -514,5 +514,5 @@ loading/failure screen test in `src/ui/thread_deletion.rs`, the measured-width
 guide-key test in `src/ui/help.rs`, and localized generated-title/count
 projections in `src/presentation/projection.rs` and
 `src/presentation/messages.rs`. These are UI-owned labels; provider errors,
-source titles, IDs, and stored values remain unchanged. The current-source audit on reconcile-34 reports `a=2916, b=1574, c=0, protected=4`; strict `--check` succeeds with zero category-c candidates; four protected records retain canonical and UI projection evidence. This note records reviewed surfaces only and does not claim the Stage C
+source titles, IDs, and stored values remain unchanged. The current-source audit on reconcile-34 reports `a=2916, b=1576, c=0, protected=4`; strict `--check` succeeds with zero category-c candidates; four protected records retain canonical and UI projection evidence. This note records reviewed surfaces only and does not claim the Stage C
 zero gate, physical PTY, Windows, or integration acceptance.
